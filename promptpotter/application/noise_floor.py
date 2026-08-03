@@ -98,9 +98,9 @@ async def measure_noise_floor(
     # needs this cycle published as the spawn context before it can dispatch an inner
     # campaign per sample. Normally done once by `run_optimization`; this use-case
     # bypasses that runner, so it publishes for itself (no-op on a non-recursive cycle).
-    publish_inner_spawn_context(session)
-
     campaign_config = validate_campaign_config(campaign.config)
+    publish_inner_spawn_context(session, campaign_config)
+
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log_fn)
     scoring_spec = split_scoring_block(campaign_config.scoring)
@@ -143,6 +143,7 @@ async def measure_noise_floor(
             # and an opt_sp-aware term is identical across all k, so it can only add a
             # constant offset to a band that exists to isolate backend noise.
             opt_sp=None,
+            measured=None,
             on_sample_scored=lambda *_a, **_k: None,
             on_sample_starting=lambda *_a, **_k: None,
             source=f"noise_floor:{campaign_id}:C0:{i}",

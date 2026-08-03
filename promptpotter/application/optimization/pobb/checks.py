@@ -27,7 +27,10 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
 
-    BackfillFn = Callable[[JobSearchPoint, list[Sample]], Awaitable[list[QueryMeasurement]]]
+    # The prior's id rides along so the backfill can stamp WHOSE catch-up this is. Without
+    # it the pass inherited the foreground candidate's identity and recorded the prior's
+    # measurement under it.
+    BackfillFn = Callable[[JobSearchPoint, list[Sample], str], Awaitable[list[QueryMeasurement]]]
 
 
 def _eliminate(
@@ -235,7 +238,7 @@ class PoBBCheck:
             existing = self.priors_by_sample[cid]
             if key in existing:
                 continue
-            new_results = await self._backfill_fn(self.prior_sps[cid], [sample])
+            new_results = await self._backfill_fn(self.prior_sps[cid], [sample], cid)
             for r in new_results:
                 sid_new = r.get("sample_id")
                 if sid_new is None or is_error_result(r):

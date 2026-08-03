@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import auto_mint_session
-from promptpotter.application.config import configure_and_apply_pipeline
+from promptpotter.application.config import configure_and_apply_pipeline, resolved_dataset_name
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.runner.identity import build_origin_cycle_id
+from promptpotter.application.runner.identity import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:
@@ -141,15 +141,35 @@ def _warn_on_duplicate_origin(
     log(f"NOTE: identical origin already run in {', '.join(prior)} — consider `resume`")
 
 
+def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
+    """A brand-new random campaign id for this session's resolved dataset.
+
+    What every mint that does NOT own its campaign's identity passes to
+    :func:`prepare_fresh_cycle`. The L4 inner spawn is the one caller that does own it —
+    it derives the id from the cell it runs, so the same cell resolves to the same
+    campaign on a retry instead of orphaning the rounds the last attempt banked
+    (``runner/inner/cycle.py::inner_campaign_id``).
+    """
+    return mint_campaign_id(resolved_dataset_name(session, campaign_config))
+
+
 def prepare_fresh_cycle(
     session: Session,
     campaign_config: CampaignConfig,
     dataset: list[Sample],
     *,
+    campaign_id: str,
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
     """Mint a fresh campaign + session + root cycle from a resolved dataset.
+
+    ``campaign_id`` is a **required keyword without a default** because who owns the
+    campaign's identity is a decision, not a detail: a generic mint wants a fresh random
+    id (:func:`fresh_campaign_id`), while the L4 inner spawn derives one from the cell it
+    is measuring so a retry lands back on the same campaign. A default would silently
+    pick the first for the caller that needed the second — which is exactly what
+    orphaned two partially-run inner campaigns and re-ran them from round 0.
 
     The one prologue ``new`` and the web mint share: resolve the cycle plan, then
     ``auto_mint_session`` writes ``campaign.json``, the root cycle index, and the
@@ -179,6 +199,7 @@ def prepare_fresh_cycle(
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,
+        campaign_id=campaign_id,
         cycle_id=plan.cycle_id,
         origin_prompt_fields=plan.origin.prompt_field_dict(),
         dataset_size=len(dataset),
@@ -194,4 +215,10 @@ def prepare_fresh_cycle(
     )
 
 
-__all__ = ["CyclePlan", "MintedCycle", "prepare_fresh_cycle", "resolve_cycle_plan"]
+__all__ = [
+    "CyclePlan",
+    "MintedCycle",
+    "fresh_campaign_id",
+    "prepare_fresh_cycle",
+    "resolve_cycle_plan",
+]

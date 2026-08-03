@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from pydantic import ValidationError
 
 from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
-from promptpotter.application.jobs.mint import prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -366,6 +366,7 @@ async def _mint_fresh_session(
         session,
         campaign_config,
         train_data,
+        campaign_id=fresh_campaign_id(session, campaign_config),
         log=logger.info if get_verbose() else None,
     )
 

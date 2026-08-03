@@ -42,7 +42,17 @@ LEDGER_BASELINE = {
     "reexport_shims": 5,
     # ``len(KNOBS)`` — the registry in ``application/knobs.py`` IS the taxonomy, so the
     # ledger does not carry a second opinion about what counts as one leaf.
-    "config_leaf_fields": 38,
+    #
+    # 38 -> 39 (2026-08-03): ``optimization.panel_gate``. A deliberate raise for a decision
+    # nothing could previously express: whether a round may ELECT on a panel with holes —
+    # cells the loop attempted and got no measurement back from. It is not a variant of the
+    # two gates beside it (``origin_gate`` grades round 0's floor, the backend gate grades
+    # reachability) and not a second under-probing guard (``coverage_floor`` decides who may
+    # win and excludes; this decides whether the round closes at all and halts). Without the
+    # knob the halt would be unconditional, and the operator who genuinely wants to elect on
+    # a short panel would have no way to say so — which is the shape a gate needs to be a
+    # policy rather than a law.
+    "config_leaf_fields": 39,
     "settings_env": 16,
     "settings_const": 16,
     "opt_search_point_fields": 25,

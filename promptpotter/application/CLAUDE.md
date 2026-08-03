@@ -53,6 +53,10 @@ does not fix the cycle, it hides this rule.
   (`optimization/dispatch/llm_call/heartbeat.py`) — silence is how this package
   says "dead", so a long quiet await reads as a vanished producer and gets reaped
   out from under itself. Obligates every long await here, not just the LLM calls.
+  That one loop also carries `on_suspend` (the machine-sleep signal a wall-clock
+  deadline needs), so **create the task unconditionally** — its `ledger` is
+  optional precisely so a missing telemetry sink can never disarm a guard that
+  has nothing to do with telemetry.
 - Backend tunables ride the per-dataset overlay
   (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) merged by
   `configure_and_apply_pipeline()` (`config.py`). See **Backend overlay** below for the merge contract.

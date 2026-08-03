@@ -41,6 +41,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
     inner_tasks_path,
+    load_inner_tasks,
     resolve_inner_task,
 )
 from promptpotter.application.seed_screen import class_floor, draw_bank
@@ -52,17 +53,26 @@ from promptpotter.domain.l4.proxies import (
     held_levels,
     mean_round_delta_se,
 )
+from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandbox_dir,
     sandbox_owner_path,
 )
-from promptpotter.shared.instrument import MAX_INSTRUMENT_DEPTH, instrument_depth
+from promptpotter.shared.instrument import (
+    MAX_INSTRUMENT_DEPTH,
+    MeasurementRole,
+    instrument_depth,
+    measured_candidate,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.results import CycleResult, CycleSpend
+    from promptpotter.domain.sample import Sample
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
@@ -151,7 +161,7 @@ _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.Con
 )
 
 
-def publish_inner_spawn_context(session: Session) -> None:
+def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfig) -> None:
     """Publish *session*'s cycle as the spawn context for any inner recursion.
 
     Called once per cycle at the runner seam (``run_optimization``) for EVERY
@@ -172,7 +182,7 @@ def publish_inner_spawn_context(session: Session) -> None:
     inner_root = inner_sandbox_dir(
         shared_root, session.store.tenant_id, session.campaign_id, cycle_id
     )
-    _verify_outer_observation_contract(session, Path(dataset_dir))
+    _verify_outer_panel_contract(session, campaign_config, Path(dataset_dir))
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
@@ -219,13 +229,21 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
         "candidate_label": (
             cand.label if cand else (candidate_label(0, 0) if round_num == 0 else None)
         ),
+        # WHY this cell ran, not just for whom. A backfill's inner campaign is spawned
+        # outside the round's shared order to fill a paired comparison; without this the
+        # record cannot be told apart from the candidate's own panel cell, and reading one
+        # as the other is what made a repaired round unreproducible.
+        "role": cand.role.value if cand else None,
         "task": query,
     }
 
 
-def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> None:
-    """An outer dataset must DECLARE every key its inner samples emit — checked once, at the
-    seam that arms the recursion, against the schema the campaign actually loaded.
+def _verify_outer_panel_contract(
+    session: Session, campaign_config: CampaignConfig, dataset_dir: Path
+) -> None:
+    """An outer dataset must DECLARE every key its inner samples emit, and must budget for
+    exactly the panel it declares — both checked once, at the seam that arms the recursion,
+    against the schema and config the campaign actually loaded.
 
     A dataset that owns the connector's declared ``experiment_file`` IS an outer dataset
     (that file is what :func:`resolve_inner_task` reads), so no name test is needed to
@@ -236,7 +254,8 @@ def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> N
     (loud, but a run in) or, worse, the observation quietly never lands in the archive and
     the what-if panel scores a term nobody measured. Fail at arm time instead."""
     schema = session.pipeline_schema
-    if not inner_tasks_path(dataset_dir).is_file():
+    panel_path = inner_tasks_path(dataset_dir)
+    if not panel_path.is_file():
         return
     declared = {key for node in schema.nodes for key in node.output_keys}
     missing = [k for k in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS) if k not in declared]
@@ -246,6 +265,22 @@ def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> N
             f"observation_mappings for {missing} — every key an inner sample emits must be "
             "declared, or it never reaches pipeline_data and the outer formula scores a "
             "measurement that was silently dropped."
+        )
+    # The panel and the round budget are ONE declaration in two files, and nothing joined
+    # them: `inner_tasks.yaml` lists the cells, `campaign.yaml::sp_budget_ttest` says how
+    # many a round draws, and their equality was asserted only in a comment. A budget BELOW
+    # the panel narrows it silently — and with `per_round_resubset` on, different rounds
+    # then draw different cells, so candidates are compared across rounds on bases that
+    # never matched. `_check_sp_budget_vs_dataset` warns in the other direction only (budget
+    # above the data), so this direction had no reader at all.
+    n_cells = len(load_inner_tasks(panel_path).tasks)
+    if campaign_config.sp_budget_ttest != n_cells:
+        raise ValueError(
+            f"{dataset_dir.name} declares a {n_cells}-cell inner panel "
+            f"({panel_path.name}) but budgets sp_budget_ttest="
+            f"{campaign_config.sp_budget_ttest} per round. The outer panel is a CENSUS, not "
+            "a sample: every candidate must run every cell or the comparison is not paired. "
+            "Set sp_budget_ttest to the cell count, or change the panel."
         )
 
 
@@ -417,12 +452,145 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     return "\n".join(head_lines + round_lines)
 
 
+def inner_campaign_id(
+    spec: InnerTaskSpec,
+    overrides: dict[str, dict[str, Any]],
+    role: MeasurementRole = MeasurementRole.PANEL,
+) -> str:
+    """The campaign a ``(cell, optimizer-prompt-overrides, purpose)`` triple OWNS here.
+
+    Content, never asker. An inner campaign's behaviour is decided entirely by the cell it
+    runs and the optimizer prompts it runs under, so those two ARE its identity — and
+    keying on them is what lets a re-measured cell find the rounds a previous attempt
+    banked instead of starting over at round 0.
+
+    **Purpose is the third component, and omitting it conflated two different
+    measurements.** A candidate's own panel cell is measured in the round's shared order;
+    a PoBB ``BACKFILL`` catches a PRIOR up on a sample out of that order, for someone
+    else's paired comparison. Same cell, same overrides, different experiment — so they
+    must own different directories, or the two collapse and whichever ran second either
+    lands on top of the other or (with random ids) forks the data into duplicates.
+
+    The discriminator is deliberately BINARY, not the four-way role: ``REPAIR`` and
+    ``PARENT`` measure an individual's own evidence and so share ``PANEL``'s identity —
+    repair exists precisely to CONTINUE the panel campaign, and giving it its own id would
+    make it start a fresh run every time, which is the bug it was written to fix.
+
+    The obvious key, ``cycle_id``, does not work: it is a benchmark-cell hash and therefore
+    **collides across candidates** — ``cycle_19ab182342b7`` is shared by C0/seed-3,
+    C1.1/seed-3 and two C1.2/seed-3 campaigns. The overrides are what tell them apart.
+    The outer half of the identity is not lost either; the sandbox directory already IS
+    ``(tenant, outer campaign, outer cycle)`` (``inner_sandbox_key``), so sandbox path +
+    content key is a complete identity with each half owned in exactly one place.
+
+    ``[:6]`` matches ``mint_campaign_id``'s ``token_hex(3)`` width so continued campaigns
+    cost no more path length than minted ones (Windows ``MAX_PATH``, ``store/layout.py``).
+    """
+    purpose = "backfill" if role is MeasurementRole.BACKFILL else "own"
+    digest = stable_hash([spec.model_dump(mode="json"), overrides, purpose])[:6]
+    return f"{spec.inner_dataset}__{digest}"
+
+
+def _banked_inner_rounds(ctx: InnerSpawnContext, campaign_id: str) -> int:
+    """Round records already on disk for *campaign_id* in this sandbox; 0 if it is new.
+
+    Read in the OUTER task, before the inner campaign is spawned, because the wall-clock
+    deadline is the outer task's to set and a continued cell must be budgeted over the
+    rounds that REMAIN. A cell resuming with 3 of 5 rounds banked that inherits the full
+    budget is not bounded by it in any useful sense.
+
+    Deliberately a directory read rather than a store call: the campaign id is
+    content-addressed and owns exactly one root cycle, so the glob (the same shape
+    ``reaper.py::reap_cycle_by_id`` uses) answers without building a Session — which does
+    not exist yet out here.
+    """
+    indexes = ctx.inner_sandbox_root.glob(f"*/campaigns/{campaign_id}/cycles/*/index.json")
+    return max(
+        (len((read_json_optional(p) or {}).get("rounds") or []) for p in indexes),
+        default=0,
+    )
+
+
+def _open_inner_campaign(
+    session: Session,
+    campaign_config: CampaignConfig,
+    train_data: list[Sample],
+    *,
+    campaign_id: str,
+) -> int:
+    """Bind *session* to this cell's campaign, minting only if it does not exist yet.
+
+    Returns how many round records are already banked (0 for a fresh mint) — the caller
+    budgets its wall clock over the rounds that REMAIN, not the whole cycle again.
+
+    Continuing rather than re-minting is the whole point: an abandoned inner campaign
+    still holds every round it finished, and the previous behaviour (always
+    ``prepare_fresh_cycle``, always a fresh random ``campaign_id``) orphaned them where no
+    reader would ever find them and re-ran the cell from round 0 against the same wall
+    clock it had just blown.
+
+    Eligibility is asked of :func:`derive_run_phase` — the single run-phase derivation —
+    and the rule is **continue unless something is live on it**. ``stop_reason_outcome`` is
+    deliberately not the question here: that governs *scoring* (only a SUCCESS cycle is a
+    measurement, ``domain/l4/proxies.py``) and stays there. For *resumption* every terminal
+    class continues, including ``PRODUCER_VANISHED`` — which is precisely the reaped state
+    this exists to recover. A cycle that finished successfully re-enters with
+    ``clean_rounds >= max_rounds``, runs zero rounds, and returns its fully replayed
+    trajectory: no spend, full proxies.
+
+    Binding is all this does. The terminal latch a continued cycle still carries is
+    cleared one layer down, in ``bootstrap_cycle`` — the seam BOTH levels pass through —
+    so an outer resume past a stop is un-latched by the same rule, not a second copy of it.
+    """
+    from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
+    from promptpotter.infrastructure.runtime_flags import derive_run_phase
+    from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+
+    plan = resolve_cycle_plan(session, campaign_config, train_data)
+    store = session.store.campaigns
+    existing = store.load(campaign_id, plan.cycle_id)
+    if existing is None:
+        prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id)
+        return 0
+
+    phase = derive_run_phase(
+        store.cycle_dir(campaign_id, plan.cycle_id),
+        is_terminal=bool(existing.get("finished_at")),
+    )
+    if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
+        raise InnerCycleUnscoreableError(
+            f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
+            "owns it, and two runs writing one cycle is not a measurement"
+        )
+    session_id = str(existing.get("parent_session_id") or "")
+    if not session_id:
+        raise InnerCycleUnscoreableError(
+            f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
+            "is no session record to continue under"
+        )
+
+    session.session_id = session_id
+    session.campaign_id = campaign_id
+    session.state.cycle_id = plan.cycle_id
+    save_active_pointer(session.store.base_dir, session_id, campaign_id, plan.cycle_id)
+    banked = len(existing.get("rounds") or [])
+    logger.info(
+        "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
+        campaign_id,
+        plan.cycle_id,
+        banked,
+        phase,
+    )
+    return banked
+
+
 async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: InnerTaskSpec,
     optimizer_prompt_overrides: dict[str, dict[str, Any]],
     cycle_dir_box: dict[str, Path],
     spawned_by: dict[str, Any],
+    spawn_role: MeasurementRole,
 ) -> CycleResult:
     """Mint + run one sandboxed inner campaign; return its ``CycleResult``.
 
@@ -449,7 +617,6 @@ async def _run_inner_campaign(
         dataset_campaign_path,
         read_campaign_config_file,
     )
-    from promptpotter.application.jobs.mint import prepare_fresh_cycle
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
@@ -556,7 +723,14 @@ async def _run_inner_campaign(
         n_scored=len(train_data),
     )
 
-    prepare_fresh_cycle(session, campaign_config, train_data)
+    # Continue this cell's own campaign when one already exists — a retry must not orphan
+    # the rounds the previous attempt banked.
+    _open_inner_campaign(
+        session,
+        campaign_config,
+        train_data,
+        campaign_id=inner_campaign_id(spec, optimizer_prompt_overrides, spawn_role),
+    )
     if session.campaign_id and session.state.cycle_id:
         # Stamp WHO asked for this measurement onto the cycle index. Written here rather
         # than threaded through `prepare_fresh_cycle` → `auto_mint_session`: those are the
@@ -730,41 +904,87 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # no-evidence shape rather than caught here. A completed inner run that merely failed to
     # improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured, not excluded —
     # so a bad mutation is still penalised.
+    # Captured in the OUTER task, like `spawned_by` above and for the same reason: the
+    # inner task gets a COPY of this context and its own candidate loop rebinds the stamp,
+    # so a read over there would return the inner run's candidate, not the asker.
+    spawn_role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
     inner_task = asyncio.create_task(
-        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by)
+        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
     )
-    heartbeat_task: asyncio.Task[None] | None = None
-    if outer_ledger is not None:
-        heartbeat_task = asyncio.create_task(
-            # NOT an optimizer node name. What is running here is a whole inner campaign
-            # — many rounds, every optimizer node inside it — so naming it after one of
-            # them charges that node with the entire campaign's wall clock: a healthy
-            # 8-round run read as `l1_critique still waiting · 1444s`, and the obvious
-            # conclusion was that critique had hung (it averages 30s). The
-            # `step_timings`/`step_tokens` keying below is a different question with a
-            # real answer (spend attribution to the ranker node) — do not re-align this
-            # display label to it.
-            heartbeat(
-                outer_ledger,
-                call_id=f"inner:{query}",
-                node="inner_campaign",
-                round_num=_CURRENT_ROUND.get(),
-                start_monotonic=start,
-                detail_fn=_inner_detail,
-            )
-        )
     # The ONE bound on this sample's total wall clock. Awaiting `inner_task` DIRECTLY makes it
     # this coroutine's `_fut_waiter`, so the timeout's cancellation propagates into the inner
     # campaign and it really stops. Do not wrap the await in `asyncio.shield` or `asyncio.wait`:
     # both detach the campaign from the cancellation, orphaning it to keep calling the optimizer
     # and billing tokens against a sample nobody will read.
-    deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * (spec.n_rounds + 1)
+    # Budget the rounds that REMAIN, not the whole cycle again. A continued cell re-enters
+    # its own campaign holding everything the last attempt banked, so charging it the full
+    # budget for the tail leaves the wall bounding almost nothing — the failure the
+    # continuation would otherwise import from the abandonment it fixes. `max(1, …)` keeps
+    # one round's grace for a fully-banked cycle to replay its priors and finalize.
+    banked = _banked_inner_rounds(ctx, inner_campaign_id(spec, overrides, spawn_role))
+    deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
+    # Constructed here rather than inline in the `async with` so the heartbeat's suspend hook
+    # below can close over it. `asyncio.timeout` fixes its absolute `when` at CALL time, so
+    # `when()` is already readable; only `reschedule` requires the context to have been entered.
+    deadline = asyncio.timeout(deadline_s)
+
+    def _give_back_suspended_time(overshoot: float) -> None:
+        """Push the deadline out by wall time the MACHINE spent asleep.
+
+        The deadline bounds how long this cell may SPEND, and a suspended machine
+        spends nothing. Without this, an overnight sleep hands the next tick a
+        budget that expired while nothing ran: one cell here was cancelled at wake
+        having completed a single inner round in ~2s of real work, and the
+        abandoned campaign was then reaped as `producer_vanished` — a hole in the
+        panel manufactured entirely by the laptop lid.
+        """
+        when = deadline.when()
+        if when is None:  # pragma: no cover — only for `timeout(None)`, never used here
+            return
+        try:
+            deadline.reschedule(when + overshoot)
+        except RuntimeError:
+            # The `async with` already exited and this tick landed before the
+            # `finally` cancelled us. Nothing left to extend.
+            return
+        logger.warning(
+            "inner cell %s: machine suspended ~%.0fs mid-campaign; extending the "
+            "%.0fs wall-clock deadline by that much rather than charging it as work",
+            query,
+            overshoot,
+            deadline_s,
+        )
+
+    heartbeat_task = asyncio.create_task(
+        # NOT an optimizer node name. What is running here is a whole inner campaign
+        # — many rounds, every optimizer node inside it — so naming it after one of
+        # them charges that node with the entire campaign's wall clock: a healthy
+        # 8-round run read as `l1_critique still waiting · 1444s`, and the obvious
+        # conclusion was that critique had hung (it averages 30s). The
+        # `step_timings`/`step_tokens` keying below is a different question with a
+        # real answer (spend attribution to the ranker node) — do not re-align this
+        # display label to it.
+        #
+        # Created UNCONDITIONALLY, even with no outer ledger to append to (`heartbeat`
+        # tolerates `None`): this task now also carries the deadline's suspend guard,
+        # and gating it on a telemetry sink would silently disarm that guard wherever
+        # the sink happens to be absent.
+        heartbeat(
+            outer_ledger,
+            call_id=f"inner:{query}",
+            node="inner_campaign",
+            round_num=_CURRENT_ROUND.get(),
+            start_monotonic=start,
+            detail_fn=_inner_detail,
+            on_suspend=_give_back_suspended_time,
+        )
+    )
     # ``None`` once the deadline has bitten — the one state both exits below funnel into, so
     # the guard has a single answer to "is there a measurement here" and a single raise.
     result: CycleResult | None = None
     try:
         try:
-            async with asyncio.timeout(deadline_s) as deadline:
+            async with deadline:
                 result = await inner_task
             # The deadline does not take the callee's word for it. ``asyncio.timeout``
             # converts its cancellation into TimeoutError only if a CancelledError comes back
@@ -788,15 +1008,26 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
                 await inner_task
         # Cancel the heartbeat whether the inner run returned or raised — an
         # in-flight task would otherwise keep appending against a finished sample.
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
     if result is None:
+        # Name the directory the abandoned campaign is IN. The reason reaches the operator
+        # through the outer ERROR row, but that row names only the cell — so the on-disk
+        # campaign it abandoned, holding real banked rounds, was unfindable from either
+        # surface. Reading `.goldmine/latest.log` beside the tree is how the two get joined.
+        logger.warning(
+            "inner cell %s abandoned at its %.0fs wall-clock deadline; its partial campaign "
+            "is at %s",
+            query,
+            deadline_s,
+            cycle_dir_box.get("dir", "<not yet minted>"),
+        )
         raise InnerCycleUnscoreableError(
             f"it ran past its {deadline_s:.0f}s wall-clock deadline "
-            f"({spec.n_rounds} rounds + origin, at {OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) "
-            "and was cancelled"
+            f"({max(1, (spec.n_rounds + 1) - banked)} round(s) still to run of "
+            f"{spec.n_rounds} + origin, {banked} already banked, at "
+            f"{OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) and was cancelled"
         )
     inner_spend: CycleSpend | None = result.spend
     elapsed = time.monotonic() - start

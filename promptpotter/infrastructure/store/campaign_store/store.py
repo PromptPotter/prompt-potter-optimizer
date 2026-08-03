@@ -781,6 +781,34 @@ class CampaignStore:
         with graceful("Cycle completion update failed"):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
+    def reopen_for_continuation(self, campaign_id: str, cycle_id: str) -> None:
+        """Clear the terminal latch so a continued cycle stops claiming it finished.
+
+        The exact inverse of :meth:`mark_finished`, and the ONLY writer that removes
+        ``finished_at``. That field is a latch, not a note: :func:`derive_run_phase`
+        returns ``TERMINAL`` on it before it consults anything else, so the cycle list,
+        the picker and the reaper's staleness sweep all read it. Continuing a cycle
+        without clearing it leaves a live producer on a cycle every reader calls
+        finished — and ``TERMINAL`` is precisely the phase the reaper's guards do not
+        refuse, so the next sweep would re-stamp it underneath the run.
+
+        ``final`` is removed with it because it names a winner for a trajectory that is
+        about to grow; a verdict that outlives the round justifying it is worse than
+        none. ``interrupted_round`` / ``crash_traceback`` describe the stop being undone.
+        """
+        self.update(
+            campaign_id,
+            cycle_id,
+            {"status": "active"},
+            remove=[
+                "finished_at",
+                "stop_reason",
+                "final",
+                "interrupted_round",
+                "crash_traceback",
+            ],
+        )
+
     def mark_producer_vanished(self, campaign_id: str, cycle_id: str) -> bool:
         """Reap a dead cycle: stamp it ``TERMINAL`` (``producer_vanished``) so the
         one liveness owner and the on-disk truth agree.

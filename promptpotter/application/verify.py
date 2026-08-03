@@ -198,6 +198,7 @@ async def verify_candidate(
         # produced it is not in scope here, and the workspace side it is compared against
         # (`compute_composite_fitness` below) has none either.
         opt_sp=None,
+        measured=None,
         on_sample_scored=lambda *_a, **_k: None,
         on_sample_starting=lambda *_a, **_k: None,
         source=f"verify:{campaign_id}:{label}",

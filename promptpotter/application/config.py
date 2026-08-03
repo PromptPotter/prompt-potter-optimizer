@@ -368,6 +368,20 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
+    panel_gate: Annotated[Literal["strict", "off"], Knob(Scope.POLICY, Estimand.GATE)] = Field(
+        "strict",
+        description=(
+            "Halt at the end of a round whose electable candidates carry HOLES — cells "
+            "the loop attempted and got no measurement back from — instead of electing a "
+            "winner from a comparison whose arms ran different cell sets. ``strict`` "
+            "(default) halts on any hole; ``off`` disarms. The halt is resumable and the "
+            "round is not persisted, so a plain ``resume`` re-runs it: the cached "
+            "candidates replay, the missing cells are re-measured, and the round decides "
+            "on a complete panel. A PoBB elimination is NOT a hole (those cells were "
+            "never attempted) and neither is a classifier-deprecated sample."
+        ),
+    )
+
     origin_gate: Annotated[
         Literal["strict", "critical_only", "off"], Knob(Scope.POLICY, Estimand.GATE)
     ] = Field(

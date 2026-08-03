@@ -152,6 +152,7 @@ def compute_degradation_health(
     dominant_node: str | None = None,
     unreachable_count: int = 0,
     no_result_count: int = 0,
+    hole_count: int = 0,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
@@ -208,6 +209,7 @@ def compute_degradation_health(
                 structural_count=0,
                 transient_count=0,
                 no_result_count=0,
+                hole_count=hole_count,
                 degraded_rate=0.0,
                 consecutive_degraded_rounds=0,
                 prior_clean_rounds=prior_clean_rounds,
@@ -221,6 +223,7 @@ def compute_degradation_health(
         return None
     structural_rate = structural_count / attempted
     no_result_rate = no_result_count / attempted
+    hole_rate = hole_count / attempted
     degraded_rate = (structural_count + transient_count) / attempted
     untested = prior_clean_rounds == 0
 
@@ -245,6 +248,10 @@ def compute_degradation_health(
         # see. Ranked below ``structural`` (a hard node failure is the more
         # specific, node-attributed cause) but above the softer signals.
         grade, reasons = "critical", ["unscoreable"]
+    elif hole_rate >= UNSCOREABLE_RATE:
+        # Most of the round's cells never reported. There is nothing to grade and nothing
+        # to optimize against — the remedy is to re-measure, not to change the prompt.
+        grade, reasons = "critical", ["holed"]
     elif starved_node is not None:
         grade, reasons = "critical", ["evidence_starved"]
         dominant_node = starved_node
@@ -293,6 +300,16 @@ def compute_degradation_health(
                 "successfully, but no parseable label came back). Fix the prompt's "
                 "answer_format so the model commits a single parseable label (or the "
                 "extraction contract), then rescore — don't optimize against it."
+            )
+        elif "holed" in reasons:
+            pct = round(hole_rate * 100)
+            suggested_action = (
+                f"{pct}% of this round's cells returned no measurement at all — they were "
+                "attempted and errored, so there is nothing here to optimize against and "
+                "nothing about the prompt to conclude. Re-measure: a plain `resume` "
+                "re-runs the cells (their errored rows are never served from cache). If "
+                "they keep failing, the cause is upstream of the prompt — read the row's "
+                "error text before changing anything."
             )
         elif "persistent" in reasons:
             suggested_action = (
@@ -409,9 +426,9 @@ def compute_round_health(
     record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
     then grades via :func:`compute_degradation_health` — failure rates over the
     ATTEMPTED rows (``len(results)``)."""
-    from promptpotter.shared.errors import ErrorCategory, error_category
+    from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
-    structural = transient = unreachable = no_result = 0
+    structural = transient = unreachable = no_result = holes = 0
     structural_nodes: dict[str, int] = {}
     for r in results or []:
         # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
@@ -429,6 +446,13 @@ def compute_round_health(
         # counted here as the PP-owned unscoreable signal.
         if r.get("predicted") == NO_RESULT:
             no_result += 1
+        # A HOLE: the row carries a typed error that is not a transport failure, so it has
+        # no diagnostics and `classify_sample_failure({}, [])` scores it neither structural
+        # nor transient. Counted here or it joins the denominator alone — which is how two
+        # abandoned L4 inner cells made their round grade healthier than a complete one.
+        if is_error_result(r):
+            holes += 1
+            continue
         diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
         statuses = diag.get("step_statuses") or {}
         warnings = diag.get("warnings") or []
@@ -461,7 +485,7 @@ def compute_round_health(
     # verdict counts clean; a ``None`` in the consecutive walk is skipped, not a stop.
     prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
     consecutive = 0
-    if structural + transient + unreachable > 0:
+    if structural + transient + unreachable + holes > 0:
         consecutive = 1
         for h in reversed(list(prior_healths)):
             if h is None:
@@ -480,6 +504,7 @@ def compute_round_health(
         dominant_node=dominant,
         unreachable_count=unreachable,
         no_result_count=no_result,
+        hole_count=holes,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
         is_origin=is_origin,

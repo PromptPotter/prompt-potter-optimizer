@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import subprocess
+import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -2265,3 +2266,124 @@ async def test_first_sight_framing_never_writes_into_install_content(
         built_stores, "gsm8k", campaign_id="c", context=None
     )
     assert again.domain == "grade-school arithmetic"
+
+
+def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
+    """A cell's inner campaign is addressed by CONTENT, and two candidates must not collide.
+
+    Silent harm, and the reason this key could not simply be the ``cycle_id``: that id is a
+    benchmark-CELL hash, so C0, C1.1 and C1.2 measuring seed-3 all derive the same one
+    (``cycle_19ab182342b7`` is shared by four campaigns on disk). The optimizer-prompt
+    overrides are the only thing that tells the candidates apart, so a key that dropped them
+    would file two candidates' inner runs under one campaign — and because
+    ``_open_inner_campaign`` CONTINUES an existing campaign, the second candidate would
+    inherit the first's banked rounds and be scored on a trajectory it never ran. No error,
+    no missing directory: just one candidate's measurement reported as another's.
+
+    Stability across processes matters for the same reason from the other side: a key that
+    varied per process would never find its own campaign, so every retry would re-mint and
+    the continuation would silently never happen.
+    """
+    from promptpotter.application.runner.inner.cycle import inner_campaign_id
+    from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+
+    spec = InnerTaskSpec(
+        inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4, n_variants=3
+    )
+    c1 = {"l1_generate": {"instruction": "widen the axes"}}
+    c2 = {"l1_generate": {"instruction": "narrow the axes"}}
+
+    assert inner_campaign_id(spec, c1) != inner_campaign_id(spec, c2), (
+        "two candidates differing only in one override field share a campaign — "
+        "their measurements merge under one id with no error"
+    )
+    # The origin (no overrides) is a third distinct arm, not a nameless default.
+    assert (
+        len({inner_campaign_id(spec, c1), inner_campaign_id(spec, c2), inner_campaign_id(spec, {})})
+        == 3
+    )
+    # A different cell of the SAME candidate is a different campaign too.
+    assert inner_campaign_id(spec.model_copy(update={"seed": 6}), c1) != inner_campaign_id(spec, c1)
+    # Recomputation is stable, and key order in the override dict is not part of the identity.
+    assert inner_campaign_id(spec, c1) == inner_campaign_id(spec, dict(c1))
+    assert inner_campaign_id(spec, {"a": {"x": "1"}, "b": {"y": "2"}}) == inner_campaign_id(
+        spec, {"b": {"y": "2"}, "a": {"x": "1"}}
+    )
+
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from promptpotter.application.runner.inner.cycle import inner_campaign_id;"
+            "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
+            "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4,n_variants=3);"
+            "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == inner_campaign_id(spec, c1), (
+        "the campaign key is not stable across processes — every retry would re-mint "
+        "instead of continuing, and the banked rounds would be orphaned in silence"
+    )
+
+
+def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> None:
+    """A HOLE is a cell that was attempted and returned nothing — not a stop, not a retry.
+
+    The silent direction is the false NEGATIVE. If this stops recognising an errored row,
+    the panel gate never fires and rounds resume being elected on incomplete comparisons —
+    which is the original defect, and it ran a whole campaign without anyone noticing: two
+    of C1.1's six cells returned no measurement, it was ranked against a rival measured on
+    a different five, and it won.
+
+    The two near-misses are pinned in the other direction because the obvious arithmetic
+    (``scored_samples - total``) counts both, and both occur on real runs:
+
+    * a PoBB-eliminated candidate simply stopped early — those cells were never attempted;
+    * a *deprecated* row is a sample the classifier marked fatal (``content_empty`` plus a
+      schema retry). It carries no ``error_category`` and is already excluded from
+      ``total``. Exactly one exists on disk, in a healthy inner round — the arithmetic form
+      would have halted that cycle, and through the L4 recursion a halted inner cycle is
+      itself unscoreable, so one transient retry would have taken the whole outer run down.
+    """
+    from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.domain.results import unscoreable_cells
+
+    def row(sample_id: int, **extra: Any) -> dict[str, Any]:
+        return {"sample_id": sample_id, "predicted": "TRUE", **extra}
+
+    # The real C1.1 shape: six attempted cells, two returned no measurement.
+    holed = [row(i) for i in range(4)] + [
+        row(4, predicted="ERROR", error_category="UNKNOWN", error="ran past its deadline"),
+        row(5, predicted="ERROR", error_category="UNKNOWN", error="ran past its deadline"),
+    ]
+    assert unscoreable_cells(holed) == 2
+
+    # The real C1.2 shape: PoBB cut it at five cells. Complete, not holed.
+    assert unscoreable_cells([row(i) for i in range(5)]) == 0
+    assert unscoreable_cells([]) == 0
+
+    # The real inner C2.2 shape: a fatal-classified transient with NO error_category.
+    deprecated = row(
+        22,
+        predicted="Uncertain",
+        pipeline_data={
+            "diagnostics": {
+                "warnings": [
+                    {
+                        "step": "llm_only",
+                        "code": "content_empty",
+                        "message": "finish_reason=error",
+                        "kind": "transient",
+                    }
+                ]
+            }
+        },
+    )
+    assert is_deprecated(deprecated), "fixture drift — this row must classify as deprecated"
+    assert unscoreable_cells([row(0), row(1), row(2), deprecated]) == 0, (
+        "a classifier-deprecated sample was counted as a hole — the gate would halt a "
+        "healthy cycle on a transient retry the loop already handles"
+    )

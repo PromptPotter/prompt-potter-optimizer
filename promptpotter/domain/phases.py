@@ -96,14 +96,17 @@ class RunPhase(enum.StrEnum):
       ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at
       Start when ``checkin`` flips to ``active``); precedes every other phase.
     - ``RUNNING`` — a process is attached and driving the active cycle.
-    - ``PAUSED`` — operator paused (the pause button or Ctrl+C); the worker
-      exits cleanly at the next checkpoint but the cycle stays **active and
-      resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``
-      OR the runner's own declaration — Ctrl+C writes no flag, so reading
-      only the flag reported a cleanly-paused run as ``detached`` and let the
-      reaper stamp it ``PRODUCER_VANISHED``. The play action relaunches via
-      ``start-run``/``resume``. The single operator-interrupt phase — there
-      is no separate "stopping".
+    - ``PAUSED`` — the worker exits cleanly but the cycle stays **active and
+      resumable** (no ``finished_at``). Three ways in: the pause button (writes
+      ``.runtime/pause.flag``), Ctrl+C, and an ``asyncio.CancelledError`` — our
+      own machinery stopping a run, typically the L4 outer sample deadline
+      cancelling its inner campaign. Only the first writes a flag, so the other
+      two are derived off the runner's DECLARATION, made once for all three at
+      the finalize seam (``runner/entry.py::_finalize_run``); leaving that to
+      each raise site is what let a deliberately-cancelled inner cycle read
+      ``detached`` and be stamped ``PRODUCER_VANISHED`` 15 minutes later. The
+      play action relaunches via ``start-run``/``resume``. The single
+      operator-interrupt phase — there is no separate "stopping".
     - ``GATE`` — alive, holding at the round-0 origin gate awaiting an
       operator decision (rescore / proceed / abort) because the origin
       verdict was not ``healthy``. Reversible (``origin-gate-decision``).

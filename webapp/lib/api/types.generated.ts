@@ -30,6 +30,7 @@ export interface DegradationHealth {
   structural_count: number;
   transient_count: number;
   no_result_count: number;
+  hole_count: number;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
   prior_clean_rounds: number;

@@ -7,16 +7,20 @@ this ONE loop; a second heartbeat is a bug.
 **The rule: an await that outlasts ``RUN_FRESH_S`` and writes nothing of its own MUST
 heartbeat.** Silence is how this package says "the producer died", so a live wait that
 stays silent is claiming to be dead — and every liveness reader downstream believes it.
+
+Because this is the one loop ticking beside every slow await, it is also the one place
+that can notice the MACHINE went to sleep underneath one — hence ``on_suspend``. A
+second watchdog task would be the second heartbeat this module forbids.
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.run_records import LLMCallProgressRecord
+from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -35,13 +39,14 @@ ledger pays one append per tick - at four optimizer calls/round and
 
 
 async def heartbeat(
-    ledger: CycleEventLog,
+    ledger: CycleEventLog | None,
     *,
     call_id: str,
     node: str,
     round_num: int | None,
     start_monotonic: float,
     detail_fn: Callable[[], str | None] | None = None,
+    on_suspend: Callable[[float], None] | None = None,
 ) -> None:
     """Periodically append :class:`LLMCallProgressRecord` while a call is open.
 
@@ -53,9 +58,22 @@ async def heartbeat(
     ``detail_fn`` (when supplied) is evaluated each tick and its result rides
     the record's ``detail`` — the L4 inner-progress line. ``None`` keeps the
     ordinary optimizer heartbeat's behavior (no detail).
+
+    ``on_suspend`` (when supplied) is called with the overshoot in seconds each
+    time a tick's sleep runs long enough to mean the MACHINE was suspended — the
+    hook a wall-clock deadline uses to give back time it never got to spend.
+
+    ``ledger`` may be ``None``: the tick still runs, it just appends nothing. That
+    is what lets a caller whose ledger is optional create this task
+    unconditionally, so a guard on the ledger can never silently disarm an
+    ``on_suspend`` that has nothing to do with telemetry.
     """
     while True:
-        await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
+        if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
+            on_suspend(overshoot)
+        if ledger is None:
+            continue
         elapsed = time.monotonic() - start_monotonic
         ledger.append(
             LLMCallProgressRecord(

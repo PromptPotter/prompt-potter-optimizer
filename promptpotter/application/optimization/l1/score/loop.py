@@ -21,6 +21,7 @@ from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -56,7 +57,9 @@ async def score_population(
     candidate_scores: list[ScoredCandidate] = []
     escalation_signal: EscalationSignal | None = None
 
-    async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
+    async def _pobb_backfill(
+        sp: JobSearchPoint, samples: list[Sample], prior_id: str
+    ) -> list[QueryMeasurement]:
         """Score *sp* on *samples* for PoBB paired-comparison fill-in. *sp* is a
         PRIOR searchpoint, not a foreground candidate — so this fires **no**
         per-sample display callbacks (``on_sample_scored=None``). The backfill's
@@ -79,6 +82,17 @@ async def score_population(
             axes=cycle.axes,
             on_sample_scored=None,
             on_sample_starting=None,
+            # The PRIOR being caught up — never the foreground candidate whose sample set
+            # triggered this. Inheriting that binding is what filed C1.1's backfills under
+            # C1.2. ``idx`` is -1 because a backfill occupies no slot in the round's
+            # population; ``role`` is what tells a reader this row was measured for a
+            # paired comparison, outside the round's shared order.
+            measured=MeasuredCandidate(
+                idx=-1,
+                candidate_id=prior_id,
+                label=f"prior:{prior_id[:8]}",
+                role=MeasurementRole.BACKFILL,
+            ),
         )
         return best_full_results
 
@@ -228,6 +242,9 @@ async def replicate_survivors_pass(
                 opt_sp=opt_sp_c,
                 on_sample_scored=None,
                 on_sample_starting=None,
+                measured=MeasuredCandidate(
+                    idx=0, candidate_id=cid, label="replicate", role=MeasurementRole.PANEL
+                ),
                 force_fresh=True,
             )
             all_candidate_results[cid].extend(rows)

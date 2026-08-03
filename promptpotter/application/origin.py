@@ -19,6 +19,7 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
+from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -89,6 +90,12 @@ async def rescore_parent(
         axes=cycle.axes,
         on_sample_scored=None,
         on_sample_starting=None,
+        measured=MeasuredCandidate(
+            idx=0,
+            candidate_id=cycle.opt_sp.lineage.id,
+            label=cycle.rounds[-1].label,
+            role=MeasurementRole.PARENT,
+        ),
         force_fresh=force_fresh,
     )
     return RoundParent(
@@ -492,6 +499,7 @@ async def prepare_scoring_context(
                 # own OSP here would give the reference an opt_sp-aware composite that no
                 # candidate's matched floor shares.
                 opt_sp=None,
+                measured=None,
                 force_fresh=attempt > 0,
                 on_sample_starting=(
                     partial(listener.on_sample_started, 0, 1) if listener is not None else None

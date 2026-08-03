@@ -173,6 +173,7 @@ def auto_mint_session(
     session: Session,
     campaign_config: CampaignConfig,
     *,
+    campaign_id: str,
     cycle_id: str,
     origin_acc: float = 0.0,
     origin_prompt_fields: dict[str, Any] | None = None,
@@ -181,12 +182,16 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:
-    """Mint fresh campaign + session + root cycle; claim the active pointer."""
+    """Mint fresh campaign + session + root cycle under *campaign_id*; claim the active pointer.
+
+    ``campaign_id`` is chosen by the caller (``jobs/mint.py::prepare_fresh_cycle``) rather
+    than minted here, so an L4 inner spawn can hand in an id derived from the cell it
+    measures and land back on the campaign a previous attempt left rounds in.
+    """
     from promptpotter.application.config import freeze_campaign_config, resolved_dataset_name
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
-    from promptpotter.application.runner.identity import mint_campaign_id
     from promptpotter.domain.campaign import Campaign
 
     target_hash = cycle_id.removeprefix("cycle_")
@@ -195,7 +200,7 @@ def auto_mint_session(
     now = utcnow_iso()
     dataset_name = resolved_dataset_name(session, campaign_config)
     optimizer_hash = combined_optimizer_prompt_hash()
-    campaign_id = mint_campaign_id(dataset_name)
+    validate_path_component(campaign_id)
     root_cycle = cycle_id
 
     state = new_session_state(

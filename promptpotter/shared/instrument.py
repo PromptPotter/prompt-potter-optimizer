@@ -10,6 +10,7 @@ one reintroduces the leak and the number still looks exactly like a measurement.
 from __future__ import annotations
 
 import contextvars
+import enum
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,7 @@ __all__ = [
     "MAX_INSTRUMENT_DEPTH",
     "InstrumentMode",
     "MeasuredCandidate",
+    "MeasurementRole",
     "enter_instrument_mode",
     "instrument_depth",
     "instrument_mode",
@@ -95,6 +97,22 @@ def instrument_depth() -> int:
     return mode.depth if mode is not None else 0
 
 
+class MeasurementRole(enum.StrEnum):
+    """WHY a scoring pass ran — the half of provenance an id alone cannot carry.
+
+    ``PANEL`` is a candidate's own evidence, measured in the round's deterministic shared
+    order. The other three re-enter the gateway for a DIFFERENT purpose and therefore
+    outside that order: ``BACKFILL`` catches a prior up on a sample the current candidate
+    reached, ``PARENT`` re-scores the round's parent on this round's scoring set, and
+    ``REPAIR`` re-measures a closed round's unmeasured cells on resume.
+    """
+
+    PANEL = "panel"
+    BACKFILL = "backfill"
+    PARENT = "parent"
+    REPAIR = "repair"
+
+
 @dataclass(frozen=True)
 class MeasuredCandidate:
     """Which candidate the OUTER loop is scoring right now.
@@ -111,14 +129,27 @@ class MeasuredCandidate:
     reasoning, and same shape, as ``_CURRENT_ROUND`` — which supplies the round half of
     this stamp and is why the round isn't duplicated here.
 
-    Bound in the OUTER task by ``score_one_candidate``. ``run_inner_cycle`` runs in that
-    same task (its inner campaign gets a fresh task only afterwards), so the binding is
-    live at the spawn site.
+    Bound in the OUTER task by ``score_search_point`` — the sole scoring ingress — from an
+    argument every caller must supply. It used to be bound by ``score_one_candidate``
+    alone, so the two askers that RE-ENTER the gateway (``_pobb_backfill``,
+    ``rescore_parent``) inherited whichever candidate happened to be bound last and
+    stamped their measurements with it: two PoBB backfills that ran C1.1's optimizer
+    prompts were recorded as C1.2's. Binding at the ingress makes every pass declare who
+    it is measuring for, and no future caller can inherit a stale identity.
+    ``run_inner_cycle`` runs in that same task (its inner campaign gets a fresh task only
+    afterwards), so the binding is live at the spawn site.
+
+    ``role`` is why a stamp is not just an id. A ``BACKFILL`` measures a PRIOR searchpoint
+    to fill a paired comparison, out of the round's shared order and on a different code
+    path; a ``PANEL`` row is a candidate's own evidence, measured in that order. Both are
+    legitimate and they are not interchangeable — recording only the id let one be read as
+    the other, which is how a paired-comparison row was promoted into a candidate's panel.
     """
 
     idx: int
     candidate_id: str
     label: str
+    role: MeasurementRole = MeasurementRole.PANEL
 
 
 _MEASURED: contextvars.ContextVar[MeasuredCandidate | None] = contextvars.ContextVar(

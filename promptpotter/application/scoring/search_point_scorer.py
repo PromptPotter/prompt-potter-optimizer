@@ -20,6 +20,7 @@ from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import error_category, is_error_result
+from promptpotter.shared.instrument import MeasuredCandidate, set_measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -278,6 +279,7 @@ async def score_search_point(
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
     opt_sp: OptSearchPoint | None,
+    measured: MeasuredCandidate | None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
@@ -317,7 +319,17 @@ async def score_search_point(
     apart from a frozen process. The required-keyword signature **is** the
     enforcement — a caller that omits the choice fails to compile/typecheck;
     there is no standing test.
+
+    ``measured`` is required for that same reason, and it is the reason this binding lives
+    HERE rather than in ``score_one_candidate``. Bound one layer up, it was set once per
+    candidate and then INHERITED by the two askers that re-enter this gateway mid-round
+    (``_pobb_backfill``, ``rescore_parent``), so their measurements were stamped with
+    whichever candidate was bound last — C1.1's backfills were recorded as C1.2's, and
+    nothing errored. Every pass now declares who it measures for and why
+    (:class:`MeasurementRole`); ``None`` means no individual is in scope (an origin pass),
+    which is an answer, not an omission.
     """
+    set_measured_candidate(measured)
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema

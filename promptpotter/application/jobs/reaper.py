@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from pathlib import Path
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
@@ -32,6 +31,7 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
     sandbox_owner_path,
 )
+from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
 logger = logging.getLogger(__name__)
 
@@ -205,15 +205,16 @@ async def periodic_sweep(
       above the 15 s heartbeat interval) before judging anything, so a
       producer that woke alongside the server gets its first post-wake
       heartbeat in before any staleness verdict.
-    - **Mid-uptime case**: each tick times its own ``asyncio.sleep`` in wall
-      clock. A real OS suspend freezes the event loop's monotonic clock along
-      with everything else, so a scheduled sleep only completes AFTER its
-      full duration re-elapses post-wake — wall time overshoots what was
-      asked for by roughly the suspend duration. When the overshoot exceeds
-      ``~60s``, this SKIPS that tick's sweep and waits ``initial_delay_s``
-      again (the same heartbeat grace period as the boot case) before
-      resuming judgment — so a just-woken producer is never reaped for the
-      silence caused by the sleep itself.
+    - **Mid-uptime case**: each tick times its own sleep in wall clock via
+      :func:`~promptpotter.shared.clock.sleep_measuring_suspend`, which owns
+      the detection rule (and states why the wall, not the monotonic clock, is
+      what can be trusted here). When the overshoot exceeds ``SUSPEND_GRACE_S``,
+      this SKIPS that tick's sweep and waits ``initial_delay_s`` again (the same
+      heartbeat grace period as the boot case) before resuming judgment — so a
+      just-woken producer is never reaped for the silence caused by the sleep
+      itself. The inner-cycle wall-clock deadline rides the same helper through
+      the heartbeat's ``on_suspend``, so a slept machine cannot fabricate a
+      deadline blowout either.
 
     ``sweep_dead_cycles`` is blocking disk I/O (~0.2-0.3 s measured at 258
     cycles); run off the event loop via ``asyncio.to_thread`` so a slow sweep
@@ -221,15 +222,13 @@ async def periodic_sweep(
     """
     sleep_for = initial_delay_s
     while True:
-        before = time.time()
-        await asyncio.sleep(sleep_for)
-        actual = time.time() - before
-        if actual > sleep_for + 60.0:
+        overshoot = await sleep_measuring_suspend(sleep_for)
+        if overshoot > SUSPEND_GRACE_S:
             logger.info(
-                "periodic sweep: %.0fs elapsed for a %.0fs sleep — the machine was "
+                "periodic sweep: a %.0fs sleep overshot by %.0fs — the machine was "
                 "likely suspended; skipping this tick to let producers heartbeat",
-                actual,
                 sleep_for,
+                overshoot,
             )
             sleep_for = initial_delay_s
             continue

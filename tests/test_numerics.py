@@ -2133,8 +2133,12 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     # candidate (0/5) is no longer overwhelmingly dominated — no elimination.
     backfill_calls: list[tuple[int, ...]] = []
 
-    async def _stub_backfill(_sp, samples):
+    async def _stub_backfill(_sp, samples, prior_id):
         backfill_calls.append(tuple(s.id for s in samples))
+        assert prior_id == "R1_lucky_winner", (
+            "the backfill must be told WHOSE catch-up it is running; inheriting the "
+            "foreground candidate's identity is what mis-filed C1.1's rows as C1.2's"
+        )
         # Leader misses 4/5 hard samples; only #13 is hit. Mirrors origin's
         # behavior on the same samples in the real cycle.
         truth = {9: False, 12: False, 13: True, 14: False, 8: False}

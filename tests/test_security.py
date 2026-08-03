@@ -226,6 +226,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         overrides: Any,
         cycle_dir_box: dict[str, Path],
         spawned_by: dict[str, Any],
+        spawn_role: Any,
     ) -> CycleResult:
         """Models the campaign as it BEHAVED, not as it should: it outlives the deadline and
         then SWALLOWS the cancellation, returning a normal result.

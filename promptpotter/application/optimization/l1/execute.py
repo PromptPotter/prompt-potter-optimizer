@@ -14,11 +14,17 @@ from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
 from promptpotter.application.optimization.l1.score.winner import l1_score
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
+from promptpotter.application.optimization.resume_and_fork.decisions import (
+    ResumeCheckpointKind,
+    record_decision,
+)
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
+from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.runner.termination import panel_gate_tripped
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.phases import CampaignPhase, emit_phase
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, emit_phase
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundResult, is_leader_eligible, unscoreable_cells
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
@@ -30,7 +36,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundStart,
     RoundWinnerChosen,
 )
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import graceful, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -163,6 +169,71 @@ async def execute_round(
         winner_matched_origin_accuracy=round_result.matched_origin_accuracy,
         winner_matched_origin_composite=round_result.matched_origin_composite,
     )
+
+    # PANEL COVERAGE — the round's own completeness, asked HERE because this is the last
+    # point at which nothing has been decided on it yet: the winner is elected but round
+    # diagnostics have not run and the critique has not fired, and a critique computed over
+    # a holed round would itself be invalid evidence for the next one. Round granularity,
+    # not per-candidate: a hole is a statement about the COMPARISON, and one candidate
+    # cannot see it.
+    #
+    # The `is_leader_eligible` conjunct matters. A degradation / scoring-error abort also
+    # produces error rows, and it already owns a channel (`backend_unreachable_tripped`);
+    # halting on it here would be a second mechanism doing one job.
+    holed = sorted(
+        c.candidate_id
+        for c in round_result.candidate_scores
+        if is_leader_eligible(c)
+        and unscoreable_cells(round_result.all_candidate_results.get(c.candidate_id) or [])
+    )
+    # Sink is the LEDGER, not the round's `decisions` list: the halt below unwinds before
+    # `persist_round`, so a round-local record would never reach disk on exactly the round
+    # it is evidence about. ARCHIVAL by gating — see `resume_and_fork/decisions.py` for why
+    # replaying it could only ever confirm itself.
+    ledger = session.state.ledger
+    assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
+    record_decision(
+        ledger,
+        ResumeCheckpointKind.PANEL_COVERAGE,
+        {
+            "candidate_ids": [c.candidate_id for c in round_result.candidate_scores],
+            "round_num": round_num,
+        },
+        holed,
+        data={
+            "holes_by_candidate": {
+                c.candidate_id: unscoreable_cells(
+                    round_result.all_candidate_results.get(c.candidate_id) or []
+                )
+                for c in round_result.candidate_scores
+            }
+        },
+        round=round_num,
+    )
+    if panel_gate_tripped(holed, opt.panel_gate) is not None:
+        for cid in holed:
+            rows = round_result.all_candidate_results.get(cid) or []
+            for row in rows:
+                if is_error_result(row):
+                    logger.warning(
+                        "round %d panel HOLE: candidate %s, sample %s — %s",
+                        round_num,
+                        cid,
+                        row.get("sample_id"),
+                        row.get("error") or row.get("error_category"),
+                    )
+        logger.warning(
+            "Round %d halted BEFORE electing on an incomplete panel: %d of %d electable "
+            "candidate(s) carry cells that returned no measurement. The round is not "
+            "persisted — `resume` re-runs it, replays the cached candidates, re-measures "
+            "the missing cells and decides on a complete panel. Set "
+            "`optimization.panel_gate: off` to elect on holed panels instead.",
+            round_num,
+            len(holed),
+            sum(1 for c in round_result.candidate_scores if is_leader_eligible(c)),
+        )
+        declare_run_phase(session, RunPhase.PAUSED)
+        raise StopLoop(StopReason.PAUSED)
 
     # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
     rounds_history = [*cycle.rounds, round_result]

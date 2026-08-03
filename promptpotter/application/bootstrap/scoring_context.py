@@ -74,6 +74,18 @@ def bootstrap_cycle(
         # A babysat cycle carries `human_intervened` on its index — surface it so a
         # resume grades its runs non-clean without re-reading the seed.
         session.human_intervened = bool(existing.get("human_intervened", False))
+        if existing.get("finished_at"):
+            # About to run rounds on a cycle still carrying its terminal latch (a reaped
+            # inner cell, an operator resume past a stop). `derive_run_phase` returns
+            # TERMINAL on `finished_at` BEFORE it consults anything else, so leaving it
+            # set makes a live run report finished to the cycle list, the picker and the
+            # reaper — and masks a `paused` declaration, which ranks below it. Both levels
+            # reach here (an inner cell runs this same `run_optimization`), so one clear
+            # serves both. Ordering is safe by construction: `build_run_observers` has
+            # already refreshed `dashboard.json`, so the cycle steps TERMINAL → RUNNING;
+            # clearing while the producer was stale would derive DETACHED — what the
+            # reaper's `_is_dead` collects.
+            store.reopen_for_continuation(campaign_id, resolved)
         return resolved, next_resume_round(existing["rounds"])
     return resolved, 1
 
@@ -237,29 +249,31 @@ def _start_observability_and_scoring(
     return tracing_campaign_id, obs
 
 
-def _apply_resume_fork(
+async def _apply_resume_fork(
     session: Session,
     cycle: Cycle,
     resolved_cycle_id: str | None,
     resumed_from_round: int,
+    dataset: list[Sample],
     *,
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    """Replay decisions; fork on divergence. Returns possibly-rebound (id, round)."""
+    """Repair holed rounds, replay decisions, fork on divergence. Returns (id, round)."""
     from promptpotter.application.optimization.resume_and_fork.resume import (
         resume_with_divergence_check,
     )
 
     # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
     if resumed_from_round > 1 and resolved_cycle_id:
-        fork_result = resume_with_divergence_check(
+        fork_result = await resume_with_divergence_check(
             session.store.campaigns,
             session.campaign_id,
             resolved_cycle_id,
             resumed_from_round,
             session,
             cycle,
+            dataset,
             skip_divergence_check=no_divergence_check,
             fork_on_divergence=fork_on_divergence,
         )
@@ -361,11 +375,12 @@ async def init_optimization_loop(
         scorer_id=scorer_id,
     )
 
-    resolved_cycle_id, resumed_from_round = _apply_resume_fork(
+    resolved_cycle_id, resumed_from_round = await _apply_resume_fork(
         session,
         cycle,
         resolved_cycle_id,
         resumed_from_round,
+        dataset,
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )

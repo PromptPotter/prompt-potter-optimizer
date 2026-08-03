@@ -9,17 +9,26 @@ Same class, and the reason ``reclaim_orphan_sandboxes`` is tested here: it is
 the package's only unattended recursive DELETE. If its reachability predicate is
 ever loosened, a live L4 campaign's inner measurement history disappears on a
 background tick with nothing raised and nothing to restore it from.
+
+Also same class, and why ``sleep_measuring_suspend`` and the heartbeat's
+``on_suspend`` are tested here rather than beside their own modules: they are the
+two halves of ONE rule — a machine suspend must never be charged to a producer as
+silence, nor to an inner cell as work. Both failures are silent, and both end at
+the same stamp.
 """
 
 from __future__ import annotations
 
 import os
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
 
+from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
+from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -33,6 +42,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared import clock
 from promptpotter.shared.errors import ConflictError
 
 _CAMPAIGN = "testds__20260101-000000"
@@ -74,6 +84,29 @@ def test_mark_producer_vanished_skips_checkin_cycle(built_stores: Stores) -> Non
 
 def test_mark_producer_vanished_skips_paused_cycle(built_stores: Stores) -> None:
     _mint(built_stores, paused=True)
+    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
+    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert data is not None and "finished_at" not in data
+
+
+def test_a_pause_that_set_no_flag_is_still_never_reaped(built_stores: Stores) -> None:
+    """The flag is only ONE of the two ways a cycle pauses. An operator ``pause`` writes
+    it; a Ctrl+C inside the round loop and an ``asyncio.CancelledError`` (the L4 sample
+    deadline cancelling its inner campaign) write nothing and only DECLARE the phase.
+    ``_finalize_run`` then deliberately skips every terminal write, so a cycle paused that
+    way carries no ``finished_at``, no flag, and a frozen dashboard — which is precisely
+    the shape a dead producer has.
+
+    That is how two deliberately-cancelled L4 inner campaigns were stamped
+    ``producer_vanished`` 15 minutes later, sending the operator to hunt a process that
+    had never crashed. The declaration is the whole difference and it must bind here, not
+    just in the freshness read."""
+    cycle_dir = _mint(built_stores, dashboard=True)
+    write_json(cycle_dir / "dashboard.json", {"run_phase": RunPhase.PAUSED.value})
+    _age(cycle_dir, seconds_ago=1000.0)
+
+    assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.PAUSED
+    assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
     assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
     data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
     assert data is not None and "finished_at" not in data
@@ -166,6 +199,114 @@ def test_a_live_gated_cycle_derives_gate_not_running(built_stores: Stores) -> No
     # A gated cycle that actually died must still be reapable, not pinned at `gate`.
     _age(cycle_dir, seconds_ago=1000.0)
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.DETACHED
+
+
+class _TicksExhaustedError(Exception):
+    """Breaks an intentionally-infinite tick loop once the scripted ticks run out."""
+
+
+class _ImmediateSleep:
+    """``asyncio`` stand-in whose ``sleep`` returns at once — the fake clock supplies
+    the elapsed time, so no test ever waits."""
+
+    @staticmethod
+    async def sleep(_seconds: float) -> None:
+        return None
+
+
+class _FakeWallClock:
+    """A ``time``-module stand-in whose ``time()`` jumps once, staging a suspend without
+    one. Only ``sleep_measuring_suspend`` reads it."""
+
+    def __init__(self, *, elapse_s: float) -> None:
+        self._now = 1_000_000.0
+        self._elapse = elapse_s
+
+    def time(self) -> float:
+        now = self._now
+        self._now += self._elapse
+        self._elapse = 0.0
+        return now
+
+
+def _scripted_overshoots(values: list[float]) -> Callable[[float], Awaitable[float]]:
+    """A ``sleep_measuring_suspend`` stand-in returning *values* in order, then stopping
+    the loop that is driving it."""
+    remaining = iter(values)
+
+    async def _fake_sleep(_seconds: float) -> float:
+        try:
+            return next(remaining)
+        except StopIteration:
+            raise _TicksExhaustedError from None
+
+    return _fake_sleep
+
+
+async def test_sleep_measuring_suspend_reports_the_wall_overshoot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The arithmetic BOTH suspend guards rest on — the reaper's tick-skip and the L4
+    inner deadline's extension. If it silently returned 0, neither guard would ever fire
+    and neither would say so: the reaper would reap live producers whose machine slept,
+    and an inner cell would be cancelled for a deadline it spent suspended, landing an
+    unscoreable hole in the panel that reads as a real measurement failure."""
+    monkeypatch.setattr(clock, "asyncio", _ImmediateSleep())
+    # 10s of wall elapsed for a 4s sleep ⇒ 6s of it was the machine being away.
+    monkeypatch.setattr(clock, "time", _FakeWallClock(elapse_s=10.0))
+    assert await clock.sleep_measuring_suspend(4.0) == pytest.approx(6.0)
+    # An ordinary sleep overshoots by nothing, and never reports a negative.
+    monkeypatch.setattr(clock, "time", _FakeWallClock(elapse_s=4.0))
+    assert await clock.sleep_measuring_suspend(4.0) == pytest.approx(0.0)
+
+
+async def test_periodic_sweep_skips_its_tick_when_the_machine_slept(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
+    """A machine suspend freezes the producer's heartbeat along with everything else, so
+    on wake every live cycle looks stale at once. Reaping on that tick stamps healthy,
+    resumable cycles ``producer_vanished`` — the exact silent clobber this file guards,
+    except arriving in a batch and blamed on the wrong cause."""
+    swept: list[float] = []
+    monkeypatch.setattr(
+        reaper,
+        "sleep_measuring_suspend",
+        _scripted_overshoots([reaper.SUSPEND_GRACE_S + 1.0, 0.0]),
+    )
+    monkeypatch.setattr(
+        reaper, "sweep_dead_cycles", lambda root, dead_after_s: swept.append(dead_after_s)
+    )
+    monkeypatch.setattr(reaper, "reclaim_orphan_sandboxes", lambda root: None)
+
+    with pytest.raises(_TicksExhaustedError):
+        await reaper.periodic_sweep(built_stores.projects_root, interval_s=900.0)
+
+    # Tick 1 overshot the grace and swept nothing; tick 2 was ordinary and swept.
+    assert swept == [900.0]
+
+
+async def test_heartbeat_reports_a_suspend_to_its_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``on_suspend`` is the wire from the one ticking loop to the L4 wall-clock deadline.
+    A heartbeat that ticked but never called it would leave the deadline charging suspend
+    time as work, with the heartbeat still appending happily — the failure looks like a
+    healthy run right up to the fabricated cancellation."""
+    reported: list[float] = []
+    monkeypatch.setattr(
+        heartbeat_mod,
+        "sleep_measuring_suspend",
+        _scripted_overshoots([1.0, heartbeat_mod.SUSPEND_GRACE_S + 5.0]),
+    )
+    with pytest.raises(_TicksExhaustedError):
+        await heartbeat_mod.heartbeat(
+            None,  # no ledger: the tick must still run, so the guard cannot be disarmed
+            call_id="inner:seed-3",
+            node="inner_campaign",
+            round_num=1,
+            start_monotonic=0.0,
+            on_suspend=reported.append,
+        )
+    # Only the tick that exceeded the grace is a suspend; ordinary lateness is not.
+    assert reported == [heartbeat_mod.SUSPEND_GRACE_S + 5.0]
 
 
 def _sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -> Path:
@@ -386,3 +527,49 @@ async def test_the_delete_verb_reaches_the_store_that_allows_it(built_stores: St
         kind="delete-campaign", campaign_id=_CAMPAIGN, reason="", idempotency_key="k1"
     )
     assert not campaign_dir.exists()
+
+
+def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fresh(
+    built_stores: Stores,
+) -> None:
+    """Clearing the terminal latch makes a cycle reapable, and only a fresh producer closes it.
+
+    The L4 continuation (``inner/cycle.py::_open_inner_campaign``) re-enters an abandoned
+    inner campaign so its banked rounds are not orphaned, which means clearing
+    ``finished_at``. That field is the ONLY thing protecting the cycle from the sweep while
+    its last attempt's ``dashboard.json`` is still hours stale: ``TERMINAL`` is refused, but
+    the moment the latch goes the same directory derives ``DETACHED`` — which is exactly what
+    ``_is_dead`` reaps. The sweep runs in the API-server process on its own timer, so the
+    window is real and nothing in the run would report losing it: the continued cycle simply
+    acquires a ``producer_vanished`` stamp underneath a live producer, and the operator goes
+    hunting a process that never died.
+
+    Hence the ordering in ``_open_inner_campaign``: refresh the dashboard FIRST, clear the
+    latch SECOND, so the cycle steps TERMINAL → RUNNING and is never momentarily reapable.
+    This pins the hazard that ordering exists for.
+    """
+    cycle_dir = _mint(built_stores, dashboard=True)
+    built_stores.campaigns.update(_CAMPAIGN, _CYCLE, {"finished_at": "2026-08-02T20:30:00Z"})
+    _age(cycle_dir, seconds_ago=10_000.0)
+
+    # Terminal: stale, but the latch protects it.
+    assert derive_run_phase(cycle_dir, is_terminal=True, fresh_s=1.0) is RunPhase.TERMINAL
+    assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
+
+    built_stores.campaigns.reopen_for_continuation(_CAMPAIGN, _CYCLE)
+    reopened = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert reopened is not None
+    assert "finished_at" not in reopened, "the terminal latch survived the reopen"
+    assert "final" not in reopened, "a stale winner block outlived the round that justified it"
+    assert reopened["status"] == "active"
+
+    # The latch is gone and the producer is still stale — this is the window.
+    _age(cycle_dir, seconds_ago=10_000.0)
+    assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.DETACHED
+
+    # A fresh dashboard write — what `build_campaign_emitter` does — closes it.
+    write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
+    assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=60.0) is RunPhase.RUNNING
+    assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=60.0) == 0
+    still = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert still is not None and "finished_at" not in still

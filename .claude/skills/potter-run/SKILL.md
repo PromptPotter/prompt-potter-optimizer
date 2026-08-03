@@ -80,8 +80,10 @@ first finishes in-flight work, second force-quits. Every query lands in
 cache-hits prior results.
 
 **`promptpotter-self` runs ONCE, in the foreground, to completion.** A kill orphans the open
-inner run → the reaper stamps it `producer_vanished` (excluded from scoring, and NOT cached), so
-the next launch re-burns that seed. And the outer `cycle_id` is deterministic (hash of
+inner run → the reaper stamps it `producer_vanished` (excluded from scoring, and NOT cached). The
+next launch no longer re-burns that seed from round 0 — an inner campaign is addressed by the
+cell it runs, so it re-enters the same campaign and continues from the rounds already banked —
+but the rounds the kill cut short are still lost, so a kill still costs. And the outer `cycle_id` is deterministic (hash of
 optimizer prompts + benchmark), so re-`new` with unchanged optimizer prompts collides on one `cycle_id` and
 renders the same measurement under N campaign headers. Iterate with `resume`; `new` again only
 after an optimizer prompt or config change.

@@ -278,6 +278,7 @@ async def screen_inner_seeds(
                 # prompt length rather than the bank (`score_search_point`'s contract for
                 # `opt_sp`).
                 opt_sp=None,
+                measured=None,
                 # No per-sample callbacks, declared rather than defaulted: a screen has no live
                 # display to report a row to.
                 on_sample_scored=None,

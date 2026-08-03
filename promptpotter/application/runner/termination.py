@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import DegradationHealth
 
 OriginGateMode = Literal["strict", "critical_only", "off"]
+PanelGateMode = Literal["strict", "off"]
 
 
 @dataclass(frozen=True)
@@ -94,9 +95,40 @@ def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason 
     return None
 
 
+def panel_gate_tripped(holed_candidate_ids: list[str], mode: PanelGateMode) -> StopReason | None:
+    """``PAUSED`` when an electable candidate's panel has holes, else ``None``.
+
+    The third sibling of :func:`origin_gate_tripped` / :func:`backend_unreachable_tripped`,
+    and the one that guards the COMPARISON rather than the floor or the backend. A hole is a
+    cell the loop spent on and got nothing back from (``domain/results.py::unscoreable_cells``),
+    so the round's candidates were ranked on different cell sets. Halting is resumable and
+    the round is not persisted, so the remedy is to refill the cells and re-decide — which is
+    why the stop reason is ``PAUSED`` and not a terminal one.
+
+    **Not a second under-probing guard.** ``coverage_floor`` (``scoring/metrics.py``) already
+    owns "did this candidate measure enough cells to be electable", counts the same
+    non-errored cells, and ``l1/score/winner.py`` explicitly bans a second sample-count gate
+    beside it. This asks a different question with a different authority: coverage decides
+    who MAY WIN and excludes; this decides whether the round may CLOSE at all and halts.
+    Excluding a holed candidate would still crown one of its rivals off an incomplete panel
+    and silently discard the holed candidate's real work. Both were live in the round that
+    motivated this: C1.1 held exactly ``coverage_floor`` (4) valid cells of 6 and won on
+    them, against a rival measured on 5.
+
+    ``strict`` (default) halts on any hole; ``off`` disarms. There is no middle mode — a
+    hole is not a matter of degree, and the operator who does not want the halt wants none
+    of it.
+    """
+    if mode == "off" or not holed_candidate_ids:
+        return None
+    return StopReason.PAUSED
+
+
 __all__ = [
     "BudgetGate",
     "OriginGateMode",
+    "PanelGateMode",
     "backend_unreachable_tripped",
     "origin_gate_tripped",
+    "panel_gate_tripped",
 ]

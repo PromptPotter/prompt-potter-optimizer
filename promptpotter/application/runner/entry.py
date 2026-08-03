@@ -573,7 +573,13 @@ async def _run_single_cycle(
         # forever. But it must also REACH the canceller, so it is re-raised past the finalize
         # below; answering a cancellation with a return is what made the L4 sample deadline
         # unenforceable (see `scoring/query_loop.py`).
-        logger.warning("Optimization cancelled before round loop entered; finalizing as paused.")
+        #
+        # Unlike KeyboardInterrupt (which `run_round_loop` catches itself), a cancellation is
+        # deliberately NOT caught in there, so this arm sees in-loop cancellations too — the
+        # common one being an L4 inner campaign cancelled by its outer sample deadline. The
+        # `paused` DECLARATION that keeps the reaper off it is made once, at the finalize seam
+        # every paused exit reaches, rather than here.
+        logger.warning("Optimization cancelled; finalizing as paused (resumable).")
         stop_reason = StopReason.PAUSED
         cycle_error = None
         cancelled = True
@@ -721,7 +727,7 @@ async def run_optimization(
     # ``<workspace>/.inner/<key>/`` + find the inner benchmark. Unconditional (the
     # runner can't know a child will recurse) + re-entrant (each level publishes
     # its own); a no-op until the cycle_id is set.
-    publish_inner_spawn_context(session)
+    publish_inner_spawn_context(session, campaign_config)
     # Select this cycle's optimizer prompt set (L4: outer = `meta`, inner =
     # default). Bound through the same per-node override channel the inner runner
     # uses — task-isolated, so an outer binding and the inner (mutation)
@@ -824,11 +830,25 @@ def _finalize_run(
     halted_mid_round = info.halts_mid_round
     has_traceback = info.has_traceback
     emitter = observers.dashboard
+    if is_paused:
+        # DECLARE the pause here, at the one point every paused exit converges on, rather
+        # than trusting each raise site to have done it. Skipping the terminal writes below
+        # leaves `derive_run_phase` with only two ways to read `paused`: the `pause.flag`, or
+        # a declaration. An operator `pause` sets the flag — but Ctrl+C inside the round loop
+        # and an `asyncio.CancelledError` (the L4 sample deadline cancelling its inner
+        # campaign) set neither, so the derivation fell through to freshness, returned
+        # DETACHED, and the reaper — whose guard reads exactly this declaration
+        # (`CampaignStore.mark_producer_vanished`) — had nothing to refuse on. Two abandoned
+        # inner cycles were stamped `producer_vanished` 15 minutes after their owner
+        # deliberately cancelled them, sending the operator hunting a dead process that had
+        # never existed. Idempotent at the projection, so the checkpoints that already
+        # declared it pay nothing.
+        declare_run_phase(session, RunPhase.PAUSED)
     # A pause is an operator interrupt that exits the worker but leaves the cycle ACTIVE and
     # resumable — NOT terminal. Skip every terminal-marking write (mark_finished /
-    # mark_stopped) so index.json keeps no `finished_at` and
-    # derive_run_phase keeps reading the PAUSED the loop already declared off `pause.flag`.
-    # The partial round is still drained (below) so the operator sees where it paused.
+    # mark_stopped) so index.json keeps no `finished_at` and derive_run_phase keeps reading
+    # the PAUSED just declared. The partial round is still drained (below) so the operator
+    # sees where it paused.
     if session.state.cycle_id and not is_paused:
         # Active round at teardown — surfaces on `interrupted_round` so the operator sees which
         # round is partial without diffing the on-disk tree (works for crash too; traceback is the

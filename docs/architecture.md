@@ -279,7 +279,12 @@ the single write-side reconciler stamping proven-dead cycles
 jobs plus a periodic sweep (roots include the flat `.inner/`
 sandboxes; never boot-one-shot, and it skips a tick after a
 detected machine-sleep so a woken producer's first heartbeat always
-lands before judgment). Every reap path funnels through the one
+lands before judgment). Sleep is detected in ONE place
+(`shared/clock.py::sleep_measuring_suspend` — wall overshoot, never
+the monotonic clock, whose behaviour across a suspend is
+platform-dependent); the sweep and the L4 inner-sample wall-clock
+deadline are its two consumers, so a slept machine can neither reap a
+live producer nor fabricate a deadline blowout. Every reap path funnels through the one
 guard seam `CampaignStore.mark_producer_vanished`, which never
 stamps a paused, check-in, or already-terminal cycle and delegates
 the write to `mark_finished`. `detached` is therefore always a dead

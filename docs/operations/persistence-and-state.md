@@ -102,6 +102,10 @@ Use when a **data-affecting** edit (scoring formula, `pipeline_overrides`, `excl
 
 **Policy-only edits** (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) can't have changed the data trace, so resume continues in-place on the same cycle and `--fork-on-divergence` is a no-op. Past decisions stay as the audit record of the policy that made them; the new policy governs unevaluated rounds.
 
+**Unless a repair lands.** Every resume first re-measures cells a closed round recorded without a measurement — a round that crowned a winner on a holed panel, which the panel gate cannot fix retroactively because it only stops the round it fires in. That is *incompleteness*, not divergence, so it is checked whatever the config diff says. A repair rewrites the rows the winner was elected from, so it forces the replay above: same winner → in place, different winner → a sibling cycle rather than an overwritten record.
+
+A hole is plugged with a **real measurement, never an archive row** — a cached row for that `(node_configs, sample_id)` may have been produced as a PoBB *backfill*, measured out of the round's shared order to fill someone else's paired comparison, and adopting it as this candidate's own panel cell is what makes a repaired round unreproducible. The re-measure bypasses only the outer archive, so the inner spawn still resolves content-addressed and **continues the furthest-along campaign banked for that cell** instead of restarting it. Budget one inner run per hole; the cells that already have their own measurement replay from cache.
+
 **Why rewind isn't enough:** rewind restarts under the *same* policy and would re-hit the same divergence; fork restarts under the *new* one.
 
 ### Human in the loop — steer & fork, pause

@@ -14,6 +14,7 @@ function health(
     structural_count: 0,
     transient_count: 5,
     no_result_count: 0,
+    hole_count: 0,
     degraded_rate: 0.25,
     consecutive_degraded_rounds: 1,
     prior_clean_rounds: 5,

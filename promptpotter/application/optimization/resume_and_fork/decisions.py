@@ -53,6 +53,18 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # trigger already shows up as a winner/cut divergence in the same round.
     ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
+    # Panel coverage re-derives INVARIANTLY under everything replay varies, so replaying it
+    # could only ever confirm itself. Replay re-runs the SCORER over stored rows, and
+    # rescoring never turns an errored row into a measured one — the hole count is a fact
+    # about which rows exist, not about how they score. Two further facts make it
+    # unreachable as a REPLAYED kind even in principle: the gate halts before
+    # ``persist_round``, so on the round that matters the record only ever reaches the
+    # ledger and never ``round_data.decisions`` — the only thing ``replay_decisions``
+    # walks. Registering a replayer here would install a guard that cannot fire. What
+    # recovers a holed round is ``repair_incomplete_rounds``, which re-measures the cells
+    # and then forces this walk so the kinds that CAN move are re-derived against the
+    # repaired rows.
+    ResumeCheckpointKind.PANEL_COVERAGE: GatingMode.ARCHIVAL,
     # Fork is observable from the parent's history (the FORK_CUT record in
     # the parent ledger names the new cycle id and the offset that the
     # fork inherits from). It's archival because the fork's identity is

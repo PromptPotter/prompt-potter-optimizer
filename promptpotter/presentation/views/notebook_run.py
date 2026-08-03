@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.bootstrap.wiring import init_services as _init_services
-from promptpotter.application.jobs.mint import prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.origin import (
     CampaignOrigin,
 )
@@ -173,7 +173,12 @@ async def prepare_origin_notebook(
     )
 
     if not session.campaign_id:
-        prepare_fresh_cycle(session, campaign_config, train_data)
+        prepare_fresh_cycle(
+            session,
+            campaign_config,
+            train_data,
+            campaign_id=fresh_campaign_id(session, campaign_config),
+        )
 
     observers = build_run_observers(
         session=session,

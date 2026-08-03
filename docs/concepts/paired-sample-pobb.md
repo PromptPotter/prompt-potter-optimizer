@@ -110,6 +110,14 @@ measurements:
 * Run fresh on the leader's prompt for genuinely new pairs, land in
   `archive/measurements/`, and become reusable for every future round.
 
+**A backfill row is not a panel row.** It is stamped with the PRIOR's identity and
+`MeasurementRole.BACKFILL` (`shared/instrument.py`) — the closure receives the prior's id
+precisely so it cannot inherit the foreground candidate's, which is how two backfills that
+ran C1.1's prompts came to be recorded as C1.2's. Reuse for a *paired comparison* is the
+point of the archive hit above; reuse as some candidate's own **panel** evidence is not,
+because a backfill is measured outside the round's shared order. Resume's hole repair
+therefore refuses it and re-measures (`resume_and_fork/resume.py`).
+
 ### 3. θ comparison in `check()`
 
 `PoBBCheck.check()` reads the candidate's sample IDs straight off

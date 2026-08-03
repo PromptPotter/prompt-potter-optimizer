@@ -50,6 +50,7 @@ class ResumeCheckpointKind(enum.StrEnum):
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
     LEADER_LOCK_IN = "leader_lock_in"
+    PANEL_COVERAGE = "panel_coverage"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
     FORK_CUT = "fork_cut"

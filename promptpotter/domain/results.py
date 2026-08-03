@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, NotRequired, TypedDict
 
 from pydantic import ConfigDict, Field, computed_field
@@ -18,6 +19,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import is_error_result
 
 # Which IRT model a cycle's δ ruler was fitted under. The absence of a member is the third,
 # real state: a cold ruler is FLAT, so θ degenerates to logit-accuracy — neither 1PL nor 2PL.
@@ -51,6 +53,7 @@ __all__ = [
     "candidate_label",
     "is_leader_eligible",
     "is_round_winner",
+    "unscoreable_cells",
 ]
 
 
@@ -247,6 +250,33 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
     return not cs.degradation_context
+
+
+def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
+    """Cells this candidate ATTEMPTED that came back carrying no measurement.
+
+    A **hole**, and the sibling of :func:`is_leader_eligible`: that one asks whether a
+    candidate's measurement can be trusted, this one asks whether the round measured what
+    it set out to. Detection rides the typed ``error_category`` channel
+    (:func:`is_error_result`) — the single owner of "this sample errored".
+
+    Two near-misses are deliberately NOT holes, and both were counted as one by the
+    obvious arithmetic (``scored_samples - total``), which is why that is not the rule:
+
+    * A **PoBB stop** is a budget decision — "more samples will not change the answer".
+      Those cells were never attempted, so there is nothing missing; the candidate is
+      fine and its short panel is the mechanism working.
+    * A **deprecated** row (``pobb/classification.py::is_deprecated``) is a sample the
+      classifier marked fatal — an empty completion, an infra truncation. It carries no
+      ``error_category``, the loop has a designed response to it, and it is already
+      excluded from ``total``. One such row exists on disk (an inner round whose cell hit
+      ``content_empty`` and retried), and the arithmetic form would have read that healthy
+      cycle as holed and halted it.
+
+    What remains is the real thing: the loop spent on a cell and got nothing back, so two
+    candidates in one round were compared on different cell sets.
+    """
+    return sum(1 for r in results if is_error_result(r))
 
 
 # ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
@@ -805,6 +835,16 @@ class DegradationHealth(StrictModel):
     # structurally-unscoreable floor (answer-format / extraction mismatch),
     # distinct from a wrong-but-extractable miss. Drives the ``unscoreable`` grade.
     no_result_count: int = 0
+    # HOLES — cells attempted that came back carrying no measurement at all
+    # (``unscoreable_cells``: a typed ``error_category`` that is not a transport failure,
+    # so ``pipeline_data`` is empty and every warning-based classifier is blind to it).
+    # Counted separately from ``no_result_count`` because the remedy differs and the
+    # operator banner names it: a NO_RESULT row means the pipeline RAN and emitted nothing
+    # parseable (fix the answer format), while a hole means the cell never reported (re-run
+    # it). Before this existed such a row joined ``samples`` and no numerator, so it made a
+    # round grade HEALTHIER the more of them it had — most consequentially at round 0,
+    # where the grade feeds ``origin_gate_tripped`` and there is no panel gate to catch it.
+    hole_count: int = 0
     degraded_rate: float
     consecutive_degraded_rounds: int
     prior_clean_rounds: int

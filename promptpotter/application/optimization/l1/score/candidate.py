@@ -31,7 +31,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import ScoredCandidate, candidate_label
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.shared.instrument import MeasuredCandidate, set_measured_candidate
+from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -84,14 +84,12 @@ async def score_one_candidate(
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
 
-    # Declare which candidate is being measured, for anything this scoring pass spawns.
-    # Today's one reader is the L4 recursion (an inner campaign stamps its provenance
-    # from it) — the connector seam carries only `(query, payload)`, so identity cannot
-    # reach it any other way. Bound before the validation-skip return below: a skipped
-    # candidate spawns nothing, but leaving the PRIOR candidate's identity bound would
-    # mis-attribute whatever ran next.
-    set_measured_candidate(
-        MeasuredCandidate(idx=idx, candidate_id=opt_sp_c.lineage.id, label=label)
+    # Who this pass measures, handed to the gateway rather than bound here — every
+    # re-entrant asker declares its own, so none can inherit this one. The L4 recursion
+    # reads it to stamp an inner campaign's provenance; the connector seam carries only
+    # `(query, payload)`, so identity cannot reach it any other way.
+    measured = MeasuredCandidate(
+        idx=idx, candidate_id=opt_sp_c.lineage.id, label=label, role=MeasurementRole.PANEL
     )
 
     # Path 1 — validation-skip synthetic-0. A ``hallucinated_node`` wound is the one
@@ -138,6 +136,7 @@ async def score_one_candidate(
         axes=cycle.axes,
         l1_diversity=l1_diversity,
         opt_sp=opt_sp_c,
+        measured=measured,
         on_sample_pre_check=_catch_priors_up,
         force_fresh=force_fresh,
     )
