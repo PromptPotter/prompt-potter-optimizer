@@ -182,9 +182,10 @@ world is a strict containment hierarchy:
   + its fork/diag/sweep descendants. `campaign_id = {dataset}__{rand6_hex}`,
   minted fresh per `new` invocation by `mint_campaign_id` — each `new`
   produces a distinct campaign regardless of declaration. The
-  declaration (target hash + optimizer-prompt hash) is recorded as
-  *properties* on `campaign.json` (`root_content_hash` +
-  `optimizer_prompt_hash`) for drift detection on resume, not as the id.
+  declaration is recorded as *properties* on `campaign.json`, never as
+  the id: `root_content_hash` (resume's config-drift check) and
+  `optimizer_prompt_hash` (an audit join key — optimizer drift is asked
+  per ROUND, where it can name one and fork at it).
   The dataset is embedded so "campaigns for dataset X" is a prefix scan.
 - **Cycle** — one node in a campaign's lineage tree: root | fork | diag
   | sweep. The operator-facing name is **Unit** — one continuous-parameter
@@ -587,10 +588,9 @@ the PR description.
   with `log.md` + `hard_samples.json` at its root and
   `cycles/{cycle_id}/` flat below (the session root plus every fork /
   diag / sweep). `campaign_id = {dataset}__{rand6_hex}` is minted fresh
-  per `new` invocation by `mint_campaign_id`; the declaration is
-  recorded as `root_content_hash` + `optimizer_prompt_hash` properties
-  on `campaign.json` and used by resume to warn on drift, not to derive
-  the id. `dashboard.json` is per-cycle, at
+  per `new` invocation by `mint_campaign_id`; the declaration rides
+  `campaign.json` as `root_content_hash` (resume's config-drift check)
+  + `optimizer_prompt_hash` (audit join key), never deriving the id. `dashboard.json` is per-cycle, at
   `cycles/{cycle_id}/dashboard.json`. Cross-campaign evidence
   pooling on the same declaration rides the dataset-scoped
   `measurements/` layer, so two `new` calls on an unchanged

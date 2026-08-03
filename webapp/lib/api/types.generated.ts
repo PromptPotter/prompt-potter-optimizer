@@ -332,6 +332,7 @@ export interface RoundResult {
   health: DegradationHealth | null;
   opt_sp: OptSearchPoint | null;
   axis_memory_peaked: string[];
+  optimizer_prompt_hashes: Record<string, string>;
   status: string;
   round_id: string;
   /** Variants whose mutation was empty against the parent. */
@@ -857,6 +858,13 @@ export interface LineageNode {
   dataset_name: string;
   /** Fork trigger; empty for roots and inner runs. */
   trigger: string;
+  /** Which side of this cut the run CONTINUES on, derived from `trigger`
+   * (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps
+   * running; `supersede` = this branch IS the line and the PARENT is what was
+   * left behind. Null for roots and inner runs, which were not cut from
+   * anything. Served, never derived in the client — the two read identically
+   * on disk and only this says them apart. */
+  fork_direction: 'offshoot' | 'supersede' | null;
   /** Operator who cut this fork. */
   steered_by: string | null;
   /** An inner run's benchmark task. Load-bearing: every task runs for every

@@ -8,6 +8,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.intelligence.exploration import theta_accuracy_ci
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    compute_optimizer_prompt_hashes,
+)
 from promptpotter.application.optimization.l1.population import parse_population
 from promptpotter.application.optimization.l1.score.loop import (
     replicate_survivors_pass,
@@ -487,6 +490,12 @@ async def l1_score(
         # `candidate_scores`, which already carries every collapsed candidate with its
         # reason. Passing them here would be a second recording that could disagree.
         l1_parse_failure=yield_stats.l1_parse_failure,
+        # WHICH optimizer produced this round — the one fact about a round that a later
+        # process cannot re-derive, since every other input to a node's package is live
+        # cycle state. Stamped here rather than at save time: a re-save (a repair, a
+        # rescore) must not restamp a round with the optimizer running NOW and erase the
+        # evidence that it ran under a different one.
+        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
     )
     return round_result, best_opt_sp
 

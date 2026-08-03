@@ -106,7 +106,8 @@ async def verify_candidate(
             "the origin's prompt fields don't live in the round-candidate cache. "
             "Pass a C{round}.{n} label instead."
         )
-    proposals = stores.campaigns.load_round_candidates(campaign_id, cycle_id, round_num)
+    _cached = stores.campaigns.load_round_candidates(campaign_id, cycle_id, round_num)
+    proposals = _cached[0] if _cached else None
     if not proposals:
         raise VerifyError(
             f"no cached candidates for round {round_num} in "

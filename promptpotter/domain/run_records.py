@@ -367,6 +367,51 @@ class ForkTrigger(enum.StrEnum):
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
+class ForkDirection(enum.StrEnum):
+    """Which side of a cut the run CONTINUES on — the half a cut alone cannot say.
+
+    One mechanism mints every fork, and the child is always the new cycle id. What differs
+    is the reading. An operator exploring branches OFF a line that keeps running; a resume
+    correcting itself moves the active pointer to the child and abandons what it cut from.
+    Same shape on disk, opposite meaning to a reader — and without this, the lineage draws
+    an offshoot and a supersession identically.
+    """
+
+    OFFSHOOT = "offshoot"
+    """The CHILD is the branch. The parent stays the line it was."""
+
+    SUPERSEDE = "supersede"
+    """The CHILD is the continuation. The parent is what was left behind."""
+
+
+# Derived from the trigger, never stored: every fork already on disk answers this from the
+# trigger it recorded, so there is nothing to migrate and no second field to fall out of
+# step. Exhaustiveness is checked at import (below) for the same reason
+# ``RESUME_CHECKPOINT_GATING`` is — a new trigger must not land without an answer.
+FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
+    # The operator is exploring beside a line that keeps its meaning: a sweep arm, a
+    # diagnostic probe, a steered what-if. Nothing about the parent is invalidated.
+    ForkTrigger.OPERATOR_SWEEP: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
+    # Each of these retargets the active pointer and abandons the tail it cut from — a
+    # rewind by hand, a layer's rebase, or a resume finding the record no longer holds.
+    # The parent keeps that tail as the record of what ran; the run is elsewhere now.
+    ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
+    ForkTrigger.L2_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.L3_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
+}
+
+_undirected = [t for t in ForkTrigger if t not in FORK_DIRECTION]
+if _undirected:
+    raise RuntimeError(
+        f"ForkTrigger members missing from FORK_DIRECTION: {_undirected}. A cut whose "
+        "direction nobody declared renders as an offshoot, which is a lie half the time."
+    )
+del _undirected
+
+
 class ConfigOverrides(StrictModel):
     """The fork's `OptimizationConfig` delta — every field optional (absent
     inherits the parent), applied to the fork's snapshot at bootstrap; never

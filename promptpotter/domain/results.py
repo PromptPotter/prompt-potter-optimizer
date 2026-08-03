@@ -16,6 +16,7 @@ from promptpotter.domain.escalation_signals import (
 from promptpotter.domain.l4.verdict import OuterVerdict
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
 from promptpotter.domain.strict_model import StrictModel
@@ -250,6 +251,18 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
     return not cs.degradation_context
+
+
+def round_document_digest(rr: RoundResult) -> str:
+    """12-hex digest of a round AS PERSISTED — what a later generation consumed from it.
+
+    The WHOLE document, never a chosen subset. Anything a round records can reach the next
+    round's package, and a digest that names fields is a list somebody forgets to extend the
+    day a field starts mattering. It answers one question — "is a generation that read this
+    round still vouched for?" — so over-firing costs one regeneration while under-firing
+    carries a stale generation forward in silence, and those are not comparable prices.
+    """
+    return stable_hash(rr.model_dump(mode="json"))[:12]
 
 
 def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
@@ -522,6 +535,15 @@ class RoundResult(StrictModel):
     # `evidence_grounding_present` check needs it (`output.py::_compute_behavior_per_round`)
     # and AxisIndex is not reconstructable from the round file alone.
     axis_memory_peaked: list[str] = Field(default_factory=list)
+    # Which OPTIMIZER produced this round — per node, template ⊕ layout ⊕ resolved config
+    # (`compute_optimizer_prompt_hashes`). Stamped at close, and the only thing that can
+    # answer "was this round produced by the optimizer I am holding now?" after the process
+    # that ran it exited: everything else a resume can re-render depends on live cycle state
+    # and so cannot be reproduced across processes. Resume compares it per round and diverges
+    # at the FIRST one that disagrees, which is what lets a prompt edit fork a sibling instead
+    # of either being ignored or condemning the whole campaign. Empty ⇒ the round predates
+    # the stamp and cannot be asked; resume says so rather than assuming either answer.
+    optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
     # "generation_only" for a sweep round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
     status: str = ""

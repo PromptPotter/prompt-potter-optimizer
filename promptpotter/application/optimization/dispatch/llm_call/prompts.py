@@ -454,16 +454,26 @@ def list_optimizer_prompts() -> list[str]:
 
 
 def compute_optimizer_prompt_hashes() -> dict[str, str]:
-    """SHA-256 (16-char prefix) of each optimizer prompt's effective content.
+    """SHA-256 (16-char prefix) per optimizer node of THE OPTIMIZER THAT RUNS IT.
 
-    Hashes the deterministic ``model_dump_json()`` of the loaded
-    ``PromptTemplate`` (so the hash reflects what was actually used — the
-    manifest base plus any bound per-node override) plus the node's resolved injection layout —
-    a layout-only L4 edit changes which evidence a node sees, so it must move
-    the node's hash (nodes without a ``NODE_LAYOUTS`` entry, e.g. ``checkin``,
-    contribute the template alone). Persisted to
-    ``index.json::final.prompt_hashes`` so cross-cycle audits can join cycles
-    by ``l1_generate_hash`` etc.
+    Three parts, because all three decide what the node produces:
+
+    * the deterministic ``model_dump_json()`` of the loaded ``PromptTemplate`` — the
+      manifest base plus any bound per-node override, i.e. what was actually used;
+    * the node's resolved injection layout — a layout-only L4 edit changes which evidence
+      the node sees, so it must move the hash (a node with no ``NODE_LAYOUTS`` entry
+      contributes nothing here);
+    * the node's resolved config — model, provider, temperature, reasoning effort. It was
+      missing, and its absence was the hole: repointing ``l1_generate`` at a different model
+      in ``promptpotter/assets/optimizer/pipeline.yaml`` left this hash unmoved, so every
+      drift check downstream read "same optimizer" while a different model was generating
+      the candidates. Measurement identity already folds the whole parsed manifest
+      (``connectors/promptpotter.py::_identity_config``), so the ARCHIVE was never at risk —
+      only the trajectory, which is what this hash is for.
+
+    Recorded per round (``RoundResult.optimizer_prompt_hashes``) — the round is what a
+    resume can ask about — and on ``index.json::final.prompt_hashes`` so cross-cycle audits
+    can join cycles by ``l1_generate``'s hash.
     """
     out: dict[str, str] = {}
     for name in list_optimizer_prompts():
@@ -476,6 +486,7 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
             # hash — so it contributes its floor, which is exactly what an L4 edit leaves it at.
             layout = resolve_node_layout(name) if spec.editor == "l4" else spec.floor
             blob += layout.model_dump_json()
+        blob += json.dumps(optimizer_node_config(name), sort_keys=True, default=str)
         out[name] = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     return out
 
@@ -483,12 +494,13 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
 def combined_optimizer_prompt_hash() -> str:
     """One 12-hex hash over the whole optimizer prompt set.
 
-    Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes`
-    into a single deterministic digest. Recorded on ``campaign.json`` as
-    ``optimizer_prompt_hash``; resume compares the stored value against a
-    fresh recomputation and warns on drift. Not part of ``campaign_id``
-    (campaign ids are random per ``new`` call) — it's a drift-detection
-    property only.
+    Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes` into a single
+    deterministic digest. Recorded on ``campaign.json`` as ``optimizer_prompt_hash`` and on
+    each inner campaign — an audit JOIN KEY ("which optimizer was this campaign minted
+    under"), not the drift gate. Drift is asked per ROUND, where the answer can name the
+    round and fork at it (``resume_and_fork/resume.py``); a campaign-level equality could
+    only say yes or no about the whole campaign. Not part of ``campaign_id`` — campaign ids
+    are random per ``new`` call.
     """
     per_prompt = compute_optimizer_prompt_hashes()
     blob = json.dumps(per_prompt, sort_keys=True)

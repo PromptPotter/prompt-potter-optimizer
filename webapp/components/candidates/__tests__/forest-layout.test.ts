@@ -47,6 +47,7 @@ function node(
     run_phase: null,
     dataset_name: "",
     trigger: "",
+    fork_direction: null,
     steered_by: null,
     task: null,
     best_accuracy: null,

@@ -28,6 +28,7 @@ What this file owns, and where each rule is stated. Names only — the section i
 - Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
 - Answer every gate before adding a concept → § Pre-flight gate
 - Never commit or push unprompted → § Conventions
+- A silent optimizer-call retry is an open defect → ⛔ URGENT line above § Working principles
 - Reach for a doctrine by its trigger → § Working principles
 - The agent owns L4 end-to-end → § The closing directive
 - Per-layer contracts — load only yours → § Pointers
@@ -62,6 +63,8 @@ When a fix would compensate for something an upstream layer should already have 
 <dispatch-first>
 **★ FIRST PRINCIPLE, THIS PHASE — fix it in the dispatch.** The target model is small: a prompt is one *information package* it must reason from, and it finds the right path only when that package is short and every line is unique, high-value, and in the right place. The **dispatch hub** (`application/optimization/dispatch/`) is where raw measurement is recomposed into those packages and wired into every optimizer prompt through **deterministic wires** (`DispatchHub.fill`). So the dispatch is the FIRST place to fix a bloated / low-value / misplaced prompt — and the one place to be **creative**: add functions, processing, recomposition, new panel logic, whatever shapes the incoming information to be *perfectly formed for its slot*. The wires stay deterministic; the intelligence lives in the shaping. Corollaries: a panel renders only what adds signal **for this task/state** and stays silent otherwise (the `answer_distribution` / suppressed-RANK rule); duplication, paraphrase, filler, and task-mismatched blocks are dispatch problems to reshape at source — never a mechanical downstream patch (a render-time dedup, a louder optimizer prompt clause) or a symptom papered over.
 </dispatch-first>
+
+⛔ **URGENT — an optimizer call can blow its wall, silently retry, and report nothing.** `_chat_under_deadline` treats a first wall-clock timeout as a provider hiccup and retries once, so one logical optimizer call can spend twice its stated budget while every on-disk surface stays clean: no ledger record, no round warning, nothing in the round file — only an outlier `duration_s` on the token-usage row, readable solely by comparing a node against its own precedent. Inside an L4 inner cell that time is spent against the OUTER per-sample wall, so a couple of these cancel the cell and the reaper stamps `producer_vanished` — the hole the panel gate and the resume repair exist to clean up *after* the fact, and plausibly its root. Observed on `justlogic-d234` seed-3 (2026-08-03): one `l1_critique` an order of magnitude past the same node's own precedent **on a smaller input**, so this is provider throughput, not a bloated package. **Fix the silence first** — a timeout-and-retry must land on the ledger like any other degradation, since a retry nobody can see is not a state. Only then argue about whether the retry should exist. Not a knob question: do not "address" it by tuning the deadline.
 
 ## Working principles
 

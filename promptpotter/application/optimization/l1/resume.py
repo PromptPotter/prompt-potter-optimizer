@@ -20,7 +20,11 @@ from promptpotter.application.optimization.validators.l1_strict import (
     detect_invariants,
 )
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
-from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.results import (
+    CandidateProposal,
+    candidate_label,
+    round_document_digest,
+)
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
 
 # Module-level alias for test monkeypatching.
@@ -76,12 +80,13 @@ async def generate_or_load_candidates(
     )
 
     if session.state.cycle_id:
-        persisted_raw = session.store.campaigns.load_round_candidates(
+        cached = session.store.campaigns.load_round_candidates(
             session.campaign_id,
             session.state.cycle_id,
             round_num,
         )
-        if persisted_raw is not None:
+        if cached is not None:
+            persisted_raw, _consumed = cached
             persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
             yield_stats = detect_invariants(
@@ -158,6 +163,11 @@ async def generate_or_load_candidates(
             session.state.cycle_id,
             round_num,
             [cp.model_dump() for cp in candidates],
+            # What this generation READ: the round it was composed from. Recorded beside the
+            # candidates so a later resume can ask whether that round still says the same
+            # thing before replaying them — a repaired round, or one whose critique was
+            # re-distilled, voids the generation that read the old one.
+            consumed=round_document_digest(cycle.rounds[-1]) if cycle.rounds else "",
         )
     # Identity, the moment it exists — a round that never closes still names its
     # candidates. The replay branch above skips this: its record is already on the ledger.

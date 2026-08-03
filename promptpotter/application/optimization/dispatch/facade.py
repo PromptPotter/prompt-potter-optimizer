@@ -14,7 +14,11 @@ construct bundles directly); the ``Cycle`` knot lives here in the
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -23,11 +27,19 @@ from promptpotter.application.optimization.dispatch.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    load_optimizer_prompt,
+    resolve_node_layout,
+)
 from promptpotter.domain.escalation_signals import exploration_budget
-from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
+from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results_health import compute_node_failure_rates
-from promptpotter.infrastructure.llm.models import emit_round_warning
+from promptpotter.infrastructure.llm.models import (
+    emit_round_warning,
+    reset_cycle_ledger,
+    set_cycle_ledger,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -181,6 +193,60 @@ class DispatchHub:
         return filled, injection_vars, rendered
 
 
+@contextlib.contextmanager
+def _no_round_warnings() -> Iterator[None]:
+    """Unbind the cycle ledger for the duration — a probe render must not emit.
+
+    ``DispatchHub.render`` raises an ``injection_budget_overrun`` warning onto the ledger
+    when a panel outgrows its cap. That is right when the render is the one the LLM sees
+    and wrong when it is a fingerprint probe: the operator would read a fresh warning about
+    a truncation that happened rounds ago, once per probed round per pass.
+    """
+    token = set_cycle_ledger(None)
+    try:
+        yield
+    finally:
+        reset_cycle_ledger(token)
+
+
+def node_packages(bundle: InjectionBundle) -> dict[str, str]:
+    """Fingerprint the information package EVERY optimizer node would be handed from *bundle*.
+
+    One hash per node over what :meth:`DispatchHub.fill` produces — the filled template body
+    plus the injections it resolved. That is the package: what the node reads to decide with,
+    minus the caller's own extras (``n_variants``, the citation menu), which are config rather
+    than evidence about the round.
+
+    **Node-agnostic by construction.** It walks :data:`NODE_LAYOUTS`, so a node is covered the
+    moment it is registered and nothing here names one. Which layout applies is asked of the
+    node's declared ``editor`` — L1's rides the L2-authored ``opt_sp.memory.l1_layout``, every
+    other node's resolves through the L4 override channel — the same split
+    :func:`resolve_node_layout` enforces. ``checkin`` runs around the loop rather than through
+    the injection path, so it is absent from the registry and from this walk.
+
+    **Compare two of these, never one against a stored value.** An absolute fingerprint cannot
+    be reproduced in a later process: the AxisIndex digest behind ``axis_memory`` and the
+    escalation fold behind ``escalation_panel`` are not reconstructible to a past round, so a
+    re-render always differs somewhere and every resume would read as drift. Build both from
+    ONE cycle with only the round content changed between them and all of that cancels exactly,
+    leaving the difference that was actually asked about.
+    """
+    out: dict[str, str] = {}
+    with _no_round_warnings():
+        for node, spec in NODE_LAYOUTS.items():
+            layout = (
+                bundle.opt_sp.memory.l1_layout if spec.editor != "l4" else resolve_node_layout(node)
+            )
+            filled, injection_vars, _ = DispatchHub.fill(
+                load_optimizer_prompt(node), layout, bundle
+            )
+            payload = json.dumps(
+                [filled.render(), sorted(injection_vars.items())], ensure_ascii=False
+            )
+            out[node] = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return out
+
+
 def build_bundle(
     cycle: Cycle,
     *,
@@ -242,4 +308,10 @@ def build_bundle(
     )
 
 
-__all__ = ["DispatchHub", "InjectionRenderError", "build_bundle", "validate_template"]
+__all__ = [
+    "DispatchHub",
+    "InjectionRenderError",
+    "build_bundle",
+    "node_packages",
+    "validate_template",
+]

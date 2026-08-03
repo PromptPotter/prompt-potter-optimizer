@@ -1676,6 +1676,15 @@
         "title": "FilesResponse",
         "type": "object"
       },
+      "ForkDirection": {
+        "description": "Which side of a cut the run CONTINUES on — the half a cut alone cannot say.\n\nOne mechanism mints every fork, and the child is always the new cycle id. What differs\nis the reading. An operator exploring branches OFF a line that keeps running; a resume\ncorrecting itself moves the active pointer to the child and abandons what it cut from.\nSame shape on disk, opposite meaning to a reader — and without this, the lineage draws\nan offshoot and a supersession identically.",
+        "enum": [
+          "offshoot",
+          "supersede"
+        ],
+        "title": "ForkDirection",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1851,6 +1860,17 @@
               }
             ],
             "title": "Expected Samples"
+          },
+          "fork_direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ForkDirection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
           "hearts": {
             "anyOf": [

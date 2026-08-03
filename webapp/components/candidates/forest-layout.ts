@@ -52,6 +52,19 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
+// Which side of a cut the run CONTINUES on, as the tree serves it (`FORK_DIRECTION`,
+// derived server-side from the trigger — never re-derived here).
+export type ForkDirection = NonNullable<LineageNode["fork_direction"]>;
+
+// "↳" = this branch IS the line now and the PARENT is what was left behind. An offshoot
+// is unmarked: it already reads as one, hanging off a line that keeps running. Both cuts
+// are the same shape on disk and wore the same ⑂, so an operator could not tell a branch
+// that superseded its parent from one exploring beside it.
+export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
+  offshoot: "",
+  supersede: "↳",
+};
+
 // One course's candidate children, in served (round) order.
 
 function groupRounds(cands: readonly LineageNode[]): Map<number, LineageNode[]> {
@@ -200,6 +213,9 @@ export interface RoundNodePos {
   courseKind: CourseKind;
   // Fork creation trigger — drives the operator_steered provenance glyph.
   trigger: string;
+  // Which side of the cut continues; null for a root or an inner run, neither of which
+  // was cut from anything.
+  forkDirection: ForkDirection | null;
   // The counterfactual, carried by the node itself rather than re-joined from a
   // parallel array by a hand-rolled `{cycle}::r{round}` key.
   divergence: LineageDivergence | null;
@@ -255,6 +271,7 @@ function placedNode(
     isLastInLane: false,
     courseKind: l.course.course_kind ?? "root",
     trigger: l.course.trigger,
+    forkDirection: l.course.fork_direction ?? null,
     divergence: cand.divergence,
     divergent: cand.divergent,
   };

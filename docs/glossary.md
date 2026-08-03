@@ -169,9 +169,10 @@ The persisted world is a four-entity containment hierarchy
   sweep descendants. Directory `campaigns/{campaign_id}/` +
   `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` —
   minted fresh per `new` call by `mint_campaign_id`; each `new` produces
-  a distinct campaign. The declaration (target hash +
-  optimizer-prompt hash) is recorded as properties on `campaign.json`
-  for drift detection on resume, not as the id. `domain/campaign.py`.
+  a distinct campaign. The declaration rides `campaign.json` as
+  properties, never as the id: `root_content_hash` (resume's config-drift
+  check) + `optimizer_prompt_hash` (audit join key — optimizer drift is
+  asked per round). `domain/campaign.py`.
 - **Session** — **not a persisted tier** (`docs/architecture.md` §0 "A
   campaign has one root cycle"). The surviving `Session`
   (`application/bootstrap/session.py`) is the in-process **wiring object**;
@@ -202,6 +203,12 @@ The persisted world is a four-entity containment hierarchy
   session**. Three kinds: divergence (operator-chosen), diagnostic,
   and sweep (sweep-toolkit A/B candidates) — all flat under the
   campaign's `cycles/`.
+- **Fork direction** (`ForkDirection`, `FORK_DIRECTION`) — which side of a cut
+  the run CONTINUES on, derived from the trigger and never stored.
+  `offshoot` = the child hangs off a line that keeps running (sweep / diag /
+  steered); `supersede` = the child IS the line and the parent is what was
+  left behind (scoring divergence, rewind, L2/L3 rebase). One mechanism mints
+  both, so without this a supersession draws as an offshoot.
 - **ForkSpec** — the single typed fork record (`domain/run_records.py`):
   one writer behind the parent's `FORK_CUT` ledger entry (SoT), the fork's
   `index.json::fork` (lineage read), and — when steered — its

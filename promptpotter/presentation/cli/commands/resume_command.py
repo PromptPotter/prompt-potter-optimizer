@@ -63,16 +63,19 @@ def _prepare_cycle_for_resume(
     POLICY_ONLY (safe) vs DATA_AFFECTING (recommend fork or fresh ``new``;
     TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
 
-    ``steer_fork`` (``--steer-model``) downgrades BOTH drift halts to a note: a
+    ``steer_fork`` (``--steer-model``) downgrades the drift halt to a note: a
     steer-fork mints a fresh sibling under the current config + prompts — the very
     "config changed → fork" resolution the halt recommends — so it must not be
     blocked by it, matching the web ``fork-cycle`` path (which runs no drift check).
 
-    Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
+    OPTIMIZER drift is not asked here. It used to be — a campaign-level hash equality that
+    halted with "mint a new campaign" — and it was the wrong shape twice over: it lived on
+    the CLI, so a resume from the webapp bypassed it entirely, and it compared against the
+    MINT-time value, so it could not name which rounds ran under which optimizer or offer
+    the fork every other divergence offers. It is now asked per round, from the application
+    seam every entry point reaches (``resume_and_fork/resume.py::_optimizer_divergences``).
+    """
     from promptpotter.application.knobs import DiffScope, classify_config_diff
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        combined_optimizer_prompt_hash,
-    )
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
     plan = resolve_cycle_plan(
@@ -146,25 +149,6 @@ def _prepare_cycle_for_resume(
                     "sibling cycle, or revert the config edits and retry `resume`."
                 )
             raise _PivotToFreshError(dataset_name)
-
-    # Optimizer-prompt drift — campaign identity folds in promptpotter/assets/optimizer/; editing them is data-affecting (``new`` is the fix).
-    # A steer-fork mints a fresh sibling under the current prompts, so this halt (like the config one above) does not apply.
-    current_optimizer_hash = combined_optimizer_prompt_hash()
-    if not steer_fork and campaign.optimizer_prompt_hash != current_optimizer_hash:
-        dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
-        raise SystemExit(
-            f"ERROR: the optimizer prompts changed since campaign "
-            f"{ctx.campaign_id} was minted.\n"
-            f"  stored optimizer hash:  {campaign.optimizer_prompt_hash}\n"
-            f"  current optimizer hash: {current_optimizer_hash}\n"
-            f"\n"
-            f"The optimizer prompts (promptpotter/assets/optimizer/) are part of a "
-            f"campaign's identity — resuming would mix old-prompt rounds with "
-            f"new-prompt rounds.\n"
-            f"  - `python -m promptpotter new {dataset_name}` mints a distinct "
-            f"campaign for the new optimizer prompts (recommended).\n"
-            f"  - Revert promptpotter/assets/optimizer/ to resume this campaign in place."
-        )
 
     if resume_from_round is not None:
         if not ctx.cycle_id:

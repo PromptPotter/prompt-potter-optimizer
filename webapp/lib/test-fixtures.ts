@@ -77,6 +77,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     health: null,
     opt_sp: null,
     axis_memory_peaked: [],
+    optimizer_prompt_hashes: {},
     status: "",
     round_id: "round_0",
     scoreboard: [],

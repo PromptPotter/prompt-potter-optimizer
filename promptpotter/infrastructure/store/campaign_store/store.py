@@ -919,7 +919,19 @@ class CampaignStore:
         return [self._entry_from_index(p) for p in self._index_files()]
 
     def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
-        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: ``n_rounds == 0``, not a family root, no children."""
+        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: banked nothing of its
+        OWN, not a family root, no children.
+
+        "Nothing of its own" is measured against what the cut INHERITED, not against zero.
+        A rebase fork copies rounds ``0..from_round-1`` at mint, so one that never ran a
+        round still carries ``n_rounds == from_round`` — and against a flat ``n_rounds == 0``
+        every rebase fork read as "ran real work". The docstring named that family and the
+        guard could not reach it, so the one cleanup path in the codebase was unusable for
+        the one family that mints stubs on failure.
+
+        A ``from_round`` we cannot read counts as 0, which is the strict reading: when it is
+        unknown what the fork inherited, refuse rather than delete.
+        """
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         index_path = self._index_path(campaign_id, cycle_id)
         # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
@@ -933,8 +945,13 @@ class CampaignStore:
         if root_cycle_id(cycle_id) == cycle_id:
             return False, "family root — deletion is for sibling stubs only"
         n_rounds = index.get("n_rounds", 0)
-        if not isinstance(n_rounds, int) or n_rounds != 0:
-            return False, f"n_rounds={n_rounds} — cycle ran real work"
+        fork = index.get("fork")
+        from_round = (fork or {}).get("from_round") if isinstance(fork, dict) else None
+        inherited = from_round if isinstance(from_round, int) and from_round > 0 else 0
+        if not isinstance(n_rounds, int) or n_rounds > inherited:
+            return False, (
+                f"n_rounds={n_rounds} against {inherited} inherited — cycle ran real work"
+            )
         for other in self._index_files():
             other_campaign, other_cycle = self._ids_from_index_path(other)
             if other_campaign != campaign_id or other_cycle == cycle_id:
@@ -1107,10 +1124,19 @@ class CampaignStore:
         cycle_id: str,
         round_num: int,
         candidates: list[dict[str, Any]],
+        *,
+        consumed: str,
     ) -> None:
-        """Persist generated candidates before scoring."""
+        """Persist generated candidates before scoring, WITH what they were generated from.
+
+        ``consumed`` is ``round_document_digest`` of the round this generation read
+        (``round_num - 1``). Without it a replayed cache is unfalsifiable: the candidates
+        say what they are and nothing says whether the round they came out of still reads
+        the same way, so a repaired or re-distilled predecessor is carried straight past
+        the replay branch. Both halves ride ONE file so they cannot drift apart.
+        """
         path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
-        write_json(path, candidates)
+        write_json(path, {"consumed": consumed, "candidates": candidates})
         logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
 
     def load_round_candidates(
@@ -1118,8 +1144,23 @@ class CampaignStore:
         campaign_id: str,
         cycle_id: str,
         round_num: int,
-    ) -> list[dict[str, Any]] | None:
-        return read_json_optional(self._layout(campaign_id, cycle_id).candidate_file(round_num))
+    ) -> tuple[list[dict[str, Any]], str | None] | None:
+        """``(candidates, consumed)`` or ``None`` when no cache exists.
+
+        ONE read for both facts, because every caller that trusts the candidates needs to
+        know what they were generated from. ``consumed`` is ``None`` for a cache written
+        before it was recorded — unvouched, which is a state to act on rather than a
+        detail to shrug at.
+        """
+        raw = read_json_optional(self._layout(campaign_id, cycle_id).candidate_file(round_num))
+        if raw is None:
+            return None
+        if isinstance(raw, dict):
+            consumed = raw.get("consumed")
+            return list(raw.get("candidates") or []), consumed if isinstance(
+                consumed, str
+            ) else None
+        return list(raw), None
 
     def delete_round_candidates(
         self,

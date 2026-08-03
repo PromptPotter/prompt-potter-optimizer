@@ -22,7 +22,12 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.run_records import LedgerCandidate
+from promptpotter.domain.run_records import (
+    FORK_DIRECTION,
+    ForkDirection,
+    ForkTrigger,
+    LedgerCandidate,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -184,6 +189,14 @@ class LineageNode(StrictModel):
     )
     dataset_name: str = ""
     trigger: str = Field(default="", description="Fork trigger; empty for roots and inner runs.")
+    fork_direction: ForkDirection | None = Field(
+        default=None,
+        description="Which side of this cut the run CONTINUES on, derived from `trigger` "
+        "(`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; "
+        "`supersede` = this branch IS the line and the PARENT is what was left behind. Null "
+        "for roots and inner runs, which were not cut from anything. Served, never derived "
+        "in the client — the two read identically on disk and only this says them apart.",
+    )
     steered_by: str | None = Field(default=None, description="Operator who cut this fork.")
     task: str | None = Field(
         default=None,
@@ -301,6 +314,22 @@ def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _fork_direction(trigger: object) -> ForkDirection | None:
+    """Read a cut's direction off the trigger it recorded. ``None`` for anything not cut.
+
+    Derived rather than stored, which is what makes every fork already on disk answer this
+    without a migration. An unrecognised trigger returns ``None`` instead of guessing:
+    drawing a supersession as an offshoot is the exact lie this exists to stop, and half of
+    those guesses would be that one.
+    """
+    if not isinstance(trigger, str) or not trigger:
+        return None
+    try:
+        return FORK_DIRECTION[ForkTrigger(trigger)]
+    except (ValueError, KeyError):
+        return None
+
+
 class _CloseFacts(NamedTuple):
     """What only a round CLOSE knows about a candidate. A round that never closed has no
     entry at all, so its candidates never inherit a crown nobody awarded.
@@ -396,6 +425,7 @@ def _course_scalars(
             derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at")))
         ),
         "trigger": str(fork.get("trigger") or ""),
+        "fork_direction": _fork_direction(fork.get("trigger")),
         "steered_by": _str_or_none(fork.get("issued_by")),
         "task": _str_or_none(spawned.get("task")),
         "dataset_name": campaign.dataset_name if campaign else "",
@@ -607,6 +637,7 @@ def _contributions(
                     # identity lives on.
                     "course_kind": course.course_kind,
                     "trigger": course.trigger,
+                    "fork_direction": _fork_direction(course.trigger),
                     "steered_by": course.steered_by,
                 }
             )

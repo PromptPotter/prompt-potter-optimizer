@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any, cast
 # Leaf import (not the package surface): EscalationFSM is the foundational
 # state type Cycle holds; importing it via escalation/__init__ would load the
 # firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    compute_optimizer_prompt_hashes,
+)
 from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -129,6 +132,10 @@ def _origin_round(
         calibration_model=calibration_model,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
+        # C0's measurement is optimizer-independent, but its critique is not — and this is
+        # where a cycle's first stamp has to land, or a campaign paused before round 1 has
+        # nothing on disk that names the optimizer it started under.
+        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
     )
 
 
@@ -518,20 +525,32 @@ class Cycle:
         is the only one ``start`` builds, and the file it was written to is the record
         of what actually ran (its verdict, its critique, a gate rescore). A fork whose
         priors begin at round 1 keeps the round 0 it inherited.
+
+        **RE-RUNNABLE, and that is load-bearing.** Rounds at or after *priors*' first
+        number are REPLACED, not merged in — so replaying a shorter list (a fork's
+        survivors) drops the tail rather than leaving it standing — and the high-water
+        scalars below are re-seeded from round 0 before the walk, so a second call
+        reconstructs rather than accumulating. Both mattered the moment resume began
+        replaying twice (the package-drift differential renders the same rounds before
+        and after a repair): a merge would have carried the discarded tail into the
+        fork, and a stale maximum would have reported a best the repaired rounds never
+        reached — and hidden the very drift the second pass exists to see.
         """
         if not priors:
             return
         schema = self.session.pipeline_schema
         tr = self.tracking
-        by_round = {rr.round: rr for rr in self.rounds}
-        by_round.update({rr.round: rr for rr in priors})
-        self.rounds = [by_round[n] for n in sorted(by_round)]
-        l1_rounds = [rr for rr in self.rounds if rr.round > 0]
-        if not l1_rounds:
-            # Resumed right after the origin — no L1 trajectory to replay, and
-            # ``start`` already seeded tracking from round 0.
-            return
-        last_rr = l1_rounds[-1]
+        from_round = min(rr.round for rr in priors)
+        self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
+            priors, key=lambda rr: rr.round
+        )
+        # The seed round: the last L1 round, or round 0 when the list carries only the
+        # origin. That case used to return early on the grounds that ``start`` had already
+        # seeded tracking — true on a FIRST call and false on every later one, which left
+        # the cycle holding the trajectory of whichever longer list it was last replayed
+        # with. Re-seeding it here is what makes replaying rounds 0..k for ascending k
+        # reconstruct each state instead of decorating the previous one.
+        last_rr = self.rounds[-1]
         if last_rr.opt_sp is None or last_rr.pipeline_params is None:
             raise ValueError(
                 f"round {last_rr.round} closed without an opt_sp / pipeline_params — "
@@ -553,6 +572,15 @@ class Cycle:
         # index. Each round's own scalars — never a score over `acc_cum`, whose rows come
         # from different configurations (see `_merge_known_outcomes`); the pool is rebuilt
         # here only to reseed `current_results` and `best_theta` below.
+        # Re-seed the mark from the origin floor first — see the re-runnable note above.
+        origin_rr = self.rounds[0]
+        tr.best_composite_fitness = origin_rr.composite_fitness
+        tr.best_accuracy = origin_rr.accuracy
+        tr.best_round = origin_rr.round
+        tr.best_theta = origin_rr.cumulative_theta
+        tr.best_sp = self.opt_sp.model_copy(
+            update={f: origin_rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
+        ).to_job_search_point(base_pipeline_params=origin_rr.pipeline_params, schema=schema)
         acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
             acc_cum = _merge_known_outcomes(acc_cum, list(rr.results))

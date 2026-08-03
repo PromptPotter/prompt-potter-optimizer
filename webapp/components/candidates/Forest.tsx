@@ -17,6 +17,7 @@ import type { LineageNode } from "@/lib/api";
 import {
   CAND_STUB,
   COL_W,
+  DIRECTION_GLYPH,
   HEADER_H,
   KIND_GLYPH,
   TRIGGER_GLYPH,
@@ -328,6 +329,9 @@ export function Forest({
                   {course.trigger === "operator_steered"
                     ? ` · steered${course.steered_by ? ` by ${course.steered_by}` : ""}`
                     : ""}
+                  {course.fork_direction === "supersede"
+                    ? "\n↳ this branch is the line — the parent keeps what it was cut from"
+                    : ""}
                   {course.state ? ` · ${course.state}` : ""}
                   {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}
                   {isEmpty
@@ -403,6 +407,7 @@ export function Forest({
                       <tspan className="family-cladogram-glyph">
                         {KIND_GLYPH[n.courseKind]}
                         {TRIGGER_GLYPH[n.trigger] ?? ""}
+                        {n.forkDirection ? DIRECTION_GLYPH[n.forkDirection] : ""}
                       </tspan>
                       <tspan dx="4">{rowLabelText}</tspan>
                       {laneHearts && (
@@ -464,6 +469,7 @@ export function Forest({
                   <tspan className="family-cladogram-glyph">
                     {KIND_GLYPH[course.course_kind ?? "root"]}
                     {TRIGGER_GLYPH[course.trigger] ?? ""}
+                    {course.fork_direction ? DIRECTION_GLYPH[course.fork_direction] : ""}
                   </tspan>
                   <tspan dx="4">{courseName(course)}</tspan>
                 </text>
