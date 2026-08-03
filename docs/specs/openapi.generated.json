@@ -371,17 +371,11 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
-          },
-          "status": {
-            "description": "Status of the campaign's run (its root cycle)",
-            "title": "Status",
-            "type": "string"
           }
         },
         "required": [
           "campaign_id",
           "dataset_name",
-          "status",
           "created_at",
           "root_cycle_id",
           "config"
@@ -534,17 +528,11 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
-          },
-          "status": {
-            "description": "Status of the campaign's run (its root cycle)",
-            "title": "Status",
-            "type": "string"
           }
         },
         "required": [
           "campaign_id",
           "dataset_name",
-          "status",
           "created_at",
           "root_cycle_id"
         ],
@@ -816,7 +804,7 @@
       },
       "CycleHop": {
         "additionalProperties": false,
-        "description": "One ``(campaign, cycle)`` step of a :data:`CyclePath`.\n\nThe campaign component is carried to name the leaf and for symmetry with the\nwebapp; it plays no part in descent — a sandbox is keyed on the cycle id alone.\n\nA model rather than a tuple so it serializes as ``{campaign_id, cycle_id}``: a\nserved path is read by a client that already speaks this shape, and a positional\npair on the wire is one more thing for a reader to decode wrongly.",
+        "description": "One ``(campaign, cycle)`` step of a :data:`CyclePath`.\n\nBOTH components are load-bearing, in descent as well as at the leaf: a cycle_id is\ncontent-addressed on the origin, so every campaign minted from one declaration shares\nit and a sandbox keyed on the cycle alone serves another campaign's inner fan-out\n(``stores.py::inner_sandbox_store``). Anything indexing nodes of a served tree keys on\nthe pair for the same reason.\n\nA model rather than a tuple so it serializes as ``{campaign_id, cycle_id}``: a\nserved path is read by a client that already speaks this shape, and a positional\npair on the wire is one more thing for a reader to decode wrongly.",
         "properties": {
           "campaign_id": {
             "title": "Campaign Id",
@@ -2491,12 +2479,16 @@
           "n_cycles_scanned": {
             "title": "N Cycles Scanned",
             "type": "integer"
+          },
+          "snr": {
+            "$ref": "#/components/schemas/OuterSnr"
           }
         },
         "required": [
           "generated_at",
           "n_cycles_scanned",
-          "candidates"
+          "candidates",
+          "snr"
         ],
         "title": "OptimizerPromptRanking",
         "type": "object"
@@ -2586,6 +2578,57 @@
           "total"
         ],
         "title": "OriginListResponse",
+        "type": "object"
+      },
+      "OuterSnr": {
+        "additionalProperties": false,
+        "description": "Can the panel resolve one optimizer prompt from another yet — and if not, by how much.\n\nFinish-line item 7's \"two series, not one ratio\", derived from the corpus this module\nalready walks rather than bought with re-runs. Both series fall out of the same\naccumulators: a state measured more than once on the SAME cell gives the NOISE (the panel\nre-reading one arm), and the spread of ``anchor_effect`` across states gives the SIGNAL\n(arms genuinely differing).\n\nUntil this existed the ratio was hand-computed off a corpus snapshot and written into prose\n— which is how the spec came to state two different answers for the same question (§4's\n\"~35 cells\" against item 7's own ``(2.8·σ/d)²``, which gives roughly half that). A number\nthe loop recomputes on every read cannot drift from the disk it was derived from.\n\nEvery field is ``None`` when the corpus cannot support it: fewer than two states, or no\ncell measured twice under one state. Absent is the honest answer — a fabricated 0 noise\nreads as a panel that can resolve anything.",
+        "properties": {
+          "between_n_states": {
+            "default": 0,
+            "title": "Between N States",
+            "type": "integer"
+          },
+          "between_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Between Sd"
+          },
+          "n_cells_to_verdict": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Cells To Verdict"
+          },
+          "within_n_groups": {
+            "default": 0,
+            "title": "Within N Groups",
+            "type": "integer"
+          },
+          "within_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Within Sd"
+          }
+        },
+        "title": "OuterSnr",
         "type": "object"
       },
       "QuotaStatus": {
@@ -2796,7 +2839,7 @@
         "type": "object"
       },
       "RunPhase": {
-        "description": "The single run-state vocabulary every surface reads.\n\nComposes two orthogonal facts — *lifecycle* (is the cycle active or\nfinished) and *control + liveness* (is a process driving it, and what is\nthe operator's intent) — into one value derived in exactly one place\n(``derive_run_phase``).\n\n- ``CHECKIN`` — the campaign is still authoring its origin (pre-loop); a\n  real disk-backed campaign in the ``checkin`` lifecycle, minted on the\n  first ingest action, resumable. Holds no machine slot. Derived from\n  ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at\n  Start when ``checkin`` flips to ``active``); precedes every other phase.\n- ``RUNNING`` — a process is attached and driving the active cycle.\n- ``PAUSED`` — operator paused (the pause button or Ctrl+C); the worker\n  exits cleanly at the next checkpoint but the cycle stays **active and\n  resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``;\n  the play action relaunches via ``start-run``/``resume``. The single\n  operator-interrupt phase — there is no separate \"stopping\".\n- ``GATE`` — alive, holding at the round-0 origin gate awaiting an\n  operator decision (rescore / proceed / abort) because the origin\n  verdict was not ``healthy``. Reversible (``origin-gate-decision``).\n- ``DETACHED`` — active lifecycle but no live producer (CLI exited or\n  ``kill -9`` left no terminal record). The *only* phase that uses the\n  freshness heuristic; never written into ``dashboard.json`` (a dead\n  producer can't write) — only emitted by ``derive_run_phase``. This is\n  a *dead* producer, not a quiet-but-alive one (a live cycle heartbeats\n  its ledger → dashboard within ``RUN_FRESH_S``), so the liveness reaper\n  (``application/jobs/reaper.py``) stamps a persistently-detached cycle\n  ``TERMINAL`` (``PRODUCER_VANISHED``); it is not an in-flight unit and\n  drops out of the dock.\n- ``TERMINAL`` — the cycle finished; the reason is the cycle's\n  :class:`StopReason` (labelled via the :data:`STOP_REASON_INFO` table).",
+        "description": "The single run-state vocabulary every surface reads.\n\nComposes two orthogonal facts — *lifecycle* (is the cycle active or\nfinished) and *control + liveness* (is a process driving it, and what is\nthe operator's intent) — into one value derived in exactly one place\n(``derive_run_phase``).\n\n- ``CHECKIN`` — the campaign is still authoring its origin (pre-loop); a\n  real disk-backed campaign in the ``checkin`` lifecycle, minted on the\n  first ingest action, resumable. Holds no machine slot. Derived from\n  ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at\n  Start when ``checkin`` flips to ``active``); precedes every other phase.\n- ``RUNNING`` — a process is attached and driving the active cycle.\n- ``PAUSED`` — the worker exits cleanly but the cycle stays **active and\n  resumable** (no ``finished_at``). Three ways in: the pause button (writes\n  ``.runtime/pause.flag``), Ctrl+C, and an ``asyncio.CancelledError`` — our\n  own machinery stopping a run, typically the L4 outer sample deadline\n  cancelling its inner campaign. Only the first writes a flag, so the other\n  two are derived off the runner's DECLARATION, made once for all three at\n  the finalize seam (``runner/entry.py::_finalize_run``); leaving that to\n  each raise site is what let a deliberately-cancelled inner cycle read\n  ``detached`` and be stamped ``PRODUCER_VANISHED`` 15 minutes later. The\n  play action relaunches via ``start-run``/``resume``. The single\n  operator-interrupt phase — there is no separate \"stopping\".\n- ``GATE`` — alive, holding at the round-0 origin gate awaiting an\n  operator decision (rescore / proceed / abort) because the origin\n  verdict was not ``healthy``. Reversible (``origin-gate-decision``).\n- ``DETACHED`` — active lifecycle but no live producer (CLI exited or\n  ``kill -9`` left no terminal record). The *only* phase that uses the\n  freshness heuristic; never written into ``dashboard.json`` (a dead\n  producer can't write) — only emitted by ``derive_run_phase``. This is\n  a *dead* producer, not a quiet-but-alive one (a live cycle heartbeats\n  its ledger → dashboard within ``RUN_FRESH_S``), so the liveness reaper\n  (``application/jobs/reaper.py``) stamps a persistently-detached cycle\n  ``TERMINAL`` (``PRODUCER_VANISHED``); it is not an in-flight unit and\n  drops out of the dock.\n- ``TERMINAL`` — the cycle finished; the reason is the cycle's\n  :class:`StopReason` (labelled via the :data:`STOP_REASON_INFO` table).",
         "enum": [
           "checkin",
           "running",
