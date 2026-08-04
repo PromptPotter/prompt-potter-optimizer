@@ -149,7 +149,7 @@ def _warning_str(w: object) -> str:
 
     Pipelines emit warnings as either dicts (``{"step", "code", ...}``) or
     bare strings; keep both shapes flowing to the same downstream surface.
-    Mirrors ``elimination._collect_advisories``.
+    Mirrors ``rendering._collect_advisories``.
     """
     if isinstance(w, dict):
         return f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"

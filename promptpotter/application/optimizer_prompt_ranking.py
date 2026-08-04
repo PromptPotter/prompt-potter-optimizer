@@ -315,8 +315,8 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
         # ONE paired point per cell — the cell's own mean level. Equal-length lists make
         # the elementwise paired mean identical to the difference of means, so this is
         # exactly ``mean_d`` re-expressed as a (candidate, origin) pair for stage two.
-        cell_cand.append(sum(cand_vals) / len(cand_vals) if cand_vals else 0.0)
-        cell_orig.append(sum(orig_vals) / len(orig_vals) if orig_vals else 0.0)
+        cell_cand.append(sum(cand_vals) / len(cand_vals))
+        cell_orig.append(sum(orig_vals) / len(orig_vals))
 
     anchor, anchor_se, n_cells = paired_diff_posterior(cell_cand, cell_orig)
     # Student-t on the CELL count, not z: the SE is estimated from the same handful of
