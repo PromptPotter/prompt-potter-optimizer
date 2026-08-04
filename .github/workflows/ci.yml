@@ -100,7 +100,7 @@ jobs:
       # from a source tree for that reason.
       - name: Install it elsewhere and run it
         run: |
-          uv venv --python 3.13 "$RUNNER_TEMP/venv"
+          uv venv --python 3.13 --seed "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
           mkdir -p "$RUNNER_TEMP/elsewhere" "$RUNNER_TEMP/home"
           cd "$RUNNER_TEMP/elsewhere"
