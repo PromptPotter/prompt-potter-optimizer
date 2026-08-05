@@ -49,7 +49,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 )
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning, emit_token_usage
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
 
 if TYPE_CHECKING:
@@ -119,6 +119,10 @@ async def _chat_under_deadline(
     :func:`run_round_loop` turns that into ``StopReason.OPTIMIZER_TIMEOUT``
     — a graceful, operator-recoverable halt.
 
+    **The retry lands on the ledger.** It doubles this call's wall budget, and
+    under L4 that time is spent against the OUTER per-sample wall — so a retry
+    only the server log knows about is a state nothing downstream can read.
+
     The wall budget is the per-round-trip ceiling times the worst-case
     round-trip count, because one ``chat()`` may include a schema-repair
     retry (a second full call); see ``_MAX_ROUND_TRIPS_PER_CALL``.
@@ -134,6 +138,14 @@ async def _chat_under_deadline(
                     "optimizer call %s exceeded the %.0fs deadline — retrying once",
                     node_label,
                     budget_s,
+                )
+                emit_round_warning(
+                    kind="optimizer_deadline_retry",
+                    message=(
+                        f"optimizer call {node_label} exceeded its {budget_s:.0f}s wall and "
+                        f"was retried once — this round spent up to {budget_s * 2:.0f}s on it"
+                    ),
+                    detail={"node": node_label, "budget_s": budget_s, "attempt": 1},
                 )
                 continue
             logger.error(
