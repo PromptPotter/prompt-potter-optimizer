@@ -618,8 +618,8 @@ class CommandDispatcher:
                 # Mint the operator-steered fork (writes the cycle + seed,
                 # retargets the active pointer), THEN launch it. Minting alone is
                 # just disk I/O — without the launch the fork sits seeded-but-idle
-                # (the old design assumed a manual CLI `resume`, which never comes
-                # when steering from the web). One gesture = stop parent → mint →
+                # waiting on a manual CLI `resume` that never comes when steering
+                # from the web. One gesture = stop parent → mint →
                 # continue optimizing from the edited searchpoint. Pass no
                 # spend/halt: the seed's reconciled limits govern at the runner
                 # seam (runner/entry.py::_apply_config_overrides).

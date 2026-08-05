@@ -131,12 +131,9 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     for sandbox in inner_dir.iterdir():
         if not sandbox.is_dir():
             continue
-        # The owner names itself, in the sandbox's own `owner.json`. This used to be a glob
-        # for `*/campaigns/*/cycles/{sandbox.name}/index.json` — across EVERY tenant and
-        # EVERY campaign — because the directory name carried only the cycle_id, which is
-        # content-addressed and therefore shared. So any campaign in any tenant that happened
-        # to have run the same origin answered "the owner exists", and the sandbox was kept.
-        # Now the claim is exact: this tenant, this campaign, this cycle.
+        # The owner names itself in the sandbox's own `owner.json` — never glob by directory
+        # name. That name is the content-addressed cycle_id, so any campaign in any tenant
+        # that ran the same origin would answer "owner exists".
         owner = read_json_optional(sandbox_owner_path(sandbox))
         if not isinstance(owner, dict):
             # No owner record and no way to derive one from a hashed name. Not provably an

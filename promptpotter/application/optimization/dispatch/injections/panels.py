@@ -702,13 +702,9 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
     if cand.total == 0:
-        # Zero samples means zero evidence, and `accuracy` is a non-optional float that
-        # defaults to 0.0 — so an unmeasured candidate is byte-identical to one that got
-        # everything wrong. It must never be quoted as an outcome. This is the same rule
-        # `matched_origin_accuracy` states one level up ("MUST NOT default to 0.0"),
-        # applied to the candidate's own score. Probe rounds used to manufacture these
-        # wholesale (empty scoring set → every candidate 0/0), and six of them reached L1
-        # reading "0% vs origin 58%" — a catastrophic loss for a mutation nobody ran.
+        # Zero samples means zero evidence, and `accuracy` defaults to 0.0 — so an unmeasured
+        # candidate is byte-identical to one that got everything wrong, and must never be
+        # quoted as an outcome. Same rule `matched_origin_accuracy` states one level up.
         return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"

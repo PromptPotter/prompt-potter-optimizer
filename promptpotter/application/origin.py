@@ -102,11 +102,8 @@ async def rescore_parent(
     return RoundParent(
         opt_sp=cycle.opt_sp,
         results=results,
-        # The gateway's OWN answer, not a second computation of it. This used to discard
-        # `scores` and re-run `compute_composite_fitness` over the same rows with the same
-        # scorer — a second code path producing what the single scoring gateway had just
-        # returned, and one that dropped the evaluator namespace on the way (leaving
-        # `RoundParent.evaluators` a declared field with no writer).
+        # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
+        # rows, which drops the evaluator namespace on the way.
         report=build_score_report(
             cycle.opt_sp,
             None,
@@ -412,8 +409,8 @@ async def prepare_scoring_context(
     )
 
     if not (campaign_config is not None and svc is not None and dataset):
-        # Nothing to score. The resolved origin still travels — the old empty-list branch
-        # dropped it and handed back a blank OptSearchPoint(instruction="").
+        # Nothing to score. The resolved origin still travels — dropping it here hands back
+        # a blank OptSearchPoint(instruction="").
         return (
             CampaignOrigin(
                 resolved_origin=resolved_origin,
@@ -515,12 +512,9 @@ async def prepare_scoring_context(
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
-        # Origin is candidate 0 of round 0, and it is measured ONCE, here, into the same
-        # `ScoredCandidate` report every L1 candidate gets. This object is both what the
-        # ledger receives and what round 0's row is built from, so the two cannot be two
-        # computations of one measurement — `Cycle.start` used to re-derive the composite
-        # and the evaluator namespace from these same rows, beside the gateway that had
-        # just returned them.
+        # Origin is candidate 0 of round 0, measured ONCE, here. This object is both what the
+        # ledger receives and what round 0's row is built from — never re-derive either from
+        # these rows a second time.
         report = build_score_report(
             resolved_origin,
             None,

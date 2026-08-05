@@ -144,11 +144,9 @@ def measurement_series_for_samples(
                 {
                     "ord": f"{created_at}/{run_id}/{idx:04d}",
                     "fitness": float(item.get("fitness") or 0.0),
-                    # Emitted HERE so all three scopes of the measurement-series endpoint
-                    # hand back the same `{ord, fitness, label}` dot. The router used to
-                    # re-map this arm alone to synthesize the label the round-file arms
-                    # emit natively — one wire shape with two authors, and the odd one
-                    # out lived in a presentation-layer dict comprehension.
+                    # Emitted HERE so all three scopes of the measurement-series endpoint hand
+                    # back the same `{ord, fitness, label}` dot — never re-map this arm in the
+                    # router, which gives one wire shape two authors.
                     "label": f"run {run_id[:8]}",
                     "run_id": run_id,
                     "created_at": created_at,

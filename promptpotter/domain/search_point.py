@@ -111,21 +111,9 @@ class JobSearchPoint(SearchPoint):
 # TaskDecomposition — structured domain context for optimizer LLM calls
 # ---------------------------------------------------------------------------
 
-# The FRAMING half: these render into the `task_context` panel of every optimizer prompt and
-# are never measured directly — no candidate carries them, so nothing scores them. They are
-# operator-authored knowledge about the task and are FROZEN for the run (`merge` refuses them).
-#
-# They used to be L2's rewrite surface, and the measurement said that was a bad trade: across
-# 143 `l2_context` fires on disk, prose was 100% of what L2 emitted, each rewrite shared only
-# 0.16 mean token overlap with the text it replaced (85% replacement, not the "accumulative
-# refinement" the field docs claim), and no accuracy effect was detectable. Worse, the render
-# capped each field and head-clipped the rest: 244 of the 258 states `key_challenges` ever held
-# were over that cap, so ~95% of the time the operator's tail was silently amputated — including,
-# on `justlogic-d234`, the measured finding that anti-hedging instructions BACKFIRE, which L1
-# then re-proposed every round.
-#
-# A round's findings still reach L1 — through `critique`, `axis_memory` and `mutation_memory`,
-# which are derived from measurement rather than paraphrased from the previous prompt.
+# The FRAMING half: operator-authored, never measured (no candidate carries them), FROZEN for
+# the run — `merge` refuses them and L2's schema has no field for them. Why, with the numbers:
+# `application/optimization/CLAUDE.md` § The framing is frozen.
 FRAMING_FIELDS: frozenset[str] = frozenset(
     {
         "domain",

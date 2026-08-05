@@ -364,13 +364,10 @@ def build_run_observers(
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
-    # The trace id is created at CampaignStart (during init, before this),
-    # so it's already on the obs bridge — hand it to the dashboard as a set-once
-    # identity stamp (like session_id), not a tracing-stream read (fan-out-only
-    # stays intact). None when Langfuse is disabled. Keyed by `tracing_campaign_id`
-    # — the stable root-cycle key the trace was stored under (`CampaignStart`); a
-    # fork reassigns `cycle_id` but emits into the same root trace, so the live
-    # `cycle_id` would miss the lookup and drop the fork's deep link.
+    # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
+    # stays intact. None when Langfuse is disabled. Keyed by `tracing_campaign_id`, the stable
+    # root-cycle key the trace was stored under: a fork reassigns `cycle_id` but emits into
+    # the same root trace, so the live `cycle_id` misses the lookup.
     obs = session.state.obs
     trace_url = (
         langfuse_trace_url(obs.get_langfuse_trace_id(session.state.tracing_campaign_id))

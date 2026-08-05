@@ -612,11 +612,10 @@ async def escalate_l2(
         )
         # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
         # so resume reproduces without a separate decision record.
-        # Every breach reaching here is now a HARD l1_layout failure (mandatory placeholder
+        # Every breach reaching here is a HARD l1_layout failure (mandatory placeholder
         # missing, unknown name, dup within slot) — a real signal that L2 is thrashing inside
-        # the plan. The soft-reject exception is gone with the framing-rewrite surface it
-        # existed for: a stale task_context repeat is unrepresentable now that the framing
-        # is frozen, so there is no inert breach left to except.
+        # the plan. No soft-reject exception: with the framing frozen, a stale task_context
+        # repeat is unrepresentable, so there is no inert breach to except.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
         if breaches:
             logger.warning(

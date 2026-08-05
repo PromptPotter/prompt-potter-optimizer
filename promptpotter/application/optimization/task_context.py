@@ -142,8 +142,8 @@ async def load_or_build_task_context(
     if existing:
         task_context = TaskDecomposition.from_dict(existing)
         # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
-        # The render used to clip instead, which meant an over-budget field was amputated on
-        # every prompt for the run's whole life and the operator only ever saw a log line.
+        # Clipping at render instead amputates an over-budget field on every prompt for the
+        # run's whole life, visible only as a log line.
         task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
         return task_context
     task_description = read_text_optional(

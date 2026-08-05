@@ -273,14 +273,11 @@ async def _prepare_run(
         clear_run_control_flags(launch_cycle_dir)
         _bind_run_controls(session, launch_cycle_dir)
 
-    # Cycle seed: the chosen searchpoint, declared at mint, rides the ledger as a
-    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id —
-    # set before this seam by the CLI resume, the API start-run launchers, and the
-    # campaign-from-origin mint). It re-homes the origin (`origin_prompt_fields`)
-    # and layers its `pipeline_overlay` ON TOP of the dataset overlay
-    # (seed > dataset > backend). Read here — the single runner seam every launch
-    # path funnels through — not threaded through each launcher + every
-    # `configure_and_apply_pipeline` caller.
+    # Cycle seed: the chosen searchpoint, declared at mint, riding the ledger as a
+    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id). It re-homes the
+    # origin (`origin_prompt_fields`) and layers its `pipeline_overlay` ON TOP of the dataset
+    # overlay (seed > dataset > backend). Read HERE — the single runner seam every launch path
+    # funnels through — never threaded through each launcher.
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
         # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
@@ -314,11 +311,10 @@ async def _prepare_run(
             session.human_intervened = True
 
     if origin is None:
-        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like
-        # any other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns
-        # (token records, the L4 heartbeat, an inner cycle's provenance stamp). Only
-        # `run_round_loop` used to call this, so the origin scored with the round
-        # unbound and every measurement it produced was stamped `None`.
+        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like any
+        # other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns (token
+        # records, the L4 heartbeat, an inner cycle's provenance stamp). Leave it to
+        # `run_round_loop` alone and every origin measurement is stamped `None`.
         cb.set_round(0)
         # Establish C0 through the single origin seam: a no-edit operator fork inherits
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
@@ -753,14 +749,11 @@ async def run_optimization(
             spend_budget_usd=spend_budget_usd,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # Prep is the only phase outside `_run_single_cycle`'s finalize, and it is also the
-        # longest: origin scoring on the L4 panel runs for hours. An interrupt landing here
-        # used to escape the whole function, so nothing declared a phase and nothing drained —
-        # the cycle's `dashboard.json` kept the last flushed `run_phase: "running"` and the
-        # `index.json` its `active`, and every non-live reader reported a dead run as healthy
-        # until the liveness reaper eventually stamped `producer_vanished` over it. Declaring
-        # + draining here is the whole fix: PAUSED is not terminal, so the cycle stays
-        # resumable and `resume` replays the seeds already banked at no cost.
+        # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest —
+        # origin scoring on the L4 panel runs for hours. An interrupt escaping here declares
+        # no phase and drains nothing, so `dashboard.json` keeps `run_phase: "running"` and
+        # every non-live reader reports a dead run as healthy. PAUSED is not terminal, so the
+        # cycle stays resumable and `resume` replays the banked seeds at no cost.
         declare_run_phase(session, RunPhase.PAUSED)
         observers.drain_all()
         raise
@@ -877,9 +870,9 @@ def _finalize_run(
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            # The ORIGIN's composite, on the origin's own samples. This used to read
-            # `rounds[0].matched_origin_composite` — round 1's winner's matched floor,
-            # a different sample basis under the origin's name.
+            # The ORIGIN's composite, on the origin's own samples — never
+            # `rounds[0].matched_origin_composite`, which is round 1's winner's matched floor
+            # on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
             # The formula EVERY number above was computed under. `log.md` has always read
             # this key (`output.py::LogMdView.formula`) and nothing had ever written it, so

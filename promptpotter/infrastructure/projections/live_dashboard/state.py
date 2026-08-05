@@ -348,11 +348,9 @@ class LiveDashboardState(StrictModel):
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "patience": f"0/{l1_patience}",
-            # Stamped by the STARTING process, not carried from `prior`, and not waiting
-            # for INIT:exit. Round 0 runs before any INIT event reaches the ledger, so a
-            # campaign whose headline is `ability` used to publish `accuracy` for the whole
-            # origin pass — hours of it on the L4 panel, and the one stretch where the two
-            # disagree most, since round 0 is the only round measured on the full bank.
+            # Stamped by the STARTING process, not carried from `prior`, and not waiting for
+            # INIT:exit — round 0 runs before any INIT event reaches the ledger, so waiting
+            # publishes the wrong headline for the whole origin pass.
             "headline_metric": headline_metric,
             "run_phase": RunPhase.RUNNING,
             "stop_reason": None,

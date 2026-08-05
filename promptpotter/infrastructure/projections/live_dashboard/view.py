@@ -87,11 +87,9 @@ _DASHBOARD_DEBOUNCE_S = 0.25
 
 
 # L1_SCORE absent: driven by sample_started / sample_scored.
-# The VALUES used to be bare strings, and they were the only declaration the
-# `dashboard.json::state` vocabulary had anywhere — the webapp mirrored them by hand against
-# no source. The key stays `str` because `PhaseEvent.phase` is genuinely wider than
-# `CampaignPhase` (a round-boundary event carries "round"); the members below say which
-# subset is mapped.
+# The VALUES are the sole declaration of the `dashboard.json::state` vocabulary — keep them
+# typed, or the webapp mirrors bare strings against no source. The key stays `str` because
+# `PhaseEvent.phase` is wider than `CampaignPhase` (a round-boundary event carries "round").
 _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
@@ -473,11 +471,9 @@ class LiveDashboardView(DerivedView):
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
-        # One debounced flush for EVERY snapshot event. Each branch mutates live
-        # state, so the cadence is uniform and no branch can forget to flush —
-        # candidate_scored previously did, leaving a finished candidate's scores
-        # (and the last/eliminated candidate of a round) unwritten until the next
-        # event or round-complete. That gap was the intermittent "didn't update".
+        # One debounced flush for EVERY snapshot event. Each branch mutates live state, so
+        # the cadence is uniform and no branch can forget to flush — a branch that does
+        # leaves a finished candidate's scores unwritten until the next event.
         self._schedule_persist()
 
     # -- Scalar mutations -----------------------------------------------------

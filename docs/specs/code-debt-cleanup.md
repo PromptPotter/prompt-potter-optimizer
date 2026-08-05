@@ -23,6 +23,36 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+- **Filler module names hiding several concepts each** (verified 2026-08-05; importer counts
+  exact). `application/config.py` — 1169 lines, **42 importers**, one name over three
+  concepts: the `CampaignConfig`/`OptimizationConfig` schema, the preflight validator
+  (`run_preflight_checks`), the pipeline resolver (`configure_and_apply_pipeline`). Splitting
+  it adds 2 modules against a ledger with **zero slack** (`modules` is at its baseline), so it
+  costs a baseline edit. Same class, smaller: `cycle.py` ×2 (`optimization/cycle.py` is the
+  cycle aggregate; `runner/inner/cycle.py`, 1128 lines, is inner-**campaign spawning**),
+  `registry.py` ×4 (`api/routers/campaigns/registry.py` is a FastAPI router), `session.py` ×3,
+  `state.py` ×2, `base.py` ×2, and `l1/resume.py` (candidate-cache reuse within a round, not
+  campaign resume). ⚠️ `shared/identity.py` (21 importers) is the capability/tier **authz**
+  vocabulary colliding with `domain/identity.py` — flagged only; the access model is the
+  operator's call.
+
+- **~15 doc→code symbol drifts, several on contract pages** (each needs its own verification
+  before acting — only four of the set were hand-checked). `docs/developer/stable-api.md:74`
+  lists per-sample evaluator names absent from the registry; `docs/concepts/the-loop.md:21`
+  describes a superseded call path; `self-healing-internals.md` says `min_queries` where the
+  parameter is `min_samples`. Found by the same sweep that caught `application/__init__.py`
+  and `docs/glossary.md` both naming a package `application/sweep/` that is a module.
+
+- **80 `__all__` entries with zero external references**, across 57 modules. Not dead code —
+  no `import *` anywhere, so `__all__` here is purely declarative, and `stable-api.md` already
+  says unlisted names are internal. Over-exports; low priority. Densest:
+  `validators/l2_behavior.py` (4 of 5), `infrastructure/llm/rate_limit.py` (4 of 20).
+
+- **Two unregistered hook scripts** — `.claude/hooks/{detect_correction,doc_drift_ratio}.py`.
+  `detect_correction.py` instructs a write to `.claude/skills/potter-dev/rules.md`, a
+  directory that no longer exists. Neither is registered in either settings file, so this is
+  dead script rather than a broken live hook. ⚠️ `.claude/` is operator-curated.
+
 - **`datasets/bbeh/sweep/*.yaml` now PARSE but would mint 12 identical no-op forks.** The
   filed entry said the blocker was a stale `brief` key; that was one of three, and fixing it
   does not revive the verb. All 12 also carried `l1_section_overrides` / `_text`, and **none

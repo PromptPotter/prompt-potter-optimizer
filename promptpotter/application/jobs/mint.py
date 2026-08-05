@@ -189,13 +189,9 @@ def prepare_fresh_cycle(
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
-    # No inner-sandbox sweep here, and that is the fix rather than an omission. A sweep stood
-    # at this line because the sandbox key was the content-addressed ``cycle_id`` alone, so a
-    # fresh mint on an unchanged origin landed on a PRIOR campaign's sandbox and had to clear
-    # it first. The key now carries the campaign too (``store/layout.py::inner_sandbox_key``)
-    # and a fresh mint always has a fresh ``campaign_id``, so the sandbox it will use cannot
-    # exist yet — there is nothing to sweep, and the rmtree that used to run here could only
-    # ever destroy a DIFFERENT campaign's inner history. It did: 39 banked inner campaigns.
+    # **Never sweep the inner sandbox here.** A fresh mint has a fresh ``campaign_id`` and the
+    # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
+    # only destroy a DIFFERENT campaign's inner history. One did: 39 banked inner campaigns.
     _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,

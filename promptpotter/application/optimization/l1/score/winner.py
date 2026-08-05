@@ -165,23 +165,11 @@ async def l1_score(
     # No-winner headline = the RETAINED incumbent re-scored on THIS round's touched subset
     # (`rescore_parent`, above) — one configuration, on named samples, actually measured.
     #
-    # It used to be `tracking.current_*`, the cumulative frontier, on the argument that the
-    # subset re-score deflates a held round (the touched subset is the incumbent's own hard
-    # failures, so ~20% can stand for a prompt whose full-set rate is ~42%). That is a real
-    # effect, but the cure was worse: the frontier is a sample-keyed union of rows measured by
-    # DIFFERENT configurations, so a held round published a number no individual ever scored.
-    # Measured on `justlogic-d234__f3af53` round 6 — candidates at 0.0 and 0.481, nobody
-    # crowned — the record read `accuracy 0.75` over 40 samples and became the cycle's best
-    # round. A deflated real measurement beats a flattering fabricated one, and the round's own
-    # `total` carries the denominator that explains it.
-    #
-    # It also makes the series ONE quantity: a winner round already reports the winner on this
-    # round's subset, so every round now reads "whoever holds the lineage, measured on the
-    # samples this round drew" instead of alternating between two incomparable things.
-    # `results`/`total` source from the SAME re-score so they stay mutually consistent
-    # (the health failure rates + the
-    # evidence-starved→L2 rate denominate over `results` — the attempted rows — internally).
-    # All nine are overwritten when a winner is elected, so this only shapes the no-winner record.
+    # Never publish `tracking.current_*` here: the frontier unions rows measured by DIFFERENT
+    # configurations, so a held round reports a number no individual scored. The subset
+    # re-score does deflate, and a deflated real measurement beats a fabricated one — `total`
+    # carries the denominator. `results`/`total` source from the SAME re-score. All nine are
+    # overwritten when a winner is elected, so this only shapes the no-winner record.
     best_acc = parent.report.accuracy
     best_comp = parent.report.composite_fitness
     # The parent reference shown beside the headline must share its sample basis, or a held
@@ -293,21 +281,11 @@ async def l1_score(
     # elected on, so the dashboard can show *why* a lower-accuracy candidate won. Left ``None``
     # for candidates outside the election fit (eliminated / under the coverage floor).
     #
-    # …and left ``None`` for EVERY candidate when the ruler is still cold, which is the whole
-    # of the guard below. On a flat ruler ``fit_theta_given_delta`` places every sample at δ=0
-    # and θ degenerates to logit-accuracy over the candidate's OWN subset — monotone in the
-    # number sitting next to it, so it explains nothing the accuracy does not already say, and
-    # it is not on the shared scale the name θ promises. A fresh campaign is cold for its first
-    # round or two (``Cycle.start`` sees only C0, which cannot identify δ), the ruler then warms
-    # inside ``absorb_round`` — AFTER this stamp — and ``_maybe_warm_ruler`` re-fits the round's
-    # ``cumulative_theta`` and re-stamps its ``calibration_model``, but not these rows. So the
-    # round file used to carry a warm round-θ and a "1PL" stamp over cold candidate-θ, and the
-    # lineage tree rendered those cold values under the same θ toggle as every later round's
-    # warm ones. Absent is the honest answer; ``accuracy`` still carries what was measured.
-    #
-    # Guarded here rather than by emptying ``electable``: that list is also the resume
-    # decision's ``candidate_ids`` and the round's ``electable_count``, and the ELECTION is
-    # still valid on a cold ruler (it ranks the arms it has). Only the stamp is suppressed.
+    # …and ``None`` for EVERY candidate while the ruler is cold — the guard below. On a flat
+    # ruler θ degenerates to logit-accuracy over the candidate's OWN subset: monotone in the
+    # accuracy beside it, and not on the shared scale the name θ promises. Absent is the honest
+    # answer. Guarded here rather than by emptying ``electable``, which is also the resume
+    # decision's ``candidate_ids``; the election is still valid on a cold ruler.
     for cid in electable if cycle.delta_scale else ():
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
@@ -406,44 +384,19 @@ async def l1_score(
         # (they had, and this branch was the one inventing a coin-flip origin).
         theta_lift = theta_lift_over_origin(abilities, winner_id)
         delta_ok = theta_lift is not None and theta_lift > gate_bar
-    # There is deliberately NO second sample-count gate here. ``coverage_floor`` (above) is the
-    # ONE under-probing guard, and ``delta_ok`` requires a winner — so by this line the election
-    # has already refused to crown anything below it. A re-check against the UNCLAMPED
-    # ``elimination_n_min`` only ever differed where the floor was clamped (``min(n_min,
-    # len(dataset))``, so "a tiny set stays electable"), and there it contradicted that clamp
-    # outright: on a dataset smaller than ``elimination_n_min`` the election crowned a winner and
-    # this gate then refused to call the round improved — forever, since the samples do not
-    # exist. One number cannot be both a stopping floor and an election floor with two different
-    # clampings; the election owns electability.
-    #
-    # ``delta_ok`` is the WHOLE verdict. A second floor used to sit beside it, ``c0_ok``,
-    # requiring the winner to also clear the FROZEN round-0 origin's theta — justified in a
-    # comment as "stops the lineage from decaying below where it started". It never did that:
-    # this verdict feeds the stall counter and the life bank and nothing else, while adoption
-    # happens unconditionally in ``absorb_round``. A winner below C0 was crowned, adopted and
-    # mutated from regardless of what this line said, so the protection was described but not
-    # implemented.
-    #
-    # What it did do was compare across evidence bases. The winner's theta was fit on THIS
-    # round's panel; ``origin_round.cumulative_theta`` was fit on round 0's; and both sat on a
-    # ruler calibrated from C0 alone, where C0 is 0.000 by the identifiability anchor. So the
-    # floor asked "does this candidate agree with round 0's hit pattern", and it was strictly
-    # harder to clear than the same-panel comparison ``delta_ok`` already runs. Measured on
-    # `justlogic-d234`, 2026-07-27: two rounds carrying +14.3pp over their matched parent at
-    # p=0.017 and p=0.046 were stamped `improved=False` here, each costing a life, and both
-    # campaigns then died on the empty bank while still holding a real lift over C0. The ruler
-    # is now identified before it is trusted (``cycle.py::_calibrate_delta_ruler``), which fixes
-    # the scale — but two floors on one verdict, one of them cross-panel, is one mechanism too
-    # many. The lineage's standing against C0 stays RECORDED, not gated: ``origin_accuracy`` and
-    # the ``matched_origin_*`` triple ride every round.
+    # ``delta_ok`` is the WHOLE verdict — add no second gate beside it. ``coverage_floor``
+    # (above) is the ONE under-probing guard and the election owns electability, so a re-check
+    # against the unclamped ``elimination_n_min`` only fires where that floor was clamped, and
+    # then refuses to call a round improved forever on a dataset smaller than the floor. A
+    # ``c0_ok`` floor is the other one not to re-add: it compares across evidence bases (this
+    # round's panel vs round 0's) and gates nothing, since adoption is unconditional in
+    # ``absorb_round``. The lineage's standing against C0 stays RECORDED, not gated —
+    # ``origin_accuracy`` and the ``matched_origin_*`` triple ride every round.
     improved = delta_ok
-    # Name the estimator that actually decided, and separate the two ways a round holds. One
-    # string used to cover both — "no winner cleared the matched parent by {t} accuracy" — and
-    # it was wrong twice over: the comparison has run in θ-logits since the election moved to
-    # the fixed ruler, and it read as "somebody was crowned and fell short" on rounds where the
-    # election crowned nobody. Fifteen of the banked rounds carry that sentence, which is where
-    # the belief that this gate reads accuracy came from; the L4 narrative and the outer L1
-    # critique both quote it, so the outer loop was being taught the wrong lever.
+    # Name the estimator that decided, and keep the two ways a round holds distinct: the
+    # comparison runs in θ-logits, and "no winner cleared the matched parent" must not be said
+    # of a round that crowned nobody. The L4 narrative and outer L1 critique quote this string,
+    # so a wrong one teaches the outer loop the wrong lever.
     if improved:
         improved_reason: str | None = None
     elif not winner_id:

@@ -128,11 +128,10 @@ def load_bbeh() -> list[Sample]:
 # (`justlogic-d234` → depths 2,3,4), so measuring a new combination costs a dataset dir and
 # nothing else — no loader, no registry row, no depth constant, no listing entry.
 #
-# Each cut MUST remain its own dataset NAME. The measurement archive keys a cell by
+# Each cut MUST remain its own dataset NAME. The archive keys a cell by
 # (dataset_name, node_configs, sample_id) with the query text OUT of the key, so re-cutting
-# in place would leave sample_id 0..N pointing at new queries while the archive still served
-# the old cut's rows under those keys. Deriving the cut from the name is what keeps one
-# loader from becoming one name.
+# in place points sample_id 0..N at new queries while the archive still serves the prior
+# cut's rows under those keys.
 _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
 # Deterministic and fixed: the per-depth train/test split and the interleave shuffle must
 # reproduce byte-for-byte across processes, or a cut silently becomes a different bank.

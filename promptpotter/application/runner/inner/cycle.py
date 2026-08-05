@@ -1021,14 +1021,11 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         try:
             async with deadline:
                 result = await inner_task
-            # The deadline does not take the callee's word for it. ``asyncio.timeout``
-            # converts its cancellation into TimeoutError only if a CancelledError comes back
-            # up; anything in the inner chain that answers a cancellation with a normal return
-            # therefore makes the whole guard vanish silently — the await completes, no
-            # TimeoutError is raised, and an over-deadline campaign is scored as a real
-            # measurement. Three sites used to do exactly that (see
-            # ``scoring/query_loop.py``'s note) and are fixed at their root, but the guard
-            # asks the clock rather than trusting that no fourth appears.
+            # The deadline does not take the callee's word for it. ``asyncio.timeout`` raises
+            # TimeoutError only if a CancelledError comes back up, so anything in the inner
+            # chain answering a cancellation with a normal return makes the guard vanish
+            # silently and an over-deadline campaign scores as a real measurement. Ask the
+            # clock rather than trust that no such site appears.
             if deadline.expired():
                 result = None
         except TimeoutError:

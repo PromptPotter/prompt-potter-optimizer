@@ -343,7 +343,7 @@ async def mint_campaign_command(
         # Run-start framing: read the committed ``task_context.yaml`` (written at
         # commit from the check-in's decomposition) — or decompose a benchmark's
         # ``task_description.md`` once on first sight. No second LLM call once the
-        # file exists; the web mint path previously ran with EMPTY framing.
+        # file exists, and never mint with empty framing.
         _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(
             stores,
@@ -638,12 +638,10 @@ async def _run_in_background(
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = result.stop_reason
-        # Job terminal status derives from the single StopReason outcome table —
-        # the SAME classification index.json / dashboard.json / the webapp read.
-        # No private reconciler: a cycle can no longer read "failed" here and
-        # "completed" there (the optimizer_timeout split is gone). For a FAILED
-        # outcome, ``result.error.message`` is the operator-facing string the
-        # runner picked at the throw site (same as dashboard.json::error.message).
+        # Job terminal status derives from the single StopReason outcome table — the SAME
+        # classification index.json / dashboard.json / the webapp read. No private
+        # reconciler, or a cycle reads "failed" here and "completed" there. For a FAILED
+        # outcome ``result.error.message`` is the runner's throw-site string.
         outcome = stop_reason_outcome(stop_reason)
         status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
         if outcome is StopOutcome.FAILED and result.error is not None:

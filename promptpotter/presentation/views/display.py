@@ -234,9 +234,8 @@ def _scoreboard(
     w = 78
 
     hdr = (
-        # CI sits beside Composite because that is what it brackets. It used to sit
-        # beside Accuracy while carrying a Wilson interval on binary hits — two
-        # different quantities, drawn as if one bounded the other.
+        # CI sits beside Composite because that is what it brackets — never beside Accuracy,
+        # which draws two different quantities as if one bounded the other.
         f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'Composite':>9s}  {'95% CI':>16s}  {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]

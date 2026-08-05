@@ -433,8 +433,8 @@ def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
         return f"bad_field={field_name!r}"
     if not injection.citable:
         return f"not_evidence={field_name!r}"
-    # A real evidence panel — just not one L1 was shown this round. The fabricated citation
-    # the old set-membership check waved through.
+    # A real evidence panel — just not one L1 was shown this round. A set-membership check
+    # waves this fabricated citation through.
     return f"panel_not_in_prompt={field_name!r}"
 
 
