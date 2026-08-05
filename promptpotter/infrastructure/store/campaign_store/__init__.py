@@ -4,7 +4,7 @@
 per-cycle ``index.json`` CRUD, fork-sibling index writers, round + candidate detail
 files, and the cycle-seed ledger I/O (``CycleSeedRecord``).
 
-**The read-once cycle seed rides the ledger** (declared-at-mint, read-once-at-bootstrap,
+**The read-once cycle seed rides the ledger** (declared-at-mint, read-once-at-init,
 recovered by replay), NOT a ``.overrides/`` sidecar. Contrast ``.runtime/``
 (``pause.flag`` / ``spend_cap.json``) — mutated-during-run, polled-every-tick, transient.
 Don't conflate a durable ledger fact with a transient flag. Full contract:

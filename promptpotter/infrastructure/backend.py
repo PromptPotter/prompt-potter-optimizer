@@ -108,7 +108,7 @@ class BackendClient:
     def http(self) -> httpx.AsyncClient:
         """Public accessor for the shared httpx client.
 
-        Used by bootstrap-side helpers (e.g. connector revision check) that
+        Used by init-side helpers (e.g. connector revision check) that
         need the same authenticated client without round-tripping through
         ``BackendClient``'s own methods.
         """

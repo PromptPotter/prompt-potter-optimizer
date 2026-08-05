@@ -30,8 +30,8 @@ from promptpotter.presentation.cli.commands._shared import (
 from promptpotter.presentation.cli.session import load_session
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx
@@ -68,12 +68,12 @@ def _prepare_cycle_for_resume(
     "config changed → fork" resolution the halt recommends — so it must not be
     blocked by it, matching the web ``fork-cycle`` path (which runs no drift check).
 
-    OPTIMIZER drift is not asked here. It used to be — a campaign-level hash equality that
-    halted with "mint a new campaign" — and it was the wrong shape twice over: it lived on
-    the CLI, so a resume from the webapp bypassed it entirely, and it compared against the
-    MINT-time value, so it could not name which rounds ran under which optimizer or offer
-    the fork every other divergence offers. It is now asked per round, from the application
-    seam every entry point reaches (``resume_and_fork/resume.py::_optimizer_divergences``).
+    OPTIMIZER drift is not asked here — it is asked per round, from the application seam
+    every entry point reaches (``resume_and_fork/resume.py::_optimizer_divergences``). A
+    campaign-level hash equality halting with "mint a new campaign" is the wrong shape
+    twice over: on the CLI a resume from the webapp bypasses it entirely, and comparing
+    against the MINT-time value cannot name which rounds ran under which optimizer or
+    offer the fork every other divergence offers.
     """
     from promptpotter.application.knobs import DiffScope, classify_config_diff
 

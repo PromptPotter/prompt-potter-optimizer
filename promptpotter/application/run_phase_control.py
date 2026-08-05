@@ -18,7 +18,7 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import PhaseRecord
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
 
 __all__ = ["declare_run_phase", "pause_requested"]
 

@@ -31,7 +31,7 @@ from promptpotter.application.optimization.task_context import checkin_call_cont
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
 

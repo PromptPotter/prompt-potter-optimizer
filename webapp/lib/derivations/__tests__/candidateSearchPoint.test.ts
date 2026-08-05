@@ -30,7 +30,7 @@ describe("candidateSearchPoint", () => {
     expect(sp).toEqual({
       origin_prompt_fields: { instruction: "evolved A", persona: "solver" },
       // model carried (not just the evolved delta); the `steps` list is stripped
-      // so the per-node fork-bootstrap merge can't choke on it.
+      // so the per-node fork-init merge can't choke on it.
       pipeline_overlay: { llm_only: { model: "openai/gpt-oss-120b", reasoning_effort: "high" } },
     });
   });

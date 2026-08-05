@@ -4,10 +4,10 @@ The archive is the database core (per ``docs/architecture.md``): cross-cycle,
 content-addressed measurements indexed by sample + node-config, and **tenant-global
 — never backend-scoped**, so nothing here takes a ``backend_id``. Every archive
 WRITE lives behind this module; reaching ``stores.archive`` outside it to write is
-drift. Nothing enforces that mechanically, and this file used to name a test that
-would have — one that was never written, which is worse than no claim at all: a
-fourth write (``maintain_index``) then landed at a caller for a year without anyone
-noticing the facade had been bypassed.
+drift. **Nothing enforces that mechanically, and this file must not claim otherwise** —
+naming a guard that does not exist is worse than claiming none: a fourth write
+(``maintain_index``) sat at a caller for a year with the facade bypassed and nobody
+looking, because the docstring said something was watching.
 
 Two READS remain outside, both narrow and both honest about it:
 ``datasets/dataset_replace.py::restamp_dataset`` (a dataset-lifecycle operation that
@@ -265,7 +265,7 @@ def maintain_measurement_index(stores: Stores) -> bool:
     measurement, not a campaign, so it must not mutate tenant-global storage — the outer
     campaign that spawned it already did this. Wrapped around the disk touch, so a second
     caller inherits the rule instead of having to remember it (this one did not: the gate
-    was an ``if`` in ``bootstrap/wiring.py``, which is also how the call ended up being the
+    was an ``if`` in ``initialization/wiring.py``, which is also how the call ended up being the
     archive's only write reaching past this facade).
     """
     if instrument_mode() is not None:

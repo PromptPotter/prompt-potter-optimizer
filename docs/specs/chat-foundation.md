@@ -203,7 +203,7 @@ operator call: the **origin gate** and the **round-1 halt-and-decide** verdict.
 ## 5. Persistence — extend the check-in thread, campaign-scoped
 
 The thread is **not a new concept beside the campaign** — it *is* the check-in, continued.
-The origin-resolution check-in conversation that bootstraps a campaign (the ingest Q&A:
+The origin-resolution check-in conversation that starts a campaign (the ingest Q&A:
 `useIngestFlow.ts` + backend `application/datasets/origin_resolve.py`) is the **first
 segment** of one campaign-scoped thread. That same thread then carries free-form messages,
 activity items, and decision buttons.

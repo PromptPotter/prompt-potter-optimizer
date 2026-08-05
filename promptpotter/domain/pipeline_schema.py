@@ -98,7 +98,7 @@ class PipelineDependency(StrictModel):
     enricher might need a knowledge base. The requirement is read off the node
     taxonomy (``NodeType``), so a new connector declares one node type and gets
     detection for free. Surfaced in the check-in / ingest UI so the operator sees
-    *which* input is missing and drops it in place — never a hidden bootstrap
+    *which* input is missing and drops it in place — never a hidden fabricated
     default. ``node`` names the node(s) it serves (comma-joined when one input feeds
     several); ``hint`` says how to fulfil it.
     """

@@ -30,8 +30,8 @@ from promptpotter.shared.identity import IdentityContext
 if TYPE_CHECKING:
     import argparse
 
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.domain.results import CycleResult
@@ -117,16 +117,14 @@ async def init_services_cli(
 ) -> Session:
     """Initialize services for a CLI command (logging style + service init).
 
-    *identity* is REQUIRED, and every caller already passes
-    :func:`identity_from_args`. It used to default to :func:`default_identity` —
-    the same conditional ``init_services`` performs one call down, so the outer
-    copy could only ever be redundant, and it disagreed: the CLI's rule is
-    ``registered_or_default_identity`` (explicit ``--tenant`` > the registered
-    operator > anonymous), while ``default_identity()`` is flatly ``default``.
-    Reached, it would have written a terminal run into the anonymous workspace
-    instead of the operator's.
+    *identity* is REQUIRED, and every caller passes :func:`identity_from_args`. A
+    :func:`default_identity` default here would be the same conditional ``init_services``
+    performs one call down — redundant at best, and it disagrees: the CLI's rule is
+    ``registered_or_default_identity`` (explicit ``--tenant`` > the registered operator >
+    anonymous), while ``default_identity()`` is flatly ``default``. Reached, it writes a
+    terminal run into the anonymous workspace instead of the operator's.
     """
-    from promptpotter.application.bootstrap.wiring import init_services
+    from promptpotter.application.initialization.wiring import init_services
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")

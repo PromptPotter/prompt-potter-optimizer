@@ -3,7 +3,7 @@
 ``init_services`` opens stores under the tenant root, applies the tenant-pointer
 guard, resolves the connector, fetches the pipeline schema, registers the backend,
 and loads the dataset. Identity + scoring lifecycle live in ``session`` +
-``scoring_context``."""
+``loop_start``."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
+from promptpotter.application.initialization.session import Session
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -130,8 +130,8 @@ async def _resolve_pipeline_schema(
     **Raises rather than returning ``None``.** Neither branch is optional in practice:
     ``_read_backend_type`` has already read this same file and raised unless it parses
     and declares a ``backend_type``, so the only way to arrive with nothing is a
-    pipeline.yaml that no longer parses — a setup error, not a mode. Returning ``None``
-    for it made the schema optional on ``Session`` and therefore optional at the ~40
+    pipeline.yaml that fails to parse — a setup error, not a mode. Returning ``None``
+    for it would make the schema optional on ``Session`` and therefore optional at the ~40
     readers downstream, where a missing schema does not fail: it drops the rendered
     prompt from the searchpoint, picks the other ``sp_hash`` algorithm, and stamps a
     different origin cycle id. The run completes and the numbers are wrong."""
@@ -214,7 +214,7 @@ def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
 
     Tolerant, unlike the strict twin ``_read_backend_type`` above: a campaign outlives its
     dataset dir, and a reader that raises because one old dataset was deleted is worse than one
-    that treats that campaign as a plain (non-L4) campaign. Bootstrap still raises, because
+    that treats that campaign as a plain (non-L4) campaign. Init still raises, because
     there a missing kind means the run cannot pick a connector at all.
     """
     try:
@@ -307,7 +307,7 @@ async def init_services(
     store: Stores | None = None,
     enable_tracing: bool = True,
 ) -> Session:
-    """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
+    """Init store, client, pipeline schema, scoring data — step 1 of run init.
 
     Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.yaml``
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).

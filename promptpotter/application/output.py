@@ -389,8 +389,8 @@ def _render_variants_table(
 ) -> list[str]:
     """Per-variant row. The audit dict carries what L1 PROPOSED; ``round_data`` carries what
     each proposal MEASURED, joined on :func:`candidate_label` — the sole writer of both sides'
-    key. Every score column used to print ``—`` while ``candidate_scores`` sat populated on
-    the first parameter, so `review.md` recorded an unscored round for every round ever run.
+    key. Join on anything else and every score column prints ``—`` while ``candidate_scores``
+    sits populated on the first parameter: `review.md` records an unscored round.
 
     There is no Δ_parent column: the round file holds each candidate's MATCHED origin, which
     is the comparison the loop itself elects on, and no parent composite. A column with no
@@ -468,7 +468,7 @@ def _is_generation_only(round_data: RoundResult) -> bool:
 
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
@@ -518,8 +518,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     There is no dataset-scope file. Dataset scope is CROSS-campaign, so no single
     campaign owns it; the one consumer (``GET /datasets/{name}/heatmap``) folds it
     from the archive per request, which is also the only way it can be correct while
-    a run is in flight. A third write here used to mint
-    ``measurements/hard_samples_{backend}_{dataset}.json`` that nothing ever read.
+    a run is in flight.
 
     Returns the artifact selected for inline log.md rendering: the
     campaign-scope one when ``optimization.seed_heatmap_from_archive`` is on,
@@ -571,10 +570,10 @@ def _load_p_best_trajectory(
     """``{candidate_id: [P(best) per query]}`` + each one's last query index.
 
     One stream line is one candidate's reading (``current_id`` says whose), so the
-    trajectory is keyed by that. It used to fan every key of a cid→prob map into its own
-    trajectory, and the non-current keys of that map were the CURRENT candidate's odds
-    against each prior — so log.md's sparkline listed every prior as a candidate and printed
-    the round's actual winner, holding P(best) 0.755, at 22.9%.
+    trajectory is keyed by that. Fanning every key of a cid→prob map into its own
+    trajectory instead lists each prior as a candidate: the non-current keys are the
+    CURRENT candidate's odds against that prior, so log.md's sparkline files the round's
+    actual winner under its own defeat.
     """
     if streams_dir is None:
         return {}, {}

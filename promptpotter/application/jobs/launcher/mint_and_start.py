@@ -23,8 +23,6 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.bootstrap.wiring import init_services
 from promptpotter.application.config import (
     CampaignConfig,
     apply_inherited_overlay,
@@ -39,6 +37,8 @@ from promptpotter.application.datasets.csv_ingest import Table, materialize_samp
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
     _build_origin_pipeline_json,
@@ -288,7 +288,7 @@ async def mint_campaign_command(
     # after mint" (mark the cycle terminal).
     campaign_id = cycle_id = ""
     try:
-        # Pre-202 phase timing — the synchronous bootstrap is what the operator
+        # Pre-202 phase timing — the synchronous init is what the operator
         # waits on (round-0 scoring is already backgrounded). One INFO line per
         # phase so the dominant cost is visible on disk, not guessed at.
         _t0 = time.perf_counter()
@@ -598,7 +598,7 @@ async def _run_in_background(
     stop_after_rounds: int | None = None,
 ) -> None:
     from promptpotter.application.run_observers import build_run_observers
-    from promptpotter.infrastructure.llm.models import set_cycle_ledger
+    from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 
     # asyncio.create_task copies the CURRENT context, where the dispatcher has the
     # command ledger bound to _CYCLE_LEDGER. Clear it so any emit before

@@ -33,7 +33,7 @@ from promptpotter.domain.results import (
     candidate_label,
 )
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-from promptpotter.infrastructure.llm.models import emit_round_warning
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful

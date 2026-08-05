@@ -33,7 +33,7 @@ from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.runner.identity import build_origin_cycle_id
+from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample

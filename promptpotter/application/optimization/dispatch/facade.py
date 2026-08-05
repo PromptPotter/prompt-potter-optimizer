@@ -35,7 +35,7 @@ from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results_health import compute_node_failure_rates
-from promptpotter.infrastructure.llm.models import (
+from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
     set_cycle_ledger,

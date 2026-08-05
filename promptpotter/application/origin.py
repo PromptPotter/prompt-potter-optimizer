@@ -7,9 +7,9 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
-from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
+from promptpotter.application.initialization.loop_start import populate_session_scoring
+from promptpotter.application.initialization.session import Session
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import (
     IndividualLineage,

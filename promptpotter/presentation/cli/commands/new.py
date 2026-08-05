@@ -33,9 +33,9 @@ from promptpotter.presentation.views.startup_checklist import checkin_line
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx

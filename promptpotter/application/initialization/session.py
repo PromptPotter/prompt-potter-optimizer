@@ -77,7 +77,7 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
-    # Resolved tenant-first at bootstrap (`readable_dataset_dir`): tenant
+    # Resolved tenant-first at init (`readable_dataset_dir`): tenant
     # uploads at `projects/{tenant}/datasets/{slug}/`, else repo `datasets/{name}/`.
     # The single resolution seam — every dataset-file loader reads this rather than
     # recomputing a repo path from the bare name.
@@ -94,7 +94,7 @@ class Session:
 
     source: str = ""
     # This cycle was babysat — an operator directly edited an engine-owned/locked
-    # value (ADR-0005). Read from the cycle index at bootstrap; forces every run
+    # value (ADR-0005). Read from the cycle index at init; forces every run
     # this cycle scores to grade C (excluded from digest / reuse / L4).
     human_intervened: bool = False
 
@@ -283,7 +283,7 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
     claims the pointer when it flips this to ``active`` at Start. The draft
     working-state + sample bank are written separately by the caller through
     :class:`CheckinDraftStore`. Returns ``(session_id, campaign_id, cycle_id)``."""
-    from promptpotter.application.runner.identity import mint_campaign_id, mint_checkin_cycle_id
+    from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.campaign import Campaign
 
@@ -419,7 +419,7 @@ def finalize_checkin_to_active(
     )
 
 
-def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
+def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import CycleEventLog
 

@@ -9,7 +9,7 @@
 //     (the param-lock / allowed-values subset). See `launcher.split_overlay`.
 //   - values → `seedOverlayFromRows` → the flat `{node:{param:value}}` overlay
 //     that `OperatorForkOverride.pipeline_overlay` merges onto
-//     `session.pipeline_params` at fork bootstrap.
+//     `session.pipeline_params` at fork init.
 //
 // Pure data→data (no React, no I/O) so it rides the lib Vitest scope.
 

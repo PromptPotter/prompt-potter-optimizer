@@ -115,8 +115,8 @@ no wire, so declaring a token on one fails the registry guard at import.
 - **Revision pinning is opt-in.** A connector can set
   `Connector.expected_revision` (the backend SHA/version this rev was
   developed against) and a `Connector.version_check(http, base_url) -> str | None`
-  hook reading the backend's self-reported revision. Bootstrap
-  (`application/bootstrap/wiring.py::_verify_connector_revision`)
+  hook reading the backend's self-reported revision. Init
+  (`application/initialization/wiring.py::_verify_connector_revision`)
   WARNs on drift; no-op when either field is `None`. Pattern motive:
   the pre-flight gate's debug-state bullet, reaching across a repo
   boundary — cross-repo dependency

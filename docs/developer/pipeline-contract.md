@@ -28,7 +28,7 @@ rejection and content-hash sensitivity by
 | `description` | optional | `str` | One-line human description. |
 | `available_models` | optional | `list[str]` | Models the connector exposes — surfaced into `PipelineSchema.available_models`. |
 | `backend_name` | optional | `str` | Human label for the backend. |
-| `backend_type` | **required** | `str` | The connector KIND (`termnorm` / `promptpotter` / …). Picks the connector at bootstrap (`wiring._read_backend_type` raises when absent), and is served on `CampaignSummary.backend_type` — the ONE test for a self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`). Never a `PipelineSchema` field: the parser drops it, so readers take it off the raw overlay. |
+| `backend_type` | **required** | `str` | The connector KIND (`termnorm` / `promptpotter` / …). Picks the connector at init (`wiring._read_backend_type` raises when absent), and is served on `CampaignSummary.backend_type` — the ONE test for a self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`). Never a `PipelineSchema` field: the parser drops it, so readers take it off the raw overlay. |
 | `resolved_prompts` | optional | `dict[str, ResolvedPrompt]` | Prompt registry keyed by `"{family}/{version}"`. Each node references its prompt via `config.prompt_family` + `config.prompt_version`. |
 | `resolved_schemas` | optional | `dict[str, ResolvedSchema]` | Output-schema registry keyed by `"{family}/{version}"`. Each node references its schema via `config.schema_family` + `config.schema_version`. |
 | `view` | optional | `dict` | Diagram metadata for the webapp; ignored by the parser. |
@@ -88,7 +88,7 @@ key. `terminal_ranking(result, schema)`
 `final_ranking` is the *universal* answer key (the typed `PipelineData.final_ranking`), but the
 pipeline **shape** — which ranker terminates it — decides the source, not the key name. A
 pipeline with no terminal ranker emits no prediction (every sample scores `NO_RESULT`);
-bootstrap warns loudly when a resolved schema has no `ranker`/`candidate_source` node with an
+init warns loudly when a resolved schema has no `ranker`/`candidate_source` node with an
 output key.
 
 ## Strict parsing — the contract is the contract

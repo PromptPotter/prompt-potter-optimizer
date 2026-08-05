@@ -8,7 +8,7 @@ Module map (read `entry.py` first — it is the one public entry point):
   critique → the post-round `decide_escalation` call).
 - `termination.py` — the cycle-boundary stop conditions (`BudgetGate`, max_rounds,
   lives). Stop conditions live HERE, never inside the loops.
-- `identity.py` — `mint_campaign_id` / `build_origin_cycle_id` / `cycle_config_identity`.
+- `campaign_ids.py` — `mint_campaign_id` / `build_origin_cycle_id` / `cycle_config_identity`.
 - `origin_gate.py` — the round-0 origin gate.
 - `sweep.py` — sweep-mode sibling runs.
 - `runner/inner/cycle.py` — `run_inner_cycle`: L4. An inner campaign in its own asyncio

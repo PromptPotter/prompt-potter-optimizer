@@ -14,7 +14,7 @@ typed event constructor over `CycleEventLog.append`. Orchestration uses
 campaign event stream.
 
 Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*`
-shape instead: a kwargs-only helper in `infrastructure/llm/models.py` reads the
+shape instead: a kwargs-only helper in `infrastructure/llm/telemetry.py` reads the
 active ledger off the per-cycle `_CYCLE_LEDGER` ContextVar (set by
 `build_run_observers`, reset by `drain_all`) and appends a typed `*Record` — same
 canonical ledger, no process global, no sink-installation indirection. **Which

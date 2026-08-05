@@ -31,7 +31,7 @@ from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_dir,
     readable_task_context,

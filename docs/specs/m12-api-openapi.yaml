@@ -2645,7 +2645,7 @@ components:
         The edited-searchpoint origin override that makes a fork's origin =
         chosen searchpoint + operator edits. Required on every operator fork
         (all are `operator_steered`). Persisted to the fork's ledger as a read-once
-        `CycleSeedRecord` (read at bootstrap) and onto the parent's `FORK_CUT` ledger record.
+        `CycleSeedRecord` (read at init) and onto the parent's `FORK_CUT` ledger record.
       properties:
         origin_prompt_fields:
           type: object
@@ -2653,7 +2653,7 @@ components:
           description: |
             The fork's origin prompt — a `PromptTemplate.prompt_field_dict()`
             shape (the 8 prompt fields). Becomes the origin `OptSearchPoint` at
-            bootstrap. `{}` inherits the parent's origin prompt.
+            init. `{}` inherits the parent's origin prompt.
         pipeline_overlay:
           type: object
           additionalProperties: true
@@ -2696,7 +2696,7 @@ components:
       additionalProperties: false
       description: |
         The fork's `OptimizationConfig` delta. Every field optional — absent
-        inherits the parent's value; applied to the fork's snapshot at bootstrap,
+        inherits the parent's value; applied to the fork's snapshot at init,
         never mutates the parent's frozen config. Three kinds of knob ride here:
         (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to

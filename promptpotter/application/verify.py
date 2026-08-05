@@ -85,12 +85,12 @@ async def verify_candidate(
     Raises :class:`VerifyError` when the candidate can't be resolved off disk
     (missing campaign manifest / round file / candidate / pipeline schema).
     """
-    from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
-    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,
     )
+    from promptpotter.application.initialization.loop_start import populate_session_scoring
+    from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.optimization.l1.population import merge_pipeline_params
     from promptpotter.application.scoring.formula import rescore_results, split_scoring_block
     from promptpotter.application.scoring.metrics import compute_composite_fitness

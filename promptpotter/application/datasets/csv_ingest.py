@@ -379,7 +379,7 @@ def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
     """Read the candidate library committed alongside an origin (``candidate_library.txt``).
 
     The single file-read seam for the per-pipeline origin's target list — the
-    runtime term-index union (``bootstrap/wiring.py``) and the reopen draft
+    runtime term-index union (``initialization/wiring.py``) and the reopen draft
     (``ingest.draft_from_dataset`` via :class:`AuthoredDataset`) both read it
     through here, so the parse (one entry per line) and normalization
     (:func:`_dedup_terms`: strip, drop blanks + the ``--`` placeholder, dedup)

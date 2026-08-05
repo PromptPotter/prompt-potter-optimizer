@@ -10,7 +10,7 @@
 // config, `{node:{param:value}, steps}`, prompt stripped — the same field the
 // OBSERVE view reads). Together they ARE the fork seed `{origin_prompt_fields,
 // pipeline_overlay}` an operator edits before confirming the fork. We seed from
-// the RESOLVED config, not the sparse delta: the fork bootstrap layers this
+// the RESOLVED config, not the sparse delta: the fork init layers this
 // overlay onto the inherited dataset overlay (`entry.py`), so a sparse seed
 // silently reset every evolved-but-untouched param (model/provider/…) back to
 // the dataset floor. The resolved config carries each param's actual running
@@ -48,7 +48,7 @@ export function searchPoint(
 
 // The fork `pipeline_overlay` is per-node config only — keep object-valued node
 // entries, drop the top-level `steps` list (and any scalar) the resolved config
-// also carries. The fork bootstrap shallow-merges each node dict onto the
+// also carries. The fork init shallow-merges each node dict onto the
 // inherited overlay (`entry.py`); a list under a node key would break that spread.
 function nodeConfigs(
   resolved: Record<string, unknown> | null | undefined,

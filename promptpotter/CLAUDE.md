@@ -9,7 +9,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | Subpackage | Owns | CLAUDE.md |
 |---|---|---|
 | `domain/` | Frozen Pydantic models, pure types, `JobSearchPoint` / `OptSearchPoint` / `PromptTemplate`, `PipelineSchema`. No I/O. | [`domain/CLAUDE.md`](domain/CLAUDE.md) |
-| `application/` | Use-case layer: bootstrap, runner, scoring, intelligence. | [`application/CLAUDE.md`](application/CLAUDE.md) |
+| `application/` | Use-case layer: initialization, runner, scoring, intelligence. | [`application/CLAUDE.md`](application/CLAUDE.md) |
 | `application/optimization/` | The L1 / L2 / L3 **agent contracts** + Cycle + dispatch + escalation + PoBB. What each layer reads / writes / decides, when each escalates / heals. | [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md) |
 | `infrastructure/` | I/O contracts: persistence (`CycleEventLog`), projections (`LiveDashboardView` / `AuditTrailView` / `PoBBStreamView`), stores, LLM clients, backend wire, tracing. | [`infrastructure/CLAUDE.md`](infrastructure/CLAUDE.md) |
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
@@ -24,7 +24,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 
 ## Ask the typed predicate, never a set of names
 
-**A membership test written as a hand-authored set of dataset / node / stop-reason names is a bug.** It silently *skips* whatever it failed to list — an arm, a fork, a new enum member — instead of rejecting it loudly, and it rots in both directions at once: the `_FINISHED_STOP_REASONS` frozenset ended up holding three strings matching no `StopReason` while dropping seven real ones. Ask `stop_reason_outcome` (`domain/phases.py`), `backend_type_of_dataset` (`application/bootstrap/wiring.py`), or the connector registry; where a set is genuinely needed, *derive* it from the typed table rather than authoring it.
+**A membership test written as a hand-authored set of dataset / node / stop-reason names is a bug.** It silently *skips* whatever it failed to list — an arm, a fork, a new enum member — instead of rejecting it loudly, and it rots in both directions at once: the `_FINISHED_STOP_REASONS` frozenset ended up holding three strings matching no `StopReason` while dropping seven real ones. Ask `stop_reason_outcome` (`domain/phases.py`), `backend_type_of_dataset` (`application/initialization/wiring.py`), or the connector registry; where a set is genuinely needed, *derive* it from the typed table rather than authoring it.
 
 ## Owned elsewhere
 

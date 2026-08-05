@@ -19,7 +19,7 @@ from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.models import (
+from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
     reset_cycle_ledger,
     set_current_round,
@@ -32,8 +32,8 @@ from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_u
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live.display import LiveDisplay
@@ -366,7 +366,7 @@ def build_run_observers(
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
-    # The trace id is created at CampaignStart (during bootstrap, before this),
+    # The trace id is created at CampaignStart (during init, before this),
     # so it's already on the obs bridge — hand it to the dashboard as a set-once
     # identity stamp (like session_id), not a tracing-stream read (fan-out-only
     # stays intact). None when Langfuse is disabled. Keyed by `tracing_campaign_id`

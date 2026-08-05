@@ -91,7 +91,7 @@ export interface ConfigOverrides {
 // `OperatorForkOverride`. Required on every operator fork (all are
 // `operator_steered`). `origin_prompt_fields` is the PromptTemplate field shape;
 // `pipeline_overlay` is the candidate's `nodes.*.config` value delta, carried verbatim
-// and merged onto the dataset overlay at fork bootstrap. `optimizer_narrowing` carries
+// and merged onto the dataset overlay at fork init. `optimizer_narrowing` carries
 // per-node param LOCK edits ({node: {param_keys, param_allowed_values}}) — overrides the
 // campaign's mint-time narrowing for this cycle only; absent inherits it unchanged.
 export interface OperatorForkOverride {

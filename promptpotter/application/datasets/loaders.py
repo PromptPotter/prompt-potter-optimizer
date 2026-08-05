@@ -262,7 +262,7 @@ def resolve_dataset_items(
 
     Returns normalized item dicts (``Sample.model_dump()`` shape); ``[]`` only when
     no cached source exists AND no loader is registered. The single materialization
-    seam shared by the run-time bootstrap (``_load_dataset_into_session``) and the
+    seam shared by the run-time init (``_load_dataset_into_session``) and the
     webapp ingest-from-dataset path (``draft_from_dataset``), so both reach the same
     samples — a benchmark whose rows are absent on this machine is fetched +
     persisted here, exactly as a fresh clone would.

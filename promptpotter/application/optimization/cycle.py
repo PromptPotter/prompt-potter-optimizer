@@ -35,8 +35,8 @@ from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecor
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.exploration import Observation, RulerEntry
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -63,8 +63,8 @@ def _merge_known_outcomes(
     Scoring it is what published ``57%→78%`` on a cycle whose best candidate ever measured
     0.679: the round-7 number was 12 rows from round 6's config glued to 28 from round 7's,
     and because the round subset is the CONTESTED one, the carried rows are the easy tail
-    the previous config scored 12/12 on. Every configuration inherited its predecessor's
-    perfect easy-tail score, so a mutation that regressed there was invisible."""
+    the previous config scored 12/12 on. Every configuration inherits its predecessor's
+    perfect easy-tail score, so a mutation that regresses there is invisible."""
     by_sid: dict[Any, dict[str, Any]] = {
         r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
     }

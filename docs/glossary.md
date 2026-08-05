@@ -62,7 +62,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   constants), `promptpotter/config/` (the package), a connector's
   `default_node_config`, and `node_config` (the wire key). Qualify the word.
 - **`session`** — (1) a **campaign run's** session (`SessionStore`,
-  `application/bootstrap/session.py`, `s_xxxx`); (2) a **browser login**
+  `application/initialization/session.py`, `s_xxxx`); (2) a **browser login**
   (`OIDCSessionStore`, `infrastructure/identity/session.py`); (3) TermNorm's
   **backend handshake** (`POST /sessions` with a terms array, `TermNormSession`);
   (4) the `Session` wiring object threaded through the runner.
@@ -173,9 +173,16 @@ The persisted world is a four-entity containment hierarchy
   properties, never as the id: `root_content_hash` (resume's config-drift
   check) + `optimizer_prompt_hash` (audit join key — optimizer drift is
   asked per round). `domain/campaign.py`.
+- **Run init** — the ordered chain from a `new` / `resume` invocation to
+  the first round: `init_services` → `populate_session_scoring` →
+  `init_cycle` → `init_optimization_loop`, in `application/initialization/`.
+  The operator sees it as `CampaignPhase.INIT` / `DashboardState.INIT`
+  ("✓ Initialized"). **Never called "bootstrap"** — that word is reserved
+  for machine provisioning (`deploy-linux/bootstrap.sh`) and external
+  proper nouns. Sequence: [`developer/run-initialization.md`](developer/run-initialization.md).
 - **Session** — **not a persisted tier** (`docs/architecture.md` §0 "A
   campaign has one root cycle"). The surviving `Session`
-  (`application/bootstrap/session.py`) is the in-process **wiring object**;
+  (`application/initialization/session.py`) is the in-process **wiring object**;
   `active_session.json` is the operator's pointer to the live campaign + cycle.
 - **Unit** — one continuous-parameter run inside a campaign. A campaign
   starts with one unit; `resume` extends the current unit; each fork
@@ -212,7 +219,7 @@ The persisted world is a four-entity containment hierarchy
 - **ForkSpec** — the single typed fork record (`domain/run_records.py`):
   one writer behind the parent's `FORK_CUT` ledger entry (SoT), the fork's
   `index.json::fork` (lineage read), and — when steered — its
-  `CycleSeedRecord` (bootstrap read).
+  `CycleSeedRecord` (read at init).
 - **CycleSeed** — the chosen-searchpoint seed a non-root cycle begins from
   (`domain/run_records.py`); the seed prompt becomes the cycle's origin
   `OptSearchPoint` and its `pipeline_overlay` layers onto the dataset

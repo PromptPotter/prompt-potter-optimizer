@@ -116,7 +116,7 @@ Three layers of confirmation:
 
 Tokens ride the canonical ledger alongside every other record — not a parallel pipeline. The "highway" is the existing per-cycle `.runtime/ledger.jsonl` stream; what this arc did is **promote the path tokens take through that highway to the optimal sequence**, by eliminating four middlemen:
 
-1. **Process global gone** — `_token_usage_sink` deleted. `emit_token_usage` reads the active ledger from `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]` (`infrastructure/llm/models.py`); `build_run_observers` calls `set_cycle_ledger(ledger)` at cycle start; `RunObservers.drain_all` resets it on teardown. Per-asyncio-task isolation — concurrent cycles (M12+) get isolation for free.
+1. **Process global gone** — `_token_usage_sink` deleted. `emit_token_usage` reads the active ledger from `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]` (`infrastructure/llm/telemetry.py`); `build_run_observers` calls `set_cycle_ledger(ledger)` at cycle start; `RunObservers.drain_all` resets it on teardown. Per-asyncio-task isolation — concurrent cycles (M12+) get isolation for free.
 2. **Wrapper dataclass gone** — `TokenUsage` deleted. `emit_token_usage(*, node, kind, input_tokens, output_tokens, duration_s, model=None, cost_usd=None)` is kwargs-only; builds `TokenUsageRecord` directly inside the helper. Round is read from `_CURRENT_ROUND: ContextVar[int | None]` (set by `RunCallbacks.set_round`).
 3. **Sole spend writer** — `LiveDashboardView._handle_token_usage` routes by `record.kind` (`optimizer` → `loop`, `backend` → `backend`), adds to the bucket, recomputes `total_used_usd` — all inline. No `apply_token_usage` / `add_to_spend_bucket` chain.
 4. **No dual writer** — backend cost flows through `emit_token_usage(kind="backend", ...)` at the `measure_sample` per-step site (over `step_tokens`, uncached only). `accumulate_backend_spend` deleted; the `view.py::_absorb_sample_scored` site no longer touches `state['spend']`.
@@ -138,7 +138,7 @@ Reifies the Stage-0 deliverables of [`0002-identity-foundation.md`](0002-identit
 
 #### 2. `IdentityContext` is the construction route for `Stores`
 
-- `TenantContext` deleted; `Session.identity: IdentityContext` (`application/bootstrap/session.py`) replaces `Session.tenant: TenantContext | None`. Behavior change, no shim. **(shipped)**
+- `TenantContext` deleted; `Session.identity: IdentityContext` (`application/initialization/session.py`) replaces `Session.tenant: TenantContext | None`. Behavior change, no shim. **(shipped)**
 - `build_stores(identity, *, projects_root=…, benchmarks_root=…)` (`infrastructure/store/stores.py`) is the only construction route. The newtype + the context object collapse into one positional argument — no caller passes a raw string. `build_stores` reads `identity.tenant_id` to root the file-based stores under `projects/{tenant_id}/`. **(shipped)**
 - Spend events that carry user identity use SCIM-named fields (`User.id`, `User.externalId`); the `org_id` tenant claim feeds `IdentityContext.tenant_id`. See [`0002-identity-foundation.md` § Data model](0002-identity-foundation.md#data-model--scim-20-core--enterpriseuser).
 
@@ -168,7 +168,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 #### 6. Migration — existing `projects/{tenant}/` directory
 
-On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenant_id = "default"` (CLI default has been `"default"` since the dir was introduced). **No migration step needed.** A startup check in `application/bootstrap/wiring.py` verifies the dir exists; if a non-`default` tenant dir is present (operator created one manually), it's used unchanged.
+On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenant_id = "default"` (CLI default has been `"default"` since the dir was introduced). **No migration step needed.** A startup check in `application/initialization/wiring.py` verifies the dir exists; if a non-`default` tenant dir is present (operator created one manually), it's used unchanged.
 
 ### Host coupon + BYO keys — the per-user wallet gate (Lane A2)
 
@@ -240,7 +240,7 @@ change (`key_source` on `TokenUsagePayload`) is asyncapi-declared. Build directi
 
 ### §0 amendment?
 
-**No — this ADR.** The Stage-0 `IdentityContext` reification is a refinement of the existing **Persistence** I/O kind (tenant-prefix on every store key); the seam itself rides existing wiring (bootstrap → Session). The §0 amendment for the new `Identity` I/O kind lands with **Stage 1 of [`0002-identity-foundation.md`](0002-identity-foundation.md)** (OIDC ingress at the API boundary) — see that ADR's "§0 amendment" section.
+**No — this ADR.** The Stage-0 `IdentityContext` reification is a refinement of the existing **Persistence** I/O kind (tenant-prefix on every store key); the seam itself rides existing wiring (init → Session). The §0 amendment for the new `Identity` I/O kind lands with **Stage 1 of [`0002-identity-foundation.md`](0002-identity-foundation.md)** (OIDC ingress at the API boundary) — see that ADR's "§0 amendment" section.
 
 ### Anchors
 
@@ -250,7 +250,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 |---|---|
 | `IdentityContext` (shipped — supersedes deleted `TenantContext`) | `promptpotter/shared/identity.py` |
 | `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` (shipped) | `promptpotter/domain/identity.py` |
-| `Session.identity` field (shipped) | `promptpotter/application/bootstrap/session.py` |
+| `Session.identity` field (shipped) | `promptpotter/application/initialization/session.py` |
 | `build_stores(identity, …)` rooting (shipped) | `promptpotter/infrastructure/store/stores.py` |
 | Path-component validator | `promptpotter/infrastructure/store/io.py` |
 | CLI seam (shipped) | `promptpotter/presentation/cli/commands/_shared.py` |
@@ -259,7 +259,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | Spend resolution | `promptpotter/shared/spend.py` |
 | Token emit (optimizer) | `promptpotter/application/optimization/dispatch/llm_call/call.py` |
 | Token emit (backend) | `promptpotter/application/scoring/sample_measurement.py` |
-| Token emit helper + ContextVars | `promptpotter/infrastructure/llm/models.py` |
+| Token emit helper + ContextVars | `promptpotter/infrastructure/llm/telemetry.py` |
 | ContextVar lifecycle | `promptpotter/application/run_observers.py` |
 | Token shape | `promptpotter/domain/run_records.py` |
 | Sole spend writer + halt accessor | `promptpotter/infrastructure/projections/live_dashboard/view.py` |

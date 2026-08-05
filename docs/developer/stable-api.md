@@ -18,7 +18,7 @@ class Connector:
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (L4 inner cycle)
     in_process_run: InProcessRun | None = None                      # async (query, payload) -> {"data": …}; required iff in_process
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
-    version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; bootstrap WARNs on drift
+    version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
     preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out
     auth_token: AuthTokenFn | None = None                           # () -> str | None bearer for THIS backend; unset when in_process
 ```

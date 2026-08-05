@@ -6,8 +6,8 @@ import html
 import json
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.bootstrap.wiring import init_services as _init_services
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import init_services as _init_services
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.origin import (
     CampaignOrigin,
@@ -161,9 +161,9 @@ async def prepare_origin_notebook(
 ) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
     """Mint the campaign, build observers, score the origin — one notebook cell.
 
-    Mints through ``prepare_fresh_cycle``, the same prologue ``new`` and the web mint
-    run. ``build_run_observers`` used to auto-mint for this caller alone, on a second
-    code path that skipped the pipeline overlay and the cycle seed."""
+    Mints through ``prepare_fresh_cycle``, the same prologue ``new`` and the web mint run
+    — never a second path in ``build_run_observers`` for this caller alone, which is how a
+    mint skips the pipeline overlay and the cycle seed."""
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     display = LiveDisplay(
         origin_acc=0.0,

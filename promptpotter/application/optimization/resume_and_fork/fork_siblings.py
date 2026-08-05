@@ -242,7 +242,7 @@ def _mint_fork(
         )
         # Clean-offshoot fork from the lineage/control panel (endorse or steered):
         # fresh sibling index (no parent-round copy, round numbering restarts at 1);
-        # the origin re-scores from the selected/edited searchpoint at bootstrap. The
+        # the origin re-scores from the selected/edited searchpoint at init. The
         # ForkSpec provenance lands on index.json::fork via the single fork-block
         # writer below.
         campaign_store.write_fresh_sibling(
@@ -357,7 +357,7 @@ def mint_operator_fork(
     numbering restarts at round 1) carrying *seed* (the chosen searchpoint's
     evolved prompt + config + reconciled run limits — recorded, not forbidden:
     operators may act, we record it), appended to the fork's ledger as a
-    ``CycleSeedRecord`` and re-scored as the fork's origin at bootstrap.
+    ``CycleSeedRecord`` and re-scored as the fork's origin at init.
     """
     parent_index = stores.campaigns.load(campaign_id, cycle_id) or {}
     spec = ForkSpec(

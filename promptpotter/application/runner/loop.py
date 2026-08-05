@@ -16,8 +16,8 @@ from __future__ import annotations
 import logging
 import traceback
 
-from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.facade import InjectionRenderError
 from promptpotter.application.optimization.l1.execute import execute_round
@@ -46,7 +46,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
 from promptpotter.domain.sample import Sample
-from promptpotter.infrastructure.llm.models import emit_error_record
+from promptpotter.infrastructure.llm.telemetry import emit_error_record
 
 logger = logging.getLogger(__name__)
 

@@ -74,7 +74,7 @@ def round_summary(rr: RoundResult) -> dict[str, Any]:
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
     """The origin's round-0 score, derived from ``rounds[]`` — there is no stored copy.
 
-    Round 0 IS the origin, and every path that (re)scores it — bootstrap, a diag
+    Round 0 IS the origin, and every path that (re)scores it — init, a diag
     fork's re-measure, the interactive origin-gate rescore — re-emits round 0
     through ``save_round_file``, so the round row is always fresh. ``None`` until
     round 0 lands (fresh mint / pre-origin fork)."""
@@ -91,11 +91,11 @@ def _apply_best(data: dict[str, Any]) -> None:
     samples that round drew, or on a held round the retained incumbent's re-score. It is
     therefore always a number some individual scored, over a stated ``total``.
 
-    It used to argmax ``cumulative_accuracy``, described here as "the incumbent rescored over
-    every sample probed so far". No such rescore ever happened: the series was a sample-keyed
-    union of rows measured by DIFFERENT configurations, so the headline routinely exceeded
-    anything the cycle had measured — ``57%→78%`` on a run whose best candidate reached 0.679.
-    That claim is what kept the defect invisible; do not reintroduce a pooled mean here.
+    **Never argmax ``cumulative_accuracy`` here.** No rescore backs that series: it is a
+    sample-keyed union of rows measured by DIFFERENT configurations, so the headline
+    routinely exceeds anything the cycle measured — it published ``57%→78%`` on a run whose
+    best candidate reached 0.679. Calling it "the incumbent rescored over every sample probed
+    so far" is what kept that invisible; do not reintroduce a pooled mean here.
 
     Deliberately a DIFFERENT basis from the winner export: ``cycle.py::absorb_round`` /
     ``replay_priors`` argmax ``best_sp``/``best_round`` on ``composite_fitness`` — the
@@ -202,11 +202,10 @@ class CampaignStore:
     def workspace(self) -> WorkspaceDir:
         """The tenant root this store is rooted at.
 
-        Exposed because a caller holding a ``CampaignStore`` already holds a resolved
-        tenant root, and used to be handed the same fact twice more — the fork mint
-        took ``(campaign_store, tenant_id, projects_root=None)`` and defaulted the
-        third, so the pointer it retargeted could belong to a different workspace than
-        the cycle it just minted."""
+        Exposed so a caller holding a ``CampaignStore`` asks it rather than being handed
+        the same fact twice more: a mint taking ``(campaign_store, tenant_id,
+        projects_root=None)`` and defaulting the third retargets a pointer that can belong
+        to a different workspace than the cycle it just minted."""
         return self._base_dir
 
     # ------------------------------------------------------------------
@@ -646,7 +645,7 @@ class CampaignStore:
         path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         data["human_intervened"] = True
-        # setdefault: the babysit stamp fires at bootstrap on a fresh-sibling fork index
+        # setdefault: the babysit stamp fires at init on a fresh-sibling fork index
         # that carries no `interventions` list yet, unlike the skip-searchpoint caller
         # which runs on an established cycle. The single append site guarantees the key.
         data.setdefault("interventions", []).append({"kind": kind, "at": at})

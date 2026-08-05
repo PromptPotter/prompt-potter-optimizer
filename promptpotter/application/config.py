@@ -1,7 +1,7 @@
 """Campaign configuration — CampaignConfig Pydantic model, pipeline setup, LLM factory.
 
 Backend-specific experiment-data extraction lives in
-:mod:`promptpotter.connectors`; ``bootstrap`` looks up a connector by name
+:mod:`promptpotter.connectors`; ``initialization`` looks up a connector by name
 and reads ``connector.extract_experiment(extract)``.
 """
 
@@ -29,7 +29,7 @@ from promptpotter.shared.errors import PayloadInvalidError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample

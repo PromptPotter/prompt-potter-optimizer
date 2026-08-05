@@ -21,7 +21,7 @@ does not fix the cycle, it hides this rule.
 
 | Subpackage | Owns |
 |---|---|
-| `bootstrap/` | `init_services` + `init_optimization_loop` — wiring stores, LLM clients, connectors → `Session`; preflight; cycle bootstrap; observability + scoring setup. Pipeline-discovery view fetched at bootstrap time lives here. |
+| `initialization/` | **Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (stores, LLM clients, connectors → `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). Pipeline-discovery view fetched at init time lives here. Sequence + pre/postconditions: [`../../docs/developer/run-initialization.md`](../../docs/developer/run-initialization.md). |
 | `optimization/` | The L1/L2/L3 loop primitives: `Cycle` state, candidate generation, critique, validation, transitions, PoBB elimination, `dispatch/` injection routing. Curated subpackages `escalation/` (state + decide + rules + firing) and `resume_and_fork/` (decisions + replayers + fork siblings + resume entry). |
 | `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. |
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, composite-fitness metrics. Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |
@@ -66,7 +66,7 @@ does not fix the cycle, it hides this rule.
   the `CycleRecord` discriminated union + a `_handle_*` no-op default to
   `DerivedView` (`infrastructure/projections/base.py`), write a kwargs-only
   `emit_*` helper that reads the active ledger from the `_CYCLE_LEDGER`
-  ContextVar (`infrastructure/llm/models.py`) and appends, register the
+  ContextVar (`infrastructure/llm/telemetry.py`) and appends, register the
   projection subscriber. No process-global sink, no wrapper dataclass — the
   call site goes from kwargs to ledger in one hop. `RunCallbacks` stays the
   shape for high-frequency snapshot/phase events the runner already drives;

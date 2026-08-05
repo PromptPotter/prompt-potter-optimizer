@@ -15,9 +15,9 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.bootstrap.scoring_context import init_optimization_loop
-from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig, apply_node_overlay
+from promptpotter.application.initialization.loop_start import init_optimization_loop
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_opt_sp
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
@@ -52,8 +52,8 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
+from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
@@ -216,14 +216,14 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
 
     The ONE binding seam for run control, called once per cycle the run touches: the launch
     cycle in ``_prepare_run`` and again per fork in the rebase loop (a fork has its own dir).
-    The CLI used to set these in new.py/resume.py, which left the API launcher's runs unable
-    to pause — the flag was written but never polled.
+    Binding at an entry point instead (new.py / resume.py) leaves the API launcher's runs
+    unable to pause — the flag is written but never polled.
 
     It binds BEFORE origin scoring because origin scoring is the longest interruptible phase
-    the package has (on the L4 panel, hours), and it is the one the hooks used to miss: bound
-    inside the rebase loop, ``session.pause_check`` was still ``None`` throughout round 0, so
-    the per-sample pause checkpoint in ``run_query_loop`` could not fire and the operator's
-    only way out of a running origin was to kill the process.
+    the package has (on the L4 panel, hours). Bound inside the rebase loop instead,
+    ``session.pause_check`` is still ``None`` throughout round 0, so the per-sample pause
+    checkpoint in ``run_query_loop`` cannot fire and the operator's only way out of a running
+    origin is to kill the process.
     """
     if not session.state.cycle_id:
         return
@@ -275,7 +275,7 @@ async def _prepare_run(
         _bind_run_controls(session, launch_cycle_dir)
 
     # Cycle seed: the chosen searchpoint, declared at mint, rides the ledger as a
-    # `CycleSeedRecord` (read-once-at-bootstrap, keyed by the known cycle_id —
+    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id —
     # set before this seam by the CLI resume, the API start-run launchers, and the
     # campaign-from-origin mint). It re-homes the origin (`origin_prompt_fields`)
     # and layers its `pipeline_overlay` ON TOP of the dataset overlay
@@ -304,7 +304,7 @@ async def _prepare_run(
         ):
             # A seed overlay steering the model OUTSIDE the origin's `allowed_models`
             # (empty = nothing sanctioned) is the ADR-0005 babysit act. Stamp the cycle
-            # index here — the mint seam could not (the index is created at bootstrap) —
+            # index here — the mint seam could not (the index is created at init) —
             # and flag the session so every run it scores grades non-clean. A steer to a
             # SANCTIONED model reaches this seam but is clean: no stamp, no taint.
             session.store.campaigns.mark_human_intervened(

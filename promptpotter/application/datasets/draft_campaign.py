@@ -402,7 +402,7 @@ def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[s
     :meth:`DraftCampaign.to_wire`).
 
     The layering itself is :func:`merge_node_blocks`, shared with the dataset overlay
-    in ``bootstrap/wiring.py``."""
+    in ``initialization/wiring.py``."""
     return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
 
 

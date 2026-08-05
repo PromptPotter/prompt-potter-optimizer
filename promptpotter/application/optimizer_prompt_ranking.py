@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
+from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (

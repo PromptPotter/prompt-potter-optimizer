@@ -203,7 +203,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
     from promptpotter.application.runner.inner import cycle
     from promptpotter.domain.results import CycleResult
-    from promptpotter.infrastructure.llm import models as llm_models
+    from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
 
     class _RecordingLedger:
@@ -280,7 +280,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             asking_cycle_id="cycle_deadbeef0000",
         )
     )
-    llm_models._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
+    llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
     with pytest.raises(cycle.InnerCycleUnscoreableError, match="wall-clock deadline"):
         await cycle.run_inner_cycle("justlogic-d67/seed-0", {})

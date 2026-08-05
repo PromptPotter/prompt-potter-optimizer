@@ -26,7 +26,7 @@ from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allo
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.models import (
+from promptpotter.infrastructure.llm.telemetry import (
     emit_command,
     emit_command_ack,
     reset_cycle_ledger,
@@ -365,16 +365,15 @@ class CommandDispatcher:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply.
 
-        The guard here is LIVENESS, and it used to be the other question entirely: it
-        refused whenever the target was the ACTIVE cycle ("switch first" — a gesture in
-        neither the command vocabulary nor the webapp) and checked nothing about whether
-        a producer was writing into the dir it was about to remove. That is the inverted
-        pair. ``try_delete_stub_cycle`` only ever removes a cycle with ``n_rounds == 0``,
-        which is *precisely* the just-minted window before round 1 commits — so the one
-        deletion this verb can perform is the one most likely to be live, and it was the
-        unchecked case. Being the cycle you happen to be looking at, meanwhile, is not a
-        hazard: the pointer is retargeted to the parent, exactly as the runner's own stub
-        cleanup does, and that helper is now the single path for both.
+        **The guard here is LIVENESS, not activeness — the two are the inverted pair.**
+        Refusing whenever the target is the ACTIVE cycle ("switch first" — a gesture in
+        neither the command vocabulary nor the webapp) checks nothing about whether a
+        producer is writing into the dir about to be removed. ``try_delete_stub_cycle``
+        only ever removes a cycle with ``n_rounds == 0``, which is *precisely* the
+        just-minted window before round 1 commits, so the one deletion this verb can
+        perform is the one most likely to be live. Being the cycle you happen to be
+        looking at is not a hazard: the pointer is retargeted to the parent, exactly as
+        the runner's own stub cleanup does, through that same single helper.
 
         Liveness lives at this entry rather than inside the store method because the two
         callers differ in what they know. This one is a third party asking about someone
@@ -832,7 +831,7 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs.launcher.core import mint_campaign_command
+        from promptpotter.application.jobs.launcher.mint_and_start import mint_campaign_command
 
         if self._job_registry is None:
             raise ServiceUnavailableError(
@@ -867,7 +866,7 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs.launcher.core import start_run_command
+        from promptpotter.application.jobs.launcher.mint_and_start import start_run_command
 
         if self._job_registry is None:
             raise ServiceUnavailableError(

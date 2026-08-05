@@ -1,7 +1,7 @@
-"""ScorerSetup build + cycle bootstrap.
+"""Run init steps 2-4 — a wired ``Session`` to a running round loop.
 
 - ``populate_session_scoring`` — attach scorer + per-round scorer + obs to a Session.
-- ``bootstrap_cycle`` — resume existing cycle or create one.
+- ``init_cycle`` — resume existing cycle or create one.
 - ``init_optimization_loop`` — runner entry: preflight, origin OSP, Cycle.start,
   fork-on-divergence, obs + scoring + axes, INIT.exit."""
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.session import Session
+from promptpotter.application.initialization.session import Session
 from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
     return max((int(r["round"]) for r in round_summaries), default=0) + 1
 
 
-def bootstrap_cycle(
+def init_cycle(
     session: Session,
     origin_jsp: JobSearchPoint,
     dataset: list[Sample],
@@ -47,7 +47,7 @@ def bootstrap_cycle(
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resolve cycle (step 3 of bootstrap) → ``(cycle_id, resumed_from_round)``.
+    """Resolve cycle (step 3 of run init) → ``(cycle_id, resumed_from_round)``.
     Drift handling lives in ``resume_with_divergence_check``.
 
     A genuinely-absent cycle is the ``existing is None`` branch (``store.load``
@@ -57,7 +57,7 @@ def bootstrap_cycle(
     ``next_resume_round``), or an invalid ``--from N`` rewind — is NOT caught: it
     propagates and halts loud. Swallowing it would silently discard the prior
     rounds and re-spend the campaign from scratch under a fresh anonymous cycle."""
-    from promptpotter.application.runner.identity import cycle_config_identity
+    from promptpotter.application.runner.campaign_ids import cycle_config_identity
 
     if not session.backend_id:
         return None, 1
@@ -100,7 +100,7 @@ def populate_session_scoring(
     cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
-    """Attach scoring + obs to *session* in place (step 2 of bootstrap).
+    """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` resolved from ``campaign.json::scoring`` by the caller."""
     from promptpotter.application.scoring.formula import (
         auto_scorer_id,
@@ -167,7 +167,7 @@ async def _emit_preflight_and_init_session(
         await session.backend_client.init_session(session.index_terms)
 
 
-def _build_cycle_and_bootstrap(
+def _build_and_start_cycle(
     origin: CampaignOrigin,
     task_context: TaskDecomposition,
     scoring_round_formula: str | None,
@@ -177,7 +177,7 @@ def _build_cycle_and_bootstrap(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, str | None, int]:
-    """Build origin OSP + Cycle.start + bootstrap storage; raise on missing resolved_origin."""
+    """Build origin OSP + Cycle.start + open storage; raise on missing resolved_origin."""
     from promptpotter.application.optimization.cycle import Cycle
 
     if origin.resolved_origin is None:
@@ -200,7 +200,7 @@ def _build_cycle_and_bootstrap(
     origin_jsp = resolved_origin.to_job_search_point(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )
-    resolved_cycle_id, resumed_from_round = bootstrap_cycle(
+    resolved_cycle_id, resumed_from_round = init_cycle(
         session,
         origin_jsp,
         dataset,
@@ -302,7 +302,7 @@ def _finalize_loop_state(
     tracing_campaign_id: str,
     resumed_from_round: int,
 ) -> None:
-    from promptpotter.application.bootstrap.session import _open_cycle_ledger
+    from promptpotter.application.initialization.session import open_cycle_ledger
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.optimization.pobb.checks import (
         build_degradation_checks,
@@ -321,7 +321,7 @@ def _finalize_loop_state(
         session.state.cycle_id = resolved_cycle_id
         # Idempotent — runner.py may have pre-opened the ledger.
         if session.state.ledger is None:
-            session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
+            session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
     session.state.tracing_campaign_id = tracing_campaign_id
     # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_ttest``.
     session.scoring.scoring_set = list(dataset)
@@ -359,7 +359,7 @@ async def init_optimization_loop(
 ) -> Cycle:
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
-    cycle, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+    cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,
         task_context,
         scoring_round_formula,
@@ -413,7 +413,7 @@ async def init_optimization_loop(
 
 
 __all__ = [
-    "bootstrap_cycle",
+    "init_cycle",
     "init_optimization_loop",
     "populate_session_scoring",
 ]

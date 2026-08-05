@@ -56,7 +56,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-from promptpotter.infrastructure.llm.models import emit_round_warning
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared import truncate

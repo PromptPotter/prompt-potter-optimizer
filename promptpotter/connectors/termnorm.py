@@ -239,7 +239,7 @@ async def _termnorm_version_check(
     """Read TermNorm's self-reported version from ``GET /status``.
 
     Returns the ``version`` field (or ``revision``/``git_sha`` as fallbacks)
-    or ``None`` when the field is absent / the call fails. Bootstrap WARNs
+    or ``None`` when the field is absent / the call fails. Init WARNs
     on mismatch with :data:`CONNECTOR.expected_revision`.
     """
     try:

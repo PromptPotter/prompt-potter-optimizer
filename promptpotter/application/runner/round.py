@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation.firing import escalate_l2
 from promptpotter.application.optimization.escalation.state import NextAction

@@ -107,8 +107,8 @@ async def run_sweep_batch(
     first. A callable is the shape that survives the loop — the same injection
     ``observer_factory`` beside it already uses.
     """
-    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
+    from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
 

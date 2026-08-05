@@ -1,7 +1,7 @@
 """presentation/ — entry-point adapters (read-only over application/).
 
 cli/ — campaign_runner.py (new / resume verbs), session.py, parsers.py;
-  thin shells over runner/ + bootstrap.
+  thin shells over runner/ + initialization.
 views/ — terminal display only: display.py (ANSI primitives), render/ (to_text /
   sp_diff), live/ (LiveDisplay ledger subscriber), notebook_run.py,
   startup_checklist.py. The typed View models + markdown rendering are the

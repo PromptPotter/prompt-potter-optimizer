@@ -43,9 +43,9 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     The committed file is the dataset's ``pipeline.yaml`` overlay; the
     backend's live ``GET /pipeline`` response is the actual schema.
     ``backend_type`` is mandatory for connector resolution
-    (``_read_backend_type`` reads it on bootstrap); ``pipelines.default``
+    (``_read_backend_type`` reads it at init); ``pipelines.default``
     overrides the backend's pipeline order per the merge contract in
-    ``application/bootstrap/wiring.py::_apply_dataset_overlay``.
+    ``application/initialization/wiring.py::_apply_dataset_overlay``.
 
     The step list is the draft's chosen pipeline (``draft.pipeline_steps`` —
     preserved when reusing an existing dataset) and falls back to

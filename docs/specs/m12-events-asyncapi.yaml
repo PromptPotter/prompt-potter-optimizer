@@ -409,7 +409,7 @@ components:
           minimum: 0
           description: |
             Round number when the error fired. `null` for crashes that
-            happened before the round loop entered (e.g. bootstrap
+            happened before the round loop entered (e.g. a run-init
             failure).
         timestamp:
           type: string
@@ -524,7 +524,7 @@ components:
       description: |
         CycleSeedRecord — the cycle's read-once starting point (`CycleSeed`),
         appended at mint / operator-steered fork / check-in flip and re-read
-        once at bootstrap. A fork inherits its parent's seed record *virtually*
+        once at init. A fork inherits its parent's seed record *virtually*
         (`CycleEventLog.inherit_from`) but appends its OWN, so a scan of the
         cycle's own ledger file returns that cycle's seed. Sweep and diag
         cycles carry none.

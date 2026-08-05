@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import Query
 from pydantic import Field
 
-from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.application.config import (
     CampaignConfig,
     Estimand,
@@ -15,6 +14,7 @@ from promptpotter.application.config import (
     estimand_doc,
     knob_label,
 )
+from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.knobs import (

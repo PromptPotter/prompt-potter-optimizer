@@ -43,7 +43,7 @@ How do we shape the codebase's identity + data-isolation seams now so the same a
 
 Chosen option: **A — OIDC wire + RLS data + SCIM 2.0 internal model.**
 
-The two contracts shape the seams once; the implementation behind each seam swaps per stage. Stage 0 ships a single-operator `IdentityContext(user_id="default", tenant_id="default")` at bootstrap with no auth and a file-based `projects/{tenant_id}/` data layout. Stage 1 swaps the resolver for an OIDC client (~200 LoC + `cryptography`) federating to Google / Apple / Microsoft / GitHub. Stage 2 swaps the file-based stores for a PostgreSQL adapter that sets `SET LOCAL app.tenant_id` per request inside RLS-protected transactions, optionally fronting Ory / Zitadel / Keycloak / Authentik as the issuer. **Reaching Stage 2 from Stage 0 is two additive jumps, not one rewrite.**
+The two contracts shape the seams once; the implementation behind each seam swaps per stage. Stage 0 ships a single-operator `IdentityContext(user_id="default", tenant_id="default")` at init with no auth and a file-based `projects/{tenant_id}/` data layout. Stage 1 swaps the resolver for an OIDC client (~200 LoC + `cryptography`) federating to Google / Apple / Microsoft / GitHub. Stage 2 swaps the file-based stores for a PostgreSQL adapter that sets `SET LOCAL app.tenant_id` per request inside RLS-protected transactions, optionally fronting Ory / Zitadel / Keycloak / Authentik as the issuer. **Reaching Stage 2 from Stage 0 is two additive jumps, not one rewrite.**
 
 Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names verbatim. The tenant claim normalizes to `org_id` at the verifier edge. Schema.org `Person` JSON-LD is an output projection on public surfaces — not the internal model. `IdentityContext` (5-field frozen dataclass at `promptpotter/shared/identity.py`) is the sole carrier past the seam; the deleted `TenantContext` collapses into it.
 
@@ -104,7 +104,7 @@ The no-drift gates that protect the seam from regression — gates #3 (`build_st
 
 | Stage | Who we serve | Identity source | Data layer | Code delta from prior stage |
 |---|---|---|---|---|
-| **Stage 0 — today** | one operator, one machine | `IdentityContext(user_id="default", tenant_id="default")` from bootstrap; auth-off | file-based, tenant-prefixed (`projects/{tenant_id}/`) | nothing — [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) lands the `IdentityContext` reification |
+| **Stage 0 — today** | one operator, one machine | `IdentityContext(user_id="default", tenant_id="default")` from init; auth-off | file-based, tenant-prefixed (`projects/{tenant_id}/`) | nothing — [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) lands the `IdentityContext` reification |
 | **Stage 1 — small SaaS / casual multi-user** | dozens to thousands of end-users | **OIDC client** to Google / Apple / GitHub / Microsoft. We never store passwords, never run a passkey ceremony — we federate to providers whose passkey UX already works. `(provider, subject) → user_id` mapping is the only thing we persist. | same file-based layout, tenant-prefixed for real | one OIDC client module (~200 LoC) + one dep (`cryptography` for JWT signature verify) |
 | **Stage 2 — Facebook / Netflix-shape** | millions+; B2B SSO; enterprise compliance | **Become OIDC provider** — front Ory Hydra / Zitadel / Authentik / Keycloak (open-source IdPs publicly run by enterprises) as a sibling process; we own the issuer URL. | PostgreSQL + RLS; the file-based stage migrates behind a clean store adapter | swap the issuer; data layer migrates via the adapter — no application-code rewrite |
 
@@ -186,9 +186,9 @@ class IdentityContext:
     capabilities: frozenset[str]     # flat capability set; RBAC is post-M13
 ```
 
-- **Stage 0** — `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. Constructed once at bootstrap. The single-operator path is the auth-off branch — one branch, not a feature flag.
+- **Stage 0** — `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. Constructed once at init. The single-operator path is the auth-off branch — one branch, not a feature flag.
 - **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id = f"{issuer}:{sub}"`, `tenant_id` from the custom `tenant_id` claim (provider-set for B2B, install-scoped fallback for casual users), `issuer` from `iss`.
-- **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/bootstrap/session.py`) replaces the deleted `Session.tenant`. The spend seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
+- **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/initialization/session.py`) replaces the deleted `Session.tenant`. The spend seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
 
 ### No-drift gates
 
@@ -261,7 +261,7 @@ Every claim in this ADR names a file. Drift is caught by review against the type
 |---|---|
 | `IdentityContext` (shipped, Stage 0+) | `promptpotter/shared/identity.py` |
 | `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` validator (shipped, Stage 0+) | `promptpotter/domain/identity.py` |
-| `Session.identity` field (shipped, Stage 0+ — replaces deleted `Session.tenant: TenantContext | None`) | `promptpotter/application/bootstrap/session.py` |
+| `Session.identity` field (shipped, Stage 0+ — replaces deleted `Session.tenant: TenantContext | None`) | `promptpotter/application/initialization/session.py` |
 | Identity resolver (shipped, Stage 0 auth-off + Stage 1 OIDC) | `promptpotter/presentation/api/deps.py` |
 | CLI seam (shipped, Stage 0+) | `promptpotter/presentation/cli/commands/_shared.py` |
 | Store construction (shipped, Stage 0+) | `promptpotter/infrastructure/store/stores.py` |

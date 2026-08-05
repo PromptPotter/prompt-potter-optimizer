@@ -123,7 +123,7 @@ def main() -> None:
     sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
 
     if args.command in ("new", "resume"):
-        from promptpotter.config.env_bootstrap import ensure_api_key
+        from promptpotter.config.first_run import ensure_api_key
 
         ensure_api_key()
 

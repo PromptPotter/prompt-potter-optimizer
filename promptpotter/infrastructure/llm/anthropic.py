@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import parse_response_content
-from promptpotter.infrastructure.llm.models import LLMResponse
 from promptpotter.infrastructure.llm.rate_limit import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
@@ -18,6 +17,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     acquire_reservation,
     apply_discovered_caps,
 )
+from promptpotter.infrastructure.llm.response import LLMResponse
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic

@@ -424,7 +424,7 @@ del _undirected
 
 class ConfigOverrides(StrictModel):
     """The fork's `OptimizationConfig` delta — every field optional (absent
-    inherits the parent), applied to the fork's snapshot at bootstrap; never
+    inherits the parent), applied to the fork's snapshot at init; never
     mutates the parent's frozen config. Three kinds of knob ride here:
 
     - **Run limits** (`max_rounds` / `spend_budget_usd` / `token_budget` /
@@ -460,7 +460,7 @@ class CycleSeed(StrictModel):
     """The chosen starting point a non-root cycle begins from — origin prompt +
     config overlay + reconciled limits. `origin_prompt_fields` is a
     `PromptTemplate.prompt_field_dict()` shape → becomes the origin `OptSearchPoint`
-    at bootstrap. `pipeline_overlay` merges ON TOP of the dataset overlay
+    at init. `pipeline_overlay` merges ON TOP of the dataset overlay
     (seed > dataset > backend default) for this cycle only — the dataset
     `pipeline.yaml` stays immutable. `origin_source` stamps the C0 lineage
     provenance: `fork_seed` for an operator-steered fork, `campaign_origin` for a
@@ -498,7 +498,7 @@ class CycleSeed(StrictModel):
     def _origin_needs_provenance(self) -> CycleSeed:
         """A seeded origin MUST name where it came from. `resolve_origin_opt_search_point`
         looks `origin_source` up in `_SEED_ORIGIN_LINEAGE` the moment `origin_prompt_fields`
-        is non-empty — an unstamped origin would `KeyError` there, deep inside bootstrap.
+        is non-empty — an unstamped origin would `KeyError` there, deep inside init.
         Fail here instead, at the boundary that built the seed."""
         if self.origin_prompt_fields and not self.origin_source:
             raise ValueError("origin_prompt_fields set without an origin_source stamp")
@@ -548,9 +548,9 @@ class LedgerCandidate(StrictModel):
     they arrive on the round's own close record (`LedgerRoundClose`), not on a candidate's.
 
     Every field below is copied verbatim from the snapshot by name (`_SCORED_INCLUDE` in
-    `campaign_store/ledger_scan.py`), so adding one here is all it takes to carry it — the
-    hand-written per-key reads that used to sit there are how the tree silently lacked a
-    field the round summary had.
+    `campaign_store/ledger_scan.py`), so adding one here is all it takes to carry it.
+    Hand-written per-key reads there are how the tree silently lacks a field the round
+    summary has.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -598,7 +598,7 @@ class LedgerRoundClose(StrictModel):
 
 class CycleSeedRecord(StrictModel):
     """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
-    at mint / operator-steered fork / check-in flip, re-read at bootstrap. A fork inherits
+    at mint / operator-steered fork / check-in flip, re-read at init. A fork inherits
     its parent's seed record *virtually* (`inherit_from`) but appends its OWN, so a scan of
     the cycle's own ledger file returns that cycle's seed — and `None` for a cycle that
     carries none (sweep / diag). Not a progress event: the SSE tail skips it (not in

@@ -1,4 +1,4 @@
-"""Bootstrap helper for ``LiveDashboardView.for_session``.
+"""Construction helper for ``LiveDashboardView.for_session``.
 
 The factory classmethod resolves the cycle's own dir, reads any prior
 ``dashboard.json`` (from a seed dir — the cycle's own, or the parent's for a

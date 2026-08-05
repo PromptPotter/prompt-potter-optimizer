@@ -38,7 +38,7 @@ site holds an explicit ledger handle.
 | If the fact originates… | Use | Why |
 |---|---|---|
 | in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, per-candidate / per-sample snapshots) | **`RunCallbacks`** method (`application/run_observers.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — `from_phase_event` mutates a `ViewContext` round-over-round. Owned state, explicit injection. |
-| **deep in the async LLM / dispatch chain**, with no ledger handle in scope (token usage, an LLM-call marker, a command ack, a crash, a self-healed round warning) | **`emit_*`** helper (`infrastructure/llm/models.py`) | Stateless: kwargs in, append out. Reads the ledger from the `_CYCLE_LEDGER` ContextVar (set by `build_run_observers`, reset by `drain_all`) — the ContextVar exists *because* these sites can't be handed a handle. |
+| **deep in the async LLM / dispatch chain**, with no ledger handle in scope (token usage, an LLM-call marker, a command ack, a crash, a self-healed round warning) | **`emit_*`** helper (`infrastructure/llm/telemetry.py`) | Stateless: kwargs in, append out. Reads the ledger from the `_CYCLE_LEDGER` ContextVar (set by `build_run_observers`, reset by `drain_all`) — the ContextVar exists *because* these sites can't be handed a handle. |
 
 Do **not** fold one into the other: routing the runner's `RunCallbacks` through
 `emit_*` would force its explicit `ViewContext` into an ambient ContextVar
@@ -52,7 +52,7 @@ impossible (the deep sites have nothing to call it on).
 2. Add an `isinstance(record, XxxRecord)` arm + matching `_handle_xxx` hook
    (default no-op) to `DerivedView.on_record` (`infrastructure/projections/base.py`).
 3. **Writer:** either add a typed method on `RunCallbacks`, **or** a kwargs-only
-   `emit_xxx` helper in `infrastructure/llm/models.py` that calls `_append_record`.
+   `emit_xxx` helper in `infrastructure/llm/telemetry.py` that calls `_append_record`.
 4. Override `_handle_xxx` on each projection that surfaces the fact
    (`LiveDashboardView` for `dashboard.json`, `AuditTrailView` for `round_NNNN.json`,
    `LiveDisplay` for the CLI). Unhandled = silently dropped — which is exactly
@@ -189,7 +189,7 @@ or `infrastructure/backend.py`.**
 3. Add the import + a row to the `CONNECTORS` dict in `connectors/__init__.py`.
    No `register()` call, no import side effects.
 4. Optional: set `expected_revision` + a `version_check` hook for cross-repo
-   drift warnings at bootstrap.
+   drift warnings at init.
 5. If the backend needs a credential, declare an `auth_token: () -> str | None` hook.
    **A credential is a per-backend fact and belongs on the connector**, never read at
    the construction site — `build_backend_client` (`infrastructure/backend.py`) is the

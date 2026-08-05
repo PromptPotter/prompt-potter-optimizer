@@ -23,7 +23,7 @@ from promptpotter.shared.errors import error_category, is_error_result
 from promptpotter.shared.instrument import MeasuredCandidate, set_measured_candidate
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
     from promptpotter.domain.opt_search_point import OptSearchPoint

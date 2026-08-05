@@ -14,7 +14,7 @@ from typing import Any
 from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.infrastructure.llm.models import LLMResponse
+from promptpotter.infrastructure.llm.response import LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class OptimizerPromptParseError(RuntimeError):
            the same request was sent twice and failed the same way both times, so it is a
            property of the prompt. The whole point of choosing that retry strategy
            (``chat()``) is to buy this answer instead of guessing at it.
-        3. No experiment available (the schema-repair path, or a legacy record with no
+        3. No experiment available (the schema-repair path, or a record with no
            first-attempt data) — fall back to the shape of the failing attempt.
         """
         if self.first_finish_reason == "length":

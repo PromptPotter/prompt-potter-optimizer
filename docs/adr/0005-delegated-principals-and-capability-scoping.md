@@ -251,7 +251,7 @@ optimizer never searches model/provider), so "human sets the model" and "optimiz
 it" are cleanly separate — only the former exists, and it is exactly what the babysit tag
 records (when the model is outside what the origin sanctioned). The
 cycle-level flag reaches the grade site through `Session.human_intervened` (read from the
-index at bootstrap for resume, set at the runner seed seam on first run). The full model
+index at init for resume, set at the runner seed seam on first run). The full model
 above — subtree propagation down the lineage, and the fork-time *include-or-exclude the
 babysat info* choice — remains the **target**, not this cut: the cycle-level flag is a valid
 degenerate case of the subtree tag, underbuilt not contradicted. No edit-kind split: one
@@ -302,7 +302,7 @@ secure method exists — a *known, bounded* limitation, not a hidden one.
    subtree propagation on the positional genealogy deferred. Residual (b) — decided **neither
    a magic `source` prefix nor a per-stamp index read**: `grade_run` gained an explicit
    `human_intervened: bool` argument that forces grade `C`, fed from `Session.human_intervened`
-   (read from the index at bootstrap, set at the runner seed seam), passed through the one
+   (read from the index at init, set at the runner seed seam), passed through the one
    write path `build_dataset_run_data`. The three consumers already exclude `C`, so no consumer
    changed — the grade *is* the exclusion.
 2. **Capability granularity — resolved for now.** One `campaign.babysit` capability

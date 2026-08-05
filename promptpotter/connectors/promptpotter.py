@@ -227,7 +227,7 @@ CONNECTOR = Connector(
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     # The outer "samples" are the inner tasks — read from this file in the dataset
-    # config dir and fed through ``extract_experiment`` at bootstrap (no CSV table).
+    # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",
     identity_config=_identity_config,
 )

@@ -37,7 +37,7 @@ ConnectorExecution = Literal["remote_http", "in_process"]
 # on) an ``in_process`` connector — the registry guard enforces the pairing.
 InProcessRun = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
-# Bootstrap calls a connector's version_check once at session init with the
+# Run init calls a connector's version_check once, with the
 # BackendClient's live httpx client + base_url; the return is the backend's
 # self-reported revision string, or None when the backend is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
@@ -114,7 +114,7 @@ class Connector:
 
     expected_revision: str | None = None
     """Backend revision (git SHA, semver, …) this PromptPotter rev expects.
-    Paired with ``version_check`` — bootstrap WARNs on drift. ``None`` opts out."""
+    Paired with ``version_check`` — init WARNs on drift. ``None`` opts out."""
 
     version_check: VersionCheck | None = None
     """Async ``(http, base_url) -> str | None`` — reads the backend's

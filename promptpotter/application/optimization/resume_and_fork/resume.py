@@ -42,7 +42,7 @@ from promptpotter.shared.errors import ResumeDivergenceError, graceful
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -431,7 +431,7 @@ async def _rederive_critiques(
     round's generator reads it. Measurements and winner untouched, so this is a repair, not a
     rewind. Round 0 is not a target: its critique comes from the ORIGIN path."""
     from promptpotter.application.optimization.l1.critique import run_l1_critique
-    from promptpotter.infrastructure.llm.models import reset_current_round, set_current_round
+    from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 
     saved = cycle.rounds
     try:

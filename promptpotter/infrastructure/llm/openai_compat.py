@@ -16,7 +16,6 @@ from promptpotter.infrastructure.llm.json_parse import (
     parse_response_content,
     try_groq_json_validate_repair,
 )
-from promptpotter.infrastructure.llm.models import LLMResponse
 from promptpotter.infrastructure.llm.rate_limit import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
@@ -25,6 +24,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     apply_discovered_caps,
     raise_if_request_too_large,
 )
+from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.shared import truncate
 
 if TYPE_CHECKING:

@@ -2,7 +2,7 @@
 
 Pure dict → domain transforms. No I/O, no async, no infrastructure
 dependency — the network fetch lives at the call site
-(``application/bootstrap/wiring.py``). Backends are self-describing
+(``application/initialization/wiring.py``). Backends are self-describing
 (`pipelines.default` for step order, per-node ``optimizer`` sub-objects,
 top-level ``resolved_schemas`` / ``resolved_prompts`` registries keyed by
 ``"{family}/{version}"``); zero hardcoded defaults.

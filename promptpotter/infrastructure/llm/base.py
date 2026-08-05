@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from promptpotter.infrastructure.llm.models import LLMResponse
+from promptpotter.infrastructure.llm.response import LLMResponse
 
 
 class LLMClientBase(ABC):

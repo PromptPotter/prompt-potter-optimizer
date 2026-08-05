@@ -23,7 +23,7 @@ Two mechanisms, one principle, and both are captured:
 - **The schema slot** — a `reasoning` field on a node's `output_schema` (justlogic's `{reasoning, answer}`). Ordered first, so thinking is in context before the answer commits.
 - **The provider's native channel** — `message.reasoning` on the OpenAI-compat wire, captured as `LLMResponse.reasoning` for reasoning models.
 
-**Both are strictly analytical.** They ride the ledger to the audit twin and the operator's node-detail pane, and they never reach a gate, metric, validator, scorer or cache key — score a model's narration of its work instead of its work, and the loop learns to narrate. The corollary that catches people: **neither has a code reader, and neither is dead.** `LLMResponse.reasoning` has been proposed for deletion by a dead-surface audit; its field note in `infrastructure/llm/models.py` is the standing answer. Do not remove a thinking channel because nothing branches on it — nothing branching on it is the design.
+**Both are strictly analytical.** They ride the ledger to the audit twin and the operator's node-detail pane, and they never reach a gate, metric, validator, scorer or cache key — score a model's narration of its work instead of its work, and the loop learns to narrate. The corollary that catches people: **neither has a code reader, and neither is dead.** `LLMResponse.reasoning` has been proposed for deletion by a dead-surface audit; its field note in `infrastructure/llm/response.py` is the standing answer. Do not remove a thinking channel because nothing branches on it — nothing branching on it is the design.
 
 ## Which levers are actually free
 

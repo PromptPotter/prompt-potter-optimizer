@@ -1,6 +1,6 @@
 """application/ — orchestration: the use-case layer over domain/, under infrastructure/.
 
-bootstrap/ — init_services / init_optimization_loop (wiring → Session).
+initialization/ — init_services / init_optimization_loop (wiring → Session).
 optimization/ — the L1/L2/L3 loop: Cycle, dispatch hub, escalation, PoBB,
   resume_and_fork (its CLAUDE.md is the agent contract).
 intelligence/ — materialized views over the MeasurementArchive (AxisIndex,

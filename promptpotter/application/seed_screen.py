@@ -31,9 +31,9 @@ as the disqualifier it is.
 
 **What it deliberately does NOT try to measure, and why.** The number a panel cell is really
 worth is its INFORMATIVE width — rows that are neither impossible nor free, since only those can
-separate two optimizer prompts. This module used to estimate it by scoring each bank a second
-time with the strongest prompt in the archive and counting the disagreements. That is withdrawn,
-because it cannot work here:
+separate two optimizer prompts. The obvious estimate — score each bank a second time with the
+strongest prompt in the archive and count the disagreements — cannot work here, so this module
+does not attempt it:
 
 - A fresh bank shares only ~14 of 40 rows with everything ever measured, so the width cannot be
   inherited from history.
@@ -221,13 +221,13 @@ async def screen_inner_seeds(
     on the measured ``justlogic-d234`` rate one pass over one bank is roughly a minute and
     ~$0.006.
     """
-    from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
-    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline, load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
     )
+    from promptpotter.application.initialization.loop_start import populate_session_scoring
+    from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.origin import resolve_origin_opt_search_point
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point

@@ -6,7 +6,7 @@ no scoreboard, no accuracy."""
 
 from __future__ import annotations
 
-from promptpotter.application.bootstrap.session import Session
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
 from promptpotter.application.output import (

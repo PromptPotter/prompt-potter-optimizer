@@ -19,17 +19,17 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.application.config import configure_and_apply_pipeline, resolved_dataset_name
+from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.runner.identity import build_origin_cycle_id, mint_campaign_id
+from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
 
@@ -46,7 +46,7 @@ def _campaign_origin_seed(origin_override: dict[str, Any] | None) -> CycleSeed |
     or ``None`` to use the dataset's authored origin.
 
     The same :class:`CycleSeed` an operator-steered fork rides — so the fresh root
-    mint funnels through the one seed seam the runner already reads at bootstrap
+    mint funnels through the one seed seam the runner already reads at init
     (``runner/entry.py::_read_cycle_seed``). ``origin_source`` stamps the C0 lineage."""
     if not origin_override:
         return None
@@ -180,7 +180,7 @@ def prepare_fresh_cycle(
     ``origin_override`` (campaign-from-origin) re-homes C0 to a chosen prior
     origin: the plan's cycle_id derives from it, and the matching
     :class:`CycleSeed` is appended to the cycle's ledger as a ``CycleSeedRecord`` so
-    the runner seam resolves the same origin at bootstrap (the generic fork/steer read
+    the runner seam resolves the same origin at init (the generic fork/steer read
     path). The
     root is parentless, so the origin still scores fresh — no inherited measurement.
     """

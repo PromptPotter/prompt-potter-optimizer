@@ -42,13 +42,14 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.models import LLMResponse, emit_token_usage
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
     decide_429_wait,
     wait_with_countdown,
 )
 from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
 
 if TYPE_CHECKING:

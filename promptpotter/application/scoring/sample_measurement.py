@@ -17,11 +17,11 @@ from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, is_hit
-from promptpotter.infrastructure.llm.models import emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -400,7 +400,7 @@ async def measure_sample(
                 logger.exception("backend warning ledger emit failed; continuing")
 
         from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-        from promptpotter.infrastructure.llm.models import _CURRENT_ROUND
+        from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND
 
         ledger = session.state.ledger
         heartbeat_task: asyncio.Task[None] | None = None
@@ -584,10 +584,8 @@ def _rerun_would_repeat_token_budget_failure(
     # from the cached result itself, so the infra-code / token lookups key on the SAME
     # node classify_result stamped. The trailing `or "llm_only"` IS a literal coupling
     # to the single-node sentinel — it fires when the row carries no `terminated_at`.
-    # "llm_only" names ONE thing now — the single-node pipeline sentinel. The connector
-    # of that name was deleted, so the collision this comment used to warn about is gone;
-    # folding the sentinel into a declared constant is an open design call, not an
-    # absence of coupling.
+    # "llm_only" names ONE thing — the single-node pipeline sentinel. Folding it into a
+    # declared constant is an open design call, not an absence of coupling.
     node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"
     cl = classify_result(cached_result)
     budget_exhausted = (

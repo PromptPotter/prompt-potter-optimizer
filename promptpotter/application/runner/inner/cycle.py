@@ -69,8 +69,8 @@ from promptpotter.shared.instrument import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult, CycleSpend
     from promptpotter.domain.sample import Sample
     from promptpotter.shared.identity import IdentityContext
@@ -573,7 +573,7 @@ def _open_inner_campaign(
     trajectory: no spend, full proxies.
 
     Binding is all this does. The terminal latch a continued cycle still carries is
-    cleared one layer down, in ``bootstrap_cycle`` — the seam BOTH levels pass through —
+    cleared one layer down, in ``init_cycle`` — the seam BOTH levels pass through —
     so an outer resume past a stop is un-latched by the same rule, not a second copy of it.
     """
     from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
@@ -645,12 +645,12 @@ async def _run_inner_campaign(
     # Lazy imports: heavy application machinery, and `run_optimization` would be a
     # package-internal import cycle (`entry.py` imports `publish_inner_spawn_context`
     # from here). Deferring to call time keeps this module import-light.
-    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
     )
+    from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
@@ -892,7 +892,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # the whole multi-minute inner campaign, which emits only to its OWN sandbox
     # ledger.
     from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-    from promptpotter.infrastructure.llm.models import _CURRENT_ROUND, _CYCLE_LEDGER
+    from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 
     outer_ledger = _CYCLE_LEDGER.get()
     cycle_dir_box: dict[str, Path] = {}

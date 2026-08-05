@@ -24,15 +24,15 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.session import (
-    finalize_checkin_to_active,
-    mint_checkin_skeleton,
-)
-from promptpotter.application.bootstrap.wiring import init_services
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, dataset_source_of
 from promptpotter.application.datasets.origin_readiness import resolution_block
-from promptpotter.application.jobs.launcher.core import (
+from promptpotter.application.initialization.session import (
+    finalize_checkin_to_active,
+    mint_checkin_skeleton,
+)
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     _admit,
     _assert_origin_ready,
@@ -57,8 +57,8 @@ from promptpotter.shared.identity import claim_email
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.search_point import TaskDecomposition
 
 logger = logging.getLogger(__name__)

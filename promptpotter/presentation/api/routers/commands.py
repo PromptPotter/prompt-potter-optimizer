@@ -32,8 +32,8 @@ from promptpotter.application.jobs.launcher.checkin import (
     save_checkin_draft,
     start_checkin_campaign,
 )
-from promptpotter.application.jobs.launcher.core import OriginIncompleteError
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
@@ -124,11 +124,10 @@ def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") ->
     for ``replace-dataset``, ``slug``.
 
     Extracting the field is this function's job; deciding what a dataset name IS
-    belongs to :func:`validate_dataset_name`, which every other entry point already
-    asked. This carried its own pattern until 2026-08-01, and the two disagreed:
-    ``POST /datasets/ingest`` mints a slug straight off the filename, so an upload
-    named ``2024-sales.csv`` produced a dataset that this rule then refused to mint
-    a campaign against.
+    belongs to :func:`validate_dataset_name`, which every entry point asks. A pattern
+    of its own here is a second rule that can disagree: ``POST /datasets/ingest`` mints
+    a slug straight off the filename, so an upload named ``2024-sales.csv`` produces a
+    dataset a stricter local rule then refuses to mint a campaign against.
     """
     raw = _require_string(payload, key, max_len=64)
     try:

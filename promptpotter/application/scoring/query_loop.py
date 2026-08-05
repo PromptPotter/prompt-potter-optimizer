@@ -38,7 +38,7 @@ from promptpotter.shared.errors import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint

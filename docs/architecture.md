@@ -170,7 +170,7 @@ world is a strict containment hierarchy:
   in it: they are the operator's, and `readable_dataset_rows` resolves them from
   the tenant tree (`store/dataset_access.py`). **One resolution
   seam:** `readable_dataset_dir` picks the dir (tenant slug first,
-  repo benchmark second) once at bootstrap and stamps it on
+  repo benchmark second) once at init and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
   (node overlay, starting prompts, origin prompt, sweep dir) reads that
   resolved dir — none recompute a repo-relative `datasets/{name}/` path.
@@ -671,7 +671,7 @@ the PR description.
     complete, then it's stored as the per-pipeline origin under
     `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate
     library) are dropped in place here and committed alongside the origin,
-    not chased at bootstrap.
+    not chased at init.
   - **Two gates, because completeness ≠ scoreability.** The readiness gate is
     *static* — it proves the required fields are present (incl. a non-empty
     `answer_format` whenever the scorer extracts a label, `_check_commit_format`),
