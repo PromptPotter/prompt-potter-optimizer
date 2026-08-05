@@ -172,9 +172,13 @@ def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> d
     flat posterior, more samples needed before elimination is safe.
     Operators read this to judge whether ``elimination_n_min`` is set
     appropriately for the dataset's per-sample variance.
+
+    ``leader_prob`` is the best standing among the round's CANDIDATES (``p_best_top``). It
+    used to max over one candidate's ``PoBBSnapshot`` dict, whose other entries were that
+    same candidate's odds against each prior — so a candidate losing badly to one prior
+    published a high "leader probability" drawn from its own defeat.
     """
-    p_best = core.current_p_best
-    if not p_best:
+    if not core.current_p_best_id:
         return {
             "current_id": "",
             "n_samples": 0,
@@ -182,7 +186,9 @@ def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> d
             "posterior_width": 1.0,
             "top": [],
         }
-    leader_prob = max(p_best.values())
+    leader_prob = max(
+        [float(row["p_best"]) for row in p_best_top] or list(core.round_p_best.values()) or [0.0]
+    )
     return {
         "current_id": core.current_p_best_id,
         "n_samples": core.current_p_best_n,

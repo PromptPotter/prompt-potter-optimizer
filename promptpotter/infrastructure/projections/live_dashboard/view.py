@@ -458,7 +458,7 @@ class LiveDashboardView(DerivedView):
         elif ev == "p_best_update":
             current_id = payload.get("current_id") or ""
             n_samples = int(payload.get("n_samples") or 0)
-            p_best = {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()}
+            p_best = float(payload.get("p_best") or 0.0)
             self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
             # Mirror the latest snapshot into the shared core so LiveDisplay sees
             # the same round-wide P(best) state.

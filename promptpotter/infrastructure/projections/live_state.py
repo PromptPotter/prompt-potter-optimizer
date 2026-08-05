@@ -60,8 +60,12 @@ class LiveStateCore:
     round_num: int = 0
     origin_acc: float = 0.0
     best_acc: float = 0.0
-    last_p_best: dict[str, float] = field(default_factory=dict)
-    current_p_best: dict[str, float] = field(default_factory=dict)
+    # Candidate id → its latest P(best) this round, and the value each held before that —
+    # the population a round-wide reading is about. A ``PoBBSnapshot`` carries ONE
+    # candidate's number, so anything ranking candidates accumulates here instead of
+    # reading a single snapshot. ``current_p_best_id`` empty ⇒ no reading this round yet.
+    round_p_best: dict[str, float] = field(default_factory=dict)
+    round_p_best_prev: dict[str, float] = field(default_factory=dict)
     current_p_best_id: str = ""
     current_p_best_n: int = 0
 
@@ -94,25 +98,37 @@ def apply_p_best_update(
     core: LiveStateCore,
     current_id: str,
     n_samples: int,
-    p_best: dict[str, float],
+    p_best: float,
 ) -> None:
-    """Stash the latest mid-round P(best) snapshot for the round-end roll-up."""
-    if not p_best:
+    """Record one candidate's P(best) reading. Empty ``current_id`` ⇒ nothing to record."""
+    if not current_id:
         return
-    core.current_p_best = dict(p_best)
+    if current_id in core.round_p_best:
+        core.round_p_best_prev[current_id] = core.round_p_best[current_id]
+    core.round_p_best[current_id] = float(p_best)
     core.current_p_best_id = current_id
     core.current_p_best_n = n_samples
 
 
 def roll_p_best_at_round_complete(core: LiveStateCore) -> None:
-    """At round-end, promote the current snapshot to ``last`` for next round's arrows."""
-    if core.current_p_best:
-        core.last_p_best = core.current_p_best
-        core.current_p_best = {}
-        core.current_p_best_id = ""
-        core.current_p_best_n = 0
+    """Clear the round's readings at round-end so the next round starts blank.
+
+    Candidate ids are round-scoped, so carrying a previous round's map forward could only
+    ever compare a candidate against a stranger — which is what the ``last_p_best`` field
+    this replaces did, silently, since no id ever matched across the boundary.
+    """
+    core.round_p_best = {}
+    core.round_p_best_prev = {}
+    core.current_p_best_id = ""
+    core.current_p_best_n = 0
 
 
-def top_n_p_best(snapshot: dict[str, float], n: int = 5) -> list[tuple[str, float]]:
-    """Top-*n* ``(cid, prob)`` from a snapshot, descending."""
-    return sorted(snapshot.items(), key=lambda kv: -kv[1])[:n]
+def top_n_p_best(standings: dict[str, float], n: int = 5) -> list[tuple[str, float]]:
+    """Top-*n* ``(candidate_id, p_best)`` descending, over a CANDIDATE→standing map.
+
+    Every key must be a candidate's own P(best). It used to be handed one candidate's
+    ``PoBBSnapshot`` dict, whose non-current keys were *P(current beats that prior)* — so the
+    "leaderboard" ranked one real candidate against numbers describing that same candidate,
+    filed under its opponents' ids.
+    """
+    return sorted(standings.items(), key=lambda kv: -kv[1])[:n]

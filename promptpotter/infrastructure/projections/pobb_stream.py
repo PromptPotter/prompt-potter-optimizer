@@ -35,9 +35,14 @@ class PoBBStreamView(DerivedView):
 
     File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
     audit dir. Each line is a JSON object with ``round``, ``sample_idx``,
-    ``current_id``, ``n_samples``, ``p_best`` (cid → prob), ``p_best_delta``
-    (cid → delta vs previous query), and ``paired_breakdown`` (prior cid →
-    {mean_d, se_d, n_paired, p_better}).
+    ``current_id``, ``n_samples``, ``p_best`` (that candidate's probability),
+    ``p_best_delta`` (its move since its own previous query), and
+    ``paired_breakdown`` (prior cid → {mean_d, se_d, n_paired, p_better}).
+
+    One line describes ONE candidate. ``p_best``/``p_best_delta`` were cid-keyed maps built
+    from a snapshot whose non-current entries meant *P(current beats that prior)*, so every
+    prior acquired a trajectory in this file made of numbers about somebody else — which
+    ``log.md``'s sparkline then drew as that prior's own progress.
     """
 
     def __init__(self, streams_dir: Path) -> None:
@@ -62,20 +67,17 @@ class PoBBStreamView(DerivedView):
             return
 
         payload: dict[str, Any] = dict(record.payload)
-        p_best: dict[str, float] = {
-            str(k): float(v) for k, v in (payload.get("p_best") or {}).items()
-        }
-        if not p_best:
+        current_id = str(payload.get("current_id", ""))
+        if not current_id:
             return
+        p_best = float(payload.get("p_best") or 0.0)
 
         if self._last_round != record.round:
             # New round → reset the delta origin.
             self._last_p_best = {}
             self._last_round = record.round
 
-        deltas: dict[str, float] = {
-            cid: float(p_best[cid] - self._last_p_best.get(cid, p_best[cid])) for cid in p_best
-        }
+        delta = p_best - self._last_p_best.get(current_id, p_best)
 
         # Per-prior θ comparison (p_better = P(θ_cand > θ_prior), n_paired)
         # — the operator's main triangulation surface. When one prior gates
@@ -88,15 +90,15 @@ class PoBBStreamView(DerivedView):
         line = {
             "round": int(record.round),
             "sample_idx": int(record.sample_idx if record.sample_idx is not None else -1),
-            "current_id": str(payload.get("current_id", "")),
+            "current_id": current_id,
             "n_samples": int(payload.get("n_samples", 0)),
             "p_best": p_best,
-            "p_best_delta": deltas,
+            "p_best_delta": delta,
             "paired_breakdown": paired_breakdown,
         }
 
         self._append(record.round, line)
-        self._last_p_best = dict(p_best)
+        self._last_p_best[current_id] = p_best
 
     def _append(self, round_num: int, line: dict[str, Any]) -> None:
         try:

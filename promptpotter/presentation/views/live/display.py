@@ -247,7 +247,11 @@ class LiveDisplay(DerivedView):
             self.on_p_best_update(
                 str(payload.get("current_id") or ""),
                 int(payload.get("n_samples") or 0),
-                {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
+                float(payload.get("p_best") or 0.0),
+                {
+                    str(pid): {str(k): float(v) for k, v in (entry or {}).items()}
+                    for pid, entry in (payload.get("paired_breakdown") or {}).items()
+                },
             )
         elif ev == "sample_order_preview":
             self.on_sample_order_preview(
@@ -322,7 +326,13 @@ class LiveDisplay(DerivedView):
             )
         )
 
-    def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
+    def on_p_best_update(
+        self,
+        current_id: str,
+        n_samples: int,
+        p_best: float,
+        paired_breakdown: dict[str, dict[str, float]],
+    ) -> None:
         """Stash PoBB snapshot; print one-line summary on first fire per candidate at q≥8."""
         apply_p_best_update(self._core, current_id, n_samples, p_best)
         POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
@@ -332,15 +342,18 @@ class LiveDisplay(DerivedView):
             and n_samples >= POBB_DISPLAY_MIN_SAMPLES
         ):
             self._pobb_printed_for = current_id
-            current_p = p_best.get(current_id, 0.0)
-            # Paired PoBB: hardest prior = min P(cand > prior).
-            prior_entries = {pid: pv for pid, pv in p_best.items() if pid != current_id}
-            if prior_entries:
-                hardest_id, hardest_p = min(prior_entries.items(), key=lambda kv: kv[1])
-                hardest_tag = hardest_id[:6]
+            current_p = p_best
+            # Paired PoBB: hardest prior = min P(cand > prior). Read off the field that NAMES
+            # that quantity rather than off the P(best) reading, which is one number about
+            # this candidate and cannot answer a per-prior question.
+            if paired_breakdown:
+                hardest_id, hardest = min(
+                    paired_breakdown.items(), key=lambda kv: kv[1].get("p_better", 1.0)
+                )
+                hardest_tag, hardest_p = hardest_id[:6], hardest.get("p_better", 0.0)
             else:
                 hardest_tag, hardest_p = "*self*", current_p
-            n_priors = len(prior_entries)
+            n_priors = len(paired_breakdown)
             prior_s = "" if n_priors == 1 else "s"
             self._write(
                 f"  {DIM}pobb:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
@@ -368,12 +381,19 @@ class LiveDisplay(DerivedView):
         self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) with ▲/▼ vs prior round; ``None`` when no PoBB this round."""
-        if not self._core.current_p_best:
+        """Top-5 P(best) across the round's candidates, ▲/▼ vs each one's own previous
+        reading; ``None`` when no PoBB this round.
+
+        The ranking is over ``round_p_best`` — one entry per candidate. It used to rank the
+        latest single ``PoBBSnapshot`` dict, whose other entries were that candidate's odds
+        against each prior, and to arrow against the PREVIOUS ROUND's snapshot, whose ids
+        are round-scoped and therefore never matched.
+        """
+        if not self._core.round_p_best:
             return None
-        last = self._core.last_p_best
+        last = self._core.round_p_best_prev
         parts: list[str] = []
-        for cid, prob in top_n_p_best(self._core.current_p_best):
+        for cid, prob in top_n_p_best(self._core.round_p_best):
             prev = last.get(cid)
             arrow = ""
             if prev is not None:

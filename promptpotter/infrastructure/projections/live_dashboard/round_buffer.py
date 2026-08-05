@@ -127,16 +127,19 @@ class RoundBuffer:
         total: int,
         current_id: str,
         n_samples: int,
-        p_best: dict[str, float],
+        p_best: float,
     ) -> None:
-        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
+        """Merge one candidate's P(best) into its slot, then rebuild the top-5 leaderboard.
 
-        Stores each candidate's ``p_best``, signed delta vs prior query, and a
-        capped trajectory list; refreshes the round-wide top-5 view consumed
-        by ``build_pobb_block``.
+        Stores this candidate's ``p_best``, its signed delta vs the prior query and a capped
+        trajectory; then refreshes the round-wide top-5 consumed by ``build_pobb_block``
+        **by aggregating across the round's candidate slots**. The leaderboard was previously
+        read straight off this one candidate's ``PoBBSnapshot`` dict, so it listed the priors
+        that candidate was measured against as if they were its rivals' standings, and each
+        new snapshot overwrote it — the last candidate to score decided the display.
         """
         cand = self.slot(idx, total)
-        current = float(p_best.get(current_id, 0.0))
+        current = float(p_best)
         prev = float(cand.get("p_best", current))
         history: list[float] = list(cand.get("p_best_history") or [])
         history.append(current)
@@ -144,12 +147,19 @@ class RoundBuffer:
         if len(history) > 64:
             history = history[-64:]
         cand["p_best"] = current
+        cand["p_best_id"] = current_id
         cand["p_best_delta"] = current - prev
         cand["p_best_history"] = history
         cand["p_best_n_samples"] = n_samples
 
-        # Round-wide leaderboard (top-5 by P(best)).
-        self.p_best_top = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
+        # Round-wide leaderboard (top-5 by P(best)) — over the candidates this round has
+        # readings for, which is the only population the question is about.
+        standings = {
+            str(c["p_best_id"]): float(c["p_best"])
+            for c in self.candidates.values()
+            if c.get("p_best_id")
+        }
+        self.p_best_top = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(standings)]
 
 
 __all__ = ["RoundBuffer"]

@@ -127,9 +127,24 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-sample PoBB snapshot. ``p_best[current_id] = min(per-prior values)``."""
+    """One candidate's mid-round PoBB standing after ``n_samples`` cells.
 
-    p_best: dict[str, float]
+    ``p_best`` is a SCALAR and the whole snapshot is about ``current_id`` alone. It was a
+    ``dict`` merging two different quantities under one name — ``[current_id]`` meant this
+    candidate's own P(best) while ``[prior_id]`` meant *P(current beats that prior)*, a fact
+    about ``current_id`` filed under someone else's key. Every round-wide consumer read the
+    whole dict as "each candidate's standing": the dashboard's top-5 leaderboard was built
+    from ONE candidate's snapshot (so it listed that candidate plus the priors it was measured
+    against, and the last candidate to score overwrote it), ``leader_prob`` maxed over the
+    mixture, and the p_best stream wrote a trajectory per prior that ``log.md`` then rendered
+    as a candidate line. A round winner holding P(best) 0.755 printed at 22.9%.
+
+    The per-prior numbers are not lost — they are in :attr:`paired_breakdown`, under a name
+    that says what they are, which is where they already were. Anything round-wide aggregates
+    across candidates; a snapshot cannot answer a question about a population of one.
+    """
+
+    p_best: float
     current_id: str
     n_samples: int
     paired_breakdown: dict[str, dict[str, float]]
@@ -329,9 +344,8 @@ class PoBBCheck:
             pid: {"p_better": float(p_better[pid]), "n_paired": float(n)} for pid in paired_priors
         }
 
-        snapshot_dict: dict[str, float] = {**p_better, cid: float(p_best_current)}
         snap = PoBBSnapshot(
-            p_best=snapshot_dict,
+            p_best=float(p_best_current),
             current_id=cid,
             n_samples=n,
             paired_breakdown=paired_breakdown,
@@ -350,7 +364,6 @@ class PoBBCheck:
                     "p_best": float(p_best_current),
                     "lock_in": float(self.lock_in),
                     "lock_in_n_min": int(self.lock_in_n_min),
-                    "p_best_snapshot": snapshot_dict,
                     "leader_id": hardest_prior_id,
                     "paired_breakdown": paired_breakdown,
                 },
@@ -383,7 +396,6 @@ class PoBBCheck:
                 "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
-                "p_best_snapshot": snapshot_dict,
                 "leader_id": hardest_prior_id,
                 "paired_breakdown": paired_breakdown,
             },

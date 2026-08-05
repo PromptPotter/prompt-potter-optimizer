@@ -2073,8 +2073,14 @@ def test_pobb_check_gates_elimination_on_posterior():
     cr = sig.check_result
     assert cr["leader_id"] == "winner"
     assert cr["p_best"] < 0.05
-    assert "p_best_snapshot" in cr
     assert cr["epsilon"] == pytest.approx(0.05)
+    # The per-prior numbers ride ``paired_breakdown``, under a name that says what they are.
+    # They must NOT also appear as bare cid→float entries beside ``p_best``: that shape put
+    # "this candidate's P(best)" and "P(this candidate beats prior X)" under one roof, and
+    # every round-wide reader ranked the mixture as if each key were a candidate's standing.
+    assert set(cr["paired_breakdown"]) == {"winner"}
+    assert cr["paired_breakdown"]["winner"]["p_better"] == pytest.approx(cr["p_best"])
+    assert not any(isinstance(v, float) and k.startswith("winner") for k, v in cr.items())
 
 
 def test_pobb_locks_in_dominant_leader():

@@ -211,7 +211,6 @@ def pobb_decision_data(
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
         "leader_id": str(candidate_score.get("leader_id", "")),
-        "p_best_snapshot": dict(candidate_score.get("p_best_snapshot") or {}),
         "paired_breakdown": dict(candidate_score.get("paired_breakdown") or {}),
         "candidate_sample_ids": list(candidate_sample_ids or []),
         "prior_histories": dict(prior_histories or {}),

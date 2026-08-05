@@ -163,8 +163,8 @@ def _replay_round_winner(
 
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> tuple[str, dict[str, float]] | None:
-    """Build (candidate_id, θ-ability snapshot) for PoBB replay.
+) -> float | None:
+    """Re-derive this candidate's ``p_best`` for PoBB replay. ``None`` ⇒ not derivable.
 
     Re-fits θ on the cycle's fixed δ ruler (``ctx.delta_scale``) over the recorded
     per-prior GRADED responses + the candidate's rescored grades on
@@ -198,27 +198,23 @@ def _pobb_replay_snapshot(
     if not paired_prior_grades:
         return None
 
-    p_best, per_prior = elimination_p_best(
+    p_best, _per_prior = elimination_p_best(
         candidate_grades,
         paired_prior_grades,
         [int(s) for s in candidate_sample_ids],
         ctx.delta_scale or {},
     )
-    # Mirror PoBBCheck.check shape: per-prior P(cand > prior) + ``cid → min``
-    # so replayers read ``snapshot[candidate_id]`` exactly like the live path.
-    snapshot: dict[str, float] = {**per_prior, candidate_id: p_best}
-    return candidate_id, snapshot
+    return float(p_best)
 
 
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
     """PoBB ε-gate re-derived on θ ability under the current scorer (deterministic)."""
-    snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if snap is None:
+    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
+    if p_best is None:
         return False
-    candidate_id, snapshot = snap
-    return float(snapshot[candidate_id]) < float(inputs_ref["epsilon"])
+    return p_best < float(inputs_ref["epsilon"])
 
 
 def _replay_leader_lock_in(
@@ -227,12 +223,11 @@ def _replay_leader_lock_in(
     """PoBB leader-lock re-derived on θ ability under the current scorer (deterministic)."""
     if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
         return False
-    snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if snap is None:
+    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
+    if p_best is None:
         return False
-    candidate_id, snapshot = snap
-    # ``cid → min`` is the lock-in metric; no separate leader guard.
-    return float(snapshot[candidate_id]) >= float(inputs_ref["lock_in"])
+    # ``min`` over priors is the lock-in metric; no separate leader guard.
+    return p_best >= float(inputs_ref["lock_in"])
 
 
 # ``RESUME_CHECKPOINT_GATING`` enumerates the kinds; the assertion below

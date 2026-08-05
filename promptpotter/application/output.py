@@ -568,15 +568,24 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
+    """``{candidate_id: [P(best) per query]}`` + each one's last query index.
+
+    One stream line is one candidate's reading (``current_id`` says whose), so the
+    trajectory is keyed by that. It used to fan every key of a cid→prob map into its own
+    trajectory, and the non-current keys of that map were the CURRENT candidate's odds
+    against each prior — so log.md's sparkline listed every prior as a candidate and printed
+    the round's actual winner, holding P(best) 0.755, at 22.9%.
+    """
     if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
     last_seen: dict[str, int] = {}
     for rec in iter_jsonl(streams_dir / f"round_{round_num:04d}_p_best.jsonl"):
-        qi = int(rec.get("sample_idx", -1))
-        for cid, prob in (rec.get("p_best") or {}).items():
-            trajectory.setdefault(str(cid), []).append(float(prob))
-            last_seen[str(cid)] = qi
+        cid = str(rec.get("current_id") or "")
+        if not cid:
+            continue
+        trajectory.setdefault(cid, []).append(float(rec.get("p_best") or 0.0))
+        last_seen[cid] = int(rec.get("sample_idx", -1))
     return trajectory, last_seen
 
 
