@@ -2,19 +2,9 @@
 
 > The real L4 recursion runs end-to-end (`new promptpotter-self` mints + runs real inner campaigns). Slices 3 + 4 + the distributable config remain; this doc is the **living finish-line plan** for them (see § Finish line below).
 >
-> ## ⚠️ EVERY MEASUREMENT BELOW IS VOID — DO NOT CITE ONE
+> ## ⚠️ EVERY MEASUREMENT PREDATING 2026-07-10 IS VOID — DO NOT CITE ONE
 >
-> On **2026-07-10** all 169 dev campaigns and the measurement cache were deleted on purpose.
-> Every origin score, noise band, CI, per-inner cost, wall-clock and self-optimizing campaign winner in
-> this document predates that reset and is **void**. Re-measure before acting on any of them.
->
-> The `justlogic` numbers are void **twice over**: `_step_llm_only` dropped `seed`, so justlogic
-> was **never seed-deterministic** — its ≈0.44 origin and the noise band around it were never
-> reproducible measurements at all. (Fixed since; proven at temp 1.0.)
->
-> The *reasoning* below is kept because it is why the knobs are what they are. The *numbers* are
-> kept only so a re-measurement has something to compare against. They are marked ~~struck~~ or
-> **[VOID]** where they appear.
+> The dev campaigns and the measurement cache were deleted on purpose that day, so every origin score, noise band, CI, per-inner cost and wall-clock older than it is **void** — re-measure before acting. The `justlogic` numbers are void **twice over**: `_step_llm_only` dropped `seed`, so justlogic was never seed-deterministic and its origin was never a reproducible measurement at all (fixed since; proven at temp 1.0). The *reasoning* is kept because it is why the knobs are what they are; surviving numbers are marked ~~struck~~ or **[VOID]** and exist only to give a re-measurement something to compare against.
 >
 > **Scope:** CLI / headless only — no webapp surface yet (that's a later lane). The outer loop is a normal `python -m promptpotter new promptpotter-self` invocation.
 >
@@ -28,10 +18,10 @@
 
    > **There is no declared target, and no *expected* headroom — deliberately.** `target_score` and the `rounds_to_N` proxy are DELETED (2026-07-12). Declaring a target asserts up front how much room the benchmark has; that assumption reached no decision (the counter had no candidate gradient and the scoring formula already ignored it) and it was epistemically backwards. **A task the inner model looks bad at is a task it has not been TUNED for yet, not a task with a low ceiling** — gpt-oss-20b can be prompted a long way up on justlogic. The default posture is *optimistic*: assume the room is large unless the evidence is unambiguous. The lift core is the raw climb on the ability ruler and divides by nothing — not by a declared target, and (since 2026-07-13) not by an inferred "room" either.
    >
-   > What this does NOT excuse: **improvement on justlogic is real but INFREQUENT.** A seed that fails to move under one optimizer prompt is weak evidence, not proof the seed is flat — do not read a quiet panel as "no headroom", and do not retire the benchmark on one run. The panel spans a *range* of seed difficulty rather than a wide count, because duplicated difficulty buys nothing — and it did NOT until 2026-08-02, when five of six seeds sat at 0.525-0.575 and the sixth held the low end only through seven impossible rows. Seeds are now chosen on measurement (`python -m promptpotter seed-screen`): a bank whose constant-answer floor EXCEEDS its origin is REJECTED — it pays a candidate for collapsing to one label — and the rest are ranked on `reasoning_margin` (origin − floor), never on accuracy, which conflates an easy bank with a large majority class. **The floor is exact and the origin is not**, so the verdict needs repeated passes (default 3) and is WITHHELD while the margin sits inside its own error bar; a single pass once condemned seed-5 on a margin its second read reversed. A thin POSITIVE margin disqualifies too — seed-4 left the panel at +0.021, one row in 40. Sizing: [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md) § Sizing the panel.
+   > What this does NOT excuse: **improvement on justlogic is real but INFREQUENT.** A seed that fails to move under one optimizer prompt is weak evidence, not proof the seed is flat — do not read a quiet panel as "no headroom", and do not retire the benchmark on one run. The panel spans a *range* of seed difficulty rather than a wide count, because duplicated difficulty buys nothing — and it did NOT until 2026-08-02, when five of six seeds sat at 0.525-0.575 and the sixth held the low end only through seven impossible rows. Seeds are now chosen on measurement (`python -m promptpotter seed-screen`): a bank whose constant-answer floor EXCEEDS its origin is REJECTED — it pays a candidate for collapsing to one label — and the rest are ranked on `reasoning_margin` (origin − floor), never on accuracy, which conflates an easy bank with a large majority class. **The floor is exact and the origin is not**, so the verdict needs repeated passes (default 3) and is WITHHELD while the margin sits inside its own error bar; a single pass once condemned seed-5 on a margin its second read reversed. A thin POSITIVE margin disqualifies too — seed-4 left the panel at +0.021, one row in 40.
 2. **Outer mutations actually reach the inner optimizer prompts (slice 3). [SHIPPED `28f9c720`, 2026-07-01.]** With the standard `assets/optimizer/` outer prompts the outer L1 emits FLAT single-prompt field edits, which do **not** map to per-node `optimizer_prompt_overrides` — candidates would run identical inner cycles and the loop would optimize noise. The specialized outer prompt set that emits per-node `PromptTemplate` edits now exists and is wired end to end: `promptpotter/assets/optimizer/sets/self_optimizing.yaml`, selected by `campaign.yaml::optimization.optimizer_set: "self_optimizing"`, whose wire schema offers only the four inner nodes × their `PromptTemplate` fields → `connectors/promptpotter.py` → `runner/inner/cycle.py::set_optimizer_prompt_overrides` → `dispatch/llm_call/prompts.py`. **This is no longer the gating item** — it was still described as one here long after it landed, which is worth knowing when reading anything that cites this line.
 3. **Spend is visible (slice 4 rollup). [SHIPPED.]** Each inner campaign's total rides its `CycleResult.spend` (read from the inner run's live dashboard state at finalize, never the debounced `dashboard.json`, which would race the read) and is returned as that outer sample's `step_tokens` — so it fans onto the outer ledger through the existing backend-cost channel (`sample_measurement`), keyed by the terminal node. The inner cost IS the outer sample's backend cost, so "spend is the headline" holds at the outer level without a second mechanism. `runner/inner/cycle.py::run_inner_cycle`. (Unmeasured or unpriced inner spend used to EXCLUDE the cell, because `delta_per_dollar` divided by it; with no cost term in the fitness that guard is gone and those cells are now measurable.)
-4. **A bounded, cheap default config.** The committed `inner_tasks.yaml` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator. The **stall brake** is what keeps the geometry honest: `inner_lives` (+1 per improving round, −1 per stall, stop at 0 → `LIVES_EXHAUSTED`) ends a stalling inner campaign early, so a dead optimizer prompt is cheap and only a compounding one buys depth. **INVARIANT: `lives.start` must sit well below `max_inner_rounds`.** Set near it, the bank cannot drain before the calendar cap — every inner then runs full-length regardless of quality, and that also removes the geometry's only brake, since an optimizer prompt that finds nothing then burns the same rounds as one that compounds (a term with no candidate gradient earns nothing — the governing law is the type, `domain/l4/proxies.py::OuterSampleProxies`; `inner_tasks.yaml` is a typed declaration now, not a place to write prose). **The brake is only free because the measurand divides by the BUDGET**: `mean_round_delta` holds the last adopted level forward over the rounds a stopped cell never ran (`held_levels`), so ending early saves the money without moving the score. Dividing by the rounds that ran instead — which it did until 2026-08-02 — paid a cell for quitting once it had lifted, i.e. the brake bought its own good grade. How the panel and the round cap are sized, and how to re-derive them: [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md) § Sizing the panel.
+4. **A bounded, cheap default config.** The committed `inner_tasks.yaml` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator. The **stall brake** is what keeps the geometry honest: `inner_lives` (+1 per improving round, −1 per stall, stop at 0 → `LIVES_EXHAUSTED`) ends a stalling inner campaign early, so a dead optimizer prompt is cheap and only a compounding one buys depth. **INVARIANT: `lives.start` must sit well below `max_inner_rounds`.** Set near it, the bank cannot drain before the calendar cap — every inner then runs full-length regardless of quality, and that also removes the geometry's only brake, since an optimizer prompt that finds nothing then burns the same rounds as one that compounds (a term with no candidate gradient earns nothing — the governing law is the type, `domain/l4/proxies.py::OuterSampleProxies`; `inner_tasks.yaml` is a typed declaration now, not a place to write prose). **The brake is only free because the measurand divides by the BUDGET**: `mean_round_delta` holds the last adopted level forward over the rounds a stopped cell never ran (`held_levels`), so ending early saves the money without moving the score. Dividing by the rounds that ran instead — which it did until 2026-08-02 — paid a cell for quitting once it had lifted, i.e. the brake bought its own good grade.
 5. **A run that demonstrably improves.** The validation gate (`proxy_lift_corr ≥ 0.6` over ≥4 paired branches) PLUS at least one real `new promptpotter-self` whose outer best beats its outer origin — the proof the cheap proxy predicts real lift and the loop climbs. **Gated on item 7, and this is the ordering that matters:** "outer best beats outer origin" is satisfied by noise at the current resolving power (6 cells, MDE ~1.7× the typical arm contrast), so a run that clears it proves nothing until the panel can tell an arm from a re-read of itself. Read `n_cells_to_verdict` first; treat this item as unmeasurable while it says `UNKNOWN`.
 6. **The loop owns its own information flow (§6). [MECHANISM BUILT — Arcs 1+2+3. Open: the validating data run.]** A distributable `promptpotter-self` must let the optimizer improve *how its optimizer prompts are built*, not only their prose. Which signals each inner node sees (the per-node injection set) is the higher-value, dataset-agnostic axis. It **is now a searched axis** with a mandatory guard-rail floor: every optimizer node owns a `NodeLayoutSpec` in `NODE_LAYOUTS` (`domain/l1_layout.py`), and the L4 layout edit is wired for the three `editor == "l4"` nodes. What remains is **validation, not construction** — a full-signal run showing outer candidates that differ by inner-node *layout* (not only prose), with the winner's layout captured. Sequenced alongside 3–5 on the same run.
 7. **The outer SNR instrument — the scientific gate that makes this whole phase falsifiable, and the trigger for when to trust the loop.** The finish-line goal — *tuning and searching a very good base configuration for the L1/L2/L3 loop, driven by the outer loop* — is only meaningful once the outer signal exceeds its own measurement noise. Below that line the outer loop is **noise-blind** and its verdicts are coin-flips: this is why `120B`-vs-`v4-flash` was unreadable, and why round-1-then-plateau makes every optimizer prompt look identical. So a **recurring power analysis** (a *gauge R&R* on the outer gradient) is a first-class deliverable, not a diagnostic afterthought:
@@ -254,49 +244,15 @@ as of the first complete 39-cell panel there is barely a composition left. The f
 `datasets/promptpotter-self/campaign.yaml::scoring` re-anchors **one** term:
 `max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))`.
 
-**The term reads the MEAN of the adopted series, not its last step — and that is a
-signal-to-noise decision taken on measurement.** On the same 39 cells: endpoint arm SD 0.077 /
-residual 0.182; mean 0.064 / **0.134**, agreeing on the arm effects at r = +0.941. A 26%
-quieter instrument at identical spend. **The mean is taken over the round BUDGET**, holding the
-last adopted level forward across rounds the cell never ran (`domain/l4/proxies.py::held_levels`)
-— dividing by the rounds that happened made the denominator a per-cell quantity, and `inner_lives`
-stops a STALLING cycle, so it paid a cell for quitting once it had lifted. Near-inert on today's
-corpus (almost every banked cell used its full cap) and it binds the moment the brake starts
-firing, which is what a better optimizer prompt causes.
+**Why THIS term and not a basket** — the mean-vs-endpoint signal-to-noise decision, the four multipliers the first complete panel removed, and the bill-vs-incurred argument that keeps any cost term out — is owned by [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md). What stays here is the composition, the open terms, and the live defect.
+
+**The mean is taken over the round BUDGET**, holding the last adopted level forward across rounds the cell never ran (`domain/l4/proxies.py::held_levels`) — dividing by the rounds that happened made the denominator a per-cell quantity, and `inner_lives` stops a STALLING cycle, so it paid a cell for quitting once it had lifted. Near-inert on today's corpus (almost every banked cell used its full cap) and it binds the moment the brake starts firing, which is what a better optimizer prompt causes.
 
 One thing this does NOT fix, and it is the open one:
 
-- **The panel still cannot resolve one optimizer prompt from another.** At 6 cells the SE is
-  0.055 against a typical arm contrast of ~0.09 — the smallest difference it can call is 1.7×
-  larger than a difference between arms, down from 1.9×. Closing that needs more cells or
-  **candidates that differ more than they currently do**, which is the cheaper lever and the
-  untried one. Until then the panel is a behavioural diagnostic, not a selector; crowning a
-  winner between near-identical arms here is reading noise.
-  - **Two caveats, both worth knowing before this ratio is quoted again.** (1) The cell count
-    was stated here as "~35 (wall-clock we do not have)", and that does not follow from the
-    spec's own arithmetic: `se ∝ 1/√n`, so reaching 1.0 needs `6 × 1.7² ≈ 18` cells — which is
-    also what item 7's `(2.8·σ/d)²` gives. Two sections stated two answers, and the larger one
-    was the stated reason for not buying cells; at 18 that is a different conversation.
-    (2) The 1.7 mixes corpora — the 0.09 contrast comes off the 39-cell `af6252`, the 0.055 SE
-    off the current 6-cell panel — and its σ is the **panel's own SE, not re-run noise**, which
-    nothing on disk has ever measured (item 7's first reading is `UNKNOWN` for exactly that
-    reason). Read `n_cells_to_verdict` off `rank-optimizer-prompts` instead of re-deriving it in
-    prose; it is served now, and a served number cannot drift from the disk it came from.
+- **The panel still cannot resolve one optimizer prompt from another.** Read `n_cells_to_verdict` off `rank-optimizer-prompts` rather than re-deriving a ratio in prose — it is served, and a served number cannot drift from the disk it came from. Two things this doc got wrong often enough to name: `se ∝ 1/√n`, so the cell count needed is far below the "~35 (wall-clock we do not have)" once quoted here as the reason not to buy cells; and the σ in any such ratio is the **panel's own SE, not re-run noise**, which nothing on disk has ever measured (item 7). Until it resolves, the panel is a behavioural diagnostic, not a selector, and crowning a winner between near-identical arms is reading noise. Closing it needs more cells or **candidates that differ more than they currently do** — the cheaper lever, and the untried one.
 
-**RESOLVED, and the earlier entry here overstated it — the anchor wander does not survive the
-subtraction.** θ_C0 is re-read on a ruler each cycle fits from its own candidates, and this spec
-recorded seed-2's origin ranging −0.06 to +1.14 off ONE cached measurement, quoting "wander 0.588
-against a 0.209 arm spread" and proposing a ~12-call-per-cell re-measure. Two corrections, both
-from the 50 banked cells. **The 0.588 was seed-2's own sd (0.546) read as the panel's; the panel
-mean is 0.234.** And a ruler shift moves θ_C0 and the round levels TOGETHER, so it cancels in
-their difference: within-seed r(origin, ended) = **+0.75, slope +0.87**, leaving ~2% of the
-delta's variance. **The re-measure is not worth buying** — it is a ~3% spend increase for ~2% of
-the noise, and that is a measurement, not a refusal. What WAS worth fixing was free: θ_C0 came off
-the JOINT `fit_rasch` (mean(θ)=0 re-anchored, σ_θ estimated by EB from whichever arms were in the
-pool) while every round level is a `fit_theta_given_delta` MAP at the locked ruler. Two estimators
-for two ends of one subtraction, and the shrinkage on the anchor moved with the arm — a bias, which
-unlike noise does not average out over a panel. `_calibrate_delta_ruler` now reads θ_C0 through the
-same conditional estimator, one expression for the cold and warm branches alike.
+**One estimator per subtraction.** θ_C0 used to come off the JOINT `fit_rasch` (re-anchored, σ_θ estimated by EB from whichever arms were in the pool) while every round level is a `fit_theta_given_delta` MAP at the locked ruler — two estimators for two ends of one difference, so the shrinkage on the anchor moved with the arm. That is a bias, which unlike noise does not average out over a panel. `_calibrate_delta_ruler` now reads θ_C0 through the same conditional estimator, one expression for the cold and warm branches alike. The anchor *wander* on top of it was measured and is **not** worth buying out: a ruler shift moves θ_C0 and the round levels together, within-seed r = **+0.75**, leaving ~2% of the delta's variance for a ~3% spend increase.
 
 **Read the shape, not only the scalar.** Every cell records a per-round `improved` verdict — a
 within-round paired comparison against the matched origin on the same samples, so it touches
@@ -308,72 +264,11 @@ Measured on the current run's six cells: **r1 3/6 · r2 1/5 · r3 2/3 · r4 1/3*
 behave; round 1 lifts only half the time when it should be the easiest round on the board, and
 round 2 nearly flatlines. That is the live L4 defect, and it is an `l1_generate` problem.
 
-**Why the lift term reads the ADOPTED incumbent and not the round's proposals.** It averaged
-proposals until 2026-07-28, and that made the metric anti-correlated with inner success: a round's
-value to the search is what it *crowns*, so averaging in the arms it discarded prices exploration
-as damage. Measured on `promptpotter-self__d8b5be`, both cells of the SAME optimizer prompt: the inner
-campaign that climbed 52.5%→82.1% (θ +0.85) scored **0.069** while one that climbed 52.5%→57.1%
-(θ +0.46) scored **0.199** — 2.9× higher for a quarter of the gain, because the first explored
-harder.
+**The re-anchoring window is `(x+1.0)/3.0`.** It widened from `(x+0.5)/1.5`, which clipped the best cell ever measured (+1.405 logits) and held zero cells in its lower third; the current one clips nothing in the banked range and is linear, so the paired estimator's effect × 3.0 IS the mean logit lift. `improvement_threshold` moved with it — it lives on the fitness scale.
 
-**RESOLVED — `cleanliness` WAS measuring the seed.** This spec left that open, charging the term
-"pending a run with a real optimizer prompt contrast". `promptpotter-self__af6252` is that run, and the
-variance decomposition over its 39 cells is decisive: `cleanliness` puts **30.9%** of its variance
-between SEEDS and **15.4%** between ARMS — twice as much signal about which data a cell drew as
-about which optimizer prompt ran it. It is out of the formula.
+**Governing law: every term carries a candidate gradient** — terms without one stay out. That law removed the four multipliers the panel measured out, along with the earlier rounds-to-target counter, the per-seed cost multiplier, and the `normalized_gain` divisor. Nothing is held "emitted-but-out-of-formula" any more: the seven unused proxies are no longer emitted at all, because an emitted-and-unread field is a field that drifts from its `observation_mappings` declaration in silence.
 
-The other three factors went with it, each for its own measured reason: `diversity_health` never
-left the top fifth of its range (no candidate gradient at all); `delta_per_dollar` correlated
-**0.958** with the lift core and flipped no ordering, making it the lift counted twice; and
-`rounds_improved_frac` flipped nothing. All four were *multipliers*, so each held authority over
-an ordering it could not justify, and together they compressed the fitness scale enough to roughly
-double the apparent significance of the run's own conclusion (pooled paired t −4.62 vs the raw
-term's −2.38, identical data).
-
-For comparison, the re-anchoring window widened from `(x+0.5)/1.5` to `(x+1.0)/3.0`. The old one
-clipped the best cell ever measured (+1.405 logits) and held zero cells in its lower third; the new
-one clips nothing in the banked range and is linear, so the paired estimator's effect × 3.0 IS the
-mean logit lift. `improvement_threshold` moved with it — it lives on the fitness scale.
-
-**The quality EVENTS still act, structurally rather than twice.** An all-empty-response cycle is
-FLOORED (`floor_reason`); a collapsed arm is dropped from the inner election and eliminated at
-PoBB. Charging them a second time inside the fitness was a second mechanism for a job the loop
-already does.
-
-**Governing law: every term carries a candidate gradient** — terms without one stay out. That law
-is what removed the four factors above, along with the earlier rounds-to-target counter, the
-per-seed cost multiplier, and the `normalized_gain` divisor. Nothing is held
-"emitted-but-out-of-formula" any more: the seven unused proxies are no longer emitted at all,
-because an emitted-and-unread field is a field that drifts from its `observation_mappings`
-declaration in silence.
-
-**A term must also be blind to our measurement history, and one was not.** The measurement and
-optimizer-call caches are tenant-global and content-addressed, so an inner cycle we have run
-before *replays*: identical work, identical trajectory, nothing billed. That is not spread evenly
-across the arms. The **origin** arm is the one that replays — a variant optimizer prompt writes
-different prompts, so its every content hash is new and it pays full freight — so any term
-denominated in the **bill** rewards the incumbent for cells we happen to have measured already.
-It is a bias toward the origin, not noise, and it is invisible: the cell either scores as
-absurdly efficient or, at the limit, records `$0.00` and is excluded outright. Live on
-2026-07-13: seed-0 ran three inner rounds in four seconds and dropped out of the panel.
-
-The resolution is that **cost and the bill are two different quantities**, and only one of them is
-a property of the candidate:
-
-- **The bill** (`CycleSpend.cost_usd`, `dashboard.json::spend.*.used_usd`) — money that left the
-  account. Cache hits contribute nothing. This is the headline and what `spend_budget_usd` gates,
-  and it must stay that way: billing a replay would halt a run that cost nothing.
-- **The incurred cost** (`CycleSpend.incurred_usd`) — what the search would cost against a cold
-  cache, with cache hits priced from the tokens they recorded. This is what a *measurement* of a
-  candidate would have to divide by. On a cold cache the two are identical, which is why the gap
-  stayed hidden.
-
-**No fitness term divides by either one today** — `delta_per_dollar` is out of the formula and out
-of the emitted vector. Both costs are still tracked and reported, because they answer different
-operator questions, and this law is kept as the standing answer to any proposal to reintroduce a
-cost term: it would have to be blind to our measurement history, and the bill is not. The same
-argument already ruled out a per-second twin — wall-clock cannot be recovered the way cost can, so
-it measures the cache rather than the optimizer prompt.
+**A term must also be blind to our measurement history** — owned by [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md) § The bill is not the cost. What this layer must get right: no fitness term divides by either cost today, and any proposal to reintroduce one answers that section first.
 
 Still to layer — the cross-sample terms (the P3 post-aggregate formula, above the
 per-sample primitives):
@@ -403,21 +298,13 @@ numbers; mutating the inner `checkin` (off the operator surface — deferred).
 branches — the empirical proof the cheap proxy predicts real lift. **Still open, and it is a
 measurement to run, not a module to write.**
 
-## Implementation order
+## Slice order
 
-1. **Shared `in_process` seam — SHIPPED** (§1). The `llm_only` connector it also yielded
-   is **withdrawn/deleted** (zero adopters; see §1).
-2. **`promptpotter` inner-cycle runner + isolation — SHIPPED & live-validated** (§2).
-3. **[GATING] Inner benchmark with headroom + specialized outer prompt set — MECHANISM SHIPPED; full-signal data run open.** `inner_tasks.yaml` → `justlogic-d234` (the origin headroom is **[VOID]/unmeasured**, finish-line item 1) + the specialized outer prompt set (§3), live-validated to emit per-node edits of the INNER optimizer prompts. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin.
-4. **Enriched outer fitness + inner-spend rollup — rollup, per-sample composed fitness, and delta-led display SHIPPED; cross-sample terms remain** (§4). Each inner cycle's spend returns as the outer sample's `step_tokens`, fanning onto the outer ledger via the existing backend-cost channel. **Done when:** `proxy_lift_corr ≥ 0.6` over ≥4 paired branches.
-5. **Distributable config + cost realism.** Tune the committed `inner_tasks.yaml` + `campaign.json` (and the shipped optimizer provider) so `new promptpotter-self` completes at evaluator-tolerable cost. The cost shape (geometric; wall-clock dominated by optimizer-call tails) is documented operator-facing in `dataset.md` § Cost shape — keep it there, not here. Default small; consider pinning groq.
+**Each slice's status is its own `##` heading, and what "done" means for it is § Finish line — this section holds only the ordering and the two facts neither of those carries.** Slices 1 + 2 shipped. 3 is the gating slice (no real signal without it); 4 + 5 make the result trustworthy + shippable; 6 (the information-flow axis) is required for the distributable claim and sequences after 3.
 
-   > **[VOID] Every cost anchor this item used to quote is unusable** — measured on an inner ladder that no longer exists and on deleted campaigns. **Re-measure before quoting a price to anyone.** Until then, `spend_budget_usd` in `campaign.json` is the only honest bound: it is a *cap*, not an estimate.
+**Slice 5 is distributable config + cost realism** — tune the committed `inner_tasks.yaml` + `campaign.json` (and the shipped optimizer provider) so `new promptpotter-self` completes at evaluator-tolerable cost, defaulting small. The cost shape (geometric; wall-clock dominated by optimizer-call tails) is documented operator-facing in `dataset.md` § Cost shape — keep it there, not here.
 
-   **Done when:** a fresh clone can `new promptpotter-self` and watch self-improvement at bounded, disclosed cost.
-6. **Per-node prompt layout — BUILT (Arcs 1+2+3); full-signal data run pending** (§6). **Done when:** the run shows outer candidates that differ by inner-node *layout* (not only prose) and the winner's layout is captured in `winner_pipeline_params` — validate alongside slices 3–5 on the same run.
-
-Slices 1 + 2 shipped. 3 is the gating slice (no real signal without it); 4 + 5 make the result trustworthy + shippable; 6 (the information-flow axis) is required for the distributable claim and sequences after 3. The agent drives 3→6 autonomously, escalating only for real spend approval / provider change / compaction.
+> **[VOID] Every cost anchor this spec used to quote is unusable** — measured on an inner ladder that no longer exists and on deleted campaigns. **Re-measure before quoting a price to anyone.** Until then, `spend_budget_usd` in `campaign.json` is the only honest bound: it is a *cap*, not an estimate.
 
 ## 6. Per-node prompt layout — the searched information-flow axis
 

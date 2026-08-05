@@ -210,12 +210,8 @@ The persisted world is a four-entity containment hierarchy
   session**. Three kinds: divergence (operator-chosen), diagnostic,
   and sweep (sweep-toolkit A/B candidates) — all flat under the
   campaign's `cycles/`.
-- **Fork direction** (`ForkDirection`, `FORK_DIRECTION`) — which side of a cut
-  the run CONTINUES on, derived from the trigger and never stored.
-  `offshoot` = the child hangs off a line that keeps running (sweep / diag /
-  steered); `supersede` = the child IS the line and the parent is what was
-  left behind (scoring divergence, rewind, L2/L3 rebase). One mechanism mints
-  both, so without this a supersession draws as an offshoot.
+- **Fork direction** (`ForkDirection`, `FORK_DIRECTION`) — which side of a cut the run CONTINUES on. `offshoot` = the child hangs off a line that keeps running (sweep / diag / steered); `supersede` = the child IS the line and the parent is what was left behind (scoring divergence, rewind, L2/L3 rebase); `equivalent` = both sides continue identically. Derived from the trigger, except a correction — it cuts before its consequence is known, so it records the measured answer on `ForkSpec.direction`, which outranks the default and is the only source of `equivalent`. **Two separate consequences:** every direction but `offshoot` moves the line; only `supersede` also retires what it replaced. One mechanism mints every cut, so without this a supersession draws as an offshoot. [`operations/persistence-and-state.md`](operations/persistence-and-state.md).
+- **Timeline** — a course's children as ONE sequence: the candidates it minted plus every attempt its forks contributed, renumbered onto it, because `C{round}.{n}` is a position in a course's PRIVATE counter and every course mints its own `C1.1`. A fork is not a node; a `supersede` cut is where the renumber stops. `infrastructure/store/lineage_views.py` — the module docstring is the law.
 - **ForkSpec** — the single typed fork record (`domain/run_records.py`):
   one writer behind the parent's `FORK_CUT` ledger entry (SoT), the fork's
   `index.json::fork` (lineage read), and — when steered — its

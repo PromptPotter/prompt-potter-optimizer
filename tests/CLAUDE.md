@@ -41,9 +41,11 @@ run reveals; each test's docstring carries the detail.
   exactly the files containing one. Two such files manufactured false dead-code findings twice.
 - `test_claude_md_claims_resolve` — **nothing but an agent reads a `CLAUDE.md`, and an agent
   following a dead pointer does not raise.** It reads a rule that is not there, or misses one
-  that is, and edits the code accordingly with every gate green throughout. A claim scan, not
-  a shape scan: it asserts nothing about how the tree is organized, only that what the files
-  already claim still resolves.
+  that is, and edits accordingly with every gate green throughout. A claim scan, not a shape
+  scan: only that what the files claim still resolves. Its **line-number ban runs wider —
+  every tracked `docs/**/*.md`** — because that half enforces the Recompute Test, which
+  governs all docs rather than the CLAUDE.md shape; scoping it narrow is what let one
+  backlog collect nine refs that had all rotted.
 
 Neither can be an import-time assert: no production module owns the repo's file bytes.
 

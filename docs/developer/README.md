@@ -128,13 +128,13 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
 
-**Schema** (`domain/sample.py:77`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
+**Schema** (`domain/sample.py::Measurement`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
 
 **Extension seams:**
 
 | Change | Files |
 |---|---|
-| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`datasets/loaders.py:397`), `_to_measurement()` (`measurement_archive.py:418`); bump `MEASUREMENTS_SCHEMA_VERSION` (`config/settings.py:45`) |
+| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`application/datasets/loaders.py`), `_to_measurement()` (`infrastructure/store/measurement_archive.py`) |
 | New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class with `_seen_runs` cursor + `ingest_run()`, register on `AxisIndex.refresh()` |
 

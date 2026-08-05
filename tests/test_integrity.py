@@ -1710,8 +1710,9 @@ _CLAUDE_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.M)
 _CLAUDE_CARD = re.compile(r"^##\s+Load-bearing\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
 _CLAUDE_CARD_TARGET = re.compile(r"→\s*§\s*(.+?)\s*$", re.M)
 # Each entry is a shape that reads as a fact but silently decays into a false one.
+_LINE_NUMBER_REF = re.compile(r"\.(?:py|ts|tsx):\d+")
 _CLAUDE_BANNED = {
-    "line-number reference": re.compile(r"\.(?:py|ts|tsx):\d+"),
+    "line-number reference": _LINE_NUMBER_REF,
     "R-NN rule tag": re.compile(r"(?<![A-Z])R-\d\d\b"),
 }
 
@@ -1746,6 +1747,15 @@ def test_claude_md_claims_resolve() -> None:
     4. No banned token. A `file.py:120` reference rots on the next edit to that file and
        cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo has
        never had (`potter-debt-sweep/SKILL.md` says so itself).
+
+    The line-number half of (4) runs over **every tracked `docs/**/*.md`**, not just the
+    CLAUDE.md tree, because it enforces the Recompute Test (`docs/CLAUDE.md` § Editing a
+    doc), which governs all docs — and the CLAUDE.md-only scope is exactly what let
+    `code-debt-cleanup.md` accumulate nine such refs, every one of them rotted by the time
+    anyone re-read them (`select_round_subset` cited at :225, actually at :806). The other
+    three assertions stay CLAUDE.md-scoped: they are about the contract-file shape. The
+    `R-NN` half stays scoped too — prose docs still carry legacy tags, and retiring those
+    is a map-each-to-its-name pass, not a scope change.
 
     What it cannot catch, so nobody reads a green as more than it is: a count that is
     simply wrong, semantic drift in a claim about behaviour, two plausible owners for one
@@ -1796,6 +1806,12 @@ def test_claude_md_claims_resolve() -> None:
 
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
+
+    for rel in (p for p in tracked if p.startswith("docs/") and p.endswith(".md")):
+        text = (root / rel).read_text(encoding="utf-8")
+        broken += [
+            f"{rel}: line-number reference {hit!r}" for hit in _LINE_NUMBER_REF.findall(text)
+        ]
 
     assert not broken, (
         "CLAUDE.md claim(s) that do not resolve:\n  " + "\n  ".join(sorted(broken)) + "\n"

@@ -1,39 +1,12 @@
 # PromptPotter Architecture
 
-This is the **architecture reference** — the single page (plus the
-load-bearing surface list in §0.5) that every PR measures against.
+This is the **architecture reference** — the single page (plus the load-bearing surface list in §0.5) that every PR measures against.
 
-**AI assistant readers, start here.** §0 below is the **entry
-point**. Read it first to know the shape of the project. It fits on
-roughly one A4 page so you can grab the whole shape quickly, then
-**progressively disclose detail by following the layered CLAUDE.md
-tree**:
+**AI assistant readers, start here.** §0 below is the entry point: read it first to know the shape of the project, then disclose detail by following the per-layer `CLAUDE.md` tree, whose index is [`promptpotter/CLAUDE.md`](../promptpotter/CLAUDE.md). **Don't load everything upfront — that's the design.** §0 plus the one layer you are touching is the right context for a task.
 
-- `CLAUDE.md` (root) — onboarding pointers, project conventions,
-  the pre-flight gate. Carries a pointer to this file
-  (`docs/architecture.md`) as the authoritative architecture
-  reference.
-- `promptpotter/CLAUDE.md` — package-level orientation.
-- `promptpotter/application/CLAUDE.md`,
-  `promptpotter/domain/CLAUDE.md`,
-  `promptpotter/infrastructure/CLAUDE.md`,
-  `promptpotter/presentation/CLAUDE.md` — per-layer detail (only
-  load these when you actually touch that layer).
-- `tests/CLAUDE.md` — test charter.
+**Each per-directory `CLAUDE.md` stays consistent with §0** — when §0 changes (a rename, a bucket move, a new invariant), the layer files update in the same PR.
 
-**Don't load everything upfront — that's the design.** §0 plus the
-layer-CLAUDE.md you're touching is the right context for a given
-task. When working in `application/optimization/`, load §0 +
-`promptpotter/application/CLAUDE.md`; when touching domain types,
-§0 + `promptpotter/domain/CLAUDE.md`. Each per-directory CLAUDE.md
-stays consistent with §0 — when §0 changes (rename, bucket move,
-new invariant), the layer files update in the same PR (the §3
-collapse of `cadence/` into `escalation/` is the canonical example:
-the rename PR also touches `application/CLAUDE.md`).
-
-If a request doesn't fit a §0 bucket, that's a flag — propose an
-answer that fits, or push back on the request. Don't run a checklist
-before reading §0; run it after, against §0.
+If a request doesn't fit a §0 bucket, that's a flag — propose an answer that fits, or push back on the request. Don't run a checklist before reading §0; run it after, against §0.
 
 ---
 
@@ -153,22 +126,12 @@ world is a strict containment hierarchy:
   first-class tiers, served by one read path: (a) **user-uploaded**
   datasets at `projects/{tenant}/datasets/{slug}/` — the
   Workspace ⊃ Dataset containment, identity-scoped, tenant-private;
-  (b) **install-global benchmarks** at repo-root `datasets/{name}/`
-  (today's `aime_2025`, `bbeh`, `email-tagging`, `gsm8k`, `hotpotqa`,
-  `justlogic`, `lca-termnorm`, `promptpotter-self`) — install-scoped,
-  read-only, admin-visible only via the `GET /datasets` list endpoint
-  identity filter. The two tiers serve different purposes (operator
+  (b) **install-global benchmarks** at repo-root `datasets/{name}/` — install-scoped, read-only, admin-visible only via the `GET /datasets` list endpoint identity filter. Which names exist is `datasets/` itself; never enumerate them here.
+  The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `pipeline.yaml` /
   `campaign.yaml` / `task_description.md` shape.
-  This tier holds **datasets only**. The optimizer's own pipeline used to sit
-  here as `_optimizer` / `_optimizer_meta`, which is why the listing carried an
-  `_`-prefix filter; it is install content, not a target, and now lives under the
-  package (`config/paths.py::optimizer_assets_root`) where it also ships in the
-  wheel. A checkout resolves benchmark definitions from `datasets/`; a wheel
-  ships the same definitions as install content and resolves them there. Either
-  way the tier is **read-only**, so a benchmark's materialized rows are not kept
-  in it: they are the operator's, and `readable_dataset_rows` resolves them from
-  the tenant tree (`store/dataset_access.py`). **One resolution
+  This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizer_assets_root`), never a target in this tier. A checkout resolves benchmark definitions from `datasets/`; a wheel ships the same definitions as install content and resolves them there. Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
+  **One resolution
   seam:** `readable_dataset_dir` picks the dir (tenant slug first,
   repo benchmark second) once at init and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
