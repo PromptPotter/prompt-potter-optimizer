@@ -21,6 +21,7 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     replay_all_divergences,
 )
 from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
@@ -73,8 +74,7 @@ class AbReport:
 
 def ab_replay_cycle(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     session: Session,
     n_min: int,
     *,
@@ -100,14 +100,10 @@ def ab_replay_cycle(
     assert scorer is not None, "session.scoring.scorer required for A/B replay"
     # ``load_rounds_range`` iterates ``range(0, end+1)`` — read the real max round from the
     # cycle index rather than scanning a huge fixed ceiling.
-    index = campaign_store.load(campaign_id, cycle_id)
+    index = campaign_store.load(hop)
     round_summaries = index["rounds"] if index is not None else []
     max_round = max((int(r["round"]) for r in round_summaries), default=-1)
-    rounds = (
-        campaign_store.load_rounds_range(campaign_id, cycle_id, 0, max_round)
-        if max_round >= 0
-        else []
-    )
+    rounds = campaign_store.load_rounds_range(hop, 0, max_round) if max_round >= 0 else []
 
     def _rescore(items: Any) -> None:
         rescore_results(list(items or []), scorer, sc.scorer_id, sc.scorer_formula)
@@ -151,10 +147,13 @@ def ab_replay_cycle(
             replay_all_divergences(t, origin_results=origin_frontier, delta_scale=delta_scale)
         )
     logger.info(
-        "A/B replay: cycle %s, %d rounds, %d divergence(s)", cycle_id, len(rounds), len(divergences)
+        "A/B replay: cycle %s, %d rounds, %d divergence(s)",
+        hop.cycle_id,
+        len(rounds),
+        len(divergences),
     )
     return AbReport(
-        cycle_id=cycle_id,
+        cycle_id=hop.cycle_id,
         scorer_id=sc.scorer_id or "",
         n_rounds=len(rounds),
         divergences=divergences,

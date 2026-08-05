@@ -11,6 +11,7 @@ from promptpotter.application.config import CampaignConfig
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.config.settings import DATASET_NAME
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import (
     IndividualLineage,
     OptSearchPoint,
@@ -140,10 +141,9 @@ def build_campaign_emitter(
 
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
-        session.state.cycle_id,
+        session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        campaign_id=session.campaign_id,
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
@@ -215,7 +215,7 @@ def try_inherit_fork_origin(
         return None
 
     store = session.store.campaigns
-    index = store.load(session.campaign_id, session.state.cycle_id)
+    index = store.load(session.hop)
     if not isinstance(index, dict):
         return None
     fork = index.get("fork")
@@ -227,7 +227,9 @@ def try_inherit_fork_origin(
     if not isinstance(from_round, int) or not isinstance(from_candidate_id, str):
         return None
 
-    parent_round = store.load_round_file(session.campaign_id, parent, from_round)
+    parent_round = store.load_round_file(
+        CycleHop(campaign_id=session.campaign_id, cycle_id=parent), from_round
+    )
     if parent_round is None:
         return None
     cand = next(

@@ -29,7 +29,7 @@ from promptpotter.application.optimizer_prompt_ranking import (
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, descend_store
-from promptpotter.presentation.api.deps import StoreDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
@@ -92,11 +92,11 @@ class CampaignDetailResponse(CampaignSummary):
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
 
 
-def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str:
+def _backend_type(stores: Stores, dataset_name: str, memo: dict[str, str]) -> str:
     """Memo over ``backend_type_of_dataset`` — the listing endpoint answers it once per DATASET,
     not once per campaign, since a workspace holds many campaigns per dataset."""
     if dataset_name not in memo:
-        memo[dataset_name] = backend_type_of_dataset(store, dataset_name)
+        memo[dataset_name] = backend_type_of_dataset(stores, dataset_name)
     return memo[dataset_name]
 
 
@@ -185,7 +185,7 @@ _LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
 
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
 def list_campaigns(
-    store: StoreDep,
+    stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: str = Query(
         default="active",
@@ -215,7 +215,7 @@ def list_campaigns(
         raise PayloadInvalidError(
             f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}."
         )
-    leaf = descend_store(store, decode_descend(descend))
+    leaf = descend_store(stores, decode_descend(descend))
     owner = str(leaf.identity.user_id)
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     if lifecycle == "active":
@@ -233,7 +233,7 @@ def list_campaigns(
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/checkin")
-def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
+def get_campaign_checkin(stores: StoresDep, campaign_id: str) -> dict[str, Any]:
     """Re-open a durable check-in campaign — its draft wire + last resolver turn.
 
     The sidebar opens a ``checkin``-lifecycle campaign through here instead of the
@@ -244,13 +244,13 @@ def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
     or never a check-in). Wire contract pinned in
     ``docs/specs/m12-api-openapi.yaml::GET /campaigns/{id}/checkin``.
     """
-    draft = load_checkin_draft(store, campaign_id)
+    draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
         raise NotFoundError(
             f"No check-in working state for campaign {campaign_id}",
             code="command_target_not_found",
         )
-    bank = store.checkin.load_bank(campaign_id) or {}
+    bank = stores.checkin.load_bank(campaign_id) or {}
     block = bank.get("resolution") or {}
     return {
         "draft": draft_wire_with_locks(draft),
@@ -262,11 +262,11 @@ def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
 
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
-def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
+def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
     """Campaign manifest detail. 404 on cross-user reads."""
     # Cross-user reads return 404 (not 403) — existence leakage is itself a
     # violation. Ownership rule lives in `load_owned`.
-    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return CampaignDetailResponse(
@@ -276,7 +276,7 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
-        backend_type=_backend_type(store, campaign.dataset_name, {}),
+        backend_type=_backend_type(stores, campaign.dataset_name, {}),
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
@@ -334,14 +334,14 @@ class ConfigMapResponse(StrictModel):
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/config-map", response_model=ConfigMapResponse)
-def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapResponse:
+def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapResponse:
     """The knob coupling/provenance map for one campaign — what moves which
     statistical estimand, what overwrites what, and which knobs currently collide.
 
     Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
     ``knobs`` registry. 404 on cross-user reads.
     """
-    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     config = CampaignConfig.model_validate(campaign.config)
@@ -393,9 +393,9 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
 # capability gate: whitelabeled users never run a pp-self campaign, so it returns empty
 # for them, and there is nothing to hide.
 @campaigns_router.get("/optimizer-prompt-ranking", response_model=OptimizerPromptRanking)
-def get_optimizer_prompt_ranking(store: StoreDep) -> OptimizerPromptRanking:
+def get_optimizer_prompt_ranking(stores: StoresDep) -> OptimizerPromptRanking:
     """The L4 prompt ranking — every candidate optimizer prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
     fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
     with no pp-self cycles."""
-    return rank_optimizer_prompts(store)
+    return rank_optimizer_prompts(stores)

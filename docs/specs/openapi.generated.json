@@ -5512,7 +5512,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "Return the caller-tenant's active-session pointer; 404 when none exists.\n\nPointers are per-tenant on disk; the API never reads another tenant's\nstate. Unauthed callers are rejected by ``resolve_identity`` before\n``StoreDep`` resolves.",
+        "description": "Return the caller-tenant's active-session pointer; 404 when none exists.\n\nPointers are per-tenant on disk; the API never reads another tenant's\nstate. Unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
         "operationId": "get_active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

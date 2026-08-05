@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import backend_type_of_dataset
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
@@ -142,7 +143,7 @@ class _Accum:
         self.orig_by_cell: dict[str, list[float]] = {}
 
 
-def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
+def _pp_self_campaign_dirs(stores: Stores) -> list[Path]:
     """Campaign dirs whose bound dataset drives the L4 recursion connector.
 
     Asks each dataset's ``pipeline.yaml::backend_type`` — the same predicate the sidebar's
@@ -152,7 +153,7 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
     """
     kind_of: dict[str, str] = {}  # once per dataset, not once per campaign
     dirs: list[Path] = []
-    for child in store.campaigns.iter_campaign_dirs():
+    for child in stores.campaigns.iter_campaign_dirs():
         cfg = read_json_tolerant(child / "campaign.json", {})
         block_raw = cfg.get("campaign_config")
         block = block_raw if isinstance(block_raw, dict) else cfg
@@ -160,17 +161,17 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
         if not dataset_name:
             continue
         if dataset_name not in kind_of:
-            kind_of[dataset_name] = backend_type_of_dataset(store, dataset_name)
+            kind_of[dataset_name] = backend_type_of_dataset(stores, dataset_name)
         if kind_of[dataset_name] == _PP_SELF_BACKEND_TYPE:
             dirs.append(child)
     return dirs
 
 
-def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
+def rank_optimizer_prompts(stores: Stores) -> OptimizerPromptRanking:
     accums: dict[str, _Accum] = {}
     n_cycles = 0
 
-    for campaign_dir in _pp_self_campaign_dirs(store):
+    for campaign_dir in _pp_self_campaign_dirs(stores):
         cycles_dir = campaign_cycles_dir(campaign_dir)
         if not cycles_dir.is_dir():
             continue
@@ -188,8 +189,7 @@ def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
                 _accumulate_round(
                     read_json_tolerant(round_file, {}),
                     origin_cells,
-                    campaign_dir.name,
-                    cycle_dir.name,
+                    CycleHop(campaign_id=campaign_dir.name, cycle_id=cycle_dir.name),
                     accums,
                 )
 
@@ -249,8 +249,7 @@ def _outer_snr(accums: dict[str, _Accum], rows: list[RankedOptimizerPrompt]) -> 
 def _accumulate_round(
     doc: dict[str, Any],
     origin_cells: dict[str, float],
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     accums: dict[str, _Accum],
 ) -> None:
     round_num = int(doc.get("round", 0) or 0)
@@ -272,7 +271,10 @@ def _accumulate_round(
             accums[state_hash] = acc
         acc.provenance.append(
             EffectProvenance(
-                campaign_id=campaign_id, cycle_id=cycle_id, round=round_num, candidate_id=cand_id
+                campaign_id=hop.campaign_id,
+                cycle_id=hop.cycle_id,
+                round=round_num,
+                candidate_id=cand_id,
             )
         )
         for cell, cand_fit in paired.items():

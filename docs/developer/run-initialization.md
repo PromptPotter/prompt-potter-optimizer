@@ -37,7 +37,7 @@ calling them out-of-order leaves the session under-wired.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  init_cycle                (loop_start.py)                           │
 │    ├─ resolve cycle_id      (from override or content-hash)          │
-│    ├─ store.campaigns.load(cycle_id)                                 │
+│    ├─ store.load(hop)                                                │
 │    ├─ rewind_to_round?      (when --from N)                          │
 │    ├─ HIT  → resumed_from_round = N+1  (snapshot refresh lives in    │
 │    │           resume_with_divergence_check, classifier-driven)      │

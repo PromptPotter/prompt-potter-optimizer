@@ -17,7 +17,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -54,24 +54,26 @@ def _store_for(cycle_dir: Path) -> CampaignStore:
     return CampaignStore(_tenant_root_of(cycle_dir))
 
 
-def reap_cycle_by_id(projects_root: Path, campaign_id: str, cycle_id: str) -> bool:
+def reap_cycle_by_id(projects_root: Path, hop: CycleHop) -> bool:
     """Stamp a single dead cycle terminal, resolving its dir across tenants.
 
     Used by the JobRegistry ``on_reap`` callback. Idempotent + safe on a missing
     cycle (returns ``False``). Does not itself judge liveness — the registry has
     already proven the task gone before calling."""
     try:
-        validate_path_component(campaign_id)
-        validate_path_component(cycle_id)
+        validate_path_component(hop.campaign_id)
+        validate_path_component(hop.cycle_id)
     except ValueError:
         return False
-    matches = list(projects_root.glob(f"*/campaigns/{campaign_id}/cycles/{cycle_id}/index.json"))
+    matches = list(
+        projects_root.glob(f"*/campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}/index.json")
+    )
     if not matches:
         return False
     cycle_dir = matches[0].parent
-    stamped = _store_for(cycle_dir).mark_producer_vanished(campaign_id, cycle_id)
+    stamped = _store_for(cycle_dir).mark_producer_vanished(hop)
     if stamped:
-        logger.info("reaped cycle %s/%s (producer_vanished)", campaign_id, cycle_id)
+        logger.info("reaped cycle %s/%s (producer_vanished)", hop.campaign_id, hop.cycle_id)
     return stamped
 
 
@@ -180,7 +182,9 @@ def sweep_dead_cycles(projects_root: Path, *, dead_after_s: float = DEAD_AFTER_S
             cycle_id = cycle_dir.name
             if not _is_dead(cycle_dir, dead_after_s=dead_after_s):
                 continue
-            if _store_for(cycle_dir).mark_producer_vanished(campaign_id, cycle_id):
+            if _store_for(cycle_dir).mark_producer_vanished(
+                CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+            ):
                 reaped += 1
     if reaped:
         logger.info("sweep stamped %d dead cycle(s) terminal", reaped)

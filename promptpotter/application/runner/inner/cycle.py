@@ -45,6 +45,7 @@ from promptpotter.application.runner.inner.tasks import (
     resolve_inner_task,
 )
 from promptpotter.application.seed_screen import class_floor, draw_bank
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     OUTER_PROXY_KEYS,
     InnerCycleUnscoreableError,
@@ -190,7 +191,9 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
     # sandbox.
     shared_root = session.store.shared_root
     inner_root = inner_sandbox_dir(
-        shared_root, session.store.tenant_id, session.campaign_id, cycle_id
+        shared_root,
+        session.store.tenant_id,
+        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
     _verify_outer_panel_contract(session, campaign_config, Path(dataset_dir))
     _INNER_SPAWN.set(
@@ -582,13 +585,13 @@ def _open_inner_campaign(
 
     plan = resolve_cycle_plan(session, campaign_config, train_data)
     store = session.store.campaigns
-    existing = store.load(campaign_id, plan.cycle_id)
+    existing = store.load(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id))
     if existing is None:
         prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id)
         return 0
 
     phase = derive_run_phase(
-        store.cycle_dir(campaign_id, plan.cycle_id),
+        store.cycle_dir(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)),
         is_terminal=bool(existing.get("finished_at")),
     )
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
@@ -606,7 +609,11 @@ def _open_inner_campaign(
     session.session_id = session_id
     session.campaign_id = campaign_id
     session.state.cycle_id = plan.cycle_id
-    save_active_pointer(session.store.base_dir, session_id, campaign_id, plan.cycle_id)
+    save_active_pointer(
+        session.store.base_dir,
+        session_id,
+        CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
+    )
     banked = len(existing.get("rounds") or [])
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
@@ -724,7 +731,7 @@ async def _run_inner_campaign(
     session = await init_services(
         dataset_name=spec.inner_dataset,
         identity=ctx.identity,
-        store=store,
+        stores=store,
         enable_tracing=False,
     )
     all_samples = session.samples
@@ -772,21 +779,15 @@ async def _run_inner_campaign(
         # in the L4 module. The cycle index is a raw dict (no model, no `extra="forbid"`),
         # so the key costs nothing and no prior inner cycle needs re-stamping — an older
         # one simply has no `spawned_by` and falls back to its origin hash.
-        session.store.campaigns.update(
-            session.campaign_id, session.state.cycle_id, {"spawned_by": spawned_by}
-        )
+        session.store.campaigns.update(session.hop, {"spawned_by": spawned_by})
         # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
         # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
-        cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(
-            session.campaign_id, session.state.cycle_id
-        )
+        cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
     task_context = await load_or_build_task_context(
         session.store,
         session.dataset_name,
         campaign_id=session.campaign_id,
-        context=checkin_call_context(
-            session.store, session.campaign_id, session.state.cycle_id or ""
-        ),
+        context=checkin_call_context(session.store, session.hop),
     )
     observers = build_run_observers(
         session=session,

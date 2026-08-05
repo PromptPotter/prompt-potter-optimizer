@@ -23,6 +23,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.views.render import render_sweep_summary
 from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
@@ -59,7 +60,7 @@ def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]
 
 
 def existing_fork_source_files(
-    store: Stores, campaign_id: str, parent_cycle_id: str
+    stores: Stores, campaign_id: str, parent_cycle_id: str
 ) -> dict[str, str]:
     """``{source_file: fork_cycle_id}`` for prior FORK_CUTs under this parent.
 
@@ -71,7 +72,9 @@ def existing_fork_source_files(
     from promptpotter.infrastructure.store.layout import CycleLayout
 
     out: dict[str, str] = {}
-    parent_dir = store.campaigns.cycle_dir(campaign_id, parent_cycle_id)
+    parent_dir = stores.campaigns.cycle_dir(
+        CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
+    )
     if not CycleLayout(parent_dir).ledger.exists():
         return out
     ledger = CycleEventLog.open(CycleDir(parent_dir))
@@ -82,7 +85,8 @@ def existing_fork_source_files(
         ):
             src = record.data.get("source_file")
             outcome = record.outcome
-            if src and outcome and store.campaigns.cycle_dir(campaign_id, str(outcome)).exists():
+            outcome_hop = CycleHop(campaign_id=campaign_id, cycle_id=str(outcome))
+            if src and outcome and stores.campaigns.cycle_dir(outcome_hop).exists():
                 out[str(src)] = str(outcome)
     return out
 
@@ -154,7 +158,11 @@ async def run_sweep_batch(
         ``finally`` so an interrupt in any fork still leaves a readable batch — otherwise every
         payload stays ``pending`` with an empty ``cycle_id`` and no ``summary.md`` is written."""
         completed_at = utcnow_iso()
-        save_active_pointer(store.base_dir, root_ctx.session_id, campaign_id, parent_cycle_id)
+        save_active_pointer(
+            store.base_dir,
+            root_ctx.session_id,
+            CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id),
+        )
         cycle_by_source = {
             p.name: cid for (p, _), cid in zip(sweep_payloads, new_cycle_ids, strict=False)
         }
@@ -234,9 +242,8 @@ async def run_sweep_batch(
             # before _orch_run_optimization commits round 1.
             new_cycle_id = _mint_fork(
                 store.campaigns,
-                campaign_id,
+                CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id),
                 root_ctx.session_id,
-                parent_cycle_id,
                 0,
                 fork_payload,
                 sweep_batch_id=batch_id,
@@ -289,8 +296,7 @@ async def run_sweep_batch(
                 if n_l1_rounds == 0:
                     cleanup_stub_fork_if_empty(
                         campaign_store=store.campaigns,
-                        campaign_id=campaign_id,
-                        cycle_id=new_cycle_id,
+                        hop=CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id),
                         parent_cycle_id=parent_cycle_id,
                     )
 

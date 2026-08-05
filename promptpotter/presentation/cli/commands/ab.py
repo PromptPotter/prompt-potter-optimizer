@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     bind_session_identity,
@@ -50,8 +51,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
 
     report = ab_replay_cycle(
         session.store.campaigns,
-        session.campaign_id,
-        ctx.cycle_id,
+        CycleHop(campaign_id=session.campaign_id, cycle_id=ctx.cycle_id),
         session,
         campaign_config.optimization.elimination_n_min,
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,

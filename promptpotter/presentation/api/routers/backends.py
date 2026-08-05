@@ -15,7 +15,7 @@ from pydantic import Field
 from promptpotter import connectors
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.backend import build_backend_client
-from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
+from promptpotter.presentation.api.deps import StoresDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
 
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
@@ -38,7 +38,7 @@ class BackendHealthResponse(StrictModel):
 
 
 @backends_router.get("", response_model=list[BackendResponse])
-def list_backends(store: StoreDep) -> list[BackendResponse]:
+def list_backends(stores: StoresDep) -> list[BackendResponse]:
     """List all registered backends."""
     return [
         BackendResponse(
@@ -48,12 +48,12 @@ def list_backends(store: StoreDep) -> list[BackendResponse]:
             base_url=b.base_url,
             created_at=b.created_at,
         )
-        for b in store.backends.list_all()
+        for b in stores.backends.list_all()
     ]
 
 
 @backends_router.get("/{backend_id}/health", response_model=BackendHealthResponse)
-async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthResponse:
+async def get_backend_health(backend_id: str, stores: StoresDep) -> BackendHealthResponse:
     """Probe the connector's own ``GET /status`` for live reachability.
 
     Thin wrapper over ``BackendClient.check_status()`` — the read half of the
@@ -62,7 +62,7 @@ async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthR
     failure to ``{"status": "unreachable"}``, so this never raises on a down
     backend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).
     """
-    backend = get_backend_or_404(backend_id, store)
+    backend = get_backend_or_404(backend_id, stores)
     client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
     try:
         probe = await client.check_status()

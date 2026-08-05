@@ -28,7 +28,7 @@ from promptpotter.application.optimization.dispatch.llm_call.call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
@@ -47,13 +47,13 @@ __all__ = [
 ]
 
 
-def checkin_call_context(stores: Stores, campaign_id: str, cycle_id: str) -> LLMCallContext:
+def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
     """The check-in call's audit home — the seeded campaign's own cycle ledger.
 
     The cache is what makes an unchanged decomposition free on replay; omitting it
     silently re-spends (see :class:`LLMCallContext`)."""
     return LLMCallContext(
-        ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))),
+        ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))),
         round_num=0,
         cache=stores.optimizer_calls,
     )
@@ -112,7 +112,7 @@ async def decompose_prompt_fields(
 
 
 async def load_or_build_task_context(
-    store: Stores,
+    stores: Stores,
     dataset_name: str | None,
     *,
     campaign_id: str,
@@ -138,7 +138,7 @@ async def load_or_build_task_context(
     """
     if dataset_name is None:
         return TaskDecomposition()
-    existing = readable_task_context(store, dataset_name)
+    existing = readable_task_context(stores, dataset_name)
     if existing:
         task_context = TaskDecomposition.from_dict(existing)
         # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
@@ -147,7 +147,7 @@ async def load_or_build_task_context(
         task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
         return task_context
     task_description = read_text_optional(
-        readable_dataset_dir(store, dataset_name) / "task_description.md"
+        readable_dataset_dir(stores, dataset_name) / "task_description.md"
     )
     if not task_description:
         return TaskDecomposition()
@@ -159,6 +159,6 @@ async def load_or_build_task_context(
     task_context = TaskDecomposition.from_dict(tc_dict)
     # Persist BEFORE gating: the decomposition call is already paid for, so a verbose checkin
     # leaves an editable file behind rather than burning the call and vanishing.
-    path = store.tenant_datasets.save_task_context(dataset_name, task_context.to_dict())
+    path = stores.tenant_datasets.save_task_context(dataset_name, task_context.to_dict())
     task_context.check_budget(source=str(path))
     return task_context

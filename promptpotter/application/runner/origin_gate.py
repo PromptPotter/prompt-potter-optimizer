@@ -204,7 +204,7 @@ async def _rescore_and_reemit(
 
 
 def _decision_path(session: Session):  # type: ignore[no-untyped-def]
-    cycle_dir = session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
+    cycle_dir = session.store.campaigns.cycle_dir(session.hop)
     return CycleLayout(cycle_dir).gate_decision
 
 

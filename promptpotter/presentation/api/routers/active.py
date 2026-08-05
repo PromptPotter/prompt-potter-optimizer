@@ -33,7 +33,7 @@ from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
-    StoreDep,
+    StoresDep,
     decode_descend,
 )
 from promptpotter.shared.errors import NotFoundError
@@ -49,18 +49,18 @@ class ActiveSessionResponse(StrictModel):
 
 
 @active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
-def get_active_session(store: StoreDep) -> ActiveSessionResponse:
+def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
     """Return the caller-tenant's active-session pointer; 404 when none exists.
 
     Pointers are per-tenant on disk; the API never reads another tenant's
     state. Unauthed callers are rejected by ``resolve_identity`` before
-    ``StoreDep`` resolves.
+    ``StoresDep`` resolves.
     """
-    session_id, campaign_id, cycle_id = read_active_pointer(store.base_dir)
+    session_id, campaign_id, cycle_id = read_active_pointer(stores.base_dir)
     if not session_id:
         raise NotFoundError("No active session")
     return ActiveSessionResponse(
-        tenant_id=store.tenant_id,
+        tenant_id=stores.tenant_id,
         session_id=session_id,
         campaign_id=campaign_id,
         cycle_id=cycle_id,
@@ -159,7 +159,7 @@ class CyclesResponse(StrictModel):
 
 
 @active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
-def get_cycles(store: StoreDep, descend: str | None = Query(None)) -> CyclesResponse:
+def get_cycles(stores: StoresDep, descend: str | None = Query(None)) -> CyclesResponse:
     """Every cycle in one store + that store's active pointer — one round-trip per forest.
 
     ``descend`` names the chain of cycles to descend INTO (``~``-joined
@@ -174,7 +174,7 @@ def get_cycles(store: StoreDep, descend: str | None = Query(None)) -> CyclesResp
     ``CycleListEntry.run_phase``'s job, and a consumer asking "is the pointed cycle
     live?" reads that off ``cycles[]`` rather than having this route re-derive it.
     """
-    leaf = descend_store(store, decode_descend(descend))
+    leaf = descend_store(stores, decode_descend(descend))
     _, active_cmp, active_cid = read_active_pointer(leaf.base_dir)
     entries = leaf.campaigns.enumerate_cycles()
     return CyclesResponse(

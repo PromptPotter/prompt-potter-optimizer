@@ -20,7 +20,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
-from promptpotter.presentation.api.deps import StoreDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
@@ -57,7 +57,7 @@ async def _stream(tail: CycleLedgerTail) -> AsyncIterator[str]:
     tags=["Stream"],
 )
 async def stream_cycle_events(
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
@@ -86,10 +86,10 @@ async def stream_cycle_events(
     See ``docs/developer/event-stream.md`` for the certified Profile A contract.
     """
     leaf_store, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
     leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
-    cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle))
+    cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf))
     if not cycle_dir.exists():
         raise NotFoundError(f"Unknown cycle {leaf_campaign}/{leaf_cycle}.")
     tail = CycleLedgerTail(cycle_dir, leaf_cycle)

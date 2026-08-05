@@ -40,7 +40,7 @@ from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CampaignConfigKind,
     CommandAcceptedBody,
@@ -251,30 +251,30 @@ def _require_checkin_id(payload: dict[str, Any], key: str) -> str:
     return raw
 
 
-def _reread_draft(store: Stores, draft_id: str) -> DraftCampaign:
-    draft = load_checkin_draft(store, draft_id)
+def _reread_draft(stores: Stores, draft_id: str) -> DraftCampaign:
+    draft = load_checkin_draft(stores, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
     return draft
 
 
-def _reread_draft_wire(store: Stores, draft_id: str) -> dict[str, Any]:
+def _reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
     """The post-mutation draft, re-read from ``draft.json`` — the response body for
     a deduped ``Idempotency-Key`` retry, whose first attempt already persisted it."""
-    return draft_wire_with_locks(_reread_draft(store, draft_id))
+    return draft_wire_with_locks(_reread_draft(stores, draft_id))
 
 
-def _origin_effect(store: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
+def _origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
     """What the applier moved in the origin, diffed against its pre-apply projection.
 
     Recorded on the ack because the ``CommandRecord.payload`` states only what was
     *asked* for — a ``resolve-origin`` payload names the draft and nothing else.
     """
-    return origin_delta(before, origin_projection(_reread_draft(store, draft_id)))
+    return origin_delta(before, origin_projection(_reread_draft(stores, draft_id)))
 
 
 async def dispatch_draft_patch(
-    store: Stores,
+    stores: Stores,
     *,
     draft_id: str,
     patch_raw: dict[str, Any],
@@ -290,15 +290,15 @@ async def dispatch_draft_patch(
     """
     patch = _EditDraftPatch.model_validate(patch_raw)
 
-    draft = load_checkin_draft(store, draft_id)
+    draft = load_checkin_draft(stores, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     changes: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
     if patch.slug is not None and patch.slug != draft.slug:
-        if store.tenant_datasets.slug_exists(patch.slug):
-            suggested = store.tenant_datasets.suggest_free_slug(patch.slug)
+        if stores.tenant_datasets.slug_exists(patch.slug):
+            suggested = stores.tenant_datasets.suggest_free_slug(patch.slug)
             raise ConflictError(
                 f"Slug '{patch.slug}' already exists in your collection.",
                 code="slug_collision",
@@ -353,26 +353,26 @@ async def dispatch_draft_patch(
             updated = updated.confirm_columns(
                 query_col=patch.column_query, ground_truth_col=patch.column_ground_truth
             )
-        save_checkin_draft(store, updated)
+        save_checkin_draft(stores, updated)
         return draft_wire_with_locks(updated)
 
     before = origin_projection(draft)
-    dispatcher = CommandDispatcher(store)
+    dispatcher = CommandDispatcher(stores)
     outcome = await dispatcher.dispatch_checkin_command(
         kind="edit-draft-campaign",
         campaign_id=draft_id,
         payload={"draft_id": draft_id, "patch": patch_raw},
         idempotency_key=idempotency_key,
         applier=_apply,
-        on_replay=lambda: _reread_draft_wire(store, draft_id),
-        effect_fn=lambda: _origin_effect(store, draft_id, before),
+        on_replay=lambda: _reread_draft_wire(stores, draft_id),
+        effect_fn=lambda: _origin_effect(stores, draft_id, before),
     )
     return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/edit-draft-campaign")
 async def edit_draft_campaign(
-    store: StoreDep,
+    stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
@@ -389,7 +389,7 @@ async def edit_draft_campaign(
     if not isinstance(patch_raw, dict):
         raise PayloadInvalidError("payload.patch must be an object.")
     return await dispatch_draft_patch(
-        store,
+        stores,
         draft_id=draft_id,
         patch_raw=patch_raw,
         idempotency_key=idemp,
@@ -399,7 +399,7 @@ async def edit_draft_campaign(
 @commands_router.post("/resolve-origin")
 async def resolve_origin(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
@@ -413,7 +413,7 @@ async def resolve_origin(
     idemp = ensure_idempotency_key(idempotency_key)
     draft_id = _require_checkin_id(envelope.payload, "draft_id")
     message = _optional_string(envelope.payload, "message", max_len=4000)
-    draft = load_checkin_draft(store, draft_id)
+    draft = load_checkin_draft(stores, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
@@ -421,7 +421,7 @@ async def resolve_origin(
 
     async def _apply() -> dict[str, Any]:
         try:
-            result = await resolve_origin_turn(stores=store, draft=draft, message=message)
+            result = await resolve_origin_turn(stores=stores, draft=draft, message=message)
         except PotterError:
             raise
         except Exception as exc:
@@ -437,14 +437,14 @@ async def resolve_origin(
     def _on_replay() -> dict[str, Any]:
         # `cache.json::resolution` is byte-identical to the block the live turn
         # returns, so a deduped retry never re-spends the LLM call.
-        bank = store.checkin.load_bank(draft_id) or {}
+        bank = stores.checkin.load_bank(draft_id) or {}
         return {
             "resolution": bank.get("resolution") or {},
-            "draft": _reread_draft_wire(store, draft_id),
+            "draft": _reread_draft_wire(stores, draft_id),
         }
 
     before = origin_projection(draft)
-    dispatcher = CommandDispatcher(store)
+    dispatcher = CommandDispatcher(stores)
     outcome = await dispatcher.dispatch_checkin_command(
         kind="resolve-origin",
         campaign_id=draft_id,
@@ -452,7 +452,7 @@ async def resolve_origin(
         idempotency_key=idemp,
         applier=_apply,
         on_replay=_on_replay,
-        effect_fn=lambda: _origin_effect(store, draft_id, before),
+        effect_fn=lambda: _origin_effect(stores, draft_id, before),
     )
     return cast("dict[str, Any]", outcome.result)
 
@@ -460,7 +460,7 @@ async def resolve_origin(
 @commands_router.post("/start-checkin")
 async def start_checkin(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
@@ -476,7 +476,7 @@ async def start_checkin(
     idemp = ensure_idempotency_key(idempotency_key)
     campaign_id = _require_checkin_id(envelope.payload, "campaign_id")
 
-    draft = load_checkin_draft(store, campaign_id)
+    draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
         raise NotFoundError(f"check-in {campaign_id!r} not found.", code="command_target_not_found")
 
@@ -489,7 +489,7 @@ async def start_checkin(
     async def _apply() -> dict[str, Any]:
         try:
             job = await start_checkin_campaign(
-                stores=store,
+                stores=stores,
                 job_registry=job_registry,
                 campaign_id=campaign_id,
             )
@@ -498,7 +498,7 @@ async def start_checkin(
             # check-in is preserved (lifecycle stays ``checkin``); the operator
             # resolves them (edit-draft-campaign) and retries. The exception already
             # carries code=origin_incomplete + details.gaps; refresh the breadcrumb.
-            save_checkin_draft(store, draft)
+            save_checkin_draft(stores, draft)
             raise
         except BackendUnreachableError as exc:
             # Preflight ran before any irreversible write → the check-in is preserved;
@@ -511,7 +511,7 @@ async def start_checkin(
         # own message; no per-case arm here.
         return {"campaign_id": campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
 
-    dispatcher = CommandDispatcher(store, job_registry=job_registry)
+    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
     outcome = await dispatcher.dispatch_checkin_command(
         kind="start-checkin",
         campaign_id=campaign_id,
@@ -529,7 +529,7 @@ async def start_checkin(
 @commands_router.post("/replace-dataset")
 async def replace_dataset(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
@@ -544,7 +544,7 @@ async def replace_dataset(
     ensure_idempotency_key(idempotency_key)
     raw_slug = _require_dataset_name(envelope.payload, "slug")
     try:
-        result = version_and_repoint(stores=store, slug=raw_slug)
+        result = version_and_repoint(stores=stores, slug=raw_slug)
     except NothingToReplaceError as exc:
         raise ConflictError(
             str(exc), code="nothing_to_replace", details={"slug": exc.slug}
@@ -558,7 +558,7 @@ async def replace_dataset(
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)
 async def post_command(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     envelope: CommandEnvelope,
     kind: Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]*$", max_length=64)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -581,7 +581,7 @@ async def post_command(
 
     payload = envelope.payload
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
-    dispatcher = CommandDispatcher(store, job_registry=job_registry)
+    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
     if kind in _WORKSPACE_BACKEND_KINDS:
         workspace_payload = _build_workspace_payload(kind, payload)

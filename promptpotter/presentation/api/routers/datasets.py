@@ -45,7 +45,7 @@ from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
-    StoreDep,
+    StoresDep,
     decode_descend,
     get_cycle_dir_or_404,
 )
@@ -95,7 +95,7 @@ class DatasetIndexResponse(StrictModel):
 
 
 @datasets_router.get("", response_model=DatasetIndexResponse)
-def list_datasets(store: StoreDep) -> DatasetIndexResponse:
+def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
     """Every dataset this identity may read — its own tenant Origins, then install content.
 
     The rule lives once in ``store/dataset_access.py`` and is shared with the
@@ -107,7 +107,7 @@ def list_datasets(store: StoreDep) -> DatasetIndexResponse:
             DatasetIndexEntry(
                 name=ref.name, title=ref.title, tier=ref.tier, n_samples=ref.n_samples
             )
-            for ref in list_readable_datasets(store)
+            for ref in list_readable_datasets(stores)
         ]
     )
 
@@ -142,7 +142,7 @@ async def _read_capped(request: Request, upload: UploadFile, cap: int) -> bytes:
 @datasets_router.post("/ingest")
 async def ingest_dataset(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     file: Annotated[
         UploadFile,
         File(description="Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns."),
@@ -163,7 +163,7 @@ async def ingest_dataset(
     # the identical orchestration; the handler only maps errors to HTTP.
     try:
         draft = ingest_draft(
-            stores=store,
+            stores=stores,
             blob=blob,
             filename=file.filename or "",
             slug=slug,
@@ -188,7 +188,7 @@ async def ingest_dataset(
 @datasets_router.post("/draft/candidate-library")
 async def upload_candidate_library(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     file: Annotated[
         UploadFile,
         File(description="Target library — one entry per line, or a single-column CSV/Excel."),
@@ -218,7 +218,7 @@ async def upload_candidate_library(
             details={"reason": "empty"},
         )
     return await dispatch_draft_patch(
-        store,
+        stores,
         draft_id=draft_id,
         patch_raw={"candidate_library": terms},
         idempotency_key=idemp,
@@ -236,7 +236,7 @@ class _BuildLibraryBody(StrictModel):
 
 @datasets_router.post("/draft/candidate-library/from-column")
 async def build_candidate_library_from_column(
-    store: StoreDep,
+    stores: StoresDep,
     body: _BuildLibraryBody,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
@@ -252,14 +252,14 @@ async def build_candidate_library_from_column(
     `draft_id` is the check-in campaign id.
     """
     idemp = ensure_idempotency_key(idempotency_key)
-    draft = load_checkin_draft(store, body.draft_id)
+    draft = load_checkin_draft(stores, body.draft_id)
     if draft is None:
         raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
     if body.column not in draft.headers:
         raise PayloadInvalidError(
             f"column {body.column!r} is not one of the dataset's columns {list(draft.headers)}."
         )
-    bank = store.checkin.load_bank(body.draft_id)
+    bank = stores.checkin.load_bank(body.draft_id)
     if bank is None:
         raise PayloadInvalidError("draft has no cached rows to build from.")
     terms = candidate_library_from_rows(bank.get("items", []), body.column)
@@ -270,7 +270,7 @@ async def build_candidate_library_from_column(
             details={"reason": "empty"},
         )
     return await dispatch_draft_patch(
-        store,
+        stores,
         draft_id=body.draft_id,
         patch_raw={"candidate_library": terms},
         idempotency_key=idemp,
@@ -278,7 +278,7 @@ async def build_candidate_library_from_column(
 
 
 @datasets_router.post("/{name}/draft")
-def draft_from_existing_dataset(name: str, store: StoreDep) -> dict[str, Any]:
+def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
     """Open an authored dataset's files as a durable check-in campaign.
 
     The direct path behind "open this dataset in the ingest panel" — a demo /
@@ -287,13 +287,13 @@ def draft_from_existing_dataset(name: str, store: StoreDep) -> dict[str, Any]:
     the same resolver as the other dataset reads; nothing runs until the operator
     starts it via ``/commands/start-checkin``.
     """
-    dataset_dir = readable_dataset_dir(store, name)
-    draft = draft_from_dataset(stores=store, dataset_dir=dataset_dir, dataset_name=name)
+    dataset_dir = readable_dataset_dir(stores, name)
+    draft = draft_from_dataset(stores=stores, dataset_dir=dataset_dir, dataset_name=name)
     return draft_wire_with_locks(draft)
 
 
 def _load_dataset_rows(
-    store: Stores, name: str
+    stores: Stores, name: str
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     """Resolve *name*'s rows; normalise sample-id keys to int.
 
@@ -305,7 +305,7 @@ def _load_dataset_rows(
     empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
     than a 404 that reads as "unknown slug" and spams the webapp console every load.
     """
-    raw = readable_dataset_rows(store, name)
+    raw = readable_dataset_rows(stores, name)
     if raw is None:
         return {"name": name, "items": []}, {}
     sample_lookup: dict[int, dict[str, Any]] = {}
@@ -316,7 +316,7 @@ def _load_dataset_rows(
 
 
 def _artifact_scope_store(
-    store: Stores,
+    stores: Stores,
     campaign_id: str | None,
     cycle_id: str | None,
     descend: str | None,
@@ -332,17 +332,17 @@ def _artifact_scope_store(
     required alongside it.
     """
     if not descend:
-        return store, campaign_id, cycle_id
+        return stores, campaign_id, cycle_id
     if not campaign_id or not cycle_id:
         raise BadRequestError("descend requires campaign_id and cycle_id (the root hop)")
     leaf_store, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
     return leaf_store, leaf.campaign_id, leaf.cycle_id
 
 
 def _resolve_scope_artifact(
-    store: Stores,
+    stores: Stores,
     *,
     scope: HeatmapScope,
     name: str,
@@ -359,7 +359,7 @@ def _resolve_scope_artifact(
     if scope == "cycle":
         if not campaign_id or not cycle_id:
             raise BadRequestError("scope=cycle requires campaign_id and cycle_id")
-        cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
+        cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, stores)
         path = cycle_dir / "hard_samples.json"
         if not path.is_file():
             return {}
@@ -368,7 +368,7 @@ def _resolve_scope_artifact(
     if scope == "campaign":
         if not campaign_id:
             raise BadRequestError("scope=campaign requires campaign_id")
-        campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
+        campaign_dir = campaign_root_dir_for(stores.base_dir, campaign_id)
         if not campaign_dir.exists():
             raise NotFoundError(f"Campaign '{campaign_id}' not found")
         path = campaign_dir / "hard_samples.json"
@@ -378,7 +378,7 @@ def _resolve_scope_artifact(
         return campaign_artifact
     # `dataset` — always per-dataset (cross-dataset pooling is meaningless).
     return build_archive_hard_samples_artifact(
-        store,
+        stores,
         dataset_name=name,
         top_k_samples=None,
     )
@@ -451,7 +451,7 @@ class DatasetPreviewResponse(StrictModel):
 @datasets_router.get("/{name}/preview", response_model=DatasetPreviewResponse)
 def get_dataset_preview(
     name: str,
-    store: StoreDep,
+    stores: StoresDep,
     limit: int = Query(default=50, ge=1, le=1000),
     max_unmeasured: int | None = Query(
         default=None,
@@ -486,11 +486,11 @@ def get_dataset_preview(
     series carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent
     fits, so it overcounts on its own.
     """
-    dataset_dir = readable_dataset_dir(store, name)
-    raw, sample_lookup = _load_dataset_rows(store, name)
+    dataset_dir = readable_dataset_dir(stores, name)
+    raw, sample_lookup = _load_dataset_rows(stores, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
-        store, campaign_id, cycle_id, descend
+        stores, campaign_id, cycle_id, descend
     )
     artifact = _resolve_scope_artifact(
         art_store,
@@ -599,7 +599,7 @@ class MeasurementSeriesResponse(StrictModel):
 )
 def get_dataset_measurement_series(
     name: str,
-    store: StoreDep,
+    stores: StoresDep,
     limit: int = Query(default=50, ge=1, le=1000),
     max_unmeasured: int | None = Query(
         default=None,
@@ -627,11 +627,11 @@ def get_dataset_measurement_series(
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
-    readable_dataset_dir(store, name)  # 404s an unknown slug before we answer with an empty bank
-    raw, sample_lookup = _load_dataset_rows(store, name)
+    readable_dataset_dir(stores, name)  # 404s an unknown slug before we answer with an empty bank
+    raw, sample_lookup = _load_dataset_rows(stores, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
-        store, campaign_id, cycle_id, descend
+        stores, campaign_id, cycle_id, descend
     )
     artifact = _resolve_scope_artifact(
         art_store,
@@ -652,7 +652,9 @@ def get_dataset_measurement_series(
 
     if scope == "cycle":
         assert art_campaign is not None and art_cycle is not None  # checked in resolver
-        series = cycle_measurement_series(art_store, art_campaign, art_cycle, selected_set)
+        series = cycle_measurement_series(
+            art_store, CycleHop(campaign_id=art_campaign, cycle_id=art_cycle), selected_set
+        )
     elif scope == "campaign":
         assert art_campaign is not None  # checked in resolver
         series = campaign_measurement_series(art_store, art_campaign, selected_set)
@@ -706,14 +708,14 @@ class DatasetPipelineResponse(StrictModel):
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
-def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
+def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
     """Return the dataset overlay's parsed pipeline schema, graph view, and per-node
     config + output schema.
 
     Identity-gated through the same resolver as the other dataset reads — there is
     no unauthenticated path to a benchmark's pipeline/overlay config.
     """
-    dataset_dir = readable_dataset_dir(store, name)
+    dataset_dir = readable_dataset_dir(stores, name)
     pipeline_path = dataset_pipeline_path(dataset_dir)
     if not pipeline_path.is_file():
         raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")

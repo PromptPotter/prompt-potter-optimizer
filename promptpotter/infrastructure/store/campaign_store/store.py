@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
@@ -58,8 +58,11 @@ from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundE
 logger = logging.getLogger(__name__)
 
 
-def round_summary(rr: RoundResult) -> dict[str, Any]:
-    """Projection of a round into the ``index.json::rounds`` shape."""
+def _round_summary(rr: RoundResult) -> dict[str, Any]:
+    """Projection of a round into the ``index.json::rounds`` shape.
+
+    Private: it shapes a WRITE, and this module owns ``index.json``.
+    """
     return {
         "round_id": rr.round_id,
         "round": rr.round,
@@ -107,7 +110,7 @@ def _apply_best(data: dict[str, Any]) -> None:
     data["best_accuracy"], data["best_round"] = best_round_by_measured_accuracy(data["rounds"])
 
 
-def fresh_sibling_index_blob(
+def _fresh_sibling_index_blob(
     parent_index: dict[str, Any],
     parent_cycle_id: str,
     sibling_kind: str,
@@ -232,24 +235,24 @@ class CampaignStore:
     def campaign_root_dir(self, campaign_id: str) -> Path:
         return self._campaign_dir(campaign_id)
 
-    def cycle_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return cycle_dir_under(self._campaign_dir(campaign_id), cycle_id)
+    def cycle_dir(self, hop: CycleHop) -> Path:
+        return cycle_dir_under(self._campaign_dir(hop.campaign_id), hop.cycle_id)
 
     def _manifest_path(self, campaign_id: str) -> Path:
         return self.campaign_root_dir(campaign_id) / "campaign.json"
 
-    def _layout(self, campaign_id: str, cycle_id: str) -> CycleLayout:
+    def _layout(self, hop: CycleHop) -> CycleLayout:
         """The per-cycle path owner (archive-aware root — ``self.cycle_dir``)."""
-        return CycleLayout(self.cycle_dir(campaign_id, cycle_id))
+        return CycleLayout(self.cycle_dir(hop))
 
-    def _index_path(self, campaign_id: str, cycle_id: str) -> Path:
-        return self._layout(campaign_id, cycle_id).manifest
+    def _index_path(self, hop: CycleHop) -> Path:
+        return self._layout(hop).manifest
 
-    def _rounds_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self._layout(campaign_id, cycle_id).rounds
+    def _rounds_dir(self, hop: CycleHop) -> Path:
+        return self._layout(hop).rounds
 
-    def _candidates_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self._layout(campaign_id, cycle_id).candidates_cache
+    def _candidates_dir(self, hop: CycleHop) -> Path:
+        return self._layout(hop).candidates_cache
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         data = read_json_optional(self._manifest_path(campaign_id))
@@ -554,7 +557,9 @@ class CampaignStore:
         if inner_sandbox_root is not None:
             tenant_id = self._base_dir.name
             for cycle_id in inner_cycle_ids:
-                inner_dir = inner_sandbox_root / inner_sandbox_key(tenant_id, campaign_id, cycle_id)
+                inner_dir = inner_sandbox_root / inner_sandbox_key(
+                    tenant_id, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+                )
                 if inner_dir.exists():
                     rmtree_robust(inner_dir)
         return True
@@ -563,22 +568,21 @@ class CampaignStore:
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate
     # ------------------------------------------------------------------
 
-    def load(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
+    def load(self, hop: CycleHop) -> dict[str, Any] | None:
         """Load a cycle's ``index.json``; ``cycle_id`` injected from dir name."""
-        data: dict[str, Any] | None = read_json_optional(self._index_path(campaign_id, cycle_id))
+        data: dict[str, Any] | None = read_json_optional(self._index_path(hop))
         if data is None:
             return None
-        data["cycle_id"] = cycle_id
+        data["cycle_id"] = hop.cycle_id
         return data
 
     def create(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         metadata: dict[str, Any],
     ) -> Path:
         """Create/augment cycle ``index.json``; replay merges keys without clobbering rounds/best."""
-        path = self._index_path(campaign_id, cycle_id)
+        path = self._index_path(hop)
         existing = read_json_optional(path) or {}
         now = utcnow_iso()
         defaults: dict[str, Any] = {
@@ -588,7 +592,7 @@ class CampaignStore:
             "type": "optimization_loop",
             "parent_session_id": existing.get("parent_session_id", ""),
             "parent_cycle_id": None,
-            "sibling_kind": sibling_kind(cycle_id),
+            "sibling_kind": sibling_kind(hop.cycle_id),
             "n_rounds": 0,
             "best_accuracy": 0.0,
             "rounds": [],
@@ -606,14 +610,13 @@ class CampaignStore:
 
     def update(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         updates: dict[str, Any],
         *,
         remove: Sequence[str] = (),
     ) -> None:
         """Merge updates into ``index.json`` and write back (+ timestamp)."""
-        path = self._index_path(campaign_id, cycle_id)
+        path = self._index_path(hop)
         data = read_json(path)
         for key in remove:
             data.pop(key, None)
@@ -623,8 +626,7 @@ class CampaignStore:
 
     def mark_human_intervened(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         *,
         kind: str,
         at: str,
@@ -642,7 +644,7 @@ class CampaignStore:
         so at write time nobody knows which round or candidate will pick it up. Every entry
         therefore carried ``"round": None, "candidate": None``. A signature asking its caller
         for information the caller structurally cannot have is not an unwired feature."""
-        path = self._index_path(campaign_id, cycle_id)
+        path = self._index_path(hop)
         data = read_json(path)
         data["human_intervened"] = True
         # setdefault: the babysit stamp fires at init on a fresh-sibling fork index
@@ -654,18 +656,17 @@ class CampaignStore:
 
     def rewind_to_round(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         after_round: int,
     ) -> None:
         """Delete round + candidate files for rounds > ``after_round``; rebuild the round index. Ledger-admissibility-gated."""
-        layout = self._layout(campaign_id, cycle_id)
+        layout = self._layout(hop)
         rounds_dir = layout.rounds
         candidates_dir = layout.candidates_cache
 
         ledger_path = layout.ledger
         if not ledger_path.exists():
-            raise NotFoundError(f"cycle {cycle_id!r} has no ledger on disk")
+            raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
         max_complete = scan_ledger_max_round_complete(ledger_path)
         if after_round > max_complete:
             raise BadRequestError(
@@ -675,7 +676,7 @@ class CampaignStore:
         if after_round >= 1:
             if not rounds_dir.exists():
                 raise NotFoundError(
-                    f"cycle {cycle_id!r}: ledger has rounds 0..{max_complete} but "
+                    f"cycle {hop.cycle_id!r}: ledger has rounds 0..{max_complete} but "
                     f"{rounds_dir} is missing — projection cache out of sync with ledger"
                 )
             target = layout.round_file(after_round)
@@ -708,7 +709,7 @@ class CampaignStore:
                 unlink_robust(p)
             logger.info(
                 "Rewind cycle %s to round %d: deleted %d displaced file(s)",
-                cycle_id,
+                hop.cycle_id,
                 after_round,
                 len(displaced),
             )
@@ -717,19 +718,18 @@ class CampaignStore:
         # trajectory when the resumed run's view is constructed — the one cut, off the
         # schema. A second writer here re-spelled that rule against the raw dict, with
         # its own `max(...)` fold in place of the domain helper.
-        self._rebuild_round_index(campaign_id, cycle_id, survivors)
+        self._rebuild_round_index(hop, survivors)
 
     def _rebuild_round_index(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         survivors: list[Path],
     ) -> None:
-        index_path = self._index_path(campaign_id, cycle_id)
+        index_path = self._index_path(hop)
         data = read_json(index_path)
 
         data["rounds"] = [
-            round_summary(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
+            _round_summary(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
         ]
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
@@ -738,8 +738,7 @@ class CampaignStore:
 
     def mark_finished(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         *,
         status: str,
         stop_reason: str,
@@ -778,9 +777,9 @@ class CampaignStore:
         else:
             remove_keys.append("crash_traceback")
         with graceful("Cycle completion update failed"):
-            self.update(campaign_id, cycle_id, updates, remove=remove_keys)
+            self.update(hop, updates, remove=remove_keys)
 
-    def reopen_for_continuation(self, campaign_id: str, cycle_id: str) -> None:
+    def reopen_for_continuation(self, hop: CycleHop) -> None:
         """Clear the terminal latch so a continued cycle stops claiming it finished.
 
         The exact inverse of :meth:`mark_finished`, and the ONLY writer that removes
@@ -796,8 +795,7 @@ class CampaignStore:
         none. ``interrupted_round`` / ``crash_traceback`` describe the stop being undone.
         """
         self.update(
-            campaign_id,
-            cycle_id,
+            hop,
             {"status": "active"},
             remove=[
                 "finished_at",
@@ -808,7 +806,7 @@ class CampaignStore:
             ],
         )
 
-    def mark_superseded(self, campaign_id: str, cycle_id: str) -> bool:
+    def mark_superseded(self, hop: CycleHop) -> bool:
         """The line moved to a branch: stamp this cycle ``TERMINAL`` (``REBASED``).
 
         The retirement half of what :meth:`mark_producer_vanished` answers — both record that
@@ -816,24 +814,23 @@ class CampaignStore:
         **by design** presents exactly as a crashed one. Idempotent (an L2/L3 rebase already
         finalizes its own parent), and :meth:`reopen_for_continuation` still clears the latch.
         """
-        return self._stamp_terminal(campaign_id, cycle_id, StopReason.REBASED)
+        return self._stamp_terminal(hop, StopReason.REBASED)
 
-    def _stamp_terminal(self, campaign_id: str, cycle_id: str, reason: StopReason) -> bool:
+    def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
         """Stamp a cycle terminal with no verdict, ONCE — ``False`` if it already carries one.
         The shared tail of the two ways a cycle stops without finishing."""
-        data = read_json_optional(self._index_path(campaign_id, cycle_id))
+        data = read_json_optional(self._index_path(hop))
         if not isinstance(data, dict) or data.get("finished_at"):
             return False
         self.mark_finished(
-            campaign_id,
-            cycle_id,
+            hop,
             status=reason.value,
             stop_reason=reason.value,
             finished_at=utcnow_iso(),
         )
         return True
 
-    def mark_producer_vanished(self, campaign_id: str, cycle_id: str) -> bool:
+    def mark_producer_vanished(self, hop: CycleHop) -> bool:
         """Reap a dead cycle: stamp it ``TERMINAL`` (``producer_vanished``) so the
         one liveness owner and the on-disk truth agree.
 
@@ -870,14 +867,14 @@ class CampaignStore:
         heartbeats (``runner/origin_gate.py``), which is the fix; this check is the
         second line, because a heartbeat can still lose a race a machine sleep
         creates, and being reaped is not recoverable by asking again."""
-        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
+        cycle_dir = self.cycle_dir(hop)
         layout = CycleLayout(cycle_dir)
         if layout.pause_flag.is_file() or is_checkin(cycle_dir):
             return False
         dash = read_json_optional(layout.dashboard)
         if isinstance(dash, dict) and dash.get("run_phase") in (RunPhase.GATE, RunPhase.PAUSED):
             return False
-        return self._stamp_terminal(campaign_id, cycle_id, StopReason.PRODUCER_VANISHED)
+        return self._stamp_terminal(hop, StopReason.PRODUCER_VANISHED)
 
     def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
         """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape."""
@@ -930,7 +927,7 @@ class CampaignStore:
         """Every cycle on disk in the webapp-picker shape; unreadable → ``status='unreadable'`` stubs."""
         return [self._entry_from_index(p) for p in self._index_files()]
 
-    def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
+    def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
         """Delete a stub cycle dir → ``(deleted, reason)``. Guards: banked nothing of its
         OWN, not a family root, no children.
 
@@ -944,8 +941,8 @@ class CampaignStore:
         A ``from_round`` we cannot read counts as 0, which is the strict reading: when it is
         unknown what the fork inherited, refuse rather than delete.
         """
-        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        index_path = self._index_path(campaign_id, cycle_id)
+        cycle_dir = self.cycle_dir(hop)
+        index_path = self._index_path(hop)
         # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
         # stub to delete, the other is a cycle whose state we cannot vouch for.
         try:
@@ -954,7 +951,7 @@ class CampaignStore:
             return False, f"index.json unreadable: {exc}"
         if index is None:
             return False, "not on disk"
-        if root_cycle_id(cycle_id) == cycle_id:
+        if root_cycle_id(hop.cycle_id) == hop.cycle_id:
             return False, "family root — deletion is for sibling stubs only"
         n_rounds = index.get("n_rounds", 0)
         fork = index.get("fork")
@@ -966,10 +963,10 @@ class CampaignStore:
             )
         for other in self._index_files():
             other_campaign, other_cycle = self._ids_from_index_path(other)
-            if other_campaign != campaign_id or other_cycle == cycle_id:
+            if other_campaign != hop.campaign_id or other_cycle == hop.cycle_id:
                 continue
             other_data = read_json_optional(other)
-            if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == cycle_id:
+            if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == hop.cycle_id:
                 return False, f"has descendant {other_cycle}"
         rmtree_robust(cycle_dir)
         return True, ""
@@ -991,11 +988,13 @@ class CampaignStore:
         """The single writer for the diag / operator-steered / sweep fork triggers
         (``kind`` ∈ ``{"diag", "fork", "sweep"}``; numbering restarts at round 1, no
         parent-round inheritance — that's ``save_rebase_fork``'s job)."""
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        blob = fresh_sibling_index_blob(
+        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
+        child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
+        parent_index = read_json_optional(self._index_path(parent)) or {}
+        blob = _fresh_sibling_index_blob(
             parent_index, parent_cycle_id, kind, forked_at, **blob_kwargs
         )
-        path = self._index_path(campaign_id, new_cycle_id)
+        path = self._index_path(child)
         write_json(path, blob)
         return path
 
@@ -1019,20 +1018,21 @@ class CampaignStore:
         ``rounds[]`` is the index SUMMARY shape, projected here — never whole round
         documents, which would bury every per-sample row in ``index.json``.
         """
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
+        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
+        parent_index = read_json_optional(self._index_path(parent)) or {}
         index = {
             **parent_index,
             "parent_cycle_id": parent_cycle_id,
             "sibling_kind": "fork",
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
-            "rounds": [round_summary(rr) for rr in surviving_rounds],
+            "rounds": [_round_summary(rr) for rr in surviving_rounds],
             "n_rounds": len(surviving_rounds),
             "status": "resumed",
             "updated_at": forked_at,
         }
         _apply_best(index)
-        path = self._index_path(campaign_id, new_cycle_id)
+        path = self._index_path(CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id))
         write_json(path, index)
         return path
 
@@ -1045,17 +1045,11 @@ class CampaignStore:
         before_round: int,
     ) -> int:
         """Copy parent's round + candidate files for rounds < ``before_round``."""
+        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
+        child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
-            (
-                self._rounds_dir(campaign_id, parent_cycle_id),
-                self._rounds_dir(campaign_id, new_cycle_id),
-                "round_",
-            ),
-            (
-                self._candidates_dir(campaign_id, parent_cycle_id),
-                self._candidates_dir(campaign_id, new_cycle_id),
-                "round_",
-            ),
+            (self._rounds_dir(parent), self._rounds_dir(child), "round_"),
+            (self._candidates_dir(parent), self._candidates_dir(child), "round_"),
         )
         n_copied = 0
         for src, dst, prefix in copy_specs:
@@ -1078,8 +1072,7 @@ class CampaignStore:
 
     def save_round_file(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         rr: RoundResult,
     ) -> Path:
         """Persist a round detail file and update the cycle index.
@@ -1089,14 +1082,14 @@ class CampaignStore:
         """
         validate_path_component(rr.round_id)
 
-        detail_path = self._layout(campaign_id, cycle_id).round_file(rr.round)
+        detail_path = self._layout(hop).round_file(rr.round)
         write_json(detail_path, rr.model_dump(mode="json"))
 
-        index_path = self._index_path(campaign_id, cycle_id)
+        index_path = self._index_path(hop)
         data = read_json(index_path)
 
         data["rounds"] = [t for t in data["rounds"] if t.get("round") != rr.round]
-        data["rounds"].append(round_summary(rr))
+        data["rounds"].append(_round_summary(rr))
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
         data["updated_at"] = utcnow_iso()
@@ -1106,34 +1099,31 @@ class CampaignStore:
 
     def load_round_file(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         round_num: int,
     ) -> RoundResult | None:
         """The sole typed read of a round document. A round file that fails validation is
         corrupt — it raises rather than degrading into a dict of defaults."""
-        raw = read_json_optional(self._layout(campaign_id, cycle_id).round_file(round_num))
+        raw = read_json_optional(self._layout(hop).round_file(round_num))
         return None if raw is None else RoundResult.model_validate(raw)
 
     def load_rounds_range(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         start: int,
         end: int,
     ) -> list[RoundResult]:
         """Load rounds ``start..end`` inclusive. Missing rounds skipped."""
         out: list[RoundResult] = []
         for r in range(start, end + 1):
-            rr = self.load_round_file(campaign_id, cycle_id, r)
+            rr = self.load_round_file(hop, r)
             if rr is not None:
                 out.append(rr)
         return out
 
     def save_round_candidates(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         round_num: int,
         candidates: list[dict[str, Any]],
         *,
@@ -1147,14 +1137,13 @@ class CampaignStore:
         the same way, so a repaired or re-distilled predecessor is carried straight past
         the replay branch. Both halves ride ONE file so they cannot drift apart.
         """
-        path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
+        path = self._layout(hop).candidate_file(round_num)
         write_json(path, {"consumed": consumed, "candidates": candidates})
         logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
 
     def load_round_candidates(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         round_num: int,
     ) -> tuple[list[dict[str, Any]], str | None] | None:
         """``(candidates, consumed)`` or ``None`` when no cache exists.
@@ -1164,7 +1153,7 @@ class CampaignStore:
         before it was recorded — unvouched, which is a state to act on rather than a
         detail to shrug at.
         """
-        raw = read_json_optional(self._layout(campaign_id, cycle_id).candidate_file(round_num))
+        raw = read_json_optional(self._layout(hop).candidate_file(round_num))
         if raw is None:
             return None
         if isinstance(raw, dict):
@@ -1176,12 +1165,11 @@ class CampaignStore:
 
     def delete_round_candidates(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         round_num: int,
     ) -> None:
         """Delete cached candidates (forces fresh generation)."""
-        path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
+        path = self._layout(hop).candidate_file(round_num)
         if path.exists():
             unlink_robust(path)
             logger.debug(
@@ -1192,17 +1180,17 @@ class CampaignStore:
     # Cycle-seed I/O — the read-once ``CycleSeedRecord`` on the ledger
     # ------------------------------------------------------------------
 
-    def write_cycle_seed(self, campaign_id: str, cycle_id: str, seed: CycleSeed) -> None:
+    def write_cycle_seed(self, hop: CycleHop, seed: CycleSeed) -> None:
         """Append the cycle seed as the read-once ``CycleSeedRecord`` on the ledger
         (was ``.overrides/seed.json``). A steered fork appends its own after inheriting
         the parent's virtually, so on disk it is this cycle's own first seed record."""
-        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
+        cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 
-    def read_cycle_seed(self, campaign_id: str, cycle_id: str) -> CycleSeed | None:
+    def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         """The cycle's own seed from its ledger, or ``None`` when it wasn't seeded. Pure
         scan — no ``CycleEventLog``, no subscribers fire (mirrors the admissibility scan)."""
-        return scan_ledger_cycle_seed(self._layout(campaign_id, cycle_id).ledger)
+        return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
 
-__all__ = ["CampaignStore"]
+__all__ = ["CampaignStore", "origin_accuracy_of"]

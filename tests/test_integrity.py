@@ -1081,7 +1081,9 @@ def test_two_inner_runs_of_one_benchmark_cell_both_reach_the_tree(built_stores) 
 
     sandbox = (
         inner_sandbox_dir(
-            built_stores.shared_root, str(built_stores.tenant_id), outer_campaign, outer_cycle
+            built_stores.shared_root,
+            str(built_stores.tenant_id),
+            CycleHop(campaign_id=outer_campaign, cycle_id=outer_cycle),
         )
         / built_stores.tenant_id
     )

@@ -39,6 +39,7 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
@@ -194,7 +195,7 @@ def _read_cycle_seed(session: Session) -> CycleSeed | None:
     root mint; ``None`` otherwise."""
     if not session.state.cycle_id:
         return None
-    return session.store.campaigns.read_cycle_seed(session.campaign_id, session.state.cycle_id)
+    return session.store.campaigns.read_cycle_seed(session.hop)
 
 
 @dataclass(frozen=True)
@@ -268,9 +269,7 @@ async def _prepare_run(
     # cycle could never be resumed). Then bind the hooks, so the origin pass below
     # is pausable like every other phase.
     if session.state.cycle_id:
-        launch_cycle_dir = session.store.campaigns.cycle_dir(
-            session.campaign_id, session.state.cycle_id
-        )
+        launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
         clear_run_control_flags(launch_cycle_dir)
         _bind_run_controls(session, launch_cycle_dir)
 
@@ -308,8 +307,7 @@ async def _prepare_run(
             # and flag the session so every run it scores grades non-clean. A steer to a
             # SANCTIONED model reaches this seam but is clean: no stamp, no taint.
             session.store.campaigns.mark_human_intervened(
-                session.campaign_id,
-                session.state.cycle_id,
+                session.hop,
                 kind="disallowed_model_override",
                 at=utcnow_iso(),
             )
@@ -533,9 +531,7 @@ async def _run_single_cycle(
         # probes re-read `.runtime/spend_cap.json` each tick so the
         # `change-spend-budget` command can move a ceiling mid-flight.
         cycle_dir_for_probe = (
-            session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-            if session.state.cycle_id
-            else Path()
+            session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
         )
         # Re-bind per rebase/fork iteration so the hooks track a fork's OWN cycle dir
         # (`_prepare_run` bound the launch cycle's; a fork mints a different one).
@@ -628,8 +624,7 @@ async def _run_single_cycle(
     if forked_in_this_run and cycle_result.n_l1_rounds == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
-            campaign_id=session.campaign_id,
-            cycle_id=session.state.cycle_id,
+            hop=session.hop,
             parent_cycle_id=pre_loop_cycle_id,
         )
 
@@ -674,9 +669,8 @@ def _mint_and_rebase_fork(
         seed = CycleSeed(config_overrides=rebase_req.config_overrides)
     new_cycle_id = _mint_fork(
         campaign_store=session.store.campaigns,
-        campaign_id=session.campaign_id,
+        parent=CycleHop(campaign_id=session.campaign_id, cycle_id=parent_cycle_id),
         session_id=session.session_id or "",
-        parent_cycle_id=parent_cycle_id,
         fork_from_round=rebase_req.fork_from_round,
         payload=ForkSpec(
             trigger=rebase_req.trigger,
@@ -906,8 +900,7 @@ def _finalize_run(
             "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }
         session.store.campaigns.mark_finished(
-            session.campaign_id,
-            session.state.cycle_id,
+            session.hop,
             status=cycle_status,
             stop_reason=stop_reason,
             finished_at=cycle_result.finished_at,

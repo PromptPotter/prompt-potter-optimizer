@@ -23,6 +23,7 @@ from promptpotter.application.config import configure_and_apply_pipeline, resolv
 from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:
@@ -199,15 +200,16 @@ def prepare_fresh_cycle(
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,
-        campaign_id=campaign_id,
-        cycle_id=plan.cycle_id,
+        hop=CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
         origin_prompt_fields=plan.origin.prompt_field_dict(),
         dataset_size=len(dataset),
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
     )
     if seed is not None:
-        session.store.campaigns.write_cycle_seed(campaign_id, cycle_id, seed)
+        session.store.campaigns.write_cycle_seed(
+            CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), seed
+        )
     return MintedCycle(
         cycle_id=cycle_id,
         session_id=session_id,

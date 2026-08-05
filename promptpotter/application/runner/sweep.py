@@ -49,8 +49,7 @@ async def run_sweep_generation_only(
             # matched-origin pair stay None because a degradation verdict and an
             # origin-restricted-to-the-winner's-samples both need scored samples.
             session.store.campaigns.save_round_file(
-                session.campaign_id,
-                session.state.cycle_id,
+                session.hop,
                 RoundResult(
                     round=round_num,
                     label=label,

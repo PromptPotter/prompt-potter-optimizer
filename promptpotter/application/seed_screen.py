@@ -234,7 +234,7 @@ async def screen_inner_seeds(
     from promptpotter.infrastructure.store.io import write_json
 
     log_fn = log or (lambda *_a, **_k: None)
-    session = await init_services(dataset_name=dataset_name, identity=identity, store=stores)
+    session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
     all_samples = session.samples
     if not all_samples:
         raise SeedScreenError(f"dataset {dataset_name!r} loaded zero samples.")

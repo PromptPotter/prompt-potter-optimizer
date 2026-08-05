@@ -19,7 +19,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -56,9 +56,8 @@ class ForkResult(NamedTuple):
 
 def _fork_sibling_setup(
     campaign_store: CampaignStore,
-    campaign_id: str,
+    parent: CycleHop,
     session_id: str,
-    parent_cycle_id: str,
     new_cycle_id: str,
     *,
     from_round: int,
@@ -67,8 +66,8 @@ def _fork_sibling_setup(
     source_file: str | None = None,
 ) -> str:
     """Common plumbing: dir create, FORK_CUT append, pointer + log. Returns ``now_iso``."""
-    parent_dir = campaign_store.cycle_dir(campaign_id, parent_cycle_id)
-    new_dir = campaign_store.cycle_dir(campaign_id, new_cycle_id)
+    parent_dir = campaign_store.cycle_dir(parent)
+    new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
@@ -92,10 +91,14 @@ def _fork_sibling_setup(
             data=record_data,
         )
 
-    save_active_pointer(campaign_store.workspace, session_id, campaign_id, new_cycle_id)
+    save_active_pointer(
+        campaign_store.workspace,
+        session_id,
+        parent.model_copy(update={"cycle_id": new_cycle_id}),
+    )
     logger.info(
         "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
-        parent_cycle_id,
+        parent.cycle_id,
         new_cycle_id,
         from_round,
         payload.trigger.value,
@@ -149,9 +152,8 @@ def _fork_suffix(*parts: str) -> str:
 
 def _mint_fork(
     campaign_store: CampaignStore,
-    campaign_id: str,
+    parent: CycleHop,
     session_id: str,
-    parent_cycle_id: str,
     fork_from_round: int,
     payload: ForkSpec,
     *,
@@ -180,30 +182,27 @@ def _mint_fork(
         if surviving_rounds is None:
             # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
             # from the parent's round files.
-            surviving_rounds = campaign_store.load_rounds_range(
-                campaign_id, parent_cycle_id, 0, fork_from_round - 1
-            )
-        new_cycle_id = f"{parent_cycle_id}_fork_{_fork_suffix(parent_cycle_id)}"
+            surviving_rounds = campaign_store.load_rounds_range(parent, 0, fork_from_round - 1)
+        new_cycle_id = f"{parent.cycle_id}_fork_{_fork_suffix(parent.cycle_id)}"
         now = _fork_sibling_setup(
             campaign_store,
-            campaign_id,
+            parent,
             session_id,
-            parent_cycle_id,
             new_cycle_id,
             from_round=fork_from_round,
             payload=payload,
         )
         campaign_store.save_rebase_fork(
-            campaign_id,
-            parent_cycle_id,
+            parent.campaign_id,
+            parent.cycle_id,
             new_cycle_id,
             surviving_rounds=surviving_rounds,
             forked_at=now,
             forked_from_round=fork_from_round,
         )
         campaign_store.copy_parent_rounds_and_candidates(
-            campaign_id,
-            parent_cycle_id,
+            parent.campaign_id,
+            parent.cycle_id,
             new_cycle_id,
             before_round=fork_from_round,
         )
@@ -212,30 +211,30 @@ def _mint_fork(
             # seeded cycle. `read_cycle_seed` scans THIS cycle's own ledger, so without
             # the record the unlock would live only in memory: it would hold for the
             # in-process run and silently re-lock on the first `resume` of the fork.
-            campaign_store.write_cycle_seed(campaign_id, new_cycle_id, payload.seed)
+            campaign_store.write_cycle_seed(
+                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
+            )
     elif payload.trigger is ForkTrigger.OPERATOR_DIAG:
-        new_cycle_id = _next_diag_sibling_id(campaign_store, campaign_id, parent_cycle_id)
+        new_cycle_id = _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
         now = _fork_sibling_setup(
             campaign_store,
-            campaign_id,
+            parent,
             session_id,
-            parent_cycle_id,
             new_cycle_id,
             from_round=0,
             payload=payload,
         )
         campaign_store.write_fresh_sibling(
-            campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=now
+            parent.campaign_id, parent.cycle_id, new_cycle_id, "diag", forked_at=now
         )
     elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
         new_cycle_id = (
-            f"{root_cycle_id(parent_cycle_id)}_fork_{_fork_suffix(parent_cycle_id, 'operator')}"
+            f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
         )
         now = _fork_sibling_setup(
             campaign_store,
-            campaign_id,
+            parent,
             session_id,
-            parent_cycle_id,
             new_cycle_id,
             from_round=0,
             payload=payload,
@@ -246,12 +245,14 @@ def _mint_fork(
         # ForkSpec provenance lands on index.json::fork via the single fork-block
         # writer below.
         campaign_store.write_fresh_sibling(
-            campaign_id, parent_cycle_id, new_cycle_id, "fork", forked_at=now
+            parent.campaign_id, parent.cycle_id, new_cycle_id, "fork", forked_at=now
         )
         # The steered seed (edited searchpoint + reconciled limits) rides its own
         # read-once home; the ledger FORK_CUT still carries it as SoT.
         if payload.seed is not None:
-            campaign_store.write_cycle_seed(campaign_id, new_cycle_id, payload.seed)
+            campaign_store.write_cycle_seed(
+                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
+            )
     elif payload.trigger is ForkTrigger.OPERATOR_SWEEP:
         if sweep_batch_id is None or sweep_source_file is None:
             raise ValueError(
@@ -259,13 +260,12 @@ def _mint_fork(
             )
         if "_" in sweep_batch_id:
             raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
-        suffix = _fork_suffix(parent_cycle_id, sweep_source_file)
-        new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
+        suffix = _fork_suffix(parent.cycle_id, sweep_source_file)
+        new_cycle_id = f"{parent.cycle_id}_sweep_{sweep_batch_id}_{suffix}"
         now = _fork_sibling_setup(
             campaign_store,
-            campaign_id,
+            parent,
             session_id,
-            parent_cycle_id,
             new_cycle_id,
             from_round=0,
             payload=payload,
@@ -273,8 +273,8 @@ def _mint_fork(
             source_file=sweep_source_file,
         )
         campaign_store.write_fresh_sibling(
-            campaign_id,
-            parent_cycle_id,
+            parent.campaign_id,
+            parent.cycle_id,
             new_cycle_id,
             "sweep",
             sweep_batch_id=sweep_batch_id,
@@ -284,20 +284,20 @@ def _mint_fork(
     # hand-built per-trigger dict). The heavy `seed` payload is excluded; it rides
     # the fork's ledger as its own read-once `CycleSeedRecord`.
     campaign_store.update(
-        campaign_id, new_cycle_id, {"fork": payload.model_dump(mode="json", exclude={"seed"})}
+        CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
+        {"fork": payload.model_dump(mode="json", exclude={"seed"})},
     )
     # THE LINE MOVED — said where the cut is made. An offshoot's parent keeps running, which
     # is why this asks the DIRECTION, not merely whether a fork happened.
     if FORK_DIRECTION.get(payload.trigger) is ForkDirection.SUPERSEDE:
-        campaign_store.mark_superseded(campaign_id, parent_cycle_id)
+        campaign_store.mark_superseded(parent)
     return new_cycle_id
 
 
 def cleanup_stub_fork_if_empty(
     *,
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     parent_cycle_id: str,
 ) -> tuple[bool, str]:
     """Delete a freshly-minted fork's dir if it never advanced past round 0;
@@ -320,29 +320,32 @@ def cleanup_stub_fork_if_empty(
     """
     workspace = campaign_store.workspace
     session_id, _, active_cid = read_active_pointer(workspace)
-    was_active = active_cid == cycle_id
+    was_active = active_cid == hop.cycle_id
     if was_active:
-        save_active_pointer(workspace, session_id, campaign_id, parent_cycle_id)
+        save_active_pointer(
+            workspace, session_id, CycleHop(campaign_id=hop.campaign_id, cycle_id=parent_cycle_id)
+        )
     try:
-        deleted, reason = campaign_store.try_delete_stub_cycle(campaign_id, cycle_id)
+        deleted, reason = campaign_store.try_delete_stub_cycle(hop)
     except Exception as exc:
-        logger.warning("Stub cleanup raised for %s: %s", cycle_id, exc)
+        logger.warning("Stub cleanup raised for %s: %s", hop.cycle_id, exc)
         if was_active:
-            save_active_pointer(workspace, session_id, campaign_id, cycle_id)
+            save_active_pointer(workspace, session_id, hop)
         return False, str(exc)
     if not deleted and was_active:
-        save_active_pointer(workspace, session_id, campaign_id, cycle_id)
-        logger.info("Stub cleanup skipped for %s (%s); active pointer restored", cycle_id, reason)
+        save_active_pointer(workspace, session_id, hop)
+        logger.info(
+            "Stub cleanup skipped for %s (%s); active pointer restored", hop.cycle_id, reason
+        )
     elif deleted:
-        logger.info("Stub fork cleaned up: %s (parent=%s)", cycle_id, parent_cycle_id)
+        logger.info("Stub fork cleaned up: %s (parent=%s)", hop.cycle_id, parent_cycle_id)
     return deleted, reason
 
 
 def mint_operator_fork(
     *,
     stores: Stores,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     from_round: int,
     from_candidate_id: str,
     seed: CycleSeed,
@@ -359,10 +362,10 @@ def mint_operator_fork(
     operators may act, we record it), appended to the fork's ledger as a
     ``CycleSeedRecord`` and re-scored as the fork's origin at init.
     """
-    parent_index = stores.campaigns.load(campaign_id, cycle_id) or {}
+    parent_index = stores.campaigns.load(hop) or {}
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_STEERED,
-        reason=f"operator-steered fork from {cycle_id}",
+        reason=f"operator-steered fork from {hop.cycle_id}",
         issued_by=steered_by or UNATTRIBUTED_OPERATOR,
         from_round=from_round,
         from_candidate_id=from_candidate_id or None,
@@ -370,9 +373,8 @@ def mint_operator_fork(
     )
     return _mint_fork(
         stores.campaigns,
-        campaign_id,
+        hop,
         str(parent_index.get("parent_session_id", "")),
-        cycle_id,
         0,
         spec,
     )

@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -71,8 +72,7 @@ async def verify_candidate(
     *,
     stores: Stores,
     identity: IdentityContext,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     round_num: int,
     cand_idx: int,
     label: str,
@@ -96,9 +96,9 @@ async def verify_candidate(
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
-    campaign = stores.campaigns.load_campaign(campaign_id)
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
-        raise VerifyError(f"campaign {campaign_id!r} has no manifest on disk.")
+        raise VerifyError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
 
     if round_num == 0:
         raise VerifyError(
@@ -106,12 +106,12 @@ async def verify_candidate(
             "the origin's prompt fields don't live in the round-candidate cache. "
             "Pass a C{round}.{n} label instead."
         )
-    _cached = stores.campaigns.load_round_candidates(campaign_id, cycle_id, round_num)
+    _cached = stores.campaigns.load_round_candidates(hop, round_num)
     proposals = _cached[0] if _cached else None
     if not proposals:
         raise VerifyError(
             f"no cached candidates for round {round_num} in "
-            f"{campaign_id}/{cycle_id} — looked under .runtime/cache/candidates/."
+            f"{hop.campaign_id}/{hop.cycle_id} — looked under .runtime/cache/candidates/."
         )
     if cand_idx >= len(proposals):
         raise VerifyError(
@@ -122,9 +122,11 @@ async def verify_candidate(
     opt_sp = OptSearchPoint.model_validate(proposal["opt_sp"])
     pp_override = proposal.get("pipeline_params_override") or {}
 
-    round_file = stores.campaigns.load_round_file(campaign_id, cycle_id, round_num)
+    round_file = stores.campaigns.load_round_file(hop, round_num)
     if round_file is None:
-        raise VerifyError(f"round_{round_num:04d}.json missing in {campaign_id}/{cycle_id}.")
+        raise VerifyError(
+            f"round_{round_num:04d}.json missing in {hop.campaign_id}/{hop.cycle_id}."
+        )
     cand_scores = round_file.candidate_scores
     cand_score = next((c for c in cand_scores if c.label == label), None)
     if cand_score is None:
@@ -141,10 +143,10 @@ async def verify_candidate(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
         identity=identity,
-        store=stores,
+        stores=stores,
     )
-    session.campaign_id = campaign_id
-    session.state.cycle_id = cycle_id
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
 
     campaign_config = validate_campaign_config(campaign.config)
     log_fn = log or (lambda *_a, **_k: None)
@@ -156,8 +158,8 @@ async def verify_candidate(
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id=cycle_id,
-        source=f"verify:{campaign_id}:{label}",
+        cycle_id=hop.cycle_id,
+        source=f"verify:{hop.campaign_id}:{label}",
     )
 
     schema = session.pipeline_schema
@@ -185,8 +187,8 @@ async def verify_candidate(
     logger.info(
         "verify %s (%s/%s): scoring %d new sample(s); %d already in archive for this config",
         label,
-        campaign_id,
-        cycle_id,
+        hop.campaign_id,
+        hop.cycle_id,
         n_to_pick,
         len(measured_ids),
     )
@@ -202,7 +204,7 @@ async def verify_candidate(
         measured=None,
         on_sample_scored=lambda *_a, **_k: None,
         on_sample_starting=lambda *_a, **_k: None,
-        source=f"verify:{campaign_id}:{label}",
+        source=f"verify:{hop.campaign_id}:{label}",
     )
 
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
@@ -250,8 +252,8 @@ async def verify_candidate(
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
         dataset=campaign.dataset_name,
-        source_campaign=campaign_id,
-        source_cycle=cycle_id,
+        source_campaign=hop.campaign_id,
+        source_cycle=hop.cycle_id,
         source_label=label,
         source_candidate_id=source_candidate_id,
         config_hash=config_hash[:12],

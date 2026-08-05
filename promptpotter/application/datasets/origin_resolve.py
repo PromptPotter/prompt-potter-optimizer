@@ -172,7 +172,7 @@ def _checkin_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
-    return checkin_call_context(stores, campaign_id, campaign.root_cycle_id)
+    return checkin_call_context(stores, campaign.root_hop)
 
 
 async def resolve_origin_turn(

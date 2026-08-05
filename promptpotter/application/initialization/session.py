@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
@@ -98,6 +99,18 @@ class Session:
     # this cycle scores to grade C (excluded from digest / reuse / L4).
     human_intervened: bool = False
 
+    @property
+    def hop(self) -> CycleHop:
+        """This session's cycle as the pair that names it — campaign plus cycle.
+
+        Derived, never stored: ``campaign_id`` is the session's and ``cycle_id`` flips with
+        ``state`` on a fork, so a stored copy would be a second answer that goes stale at the
+        one moment it matters. The pair is the unit because a cycle_id repeats across sibling
+        ``.inner`` sandboxes — reading either half alone is what let one campaign's fan-out
+        serve another's.
+        """
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.state.cycle_id)
+
     def llm_node_name(self) -> str:
         """The dataset's prompt-bearing LLM node — the override target for a per-cell
         seed / model pin.
@@ -172,8 +185,7 @@ def auto_mint_session(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     origin_acc: float = 0.0,
     origin_prompt_fields: dict[str, Any] | None = None,
     dataset_size: int = 0,
@@ -193,14 +205,14 @@ def auto_mint_session(
     )
     from promptpotter.domain.campaign import Campaign
 
-    target_hash = cycle_id.removeprefix("cycle_")
+    target_hash = hop.cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
     session_id = mint_session_id()
     now = utcnow_iso()
     dataset_name = resolved_dataset_name(session, campaign_config)
     optimizer_hash = combined_optimizer_prompt_hash()
-    validate_path_component(campaign_id)
-    root_cycle = cycle_id
+    validate_path_component(hop.campaign_id)
+    root_cycle = hop.cycle_id
 
     state = new_session_state(
         init_params={
@@ -221,7 +233,7 @@ def auto_mint_session(
     campaigns = session.store.campaigns
     campaigns.create_campaign(
         Campaign(
-            campaign_id=campaign_id,
+            campaign_id=hop.campaign_id,
             dataset_name=dataset_name,
             label=label,
             created_at=now,
@@ -236,9 +248,9 @@ def auto_mint_session(
         )
     )
 
+    root_hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=root_cycle)
     campaigns.create(
-        campaign_id,
-        root_cycle,
+        root_hop,
         {
             "parent_session_id": session_id,
             "header": _build_index_header(session, dataset_size),
@@ -246,10 +258,10 @@ def auto_mint_session(
     )
 
     session.session_id = session_id
-    session.campaign_id = campaign_id
+    session.campaign_id = hop.campaign_id
     session.state.cycle_id = root_cycle
 
-    save_active_pointer(session.store.base_dir, session_id, campaign_id, root_cycle)
+    save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
     from promptpotter.application.origin import build_campaign_emitter
@@ -260,11 +272,11 @@ def auto_mint_session(
 
     logger.info(
         "Minted fresh campaign %s — session %s, cycle %s",
-        campaign_id,
+        hop.campaign_id,
         session_id,
         root_cycle,
     )
-    return session_id, campaign_id, root_cycle
+    return session_id, hop.campaign_id, root_cycle
 
 
 def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
@@ -306,8 +318,7 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
         )
     )
     stores.campaigns.create(
-        campaign_id,
-        cycle_id,
+        CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
         {
             "parent_session_id": session_id,
             "header": {
@@ -322,7 +333,9 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
     # session between skeleton and Start; finalize overwrites it with the run state.
     stores.sessions.create(session_id, {"dataset_name": slug})
 
-    checkin_flag = CycleLayout(stores.campaigns.cycle_dir(campaign_id, cycle_id)).checkin_flag
+    checkin_flag = CycleLayout(
+        stores.campaigns.cycle_dir(CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
+    ).checkin_flag
     checkin_flag.parent.mkdir(parents=True, exist_ok=True)
     checkin_flag.write_text("", encoding="utf-8")
 
@@ -336,8 +349,7 @@ def finalize_checkin_to_active(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     session_id: str,
     cycle_plan: CyclePlan,
     dataset_size: int,
@@ -371,7 +383,7 @@ def finalize_checkin_to_active(
     session.store.sessions.create(session_id, state)
 
     session.store.campaigns.update_campaign(
-        campaign_id,
+        hop.campaign_id,
         {
             "root_content_hash": target_hash,
             "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
@@ -382,8 +394,7 @@ def finalize_checkin_to_active(
         },
     )
     session.store.campaigns.create(
-        campaign_id,
-        cycle_id,
+        hop,
         {
             "parent_session_id": session_id,
             "header": _build_index_header(session, dataset_size),
@@ -391,8 +402,8 @@ def finalize_checkin_to_active(
     )
 
     session.session_id = session_id
-    session.campaign_id = campaign_id
-    session.state.cycle_id = cycle_id
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
 
     # Claim the active pointer now (not at skeleton mint) — Start is when the cycle
     # becomes the running one the dashboard follows. A following workspace snaps to
@@ -402,9 +413,9 @@ def finalize_checkin_to_active(
     # pointer and never the outer tenant's — otherwise the inner mint clobbers the
     # outer's active_session.json and the webapp (which reads the default root)
     # follows a pointer to a campaign that lives under `.inner/…` and 404s.
-    save_active_pointer(session.store.base_dir, session_id, campaign_id, cycle_id)
+    save_active_pointer(session.store.base_dir, session_id, hop)
 
-    cycle_dir = session.store.campaigns.cycle_dir(campaign_id, cycle_id)
+    cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
     from promptpotter.application.origin import build_campaign_emitter
@@ -414,7 +425,10 @@ def finalize_checkin_to_active(
         build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
 
     logger.info(
-        "Check-in campaign %s started — session %s, cycle %s", campaign_id, session_id, cycle_id
+        "Check-in campaign %s started — session %s, cycle %s",
+        hop.campaign_id,
+        session_id,
+        hop.cycle_id,
     )
 
 
@@ -424,7 +438,11 @@ def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
 
     if session.store is None:
         return None
-    cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.campaign_id, cycle_id))
+    cycle_dir = CycleDir(
+        session.store.campaigns.cycle_dir(
+            CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id)
+        )
+    )
     return CycleEventLog.open(cycle_dir)
 
 

@@ -294,8 +294,7 @@ def ray_validator_parts(
     """
     parts: list[object] = ["ray", limit, before]
     for course in courses:
-        leaf = course.path[-1]
-        layout = CycleLayout(cycle_dir_for(course.store.base_dir, leaf.campaign_id, leaf.cycle_id))
+        layout = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1]))
         parts.append(encode_cycle_path(course.path))
         parts.append(newest_mtime_ns(layout.ledger, layout.manifest))
     return tuple(parts)
@@ -320,10 +319,7 @@ def build_family_ray(
     truncated = False
 
     for course in courses:
-        leaf = course.path[-1]
-        ledger = CycleLayout(
-            cycle_dir_for(course.store.base_dir, leaf.campaign_id, leaf.cycle_id)
-        ).ledger
+        ledger = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1])).ledger
         key = encode_cycle_path(course.path)
         rows, dropped = _read_curated(
             ledger, encoded_path=key, depth=course.depth, keep=limit, bound=before

@@ -81,8 +81,7 @@ async def generate_or_load_candidates(
 
     if session.state.cycle_id:
         cached = session.store.campaigns.load_round_candidates(
-            session.campaign_id,
-            session.state.cycle_id,
+            session.hop,
             round_num,
         )
         if cached is not None:
@@ -159,8 +158,7 @@ async def generate_or_load_candidates(
     # that produced nothing.
     if session.state.cycle_id and candidates:
         session.store.campaigns.save_round_candidates(
-            session.campaign_id,
-            session.state.cycle_id,
+            session.hop,
             round_num,
             [cp.model_dump() for cp in candidates],
             # What this generation READ: the round it was composed from. Recorded beside the

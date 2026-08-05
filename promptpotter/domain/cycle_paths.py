@@ -1,4 +1,4 @@
-"""Typed addresses + the projection protocol for the run ledger.
+"""Typed addresses for a cycle and the directories one is written to.
 
 A cycle's address is a ``CyclePath``, never an id: cycle ids repeat across
 sibling ``.inner`` sandboxes, so only the root → leaf hop chain (every hop but
@@ -9,18 +9,16 @@ newtypes so a write target can never be an unmarked ``Path``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NewType, Protocol
+from typing import NewType
 
 from pydantic import ConfigDict
 
-from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
     "CycleDir",
     "CycleHop",
     "CyclePath",
-    "Projection",
     "WorkspaceDir",
     "encode_cycle_path",
 ]
@@ -62,15 +60,3 @@ def encode_cycle_path(path: CyclePath) -> str:
     ``list[CycleHop]`` is not hashable and a bare ``cycle_id`` is not unique across sandboxes.
     """
     return "~".join(f"{hop.campaign_id}::{hop.cycle_id}" for hop in path)
-
-
-class Projection(Protocol):
-    """A subscriber to the ledger's record stream.
-
-    Projections receive every appended record via ``on_record``. They
-    persist whatever projection-specific view they own (a JSON dashboard,
-    a markdown log, an in-memory index). Projections never call
-    ``append`` — the ledger is single-writer from the campaign loop.
-    """
-
-    def on_record(self, record: CycleRecord, offset: int) -> None: ...

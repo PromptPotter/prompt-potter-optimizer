@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, RoundSummary
 from promptpotter.domain.strict_model import StrictModel
@@ -315,8 +316,7 @@ class LiveDashboardState(StrictModel):
         cls,
         prior: LiveDashboardState | None,
         *,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         session_id: str,
         l1_patience: int,
         n_variants: int,
@@ -340,8 +340,8 @@ class LiveDashboardState(StrictModel):
         printed beside it.
         """
         mine: dict[str, Any] = {
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
+            "campaign_id": hop.campaign_id,
+            "cycle_id": hop.cycle_id,
             "session_id": session_id,
             "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),

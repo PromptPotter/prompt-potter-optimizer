@@ -16,7 +16,7 @@ from promptpotter.application.origin import (
 )
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -358,9 +358,7 @@ def build_run_observers(
             "jobs.mint.prepare_fresh_cycle — it needs both cycle_id and store"
         )
 
-    cycle_dir = CycleDir(
-        session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-    )
+    cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     audit = AuditTrailView.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
@@ -399,7 +397,9 @@ def build_run_observers(
             langfuse_trace_url=trace_url,
         )
         parent_dir = CycleDir(
-            session.store.campaigns.cycle_dir(session.campaign_id, fork.parent_cycle_id)
+            session.store.campaigns.cycle_dir(
+                CycleHop(campaign_id=session.campaign_id, cycle_id=fork.parent_cycle_id)
+            )
         )
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)

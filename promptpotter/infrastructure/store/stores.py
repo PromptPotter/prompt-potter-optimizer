@@ -209,7 +209,7 @@ def build_stores(
 
 
 def inner_sandbox_store(
-    store: Stores, outer_campaign_id: str, outer_cycle_id: str
+    stores: Stores, outer_campaign_id: str, outer_cycle_id: str
 ) -> Stores | None:
     """A :class:`Stores` rooted at the inner sandbox of ``(outer_campaign_id, outer_cycle_id)``.
 
@@ -234,14 +234,16 @@ def inner_sandbox_store(
     staying tenant-global. The two roots coincide at depth 1, which is why neither had fired.
     """
     sandbox_root = inner_sandbox_dir(
-        store.shared_root, str(store.tenant_id), outer_campaign_id, outer_cycle_id
+        stores.shared_root,
+        str(stores.tenant_id),
+        CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id),
     )
-    if not (sandbox_root / store.tenant_id).is_dir():
+    if not (sandbox_root / stores.tenant_id).is_dir():
         return None
-    return build_stores(store.identity, projects_root=sandbox_root, shared_root=store.shared_root)
+    return build_stores(stores.identity, projects_root=sandbox_root, shared_root=stores.shared_root)
 
 
-def descend_store(store: Stores, hops: CyclePath) -> Stores:
+def descend_store(stores: Stores, hops: CyclePath) -> Stores:
     """Fold ``.inner/<key>`` over *hops* — THE recursive step, and the one
     place a nested store is reached.
 
@@ -251,7 +253,7 @@ def descend_store(store: Stores, hops: CyclePath) -> Stores:
     (L4, L5, … all fold identically). Every component is char-validated before any
     filesystem touch (400 on bad chars); a missing sandbox is a 404.
     """
-    cur = store
+    cur = stores
     for hop in hops:
         try:
             validate_path_component(hop.campaign_id)
@@ -265,7 +267,7 @@ def descend_store(store: Stores, hops: CyclePath) -> Stores:
     return cur
 
 
-def resolve_cycle_path(store: Stores, path: CyclePath) -> tuple[Stores, CycleHop]:
+def resolve_cycle_path(stores: Stores, path: CyclePath) -> tuple[Stores, CycleHop]:
     """Resolve a :data:`CyclePath` (root → leaf) to ``(Stores, leaf)``.
 
     What makes an inner cycle addressable exactly like a top-level one: the leaf
@@ -280,7 +282,7 @@ def resolve_cycle_path(store: Stores, path: CyclePath) -> tuple[Stores, CycleHop
         validate_path_component(leaf.cycle_id)
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
-    return descend_store(store, path[:-1]), leaf
+    return descend_store(stores, path[:-1]), leaf
 
 
 __all__ = [

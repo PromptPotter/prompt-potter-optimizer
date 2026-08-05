@@ -26,7 +26,7 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     replay_decisions,
 )
 from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     ForkDirection,
@@ -117,17 +117,17 @@ def repair_cut(prior: list[RoundResult]) -> RepairCut:
 
 def _rebank_on_branch(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    parent_cycle_id: str,
+    parent: CycleHop,
     branch_cycle_id: str,
     retirements: list[tuple[RoundResult, int]],
 ) -> int:
     """Put the corrected candidates on the BRANCH's own ledger — a measurement enters through
     the ingress, and a round file with none behind it leaves the branch unable to name a
     candidate of its own. Identity is copied; only the MEASUREMENT is re-emitted."""
-    parent_ledger = CycleLayout(campaign_store.cycle_dir(campaign_id, parent_cycle_id)).ledger
+    branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
+    parent_ledger = CycleLayout(campaign_store.cycle_dir(parent)).ledger
     minted_at = {(c.round, c.idx): c for c in scan_ledger_candidates(parent_ledger)}
-    ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(campaign_id, branch_cycle_id)))
+    ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
     # `parent_id` and `source` reach a reader ONLY through the mint record; every other field
     # rides the snapshot (`ledger_scan._SCORED_INCLUDE`). Copied by shared field NAME, so
     # adding one to both models carries it without a third edit here.
@@ -182,8 +182,7 @@ def _resync_round_headline(t: RoundResult) -> bool:
 
 async def repair_incomplete_rounds(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     prior: list[Any],
     session: Session,
     cycle: Cycle,
@@ -209,7 +208,7 @@ async def repair_incomplete_rounds(
     by_id = {str(s.id): s for s in dataset}
     repaired: list[int] = []
     for t in prior:
-        cache = campaign_store.load_round_candidates(campaign_id, cycle_id, t.round)
+        cache = campaign_store.load_round_candidates(hop, t.round)
         cached = cache[0] if cache else []
         opt_sps: dict[str, OptSearchPoint] = {}
         for entry in cached:
@@ -322,8 +321,7 @@ async def repair_incomplete_rounds(
 
 def _stale_generation(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     prior: list[RoundResult],
     resumed_from_round: int,
 ) -> Divergence | None:
@@ -332,7 +330,7 @@ def _stale_generation(
     recorded digest ⇒ UNVOUCHED ⇒ a divergence, not a shrug."""
     from promptpotter.domain.results import round_document_digest
 
-    cached = campaign_store.load_round_candidates(campaign_id, cycle_id, resumed_from_round)
+    cached = campaign_store.load_round_candidates(hop, resumed_from_round)
     if cached is None or not prior:
         return None
     _candidates, consumed = cached
@@ -420,8 +418,7 @@ def _round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[s
 
 async def _rederive_critiques(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     session: Session,
     cycle: Cycle,
     drifted: list[RoundResult],
@@ -447,7 +444,7 @@ async def _rederive_critiques(
                     rr.critique = await run_l1_critique(
                         cycle, rr, round_num=rr.round, ledger=session.state.ledger
                     )
-                    campaign_store.save_round_file(campaign_id, cycle_id, rr)
+                    campaign_store.save_round_file(hop, rr)
                     logger.warning(
                         "Round %d critique re-distilled: its input package drifted when the "
                         "round was repaired, so the recorded one described evidence that no "
@@ -465,8 +462,7 @@ def _package_drift(
     after: dict[int, dict[str, str]],
     by_round: dict[int, RoundResult],
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
 ) -> tuple[dict[int, Divergence], list[RoundResult]]:
     """What the correction REACHED: ``({round that consumed a moved package: divergence},
     [rounds whose own package moved])``. Raised at the CONSUMER (``rn + 1``), never the
@@ -486,10 +482,7 @@ def _package_drift(
             ", ".join(moved),
         )
         nxt = rn + 1
-        owns = (
-            nxt in by_round
-            or campaign_store.load_round_candidates(campaign_id, cycle_id, nxt) is not None
-        )
+        owns = nxt in by_round or campaign_store.load_round_candidates(hop, nxt) is not None
         if owns and nxt not in divergences:
             divergences[nxt] = Divergence(
                 round_num=nxt,
@@ -503,8 +496,7 @@ def _package_drift(
 
 async def _apply_correction(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     prior: list[RoundResult],
     packages_before: dict[int, dict[str, str]],
     session: Session,
@@ -519,7 +511,7 @@ async def _apply_correction(
     ``cleanup_stub_fork_if_empty`` and returns ``None``.
     """
     cut = repair_cut(prior)
-    repair_target = cycle_id
+    repair_target = hop.cycle_id
     repair_spec: ForkSpec | None = None
     if cut.rounds:
         # The CANDIDATE, not the label — every course mints its own `C2.1`.
@@ -532,9 +524,8 @@ async def _apply_correction(
         )
         repair_target = _mint_fork(
             campaign_store,
-            campaign_id,
+            hop,
             session.session_id,
-            cycle_id,
             cut.resume_at,
             repair_spec,
             surviving_rounds=list(prior[: cut.resume_at]),
@@ -553,7 +544,7 @@ async def _apply_correction(
     # replaced, so the branch REGENERATES it rather than paying to correct a document it will
     # discard. No cut ⇒ empty slice, the same answer the walk gives.
     repaired = await repair_incomplete_rounds(
-        campaign_store, campaign_id, cycle_id, prior[: cut.resume_at], session, cycle, dataset
+        campaign_store, hop, prior[: cut.resume_at], session, cycle, dataset
     )
     if not repaired:
         return None
@@ -569,23 +560,21 @@ async def _apply_correction(
         _round_packages(cycle, prior),
         by_round,
         campaign_store,
-        campaign_id,
-        cycle_id,
+        hop,
     )
+    branch = CycleHop(campaign_id=hop.campaign_id, cycle_id=repair_target)
     # As a round file AND on the branch's ledger — see `_rebank_on_branch`.
     for rn in repaired:
-        campaign_store.save_round_file(campaign_id, repair_target, by_round[rn])
+        campaign_store.save_round_file(branch, by_round[rn])
     logger.warning(
         "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "
         "what a reader sees at those positions is the corrected measurement rather than the "
         "parent's, which is the version the cut retired.",
-        _rebank_on_branch(campaign_store, campaign_id, cycle_id, repair_target, cut.retirements),
+        _rebank_on_branch(campaign_store, hop, repair_target, cut.retirements),
         repair_target,
     )
     if drifted:
-        await _rederive_critiques(
-            campaign_store, campaign_id, repair_target, session, cycle, drifted
-        )
+        await _rederive_critiques(campaign_store, branch, session, cycle, drifted)
 
     # GRADE the cut now its consequence is known, by RE-SERIALIZING the spec it was minted
     # from — `update` replaces `index.json::fork` wholesale, so a hand-built dict dropped
@@ -593,8 +582,7 @@ async def _apply_correction(
     equivalent = not divergences
     direction = ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
     campaign_store.update(
-        campaign_id,
-        repair_target,
+        branch,
         {
             "fork": repair_spec.model_copy(update={"direction": direction}).model_dump(
                 mode="json", exclude={"seed"}
@@ -603,7 +591,7 @@ async def _apply_correction(
     )
     if equivalent:
         campaign_store.copy_parent_rounds_and_candidates(
-            campaign_id, cycle_id, repair_target, before_round=cut.resume_at + 1
+            hop.campaign_id, hop.cycle_id, repair_target, before_round=cut.resume_at + 1
         )
         logger.warning(
             "The correction reached nothing any node reads — cut %s marked EQUIVALENT "
@@ -617,8 +605,7 @@ async def _apply_correction(
 
 async def resume_with_divergence_check(
     campaign_store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     resumed_from_round: int,
     session: Session,
     cycle: Cycle,
@@ -635,7 +622,7 @@ async def resume_with_divergence_check(
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
-    prior = campaign_store.load_rounds_range(campaign_id, cycle_id, 0, resumed_from_round - 1)
+    prior = campaign_store.load_rounds_range(hop, 0, resumed_from_round - 1)
 
     def _rescore(items: Any) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = list(items or [])
@@ -655,7 +642,7 @@ async def resume_with_divergence_check(
     packages_before = _round_packages(cycle, [t.model_copy(deep=True) for t in prior])
 
     correction = await _apply_correction(
-        campaign_store, campaign_id, cycle_id, prior, packages_before, session, cycle, dataset
+        campaign_store, hop, prior, packages_before, session, cycle, dataset
     )
     if correction is not None:
         return correction
@@ -665,8 +652,8 @@ async def resume_with_divergence_check(
         # not KNOBS, so `DiffScope.NONE` says nothing about them; and a stale generation is the
         # one check answering for an EARLIER resume, which by now diffs clean.
         optimizer_divergences = _optimizer_divergences(prior)
-        stale = _stale_generation(campaign_store, campaign_id, cycle_id, prior, resumed_from_round)
-        campaign = campaign_store.load_campaign(campaign_id)
+        stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
+        campaign = campaign_store.load_campaign(hop.campaign_id)
         frozen = campaign.config if campaign is not None else {}
         scope, diffed = classify_config_diff(cycle.config, frozen)
         if (
@@ -678,12 +665,12 @@ async def resume_with_divergence_check(
                 logger.info(
                     "Resume: policy-only config diff (%s); continuing on cycle %s in-place",
                     ", ".join(diffed),
-                    cycle_id,
+                    hop.cycle_id,
                 )
                 # Refresh the campaign snapshot so future resumes diff
                 # against current state.
                 campaign_store.update_campaign(
-                    campaign_id, {"config": freeze_campaign_config(cycle.config)}
+                    hop.campaign_id, {"config": freeze_campaign_config(cycle.config)}
                 )
             return None
         if scope is DiffScope.DATA_AFFECTING and diffed:
@@ -717,9 +704,8 @@ async def resume_with_divergence_check(
                 )
             new_cycle_id = _mint_fork(
                 campaign_store,
-                campaign_id,
+                hop,
                 session.session_id,
-                cycle_id,
                 div.round_num,
                 ForkSpec(
                     trigger=ForkTrigger.SCORING_DIVERGENCE,

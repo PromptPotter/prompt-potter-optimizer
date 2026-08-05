@@ -19,7 +19,7 @@ from promptpotter.infrastructure.store.family_ray_views import (
 )
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import iter_family_courses
-from promptpotter.presentation.api.deps import StoreDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
     weak_etag,
@@ -34,7 +34,7 @@ from promptpotter.shared.errors import BadRequestError, NotFoundError
 )
 def get_family_ray(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
@@ -62,9 +62,9 @@ def get_family_ray(
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     # ONE family walk (it also owns the path resolution), whichever way the conditional
     # goes — the expensive half is reading the ledgers, which is what the 304 skips.
-    courses = iter_family_courses(store, path)
+    courses = iter_family_courses(stores, path)
     leaf = courses[0].path[-1]
-    if not cycle_dir_for(courses[0].store.base_dir, leaf.campaign_id, leaf.cycle_id).is_dir():
+    if not cycle_dir_for(courses[0].store.base_dir, leaf).is_dir():
         raise NotFoundError(f"Cycle '{leaf.campaign_id}/{leaf.cycle_id}' not found")
 
     etag = weak_etag(*ray_validator_parts(courses, limit=limit, before=before))

@@ -192,8 +192,8 @@ The persisted world is a four-entity containment hierarchy
 - **Cycle** — the round-loop state container; the internal name for a
   Unit. `cycle_{content_hash[:12]}` from the origin JSP content hash
   (+ `_fork_`/`_diag_`/`_sweep_` for branches). `cycle_id` is
-  campaign-scoped — path resolution is `(campaign_id, cycle_id)`.
-  `application/optimization/cycle.py`.
+  campaign-scoped, so the address type is `CycleHop`
+  (`domain/cycle_paths.py`). `application/optimization/cycle.py`.
 - **unit_kind** — operator-facing label on the webapp sidebar, computed
   server-side from `(sibling_kind, fork_trigger)`: `session` (a session
   root run; `resume` extends it), `divergent_resume` (a `resume

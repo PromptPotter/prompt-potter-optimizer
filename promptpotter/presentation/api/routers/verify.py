@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query
 
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoresDep
 
 verify_router = APIRouter(tags=["Verify"])
 
@@ -26,11 +26,11 @@ class DiagnosticRunListResponse(StrictModel):
 
 @verify_router.get("/diagnostic-runs", response_model=DiagnosticRunListResponse)
 def list_diagnostic_runs(
-    store: StoreDep,
+    stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset."),
 ) -> DiagnosticRunListResponse:
     """Return every diagnostic-run record on disk, optionally filtered by dataset."""
-    runs = store.diagnostic_runs.list(dataset=dataset)
+    runs = stores.diagnostic_runs.list(dataset=dataset)
     return DiagnosticRunListResponse(n=len(runs), runs=runs)
 
 

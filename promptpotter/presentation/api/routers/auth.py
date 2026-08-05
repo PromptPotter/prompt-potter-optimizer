@@ -51,7 +51,7 @@ from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.user_store import ConsentRecord
-from promptpotter.presentation.api.deps import IdentityDep, StoreDep
+from promptpotter.presentation.api.deps import IdentityDep, StoresDep
 from promptpotter.presentation.api.middleware.oidc import SESSION_COOKIE_NAME
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
@@ -318,7 +318,7 @@ async def logout(request: Request) -> JSONResponse:
 
 
 @auth_router.get("/me", response_model=MeResponse)
-async def me(request: Request, identity: IdentityDep, store: StoreDep) -> MeResponse:
+async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeResponse:
     """Identity envelope + the data the account modal + consent gate need.
 
     `connected_accounts` is a single-entry list at Stage 1 (one provider
@@ -334,7 +334,7 @@ async def me(request: Request, identity: IdentityDep, store: StoreDep) -> MeResp
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
-    user = store.users.get_or_create(
+    user = stores.users.get_or_create(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
         email=email,
@@ -378,7 +378,7 @@ _N_BUCKETS = 30
 
 
 @auth_router.get("/quota-status", response_model=QuotaStatus)
-def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
+def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     """Live quota snapshot for the Security pane.
 
     Today's spend sums ``TokenUsageRecord`` cost from the canonical ledger since
@@ -386,10 +386,10 @@ def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     the true overage rather than clamping the display to the cap; concurrent +
     daily counts ride the `JobRegistry`.
     """
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
-        email=claim_email(store.identity),
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=claim_email(stores.identity),
     )
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
@@ -403,7 +403,7 @@ def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     # over-budget day reports the true overage instead of clamping to the cap
     # (the cap itself rides `spend_budget_usd_daily` below).
     spent = sum_user_spend(
-        store=store, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
+        stores=stores, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
     )
 
     return QuotaStatus(
@@ -417,27 +417,27 @@ def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
 
 
 @auth_router.get("/user-settings", response_model=UserSettings)
-def get_user_settings(store: StoreDep) -> UserSettings:
+def get_user_settings(stores: StoresDep) -> UserSettings:
     """Read the current user's preferences (Account → Preferences)."""
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
-        email=claim_email(store.identity),
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=claim_email(stores.identity),
     )
     return UserSettings(demo_mode_enabled=user.demo_mode_enabled)
 
 
 @auth_router.patch("/user-settings", response_model=UserSettings)
-def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
+def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
     """Persist a preference change. A user-account mutation (not a campaign
     command), so it rides the auth router alongside session writes rather than
     the ``/commands`` highway."""
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
-        email=claim_email(store.identity),
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=claim_email(stores.identity),
     )
-    store.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
+    stores.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
 
 
@@ -456,7 +456,7 @@ class TermsConsent(StrictModel):
 
 
 @auth_router.post("/accept-terms", response_model=TermsConsent)
-def accept_terms(body: AcceptTermsBody, store: StoreDep) -> TermsConsent:
+def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
     """Record the current user's acceptance of the Terms — the provable consent
     artifact the legal clauses depend on. A per-user identity mutation (like
     user-settings), not a campaign command, so it rides the auth router rather
@@ -471,19 +471,19 @@ def accept_terms(body: AcceptTermsBody, store: StoreDep) -> TermsConsent:
             code="terms_version_stale",
             details={"expected": TERMS_VERSION, "received": body.version},
         )
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
-        email=claim_email(store.identity),
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=claim_email(stores.identity),
     )
     record = ConsentRecord(version=TERMS_VERSION, accepted_at=utcnow_iso())
-    store.users.save(user.model_copy(update={"terms_accepted": record}))
+    stores.users.save(user.model_copy(update={"terms_accepted": record}))
     return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=TERMS_VERSION)
 
 
 @auth_router.get("/activity", response_model=ActivityResponse)
 def activity(
-    store: StoreDep,
+    stores: StoresDep,
     window: Annotated[str, Query(pattern=r"^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$")] = "1d",
     group_by: Annotated[str, Query(pattern=r"^(model|api_key)$")] = "model",
 ) -> ActivityResponse:
@@ -522,7 +522,7 @@ def activity(
     total_requests = 0
     label_order: dict[str, int] = {}  # insertion-order set
 
-    for rec in iter_user_token_usage(store=store, since=since, until=until):
+    for rec in iter_user_token_usage(stores=stores, since=since, until=until):
         idx = min(_N_BUCKETS - 1, max(0, int((rec["ts"] - since) / bucket_width)))
         b = buckets[idx]
         tokens = rec["tokens"]

@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
     validate_path_component,
@@ -39,23 +39,21 @@ def mint_session_id() -> str:
     return f"s_{uuid.uuid4().hex[:8]}"
 
 
-def save_active_pointer(
-    workspace: WorkspaceDir, session_id: str, campaign_id: str, cycle_id: str
-) -> None:
+def save_active_pointer(workspace: WorkspaceDir, session_id: str, hop: CycleHop) -> None:
     """Persist *workspace*'s active pointer — session + campaign + cycle.
 
     The workspace root selects the file; the JSON payload carries only the
     session / campaign / cycle ids.
     """
     validate_path_component(session_id)
-    validate_path_component(campaign_id)
-    validate_path_component(cycle_id)
+    validate_path_component(hop.campaign_id)
+    validate_path_component(hop.cycle_id)
     write_json(
         _active_pointer_path(workspace),
         {
             "session_id": session_id,
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
+            "campaign_id": hop.campaign_id,
+            "cycle_id": hop.cycle_id,
         },
     )
 

@@ -96,10 +96,7 @@ async def run_round_loop(
         # 0, round 0 inherited from the parent lane) skip it.
         if not sweep and not diag and clean_rounds == 0:
             round0_present = bool(
-                session.state.cycle_id
-                and session.store.campaigns.load_round_file(
-                    session.campaign_id, session.state.cycle_id, 0
-                )
+                session.state.cycle_id and session.store.campaigns.load_round_file(session.hop, 0)
             )
             if not round0_present:
                 await emit_origin_round(cycle, session, cb)
@@ -201,8 +198,7 @@ async def run_round_loop(
                     return StopReason.BACKEND_UNREACHABLE, None
                 if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
-                        session.campaign_id,
-                        session.state.cycle_id,
+                        session.hop,
                         round_num + 1,
                     )
                 emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
