@@ -79,7 +79,12 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   the **re-entrant** invariant holds (task spawns at every level → L5+ nests). The
   spawning cycle publishes its context via `publish_inner_spawn_context` (runner
   seam, every cycle) so this context-free hook can find where to sandbox + which
-  inner benchmark to run; the outer L1's optimizer prompt mutations apply to the inner
+  inner benchmark to run. **Owner and asker are two facts, and a fork splits them:**
+  once the cycle id is final `retarget_inner_spawn` moves only the *asker* an inner run
+  stamps as `spawned_by.outer_cycle_id`, while the sandbox owner never follows a fork —
+  a repaired cell CONTINUING the campaign the parent banked is the whole point, and one
+  field meaning both filed every measurement a fork paid for under the cycle it
+  superseded. The outer L1's optimizer prompt mutations apply to the inner
   `assets/optimizer/pipeline.yaml` prompts through a per-run override ContextVar
   (`set_optimizer_prompt_overrides`, set inside the inner task). One process, no
   networking. The localhost-endpoint option is retained only as the future

@@ -2,23 +2,30 @@
 
 > Read [`docs/architecture.md`](docs/architecture.md) first — §0 + §0.5 are what every PR measures against. Don't restate here.
 
+## What this is
+
+PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`). 
+
+**Related work / competitive landscape:** [`docs/research/related-work.md`](docs/research/related-work.md) — the umbrella systems, the classical algorithm-configuration lineage, the MCTS mapping, and the adjacent harness-/weight-tuning agents. Our main comparison is therefore with AlphaEvolve, although PromptPotter is almost everywhere strictly better (except for math problems, and where evaluating an evolutionary search point is very expensive).
+
+**Roadmap:** three ways to run it — **(1)** hosted beta, **(2)** local `/potter-run` (local-secure), **(3)** the self-hosted **team-online** stack ([`deploy-linux/`](deploy-linux/); Cloudflare tunnel + OIDC allowlist + quotas). **Our setting is the cloud team-online deployment (tier 3), NOT the local-secure one (tier 2)** — treat cloud/team as the default operating context in everything we build. What shipped and what is in flight: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+
+**Origin = the campaign root = C0**, and for a fork the point it branches *from*. An *individual/candidate* is a configuration (they both are of the class `OptSearchPoint`). **The general relation is *parent*** — the individual a candidate was mutated from (`RoundParent`), which is the origin at round 0 and the prior winner after it
+
+**Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **what-if** / **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
+
 ## First — decide what KIND of ask this is, then load for it
 
-**This repo is not only code.** The same root file serves launching a campaign, diagnosing a live run, editing a prompt, changing the engine, changing the webapp, and cutting a dataset — and those load almost **disjoint** context. Reading everything is not the answer; reading the wrong subset is how a run gets edited mid-flight or a prompt gets patched downstream of its cause. Classify first. Each row is *what to load*, then the **symptom** that kind produces when it goes wrong — the cure lives in the file the row points at, never in this table.
+**This repo is not only code.** The same root file serves launching a campaign, diagnosing a live run, editing a prompt, changing the engine, changing the webapp, and cutting a dataset — and those load almost **disjoint** context. Reading everything is not the answer. Each row is *what to load*, then the **symptom** that kind produces when it goes wrong — the cure lives in the file the row points at, never in this table.
 
 | The ask sounds like | Load | How this kind goes wrong |
 |---|---|---|
 | **Run / watch a campaign** — "run bbeh", "start it", "how's it going" | `/potter-run` · `.goldmine/latest.log` · [`operations/`](docs/operations/) | Fired and left; config edited mid-flight. |
-| **Diagnose a live or stuck run** — "it's hung", "why did it stop" | ledger tail → `run_phase` → `.runtime/` flags → process → mtimes, **in that order** · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) | Mtimes read first; a heartbeat called a hang. |
-| **L4 / `promptpotter-self`** — self-improvement, the finish line | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line + § Running & supervising · `/l4-improve-l1-gen` | A leader believed from a panel that cannot resolve arms. |
-| **Engine code (Python)** | the per-layer `CLAUDE.md` for the layer you touch · [`conventions.md`](docs/developer/conventions.md) | Green locally, red in CI — gated in the wrong env. |
+| **Diagnose a live or stuck run** — "it's hung", "why did it stop" | ledger tail → `run_phase` → `.runtime/` flags → process → mtimes, **in that order** · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) | |
+| **L4 / `promptpotter-self`** self-improvement, the optimizer's own business logic, prompts and configuarations equally alike. | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line + § Running & supervising · `/l4-improve-l1-gen` · [`optimization/CLAUDE.md`](promptpotter/application/optimization/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) | A leader believed from a panel that cannot resolve arms. |
+| **Dataset / benchmark work** | [`datasets/CLAUDE.md`](datasets/CLAUDE.md) | Rows re-cut under the name they already had. |
+| **Engine code (Python)** | [`conventions.md`](docs/developer/conventions.md) | Green locally, red in CI — gated in the wrong env. |
 | **Webapp code** | [`webapp/CLAUDE.md`](webapp/CLAUDE.md) · [`frontend-surface-contract.md`](docs/specs/frontend-surface-contract.md) · `/design` | A number computed in the browser. |
-| **Prompt work — the optimizer's own prompts, not code** | `<dispatch-first>` below · [`optimization/CLAUDE.md`](promptpotter/application/optimization/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) | A louder clause added downstream of the cause. |
-| **Dataset / benchmark work** | [`datasets/CLAUDE.md`](datasets/CLAUDE.md) · [`adding-a-dataset.md`](docs/operations/adding-a-dataset.md) · [`dataset-reasoning-matrix.md`](docs/operations/dataset-reasoning-matrix.md) | Rows re-cut under the name they already had. |
-| **Docs / specs** | [`docs/CLAUDE.md`](docs/CLAUDE.md) § Editing a doc · [`specs/CLAUDE.md`](docs/specs/CLAUDE.md) · `/spec-buddy` | Text added; nothing the change made untrue deleted. |
-| **Cleanup / debt** | `/potter-debt-sweep` · [`code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md) | Acted on a backlog entry that had already decayed. |
-
-**Mixed asks are the norm** — a diagnosis becomes an engine change, a run becomes a prompt edit. Re-route when the kind changes instead of carrying the first row's context into the second. When the ask spans a run *and* a change: the run's rules win while it is live.
 
 ## Load-bearing
 
@@ -26,35 +33,24 @@ What this file owns, and where each rule is stated. Names only — the section i
 
 - Classify the ask before loading → § First — decide what KIND of ask this is, then load for it
 - Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
-- Answer every gate before adding a concept → § Pre-flight gate
 - Never commit or push unprompted → § Conventions
 - A silent optimizer-call retry is an open defect → ⛔ URGENT line above § Working principles
 - Reach for a doctrine by its trigger → § Working principles
-- The agent owns L4 end-to-end → § The closing directive
 - Per-layer contracts — load only yours → § Pointers
-
-## What this is
-
-PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`).
-
-The **front door is a chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its work into the thread Perplexity-style (tool calls, web search, each round as it lands), and decisions surface as buttons that fire existing control-plane verbs. The chat is a **canonical agent-chat template** built on a generic activity taxonomy — keep the core (thread model + activity stream + transport), delete the optimizer panes. Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
-
-**Origin = the starting configuration = C0 — one word, one thing**, and for a fork the point it branches *from*. An individual **is** a configuration (the origin resolves to an `OptSearchPoint`, the same type every candidate is), so "the config the loop starts from" and "C0, the first candidate" are one statement. **The general relation is *parent*** — the individual a candidate was mutated from (`RoundParent`), which is the origin at round 0 and the prior winner after it — so **reserve "origin" for offset 0 and the fork point, and say *parent* everywhere else**. Definitions, check-in, and the two gates: [`docs/architecture.md`](docs/architecture.md) §0.5.
-
-**Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **what-if** / **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 
 ## STOP — no backward compatibility, ever
 
 Zero released versions, zero stale on-disk data — nothing to be compatible with. **This is the rule that gets ignored most often.**
 
 Delete on sight — don't ask, don't TODO, don't "remove later":
-- **Shim code**, **Fallback chains**, **Breadcrumb comments**, **Redundant mechanisms** (a second validator / surface / code path doing the same *kind* of work as an existing one — fold it into the canonical mechanism, never add beside it).
+- **Shim code**, **Fallback chains**, **Breadcrumb comments**, **Redundant mechanisms** — fold it into the canonical mechanism, never add beside it.
+- **Names: distinct + self-describing.** Grep for collisions; a name that could mean three things gets renamed now — naming is cheap. Two failures beyond collision, both found by asking *can a reader pinpoint the concept from this name alone?* — (1) **a second word for something the repo already names** is a deletion, not a synonym: check what the operator already sees on screen and on disk before coining one; (2) **a name that stopped describing its contents** as the module grew under it. Renaming a module means renaming its doc, its `CLAUDE.md` row and its prose in the same commit — a code/doc name split is the drift, not the fix.
 
-**Lean to suspicion** — the remaining wins are small consolidations ignored precisely because each looks too small to bother. When a change *could* ride an existing channel, assume it *should*, and collapse redundant paths you pass mid-task instead of noting them for later. Fewer lines beats more lines at equal behavior.
+**Lean to suspicion** — small consolidations ignored because each looks too small to bother should be corrected on sight, independent of whether they fit the arc's main subject. When a change *could* ride an existing channel, assume it *should*, and collapse redundant paths you pass mid-task instead of noting them for later.
 
-**This covers ON-DISK SHAPE, not just code — and that is the half that keeps getting read backwards.** "No backward compatibility" is not permission to leave a bad shape alone because data exists in it; it is an instruction to **pick the right shape and then delete or migrate the data to fit**. Aggressively: wipe the store, restamp it, or partially both. The persistence layer is still being shaped, and it is far cheaper to shape it now than after release — **so a design decision must never be bent around what happens to be on disk today**. Measure whether the data is worth keeping (is the cache ever hit? is the field derivable from what sits beside it?), then act on the answer.
+**This covers ON-DISK SHAPE, not just code — and that is the half that keeps getting read backwards.** Do not leave a bad shape alone because data exists in it; it is an instruction to **rearchitect the right shape and then delete or migrate the data to fit**. Aggressively: wipe the store, restamp it, or partially both. The persistence layer is still being shaped, and it is far cheaper to shape it now than after release — **so a design decision must never be bent around what happens to be on disk today**. Measure whether the data is worth keeping (is the cache ever hit? is the field derivable from what sits beside it?), then act on the answer.
 
-**Before invoking migration caution, COUNT the data — do not recall it.** `ls .promptpotter/projects/*/campaigns` answers in one command whether anything would actually have to migrate, and the dev store gets wiped often enough that a remembered number is usually wrong in the direction that makes you timid. An empty store means a shape change carries none of its usual risk.
+**Before invoking migration caution, COUNT the data — do not recall it:** `ls .promptpotter/projects/*/campaigns` answers in one command whether anything would actually have to migrate.
 
 <root-fix>
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
@@ -71,8 +67,8 @@ When a fix would compensate for something an upstream layer should already have 
 Four *situational* guardrails against recurring AI blind spots live in [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine; reach for them by trigger:
 - **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, in both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, and is asked for explicitly. When the budget binds, get more from measurements already paid for.
 - **slow / costly / token-heavy LLM call** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens; the timeout, cap and provider are safety rails, not the fix.
-- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down** — subtract a *named* concept, don't relocate one. It records rather than blocks: a raise that ships a feature is fine, it just costs a baseline edit and a written reason.
-- **changed what the engine *decides*** (a gate / metric / state) → `<reach-the-operator>`: engine-correct ≠ product-complete; webapp parity is part of done, and you teach a new value rather than dumping it.
+- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. A raise that ships a feature is fine, it just costs a baseline edit and a written reason.
+- **changed what the engine DECIDES, or added a capability at one entry point** → `<entry-point-parity>`: four ways in — CLI, AIs (skill: `/potter-run`), REST API, Js-Webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it.
 
 ## Commands
 
@@ -88,14 +84,16 @@ python -m promptpotter resume --fork-on-divergence           # sibling cycle at 
 python -m uvicorn promptpotter.main:app --port 8001          # read-only API + webapp preview at the root (http://localhost:8001/)
 ```
 
-`new` and `resume` are the loop-mint verbs; lifecycle (`archive`/`delete`/`unarchive`/`reset`), run-control (`pause` — stops a running cycle at its next checkpoint, resumable, the terminal's half of the webapp control), and diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`/`reindex`) verbs also exist. Reads happen by opening files; there is no read CLI. `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required; provider is per-dataset in `promptpotter/assets/optimizer/pipeline.yaml::nodes.{node}.config.provider`. What each verb does, its flags, identity and fork lineage → [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
+`new` and `resume` are the loop-mint verbs; lifecycle (`archive`/`delete`/`unarchive`/`reset`), run-control (`pause` — stops a running cycle at its next checkpoint, resumable, the terminal's half of the webapp control), and diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`/`reindex`) verbs also exist. Reads happen by opening files; there is no read CLI. What each verb does, its flags, identity and fork lineage → [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
 
-**The project file tree IS the dashboard**, alongside a read-only webapp at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s. The most-recent run's terminal readout (per-sample HIT/MISS, SP tables, round summaries) is mirrored ANSI-stripped to the gitignored **`.goldmine/latest.log`** — read it instead of asking the operator to paste console output (`LiveDisplay._write`). Onboarding: install → restart VS Code → `/potter-run`.
+**The project file tree IS the dashboard**, alongside a read-only webapp at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s. The most-recent run's terminal readout is mirrored ANSI-stripped to the gitignored **`.goldmine/latest.log`** — read it instead of asking the operator to paste console output (`LiveDisplay._write`). Onboarding: install → restart VS Code → `/potter-run`.
+
+The **front door is a browser chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its work into the thread Perplexity-style (tool calls, web search, each round as it lands), and decisions surface as buttons that fire existing control-plane verbs. The chat is a **canonical agent-chat template** built on a generic activity taxonomy — keep the core (thread model + activity stream + transport), delete the optimizer panes. Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
 
 ## Conventions
 
 - Full style + code-shape + git rules → [`docs/developer/conventions.md`](docs/developer/conventions.md); enumerations → [`docs/glossary.md`](docs/glossary.md).
-- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits — the L4 closing-phase "commit small green arcs" (§ The closing directive) and endorsed drain passes — and **even then never push**. Ruff format + check before any commit (see Commands).
+- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits. Ruff format + check before any commit (see Commands).
 - **Vocabulary:** say "node" never service/building-block; **"optimizer prompt" never "meta-prompt"** — a prompt the optimizer *runs on*, whose opposite is the **target prompt** it *produces* during optimization (`OptSearchPoint` vs `JobSearchPoint`); for L4 say **outer/inner** (position) and **self-optimization** (the arrangement), never "meta"; **"run init" / the INIT phase, never "bootstrap"** — the chain from `new`/`resume` to round 1 (`application/initialization/`), which the operator already sees as `INIT` / `✓ Initialized`, so a third word for it only hides the concept; the word survives ONLY for machine provisioning (`deploy-linux/bootstrap.sh`) and external proper nouns (DSPy `BootstrapFewShot`); domain framing = evolution (generation/population/fitness/mutation/selection/individual).
 - **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place.
 
@@ -107,14 +105,12 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 - **Map to a §0 bucket.** If it fits none, stop — either §0 is incomplete (update it, separate PR landing first) or this is the wrong PR.
 - **New I/O kind → amend §0 first.** The five are fixed (Persistence, Display, Control-local, Control-remote, Identity). New Control-remote command/event → declare schema in `docs/specs/m12-api-openapi.yaml` / `m12-events-asyncapi.yaml` *before* the handler lands.
 - **Material facts land on disk, human-readable** — never surfaced only via stdout, in-memory state, or `--verbose`. Same for debug-state: if a bug needs an operator-only env to reproduce, the unblocker (mock/fixture/pin) is a separate PR landing first.
-- **New LLM call or backend match → wrap with `observed_node()`.** Unwrapped LLM calls are an automatic block.
-- **Names: distinct + self-describing.** Grep for collisions; a name that could mean three things gets renamed now — naming is cheap. Two failures beyond collision, both found by asking *can a reader pinpoint the concept from this name alone?* — (1) **a second word for something the repo already names** is a deletion, not a synonym: check what the operator already sees on screen and on disk before coining one; (2) **a name that stopped describing its contents** as the module grew under it. Renaming a module means renaming its doc, its `CLAUDE.md` row and its prose in the same commit — a code/doc name split is the drift, not the fix.
 
 ## The closing directive
 
-**Ship a distributable `promptpotter-self`** — the optimizer optimizing its own optimizer prompts — **and open no new features until the config is distributable.** **The AI agent owns L4 end-to-end and drives it autonomously**: refine the plan, build the slices, commit small green arcs. Escalate to the operator ONLY for genuine actions — real multi-campaign spend approval, a provider/account change, or a compaction handoff. The living finish-line plan is [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; read status there and nowhere else, remembering that several of its items stayed marked "gating" for months after they shipped.
+**Ship a distributable `promptpotter-self`** — the optimizer optimizing its own optimizer prompts — **and open no new features until the config is distributable.** Escalate to the operator campaign spend approval, or a compaction handoff. The living finish-line plan is [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; read status there and nowhere else, remembering that several of its items stayed marked "gating" for months after they shipped.
 
-**What remains is empirical, not structural** — the loop, seams, recursion and scoring gateway all exist and are green; what remains is making the optimizer *behave well*, which is found by running it (`new promptpotter-self` on `justlogic-d234`, read what the loop produced, fix, re-run). **Every fix still goes to its ROOT (`<root-fix>` above)** — in this phase the root is usually a prompt rather than code, but that is an observation about where the causes have been, never a licence to patch the symptom. Name the cause, then pick the site. **Supervise every run actively — never fire-and-wait.** How to run + supervise + when to reach past prompts to code: [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Running & supervising.
+**What remains is (mostly) empirical, (mostly) not structural** — the loop, seams, recursion and scoring gateway all exist and are green; what remains is making the optimizer *behave well*, which is found by running running L3 campaigns as well as `promptpotter-self`, read what the loop produced, fix, re-run. **Every fix still goes to its ROOT (`<root-fix>` above)** — in this phase the root is usually a prompt or dispatch-hub. **Supervise every run actively — never fire-and-wait. (3 min intervals first, then adjust case dependent)** How to run + supervise + when to reach past prompts to code: [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Running & supervising.
 
 ⚠️ **Read the panel's resolving power before its result** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line, item 7, which `python -m promptpotter rank-optimizer-prompts` serves live. Do that before quoting any outer number anywhere in this repo.
 
@@ -123,8 +119,6 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 ## Pointers
 
 - **Architecture:** [`docs/architecture.md`](docs/architecture.md) §0/§0.5 — backbone primitives, five I/O kinds, the central loop + L1/L2/L3 escalation + L4-is-recursion, searchpoints, scoring, identity, token/cost ledger. **Extend primitives in place** — the wrong shape is meant to be hard to express, not policed by a test.
-- **Related work / competitive landscape:** [`docs/research/related-work.md`](docs/research/related-work.md) — the umbrella systems, the classical algorithm-configuration lineage, the MCTS mapping, and the adjacent harness-/weight-tuning agents. Read before positioning against a "competitor".
-- **Roadmap:** three ways to run it — **(1)** hosted beta, **(2)** local `/potter-run` (local-secure), **(3)** the self-hosted **team-online** stack ([`deploy-linux/`](deploy-linux/); Cloudflare tunnel + OIDC allowlist + quotas). **Our setting is the cloud team-online deployment (tier 3), NOT the local-secure one (tier 2)** — treat cloud/team as the default operating context in everything we build and reason about; tiers 1 & 3 share this stack. What shipped and what is in flight: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 - **Persistence:** [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md) — four-entity tree (Workspace → Dataset → Campaign → Cycle), `.promptpotter/` layout, `measurements/`, fork lineage, recovery.
 - **Per-layer contracts** — load only the layer you touch. The index is [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md); it routes to `domain/` · `application/` · `application/optimization/` · `infrastructure/` · `presentation/` · `connectors/` and says what each owns.
 - **Contracts:** ADRs [`0001`](docs/adr/0001-m12-control-plane.md) (control plane) · [`0002`](docs/adr/0002-identity-foundation.md) (identity) · [`0003`](docs/adr/0003-spend-and-tenancy.md) (spend/tenancy). Index map: [`docs/CLAUDE.md`](docs/CLAUDE.md).

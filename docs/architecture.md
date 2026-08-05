@@ -204,7 +204,7 @@ whole containment story: `campaign → cycle → fork` was two tiers wearing
 three names (`list_sessions` was always length 1), so the tier was
 removed. What survives is *not* an entity:
 
-- **`Session`** (`application/bootstrap/session.py`) — the in-process
+- **`Session`** (`application/initialization/session.py`) — the in-process
   **wiring object**: stores, LLM clients, connectors, the resolved
   `dataset_config_dir`. It is services + identity, not a persisted tier.
 - **`active_session.json`** — the operator's *pointer/lens* into the
@@ -274,7 +274,10 @@ split: **every producer await that can exceed `RUN_FRESH_S` rides
 the in-flight heartbeat** (`dispatch/llm_call/heartbeat.py` —
 optimizer LLM calls, L4 inner-cycle awaits, and the backend scoring
 query), so a stale dashboard means a *dead* producer, never a quiet
-one; and the **liveness reaper** (`application/jobs/reaper.py`) is
+one — and a cycle that stops ON PURPOSE says so at the moment it does
+(a `supersede` cut retires its parent `REBASED` right at the cut,
+`CampaignStore.mark_superseded`), so the reaper never has to interpret
+a deliberate silence; and the **liveness reaper** (`application/jobs/reaper.py`) is
 the single write-side reconciler stamping proven-dead cycles
 `TERMINAL` (`producer_vanished`) — the registry `on_reap` for API
 jobs plus a periodic sweep (roots include the flat `.inner/`

@@ -287,9 +287,10 @@ The persisted world is a four-entity containment hierarchy
   sample-keyed priors, joint 1PL Rasch fit, closed-form `p_best` —
   [`concepts/paired-sample-pobb.md`](concepts/paired-sample-pobb.md).
   `application/optimization/pobb/checks.py`.
-- **Posterior width** — `1 - max(p_best)`. Operator-visible measure of
-  how confidently the leader can be locked in. Surfaced on
-  `dashboard.json::current_round.pobb`.
+- **Posterior width** — `1 - max(p_best)` **over the round's candidates**.
+  Operator-visible measure of how confidently the leader can be locked in.
+  Surfaced on `dashboard.json::current_round.pobb`. A `PoBBSnapshot` holds
+  ONE candidate's number, so every round-wide reading is an aggregate.
 - **Candidate budget allocation** — how the round's query budget is
   spent across the N candidates. Implemented by PoBB. The umbrella
   term — NEVER call this "query ranking."
@@ -354,7 +355,7 @@ The persisted world is a four-entity containment hierarchy
 - **pick-value** — the between-round CAT acquisition objective:
   `decision_information_gain + delta_learning_gain` (in nats). Drives
   `select_round_subset` ranking and the `pick_score` snapshot.
-  Contract: [`specs/verdict-resolution.md`](specs/verdict-resolution.md).
+  Contract: [`methods/verdict-resolution.md`](methods/verdict-resolution.md).
 - **Decision information gain** — the pick-value objective: the
   mutual information between the next outcome and
   the keep/abort verdict `θ_c > θ_s` against the seed. The

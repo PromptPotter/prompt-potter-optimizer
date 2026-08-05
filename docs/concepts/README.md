@@ -7,10 +7,8 @@
 Three layers, each wrapping the next like a system prompt wraps a user prompt:
 
 - **L1** mutates the prompt template's fields (persona, task instruction, …) and pipeline params, then scores each variant.
-- **L2** writes a **CONTEXT** outline wrapping L1, and modifies L1's fields when L1 stalls.
-- **L3** writes a **PLAN** outline wrapping L2, rewritten when L2 stalls.
-
-CONTEXT and PLAN live on disk inside each round file — the loop's actual config, inspectable and editable. "Add this to the plan" means exactly that.
+- **L2** modifies L1's fields when L1 stalls (+`CONTEXT` wrapping L1).
+- **L3** rewrites `PLAN` when L2 stalls.
 
 ## Spend control
 

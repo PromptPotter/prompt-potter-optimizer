@@ -71,5 +71,5 @@ nats) survives for **between-round** uses:
   the θ ε-gate this order feeds.
 * [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md) —
   sample selection across the hard-sample leaderboard.
-* [`../specs/verdict-resolution.md`](../specs/verdict-resolution.md) — the
+* [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) — the
   statistical model behind the pick-value objective.

@@ -8,7 +8,6 @@ Deliberately small: forward direction lives in one roadmap; the rest are living 
 |---|---|
 | [roadmap.md](roadmap.md) | **Forward direction** — execution-ordered lanes + the folded per-milestone design notes (origin check-in, ingest/chat-web, connectors/L4, prompt-iteration framework, agent-tool parity, BYO keys, operator-steered fork, state-sync). The lane table's **Status column** is truth for what shipped. |
 | [code-debt-cleanup.md](code-debt-cleanup.md) | Living debt backlog — open items only; `git log` is the history layer. |
-| [verdict-resolution.md](verdict-resolution.md) | The single statistical model behind the live adaptive queue + the persisted `hard_samples.json` ranking. |
 | [frontend-surface-contract.md](frontend-surface-contract.md) | Per-control webapp behavior per auth/data state + the **`I*` invariant block** (the file's own enumeration — every user-facing PR is measured against it). |
 | [chat-foundation.md](chat-foundation.md) | The chat-first front door (Lane C1): thread model, `ProjectionEnvelope → ActivityItem` translator, copilot decision buttons (existing verbs), campaign-scoped persistence, reusable-template seam. |
 | [fitness-comparability.md](fitness-comparability.md) | The θ/accuracy boundary collapse — **slices 1–3 SHIPPED** (gating fitness = the 1PL Rasch ability θ on one fixed ruler, subset-invariant; resubset ON; 1PL→2PL graduation per-dataset). Open: slice-4's cross-round headline surfaces + feeding graduated discrimination into selection. Prerequisite to l4-outer-loop — satisfied. |

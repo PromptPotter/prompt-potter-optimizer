@@ -10,7 +10,7 @@ L1 writes prompt fields + operational memory each round. L2 (when it fires) writ
 
 The record is the optimizer's working memory for two independent reasons:
 
-- **Persistence.** Every round's record is serialized to `<cycle_dir>/rounds/round_NNNN.json`. Resume reads from the latest trial. State that's not on the record does not survive interruption.
+- **Persistence.** Every round's record is serialized to `<cycle_dir>/rounds/round_NNNN.json`. Resume reads from the latest trial. State that's not on the record does not survive interruption. The serialized record IS the loop's live config, not a log of it — CONTEXT and PLAN are inspectable and editable on disk, so "add this to the plan" means exactly that.
 - **Steering.** Every layer reads from the record to know what to do — L1 reads prompt fields + brief + surface overrides; L2 reads operational memory + surface state; L3 reads plan + runtime failures.
 
 ## What the record is NOT

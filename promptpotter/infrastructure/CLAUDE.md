@@ -7,7 +7,12 @@ or talks to a network without going through one of these seams.
 ## Persistence — one ingress, two projections
 
 **Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`).
-Forks via `CycleEventLog.inherit_from(parent, offset)`. The writer-side API
+Forks via `CycleEventLog.inherit_from(parent, offset)` — an IN-PROCESS binding
+that writes nothing, so a later reader sees a fork's ledger begin at its own
+first append. Anything a fork must answer for ITSELF is appended to it: a
+repair's corrected rounds reach the branch via `resume.py::_rebank_on_branch`,
+because a round file written with no ingress behind it is invisible to every
+scan and readers silently fall back to the parent. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
 typed event constructor over `CycleEventLog.append`. Orchestration uses
 `RunCallbacks`; the ledger is the only thing that touches disk for the
@@ -70,6 +75,36 @@ the one closing signature. Round 0 closes through the same path as any round via
 lives in `scan_ledger_max_round_complete` (`store/campaign_store/ledger_scan.py`)
 and never instantiates `CycleEventLog`, so no subscribers fire during
 admissibility checks.
+
+## The lineage tree — one timeline per campaign
+
+`store/lineage_views.py` serves the genealogy; nodes alternate `Course -> Candidate -> Course`
+at any depth, so L5+ needs no new tier. **A fork is not a node** — its candidates mount onto
+the parent's ONE timeline and are renumbered into it, because `C{round}.{n}` is a position in
+a course's PRIVATE counter and every course mints its own `C1.1`. **Unless the fork corrects
+the parent** (a `supersede` cut): then its attempts take the positions they replaced, and the
+retired tail keeps its numbers under `superseded_by`.
+
+Three bounds, each a bug before it was a rule — get them wrong and the tree lies without
+erroring:
+
+- **A cut retires only as far as the branch actually GOT.** Retirement is a replacement, not
+  a position; a cut is taken before its consequence is known, so `_retired_by` reads the
+  branch's own reach back rather than asserting the future. A branch that died retires nothing.
+- **Identity outranks direction.** A repair re-measures without re-minting, so a
+  `candidate_id` already on the timeline is corrected in place (`equivalent` — the common
+  outcome; folding it as a peer rendered a two-candidate round as four) or kept beside its
+  withdrawn twin (`supersede` — two measurements of one individual, both facts), never given
+  a fresh index. The RUNS are single-homed on the live row: they measured the INDIVIDUAL, and
+  a fork's inner runs land in the PARENT's sandbox, so all of them arrive filed under the row
+  being replaced. ⑂ marks an OFFSHOOT only — except on a branch that minted nothing, whose
+  row is the course as a stand-in and keeps its own provenance.
+- **Whichever cut moved the POINTER answers for run-state** — `supersede` and `equivalent`
+  both do, `offshoot` alone leaves the parent running. Separate from what a cut retires.
+
+**It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
+resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut
+writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/operations/persistence-and-state.md).
 
 ## Stores — composite over leaves
 

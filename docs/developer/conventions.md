@@ -92,6 +92,7 @@ collects everything else.
 - **Commit messages: hard cap 800 chars** total (incl. trailer); title <70.
   Terse bullets — no motivation essays. Over 800 → rewrite, do not
   commit-and-fix-later.
+- **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. Two pre-convention commits marked it in the subject instead (`docs: manual edit…`, `docs: maunal pass`); don't copy that — `manual` collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
 
 ## Reasoning doctrine
 
@@ -126,11 +127,11 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 4. **Lock the wins.** When a deletion lowers a dimension, lower the baseline in the same commit so it can't drift back. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.
 </surface-ledger>
 
-**When you changed what the engine *decides* (a gate, metric, or state) → `<reach-the-operator>`:**
+**When you changed what the engine *decides* (a gate, metric, or state), or added a capability at any entry point → `<entry-point-parity>`:**
 
-<reach-the-operator>
-**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves the operator-facing half (does the webapp *show* this? can the operator *see, understand, and steer* it?) as a silent "later". Engine-correct is not product-complete. This project is whitelabeled and user-facing; **the webapp surface is the most-forgotten half precisely because it sits one layer past where the change was made.** Two rules:
+<entry-point-parity>
+**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves every caller-facing half as a silent "later". Engine-correct is not product-complete. **There are four ways in — the CLI, an AI caller (the `/potter-run` skill), the REST API, and the webapp — and a capability that reaches only the one you happened to be editing is half-built.** This project is whitelabeled and user-facing; the forgotten surface is always the one sitting a layer past where the change was made, which is usually the webapp. Two rules:
 
-1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe the operator a legible surface for it in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
+1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe every entry point that could ask for it a legible surface in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it from where they actually work, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
 2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a new statistic, a new mode) reaches the operator *taught*: a plain-language explainer, riding an **existing** surfacing channel (the lens/formula seam, not a new toggle), and **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the metric they chose. Teach from **one corpus** that serves the operator and the next AI reader alike — don't fork the prose.
-</reach-the-operator>
+</entry-point-parity>

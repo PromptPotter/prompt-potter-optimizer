@@ -19,6 +19,16 @@ A trace can be judged under many policies, so scores are persisted as a ledger �
 
 Every trace gets rescored under the active scorer when crossing from disk to memory. Fresh samples, cache hits, trial reloads, cross-campaign memory ingest — all four paths go through the same step. The `hit` / `score` you read at runtime is always the current policy's view.
 
+---
+
+One of the downstream consequences is the system keeps **two costs**, and they answer different questions:
+
+- **The bill** — money that actually left the account. Cache hits contribute nothing to it. This is the headline, and it is what the spend budget caps. It has to stay this way: billing a replay would halt a run that cost nothing to make.
+- **The incurred cost** — what the search would cost to run against a cold cache, with cache hits priced from the tokens they recorded (the cached payloads carry them, so nothing is estimated). This is what a *measurement of a candidate* has to divide by.
+
+On a cold cache the two are equal — which is exactly why this could sit undetected until the archive got deep enough for an arm to start free-riding on it.
+
+
 ## Deprecated samples
 
 Backend emits neutral advisories (e.g. `llm_only:content_empty`) + raw response shape; `classify_result()` walks those signals and derives **fatal codes** (reasoning budget exhausted, empty response, content filtered). A result whose classifier returns any fatal code is deprecated and excluded from primary statistics; evicted from cache (fresh re-measurements tagged `retry_of_deprecated_cache`, prefixed 🔄); tagged `DEPR` in per-sample view. The trace itself stays in `archive/measurements/` — the archive is the forensic record.

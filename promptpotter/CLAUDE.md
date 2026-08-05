@@ -15,8 +15,6 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
 | `connectors/` | Backend-specific hook bundles: `termnorm`, `promptpotter` (self-recursion / L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |
 
-`shared/` and `config/` are leaf utilities — no CLAUDE.md needed.
-
 ## Where L4 lives
 
 **Keep L4's law and its machinery in separate packages — the split is the point.**
