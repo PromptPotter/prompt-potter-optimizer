@@ -291,14 +291,13 @@ def compute_composite_fitness(
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
       non-duplicate) L1 variants. **A pass no L1 batch produced leaves it at the 1.0
       default — the vacuous value, exactly like ``opt_sp=None`` above, and for the same
-      reason.** Three such passes (the ``round_parent`` floor, the PoBB backfill, the
-      replicate draw) used to hand it ``0.0`` instead. Both readings are sayable —
-      "no batch produced this" vs "vacuously perfect" — but they cannot both be right,
-      and ``0.0`` breaks the pairing the sites beside it are establishing: the parent
-      floor would carry the term at zero while every candidate it is differenced against
-      carries its real yield, so a formula naming ``l1_diversity`` scored the two halves
-      of one delta on different bases. ``matched_origin_stats`` — the other paired floor
-      — already passes 1.0 beside ``opt_sp=None``; this is that rule, applied evenly.
+      reason.** Three such passes rely on it: the ``round_parent`` floor, the PoBB backfill,
+      the replicate draw. Both readings are sayable — "no batch produced this" vs "vacuously
+      perfect" — but they cannot both be right, and ``0.0`` breaks the pairing those sites
+      establish: the parent floor would carry the term at zero while every candidate it is
+      differenced against carries its real yield, so a formula naming ``l1_diversity`` would
+      score the two halves of one delta on different bases. ``matched_origin_stats`` — the
+      other paired floor — passes 1.0 beside ``opt_sp=None``; this is that rule, applied evenly.
       (Free to settle today: no shipped dataset formula references the term.)
 
     The composite_fitness is **recorded, not gating**: the round-winner

@@ -215,9 +215,9 @@ def _scoreboard(
 
     Reads the frozen ``ScoreEntry`` rows directly. The Δ column compares each row against
     ``matched_origin_accuracy`` — origin on the samples that row actually ran — and is blank
-    where the row has none. The round's full-set origin used to be passed in as the fallback
-    for those rows; it is not a fallback, it is a different sample basis, so the parameter is
-    gone rather than left unread. Returns multi-line string ready to print.
+    where the row has none. The round's full-set origin is NOT a fallback for those rows: it
+    is a different sample basis, so there is no parameter for it rather than one left unread.
+    Returns multi-line string ready to print.
     """
     # Filter synthetic-zeroed variants (no_op / duplicate) — they did not burn an LLM call
     # and ranking them as 0.0% delta distorts the verdict. The set is imported, never

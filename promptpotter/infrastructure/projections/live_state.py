@@ -126,9 +126,9 @@ def roll_p_best_at_round_complete(core: LiveStateCore) -> None:
 def top_n_p_best(standings: dict[str, float], n: int = 5) -> list[tuple[str, float]]:
     """Top-*n* ``(candidate_id, p_best)`` descending, over a CANDIDATE→standing map.
 
-    Every key must be a candidate's own P(best). It used to be handed one candidate's
-    ``PoBBSnapshot`` dict, whose non-current keys were *P(current beats that prior)* — so the
-    "leaderboard" ranked one real candidate against numbers describing that same candidate,
-    filed under its opponents' ids.
+    Every key must be a candidate's own P(best) — never one candidate's ``PoBBSnapshot``
+    dict, whose non-current keys are *P(current beats that prior)*: the "leaderboard" would
+    rank one real candidate against numbers describing that same candidate, filed under its
+    opponents' ids.
     """
     return sorted(standings.items(), key=lambda kv: -kv[1])[:n]

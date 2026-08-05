@@ -162,17 +162,16 @@ def compute_degradation_health(
     ``attempted`` (all rows the round ran — health grades the round's WORK, and an
     errored row is exactly the evidence health exists to count).
 
-    Health does not grade PRECISION, and it used to try. A clause graded an untested
-    round ``degraded`` when its Wilson interval was wider than ``DEGRADED_RATE_FLAG``
-    — reusing a "fraction of samples that failed" threshold as an interval width,
-    two unrelated quantities sharing one number. Measured across the shipped sample
-    budgets, that fires for any round whose accuracy is not pinned near 0 or 1 below
-    n≈100: a round scoring 50% of 20 samples was graded ``degraded`` for existing.
-    Since ``prior_clean_rounds`` counts only HEALTHY priors, such a cycle never
-    cleared ``untested`` — which permanently armed the ``structural_untested`` clause
-    above, so the first transient blip at any later round graded ``critical`` and
-    could trip ``origin_gate_tripped``. "The interval is wide" is a fact about n, and
-    the honest place for it is the CI already drawn beside every candidate
+    **Health does not grade PRECISION — never add a clause that does.** Grading an
+    untested round ``degraded`` on a Wilson interval wider than ``DEGRADED_RATE_FLAG``
+    reuses a "fraction of samples that failed" threshold as an interval width: two
+    unrelated quantities sharing one number. Across the shipped sample budgets that
+    fires for any round whose accuracy is not pinned near 0 or 1 below n≈100 — a round
+    scoring 50% of 20 samples is ``degraded`` for existing. Since ``prior_clean_rounds``
+    counts only HEALTHY priors, such a cycle never clears ``untested``, which permanently
+    arms the ``structural_untested`` clause above: the first transient blip at any later
+    round grades ``critical`` and can trip ``origin_gate_tripped``. "The interval is wide"
+    is a fact about n, and its honest home is the CI already drawn beside every candidate
     (``composite_ci_lo``/``_hi``), not a verdict that the pipeline is unwell.
 
     Returns ``None`` when nothing was

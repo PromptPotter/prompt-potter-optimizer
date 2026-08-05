@@ -160,9 +160,9 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     decision would leave the origin uncrownable.
 
     **A round with no entry never closed, and that is the honest answer** — its candidates
-    get no crown, no θ, and nothing invents one. These facts used to be recovered by opening
-    ``dashboard.json``: a projection reading another projection's output, because the close
-    never reached the ingress.
+    get no crown, no θ, and nothing invents one. Recovering these facts from
+    ``dashboard.json`` instead is a projection reading another projection's output, which is
+    what a close that never reaches the ingress forces.
     """
     out: dict[int, LedgerRoundClose] = {}
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):

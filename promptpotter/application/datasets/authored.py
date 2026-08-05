@@ -89,10 +89,9 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
     ``write_committed_dataset``) and what ``TenantDatasetStore._rewrite_campaign_self_ref``
     requires. It is NOT the minted **manifest** at ``campaigns/{id}/campaign.json`` (a frozen
     :class:`Campaign`, ``extra="forbid"``, owned by ``CampaignStore``). Two incompatible schemas
-    once shared one filename; they no longer share an extension either, but check which tree the
-    path is under before assuming a shape — and read the template through here, never with a
-    hand-rolled ``.get("campaign_config", data)``, which quietly accepted an unwrapped shape
-    no writer produces.
+    under one stem: check which tree the path is under before assuming a shape — and read the
+    template through here, never with a hand-rolled ``.get("campaign_config", data)``, which
+    quietly accepts an unwrapped shape no writer produces.
 
     Unreadable bytes raise :class:`StoredConfigInvalidError` naming *path* — this is the
     only layer that still knows which file it was, so a bare parse error escaping

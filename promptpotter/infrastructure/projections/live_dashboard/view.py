@@ -726,10 +726,9 @@ class LiveDashboardView(DerivedView):
         ``total``. During scoring ``current_acc`` still ticks the in-flight candidate via
         ``_update_current_acc``; this is the round-boundary settle.
 
-        It used to settle to ``cumulative_accuracy``, described as "the incumbent rescored over
-        every sample probed so far". Nothing rescored: that series pooled rows measured by
-        different configurations, so the headline could exceed everything the cycle measured.
-        The concern it was answering is real — a hard-first subset score is not the full-set
+        **Never settle to ``cumulative_accuracy``.** Nothing rescores: that series pools rows
+        measured by different configurations, so the headline can exceed everything the cycle
+        measured. The concern behind it is real — a hard-first subset score is not the full-set
         rate — but the answer is the round's own ``total`` beside the number, and
         ``cumulative_theta`` for the cross-round-comparable series, not a pooled mean.
         """

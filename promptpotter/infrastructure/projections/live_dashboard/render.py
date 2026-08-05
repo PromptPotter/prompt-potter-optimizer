@@ -173,10 +173,10 @@ def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> d
     Operators read this to judge whether ``elimination_n_min`` is set
     appropriately for the dataset's per-sample variance.
 
-    ``leader_prob`` is the best standing among the round's CANDIDATES (``p_best_top``). It
-    used to max over one candidate's ``PoBBSnapshot`` dict, whose other entries were that
-    same candidate's odds against each prior — so a candidate losing badly to one prior
-    published a high "leader probability" drawn from its own defeat.
+    ``leader_prob`` is the best standing among the round's CANDIDATES (``p_best_top``) —
+    never a max over one candidate's ``PoBBSnapshot`` dict, whose other entries are that
+    same candidate's odds against each prior, so a candidate losing badly to one prior
+    would publish a high "leader probability" drawn from its own defeat.
     """
     if not core.current_p_best_id:
         return {

@@ -384,10 +384,10 @@ class LiveDisplay(DerivedView):
         """Top-5 P(best) across the round's candidates, ▲/▼ vs each one's own previous
         reading; ``None`` when no PoBB this round.
 
-        The ranking is over ``round_p_best`` — one entry per candidate. It used to rank the
-        latest single ``PoBBSnapshot`` dict, whose other entries were that candidate's odds
-        against each prior, and to arrow against the PREVIOUS ROUND's snapshot, whose ids
-        are round-scoped and therefore never matched.
+        The ranking is over ``round_p_best`` — one entry per candidate. Ranking the latest
+        single ``PoBBSnapshot`` dict instead ranks that candidate's odds against each prior,
+        and arrowing against the PREVIOUS ROUND's snapshot never matches at all: those ids
+        are round-scoped.
         """
         if not self._core.round_p_best:
             return None

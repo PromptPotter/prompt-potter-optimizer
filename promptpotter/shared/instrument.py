@@ -130,12 +130,11 @@ class MeasuredCandidate:
     this stamp and is why the round isn't duplicated here.
 
     Bound in the OUTER task by ``score_search_point`` — the sole scoring ingress — from an
-    argument every caller must supply. It used to be bound by ``score_one_candidate``
-    alone, so the two askers that RE-ENTER the gateway (``_pobb_backfill``,
-    ``rescore_parent``) inherited whichever candidate happened to be bound last and
-    stamped their measurements with it: two PoBB backfills that ran C1.1's optimizer
-    prompts were recorded as C1.2's. Binding at the ingress makes every pass declare who
-    it is measuring for, and no future caller can inherit a stale identity.
+    argument every caller must supply. Bind it at ``score_one_candidate`` instead and the
+    two askers that RE-ENTER the gateway (``_pobb_backfill``, ``rescore_parent``) inherit
+    whichever candidate was bound last and stamp their measurements with it: PoBB backfills
+    running C1.1's optimizer prompts get recorded as C1.2's. Binding at the ingress makes
+    every pass declare who it is measuring for, so no caller can inherit a stale identity.
     ``run_inner_cycle`` runs in that same task (its inner campaign gets a fresh task only
     afterwards), so the binding is live at the spawn site.
 

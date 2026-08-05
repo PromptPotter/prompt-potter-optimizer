@@ -18,9 +18,9 @@ per kind:
 * ``task-context/{name}.yaml`` — the first-sight LLM decomposition of
   ``task_description.md``; see :meth:`task_context_path`.
 
-Both used to be written back into the definition dir, which is the only reason that
-tier ever had to be writable. This store only touches the tenant tree, and it is the
-only place either artifact is written.
+Writing either back into the definition dir is the only thing that would make that tier
+need to be writable. This store only touches the tenant tree, and it is the only place
+either artifact is written.
 """
 
 from __future__ import annotations

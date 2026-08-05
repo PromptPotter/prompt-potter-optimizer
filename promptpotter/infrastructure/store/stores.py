@@ -165,12 +165,12 @@ def build_stores(
 ) -> Stores:
     """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
 
-    ``projects_root`` is REQUIRED, and that is the whole point: it used to default to
-    the process-global ``DEFAULT_PROJECTS_ROOT``, so eleven of twelve callers omitted
-    it and a store built anywhere inside an L4 sandbox silently addressed the operator's
-    real workspace. An entry point that genuinely means the process-global workspace
-    still says so — it just says it out loud, and every caller downstream of one is now
-    forced by mypy to pass the root it already holds. The tenant slug rides
+    ``projects_root`` is REQUIRED, and that is the whole point: defaulted to the
+    process-global ``DEFAULT_PROJECTS_ROOT`` it goes unpassed by nearly every caller, and
+    a store built anywhere inside an L4 sandbox silently addresses the operator's real
+    workspace. An entry point that genuinely means the process-global workspace says so
+    out loud, and every caller downstream of one is forced by mypy to pass the root it
+    already holds. The tenant slug rides
     ``identity.tenant_id``; use :func:`~promptpotter.shared.identity.default_identity`
     for Stage-0 single-operator callers.
 

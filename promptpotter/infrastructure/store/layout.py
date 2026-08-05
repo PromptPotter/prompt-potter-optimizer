@@ -47,11 +47,11 @@ def validate_dataset_name(name: str) -> str:
     :meth:`~...TenantDatasetStore.slug_exists` reported two. Ingest already
     lowercases, so nothing legal is lost.
 
-    A leading digit is allowed on purpose — ``2024-sales.csv`` is an ordinary upload,
-    and the wire used to reject the slug its own ingest had just minted, so a dataset
-    could be created and never minted against. That was two rules for one field
-    (``_DATASET_NAME_PATTERN`` in the commands router), which is why they could
-    disagree at all.
+    A leading digit is allowed on purpose — ``2024-sales.csv`` is an ordinary upload, and
+    a wire rule that rejects it rejects the slug its own ingest just minted, so a dataset
+    can be created and never minted against. That is what a second rule for this field
+    buys (it was ``_DATASET_NAME_PATTERN`` in the commands router); there is one rule
+    because two can disagree.
 
     Raises ``ValueError`` on invalid; returns *name* unchanged otherwise.
     """

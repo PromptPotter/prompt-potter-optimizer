@@ -2,13 +2,12 @@
 
 Read-only and **zero spend**: :func:`rank_optimizer_prompts` re-derives the ranking from round files
 already written, so it pools every cell every past L4 run paid for and answers "which edit
-actually held up" retroactively. It was reachable only over HTTP (``GET /optimizer-prompt-ranking``),
-which a CLI-only operator has no route to — the same shape as the reaper having had only
-server-lifespan call sites.
+actually held up" retroactively. A verb as well as ``GET /optimizer-prompt-ranking`` because a
+CLI-only operator has no route to HTTP.
 
 It NAMES a winner and writes nothing. Graduating one into
-``promptpotter/assets/optimizer/pipeline.yaml`` stays a deliberate hand-edit (the verb that
-used to write that file is gone, and the manifest is operator-owned).
+``promptpotter/assets/optimizer/pipeline.yaml`` stays a deliberate hand-edit — that manifest is
+operator-owned, and no verb here writes it.
 """
 
 from __future__ import annotations

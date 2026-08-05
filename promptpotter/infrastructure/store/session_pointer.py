@@ -2,14 +2,13 @@
 
 Every verb here is keyed on a :data:`~promptpotter.domain.cycle_paths.WorkspaceDir` —
 the tenant's own root, ``Stores.base_dir`` — so there is no global pointer and by
-construction no tenant can read or clobber another's. The key is the whole contract:
-these functions used to accept ``(tenant_id, projects_root=None)`` and fall back to
-the process-global ``DEFAULT_PROJECTS_ROOT``, which made omitting the root compile
-and be silently wrong. Nearly every caller omitted it, and one of them was the L4
-auto-rebase — so an inner cycle retargeted the OPERATOR's pointer at a campaign under
-``.inner/``, every per-cycle route 404'd, and the dashboard went blank mid-run. A
-resolved root is now the only way to ask, and the newtype stops the ``projects_root``
-one level up from being passed by mistake.
+construction no tenant can read or clobber another's. **The key is the whole contract —
+never give it a default.** ``(tenant_id, projects_root=None)`` falling back to the
+process-global ``DEFAULT_PROJECTS_ROOT`` makes omitting the root compile and be silently
+wrong, and nearly every caller omits it. One is the L4 auto-rebase: an inner cycle
+retargets the OPERATOR's pointer at a campaign under ``.inner/``, every per-cycle route
+404s, and the dashboard goes blank mid-run. A resolved root is the only way to ask, and
+the newtype stops the ``projects_root`` one level up from being passed by mistake.
 
 Distinct from :class:`store.session_store.SessionStore`: this answers *which* session
 is live, that stores *what* a session holds. Depends only on the pure leaves

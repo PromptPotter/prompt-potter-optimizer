@@ -28,9 +28,8 @@ class DatasetAccessError(NotFoundError):
     """No dataset *name* this identity can resolve — invalid slug, or absent.
 
     A :class:`NotFoundError`, so the central ``PotterError`` handler maps it to
-    404 with no per-route arm. Two routers used to catch it and rebuild that same
-    404 by hand. One exception because there is one reason: the dataset is not
-    there.
+    404 with no per-route arm — a router catching it to rebuild that same 404 by hand
+    is drift. One exception because there is one reason: the dataset is not there.
 
     404 rather than 403 is the existence-leak posture, and it belongs here rather
     than at a router: a non-admin must not be able to tell a benchmark they may not
@@ -71,14 +70,14 @@ def dataset_task_context_path(dataset_dir: Path) -> Path:
 def is_dataset_dir(dataset_dir: Path) -> bool:
     """A directory is a dataset iff it carries a pipeline overlay.
 
-    Public because three call sites used to re-derive it with their own literal —
-    the readiness probe in the origins router among them — so "is this a dataset"
-    could answer differently depending on who asked.
+    Public so no call site re-derives it with its own literal — the readiness probe in
+    the origins router among them — because then "is this a dataset" answers differently
+    depending on who asked.
 
-    A materialized ``cache.json`` used to count too, which made this disagree with
-    :func:`list_readable_datasets` (that one has always asked for the overlay): a
-    row bank with no definition listed nowhere yet resolved here. Rows now live
-    outside the dir entirely, so the definition is the only thing left to ask for.
+    A materialized ``cache.json`` does NOT count: that would disagree with
+    :func:`list_readable_datasets`, which asks for the overlay, and a row bank with no
+    definition would list nowhere yet resolve here. Rows live outside the dir entirely,
+    so the definition is the only thing left to ask for.
     """
     return dataset_pipeline_path(dataset_dir).is_file()
 
@@ -108,11 +107,10 @@ def readable_dataset_rows(store: Stores, name: str) -> dict[str, Any] | None:
     """The materialized rows for *name*, or ``None`` — the row half of the resolver.
 
     A dataset dir is a DEFINITION (ours under a wheel, read-only) and its rows are a
-    MEASUREMENT INPUT the operator materialized (fetched, regenerable, 6.8 MB). They
-    used to share a directory, which is the only reason the install tier ever had to
-    be writable — and writable it is not, once the definitions ship inside
-    ``site-packages``. So they are resolved separately, in the same tenant-first order
-    the dir resolver uses:
+    MEASUREMENT INPUT the operator materialized (fetched, regenerable, 6.8 MB). Sharing
+    a directory is the only thing that would make the install tier need to be writable —
+    and writable it is not, once the definitions ship inside ``site-packages``. So they
+    resolve separately, in the same tenant-first order the dir resolver uses:
 
     1. A committed tenant dataset's own ``cache.json`` — authored at commit time,
        inside a dir the tenant owns outright.
@@ -172,12 +170,10 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
     A tenant slug shadows an install slug of the same name, matching the resolver's
     tenant-first precedence.
 
-    There used to be an ``_``-prefix filter here (``_is_internal``), because the
-    optimizer's own pipeline sat among the benchmark datasets as ``_optimizer`` /
-    ``_optimizer_meta`` and had to be hidden from a picker that would otherwise offer
-    "mint a campaign against the optimizer". That config is install content and now
-    lives under the package (``config/paths.py::optimizer_assets_root``), so the
-    convention it needed is gone with it: whatever sits in this tree is a dataset.
+    No name filter here, and none is needed: whatever sits in this tree is a dataset.
+    The optimizer's own pipeline lives under the package
+    (``config/paths.py::optimizer_assets_root``), not among the benchmark datasets, so
+    there is nothing a picker could offer "mint a campaign against" by mistake.
     """
     refs: list[DatasetRef] = []
     own: set[str] = set()

@@ -100,7 +100,7 @@ def user_data_root() -> Path:
        source tree.** Development and ``deploy-linux/`` both run from a checkout,
        so both keep the exact tree they have today. Nothing moves.
     3. The OS application-data dir — reached only when there is no checkout to
-       sit beside, which is precisely the case that used to resolve into
+       sit beside, which is precisely the case that would otherwise resolve into
        ``site-packages/``.
     """
     override = os.environ.get(_ENV_HOME)

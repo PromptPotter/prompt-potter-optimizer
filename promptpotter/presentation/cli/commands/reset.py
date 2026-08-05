@@ -73,14 +73,14 @@ def _human_size(path: Path) -> str:
 def _resolve_tenant_dirs(args: argparse.Namespace, projects_root: Path) -> list[Path]:
     """Pick the tenant dirs to operate on, honoring ``--tenant`` / ``--all-tenants``.
 
-    The single tenant comes from ``identity_from_args`` — the seam every other verb
-    uses — and not from ``args.tenant or "default"``. That hardcoded default made
-    this the one verb that resolved its own identity, and it resolved it wrongly:
-    the first web sign-in RENAMES ``projects/default/`` to ``projects/{user_id}/``
-    (``identity/migration.py::maybe_claim_default``), so on any registered install a
-    bare ``reset`` addressed a directory that no longer exists and reported
-    "tenant dir does not exist — nothing to reset" while the real workspace sat
-    untouched. A destructive verb that silently does nothing and calls it success."""
+    The single tenant comes from ``identity_from_args`` — the seam every other verb uses
+    — never from ``args.tenant or "default"``. A hardcoded default makes this the one verb
+    resolving its own identity, and it resolves it wrongly: the first web sign-in RENAMES
+    ``projects/default/`` to ``projects/{user_id}/``
+    (``identity/migration.py::maybe_claim_default``), so on any registered install a bare
+    ``reset`` addresses a directory that is not there and reports "tenant dir does not
+    exist — nothing to reset" while the real workspace sits untouched. A destructive verb
+    that silently does nothing and calls it success."""
     if getattr(args, "all_tenants", False):
         if not projects_root.is_dir():
             return []

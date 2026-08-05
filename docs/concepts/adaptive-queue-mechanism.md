@@ -1,4 +1,4 @@
-# Sample Ordering — the shared round order (+ between-round CAT primitives)
+# Adaptive queue mechanism — sample ordering: the shared round order (+ between-round CAT primitives)
 
 > **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
 

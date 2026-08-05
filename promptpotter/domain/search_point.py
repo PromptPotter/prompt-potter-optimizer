@@ -81,12 +81,12 @@ class JobSearchPoint(SearchPoint):
     def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
         """SearchPoint identity hash, over the schema-resolved node configs.
 
-        The schema is REQUIRED because it selects the algorithm. It used to default to
-        ``None`` and hash the raw ``pipeline_params`` dict instead — two different hashes
-        behind one name, and this value persists as ``prompt_fields_id`` on every
-        measurement batch. One searchpoint reached the archive under two identities
-        depending on whether its caller happened to have a schema in scope, and
-        cross-run grouping split with no error anywhere.
+        The schema is REQUIRED because it selects the algorithm — never give it a
+        ``None`` default that falls back to hashing the raw ``pipeline_params`` dict.
+        That is two hashes behind one name, and this value persists as
+        ``prompt_fields_id`` on every measurement batch: one searchpoint reaches the
+        archive under two identities depending on whether its caller happens to have a
+        schema in scope, and cross-run grouping splits with no error anywhere.
 
         Role split (the codebase has TWO hashes — don't conflate): ``sp_hash`` is the
         optimizer/prompt-side dedup over the node-config structure; ``content_hash``

@@ -379,7 +379,14 @@ The persisted world is a four-entity containment hierarchy
 ## Escalation + healing
 
 - **Patience** — L1's per-cycle stall budget. Bumps after each
-  no-improvement round; resets on improvement.
+  no-improvement round; resets on improvement. Distance to the next
+  *escalation*, never the run's remaining life — Lives own that.
+- **Lives** / **hearts** — one concept, two words, the same operator-facing
+  split as **Unit** / **Cycle** above: the improvement-banked round budget
+  (`LivesConfig`, `application/config.py`) is `lives` in config and on disk,
+  and **hearts** wherever the operator reads it (the ♥ bank in the terminal
+  readout, `hearts` / `hearts_cap` on the view models). Opt-in alternative to
+  the fixed `max_rounds` ceiling.
 - **Stall** — N consecutive non-improving rounds for L1, L2, or L3.
   Tracked on `EscalationFSM.l1_stall_count` etc.
 - **Escalation** — the post-round router (`decide_escalation` over

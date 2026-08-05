@@ -133,10 +133,10 @@ class RoundBuffer:
 
         Stores this candidate's ``p_best``, its signed delta vs the prior query and a capped
         trajectory; then refreshes the round-wide top-5 consumed by ``build_pobb_block``
-        **by aggregating across the round's candidate slots**. The leaderboard was previously
-        read straight off this one candidate's ``PoBBSnapshot`` dict, so it listed the priors
-        that candidate was measured against as if they were its rivals' standings, and each
-        new snapshot overwrote it — the last candidate to score decided the display.
+        **by aggregating across the round's candidate slots**. Reading the leaderboard
+        straight off this one candidate's ``PoBBSnapshot`` dict instead lists the priors it
+        was measured against as if they were its rivals' standings, and each new snapshot
+        overwrites it — the last candidate to score decides the display.
         """
         cand = self.slot(idx, total)
         current = float(p_best)
