@@ -215,8 +215,8 @@ def _resolve_partial_escalation(
             pass
         elif batch.stop_reason in {"graceful", "force"}:
             # Graceful/force stop — partial state is already on disk via
-            # per-fresh-sample persist; just unwind.
-            raise KeyboardInterrupt()
+            # per-fresh-sample persist; just unwind. The instance carries which of the two.
+            raise KeyboardInterrupt(batch.stop_reason)
         else:
             # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
             # pipeline ERROR). Synthesize a candidate-scoped escalation so the

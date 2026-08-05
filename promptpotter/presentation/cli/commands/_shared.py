@@ -250,8 +250,7 @@ async def drive_cycle(
     """One pass through the optimization loop — the single CLI driver.
 
     Owns the scaffolding every loop verb (``new`` / ``resume`` / sweep) shares:
-    observers, the "optimizing" → "optimize" phase flips, banking
-    ``best_accuracy``, and the spend fallback (CLI ``--spend-budget`` overrides
+    observers and the spend fallback (CLI ``--spend-budget`` overrides
     ``OptimizationConfig.spend_budget_usd``). Callers construct only the verb's
     :class:`RunMode`.
     """
@@ -259,24 +258,23 @@ async def drive_cycle(
 
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     observers = build_observers(args, session, campaign_config, train_data, pre_origin_acc)
-    ctx.save_phase("optimizing")
 
     # Control-local hooks (pause.flag under .runtime/) are bound centrally in
     # run_optimization (the single runner seam) so CLI and API launches behave
     # identically — no per-entry-point wiring here.
-    cycle_result = await run_optimization(
-        train_data,
-        campaign_config,
-        session=session,
-        observers=observers,
-        task_context=ctx.task_context,
-        mode=mode,
-        spend_budget_usd=getattr(args, "spend_budget_usd", None)
-        or campaign_config.optimization.spend_budget_usd,
+    return (
+        await run_optimization(
+            train_data,
+            campaign_config,
+            session=session,
+            observers=observers,
+            task_context=ctx.task_context,
+            mode=mode,
+            spend_budget_usd=getattr(args, "spend_budget_usd", None)
+            or campaign_config.optimization.spend_budget_usd,
+        ),
+        observers,
     )
-    ctx.state["best_accuracy"] = cycle_result.best_accuracy
-    ctx.save_phase("optimize")
-    return cycle_result, observers
 
 
 def cycle_result_command(

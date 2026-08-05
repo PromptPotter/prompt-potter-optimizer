@@ -75,7 +75,14 @@ from promptpotter.shared.identity import claim_email
 logger = logging.getLogger(__name__)
 
 
-def _record_launch_failure(
+def launch_interrupted(exc: BaseException) -> bool:
+    """True when the launch stopped because someone asked — the pause flag's synthetic
+    ``KeyboardInterrupt``, a terminal Ctrl+C's ``CancelledError``, or the host cancelling the
+    task. None is a defect in the campaign, and none is visible to ``except Exception``."""
+    return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
+
+
+def _record_launch_stop(
     *,
     stores: Stores,
     campaign_id: str,
@@ -83,33 +90,33 @@ def _record_launch_failure(
     session_id: str,
     exc: BaseException,
 ) -> None:
-    """Stamp a crashed launch onto the cycle's on-disk truth — a terminal
-    ``dashboard.json`` (via its sole writer) + ``index.json::finished_at`` — so the
-    file tree and the webapp show ``failed`` with the crash message instead of a
-    frozen ``init``. Called from the launch ``except`` sites, where the projection
-    pipeline never bound to write this itself. Best-effort: it must never mask the
-    original error, so any failure here is logged and swallowed."""
+    """Stamp a launch that ended before its projection pipeline bound onto the cycle's on-disk
+    truth. :func:`launch_interrupted` picks the shape: a crash gets ``finished_at``, an
+    interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
     from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
+    interrupted = launch_interrupted(exc)
     try:
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))
-        LiveDashboardView.write_launch_failure(
+        LiveDashboardView.write_launch_stop(
             cycle_dir,
             campaign_id=campaign_id,
             cycle_id=cycle_id,
             session_id=session_id,
             exc=exc,
+            interrupted=interrupted,
         )
-        stores.campaigns.mark_finished(
-            campaign_id,
-            cycle_id,
-            status="failed",
-            stop_reason=f"{type(exc).__name__}: {exc}",
-            finished_at=utcnow_iso(),
-            crash_traceback=traceback.format_exc(),
-        )
+        if not interrupted:
+            stores.campaigns.mark_finished(
+                campaign_id,
+                cycle_id,
+                status="failed",
+                stop_reason=f"{type(exc).__name__}: {exc}",
+                finished_at=utcnow_iso(),
+                crash_traceback=traceback.format_exc(),
+            )
     except Exception:
-        logger.exception("failed to record launch failure for %s/%s", campaign_id, cycle_id)
+        logger.exception("failed to record launch stop for %s/%s", campaign_id, cycle_id)
 
 
 # The one outcome → JobStatus mapping. Sole bridge from the StopReason outcome
@@ -355,9 +362,14 @@ async def mint_campaign_command(
             time.perf_counter() - _t0,
         )
     except BaseException as exc:
-        job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+        stopped = launch_interrupted(exc)
+        job_registry.mark_finished(
+            job.job_id,
+            status="stopped" if stopped else "failed",
+            stop_reason="launch_interrupted" if stopped else "launch_aborted",
+        )
         if campaign_id and cycle_id:
-            _record_launch_failure(
+            _record_launch_stop(
                 stores=stores,
                 campaign_id=campaign_id,
                 cycle_id=cycle_id,
@@ -557,8 +569,13 @@ async def start_run_command(
             raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
         session.session_id = session_id
     except BaseException as exc:
-        job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
-        _record_launch_failure(
+        stopped = launch_interrupted(exc)
+        job_registry.mark_finished(
+            job.job_id,
+            status="stopped" if stopped else "failed",
+            stop_reason="launch_interrupted" if stopped else "launch_aborted",
+        )
+        _record_launch_stop(
             stores=stores,
             campaign_id=campaign_id,
             cycle_id=cycle_id,
@@ -644,7 +661,10 @@ async def _run_in_background(
             status=status,
             stop_reason=persisted_reason,
         )
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        # Both reach here: the runner re-raises a cancellation past its own finalize, and the
+        # pause flag's synthetic KeyboardInterrupt escapes round-0 origin scoring, which runs
+        # inside `_prepare_run` — outside the round loop's own arm.
         job_registry.mark_finished(job_id, status="stopped", stop_reason="task_cancelled")
         raise
     except Exception as exc:
@@ -664,7 +684,7 @@ async def _run_in_background(
         # fired before / outside its own try/except — e.g. build_run_observers),
         # so nothing wrote the cycle terminal. Stamp it so the fork doesn't sit
         # frozen at `init` in the file tree and the webapp.
-        _record_launch_failure(
+        _record_launch_stop(
             stores=session.store,
             campaign_id=session.campaign_id,
             cycle_id=session.state.cycle_id or "",

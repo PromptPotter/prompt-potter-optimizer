@@ -36,9 +36,11 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     _admit,
     _assert_origin_ready,
+    _record_launch_stop,
     _run_in_background,
     _run_preflight,
     build_cycle_config,
+    launch_interrupted,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
@@ -285,8 +287,23 @@ async def start_checkin_campaign(
             draft=draft,
             make_session=make_session,
         )
-    except BaseException:
-        job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+    except BaseException as exc:
+        # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
+        # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
+        # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
+        stopped = launch_interrupted(exc)
+        job_registry.mark_finished(
+            job.job_id,
+            status="stopped" if stopped else "failed",
+            stop_reason="launch_interrupted" if stopped else "launch_aborted",
+        )
+        _record_launch_stop(
+            stores=stores,
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            session_id="",
+            exc=exc,
+        )
         raise
 
     task = asyncio.create_task(

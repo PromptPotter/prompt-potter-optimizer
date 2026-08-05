@@ -230,7 +230,7 @@ class LiveDashboardView(DerivedView):
         )
 
     @classmethod
-    def write_launch_failure(
+    def write_launch_stop(
         cls,
         cycle_dir: CycleDir,
         *,
@@ -238,14 +238,18 @@ class LiveDashboardView(DerivedView):
         cycle_id: str,
         session_id: str = "",
         exc: BaseException,
+        interrupted: bool,
     ) -> None:
-        """Flip a cycle's ``dashboard.json`` terminal when a launch/run crashed
-        BEFORE the projection pipeline bound — so the file tree and the webapp show
-        the failure instead of a frozen ``init``, and the crash's own message lands
-        on disk (the folder-UI truth guarantee). Reads any prior state and marks it
-        terminal in place; writes a minimal one when none exists yet. Best-effort —
-        it runs on an error path and must not raise. Sole-writer rule holds: this IS
-        ``LiveDashboardView`` writing its own file, atomically."""
+        """Stamp a cycle's ``dashboard.json`` when a launch/run stopped BEFORE the
+        projection pipeline bound — so the file tree and the webapp show what happened
+        instead of a frozen ``init``. Reads any prior state and marks it in place; writes
+        a minimal one when none exists yet. Best-effort — it runs on an exit path and must
+        not raise. Sole-writer rule holds: this IS ``LiveDashboardView`` writing its own
+        file, atomically.
+
+        ``interrupted`` picks the outcome: a crash is TERMINAL and carries its message in
+        ``error``; an interrupt is PAUSED and carries none. Callers pair this with
+        ``mark_finished`` only for a crash — a ``finished_at`` makes the pause unresumable."""
         cycle_path = Path(cycle_dir)
         state = resolve_resume_state(cycle_path, cycle_path, None) or LiveDashboardState(
             campaign_id=campaign_id,
@@ -255,14 +259,17 @@ class LiveDashboardView(DerivedView):
             n_variants=0,
             sp_budget_ttest=0,
         )
-        state.error = DashboardError(
-            kind="launch_failed",
-            message=str(exc) or type(exc).__name__,
-            stop_reason="launch_aborted",
-        )
-        state.stop_reason = f"{type(exc).__name__}: {exc}"
-        state.run_phase = RunPhase.TERMINAL
-        state.state = DashboardState.STOPPED
+        if interrupted:
+            state.run_phase = RunPhase.PAUSED
+        else:
+            state.error = DashboardError(
+                kind="launch_failed",
+                message=str(exc) or type(exc).__name__,
+                stop_reason="launch_aborted",
+            )
+            state.stop_reason = f"{type(exc).__name__}: {exc}"
+            state.run_phase = RunPhase.TERMINAL
+            state.state = DashboardState.STOPPED
         state.state_since = utcnow_iso()
         write_json(CycleLayout(cycle_path).dashboard, state.model_dump(), default=str)
 

@@ -5,8 +5,9 @@ Two write verbs: ``new [DATASET|FILE]`` mints a fresh campaign — from an autho
 check-in → commits as a tenant dataset → runs, the headless twin of the web
 onboarding); ``resume`` continues the active session. Reads = open the on-disk
 artifact tree (``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``).
-Ctrl+C stops; ``pause`` asks a running cycle to stop at its next checkpoint, through
-the same dispatcher the webapp's pause control fires.
+Ctrl+C is a resumable pause that exits 130, not a stop; ``pause`` asks a running cycle
+to stop at its next checkpoint, through the same dispatcher the webapp's pause control
+fires.
 """
 
 from __future__ import annotations
@@ -135,6 +136,14 @@ def main() -> None:
         # traceback. PotterError is the one typed-error family the seams raise.
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+        # Both kinds land here: `asyncio.Runner` cancels the main task on the first SIGINT and
+        # raises KeyboardInterrupt on the second. The cycle already finalized itself as PAUSED,
+        # so this writes nothing — it is the process's half of that pause.
+        reason = f" — {exc}" if str(exc) else ""
+        print(f"\nPaused{reason}. Completed work is saved; continue with:", file=sys.stderr)
+        print("  python -m promptpotter resume", file=sys.stderr)
+        sys.exit(130)
     if result is None:
         return
     if args.json_output or result.human is None:

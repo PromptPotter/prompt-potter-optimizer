@@ -78,7 +78,7 @@ ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytes
 git config core.hooksPath .githooks                           # one-time per clone: pre-commit ruff (py) + tsc & eslint (webapp — `next build` checks neither)
 python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from datasets/<name>/, run from round 0
 python -m promptpotter new <file.csv> --set task_description=…  # fresh from RAW file: ingest → resolve origin check-in → run
-python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st saves, 2nd force-quits
+python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st pauses (resumable, exit 130), 2nd force-quits
 python -m promptpotter resume --from N                       # rewind in place
 python -m promptpotter resume --fork-on-divergence           # sibling cycle at divergence point
 python -m uvicorn promptpotter.main:app --port 8001          # read-only API + webapp preview at the root (http://localhost:8001/)

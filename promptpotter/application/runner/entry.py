@@ -478,7 +478,7 @@ async def _run_single_cycle(
 
     # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
     cycle: Cycle | None = None
-    cancelled = False
+    cancel_exc: asyncio.CancelledError | None = None
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -567,22 +567,26 @@ async def _run_single_cycle(
         logger.warning("Optimization paused before round loop entered (user-initiated).")
         stop_reason = StopReason.PAUSED
         cycle_error = None
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
         # A cancellation still finalizes — the cycle's own state must land on disk exactly as a
         # pause does, or a cancelled inner campaign leaves a dashboard reading `running`
         # forever. But it must also REACH the canceller, so it is re-raised past the finalize
         # below; answering a cancellation with a return is what made the L4 sample deadline
         # unenforceable (see `scoring/query_loop.py`).
         #
-        # Unlike KeyboardInterrupt (which `run_round_loop` catches itself), a cancellation is
-        # deliberately NOT caught in there, so this arm sees in-loop cancellations too — the
-        # common one being an L4 inner campaign cancelled by its outer sample deadline. The
+        # Where a terminal Ctrl+C lands (`asyncio.Runner` cancels the main task on the first
+        # SIGINT) and where an L4 inner campaign cancelled by its outer sample deadline lands.
+        # `run_round_loop` catches only KeyboardInterrupt, which is the pause flag's. The
         # `paused` DECLARATION that keeps the reaper off it is made once, at the finalize seam
-        # every paused exit reaches, rather than here.
-        logger.warning("Optimization cancelled; finalizing as paused (resumable).")
+        # every paused exit reaches, rather than here. The cycle is named because an L4 run
+        # re-enters this function in-process, logging the line once per nesting level.
+        cancel_exc = exc
+        logger.warning(
+            "Optimization cancelled (%s); finalizing as paused (resumable).",
+            session.state.cycle_id or "no cycle",
+        )
         stop_reason = StopReason.PAUSED
         cycle_error = None
-        cancelled = True
     except ResumeDivergenceError as exc:
         # Operator-recoverable; fix is ``--fork-on-divergence``.
         message = str(exc) or type(exc).__name__
@@ -615,12 +619,9 @@ async def _run_single_cycle(
     langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
-    if cancelled:
-        # Everything above has landed on disk; now let the cancellation finish travelling.
-        raise asyncio.CancelledError
-
     # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
-    # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
+    # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs. Ahead of the
+    # re-raise below, because a cancellation is one of those interrupts.
     forked_in_this_run = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
@@ -631,6 +632,11 @@ async def _run_single_cycle(
             cycle_id=session.state.cycle_id,
             parent_cycle_id=pre_loop_cycle_id,
         )
+
+    if cancel_exc is not None:
+        # Everything above has landed on disk; now let the cancellation finish travelling.
+        # The caught instance, not a fresh class — it carries the reason its raise site named.
+        raise cancel_exc
 
     return _CycleOutcome(cycle_result=cycle_result, cycle=cycle, observers=observers)
 

@@ -439,7 +439,6 @@ async def _maybe_dispatch_sweep_batch(
             f"--sweep-batch found {sweep_dir} but no *.yaml payloads in it. Author one "
             "OperatorSweepFile per arm, or drop the flag."
         )
-    ctx.save_phase("optimizing")
     return await _run_sweep_batch(args, ctx, campaign_config, train_data, sweep_payloads)
 
 

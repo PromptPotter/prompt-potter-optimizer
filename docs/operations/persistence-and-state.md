@@ -193,7 +193,7 @@ The workflow flags `--from`, `--fork-on-divergence`, `--rewind`, `--rewind-reaso
 
 ### Interrupt handling
 
-- **First Ctrl+C** — finishes the in-flight backend call, saves all completed work, exits cleanly.
+- **First Ctrl+C** — cancels the in-flight call, banks completed work, declares the cycle `paused` (resumable), exits **130**.
 - **Second Ctrl+C** — force-quits immediately.
 
 After an interrupted run, check for orphan processes (`tasklist | findstr python` on Windows; `ps aux | grep python` on Linux/Mac). An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind above for which `--from N` offsets are then admissible.

@@ -82,10 +82,6 @@ class SessionCtx:
     def task_context(self) -> dict[str, Any] | None:
         return self.state.get("task_context")
 
-    def save_phase(self, phase: str) -> None:
-        self.state["phase"] = phase
-        self.store.sessions.update(self.session_id, dict(self.state))
-
 
 def no_dataset_hint() -> str:
     """Formatted list of discovered datasets + exact fresh-init commands."""

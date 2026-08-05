@@ -75,7 +75,7 @@ max — ask before exceeding.
 
 Flags come from `datasets/{name}/dataset.md § Init Flags`, verbatim — never guessed. `new`
 overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
-first finishes in-flight work, second force-quits. Every query lands in
+first cancels the in-flight call and pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/runs/{run_id}.jsonl` immediately, so a hard kill loses zero work and `resume`
 cache-hits prior results.
 

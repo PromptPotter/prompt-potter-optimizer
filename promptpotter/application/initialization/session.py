@@ -141,7 +141,6 @@ def new_session_state(
     active_steps: list[str],
 ) -> dict[str, Any]:
     return {
-        "phase": "init",
         "init_params": init_params,
         "pipeline_params": pipeline_params,
         "active_steps": active_steps,
@@ -321,7 +320,7 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
     )
     # Placeholder session row so re-open + the sidebar's session count resolve a real
     # session between skeleton and Start; finalize overwrites it with the run state.
-    stores.sessions.create(session_id, {"phase": "checkin", "dataset_name": slug})
+    stores.sessions.create(session_id, {"dataset_name": slug})
 
     checkin_flag = CycleLayout(stores.campaigns.cycle_dir(campaign_id, cycle_id)).checkin_flag
     checkin_flag.parent.mkdir(parents=True, exist_ok=True)

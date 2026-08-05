@@ -249,11 +249,13 @@ async def run_round_loop(
 
     except StopLoop as sl:
         return sl.reason, None
-    except KeyboardInterrupt:
-        # Ctrl+C is an operator pause: the worker exits but the cycle stays resumable.
-        # ``asyncio.CancelledError`` is NOT caught with it — see the query loop's note; a
-        # cancellation is our own machinery stopping this run and must reach whoever asked.
-        logger.warning("Optimization paused at round %d (user-initiated).", round_num)
+    except KeyboardInterrupt as exc:
+        # The PAUSE FLAG's stop (`scoring/search_point_scorer.py`), not the terminal's — a
+        # Ctrl+C arrives as ``CancelledError`` and lands in `runner/entry.py`. Which is also why
+        # one is not caught here: a cancellation is our own machinery, and must reach its asker.
+        logger.warning(
+            "Optimization paused at round %d (%s).", round_num, str(exc) or "user-initiated"
+        )
         return StopReason.PAUSED, None
     except InjectionRenderError as exc:
         # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
