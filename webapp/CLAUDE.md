@@ -23,7 +23,7 @@ before changing any control's states. Its invariants — `I1_state_complete`,
 `I2_no_raw_transport`, `I3_affordance_honest`, `I4_auth_coherent`,
 `I5_no_anon_noise` (anon fires no auth-gated request — don't fire it, not merely
 "keep the console clean"), `I6_run_state_server_owned` (`run_phase` has ONE
-server-owned answer; `IN_FLIGHT_PHASES` in `lib/run-phase.ts`),
+server-owned answer; `IN_FLIGHT` in `lib/run-phase.ts`),
 `I7_failure_traceable` (every failure identified, classified and traceable — see
 § Failure handling below) — are the bar for user-facing PRs. Drive the surface against it with the
 two-harness recipe in § Testing posture below (anon = `:8001`; authed+live =

@@ -33,17 +33,16 @@ marketing).
    do not entangle the sweep with operator WIP. Report "tree dirty, skipped" and stop.
 2. **On `main`, up to date.** `git fetch && git checkout main && git pull --ff-only`.
    If the pull isn't fast-forward, abort and report.
-3. **`main`'s own CI must already be green.** `gh run list --branch main --workflow CI --limit 1`
-   — if the latest run is `failure` or still `in_progress`, **abort and report** ("main CI
-   <state> — fix before sweeping"). A sweep never builds on a red main and never stacks a PR
-   on top of one (this is exactly how the 2026-06-15 pile-up happened).
-4. **Gate is green at HEAD, in the *pinned* environment** (so local-green ⇒ CI-green — the
-   sweep must see what CI sees, not a stale local resolve):
+3. **Gate at HEAD for the BASELINE, in the *pinned* environment** (so local-green ⇒ CI-green —
+   the sweep must see what CI sees, not a stale local resolve):
    `pip install -q uv` (if absent) → `python -m uv sync --extra stats --extra dev --frozen` →
    `python -m uv run ruff check promptpotter/ tests/ && python -m uv run mypy promptpotter/ &&
    python -m uv run pytest -q`. The `--frozen` flag installs the exact `uv.lock` graph CI uses;
-   never gate against an ad-hoc `pip install` set. If already red, abort and report.
-5. **Stay on `main`.** There is no sweep branch — the audit runs on `main` itself and the
+   never gate against an ad-hoc `pip install` set. **A failure already present at HEAD is the
+   baseline, not a finding and not an abort** — only what the sweep's own edits break blocks it
+   (Phase 5). `main`'s CI status is never read: whether the last push went green is not this
+   skill's business, and a sweep that spends its run diagnosing CI did not sweep.
+4. **Stay on `main`.** There is no sweep branch — the audit runs on `main` itself and the
    fixes stay uncommitted in the tree. Prior fixes can't be re-flagged because they either
    landed (the operator committed them) or are still in the tree in front of you; anything
    deliberately *not* fixed lives on the backlog, which Phase 1 loads as the exclusion set.
@@ -111,7 +110,7 @@ When in doubt, HOLD. A missed cleanup is free; a wrong auto-edit on `main`-bound
 
 ## Phase 5 — Gate (never ship red)
 
-After applying the safe fixes, gate through the **pinned** env (same as Phase 0.4):
+After applying the safe fixes, gate through the **pinned** env (same as Phase 0.3):
 `python -m uv run ruff format promptpotter/ tests/` →
 `python -m uv run ruff check promptpotter/ tests/` → `python -m uv run mypy promptpotter/` →
 `python -m uv run pytest -q`. If any TypeScript changed: `cd webapp && npm run lint && npx tsc --noEmit && npm run test && npm run build`.
@@ -152,5 +151,4 @@ The operator reads the report, reviews `git diff`, and commits what they want.
   items stay on the backlog as cross-repo notes.
 - **Hold all feature/lane work** — this skill ships cleanup only.
 - **Never branch, commit, push, or open a PR.** The deliverable is a reviewed-in-place diff.
-- **Never sweep on red, never declare done on red** — Phase 0.3 aborts if main's CI is red;
-  Phase 7 won't claim a clean sweep on a red gate.
+- **Never declare done on red** — Phase 7 won't claim a clean sweep on a red gate.

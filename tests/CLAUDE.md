@@ -42,10 +42,10 @@ run reveals; each test's docstring carries the detail.
 - `test_claude_md_claims_resolve` — **nothing but an agent reads a `CLAUDE.md`, and an agent
   following a dead pointer does not raise.** It reads a rule that is not there, or misses one
   that is, and edits accordingly with every gate green throughout. A claim scan, not a shape
-  scan: only that what the files claim still resolves. Its **line-number ban runs wider —
-  every tracked `docs/**/*.md`** — because that half enforces the Recompute Test, which
-  governs all docs rather than the CLAUDE.md shape; scoping it narrow is what let one
-  backlog collect nine refs that had all rotted.
+  scan: only that what the files claim still resolves. Its **banned tokens (a `file.py:<line>`
+  ref, an `R-NN` tag) run wider — every tracked `docs/**/*.md`** — because those govern all
+  docs rather than the CLAUDE.md shape; scoping them narrow is what let one backlog collect
+  nine refs that had all rotted, and twelve tags outlive the registry that defined them.
 
 Neither can be an import-time assert: no production module owns the repo's file bytes.
 

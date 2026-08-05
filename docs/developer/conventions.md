@@ -89,8 +89,8 @@ collects everything else.
 ## Git
 
 - **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, etc.
-- **Commit messages: hard cap 800 chars** total (incl. trailer); title <70.
-  Terse bullets — no motivation essays. Over 800 → rewrite, do not
+- **Commit messages: aim 900 chars** total (incl. trailer), 950 tolerated; title <70.
+  Terse bullets — no motivation essays. Past 950 → rewrite, do not
   commit-and-fix-later.
 - **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. Two pre-convention commits marked it in the subject instead (`docs: manual edit…`, `docs: maunal pass`); don't copy that — `manual` collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
 

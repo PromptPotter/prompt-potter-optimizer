@@ -596,7 +596,7 @@ the PR description.
   `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
 - **Origin, parent, and check-in — the start definitions the whole loop
-  depends on.** Say "origin", never "baseline" (R-23):
+  depends on.** Say "origin", never "baseline":
   - **Origin = the starting configuration = C0.** One word, one thing. In
     program evolution an individual **is** a configuration: the origin
     resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`,
@@ -706,9 +706,9 @@ the PR description.
   argmax-over-candidates form. Alternative formulas (what-if, the
   `score:<formula>` lens, replay) never recompute in the consumer — they
   re-project from the stored evaluator namespace via
-  `value_with_mask_applied` (`metrics.py`) and are **served** (R-36: every
-  score, active or alternative, is backend-computed — the webapp never
-  recomputes). Don't
+  `value_with_mask_applied` (`metrics.py`) and are **served** — every
+  score, active or alternative, is backend-computed and the webapp never
+  recomputes. Don't
   add a second composite-or-accuracy resolution; route through
   `display_fitness`. **A cycle's "best" deliberately has two bases:** the
   *winner export* (and the L2/L3 stall comparator) argmaxes cumulative
