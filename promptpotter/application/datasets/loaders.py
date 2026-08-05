@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.shared import GSM8K_ANSWER_RE
@@ -125,8 +126,7 @@ def load_bbeh() -> list[Sample]:
 
 # ONE JustLogic loader for every depth cut. The cut is DERIVED FROM THE DATASET NAME
 # (`justlogic-d234` → depths 2,3,4), so measuring a new combination costs a dataset dir and
-# nothing else — no loader, no registry row, no depth constant. `justlogic` is the one
-# irregular name: it predates the `-dNNN` convention and means depths 6-7.
+# nothing else — no loader, no registry row, no depth constant, no listing entry.
 #
 # Each cut MUST remain its own dataset NAME. The measurement archive keys a cell by
 # (dataset_name, node_configs, sample_id) with the query text OUT of the key, so re-cutting
@@ -137,7 +137,6 @@ _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
 # Deterministic and fixed: the per-depth train/test split and the interleave shuffle must
 # reproduce byte-for-byte across processes, or a cut silently becomes a different bank.
 _JUSTLOGIC_SEED: int = 42
-_JUSTLOGIC_LEGACY_DEPTHS: tuple[int, ...] = (6, 7)
 _JUSTLOGIC_CUT_RE = re.compile(r"^justlogic-d(\d+)$")
 
 
@@ -145,10 +144,8 @@ def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
     """The depth cut *dataset_name* denotes, or ``None`` when it names no JustLogic cut.
 
     ``justlogic-d234`` → ``(2, 3, 4)`` — one digit per depth, since JustLogic ships depths
-    1-7. The bare ``justlogic`` → its historical ``(6, 7)``.
+    1-7. Every cut names its depths; there is no irregular spelling to special-case.
     """
-    if dataset_name == "justlogic":
-        return _JUSTLOGIC_LEGACY_DEPTHS
     m = _JUSTLOGIC_CUT_RE.match(dataset_name)
     if m is None:
         return None
@@ -246,10 +243,17 @@ def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
 
 
 def loadable_dataset_names() -> list[str]:
-    """Names a caller can offer today — the fixed cuts plus the JustLogic cuts that ship a
-    dataset dir. The family is open, so this is a *listing*, never a validity test; ask
-    :func:`dataset_loader` for that."""
-    return [*sorted(DATASET_LOADERS), "justlogic", "justlogic-d23", "justlogic-d234"]
+    """Names a caller can offer today — the fixed loaders plus every JustLogic cut that
+    ships a dataset dir, DERIVED from the dirs rather than listed here. A new
+    ``justlogic-dNNN/`` therefore appears with no edit to this module. The family is open,
+    so this is a *listing*, never a validity test; ask :func:`dataset_loader` for that."""
+    root = benchmark_datasets_root()
+    cuts = (
+        sorted(p.name for p in root.iterdir() if p.is_dir() and _JUSTLOGIC_CUT_RE.match(p.name))
+        if root.is_dir()
+        else []
+    )
+    return [*sorted(DATASET_LOADERS), *cuts]
 
 
 def resolve_dataset_items(

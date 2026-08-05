@@ -11,9 +11,9 @@ split (deterministic `seed=42` per depth), the three depths **interleaved before
 so any `n`-sample prefix is an iid draw across d2/d3/d4. The depths are derived from this
 dataset's NAME — one `_load_justlogic` serves every cut (`justlogic_depths`,
 `promptpotter/application/datasets/loaders.py`), so a new combination such as
-`justlogic-d34` needs a dataset dir and no code. Still a SEPARATE dataset name from `justlogic-d23`,
-never a re-cut (the archive keys a cell by `(dataset_name, node_configs, sample_id)` with query
-text OUT of the key, so re-cutting in place would serve d23's banked rows under new sample_ids).
+`justlogic-d34` needs a dataset dir and no code. Each cut is a SEPARATE dataset name, never a re-cut of another (the archive keys a cell by
+`(dataset_name, node_configs, sample_id)` with query text OUT of the key, so re-cutting in
+place would serve the old cut's banked rows under the new sample_ids).
 
 The authors' canonical test set is withheld (leakage control), so numbers here are NOT
 leaderboard-comparable; HF `train` is the public training fold. Per-depth label distribution is

@@ -264,12 +264,12 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     write_json(
         tmp_path / "inner_tasks.yaml",
         {
-            "inner_benchmark": "justlogic",
+            "inner_benchmark": "justlogic-d234",
             "inner_benchmark_config": {
                 "n_samples_per_inner_round": 24,
                 "max_inner_rounds": 7,
             },
-            "tasks": [{"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0}],
+            "tasks": [{"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}],
         },
     )
     cycle._INNER_SPAWN.set(
@@ -286,7 +286,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
     with pytest.raises(cycle.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await cycle.run_inner_cycle("justlogic-d67/seed-0", {})
+        await cycle.run_inner_cycle("justlogic-d234/seed-0", {})
 
     assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"

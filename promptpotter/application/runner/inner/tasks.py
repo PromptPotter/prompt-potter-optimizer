@@ -69,7 +69,7 @@ class InnerBenchmarkConfig(StrictModel):
 
 
 class InnerTask(StrictModel):
-    """One panel cell. ``id`` is the outer query (e.g. ``"justlogic-d67/seed-0"``).
+    """One panel cell. ``id`` is the outer query (e.g. ``"justlogic-d234/seed-0"``).
 
     A cell that omits the override fields inherits the top-level benchmark and the dataset's own
     model, so a single-benchmark panel needs no per-cell overrides. The model/provider overrides

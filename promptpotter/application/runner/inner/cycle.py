@@ -240,7 +240,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     A work-item is (candidate × ``task``), not a candidate: the panel runs EVERY task
     per candidate, so one candidate's spawns are as many as ``inner_tasks.yaml`` has
     cells (seven for ``promptpotter-self``). ``task`` is the outer QUERY — the panel
-    cell's id, e.g. ``justlogic-d23/seed-0`` — and it is the only thing telling those
+    cell's id, e.g. ``justlogic-d234/seed-0`` — and it is the only thing telling those
     siblings apart; the candidate fields are identical across all of them.
 
     Read in the OUTER task (see the caller). ``candidate`` is ``None`` for the origin

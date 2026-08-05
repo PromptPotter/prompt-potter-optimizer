@@ -62,7 +62,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # reusing them stale (the identity-joined plumbing l4-outer-loop.md § item 5 named).
     # The WHOLE inner spec defines the inner baseline — the benchmark NAME and its task list
     # (which bank + which seeds/cells), not only the numeric config. Switching
-    # justlogic-d23 → justlogic-d234 keeps the same `inner_benchmark_config` knobs but changes
+    # Switching the inner benchmark keeps the same `inner_benchmark_config` knobs but changes
     # what is measured; hashing only the knobs let a d23-banked origin be served against a d234
     # candidate — a stale-vs-fresh comparison that fabricates outer signal (the exact bug this
     # fingerprint exists to prevent).
@@ -88,7 +88,7 @@ def promptpotter_wire_adapter(
     """Outbound payload describing an inner PromptPotter cycle to run.
 
     ``query`` is the inner-benchmark task identifier (e.g.
-    ``"justlogic-d67/seed-0"``). ``pipeline_params`` carries the outer L1's
+    ``"justlogic-d234/seed-0"``). ``pipeline_params`` carries the outer L1's
     mutation surface — a nested dict keyed by inner-optimizer prompt node:
 
     ```
@@ -170,7 +170,7 @@ def _extract_experiment(
 
         {
           "tasks": [
-            {"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0},
+            {"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0},
             ...
           ]
         }

@@ -43,7 +43,7 @@ from promptpotter.shared.hashing import content_hash
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
     """The committed `datasets/{dataset}/pipeline.yaml`, parsed. `promptpotter-self` is the
-    outer L4 campaign (it declares the schema levers); `justlogic` is a plain inner one."""
+    outer L4 campaign (it declares the schema levers); `justlogic-d234` is a plain inner one."""
     path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.yaml"
     return parse_pipeline_response(yaml.safe_load(path.read_text(encoding="utf-8")))
 
@@ -440,7 +440,9 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
-    spec = InnerTaskSpec(inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, n_variants=2)
+    spec = InnerTaskSpec(
+        inner_dataset="justlogic-d234", seed=3, n_samples=24, n_rounds=2, n_variants=2
+    )
 
     def _round(n: int, desc: str, fix: str, highlights: list[str]) -> RoundResult:
         return RoundResult(
@@ -629,7 +631,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     """A `description` edit folds into the TARGET's wire schema; an invented key never lands.
 
     The core structured-output lever: `l1_generate` describes a TARGET node's own output
-    schema (justlogic's `{reasoning, answer}`), keyed by that node's fields, on any
+    schema (justlogic-d234's `{reasoning, answer}`), keyed by that node's fields, on any
     `output_schema`-bearing target — no per-dataset opt-in. Silently harmful two ways. If the
     key the schema advertises drifts from the field the fold writes, the optimizer spends
     budget on an axis the wire never carries, and every variant scores as a legitimate no-op.
@@ -642,7 +644,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     )
     from promptpotter.domain.opt_search_point import fold_schema_descriptions
 
-    schema = _pipeline_schema("justlogic")
+    schema = _pipeline_schema("justlogic-d234")
     node = schema.get_node("llm_only")
     assert node is not None and node.output_schema is not None
     fields = list(node.output_schema.fields)  # ["reasoning", "answer"] — the closed set
@@ -742,7 +744,7 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
 
     # Every nested param a node's schema can graft accumulates, not just the first one:
     # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self),
-    # `output_schema_descriptions` on any target node (justlogic's `llm_only`, below).
+    # `output_schema_descriptions` on any target node (justlogic-d234's `llm_only`, below).
     for node, nested in (("l1_generate", "output_schema_field_names"), ("l1_critique", "layout")):
         got = merge_pipeline_params(
             {node: {nested: {"a": "A", "b": "B"}}},
@@ -756,7 +758,7 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
         )
 
     # The description axis accumulates on the TARGET node, keyed by that node's fields.
-    just = _pipeline_schema("justlogic")
+    just = _pipeline_schema("justlogic-d234")
     base = {
         "llm_only": {
             "temperature": 0.7,
@@ -820,7 +822,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     from promptpotter.domain.run_records import ConfigOverrides
 
     outer = _pipeline_schema("promptpotter-self")
-    inner = _pipeline_schema("justlogic")
+    inner = _pipeline_schema("justlogic-d234")
     rename = {"changes_description": "mutation_rationale"}
 
     try:
@@ -1508,12 +1510,8 @@ _CONFIG_TIER_BOOLEANS = frozenset(
         "bbeh/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "email-tagging/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "gsm8k/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
-        "justlogic-d23/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
-        "justlogic-d23/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "justlogic-d234/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
         "justlogic-d234/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
-        "justlogic/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
-        "justlogic/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "lca-termnorm/pipeline::nodes.cache_lookup.short_circuit",
         "lca-termnorm/pipeline::nodes.entity_profiling.optimizer.observation_mappings[0].is_llm",
         "lca-termnorm/pipeline::nodes.fuzzy_matching.short_circuit",
