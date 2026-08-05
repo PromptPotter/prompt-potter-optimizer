@@ -1,6 +1,6 @@
 # BRAND.md — Visual identity
 
-> Single source of truth for **design** across this repo, the `/ui` webapp, and the sibling marketing repo `promptpotter-web`. Copy register and language rules live in [`VOICE.md`](VOICE.md). Tokens live in `webapp/app/globals.css`.
+> Single source of truth for **design** across this repo, the `/ui` webapp, and the sibling marketing repo `promptpotter-web`. Copy register and language rules live in [`VOICE.md`](VOICE.md). Tokens live in `webapp/app/styles/foundation/tokens.css`.
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. CLI-first today; the file tree (per-cycle `dashboard.json`, `rounds/`, `log.md`) is the operator's primary surface, with a read-only webapp at `/ui` (Next.js static export at `webapp/out/`, source at `webapp/`) polling `dashboard.json` every 2 s. M12 promotes the webapp to a full control plane while keeping the file tree authoritative. Whitelabel distribution is a stated goal — every brand element must be themable.
 
@@ -58,4 +58,4 @@ The brand is explicitly **anti-nerdy / pro-accessibility** — accessibility is 
 5. **Whitelabel-safe by default.** Accent color, mark, and brand copy flow through tokens (`--color-accent`, `--brand-name`). Never hardcode "PromptPotter" into a styled element that resists rebrand.
 6. **Accessible because the brand demands it.** Anti-nerdy / pro-accessibility means WCAG isn't a checklist — it's a feature we sell. Contrast, keyboard, motion respect, and color-independent state are non-negotiable.
 7. **Substance over spectacle.** Animations and ornamentation must serve comprehension. The optimizer is the show; the UI gets out of the way.
-8. **Marketing copy stays in `promptpotter-web`; visual tokens are shared.** Astro page structure, hero copy, CTAs, and the waitlist form live in the sibling repo. The brand palette, mark, logo set, and asset library are the same in both — change them in one place (this `BRAND.md` is the spec; tokens live in `webapp/app/globals.css`) and port to the other.
+8. **Marketing copy stays in `promptpotter-web`; visual tokens are shared.** Astro page structure, hero copy, CTAs, and the waitlist form live in the sibling repo. The brand palette, mark, logo set, and asset library are the same in both — change them in one place (this `BRAND.md` is the spec; tokens live in `webapp/app/styles/foundation/tokens.css`) and port to the other.

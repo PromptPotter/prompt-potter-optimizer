@@ -94,8 +94,8 @@ def validate_template(name: str, template: PromptTemplate) -> None:
     if unknown:
         raise KeyError(
             f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
-            f"Add to dispatch_hub.INJECTIONS or to _TEMPLATE_EXTRAS[{name!r}] if "
-            "the slot is a caller-supplied extra."
+            f"Add to INJECTIONS (dispatch/injections/registry.py) or to "
+            f"_TEMPLATE_EXTRAS[{name!r}] if the slot is a caller-supplied extra."
         )
 
 

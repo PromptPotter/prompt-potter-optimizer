@@ -253,7 +253,6 @@ async def screen_inner_seeds(
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id="",
         source=f"seed_screen:{dataset_name}",
     )
     origin_sp = resolve_origin_opt_search_point(

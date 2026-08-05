@@ -207,3 +207,15 @@ adapters live in `promptpotter/connectors/`.
 
 `tracing/` exposes no read API. State reaches the optimizer via the
 ledger; tracing is fan-out only.
+
+## Identity — the OIDC foundation
+
+`identity/` holds the sign-in machinery: provider config + the two issuers
+(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `allowlist.py`, `grants.py`,
+browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAMES
+`projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
+that `build_stores` takes; the capability vocabulary that reads it lives one layer out
+in `shared/identity.py`. **The access model itself is a constitution, not a layer
+note** — tiers, boundaries and enforcement are owned by
+[`docs/adr/0002-identity-foundation.md`](../../docs/adr/0002-identity-foundation.md) and
+[`docs/operations/access-model.md`](../../docs/operations/access-model.md).

@@ -99,7 +99,6 @@ def populate_session_scoring(
     scoring_formula: str | None,
     scoring_round_formula: str | None = None,
     scorer_id: str | None = None,
-    cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
@@ -243,7 +242,6 @@ def _start_observability_and_scoring(
     populate_session_scoring(
         session,
         obs=obs,
-        cycle_id=resolved_cycle_id,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,

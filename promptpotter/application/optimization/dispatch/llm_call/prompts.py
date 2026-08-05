@@ -63,10 +63,8 @@ __all__ = [
 #
 # INSTALL CONTENT, not a dataset. These are install-global by contract (one file
 # configures the optimizer for every campaign), so they live under the package and ship
-# in the wheel. They used to sit among the benchmark datasets, reached through a parent
-# walk that resolved to ``site-packages/datasets/`` once installed — where the HuggingFace
-# ``datasets`` library lives, so an installed loop looked for the optimizer's own prompts
-# inside a third-party package's directory.
+# in the wheel — never among the benchmark datasets, where a parent walk resolves to
+# ``site-packages/datasets/``, the HuggingFace library's directory.
 #
 # The manifest resolves through ``optimizer_pipeline_path()`` and the registry does not:
 # the operator may shadow the file they author, never the file we generate.
@@ -316,9 +314,9 @@ def effective_optimizer_prompts(
 def load_optimizer_prompt(name: str) -> PromptTemplate:
     """Load an optimizer prompt from the manifest registry.
 
-    Every load runs through :func:`dispatch_hub.validate_template`, so a
-    template that references a slot not in
-    :data:`dispatch_hub.INJECTIONS` (and not in the per-template extras list)
+    Every load runs through :func:`~promptpotter.application.optimization.dispatch.facade.validate_template`,
+    so a template referencing a slot that is not in ``INJECTIONS``
+    (``dispatch/injections/registry.py``) and not in the per-template extras list
     raises at load time rather than silently rendering empty.
     """
     from promptpotter.application.optimization.dispatch.facade import validate_template

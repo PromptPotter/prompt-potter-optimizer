@@ -158,7 +158,6 @@ async def verify_candidate(
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id=hop.cycle_id,
         source=f"verify:{hop.campaign_id}:{label}",
     )
 

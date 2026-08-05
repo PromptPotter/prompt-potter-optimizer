@@ -46,7 +46,6 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id=ctx.cycle_id,
     )
 
     report = ab_replay_cycle(

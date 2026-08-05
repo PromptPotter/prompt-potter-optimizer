@@ -59,9 +59,7 @@ LEDGER_BASELINE = {
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
     "domain_any_maps": 72,
-    # 4051 -> 4052 (2026-08-05): `_count_domain_any_maps`'s own parameter. Adding a counter
-    # costs one declaration, which is the dimension counting itself and correct.
-    "param_decls": 4052,
+    "param_decls": 4051,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,
