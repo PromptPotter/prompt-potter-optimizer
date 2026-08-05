@@ -383,6 +383,16 @@ class ForkDirection(enum.StrEnum):
     SUPERSEDE = "supersede"
     """The CHILD is the continuation. The parent is what was left behind."""
 
+    EQUIVALENT = "equivalent"
+    """BOTH sides continue, identically — the cut changed nothing any reader saw.
+
+    A correction has to cut before it writes, so the version it replaces survives; but
+    whether the replacement matters is only knowable afterwards. When it turns out nothing
+    downstream read a different word, the branch is not a dead end and drawing it as one
+    invites pruning a line that is perfectly good. It is the same line twice, and both
+    carry the same content forward. Measured, so it is the one direction a trigger cannot
+    imply — it rides ``ForkSpec.direction``."""
+
 
 # Derived from the trigger, never stored: every fork already on disk answers this from the
 # trigger it recorded, so there is nothing to migrate and no second field to fall out of
@@ -642,6 +652,13 @@ class ForkSpec(StrictModel):
     from_candidate_id: str | None = None
     l1_layout: dict[str, list[str]] | None = None
     seed: CycleSeed | None = None
+    # The MEASURED direction, when the cut had to be taken before its consequence was
+    # known. Only a correction needs it: it cuts first so the version it replaces survives,
+    # then finds out whether the replacement reached anything. `None` ⇒ the trigger implies
+    # the direction (`FORK_DIRECTION`), which is every other cut. An override, not a
+    # fallback — a measured answer outranks a derived default, and only one of them exists
+    # at a time.
+    direction: ForkDirection | None = None
 
 
 class RebaseRequest(StrictModel):

@@ -56,13 +56,16 @@ export const TRIGGER_GLYPH: Record<string, string> = {
 // derived server-side from the trigger — never re-derived here).
 export type ForkDirection = NonNullable<LineageNode["fork_direction"]>;
 
-// "↳" = this branch IS the line now and the PARENT is what was left behind. An offshoot
-// is unmarked: it already reads as one, hanging off a line that keeps running. Both cuts
-// are the same shape on disk and wore the same ⑂, so an operator could not tell a branch
-// that superseded its parent from one exploring beside it.
+// "↳" = this branch IS the line now and the PARENT is what was left behind. "≡" = the cut
+// was taken but changed nothing measurable, so both sides carry on identically — a resume
+// that corrected a round nothing downstream had read. An offshoot is unmarked: it already
+// reads as one, hanging off a line that keeps running. All three are the same shape on disk
+// and wore the same ⑂, so an operator could not tell a branch that superseded its parent
+// from one exploring beside it, nor either from a cut that turned out to be a no-op.
 export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
   offshoot: "",
   supersede: "↳",
+  equivalent: "≡",
 };
 
 // One course's candidate children, in served (round) order.
@@ -220,6 +223,10 @@ export interface RoundNodePos {
   // parallel array by a hand-rolled `{cycle}::r{round}` key.
   divergence: LineageDivergence | null;
   divergent: boolean;
+  // The branch that replaced this candidate — served on the left-behind side of a
+  // supersede cut. Kept apart from `divergent`: that one is a counterfactual under a
+  // lens the operator applied, this one is what the run actually did.
+  retiredBy: string | null;
 }
 interface BranchSeg {
   x1: number;
@@ -274,6 +281,7 @@ function placedNode(
     forkDirection: l.course.fork_direction ?? null,
     divergence: cand.divergence,
     divergent: cand.divergent,
+    retiredBy: cand.superseded_by,
   };
 }
 
@@ -287,8 +295,11 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   const nodes: RoundNodePos[] = [];
   const segs: BranchSeg[] = [];
   const spineByKeyRound = new Map<string, RoundNodePos>();
-  // Candidate ids are MINTED and globally unique, so one flat map anchors a child
-  // course to its parent candidate at any depth — no per-cycle key scoping.
+  // Anchors a child course to its parent candidate at any depth — no per-cycle key scoping.
+  // A candidate id is MINTED, but it is not unique on the timeline: a repair re-measures
+  // rather than re-mints, so one id names both the corrected node and the measurement it
+  // withdrew. The RETIRED one is skipped — the runs measured the individual and are served on
+  // the live node, so a last-write-wins map would resolve correctly only by iteration order.
   const nodeByCandidate = new Map<string, RoundNodePos>();
 
   for (const [laneKey, l] of layouts) {
@@ -303,8 +314,11 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       for (const [round, cands] of rounds) {
         const winner = pickWinner(cands);
         // The round's stand-in when it elected nobody: the first candidate carries
-        // the position, but never the crown — `isWinner` rides the real fact.
-        const stand = winner ?? cands[0];
+        // the position, but never the crown — `isWinner` rides the real fact. A RETIRED
+        // one is passed over: a correction withdraws the crown from the tail it cut, so
+        // the first candidate of such a round is exactly the one the run stopped being,
+        // and a collapsed band that stands on it plots the abandoned line.
+        const stand = winner ?? cands.find((c) => !c.superseded_by) ?? cands[0];
         if (!stand) continue;
         const node = placedNode(
           laneKey,
@@ -347,7 +361,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         const node = placedNode(laneKey, l, cand, x, y, true, cand.label, cands.length);
         nodes.push(node);
         roundNodes.push(node);
-        nodeByCandidate.set(cand.id, node);
+        if (!cand.superseded_by) nodeByCandidate.set(cand.id, node);
         // Parent winner → this child's stub start. The stub itself (and the label) is
         // drawn by the node group in lineage style, so emit only the slant here.
         if (parent) {

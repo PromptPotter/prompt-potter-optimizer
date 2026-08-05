@@ -142,7 +142,7 @@ export function buildForest(
 // A node's stable key. `kind` separates the tiers that can share an address — a
 // declaration and its sole run — and `path` is the CyclePath-encoded address, so
 // keys are unique at any depth.
-export type NodeKind = "org" | "course" | "cand";
+export type NodeKind = "org" | "course" | "cand" | "retired";
 
 export function nodeKey(kind: NodeKind, path: string): string {
   return `${kind}:${path}`;
@@ -162,10 +162,16 @@ export function nodeKey(kind: NodeKind, path: string): string {
 // inner runs with the course that owns the sandbox — so a candidate shows what came
 // of it without a second click. It cannot cascade: anything one hop further is a
 // `course`, closed, so the next fetch waits for the next ask.
+// `retired` closes: it holds what a supersede cut left behind, and the attempts that
+// REPLACED those sit on the timeline above under the same labels. Open by default the
+// sidebar would show every position twice and the operator would have to work out which
+// half is the live line — which is the confusion the cut exists to resolve. Reachable in
+// one click, because it is the record of what ran and nothing prunes it.
 const OPEN_BY_DEFAULT: Record<NodeKind, boolean> = {
   org: true,
   course: false,
   cand: true,
+  retired: false,
 };
 
 export function isNodeOpen(toggled: ReadonlySet<string>, kind: NodeKind, path: string): boolean {

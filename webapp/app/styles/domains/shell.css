@@ -139,9 +139,15 @@
 .unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}
 .unit-library-family.selected{background:var(--color-background-tint-active)}
 /* Archived rows live in the recycle bin — muted, and their primary click restores
-   (the detail routes 404 until restored). The status cell reads "Archived · restore". */
-.unit-library-family.archived > .unit-library-item{opacity:0.6;font-style:italic}
-.unit-library-family.archived > .unit-library-item:hover{opacity:1}
+   (the detail routes 404 until restored). The status cell reads "Archived · restore".
+   A RETIRED candidate takes the same recede: it is the left-behind side of a supersede
+   cut, still on the timeline and still selectable (it is the record of what ran), but not
+   a peer of the attempt that replaced it. The dim never carries that alone — the row wears
+   a "retired" badge naming the branch that took over. */
+.unit-library-family.archived > .unit-library-item,
+.unit-library-family.retired > .unit-library-item{opacity:0.6;font-style:italic}
+.unit-library-family.archived > .unit-library-item:hover,
+.unit-library-family.retired > .unit-library-item:hover{opacity:1}
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}

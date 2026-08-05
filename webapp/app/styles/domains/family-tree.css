@@ -71,6 +71,11 @@
    pairs with an aria-label + tooltip, never colour alone. */
 .family-cladogram-node.mask-divergent,
 .lineage-node.mask-divergent{opacity:0.38}
+/* RETIRED — the left-behind side of a supersede cut. Recedes like a counterfactual but
+   is a different fact (what the run did, not what a mask would have done), so it holds a
+   lighter dim and says so in its tooltip + aria-label rather than borrowing the lens
+   copy. Still selectable: it is the record of what ran. */
+.lineage-node.retired{opacity:0.55}
 /* Divergence = RED throughout. No glyphs — the marking IS the colour: the
    alternative candidate's own branch line glows red ("this is the configuration
    the mask would have elected, this is where it forks"), and the collapsed

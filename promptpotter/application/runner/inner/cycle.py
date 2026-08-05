@@ -33,7 +33,7 @@ import contextlib
 import contextvars
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -142,11 +142,20 @@ class InnerSpawnContext:
     0.375 in seven sandboxes and 0.417 in two). The outer fitness subtracts that origin,
     so the isolation injected a noise term larger than the lift it was measuring.
 
-    ``spawn_campaign_id`` / ``spawn_cycle_id`` are the OUTER campaign + cycle that own this
+    ``spawn_campaign_id`` / ``spawn_cycle_id`` are the OUTER campaign + cycle that OWN this
     sandbox — carried explicitly rather than re-parsed off ``inner_sandbox_root.name``, so
     the provenance an inner campaign stamps names its parent by fact, not by string surgery
     on a path. Since the key became a hash, re-parsing is not merely fragile but impossible,
-    and these two are also what the sandbox records in its ``owner.json``."""
+    and these two are also what the sandbox records in its ``owner.json``.
+
+    ``asking_cycle_id`` is a DIFFERENT fact and the two were one field: which cycle is asking
+    for this measurement right now. They diverge the moment a resume forks — the fork asks,
+    while the sandbox stays owned by the cycle it was cut from, deliberately, because that is
+    what lets a repaired cell CONTINUE the campaign the parent banked instead of restarting
+    it from zero. Stamping the owner as the asker filed every measurement a fork paid for
+    under the cycle it superseded, where the lineage could only match it back by
+    ``candidate_label`` — a counter each course mints its own copy of — so a fork's ``C2.1``
+    landed on the parent's ``C2.1`` and the live work appeared on the retired branch."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
@@ -154,6 +163,7 @@ class InnerSpawnContext:
     shared_root: Path
     spawn_campaign_id: str
     spawn_cycle_id: str
+    asking_cycle_id: str
 
 
 _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.ContextVar(
@@ -191,7 +201,29 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             shared_root=shared_root,
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
+            asking_cycle_id=cycle_id,
         )
+    )
+
+
+def retarget_inner_spawn(session: Session) -> None:
+    """Re-point the provenance at the cycle now running, leaving the sandbox where it is.
+
+    Called once the cycle id is FINAL — a resume can mint a repair fork and retarget the
+    pointer well after :func:`publish_inner_spawn_context` ran, and the spawn context is
+    published at the top of the runner seam because a child may recurse before any of that
+    resolves. Only the asker moves; the sandbox owner must not, or the fork's cells would
+    look for their banked campaigns in a sandbox that has none and re-run every one.
+    """
+    ctx = _INNER_SPAWN.get()
+    cycle_id = session.state.cycle_id
+    if ctx is None or not cycle_id or ctx.asking_cycle_id == cycle_id:
+        return
+    _INNER_SPAWN.set(replace(ctx, asking_cycle_id=cycle_id))
+    logger.info(
+        "inner spawn provenance now names %s; sandbox stays owned by %s",
+        cycle_id,
+        ctx.spawn_cycle_id,
     )
 
 
@@ -218,7 +250,9 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
 
     cand = measured_candidate()
     return {
-        "outer_cycle_id": ctx.spawn_cycle_id,
+        # The ASKER, not the sandbox owner — a repair fork asks while the parent still owns
+        # the sandbox, and this is the join the lineage hangs an inner run off.
+        "outer_cycle_id": ctx.asking_cycle_id,
         # The campaign half. A cycle_id is content-addressed on its origin, so it is SHARED
         # by every campaign minted from that origin — stamping it alone recorded half an
         # identity, the same defect the sandbox key itself had.

@@ -277,6 +277,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             shared_root=tmp_path,
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
+            asking_cycle_id="cycle_deadbeef0000",
         )
     )
     llm_models._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]

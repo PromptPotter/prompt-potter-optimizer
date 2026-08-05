@@ -809,6 +809,31 @@ class CampaignStore:
             ],
         )
 
+    def mark_superseded(self, campaign_id: str, cycle_id: str) -> bool:
+        """The line moved to a branch: stamp this cycle ``TERMINAL`` (``REBASED``).
+
+        The retirement half of what :meth:`mark_producer_vanished` answers — both record that
+        a cycle stopped writing, and the difference is WHY. Unstamped, a parent that stops
+        **by design** presents exactly as a crashed one. Idempotent (an L2/L3 rebase already
+        finalizes its own parent), and :meth:`reopen_for_continuation` still clears the latch.
+        """
+        return self._stamp_terminal(campaign_id, cycle_id, StopReason.REBASED)
+
+    def _stamp_terminal(self, campaign_id: str, cycle_id: str, reason: StopReason) -> bool:
+        """Stamp a cycle terminal with no verdict, ONCE — ``False`` if it already carries one.
+        The shared tail of the two ways a cycle stops without finishing."""
+        data = read_json_optional(self._index_path(campaign_id, cycle_id))
+        if not isinstance(data, dict) or data.get("finished_at"):
+            return False
+        self.mark_finished(
+            campaign_id,
+            cycle_id,
+            status=reason.value,
+            stop_reason=reason.value,
+            finished_at=utcnow_iso(),
+        )
+        return True
+
     def mark_producer_vanished(self, campaign_id: str, cycle_id: str) -> bool:
         """Reap a dead cycle: stamp it ``TERMINAL`` (``producer_vanished``) so the
         one liveness owner and the on-disk truth agree.
@@ -853,19 +878,7 @@ class CampaignStore:
         dash = read_json_optional(layout.dashboard)
         if isinstance(dash, dict) and dash.get("run_phase") in (RunPhase.GATE, RunPhase.PAUSED):
             return False
-        index_path = self._index_path(campaign_id, cycle_id)
-        data = read_json_optional(index_path)
-        if not isinstance(data, dict) or data.get("finished_at"):
-            return False
-        reason = StopReason.PRODUCER_VANISHED.value
-        self.mark_finished(
-            campaign_id,
-            cycle_id,
-            status=reason,
-            stop_reason=reason,
-            finished_at=utcnow_iso(),
-        )
-        return True
+        return self._stamp_terminal(campaign_id, cycle_id, StopReason.PRODUCER_VANISHED)
 
     def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
         """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape."""

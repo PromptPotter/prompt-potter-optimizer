@@ -1,21 +1,15 @@
 """The lineage tree — the served genealogy, read at any depth.
 
-Nodes alternate ``Course -> Candidate -> Course`` forever — at L4 a candidate's children
-ARE courses, which is why L5+ needs no new tier. A course's children are its TIMELINE:
-the candidates it minted plus every attempt its forks contributed, **renumbered here**,
-because ``C{round}.{n}`` is a position in one course's private sequence and a fork's own
-counter names nothing campaign-wide. **A fork is not a node** — it survives as a
-provenance stamp on the candidates it contributed. Identity comes from the ledger,
-election/θ/CI from ``dashboard.json::rounds[]`` (:func:`_close_facts` says why); the two
-owners cannot be collapsed. **This is a READ MODEL and decides nothing** — the decision
-genealogy (``mask/backprop.py``, ``mask/divergence.py``, the resume replayers) rides
-positional ``(cycle_id, round)`` and must not be moved onto it.
+A fork is not a node; its candidates mount onto the parent's ONE timeline, unless the cut
+superseded. The law, its three bounds and the read-model rule: `infrastructure/CLAUDE.md`
+§ The lineage tree. Nothing here decides anything.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -51,16 +45,8 @@ __all__ = [
 NodeKind = Literal["course", "candidate"]
 CourseKind = Literal["root", "fork", "diag", "sweep", "inner"]
 
-# How many COURSE levels a family walk expands. A COST BOUND, not a caller's dial — there is
-# one served tree per campaign and every consumer reads the same one, so a per-caller depth is
-# just two clients disagreeing about the same object (which is exactly what it was: the
-# sidebar asked for 1 and the overlay for 3, measured byte-identical only because today's L4
-# inner runs spawn no inner runs of their own).
-#
-# It stays a bound rather than being removed: `_child_courses` walks `.inner/` sandboxes,
-# which nest re-entrantly (`stores.py::inner_sandbox_store`), so an unbounded walk is
-# unbounded on disk too. 3 covers L4 (depth 1) with room for L5+ before the bound is the
-# thing that has to change.
+# A COST BOUND on `.inner/` NESTING, never a caller's dial: one served tree per campaign, and
+# sandboxes nest re-entrantly, so an unbounded walk is unbounded on disk. 3 covers L4.
 _MAX_COURSE_DEPTH = 3
 
 
@@ -94,7 +80,10 @@ class LineageNode(StrictModel):
     label: str = Field(
         description="`C{round}.{n}` on the campaign's ONE timeline: this course's own "
         "candidates keep their minted label; an attempt a fork contributed takes the next "
-        "free index of its round, by mint time.",
+        "free index of its round, by mint time — UNLESS the cut superseded, where it keeps "
+        "its own label because it replaced that position rather than joining it, and the "
+        "candidate it replaced carries `superseded_by`. So one label can appear twice in a "
+        "round: at most once LIVE, the other retired.",
     )
     course_label: str = Field(
         description="This candidate's label in the course that MINTED it. Equal to `label` "
@@ -173,6 +162,16 @@ class LineageNode(StrictModel):
         description="This node is inside the counterfactual subtree below a divergence — the "
         "client dims it.",
     )
+    superseded_by: str | None = Field(
+        default=None,
+        description="The cycle_id of the branch that took this candidate's place. Set on the "
+        "LEFT-BEHIND side of a `supersede` cut (`ForkDirection`) — the tail its own course "
+        "kept as the record of what ran, while the line continued elsewhere. Null on every "
+        "candidate still on a line, including both sides of an `offshoot` or `equivalent` "
+        "cut. Served because a fork is NOT a node: without a name the operator sees a "
+        "retired attempt and a live one as peers of one round, which is the whole reason a "
+        "cut records its direction.",
+    )
 
     # -- course scalars -------------------------------------------------------
     # Also set on a FORK-candidate: a fork is served as a candidate (it IS the attempt), and
@@ -214,24 +213,17 @@ class LineageNode(StrictModel):
 
 
 class FamilyCourse(NamedTuple):
-    """A course in the family and how to reach it — the recursion's unit of work.
-
-    Public because the tree is not the only reader of the family: the time-ray
-    (``store/family_ray_views.py``) merges the same set of cycles into one chronology, via
-    :func:`iter_family_courses` — a second family walk would be a second answer to "who
-    hangs off whom", and the fork-vs-inner distinction is exactly the part that would drift.
-    """
+    """A course in the family and how to reach it — the recursion's unit of work. Public
+    because ``store/family_ray_views.py`` walks the same family; a second walk would be a
+    second answer to "who hangs off whom"."""
 
     store: Stores
     path: CyclePath
     # NOT `index` — a NamedTuple field by that name shadows `tuple.index`.
     manifest: dict[str, object]
-    # An L4 inner run (a sandbox root) vs a fork/sweep/diag of THIS course. Both hang off a
-    # candidate by the same edge; only a fork contributes attempts to this course's timeline.
+    # A sandbox root vs a fork/sweep/diag: only a fork contributes attempts to this timeline.
     inner: bool
-    # Hop count off the family root — stamped by `iter_family_courses` (a fork replaces the
-    # leaf hop, so it costs no depth; an inner run extends the path and costs one). Left 0
-    # by `_build`'s recursion, which tracks depth itself.
+    # Hops off the family root, stamped by `iter_family_courses`; a fork costs no depth.
     depth: int = 0
 
     @property
@@ -242,24 +234,16 @@ class FamilyCourse(NamedTuple):
 
 
 class _Reads:
-    """Every store this tree touches, read ONCE. ``enumerate_cycles`` answers a WHOLE store,
-    so asking it per course is the tree's O(n²).
-
-    Per-build and thrown away after: the file tree IS the dashboard, so a memo outliving the
-    request would serve a round that has since closed.
-    """
+    """Every store this tree touches, read ONCE (``enumerate_cycles`` answers a WHOLE store,
+    so asking it per course is the tree's O(n²)). Per-build and thrown away after: the file
+    tree IS the dashboard, so a memo outliving the request serves a round that has closed."""
 
     def __init__(self) -> None:
         self._cycles: dict[Path, list[dict[str, object]]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
-        # Cycle DIRS already visited this build — `(base_dir, campaign_id, cycle_id)`, the
-        # full identity, because a cycle_id alone is not one: it is a content hash of the
-        # origin, so every campaign on a declaration shares it, and inside one L4 sandbox
-        # every candidate that ran the same benchmark cell mints it again. Keyed on the id
-        # alone this dropped the SECOND inner run of a cell and its candidate then reported
-        # a panel it never measured. The guard it exists for survives untouched: a corrupt
-        # `parent_cycle_id` pointing back up the chain revisits the same dir, so both walkers
-        # (`_build`'s recursion and `iter_family_courses`) still terminate.
+        # Dirs visited this build, keyed on the FULL identity — a cycle_id alone is not one
+        # (it is a content hash, so campaigns and inner cells repeat it). Terminates both
+        # walkers against a `parent_cycle_id` that points back up the chain.
         self.seen: set[tuple[Path, str, str]] = set()
 
     def cycles(self, store: Stores) -> list[dict[str, object]]:
@@ -274,8 +258,7 @@ class _Reads:
 
 
 def _layout(store: Stores, hop: CycleHop) -> CycleLayout:
-    """This hop's cycle paths. Three readers here wanted three different files out of
-    the same dir and each spelled its own name; ``CycleLayout`` owns all three."""
+    """This hop's cycle paths — ``CycleLayout`` owns every filename in the dir."""
     return CycleLayout(cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id))
 
 
@@ -294,15 +277,9 @@ def _str_or_none(value: object) -> str | None:
 
 
 def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
-    """``(candidate_id, candidate_label)`` this course hangs off — the ONE resolver, collapse #1.
-
-    A fork records it as ``fork.from_candidate_id``; an L4 inner run as ``spawned_by``, which
-    carries BOTH an id and a label. The label is the fallback and not a lesser one now that
-    labels are minted facts rather than read-time positions: every inner run on disk today
-    stamped ``candidate_label`` and left ``candidate_id`` null, so the label is the only edge
-    those runs have. Both null = a campaign root, or a fork from the rebase family whose
-    minting path stamps neither; the caller attaches those to the course's origin.
-    """
+    """``(candidate_id, candidate_label)`` this course hangs off — the ONE resolver. The label
+    is a full-strength fallback: inner runs on disk stamp only it. Both null = a campaign root
+    or a rebase fork, which the caller attaches to the origin."""
     fork = _block(index, "fork")
     if cid := _str_or_none(fork.get("from_candidate_id")):
         return cid, None
@@ -314,14 +291,17 @@ def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _fork_direction(trigger: object) -> ForkDirection | None:
-    """Read a cut's direction off the trigger it recorded. ``None`` for anything not cut.
-
-    Derived rather than stored, which is what makes every fork already on disk answer this
-    without a migration. An unrecognised trigger returns ``None`` instead of guessing:
-    drawing a supersession as an offshoot is the exact lie this exists to stop, and half of
-    those guesses would be that one.
-    """
+def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
+    """A cut's direction: the MEASURED one it recorded (a correction outranks its default),
+    else the one its trigger implies. An unrecognised trigger returns ``None`` rather than
+    guessing — drawing a supersession as an offshoot is the lie this exists to stop."""
+    measured = fork.get("direction")
+    if isinstance(measured, str):
+        try:
+            return ForkDirection(measured)
+        except ValueError:
+            return None
+    trigger = fork.get("trigger")
     if not isinstance(trigger, str) or not trigger:
         return None
     try:
@@ -331,14 +311,9 @@ def _fork_direction(trigger: object) -> ForkDirection | None:
 
 
 class _CloseFacts(NamedTuple):
-    """What only a round CLOSE knows about a candidate. A round that never closed has no
-    entry at all, so its candidates never inherit a crown nobody awarded.
-
-    Nothing a candidate can know alone belongs here — its accuracy, its evaluators, its own
-    composite CI all ride its `candidate_scored` snapshot. What is left is the joint fit:
-    the election, the ability it ranked on, the θ-implied band that OVERRIDES the candidate's
-    own whisker where the ruler was warm, and the frontier the round advanced.
-    """
+    """What only a round CLOSE knows — the joint fit: the election, the ability it ranked on,
+    the θ-implied band overriding the candidate's own whisker, the frontier it advanced.
+    Nothing a candidate knows alone belongs here. No entry ⇒ no crown nobody awarded."""
 
     is_winner: bool
     theta: float | None
@@ -349,20 +324,13 @@ class _CloseFacts(NamedTuple):
 
 
 def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _CloseFacts]:
-    """``candidate_id -> _CloseFacts``, folded from the cycle's OWN ledger.
+    """``candidate_id -> _CloseFacts``, folded from the cycle's OWN ledger, one scan after
+    ``scan_ledger_candidates``.
 
-    A round's close is a ledger fact now, so this reads the same file
-    ``scan_ledger_candidates`` reads, one scan later. It used to open ``dashboard.json``,
-    because ``l1_score`` appended the ``ROUND_WINNER`` record to a local list instead of the
-    cycle's decision sink and ``on_round_complete`` persisted three scalars — a served view
-    was reduced to reading another projection's output for facts the ingress should carry.
-
-    **The join stays on ``label``, the positional identity.** Moving both sides onto one file
-    does not make ``candidate_id`` safe: it is a fresh uuid per construction, and a resume
-    re-scores the origin, so the ledger holds a NEW mint for `(0, 0)` beside a close written
-    under the OLD id. Position is stable across exactly that churn.
-
-    A round with no close record has no entry, so its candidates get no crown and no θ.
+    **The join stays on ``label``, the positional identity.** One file does not make
+    ``candidate_id`` safe: it is a fresh uuid per construction and a resume re-scores the
+    origin, so the ledger holds a NEW mint for `(0, 0)` beside a close written under the OLD
+    id. A round with no close record gets no entry, so no crown and no θ.
     """
     closes = scan_ledger_round_closes(ledger_path)
     out: dict[str, _CloseFacts] = {}
@@ -370,9 +338,7 @@ def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         close = closes.get(cand.round)
         if close is None:
             continue
-        # Walking THIS round's candidates is what keeps a HELD round honest: its adopted
-        # individual is the retained incumbent, which is not among them, so nobody is crowned
-        # and the frontier stays with the round that earned it.
+        # A HELD round adopted the incumbent, which is not among these — so nobody is crowned.
         won = cand.label == close.winner_label
         ability = close.abilities.get(cand.label, {})
         out[cand.candidate_id] = _CloseFacts(
@@ -381,8 +347,7 @@ def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
             theta_se=ability.get("theta_se"),
             # The frontier belongs to the spine: only the adopted candidate advanced it.
             cumulative_theta=close.cumulative_theta if won else None,
-            # Present only where the warm ruler implied a band; otherwise the candidate's own
-            # whisker stands, and the caller resolves that precedence.
+            # Only where the warm ruler implied a band; else the candidate's own whisker stands.
             composite_ci_lo=ability.get("composite_ci_lo"),
             composite_ci_hi=ability.get("composite_ci_hi"),
         )
@@ -407,31 +372,26 @@ def _course_scalars(
     cap = limits.get("lives_cap") if isinstance(limits, dict) else None
     campaign = reads.campaign(store, hop.campaign_id)
 
-    # A course is INNER because of where it lives, not because it remembered to say so:
-    # the rebase pair on disk carries no `spawned_by` yet sits in the sandbox, and calling
-    # those "root" would put two roots in one tree. A fork of an inner run stays a fork —
-    # only the sandbox's own roots are the recursion's entry point.
+    # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no
+    # `spawned_by`, and calling it "root" puts two roots in one tree.
     kind: CourseKind = sibling_kind(hop.cycle_id)
-    # A sandbox store is rooted at its own `.inner/<key>`, so its own path is the answer.
     if kind == "root" and (spawned or ".inner" in store.projects_root.parts):
         kind = "inner"
 
     return {
         "course_kind": kind,
         "state": str(index.get("status") or ""),
-        # The ONE run-phase derivation, the same call `/cycles` makes — never a second
-        # "is it running?" computed from this module's own inputs.
+        # The ONE run-phase derivation, the same call `/cycles` makes.
         "run_phase": str(
             derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at")))
         ),
         "trigger": str(fork.get("trigger") or ""),
-        "fork_direction": _fork_direction(fork.get("trigger")),
+        "fork_direction": _fork_direction(fork),
         "steered_by": _str_or_none(fork.get("issued_by")),
         "task": _str_or_none(spawned.get("task")),
         "dataset_name": campaign.dataset_name if campaign else "",
         "best_accuracy": float(best) if isinstance(best, int | float) else None,
-        # The SAME derivation `/cycles` serves it by — round 0 IS the origin, and there is
-        # no stored copy to drift from.
+        # The SAME derivation `/cycles` uses — no stored copy to drift from.
         "origin_accuracy": origin_accuracy_of(index),
         "hearts": hearts if isinstance(hearts, int) else None,
         "lives_cap": cap if isinstance(cap, int) else None,
@@ -439,21 +399,10 @@ def _course_scalars(
 
 
 def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
-    """Every course hanging off the course at *path* — forks AND inner runs, one list.
-
-    Collapse #1 in code: a fork is a sibling cycle in the SAME store whose
-    ``parent_cycle_id`` is ours (so its path replaces our leaf); an inner run is a campaign
-    ROOT inside our ``.inner/<key>`` sandbox (so its path extends ours by one hop). Two
-    directories, one kind of thing — callers never branch on which.
-
-    Only sandbox ROOTS are taken: an inner run's own forks are that course's children, and
-    lifting them here would attach a grandchild to us and draw it twice.
-
-    Both matches are on the full ``(campaign_id, cycle_id)`` identity, never the cycle_id
-    alone — see ``_Reads.seen``. A fork lives in its parent's OWN campaign dir, so a bare
-    ``parent_cycle_id`` match reaches into every other campaign minted on the same
-    declaration (they share the root cycle id) and hands us a branch we never cut.
-    """
+    """Every course hanging off *path* — forks AND inner runs, one list, so callers never
+    branch on which. Only sandbox ROOTS (an inner run's own forks are ITS children), and both
+    matches on the full ``(campaign_id, cycle_id)``: a bare cycle_id reaches into another
+    campaign minted on the same declaration."""
     leaf = path[-1]
     reads.seen.add((store.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
@@ -496,20 +445,9 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
 
 
 def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
-    """The whole family rooted at *path*, root first, then breadth-first below it.
-
-    The FLAT view of what :func:`_build` walks recursively — same :func:`_child_courses`,
-    same ``reads.seen`` guard, so "who belongs to this family" has exactly one answer. The
-    time-ray needs the set without the tree's alternating shape (it merges ledgers, it does
-    not nest them).
-
-    Order is stable — root, then each level sorted by ``(created_at, campaign_id, cycle_id)``
-    — so the ray's ETag, which folds the courses in walk order, holds across identical
-    requests. The campaign is part of the key because the cycle_id is not unique among
-    siblings: two inner runs of the same benchmark cell carry the same one.
-    :data:`_MAX_COURSE_DEPTH` bounds ``.inner/`` NESTING exactly as ``_build`` does: a fork
-    replaces its parent's leaf hop rather than extending the path, so it costs no depth.
-    """
+    """The whole family rooted at *path* — the FLAT view of what :func:`_build` walks
+    recursively, same helpers, so membership has one answer. Order is stable so the
+    time-ray's ETag holds across identical requests."""
     reads = _Reads()
     root_store, _ = resolve_cycle_path(store, path)
     root = FamilyCourse(
@@ -535,14 +473,9 @@ def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
 
 
 def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]) -> str:
-    """The candidate this course descends from.
-
-    Resolution order — id, then label, then the origin. The label join is scoped to THIS
-    course's candidates, so it is a join on a minted key within one namespace, not a guess.
-    A course that resolves to nothing still descends from something: C0 is the one candidate
-    every course is guaranteed to have, and attaching there beats floating loose — which is
-    exactly the bug this tree exists to end.
-    """
+    """The candidate this course descends from: id, then label, then the origin. The label
+    join is scoped to THIS course's candidates, so it is a minted key in one namespace, not a
+    guess. Falling back to C0 beats floating loose — the bug this tree exists to end."""
     by_label = {c.label: c.candidate_id for c in candidates}
     known = {c.candidate_id for c in candidates}
     origin = candidates[0].candidate_id if candidates else ""
@@ -561,27 +494,39 @@ def _bucket_by_parent(
     return out
 
 
-def _is_replay(node: LineageNode) -> bool:
-    """A ``C0`` that descends from a candidate IS that candidate, re-run.
+def _retired_by(
+    fork: FamilyCourse, candidates: list[LedgerCandidate], reach: int | None
+) -> dict[str, str]:
+    """``candidate_id -> the branch that replaced it``, for the tail a SUPERSEDE cut retired.
 
-    **Structural, not a convention:** a campaign root's origin has no parent; a fork's always
-    names the candidate it was cut from, because a fork borrows an origin rather than deriving
-    one. So it is not an attempt — it merges into what it replays, and the runs that measured
-    it move there (:func:`_contributions`).
+    Bounded by BOTH the cut (a candidate where one was recorded, else the round) and *reach*
+    — retirement is a replacement, not a position. A cut recording neither retires nothing
+    rather than placing it by inference.
     """
+    spec = _block(fork.manifest, "fork")
+    if _fork_direction(spec) is not ForkDirection.SUPERSEDE or reach is None:
+        return {}
+    edge = _str_or_none(spec.get("from_candidate_id"))
+    cut = next((i + 1 for i, c in enumerate(candidates) if c.candidate_id == edge), None)
+    if cut is None:
+        cut_round = spec.get("from_round")
+        if not isinstance(cut_round, int) or isinstance(cut_round, bool):
+            return {}
+        cut = next((i for i, c in enumerate(candidates) if c.round >= cut_round), len(candidates))
+    branch = fork.path[-1].cycle_id
+    return {c.candidate_id: branch for c in candidates[cut:] if c.round <= reach}
+
+
+def _is_replay(node: LineageNode) -> bool:
+    """A ``C0`` that descends from a candidate IS that candidate, re-run — so it merges into
+    what it replays rather than joining the timeline as an attempt. Structural, not a
+    convention: only a fork's origin has a parent, because a fork borrows one."""
     return node.label == "C0" and node.parent_id is not None
 
 
 def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> LineageNode:
-    """A fork that put no candidate on the timeline still holds its row — dropping it would
-    hand its index to the next real attempt.
-
-    ``accuracy`` is None on purpose: ``index.json::best_accuracy`` on such a fork is seeded
-    from the parent, so painting it would report a number nothing here measured. Its
-    ``course_label`` stays the fork's cycle_id (it minted no candidate, so no private
-    position exists) — join-safe, because a cycle_id never matches a label in a per-cycle
-    projection.
-    """
+    """A fork that put no candidate on the timeline still holds its row. ``accuracy`` is None
+    on purpose: its ``best_accuracy`` is seeded from the PARENT."""
     return course.model_copy(
         update={
             "kind": "candidate",
@@ -597,12 +542,12 @@ class _Contribution(NamedTuple):
     """What a fork puts on its parent's timeline, and what it hands back to the candidate it
     was cut from."""
 
-    # The fork's own candidates, minus the replayed origin — each an attempt on the parent's
-    # sequence. Never empty: a fork that produced none contributes `_empty_attempt`.
-    attempts: list[LineageNode]
-    # The courses that measured the fork's replayed C0. They measured the candidate it
-    # replays, so they belong there.
-    replayed_runs: list[LineageNode]
+    attempts: list[LineageNode]  # never empty — a fork with none gets `_empty_attempt`
+    replayed_runs: list[LineageNode]  # they measured the candidate the fork's C0 replays
+    supersedes: bool  # retired what it replaced → `superseded_by` + the label rule
+    takes_the_line: bool  # the RUN moved here (all but offshoot) → delegation + the ⑂ strip
+    reach: int | None  # last round this fork minted for; bounds the retirement
+    course: LineageNode  # held, not re-derived — `_build` reads the campaign's liveness off it
 
 
 def _contributions(
@@ -626,26 +571,136 @@ def _contributions(
         attempts.append(
             cand.model_copy(
                 update={
-                    # An attempt off the replayed origin descends from what that origin
-                    # replays — the replay is gone, and a parent_id pointing at a node no
-                    # longer in the tree is a dangling edge. An attempt off an EARLIER
-                    # attempt of the same fork keeps its edge: that candidate is on the
-                    # timeline too, under its new label but the same id.
+                    # The replay is gone, so an attempt off it would dangle.
                     "parent_id": cut_from if cand.parent_id in replay_ids else cand.parent_id,
-                    # The ⑂ stamp: what marks an attempt the operator cut apart from one L1
-                    # minted in this course. The fork is not a node, so this is where its
-                    # identity lives on.
+                    # The ⑂ stamp — a fork is not a node, so its identity lives here.
                     "course_kind": course.course_kind,
                     "trigger": course.trigger,
-                    "fork_direction": _fork_direction(course.trigger),
+                    "fork_direction": course.fork_direction,
                     "steered_by": course.steered_by,
                 }
             )
         )
 
+    # BEFORE `_empty_attempt` fabricates a row: a stand-in is no evidence of reach.
+    reach = max((c.round or 0 for c in course.children), default=None)
     if not attempts:
         attempts = [_empty_attempt(course, cut_from=cut_from, round_=cut_round + 1)]
-    return _Contribution(attempts, [k for c in replays for k in c.children])
+    return _Contribution(
+        attempts,
+        [k for c in replays for k in c.children],
+        course.fork_direction is ForkDirection.SUPERSEDE,
+        course.fork_direction is not None and course.fork_direction is not ForkDirection.OFFSHOOT,
+        reach,
+        course,
+    )
+
+
+def _fold_contributions(
+    kids: list[LineageNode], contributions: list[_Contribution]
+) -> list[LineageNode]:
+    """Mount every fork's attempts onto this course's ONE timeline — the law in code, three
+    cases in the order asked: same id + nothing retired ⇒ replace in place; same id +
+    retired ⇒ both stay (address is ``(path, id)``); new id ⇒ keep the label it replaced, or
+    queue. ``course_label`` survives untouched — it is the fork's private position.
+    """
+    by_round: dict[int, int] = {}
+    for k in kids:
+        by_round[k.round or 0] = by_round.get(k.round or 0, 0) + 1
+    at_id = {k.id: i for i, k in enumerate(kids)}
+    positions = {k.label for k in kids}
+    for contribution in contributions:
+        for attempt in contribution.attempts:
+            if contribution.takes_the_line and contribution.reach is not None:
+                attempt = attempt.model_copy(
+                    update={
+                        "course_kind": None,
+                        "trigger": "",
+                        "fork_direction": None,
+                        "steered_by": None,
+                    }
+                )
+            twin = at_id.get(attempt.id)
+            if twin is not None and not contribution.supersedes:
+                kids[twin] = attempt.model_copy(
+                    update={
+                        "label": kids[twin].label,
+                        "course_label": kids[twin].course_label,
+                        "children": [*kids[twin].children, *attempt.children],
+                    }
+                )
+                continue
+            if twin is not None:
+                attempt = attempt.model_copy(
+                    update={"children": [*kids[twin].children, *attempt.children]}
+                )
+                kids[twin] = kids[twin].model_copy(update={"children": []})
+            round_ = attempt.round or 0
+            # Keeping a label claims a position this timeline HAS — `_empty_attempt` carries
+            # a cycle_id and replaced nothing, so it renumbers like any other attempt.
+            if not (contribution.supersedes and (twin is not None or attempt.label in positions)):
+                by_round[round_] = by_round.get(round_, 0) + 1
+                attempt = attempt.model_copy(update={"label": f"C{round_}.{by_round[round_]}"})
+            positions.add(attempt.label)
+            at_id[attempt.id] = len(kids)
+            kids.append(attempt)
+    # Stable: arrival order within a round, which is the order the labels were assigned in.
+    kids.sort(key=lambda k: k.round or 0)
+    return kids
+
+
+_NO_CLOSE = _CloseFacts(
+    is_winner=False,
+    theta=None,
+    theta_se=None,
+    cumulative_theta=None,
+    composite_ci_lo=None,
+    composite_ci_hi=None,
+)
+
+
+def _candidate_node(
+    cand: LedgerCandidate,
+    *,
+    close: _CloseFacts,
+    children: list[LineageNode],
+    retired_by: str | None,
+    hops: list[CycleHop],
+) -> LineageNode:
+    """One candidate as the tree serves it — ledger identity plus its round-CLOSE facts, two
+    appends to one ledger that identity joins (:func:`_close_facts`)."""
+    # Its OWN whisker unless a warm-ruler election implied a tighter band. Both bounds move
+    # together: read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it.
+    ci_lo, ci_hi = (
+        (close.composite_ci_lo, close.composite_ci_hi)
+        if close.composite_ci_lo is not None
+        else (cand.composite_ci_lo, cand.composite_ci_hi)
+    )
+    return LineageNode(
+        kind="candidate",
+        id=cand.candidate_id,
+        parent_id=cand.parent_id,
+        label=cand.label,
+        # Equal here; they diverge only where the fold renumbers a contribution.
+        course_label=cand.label,
+        path=hops,
+        round=cand.round,
+        accuracy=cand.accuracy,
+        composite_fitness=cand.composite_fitness,
+        state=cand.state,
+        evaluators=cand.evaluators,
+        composite_ci_lo=ci_lo,
+        composite_ci_hi=ci_hi,
+        scored_samples=cand.scored_samples,
+        expected_samples=cand.expected_samples,
+        # A RETIRED candidate wears no crown — the branch re-asks that election.
+        is_winner=close.is_winner and retired_by is None,
+        theta=close.theta,
+        theta_se=close.theta_se,
+        cumulative_theta=close.cumulative_theta,
+        superseded_by=retired_by,
+        children=children,
+    )
 
 
 def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
@@ -663,21 +718,12 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
     hops = list(path)
 
     closed = _close_facts(ledger_path, candidates)
-    no_close = _CloseFacts(
-        is_winner=False,
-        theta=None,
-        theta_se=None,
-        cumulative_theta=None,
-        composite_ci_lo=None,
-        composite_ci_hi=None,
-    )
 
-    # Every fork, resolved BEFORE our own candidates are built — a fork's replayed origin
-    # grafts its runs onto the candidate it replays, so that candidate cannot be finished
-    # until every fork cut from it has been asked what it hands back.
+    # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
     contributions: list[_Contribution] = []
     grafts: dict[str, list[LineageNode]] = {}
+    retired: dict[str, str] = {}
     for fork in forks:
         cut_from = _parent_candidate_of(fork, candidates)
         cut = by_id.get(cut_from)
@@ -686,77 +732,38 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
         )
         contributions.append(contribution)
         grafts.setdefault(cut_from, []).extend(contribution.replayed_runs)
+        retired |= _retired_by(fork, candidates, contribution.reach)
 
-    kids: list[LineageNode] = []
-    for cand in candidates:
-        under = buckets.get(cand.candidate_id, [])
-        replayed = grafts.get(cand.candidate_id, [])
-        # Both sides are appends to one ledger, so identity joins — see `_close_facts`.
-        close = closed.get(cand.candidate_id, no_close)
-        # The whisker is the candidate's OWN, stamped when it finished scoring; a warm-ruler
-        # election overrides it with the tighter θ-implied band. Same precedence the engine
-        # applies to `ScoredCandidate`, so a mid-round bar and a closed one differ in which
-        # interval they show, never in whether they show one.
-        ci = (
-            (close.composite_ci_lo, close.composite_ci_hi)
-            if close.composite_ci_lo is not None
-            else (cand.composite_ci_lo, cand.composite_ci_hi)
-        )
-        kids.append(
-            LineageNode(
-                kind="candidate",
-                id=cand.candidate_id,
-                parent_id=cand.parent_id,
-                label=cand.label,
-                # This course minted it, so the two labels agree. They diverge only where
-                # the renumber below rewrites `label` on a fork's contribution.
-                course_label=cand.label,
-                path=hops,
-                round=cand.round,
-                accuracy=cand.accuracy,
-                composite_fitness=cand.composite_fitness,
-                state=cand.state,
-                evaluators=cand.evaluators,
-                composite_ci_lo=ci[0],
-                composite_ci_hi=ci[1],
-                scored_samples=cand.scored_samples,
-                expected_samples=cand.expected_samples,
-                is_winner=close.is_winner,
-                theta=close.theta,
-                theta_se=close.theta_se,
-                cumulative_theta=close.cumulative_theta,
+    kids = _fold_contributions(
+        [
+            _candidate_node(
+                cand,
+                close=closed.get(cand.candidate_id, _NO_CLOSE),
                 children=[
                     _build(c.store, c.path, depth=depth - 1, reads=reads)
-                    for c in under
+                    for c in buckets.get(cand.candidate_id, [])
                     if depth > 0
                 ]
-                + replayed,
+                + grafts.get(cand.candidate_id, []),
+                retired_by=retired.get(cand.candidate_id),
+                hops=hops,
             )
-        )
+            for cand in candidates
+        ],
+        contributions,
+    )
 
-    # THE TIMELINE. One sequence per campaign: the candidates L1 minted in this course, plus
-    # every attempt its forks contributed, renumbered here — because `C{round}.{n}` is a
-    # position in a course's PRIVATE sequence, so a fork's own counter names nothing
-    # campaign-wide (four forks cut off C0 each minted a `C1.1`). Renumbering onto this
-    # sequence is what makes the label mean something. Nothing renumbers a candidate this
-    # course minted itself.
-    #
-    # `course_label` deliberately survives this untouched, and that is the whole point of the
-    # field: the renumber is the ONLY place the fork's private position was ever lost, and a
-    # consumer joining against the fork's own per-cycle `dashboard.json` needs it back. Do not
-    # add `course_label` to the update dict below.
-    by_round: dict[int, int] = {}
-    for k in kids:
-        by_round[k.round or 0] = by_round.get(k.round or 0, 0) + 1
-    for contribution in contributions:
-        for attempt in contribution.attempts:
-            round_ = attempt.round or 0
-            by_round[round_] = by_round.get(round_, 0) + 1
-            kids.append(attempt.model_copy(update={"label": f"C{round_}.{by_round[round_]}"}))
-
-    # Stable, so within a round the order is arrival order — own candidates in ledger order,
-    # then the forks by mint time. That is exactly the order the labels were assigned in.
-    kids.sort(key=lambda k: k.round or 0)
+    scalars = _course_scalars(store, leaf, index, reads)
+    # A course whose line MOVED does not answer for run-state; the LAST such cut speaks, and
+    # each branch delegates onward, so a chain resolves to its tip. `origin_accuracy` stays
+    # OURS — round 0 is the shared prefix, not the cut.
+    branch = next((c.course for c in reversed(contributions) if c.takes_the_line), None)
+    if branch is not None:
+        scalars |= {
+            "run_phase": branch.run_phase,
+            "state": branch.state,
+            "best_accuracy": branch.best_accuracy,
+        }
 
     edge_id, _ = _course_edge(index)
     return LineageNode(
@@ -764,13 +771,11 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
         id=leaf.cycle_id,
         parent_id=edge_id or (candidates[0].parent_id if candidates else None),
         label=leaf.cycle_id,
-        # A course is never renumbered — nothing folds it onto another course's timeline —
-        # so its two labels are the same fact. Set rather than defaulted: the field is
-        # required, and a course that omitted it would be a hole a candidate join falls into.
+        # Nothing folds a course onto another timeline, so its two labels are one fact.
         course_label=leaf.cycle_id,
         path=hops,
         children=kids,
-        **_course_scalars(store, leaf, index, reads),
+        **scalars,
     )
 
 

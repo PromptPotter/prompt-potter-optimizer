@@ -260,6 +260,7 @@ async def _apply_resume_fork(
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
     """Repair holed rounds, replay decisions, fork on divergence. Returns (id, round)."""
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
     from promptpotter.application.optimization.resume_and_fork.resume import (
         resume_with_divergence_check,
     )
@@ -280,6 +281,13 @@ async def _apply_resume_fork(
         if fork_result is not None:
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
+        # The FSM is rebuilt from the ledger whichever way that went — halt, fork, or carry
+        # on — because every one of them replays priors and `replay_priors` deliberately does
+        # not touch escalation. It was written at each of the four exits inside; a
+        # postcondition of the call belongs at the call.
+        cycle.escalation = EscalationFSM.from_ledger(
+            session.state.ledger, lives=cycle.config.optimization.lives
+        )
     return resolved_cycle_id, resumed_from_round
 
 
@@ -384,6 +392,12 @@ async def init_optimization_loop(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )
+    # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
+    # published before any of that resolved (a child may recurse before this point). Local
+    # import: `runner.inner.cycle` reaches back into this package for `Session`.
+    from promptpotter.application.runner.inner.cycle import retarget_inner_spawn
+
+    retarget_inner_spawn(session)
 
     _finalize_loop_state(
         cycle,

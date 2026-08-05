@@ -11,6 +11,7 @@
 // here derives genealogy. There is no fork row: a fork is not a node — its candidates sit on
 // this course's timeline wearing the ⑂ stamp and its own `path`.
 
+import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
@@ -24,7 +25,9 @@ import {
   panelCellLabel,
   pathOf,
   roundSizes,
+  splitRetired,
   wasElected,
+  type RetiredGroup,
 } from "@/lib/derivations";
 import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
 import type { CampaignSummary, LineageNode } from "@/lib/api";
@@ -76,48 +79,76 @@ export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: Tree
 // Its address carries NO path — a declaration is not an address inside any one campaign, it
 // is the set of campaigns measuring it — so the origin id is what owns its view memory
 // (`ids.ts::ownerOfNodeAddress`).
-function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
-  if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} ctx={ctx} />;
-
-  const addr = nodeAddress([], origin.originId);
-  const open = ctx.isNodeOpen("org", addr);
-
+// A GROUPING, not an address: a twist, a label, and children. Nothing here is selectable —
+// the rows inside carry their own addresses — so the row only opens and closes.
+function GroupRow({
+  kind,
+  addr,
+  ctx,
+  className,
+  title,
+  name,
+  meta,
+  children,
+}: {
+  kind: NodeKind;
+  addr: string;
+  ctx: TreeCtx;
+  className: string;
+  title: string;
+  name: ReactNode;
+  meta?: ReactNode;
+  children: ReactNode;
+}) {
+  const open = ctx.isNodeOpen(kind, addr);
   return (
     <>
-      <div className="unit-library-family origin-row">
+      <div className={`unit-library-family ${className}`}>
         <button
           type="button"
           className="unit-library-twist"
-          onClick={() => ctx.toggleNode("org", addr)}
+          onClick={() => ctx.toggleNode(kind, addr)}
           aria-label={open ? "Collapse" : "Expand"}
           aria-expanded={open}
           tabIndex={-1}
         >
           {open ? "▼" : "▶"}
         </button>
-        <span
-          className="unit-library-item origin-label"
-          title={`${origin.runs.length} campaigns start from this same specification (${origin.originId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
-        >
+        <span className="unit-library-item origin-label" title={title}>
           <span className="unit-library-row">
-            <span className="unit-library-name">
-              spec {shortOrigin(origin.originId)}
-              <span className="unit-library-kind">{origin.runs.length} runs</span>
-            </span>
-            <span className="unit-library-meta">{fmtPct0(origin.bestAccuracy)}</span>
+            <span className="unit-library-name">{name}</span>
+            <span className="unit-library-meta">{meta}</span>
           </span>
         </span>
       </div>
-      {open && (
-        <ul className="unit-library-children">
-          {origin.runs.map((run) => (
-            <li key={run.campaign.campaign_id}>
-              <RunRow run={run} ctx={ctx} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {open && <ul className="unit-library-children">{children}</ul>}
     </>
+  );
+}
+
+function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
+  if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} ctx={ctx} />;
+  return (
+    <GroupRow
+      kind="org"
+      addr={nodeAddress([], origin.originId)}
+      ctx={ctx}
+      className="origin-row"
+      title={`${origin.runs.length} campaigns start from this same specification (${origin.originId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
+      name={
+        <>
+          spec {shortOrigin(origin.originId)}
+          <span className="unit-library-kind">{origin.runs.length} runs</span>
+        </>
+      }
+      meta={fmtPct0(origin.bestAccuracy)}
+    >
+      {origin.runs.map((run) => (
+        <li key={run.campaign.campaign_id}>
+          <RunRow run={run} ctx={ctx} />
+        </li>
+      ))}
+    </GroupRow>
   );
 }
 
@@ -179,6 +210,11 @@ function CourseRow({
   const addr = encodeCyclePath(path);
   const open = courseOpen(ctx, path);
   const rows = candidatesOf(node ?? undefined);
+  // The timeline is the LIVE line; what a correction retired hangs below it in one row per
+  // cut. Both sides carry the same labels by design — a supersede replaces a position rather
+  // than queueing beside it — so keeping them in one flat list is what made a round of three
+  // read as a round of six.
+  const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
   const originAccuracy = node?.origin_accuracy ?? null;
   const best = bestAccuracy ?? node?.best_accuracy ?? null;
@@ -299,14 +335,62 @@ function CourseRow({
             </li>
           )}
           {tree.loaded && rows.length === 0 && <li className="inner-library-empty">Never ran</li>}
-          {rows.map((cand) => (
-            <li key={cand.id}>
+          {liveRows.map((cand) => (
+            <li key={nodeKeyOf(cand)}>
               <CandidateRow cand={cand} siblings={rows} tree={tree} ctx={ctx} timeline={path} />
+            </li>
+          ))}
+          {retiredGroups.map((group) => (
+            <li key={group.branch}>
+              <RetiredGroupRow
+                group={group}
+                siblings={rows}
+                tree={tree}
+                ctx={ctx}
+                timeline={path}
+              />
             </li>
           ))}
         </ul>
       )}
     </>
+  );
+}
+
+// What ONE supersede cut left behind — the record of what ran, collapsed under the live line.
+// The attempts that replaced these are above wearing the SAME labels, so flattening the two
+// makes a round of three read as a round of six.
+function RetiredGroupRow({
+  group,
+  siblings,
+  tree,
+  ctx,
+  timeline,
+}: {
+  group: RetiredGroup;
+  siblings: readonly LineageNode[];
+  tree: CampaignTree;
+  ctx: TreeCtx;
+  timeline: CyclePath;
+}) {
+  const n = group.candidates.length;
+  const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
+  return (
+    <GroupRow
+      kind="retired"
+      addr={nodeAddress(timeline, group.branch)}
+      ctx={ctx}
+      className="retired"
+      title={`${attempts} the run left behind when it branched to ${group.branch} and continued there. They keep their labels and their numbers; the attempts that replaced them are on the line above.`}
+      name={<span className="unit-library-kind">⑂ retired → {shortFamilyTail(group.branch)}</span>}
+      meta={<span className="unit-library-status">{attempts}</span>}
+    >
+      {group.candidates.map((cand) => (
+        <li key={nodeKeyOf(cand)}>
+          <CandidateRow cand={cand} siblings={siblings} tree={tree} ctx={ctx} timeline={timeline} />
+        </li>
+      ))}
+    </GroupRow>
   );
 }
 
@@ -345,6 +429,10 @@ function CandidateRow({
   const isOrigin = (cand.round ?? 0) === 0;
   const cutFrom = cutFromLabel(cand, siblings);
   const elected = wasElected(cand.is_winner, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
+  // The left-behind side of a supersede cut (served — the client never derives it). It
+  // stays on the timeline holding its position, because it is the record of what ran, but
+  // it is not a peer of the attempt that replaced it and must not read as one.
+  const retiredBy = cand.superseded_by;
 
   // The navigate+inspect pair lives in `useSelectNode` — the time-ray fires the same
   // gesture on a candidate step, and both have to resolve the measurement off the node
@@ -353,16 +441,18 @@ function CandidateRow({
   const { isPicked, pick } = useSelectNode(ctx.selectCyclePath);
   const selected = isPicked(cand);
 
-  const description = isOrigin
-    ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
-    : cand.course_kind
-      ? `${cand.label} — an attempt you cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Selects it; the dashboard follows that fork.`
-      : `${cand.label} — a candidate this course proposed and measured. Selects it; the ▶ twist expands what measured it.`;
+  const description = retiredBy
+    ? `${cand.label} — retired: the run branched to ${shortFamilyTail(retiredBy)} and continued there. It stays as the record of what ran; nothing after it is on the line.`
+    : isOrigin
+      ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
+      : cand.course_kind
+        ? `${cand.label} — an attempt you cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Selects it; the dashboard follows that fork.`
+        : `${cand.label} — a candidate this course proposed and measured. Selects it; the ▶ twist expands what measured it.`;
 
   return (
     <>
       <RowHoverCard cycleId={cycleId} description={description}>
-        <div className={cx("unit-library-family", selected && "selected")}>
+        <div className={cx("unit-library-family", selected && "selected", retiredBy && "retired")}>
           <button
             type="button"
             className="unit-library-twist"
@@ -394,6 +484,17 @@ function CandidateRow({
                 {elected && (
                   <span className="unit-library-kind" title="Elected this round's winner">
                     won
+                  </span>
+                )}
+                {/* The word, not the dim alone — a state pairs with a label here like
+                    HIT/MISS and live/stale do, and a retired attempt that HAD measured
+                    still shows its number, so the meta cell cannot carry this. */}
+                {retiredBy && (
+                  <span
+                    className="unit-library-kind"
+                    title={`Retired — the run branched to ${shortFamilyTail(retiredBy)} and continued there. Kept as the record of what ran.`}
+                  >
+                    retired
                   </span>
                 )}
               </span>

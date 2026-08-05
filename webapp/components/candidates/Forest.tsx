@@ -73,19 +73,24 @@ const CandidateNode = memo(function CandidateNode({
   alt: boolean;
   divergence: boolean;
 }) {
+  // Served (`superseded_by`): this attempt was replaced when the run branched away. It
+  // recedes like a lens counterfactual but is a different fact — what the run DID, not
+  // what a mask would have done — so it wears its own class and its own words.
+  const retiredBy = n.retiredBy;
   return (
     <g
       className={cx(
         "lineage-node",
         selected && "selected",
         dimmed && "mask-divergent",
+        retiredBy && "retired",
         alt && "mask-alt",
         divergence && "mask-divergence",
       )}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isElected ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isElected ? ", round winner" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -105,6 +110,9 @@ const CandidateNode = memo(function CandidateNode({
           : n.isWinner
             ? "\nthe round's only arm — it advances without an election"
             : ""}
+        {retiredBy
+          ? `\nretired — the run branched to ${shortFamilyTail(retiredBy)} and continued there; kept as the record of what ran`
+          : ""}
       </title>
       {/* The alternative candidate is marked by its own branch line glowing red
           (`.mask-alt .lineage-stub`) — no glyph. */}
@@ -331,6 +339,9 @@ export function Forest({
                     : ""}
                   {course.fork_direction === "supersede"
                     ? "\n↳ this branch is the line — the parent keeps what it was cut from"
+                    : ""}
+                  {course.fork_direction === "equivalent"
+                    ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
                   {course.state ? ` · ${course.state}` : ""}
                   {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}

@@ -21,6 +21,28 @@ export function candidatesOf(course: LineageNode | undefined): LineageNode[] {
   return (course?.children ?? []).filter((c) => c.kind === "candidate");
 }
 
+// Everything one supersede cut left behind, and the branch that replaced it.
+export interface RetiredGroup {
+  branch: string;
+  candidates: LineageNode[];
+}
+
+// The timeline split by which side of a supersede cut each candidate is on. Grouped by BRANCH:
+// two cuts retire two different tails, and one row for both would say a single correction did
+// it. Grouping only — `superseded_by` is served, and nothing is decided here.
+export function splitRetired(rows: readonly LineageNode[]): {
+  live: LineageNode[];
+  retired: RetiredGroup[];
+} {
+  const byBranch = new Map<string, LineageNode[]>();
+  const live: LineageNode[] = [];
+  for (const cand of rows) {
+    if (!cand.superseded_by) live.push(cand);
+    else byBranch.set(cand.superseded_by, [...(byBranch.get(cand.superseded_by) ?? []), cand]);
+  }
+  return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
+}
+
 // The courses hanging off a candidate — an L4 inner run filed under it. A fork is NOT one
 // of these: a fork is not a node, its candidates sit on the parent's timeline.
 export function childCourses(candidate: LineageNode | undefined): LineageNode[] {

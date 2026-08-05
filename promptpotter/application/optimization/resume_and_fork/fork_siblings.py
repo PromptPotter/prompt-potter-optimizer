@@ -1,9 +1,10 @@
 """Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
 
-Every trigger mints through here; the rebase-family triggers share one on-disk shape and
-differ only as an audit discriminator, which is why they cannot each grow a mint path. A
-fork is a new *cycle* inside the **same campaign** — every cycle lands flat under
-``campaigns/{campaign_id}/cycles/``, never nested under its parent.
+Every trigger mints through here; the rebase family shares one on-disk shape and differs only
+as an audit discriminator, so none may grow its own mint path. A fork is a new *cycle* in the
+**same campaign**, flat under ``cycles/``, never nested under its parent. A cut that
+**supersedes** also retires the parent (``mark_superseded``) — the line moved, and a state
+nobody writes is one every reader has to guess.
 """
 
 from __future__ import annotations
@@ -20,7 +21,13 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR, ForkSpec, ForkTrigger
+from promptpotter.domain.run_records import (
+    FORK_DIRECTION,
+    UNATTRIBUTED_OPERATOR,
+    ForkDirection,
+    ForkSpec,
+    ForkTrigger,
+)
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import (
@@ -129,6 +136,16 @@ _REBASE_TRIGGERS = frozenset(
     }
 )
 
+# A non-rebase branches from the origin and lifts no parent round, so its only cut is 0.
+_ZERO_ROUND_TRIGGERS = frozenset(ForkTrigger) - _REBASE_TRIGGERS
+
+
+def _fork_suffix(*parts: str) -> str:
+    """8-hex id suffix over *parts* + the wall clock, which is what separates two forks cut
+    from one parent in the same second."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return hashlib.sha256("|".join((*parts, stamp)).encode()).hexdigest()[:8]
+
 
 def _mint_fork(
     campaign_store: CampaignStore,
@@ -142,36 +159,21 @@ def _mint_fork(
     sweep_batch_id: str | None = None,
     sweep_source_file: str | None = None,
 ) -> str:
-    """Single entry point for fork creation. Dispatches on ``payload.trigger``.
+    """Single entry point for fork creation, dispatching on ``payload.trigger``. The pointer
+    retargets in ``campaign_store``'s OWN workspace, never a process-global one.
 
-    The new cycle lands in the same campaign (``campaign_id``), and its active pointer
-    is retargeted in ``campaign_store``'s OWN workspace. That used to be a separate
-    ``(tenant_id, projects_root=None)`` pair, defaulting to the process-global
-    workspace — so the L4 auto-rebase, which passes an inner cycle's store and omitted
-    the root, pointed the operator's real ``active_session.json`` at a campaign under
-    ``.inner/`` and every per-cycle route 404'd until they re-ran ``resume``.
-    ``SCORING_DIVERGENCE`` requires ``surviving_rounds``.
-    ``L{2,3}_REBASE`` / ``OPERATOR_REWIND`` synthesize ``surviving_rounds``
-    from the parent's persisted rounds if the caller omits them.
-    ``OPERATOR_SWEEP`` requires ``sweep_batch_id`` + ``sweep_source_file``.
-    ``OPERATOR_DIAG`` takes neither.
-
-    ``fork_from_round`` is MECHANICAL — how many of the parent's rounds this fork
-    lifts (``0`` = a clean offshoot that lifts none). ``ForkSpec.from_round`` is
-    PROVENANCE — which round the cut was taken from. A rebase makes them equal, so
-    the seam back-fills the spec when its author left it unset: five of six triggers
-    otherwise wrote ``index.json::fork.from_round = null`` and the two readers
-    disagreed about the cut (the lineage tree fell back to scanning the parent ledger;
-    the mask projection had no fallback and silently read ``None``).
-
-    An author who DOES know the round keeps it. A steered fork lifts nothing yet is
-    cut from a real round's candidate — overwriting it here wrote ``from_round: 0``
-    beside a round-3 ``from_candidate_id``, so the label lookup searched round 0,
-    missed, and ``origin.py::try_inherit_fork_origin`` silently re-scored the origin
-    instead of inheriting it.
+    ``fork_from_round`` is MECHANICAL (how many of the parent's rounds this fork lifts; ``0``
+    = a clean offshoot); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came
+    from). Equal for a rebase, so the seam back-fills the spec only when its author left it
+    unset — a steered fork lifts nothing yet is cut from a real round's candidate.
     """
     if payload.from_round is None:
         payload = payload.model_copy(update={"from_round": fork_from_round})
+    if payload.trigger in _ZERO_ROUND_TRIGGERS and fork_from_round != 0:
+        raise ValueError(
+            f"_mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
+            f"round, so fork_from_round must be 0; got {fork_from_round}"
+        )
     if payload.trigger in _REBASE_TRIGGERS:
         if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
             raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
@@ -181,9 +183,7 @@ def _mint_fork(
             surviving_rounds = campaign_store.load_rounds_range(
                 campaign_id, parent_cycle_id, 0, fork_from_round - 1
             )
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        suffix = hashlib.sha256(f"{parent_cycle_id}|{ts}".encode()).hexdigest()[:8]
-        new_cycle_id = f"{parent_cycle_id}_fork_{suffix}"
+        new_cycle_id = f"{parent_cycle_id}_fork_{_fork_suffix(parent_cycle_id)}"
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
@@ -214,10 +214,6 @@ def _mint_fork(
             # in-process run and silently re-lock on the first `resume` of the fork.
             campaign_store.write_cycle_seed(campaign_id, new_cycle_id, payload.seed)
     elif payload.trigger is ForkTrigger.OPERATOR_DIAG:
-        if fork_from_round != 0:
-            raise ValueError(
-                f"_mint_fork(OPERATOR_DIAG) requires fork_from_round=0, got {fork_from_round}"
-            )
         new_cycle_id = _next_diag_sibling_id(campaign_store, campaign_id, parent_cycle_id)
         now = _fork_sibling_setup(
             campaign_store,
@@ -232,14 +228,9 @@ def _mint_fork(
             campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=now
         )
     elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
-        if fork_from_round != 0:
-            raise ValueError(
-                f"_mint_fork({payload.trigger.value}) requires fork_from_round=0, "
-                f"got {fork_from_round}"
-            )
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        suffix = hashlib.sha256(f"{parent_cycle_id}|operator|{ts}".encode()).hexdigest()[:8]
-        new_cycle_id = f"{root_cycle_id(parent_cycle_id)}_fork_{suffix}"
+        new_cycle_id = (
+            f"{root_cycle_id(parent_cycle_id)}_fork_{_fork_suffix(parent_cycle_id, 'operator')}"
+        )
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
@@ -268,14 +259,7 @@ def _mint_fork(
             )
         if "_" in sweep_batch_id:
             raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
-        if fork_from_round != 0:
-            raise ValueError(
-                f"_mint_fork(OPERATOR_SWEEP) requires fork_from_round=0, got {fork_from_round}"
-            )
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        suffix = hashlib.sha256(f"{parent_cycle_id}|{ts}|{sweep_source_file}".encode()).hexdigest()[
-            :8
-        ]
+        suffix = _fork_suffix(parent_cycle_id, sweep_source_file)
         new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
         now = _fork_sibling_setup(
             campaign_store,
@@ -302,6 +286,10 @@ def _mint_fork(
     campaign_store.update(
         campaign_id, new_cycle_id, {"fork": payload.model_dump(mode="json", exclude={"seed"})}
     )
+    # THE LINE MOVED — said where the cut is made. An offshoot's parent keeps running, which
+    # is why this asks the DIRECTION, not merely whether a fork happened.
+    if FORK_DIRECTION.get(payload.trigger) is ForkDirection.SUPERSEDE:
+        campaign_store.mark_superseded(campaign_id, parent_cycle_id)
     return new_cycle_id
 
 

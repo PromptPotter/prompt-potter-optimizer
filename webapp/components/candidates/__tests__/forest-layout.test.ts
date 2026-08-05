@@ -43,6 +43,7 @@ function node(
     sample_set_n: null,
     divergence: null,
     divergent: false,
+    superseded_by: null,
     course_kind: null,
     run_phase: null,
     dataset_name: "",

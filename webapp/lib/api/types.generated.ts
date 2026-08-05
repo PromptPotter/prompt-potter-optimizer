@@ -790,7 +790,10 @@ export interface LineageNode {
   parent_id: string | null;
   /** `C{round}.{n}` on the campaign's ONE timeline: this course's own candidates
    * keep their minted label; an attempt a fork contributed takes the next
-   * free index of its round, by mint time. */
+   * free index of its round, by mint time — UNLESS the cut superseded, where
+   * it keeps its own label because it replaced that position rather than
+   * joining it, and the candidate it replaced carries `superseded_by`. So one
+   * label can appear twice in a round: at most once LIVE, the other retired. */
   label: string;
   /** This candidate's label in the course that MINTED it. Equal to `label` for a
    * candidate this course minted itself; a fork-contributed attempt keeps the
@@ -849,6 +852,15 @@ export interface LineageNode {
   /** This node is inside the counterfactual subtree below a divergence — the client
    * dims it. */
   divergent: boolean;
+  /** The cycle_id of the branch that took this candidate's place. Set on the LEFT-
+   * BEHIND side of a `supersede` cut (`ForkDirection`) — the tail its own
+   * course kept as the record of what ran, while the line continued
+   * elsewhere. Null on every candidate still on a line, including both sides
+   * of an `offshoot` or `equivalent` cut. Served because a fork is NOT a
+   * node: without a name the operator sees a retired attempt and a live one
+   * as peers of one round, which is the whole reason a cut records its
+   * direction. */
+  superseded_by: string | null;
   /** Courses, and the candidates a fork contributed here — on those it is the ⑂
    * stamp marking an attempt the operator cut. */
   course_kind: 'root' | 'fork' | 'diag' | 'sweep' | 'inner' | null;
@@ -864,7 +876,7 @@ export interface LineageNode {
    * left behind. Null for roots and inner runs, which were not cut from
    * anything. Served, never derived in the client — the two read identically
    * on disk and only this says them apart. */
-  fork_direction: 'offshoot' | 'supersede' | null;
+  fork_direction: 'offshoot' | 'supersede' | 'equivalent' | null;
   /** Operator who cut this fork. */
   steered_by: string | null;
   /** An inner run's benchmark task. Load-bearing: every task runs for every
