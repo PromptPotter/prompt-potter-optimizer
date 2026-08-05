@@ -10,7 +10,7 @@ Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt
 
 Every candidate in a round walks **one deterministic shared order**, built once from the seed's per-sample outcomes (`build_round_order`, `promptpotter/application/intelligence/adaptive_queue_mechanism.py`): seed-MISS samples first (ascending δ — the only place a candidate can *win*, so both futility evidence and the deterministic-exhaustion bound accrue fastest), a seed-HIT regression probe every 4th slot (descending δ — likeliest regression points first, feeding losses to the gates early), unknowns riding the MISS stratum. The order is a pure function of (seed grades, δ ruler, sample ids) — resume re-derives it exactly; shared prefixes keep the paired stats comparable across candidates.
 
-The previous per-candidate online CAT re-rank was deleted 2026-07-04: measured live it front-loaded the seed's exact hit set (zero-information ties), pinning p_best at 0.5 and blinding every gate until the tail — zero eliminations across a full cycle. Detail: [`../concepts/adaptive-queue-mechanism.md`](../concepts/adaptive-queue-mechanism.md).
+**The order is shared, never re-ranked per candidate** — owned by [`../concepts/adaptive-queue-mechanism.md`](../concepts/adaptive-queue-mechanism.md) § Why the order is shared, not per-candidate. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
 
 ## Bayesian PoBB
 
@@ -32,7 +32,7 @@ Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule o
 **Both manifest** over a campaign. PoBB is at-least-as-good-as Wilcoxon in every regime and strictly better in early high-signal where over-investment costs the most.
 
 - **Early — high-signal.** LLM-generated prompts differ a lot; some clearly dominate. Between-candidate ability gaps large. The θ posteriors separate fast; `P(cand > prior)` becomes lopsided within 3–5 queries. Example: candidates at 0.8 vs 0.4 hit-rate → `P(loser > leader)` < 0.05 by query 4–5. Wilcoxon needs ≥ 8 queries at α=0.2 because it's variance-agnostic.
-- **Late — low-signal.** L2/L3 escalation has narrowed the population. True gaps ≤ 0.02. The Bayesian *best*-test cannot confidently abort a near-tie (P(best) ≈ 0.5), so a tie rides to the sample cap and the winner is picked by the θ election. A futility gate used to cut those early; it was deleted for the reasons in the table above, and buying that back means one gate on the θ ruler, never a second comparator beside it.
+- **Late — low-signal.** L2/L3 escalation has narrowed the population. True gaps ≤ 0.02. The Bayesian *best*-test cannot confidently abort a near-tie (P(best) ≈ 0.5), so a tie rides to the sample cap and the winner is picked by the θ election. A futility gate cut those early and was removed (§ The full elimination ladder, below); buying that back means one gate on the θ ruler, never a second comparator beside it.
 
 PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all** candidates and asking the actually-relevant question. Population-aware; ~60 LOC vs LUCB's ~120.
 
@@ -60,7 +60,7 @@ Deferred until empirical data informs the design.
 
 ## The full elimination ladder
 
-Six independent mechanisms can end a candidate's evaluation early or annotate a query. Fixed order; each owns its own memory field and display annotation.
+Five independent mechanisms can end a candidate's evaluation early or annotate a query. Fixed order; each owns its own memory field and display annotation.
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
@@ -72,6 +72,6 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 
 **Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–5 co-exist in that final list — fatal beats rate beats Bayesian PoBB.
 
-**There was a sixth: a paired-margin futility gate, deleted 2026-07-27.** It was a second comparator beside the θ ruler — counting discordant binary wins while the election ranked on difficulty-adjusted ability — and a second encoding of `improvement_threshold`, with a duplicate implementation in the replayer. It was also inert on a graded backend, where a fitness of 0.63 is neither a win nor a loss. Its kill payload stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible` read as a PoBB loss and so barred the candidate from the round election: on `promptpotter-self` every candidate in rounds 2–3 stopped that way and four rounds closed with no winner while the real θ lift was **+0.099**. One comparator, one stop rule.
+**One comparator, one stop rule — do not add a sixth.** A paired-margin futility gate ran here and was removed. Anything that counts discordant binary wins is a second comparator beside the θ ruler the election actually ranks on, so the two disagree by construction; it re-encodes `improvement_threshold` a second time; and it goes inert on a graded backend, where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible` reads as a PoBB loss — silently barring a cut candidate from the round election, so whole rounds closed with no winner while the real θ lift was positive. Buying futility back means one gate **on the θ ruler**.
 
 The `classify_result()` rule table and its three load-boundary effects: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).

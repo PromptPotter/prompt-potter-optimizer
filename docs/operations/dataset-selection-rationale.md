@@ -8,7 +8,7 @@ Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-da
 
 **BBEH stays the headline benchmark** for publication framing. Nothing about the candidate list below changes that.
 
-**But** at the optimizer's current maturity, BBEH is the wrong *iteration* target for L1 optimizer prompt evolution. `gpt-oss-20b @ low` scores in the floor band on BBEH (~14% public, see [BBEH score anomaly](../../README.md) and `project_bbeh_score_anomaly.md`) — every cycle ties at noise, PoBB can't separate candidates, and the L1 self-optimizing campaign can't tell good edits from bad ones.
+**But** at the optimizer's current maturity, BBEH is the wrong *iteration* target for L1 optimizer prompt evolution. `gpt-oss-20b @ low` scores low enough on BBEH that every cycle ties at noise (our in-house BBEH-mini measurement at `low` is 28%, which also debunks the ~14% public figure for this model), PoBB can't separate candidates, and the L1 self-optimizing campaign can't tell good edits from bad ones.
 
 Framing the operator gave (2026-05-18): *we are too far from the local valley on BBEH; we have to work our way to it with more tractable signal first — improve L1 optimizer prompts (and other optimizer pieces) on datasets where lift is measurable, then return to BBEH as headline with better hyperparameters and a more mature optimizer.*
 
@@ -16,7 +16,7 @@ Framing the operator gave (2026-05-18): *we are too far from the local valley on
 
 A focus dataset for L1 optimizer prompt evolution must satisfy:
 
-1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (BBEH problem). Above 40% → ceiling effect (no headroom for L1 lift to register against PoBB noise). *Band widened from 15-35% after the 7-dataset recon trail 2026-05-19 — see "Selection trail Round 6" for the systemic finding on projection slop.*
+1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (BBEH problem). Above 40% → ceiling effect (no headroom for L1 lift to register against PoBB noise). *The band is 15-40% rather than 15-35% because of the projection slop in § What the selection trail established.*
 1b. **Origin clears its CONSTANT-ANSWER floor.** The score a stub emitting the single commonest label would earn. This is the floor that matters, and it is per-dataset, not 15%: on a 3-class set whose majority label holds 40% of the bank, a collapsed pipeline scores 40% and reads as a healthy in-band origin with headroom. An origin that merely ties its constant is not a measurement — nothing can be optimised out of it, because the pipeline is not reading the input. **Read it off the `answer_distribution` panel**, which renders the score a constant single-label answer would earn on every round — that is the live surface for this criterion. (An earlier enforcement — `classify_band` + `constant_answer_floor` in `application/resource_matrix/matrix.py` — was retired 2026-07-26 having never once run: reaching it required `matrix measure`, and no matrix was ever measured. It is now enforced where the measurement is actually taken: `domain/scoring.py::is_answer_collapsed` withholds θ from a collapsed candidate and PoBB eliminates it, so a dataset whose pipeline ties its constant can no longer contribute a fitted ability at all.) Criterion (1) alone cannot see this and let a degenerate JustLogic cell into the L4 panel for the whole of its first campaign — see the JustLogic row below.
 2. **Reachable ceiling.** Plausible **50–75%** under strong prompt engineering. The origin-to-ceiling gap is what L1 climbs; bigger gap = cleaner signal/noise.
 3. **N ≥ 400, preferably 800+.** For stable cycle-to-cycle verdicts under PoBB (thresholds: `pobb_epsilon` / `elimination_n_min`, defaults on `OptimizationConfig`). Smaller N usable with per-subtask stratification.
@@ -25,14 +25,14 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 6. **No mode-collapse on a single gold class.** A dataset where the modal answer covers >40% of the gold set, or where the model collapses 3-class to 2-class (BoardgameQA's missing `disproved`), will be label-bias coasted and produce inflated origin. Stratify by `prop` / `category` / `subtask` to spot the trap before commit.
 7. **HF-loadable.** Single jsonl on Hugging Face = trivial loader. Custom scraper = real plumbing cost.
 8. **Contamination-resistant.** 2024+ release preferred. Synthetic generation a plus.
-9. **Anchored by measurement, not projection.** A 25-sample recon on `gpt-oss-20b @ low` via Groq is the verdict — projections from Llama-3-8B / T5-XL / GPT-3.5 anchors systematically underpredict `gpt-oss-20b`'s reasoning strength. See Round 6 below.
+9. **Anchored by measurement, not projection.** A 25-sample recon on `gpt-oss-20b @ low` via Groq is the verdict — projections from Llama-3-8B / T5-XL / GPT-3.5 anchors systematically underpredict `gpt-oss-20b`'s reasoning strength (§ What the selection trail established).
 
 ## Headline ≠ focus
 
 | Role | Dataset(s) | Why |
 |---|---|---|
 | **Headline benchmark** (publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
-| **Self-optimizing campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`). The earlier d6-7 wiring below + its recon numbers are **VOID** (data-deprecation-era). BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
+| **Self-optimizing campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`); BBEH-mini @ `low` held as secondary in-band candidate. Next-priority queue: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
 | **Connector validation** | TermNorm (lca-termnorm) | Per-connector regression, not optimizer iteration. |
 
 When the optimizer matures enough that L1 prompts produce measurable lift on BBEH, the focus role collapses back into the headline role. Until then, they are separate jobs.
@@ -49,15 +49,28 @@ Pinning is via `nodes.llm_only.config` overlay in each dataset's `pipeline.yaml`
 
 ## Wired — primary
 
-> **⚠️ SUPERSEDED / VOID (data-deprecation-era bug).** The JustLogic **d6-7** cut wired below — and every origin / latency / class-behaviour number in this section and in the dated recon rows further down — came from a data-deprecation-era bug and reproduces nothing. The live L4 inner instrument is **`justlogic-d234`**, an iid random mix of depths 2, 3, 4 (`datasets/justlogic-d234/`). The dated decisions are kept as history; do not cite their numbers.
+**JustLogic — `justlogic-d234`, an iid random mix of depths 2, 3 and 4.** Synthetic 3-class
+deductive reasoning (`TRUE`/`FALSE`/`Uncertain`, Chen 2025), so zero contamination and a
+balanced gold distribution — a class bias the pipeline shows is a reasoning failure, not a
+label-skew coast. The cut, the scoring rule and the `:nitro` speed trade are owned by
+[`../../datasets/justlogic-d234/dataset.md`](../../datasets/justlogic-d234/dataset.md); the
+model pin by [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md).
 
-| Dataset | HF path | Cut | Measured origin | Latency | Class behavior | L1 attack surface |
-|---|---|---|---|---|---|---|
-| **JustLogic depth ≥ 6** | `michaelchenkj/JustLogic` (single `train` split, 4,900 rows) | Operator-defined: depths 6+7 only, 200/depth train (400) + 500/depth test (1,000). Authors' canonical test set is withheld; HF `train` IS the public training fold. See `datasets/justlogic/dataset.md`. | **44% (11/25)** on 25-sample d≥6 recon, OpenRouter `:nitro` | **~0.3s/sample** — very fast, very cheap | 3-class `TRUE`/`FALSE`/`Uncertain`, all used (no class-collapse). Hedge bias: ~17/25 preds = `Uncertain`; per-depth gold distribution is balanced ~33% each → hedge bias is real reasoning failure, not label-skew coast. | **Break the hedge**: prompt mutations saying "commit to TRUE/FALSE when premises strictly determine the conclusion; reserve `Uncertain` for genuine indeterminacy." Synthetic generation = zero contamination. Random baseline 33.3%; human avg 73%; ceiling per o1-preview 81% (paper). |
+Two things a reader of this page needs that those files do not carry:
 
-**Wire commit 2026-05-19**: `datasets/justlogic/` + `load_justlogic(split=...)` shipped. `pipeline.yaml` pins `openai/gpt-oss-20b:nitro` @ `low` via OpenRouter (matches recon conditions exactly).
+- **Depth cuts do not compare.** Each is a separate `dataset_name` sharing no cache key with
+  another, so a cross-cut "band" reads the keying rather than the capability
+  (`datasets/CLAUDE.md` § L4). The earlier d6-7 wiring and its recon numbers were replaced for
+  that reason, not refined.
+- **The hedge is not a prompt-shaped target.** The pipeline's dominant pathology at `low` is
+  retreat to `Uncertain`, and it does **not** respond to being told off — anti-hedge wording,
+  derivation procedures and personas measure *worse* than the plain origin, because the extra
+  text competes for the budget the derivation needs. Attack the chain, not the conclusion.
 
-## Next-priority after JustLogic (Round 8, 2026-05-19)
+Origin and latency are unmeasured under the current wiring; read them off a cold-workspace
+ledger (`noise-floor --k 3`) rather than quoting a figure from this page.
+
+## Next-priority after JustLogic
 
 Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQue + AR-LSAT + PlanBench, 4 candidates) — operator decision: **hold both, wire after JustLogic delivers its first cycle**, treat as the "30-40% experiments" queue. Both genuinely diversify L1 attack surface (planning, not deduction or math).
 
@@ -97,7 +110,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 | **MuSR** (3 subtasks) | `TAUR-Lab/MuSR` full 300-row operator cut | low | **81%** on 21-sample live cycle | `murder_mysteries` ships binary A/B choices with B-skewed golds — model coasts on frequency bias. Ceiling effect. |
 | **MuSR** (2 subtasks salvage) | `object_placements` + `team_allocation`, 200 train | low | *not measurable* | Dataset cached in backend store from the 3-subtask wire; loader change didn't take effect on `new musr` (cache hit). Superseded by MMLU-ProX-sw before re-test. Loader + `datasets/musr/` deleted 2026-05-19. |
 | **JustLogic** | depth ≥ 4, 25 samples | low | **52% (13/25)** | Label-bias coast: 11/25 gold = `Uncertain`, model defaulted to `uncertain` on 15. Always-predict-uncertain baseline = 44%. Real reasoning lift over mode-prediction ≈ 8pp. |
-| **JustLogic** (harder) | depth ≥ 6, 25 samples | low | **44% (11/25)** — *in-band edge* | Same hedge bias but at the deeper filter. Predictions: `uncertain` × 17, `false` × 5, `true` × 3 — all 3 classes used (no class-collapse). Mode-predict-uncertain baseline = 10/25 = 40%; real lift over mode ~4pp. **⚠ 2026-07-13 — THIS ROW WAS THE WARNING, AND IT WAS READ AS A FOOTNOTE.** A ~4pp lift over the mode on n=25 (Wilson half-width ~±20pp) is not a signal. Measured live across 16 full-bank origin runs: the pipeline answers `Uncertain` on **80%** of samples — `gpt-oss-120b` on **96%**, scoring its constant floor EXACTLY. The "all 3 classes used (no class-collapse)" verdict came from a single 25-sample look at label PRESENCE; the collapse is in the *proportions*, and it deepened. JustLogic d6-7 @ low is a `floor` cell under criterion (1b) and was never a viable instrument. The hedge bias is real — but it is the pipeline's dominant pathology, not "a clean L1 prompt-mutation target", and L1 could not attack it because no panel carried the answer distribution until `answer_distribution` shipped. **Latency 0.3s/sample on OpenRouter `:nitro`** — very fast, very cheap. Closest in-band candidate among the trial-and-error English reasoning datasets; hedge bias is itself a clean L1 prompt-mutation target ("commit to TRUE/FALSE when premises strictly determine the conclusion"). Held aside pending BBEH re-recon at `low`/`medium`. |
+| **JustLogic d6-7** (the deep cut) | depth ≥ 6, 25 samples | low | **rejected — a `floor` cell under criterion (1b)** | A 25-sample recon read 44% and "all 3 classes used, no class-collapse", and that verdict was wrong twice over. The ~4pp lift over the mode-predict-`Uncertain` baseline sits well inside the Wilson half-width at n=25, so it was never a signal; and label PRESENCE is the wrong test — the collapse is in the *proportions*. Measured across full-bank origin runs the pipeline answers `Uncertain` on ~80% of samples (`gpt-oss-120b`: ~96%, exactly its constant floor). The hedge is real but is the pipeline's dominant pathology at this depth, **not** a prompt-mutation target — see § Wired — primary. The live cut is `justlogic-d234`. |
 | **ExploreToM** | non-adversarial slice, 25 samples | low | **68% (17/25)** | Model strong on state tracking even at high difficulty. Adversarial split projected at 5-15% (floor risk) — not trialed. |
 | **BoardgameQA** | depth-2/3, 25 samples | low | **60% (15/25)** | Class-collapse: model never predicts `disproved` (0/7 disproved-gold samples). Effectively a 2-class problem; 60% is on the easier proved/unknown subset. |
 | **BoardgameQA** (harder) | `Main-depth3` only, 25 samples | low | **64% (16/25)** — ceiling, class-collapse persists | Predictions: `proved` × 14, `unknown` × 11, `disproved` × **0**. Of 8 `disproved`-gold samples → 0 hits. On the proved/unknown subset alone, 16/17 = 94%. Model still treats it as a 2-class problem at depth-3. **Latency 0.5s/sample on `:nitro`** — very low / very cheap, like JustLogic. **Keep as a future candidate** if the class-collapse can be unblocked by prompt mutations forcing `disproved` consideration (operator's note 2026-05-19): "we can use this later." For now, JustLogic d≥6 is the better fit — same latency profile, real 3-class signal, in-band. |
@@ -112,29 +125,21 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 | **NaturalPlan** | `google-deepmind/natural-plan` raw GitHub (NOT HF — colleague misremembered) | 3-subtask stratified, 25 samples | low | **36% (9/25)** in-band macro — **HELD next-priority** | Per-subtask scorer dispatch was required (each gold has a different shape): `trip_planning` 0/9 (real floor at low), `calendar_scheduling` 6/9 (ceiling — bare 4-token boilerplate gold caused initial scorer-artifact 0% before the day+time-slot scorer was added), `meeting_planning` 3/7 = 43% (clean in-band). 0.5s/sample. **Wire path: `meeting_planning`-only** for the cleanest cut. See "Next-priority after JustLogic" section above. |
 | **PlanBench task_1** | `tasksource/planbench`, config `task_1_plan_generation`, multi-domain stratified, 25 samples | low | **36% (9/25)** in-band — **HELD next-priority** | PDDL-style plan generation across blocksworld + logistics + obfuscated variants. Scorer = 50% action-call overlap with gold plan (coarse but fair for 3-7 action plans). 1.5s/sample. Brand-new family (planning, no overlap with current portfolio). Wire-time needs PDDL plan-validator scorer for rigor. See "Next-priority after JustLogic" section above. |
 
-## Selection trail — six rounds (2026-05-18 → 2026-05-19)
+## What the selection trail established
 
-**Round 1 — "Goldilocks for 120b @ low" (wrong model, anchored too high).** Picked GPQA Diamond + MuSR. Rejected when operator corrected: target is 20b, not 120b.
+Eight rounds of literature triage and empirical recon (the per-candidate outcomes are in
+§ Trialed and rejected and § Rejected without trial above and below) converged on one
+systemic finding, which is the part worth carrying forward:
 
-**Round 2 — "Goldilocks for 20b @ low, origin 40–75%".** Picked MMLU-Pro (~63–67%) + MuSR (~45–60%). Rejected when operator pushed back: bigger headroom = cleaner signal/noise, want origin lower not higher.
+**Model-strength projections taken from older proxies underpredict `gpt-oss-20b @ low` by
+10-20pp.** Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone
+for this model, so bias every `<20B`-class projection upward before trusting it. The one
+exception measured was language transfer (Swahili), which bypasses the effect — the model's
+reasoning strength in English does not carry across the language barrier — and was rejected
+anyway: it teaches L1 "translate to English first" tricks rather than reasoning.
 
-**Round 3 — "20–30% origin, big ceiling-room, multi-subtask".** Picked OlympiadBench (math/physics) → operator asked for non-math. Re-scoped to MuSR (deductive/spatial/constraint reasoning) as primary, FOLIO as fallback. OlympiadBench kept as math-axis option.
-
-**Round 4 — "signal content > N + ceiling-room"** (peer-review pushback). Reframed: per-sample structured failure modes outrank raw accuracy resolution for L1 critique quality. Added IFBench as a parallel Track B (diagnostic). Rejected AA-LCR (LLM-judge cost). Deferred AA-Omniscience pending floor check.
-
-**Round 5 — IFBench parked.** Literature research confirmed (a) no author-blessed train/test sub-split of the 300, (b) training pool families disjoint from test families, (c) tests compliance not reasoning. Dropped from primary trial sequence. Produced `docs/operations/adding-a-dataset.md` as a side benefit.
-
-**Round 6 — empirical recon, first wave: 7 candidates, all rejected, then MMLU-ProX-sw landed.** Wired MuSR per Round 5; trial cycle landed at 81% origin (ceiling). Salvaged to 2 subtasks (`murder_mysteries` excluded) — but the dataset-store cache blocked re-test. Pivoted to a fresh literature hunt with the new evidence: published anchors from Llama-3-8B / T5-XL / GPT-3.5 systematically underpredict `gpt-oss-20b @ low`. Recon'd 4 more candidates (JustLogic d≥4 52%, ExploreToM 68%, BoardgameQA d2/3 60%, CRUXEval-O desk-rejected). All over-band. Expanded hunt: shortlist 2 added knowledge-intensive (PopQA), structured-prediction (SATBench), language-transfer (MMLU-ProX Swahili). Recon: SATBench 100% (over-ceiling), PopQA 44%-then-20%-with-coast (knowledge-memorized), **MMLU-ProX Swahili 36% — in band**.
-
-**Round 7 — operator rejects MMLU-ProX-sw, retests harder strata + BBEH (2026-05-19).** Operator clarified: target is *English* reasoning, not language-transfer (MMLU-ProX-sw would have L1 finding "translate to English first" tricks). MMLU-ProX-sw moved to rejected. Re-recon with harder strata + BBEH at the wired `low` (plus a `medium` fallback test, with `high` as the upfront experiment): **JustLogic d≥6 = 44% (in band, hedge bias, no class-collapse)**, BoardgameQA Main-depth3 = 64% (ceiling + class-collapse persists; held for later — very cheap latency), **BBEH-mini @ `low` = 28% (in band; boardgame_qa subtask class-collapse, but other subtasks contribute), BBEH-mini @ `medium` = 44% (in band but 24.7s mean with 220s tail — fallback only)**. **Public BBEH-on-20b ~14% reference is debunked** — our in-house measurement at `low` lands at 28% on the mini split; the public number must have used a different setup or a different model. Two viable candidates: JustLogic d≥6 and BBEH @ low. Operator decision pending.
-
-**Round 8 — colleague triage adds 4 new candidates (2026-05-19, post-JustLogic wire).** Research colleague raised NaturalPlan + MuSiQue + NPHardEval + CLadder. Pre-sort triage on existing evidence: CLadder dropped (same class-with-hedge family as JustLogic / BoardgameQA / FOLIO — colleague's own rejection pattern). NPHardEval deferred (canonical task data is DIMACS files on GitHub with ad-hoc ground-truth construction — wiring a fair harness exceeds today's scope). Recon'd the other two, plus a follow-up wave with AR-LSAT + PlanBench: **AR-LSAT 72% (CEILING — surprise vs lit projection)**, **MuSiQue 60% macro CEILING (3hop-only at 38% in-band held)**, **NaturalPlan 36% in-band macro (Frankenstein avg: trip=0% / calendar=67% / meeting=43%; `meeting_planning`-only is the clean 43% cut)**, **PlanBench task_1 36% in-band**. Two systemic findings: (a) NaturalPlan is NOT on the HF Hub despite the colleague's claim — data lives in `google-deepmind/natural-plan/data/*.json` on GitHub; future recons should `curl https://api.github.com/repos/.../contents/...` to verify the source layout BEFORE writing a `load_dataset(...)` call; (b) AR-LSAT first-pass had a field-shape bug (assumed HF stores `gold` / `choices` as stringified, actually native lists) — recon harness should always inspect `type(row[field])` before `ast.literal_eval`. **Operator decision: hold PlanBench + NaturalPlan as "next-priority after JustLogic" — both genuinely diversify the portfolio (no planning surface wired today).** See "Next-priority after JustLogic" section above for the full per-dataset breakdown.
-
-The systemic finding: model-strength projections from older proxies underpredict `gpt-oss-20b @ low` by 10-20pp. Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone for our model. Language-transfer (Swahili) bypasses this — the model's strength on reasoning *in English* is bounded by its weakness in *reading Swahili technical prose*, which is empirically a 30-50pp gap. The bias rule going forward: **prefer measurement to projection; bias projections from <20B-class anchors upward 10-20pp.**
-
-**Wired** (2026-05-19 — since SUPERSEDED → `justlogic-d234`, the live instrument; the d≥6 numbers are VOID): JustLogic d≥6 (Round 7 outcome; MMLU-ProX-sw rejected in Round 7 — language-transfer, not English reasoning).
-
-This sequence is operator-revisable any time.
+The wired outcome is `justlogic-d234` (§ Wired — primary). This sequence is
+operator-revisable at any time.
 
 ## Rejected without trial — one-line reasons
 
@@ -164,11 +169,11 @@ Captured here so they don't get re-investigated next time:
 
 ## Deferred research
 
-Candidates that may earn a slot pending an empirical check. Verify the open question first. **Projection bands here are priors, not commitments — after the Round 6 recon trail showed 5-for-5 overshoots vs published anchors, bias all <20B-class anchors upward 10-20pp.**
+Candidates that may earn a slot pending an empirical check. Verify the open question first. **Projection bands here are priors, not commitments — the recon trail overshot published anchors five times out of five, so bias all <20B-class anchors upward 10-20pp.**
 
 - **AA-Omniscience** (`ArtificialAnalysis/AA-Omniscience-Public`, N=600 public / 6000 full, 42 topics, released 2025-11). Asymmetric scoring (+correct / −hallucinated / 0 abstain) gives L2 a real second knob: a candidate that hallucinates 30% and one that abstains 30% score differently at identical correctness. **Open question — floor risk.** AA reports "even the best frontier models score only slightly above 0" on the Omniscience Index → `gpt-oss-20b @ low` plausibly deep-negative, but the calibration axis means lift can come from teaching abstention even without raising raw correctness. **Verify with a 50-sample reconnaissance slice** before committing. Currently the only candidate not invalidated by Round 6 evidence — its scoring rubric is different enough that the proxy-anchor projection issue doesn't apply.
 
-*(Round 6 ran recons on CRUXEval-O, JustLogic, ExploreToM, BoardgameQA, PopQA, SATBench — all rejected. Measurements + reasons in the "Trialed and rejected" table above. Do not re-investigate.)*
+*(CRUXEval-O, JustLogic d6-7, ExploreToM, BoardgameQA, PopQA and SATBench were all reconned and rejected — measurements + reasons in § Trialed and rejected above. Do not re-investigate.)*
 
 ## Update protocol
 

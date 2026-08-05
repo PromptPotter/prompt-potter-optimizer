@@ -36,8 +36,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   tree a path is under before assuming a shape.
 - **`"llm_only"`** — the **single-node pipeline sentinel**, and nothing else
   (`terminated_at`). It is a NODE name the six single-node benchmarks declare inside a
-  `termnorm` pipeline. It once also named a connector; that connector was deleted, so
-  the old two-meanings warning no longer applies.
+  `termnorm` pipeline — never a connector.
 - **thinking channel** — where a model puts its internal process: a `reasoning` slot in a
   node's `output_schema`, or the provider's native `message.reasoning` (captured as
   `LLMResponse.reasoning`). **Not optional instrumentation** — a model given nowhere to
@@ -342,12 +341,6 @@ The persisted world is a four-entity containment hierarchy
   every 4th slot (desc δ), unknowns riding the miss stratum. Pure
   function of (seed grades, δ ruler, ids) — resume re-derives it.
   `application/intelligence/adaptive_queue_mechanism.py`.
-- **Paired-margin gate** — DELETED 2026-07-27. A second comparator
-  beside the θ ruler (discordant binary wins vs difficulty-adjusted
-  ability), inert on graded backends, and its hardcoded `p_best: 0.0`
-  kill payload barred cut candidates from the round election. One
-  comparator now: PoBB's paired `P(best) < ε`. See
-  [`methods/candidate-elimination.md`](methods/candidate-elimination.md).
 - **pick-value** — the between-round CAT acquisition objective:
   `decision_information_gain + delta_learning_gain` (in nats). Drives
   `select_round_subset` ranking and the `pick_score` snapshot.

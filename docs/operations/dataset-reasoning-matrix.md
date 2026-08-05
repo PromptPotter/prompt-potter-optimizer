@@ -4,15 +4,15 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
-| `aime_2025` | `openai/gpt-oss-20b:nitro` | `low` | absent | Competition math. **Currently `openai/gpt-oss-20b:nitro @ low`** (swapped to `:nitro` 2026-05-13 for speed). Previous pin was `meta-llama/llama-3.3-70b-instruct:nitro` (fast+stable+cheap); flipped because gpt-oss-20b is cheaper ($0.03/$0.14 vs ~$0.10/$0.32), and `:nitro` routes to the highest-throughput provider (Groq at ~845 tok/s) at no cost premium. Empirical A/B table at the bottom of this file. |
+| `aime_2025` | `openai/gpt-oss-20b:nitro` | `low` | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. Empirical A/B table below. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
 | `hotpotqa` | `openai/gpt-oss-120b` | `medium` | absent | Multi-hop QA. Medium reasoning. |
 | `bbeh` | `openai/gpt-oss-20b` | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional. |
-| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning (`TRUE`/`FALSE`/`Uncertain`). iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Prior `justlogic` d6-7 origin/band numbers are VOID (data-deprecation-era) — see `datasets/justlogic-d234/dataset.md`. |
+| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning (`TRUE`/`FALSE`/`Uncertain`). iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name and shares no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` (the cap is load-bearing — see section below). Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
 
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — provider ceiling applies. True on every dataset as of 2026-08-01, and held by convention: this line claimed enforcement by a `tests/test_dataset_pipeline_defaults.py` that was never written.
+`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — provider ceiling applies. Held by convention, not by a test: nothing enforces it, so check the overlay rather than assuming.
 
 ## The Groq output ceiling
 
@@ -24,19 +24,19 @@ The floor default for a **new** dataset is `openai/gpt-oss-20b:nitro @ low` via 
 
 ## Per-sample timings understate wall-clock
 
-**Per-row timing caveat observed during these tests.** The `[ N] XX.Ys` per-sample line in the PromptPotter CLI reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries — so summing the per-row lines understates true wall-clock whenever retries fire. Filed as a UX issue, not a correctness issue. [#TODO; Remind me to fix it if I havent fixed it on my termnorm repo]
+The `[ N] XX.Ys` per-sample line in the PromptPotter CLI reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries — so summing the per-row lines understates true wall-clock whenever retries fire. A UX issue, not a correctness one; the fix belongs in the TermNorm repo.
 
-## AIME 2025 model A/B/C tests (2026-05-11)
+## AIME 2025 model A/B/C tests
 
-Live operator A/B/C hunt for a cost+speed+quality sweet spot on AIME competition math. All routes: OpenRouter, `reasoning_effort: low`, `temperature: 0.0`, dataset 20-query origin slice (≥10 samples measured before swap).
+Operator A/B/C hunt for a cost+speed+quality sweet spot on AIME competition math. All routes: OpenRouter, `reasoning_effort: low`, `temperature: 0.0`, dataset 20-query origin slice (≥10 samples measured before swap). Latency figures are provider-dependent and were taken on one day — treat them as a ranking, not a spec.
 
 | Model | Avg latency / query | Output tokens (avg) | Origin hits (n / measured) | Quality | Cost | Verdict |
 |---|---|---|---|---|---|---|
-| `openai/gpt-oss-20b:nitro` | **3.1-9.6s, ~5s median** | ~2300 mean (range 524-6935; tail-heavy — two outliers at 6.8k/6.9k on hard combinatorics problems) | **6/20 = 30%** origin |  | ✓ identical price to non-:nitro ($0.03/$0.14) | **✅ Promoted as current AIME pin 2026-05-13. My first choice for testing and development for 3 months**  |
+| `openai/gpt-oss-20b:nitro` | **3.1-9.6s, ~5s median** | ~2300 mean (range 524-6935; tail-heavy — two outliers at 6.8k/6.9k on hard combinatorics problems) | **6/20 = 30%** origin |  | ✓ identical price to non-:nitro ($0.03/$0.14) | **✅ The current AIME pin.** |
 | `meta-llama/llama-3.3-70b-instruct:nitro` | ~3.0s median, ~3.8s mean | ~975 | 1/10 | 2/5 ★★ | ✓ cheap, very fast (Cerebras/SambaNova routing) |  Fast+cheap; let L1 explore upward via prompt mutation. |
-| `google/gemma-3-27b-it` | ~28s mean (n=2 completed before interrupt) | ~700 | 1/2 | insufficient data | n/a | **Too unstable on OpenRouter today** ReadTimeouts + provider-side `timeout_s=60 attempt=3/3` retries |
+| `google/gemma-3-27b-it` | ~28s mean (n=2 completed before interrupt) | ~700 | 1/2 | insufficient data | n/a | **Unstable on OpenRouter** — ReadTimeouts + provider-side `timeout_s=60 attempt=3/3` retries |
 | `mistralai/mistral-small-3.2-24b-instruct:nitro` | ~29s mean (n=4 before interrupt) | ~3000 (high) | 3/4 | ★★★ quality OK | $0.10/$0.30 nominal — but slow | Quality decent, speed not. |
-| `qwen/qwen3-30b-a3b-instruct-2507` | ~27s mean per [RESP] | ~1700 (high variance: 754…5782) | **6/6** on cached replay |  |  | **Smartest of all tested models on AIME math, but unstable on OpenRouter today** |
+| `qwen/qwen3-30b-a3b-instruct-2507` | ~27s mean per [RESP] | ~1700 (high variance: 754…5782) | **6/6** on cached replay |  |  | **Smartest of all tested models on AIME math, but unstable on OpenRouter** |
 
 # More models to look at
 
@@ -64,14 +64,14 @@ Realistic candidates — production tier (not `:free`), priced ≤ ~$0.05 in / ~
 
 1. `meta-llama/llama-3.3-70b-instruct:nitro`
 2. `qwen/qwen3-30b-a3b-instruct-2507` — **quality signal positive (perfect 6/6 on the measured AIME subset — smartest of all tested)**, but defer for cost (verbose outputs ~2× effective cost vs Llama:nitro) and stability (OpenRouter routing timeouts). Watch for a less-verbose Qwen3 variant.
-3. `google/gemma-3-27b-it` — not fully assessed; defer until OpenRouter routing stabilizes (new model, April 2026).
+3. `google/gemma-3-27b-it` — not fully assessed; defer until OpenRouter routing stabilizes.
 4. **Rejected**: `google/gemini-2.5-flash` stable, but **~8× too expensive on output tokens** even at `reasoning_effort: low`.
 
 ---
 
 # More datasets
 
-## Held — next-priority after JustLogic (2026-05-19, Round 8)
+## Held — next-priority after JustLogic
 
 Two recon-measured in-band candidates queued for wiring after JustLogic delivers its first cycle. Same model + effort + latency band as JustLogic — they slot into the same matrix row when wired. Full rationale + per-subtask measurements: [`dataset-selection-rationale.md`](dataset-selection-rationale.md) "Next-priority after JustLogic" section.
 

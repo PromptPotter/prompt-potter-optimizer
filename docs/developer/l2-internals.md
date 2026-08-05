@@ -74,7 +74,7 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 
 `l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — and **any** breach after `_apply_l2` force-triggers L3 to heal. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
-There is no soft-reject tier and no task_context validator. This section described `run_l2_output_validators` / `validators/l2_output.py` / `L2_TASK_CONTEXT_STALE_REPEAT` / `_L2_SOFT_REJECT_VALIDATOR_IDS` for a long time; none of those has ever existed in the tree as written, and the last of the shape they belonged to left with the framing-rewrite surface — a stale task_context repeat is unrepresentable now that the framing is frozen, so there is no inert breach left to except (`escalation/firing.py`, above its unconditional `if breaches:`).
+**Every breach is hard — there is no soft-reject tier, and no `task_context` validator.** `task_context` framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so a stale-repeat breach is not representable and there is nothing inert to except: `escalation/firing.py` is an unconditional `if breaches:`. Do not add a tier to re-admit one.
 
 ## File-line anchors
 

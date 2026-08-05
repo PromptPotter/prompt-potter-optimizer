@@ -45,22 +45,15 @@ place in its final round, which the endpoint cannot separate at all.
 The re-anchor is linear, so the paired estimator's reported effect times the window width IS the
 mean logit lift — a number to read, not merely to order by.
 
-**It used to compose four factors over eight emitted proxies** — lift core × sustained discovery
-× bounded quality × efficiency. The first complete 39-cell panel then measured each of them, and
-the composition did not survive contact:
-
-- `cleanliness` put **twice** as much of its variance into the SEED as into the arm (30.9% vs
-  15.4%). It was grading which data a cell drew, not which optimizer prompt ran it. This spec had
-  flagged exactly that as open and left it charging pending "a run with a real optimizer prompt
-  contrast"; that run happened.
-- `diversity_health` never left the top fifth of its range — no candidate gradient at all.
-- `delta_per_dollar` correlated **0.958** with the lift core and flipped no ordering: it was the
-  lift counted a second time.
-- `rounds_improved_frac` flipped nothing.
-
-Each was a *multiplier*, so each held authority over an ordering it could not justify — and
-together they roughly doubled the apparent significance of the run's conclusion by compressing
-the fitness scale (pooled paired t of −4.62 against the raw term's −2.38, on identical data).
+**One term, not a basket — and the reason is measured, not aesthetic.** A composition of
+lift core × sustained discovery × bounded quality × efficiency was put to a full panel and every
+factor beside the lift core failed the candidate-gradient bar: `cleanliness` put twice as much of
+its variance into the SEED as into the arm (it graded which data a cell drew, not which optimizer
+prompt ran it), `diversity_health` never left the top fifth of its range, `delta_per_dollar`
+correlated ~0.96 with the lift core and flipped no ordering, and `rounds_improved_frac` flipped
+nothing. Each was a *multiplier*, so each held authority over an ordering it could not justify —
+and together they roughly doubled the apparent significance of a conclusion by compressing the
+fitness scale. **A term that cannot move with the candidate does not get a vote.**
 
 **The quality EVENTS still act; they simply act once, structurally.** A cycle whose every round
 lost its candidates to an empty optimizer response goes to the FLOOR (`floor_reason`); a

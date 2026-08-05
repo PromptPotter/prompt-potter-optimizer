@@ -148,39 +148,26 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
 `build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts seed-MISS win-opportunities
 first (ascending δ) and slots seed-HIT regression probes every 4th position, so every arm ends
-`…1111111` and opens near zero. Four arms on `justlogic-d234` (2026-08-02) ran
-`0011000100101011111101111111` / `0001000110001011110111111101` / two more the same shape — the
-late run is the bank, not momentum, and paired against an incumbent that also wins those rows it
-carries no information.
+`…1111111` and opens near zero. The late run is the bank, not momentum, and paired against an
+incumbent that also wins those rows it carries no information.
 
-**The promotion gate and the PoBB posterior disagree — but they are asking different questions.**
-Same round, same 28 paired samples: `paired_breakdown.p_better` = **0.842** against the incumbent,
-while the election held. It is tempting to read that as two estimators of one quantity, and the
-earlier version of this note did: it claimed the gate reads accuracy while the campaign declares
-`headline_metric: ability`. **That was wrong** — the gate has compared θ on the locked δ ruler
-since `a4753a23`, and `headline_metric` is DISPLAY config by design (`config.py` says so: "the
-gate is always difficulty-adjusted ability θ"). What actually misled every reader was the gate's
-own *explanation string*, which still said "cleared the matched parent by 0.02 accuracy" — fifteen
-banked rounds carry that sentence. Fixed: the reason now names the θ lift, the θ-space bar, and
-distinguishes "the election crowned nobody" from "a winner was crowned and fell short".
+**The promotion gate and the PoBB posterior can disagree — they are asking different questions.**
+`p_better` is a **stopping** posterior (is more measurement worth buying?); `improved` is a
+**promotion effect-size** gate (is the lift big enough to adopt?). Both read θ on the locked δ
+ruler — `headline_metric` is DISPLAY config, never what the gate compares. They can legitimately
+disagree without either being broken. Read both, name both.
 
-What remains true is that `p_better` is a **stopping** posterior (is more measurement worth
-buying?) and `improved` is a **promotion effect-size** gate (is the lift big enough to adopt?).
-Those can legitimately disagree without either being broken. Read both, name both.
+**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_origin_*` strata
+are defined by the *incumbent's own* grades, so on a truncated prefix the score is fixed by
+construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
+`⌊n/4⌋/n`). `scoring/metrics.py::matched_origin_stats` now returns `None` unless the candidate
+covered the origin's panel, so a cut arm reports where it stopped plus its θ, never a standing.
+**A `matched_origin_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
+artifact — do not quote it, and do not compare it across arms.**
 
-**A truncated `matched_origin_accuracy` was an artifact of the order — FIXED 2026-08-02, and the
-diagnostic is still worth knowing.** Both strata are defined by the *incumbent's own* grades, so
-on any prefix its score was fixed by construction: positions 1-6 hold exactly one HIT-stratum slot
-(position 4), so a candidate cut at six reported `1/6` whatever the data said — measured over the
-32 truncated rows on disk, `⌊n/4⌋/n` predicted the banked value exactly 28 times. The writer now
-refuses it (`scoring/metrics.py::matched_origin_stats` returns `None` unless the candidate covered
-the origin's panel), so a cut arm reports where it stopped plus its θ, and never a standing. **If
-you see a `matched_origin_accuracy` on a row whose `scored_samples < expected_samples`, that round
-predates the fix — do not quote it, and do not compare it across arms.**
-
-What the ordering does **not** do is starve the posterior: measured over 6 arms, `p_best` moved on
-46-79% of the budget, so the stratification is not why ε fails to fire. Arms that end close are
-close. Checked and refuted 2026-08-02 — don't re-run this hypothesis.
+What the ordering does **not** do is starve the posterior — `p_best` moves across most of the
+budget, so the stratification is not why ε fails to fire. Arms that end close are close. Checked
+and refuted; don't re-run this hypothesis.
 
 So: **when a round reports `improved: false`, open
 `.runtime/streams/round_NNNN_p_best.jsonl` and read the final `paired_breakdown` before accepting
