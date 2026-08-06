@@ -339,8 +339,8 @@ paths:
       operationId: deleteCycle
       summary: Delete a stub cycle dir (guarded — n_rounds==0, not root, not active).
       description: |
-        Migrated from `DELETE /api/v1/campaigns/{c}/cycles/{cy}`
-        (active.py:236). The HTTP verb changes (DELETE -> POST /commands/...)
+        Migrated from `DELETE /api/v1/campaigns/{c}/cycles/{cy}`, a route that no
+        longer exists. The HTTP verb changes (DELETE -> POST /commands/...)
         because every Control-remote mutation rides the same dispatcher;
         guard semantics in `CampaignStore.try_delete_stub_cycle` unchanged.
       tags: [cycle-lifecycle]
@@ -371,8 +371,8 @@ paths:
       operationId: cleanupEmptyCycles
       summary: Batch-delete every empty-stub sibling under the root.
       description: |
-        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/cleanup-empty`
-        (active.py:254). Leaves-first via two passes (covers the
+        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/cleanup-empty`, a
+        route that no longer exists. Leaves-first via two passes (covers the
         two-generation stub chains we ship today); active-pointer guard
         respected per-cycle.
       tags: [cycle-lifecycle]
@@ -942,7 +942,7 @@ paths:
       operationId: registerBackend
       summary: Register a new backend connection (workspace-scoped).
       description: |
-        Migrated from `POST /api/v1/backends` (backends.py:58). Workspace-scoped,
+        Migrated from `POST /api/v1/backends`, a route that no longer exists. Workspace-scoped,
         no `Expected-Version` — the target is the backend registry, not a cycle.
       tags: [backends]
       parameters:

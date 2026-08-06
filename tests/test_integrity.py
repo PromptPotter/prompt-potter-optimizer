@@ -1747,13 +1747,18 @@ def test_claude_md_claims_resolve() -> None:
        cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo has
        never had (`potter-debt-sweep/SKILL.md` says so itself).
 
-    (4) runs over **every tracked `docs/**/*.md`**, not just the CLAUDE.md tree, because
-    both its bans govern all docs rather than the contract-file shape — and the old
-    CLAUDE.md-only scope is exactly what let them rot unseen: `code-debt-cleanup.md` had
-    accumulated nine line refs, every one stale (`select_round_subset` cited at :225,
-    actually at :806), and twelve `R-NN` tags survived the deletion of the registry that
-    defined them (`.claude/skills/potter-dev/rules.md`, gone 2026-06-18) — each now says
-    the rule by name instead. The other three assertions stay CLAUDE.md-scoped.
+    (4) runs over **every tracked `docs/**/*.md` and `docs/**/*.yaml`**, not just the
+    CLAUDE.md tree, because both its bans govern all docs rather than the contract-file
+    shape. Scope has now been the failure twice, the same way each time — a ban is written
+    for the whole docs tree and then applied to a subset of it, so whatever sits outside
+    rots with the gate green. The CLAUDE.md-only scope let `code-debt-cleanup.md` collect
+    nine line refs, every one stale (`select_round_subset` cited at :225, actually at
+    :806), plus twelve `R-NN` tags outliving the registry that defined them
+    (`.claude/skills/potter-dev/rules.md`, gone 2026-06-18). The `.md`-only scope that
+    replaced it then let the control-plane spec keep three refs into routes that had been
+    migrated away entirely — `active.py:236` and `:254` now point at an unrelated handler,
+    `backends.py:58` at another. Each now says the thing by name instead. The other three
+    assertions stay CLAUDE.md-scoped.
 
     What it cannot catch, so nobody reads a green as more than it is: a count that is
     simply wrong, semantic drift in a claim about behaviour, two plausible owners for one
@@ -1805,7 +1810,7 @@ def test_claude_md_claims_resolve() -> None:
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
 
-    for rel in (p for p in tracked if p.startswith("docs/") and p.endswith(".md")):
+    for rel in (p for p in tracked if p.startswith("docs/") and p.endswith((".md", ".yaml"))):
         text = (root / rel).read_text(encoding="utf-8")
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]

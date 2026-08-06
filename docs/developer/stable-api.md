@@ -70,9 +70,8 @@ Configured per dataset via `campaign.yaml::scoring`:
 
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 
-- **Builtins:** `min`, `max`, `sum`, `mean` (arithmetic — `statistics.fmean`). Nothing else from `__builtins__`.
-- **Per-sample evaluators:** any registered name. Today: `acc` (rank-1 exact match), `gt_in_ranked_items`, `gt_in_source`, `composite` (multi-axis blend). Names stable; implementation may change.
-- **Per-round aggregators:** `mean`, `median`, `min`, `max`, `count`, plus per-sample evaluator names lifted to round level.
+- **Builtins:** the `_SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
+- **Evaluators:** any registered name, per-sample or per-round. `all_evaluators()` (`application/scoring/evaluators.py`) is the registry, `evaluators_meta()` its served projection. Names are stable and implementations may change — read the registry, not a list here.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
@@ -115,7 +114,7 @@ off a doc.
 
 **Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `promptpotter/assets/optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed campaign config — `pobb_lock_in` / `pobb_lock_in_n_min` / `mechanisms.elimination.leader_lock_in`.
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 

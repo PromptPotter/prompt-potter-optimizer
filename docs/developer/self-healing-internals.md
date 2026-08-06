@@ -76,8 +76,8 @@ L1's own layout (`l1_layout`) renders the validation block inside the `{{l1_woun
 
 `DegradationCheck` (`application/optimization/pobb/checks.py`) fires mid-evaluation. Two paths:
 
-1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape (`finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`). One sighting ends the candidate; bypasses `min_queries`/`threshold`.
-2. **Rate-based.** After `min_queries=3`, if `degraded_rate >= 0.4`, eliminate.
+1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape (`finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`). One sighting ends the candidate; bypasses `min_samples`/`threshold`.
+2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
 
 Both produce `EscalationSignal(target=ELIMINATE_CANDIDATE)`. `score_population` synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check + observed pipeline_params, attaches to `cp.osp.wounds.runtime_failures`, and continues with the next candidate — round winner unaffected.
 
@@ -164,7 +164,7 @@ Fatal codes are deterministic for the whole config — one sighting proves the c
 
 Three load-boundary effects (consumed via `is_deprecated()`):
 
-1. **Candidate elimination** — `DegradationCheck` fast-path returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_queries` and `threshold`.
+1. **Candidate elimination** — `DegradationCheck` fast-path returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_samples` and `threshold`.
 2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on `archive.load_reusable_results` and drops every entry the classifier marks fatal. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
 3. **Stats exclusion** — `_compute_accuracy` partitions deprecated rows into a separate `deprecated` count and excludes them from `hits`, `total`, `errors`, accuracy denominator.
 

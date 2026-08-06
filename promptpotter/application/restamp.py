@@ -1,25 +1,46 @@
-"""Re-stamp every on-disk ``CampaignConfig`` onto the current model.
+"""Re-stamp every on-disk ``StrictModel`` record onto the current model.
 
-``CampaignConfig`` is ``extra="forbid"``. A file written before a field was renamed or dropped
-still carries that field, so ``load_campaign_config`` raises ``extra_forbidden`` and the campaign
-can no longer be read — silently, until someone tries to resume it. Re-stamping is the sanctioned
-remedy. Never ``extra="allow"``, never an alias, never a migration shim.
+Every model here is ``extra="forbid"``. A file written before a field was renamed or dropped
+still carries that field, so the read raises ``extra_forbidden`` and the record can no longer be
+loaded — silently, until someone tries to use it. Re-stamping is the sanctioned remedy. Never
+``extra="allow"``, never an alias, never a migration shim.
 
-Two trees, two shapes, two formats, two treatments — related by nothing but a stem:
+**The forbid default obliges EVERY on-disk model, and :data:`_SURFACES` is where that
+obligation is discharged.** ``5a69ca67`` dropped ``BackendConnection.last_synced_at`` and the
+stored ``backend.json`` records still carried it, so ``BackendStore`` raised at
+``init_services`` and every ``new``/``resume`` died at load — a surface this verb did not
+cover, on a box whose deploy runs it. Fixing that by hand-adding a third glob beside two
+others just moved the next omission one model along; the table is the fix, because a model
+that reaches disk becomes a ROW rather than a code change, and a kind missing from the tuple
+is visibly missing rather than merely un-thought-of.
 
-- **The minted snapshot**, ``campaigns/{id}/campaign.json::config``. Machine-written, so JSON.
-  Rewritten as the **delta from today's defaults** (``freeze_campaign_config``), which is the
-  shape the engine now persists.
-- **The dataset template**, ``datasets/{slug}/campaign.yaml::campaign_config``. Human-authored,
-  so YAML. Stale keys are pruned and *nothing else changes* — an operator who wrote a default
-  value out in full meant to see it there. A delta would silently reformat their file. The
-  rewrite goes back through the package emitter, so an operator's block scalars survive; YAML
-  comments do not, which is the one thing this script destroys and cannot help.
+Two treatments, and which one a row takes is a statement about what the file IS:
 
-Both: every dropped key is reported with the value it held, never silently. Whether that value
-*was* the default of the day is unknowable — a deleted field leaves no default behind — so this
-reports rather than classifies, and never maps an old key onto a new one. Guessing a mapping is
-a migration shim wearing a script.
+- **Delta** — the minted snapshot's config. Machine-written, and the engine already persists
+  it as the delta from today's defaults (``freeze_campaign_config``), so that is the shape it
+  is rewritten in.
+- **Prune** — every other record. Stale keys go and *nothing else changes*. Human-authored
+  YAML gets this and not the delta: an operator who wrote a default value out in full meant to
+  see it there, and a delta would silently reformat their file. The rewrite goes back through
+  the package emitter, so block scalars survive; YAML comments do not, which is the one thing
+  this script destroys and cannot help.
+
+**What is deliberately absent is the other half of the contract**, since a table read as
+partial teaches nothing:
+
+- **Measurements** (``rounds/round_*.json``, ``RoundResult``) — the one on-disk model that is
+  ``extra="ignore"``, and that is the migration story: a stale key must never make a *paid*
+  measurement unreadable, so the read tolerates it and no re-stamp is owed. A row here would
+  report every ``@computed_field`` as a stale key and rewrite nothing.
+- **The optimizer-call cache** (``archive/optimizer_calls/*.json``, ``LLMResponse``) — a
+  content-addressed cache is EVICTABLE, not migratable. A record that no longer validates is
+  one the next call re-fetches, so re-stamping it would pay to preserve something whose whole
+  contract is that losing it costs one call.
+
+Every dropped key is reported with the value it held, never silently. Whether that value *was*
+the default of the day is unknowable — a deleted field leaves no default behind — so this
+reports rather than classifies, and never maps an old key onto a new one. Guessing a mapping
+is a migration shim wearing a script.
 
 Skips are counted and printed; a scan that swallows ``OSError`` reports a vacuous zero.
 
@@ -37,20 +58,111 @@ import json
 import pathlib
 import types
 from collections import Counter
-from typing import Any, Union, get_args, get_origin
+from collections.abc import Callable
+from typing import Any, NamedTuple, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.application.config import (
-    CampaignConfig,
-    freeze_campaign_config,
-    load_campaign_config,
-)
+from promptpotter.application.config import CampaignConfig, freeze_campaign_config
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
+from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store.io import write_yaml
+from promptpotter.infrastructure.store.user_store import User
 
 __all__ = ["restamp_campaign_configs"]
+
+# What a row writes back once the record has validated. Takes the pruned mapping rather than
+# the validated model so no row has to narrow a type the table already fixed — the alternative
+# was a runtime `isinstance` inside otherwise model-agnostic code, which is a table pretending
+# to be a parameter.
+_Rewrite = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+def _as_delta(pruned: dict[str, Any]) -> dict[str, Any]:
+    """The minted snapshot's rewrite — today's config as the delta from today's defaults."""
+    return freeze_campaign_config(CampaignConfig.model_validate(pruned))
+
+
+def _as_pruned(pruned: dict[str, Any]) -> dict[str, Any]:
+    """Write back exactly what validated: stale keys gone, every surviving value untouched."""
+    return pruned
+
+
+class _Surface(NamedTuple):
+    """One on-disk model kind: where it lives, what validates it, what happens to it.
+
+    ``key_path`` addresses the record inside the document; empty means the whole document IS
+    the record, which is what a leaf store writes. ``benchmark_globs`` is the second root from
+    ``config/paths.py`` — the install's own dataset definitions, which only the template
+    surface has.
+    """
+
+    title: str
+    verb: str
+    workspace_globs: tuple[str, ...]
+    key_path: tuple[str, ...]
+    model_cls: type[BaseModel]
+    rewrite: _Rewrite
+    benchmark_globs: tuple[str, ...] = ()
+
+
+# THE coverage contract. A model that reaches disk belongs here the day it is written; adding
+# one is a row, not a code change. Ordered so a document addressed twice (the campaign manifest
+# and the config nested inside it) has its inner record settled first.
+_SURFACES: tuple[_Surface, ...] = (
+    _Surface(
+        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
+        verb="re-stamped",
+        workspace_globs=("*/campaigns/*/campaign.json", "*/archive/*/campaign.json"),
+        key_path=("config",),
+        model_cls=CampaignConfig,
+        rewrite=_as_delta,
+    ),
+    _Surface(
+        title="Campaign manifests (campaigns/*/campaign.json) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/campaigns/*/campaign.json", "*/archive/*/campaign.json"),
+        key_path=(),
+        model_cls=Campaign,
+        rewrite=_as_pruned,
+    ),
+    _Surface(
+        title="Dataset templates (datasets/*/campaign.yaml::campaign_config) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/datasets/*/campaign.yaml",),
+        key_path=("campaign_config",),
+        model_cls=CampaignConfig,
+        rewrite=_as_pruned,
+        benchmark_globs=("*/campaign.yaml",),
+    ),
+    _Surface(
+        title="Backend records (archive/backends/*/backend.json) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/archive/backends/*/backend.json",),
+        key_path=(),
+        model_cls=BackendConnection,
+        rewrite=_as_pruned,
+    ),
+    _Surface(
+        title="User records (user.json) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/user.json",),
+        key_path=(),
+        model_cls=User,
+        rewrite=_as_pruned,
+    ),
+    _Surface(
+        title="Diagnostic runs (archive/diagnostic_runs/*.json) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/archive/diagnostic_runs/*.json",),
+        key_path=(),
+        model_cls=DiagnosticRunRecord,
+        rewrite=_as_pruned,
+    ),
+)
 
 
 def _nested_model(ann: Any) -> type[BaseModel] | None:
@@ -110,12 +222,10 @@ class _Tally:
         print(f"  {'still invalid':>18}: {self.failed}")
 
 
-def _process(
-    path: pathlib.Path, key_path: tuple[str, ...], *, delta: bool, apply: bool, tally: _Tally
-) -> None:
-    """Prune (and for a snapshot, delta-ify) the config at *key_path* inside the doc at *path*.
+def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tally) -> None:
+    """Prune, validate and (per the row's treatment) rewrite the record *surface* addresses.
 
-    Format follows the tree: ``.yaml`` templates in and out, ``.json`` snapshots in and out.
+    Format follows the tree: ``.yaml`` templates in and out, ``.json`` records in and out.
     """
     is_yaml = path.suffix == ".yaml"
     try:
@@ -127,19 +237,19 @@ def _process(
         return
 
     holder: Any = doc
-    for key in key_path[:-1]:
+    for key in surface.key_path[:-1]:
         holder = holder.get(key)
         if not isinstance(holder, dict):
             tally.empty += 1
             return
-    raw = holder.get(key_path[-1])
+    raw = holder.get(surface.key_path[-1]) if surface.key_path else doc
     if not raw:
         tally.empty += 1
         return
 
-    pruned, dropped = _prune_to_schema(raw, CampaignConfig)
+    pruned, dropped = _prune_to_schema(raw, surface.model_cls)
     try:
-        config = load_campaign_config(pruned)
+        surface.model_cls.model_validate(pruned)
     except ValidationError as exc:
         tally.failed += 1
         print(f"  FAIL  {path}: still invalid after pruning — {exc.error_count()} error(s)")
@@ -147,7 +257,7 @@ def _process(
             print(f"          {'.'.join(map(str, err['loc']))}: {err['type']}")
         return
 
-    new = freeze_campaign_config(config) if delta else pruned
+    new = surface.rewrite(pruned)
     if new == raw:
         tally.unchanged += 1
         return
@@ -156,7 +266,10 @@ def _process(
         tally.gone[f"{dotted} = {value!r}"] += 1
     tally.rewritten += 1
     if apply:
-        holder[key_path[-1]] = new
+        if surface.key_path:
+            holder[surface.key_path[-1]] = new
+        else:
+            doc = new
         if is_yaml:
             write_yaml(path, doc)
         else:
@@ -164,7 +277,7 @@ def _process(
 
 
 def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
-    """Scan both on-disk config surfaces; report, and rewrite when *apply*.
+    """Scan every surface in :data:`_SURFACES`; report, and rewrite the rows that rewrite.
 
     Roots come from ``config/paths.py`` — the tenant workspace and the install's benchmark
     definitions — so the verb addresses the same trees the engine reads, from any CWD and
@@ -178,38 +291,30 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
         print(f"No workspace at {root} — nothing to re-stamp.")
         return {"rewritten": 0, "failed": 0, "skipped": 0}
 
-    snapshots = _Tally()
-    for path in sorted(root.glob("*/campaigns/*/campaign.json")) + sorted(
-        root.glob("*/archive/*/campaign.json")
-    ):
-        _process(path, ("config",), delta=True, apply=apply, tally=snapshots)
+    benchmarks = benchmark_datasets_root()
+    tallies = [_Tally() for _ in _SURFACES]
+    for surface, tally in zip(_SURFACES, tallies, strict=True):
+        paths = [p for g in surface.workspace_globs for p in root.glob(g)]
+        paths += [p for g in surface.benchmark_globs for p in benchmarks.glob(g)]
+        for path in sorted(set(paths)):
+            _process(path, surface, apply=apply, tally=tally)
 
-    templates = _Tally()
-    for path in sorted(root.glob("*/datasets/*/campaign.yaml")) + sorted(
-        benchmark_datasets_root().glob("*/campaign.yaml")
-    ):
-        _process(path, ("campaign_config",), delta=False, apply=apply, tally=templates)
+    for surface, tally in zip(_SURFACES, tallies, strict=True):
+        tally.report(surface.title, surface.verb if apply else f"would be {surface.verb}")
 
-    snapshots.report(
-        "Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
-        "re-stamped" if apply else "would re-stamp",
-    )
-    templates.report(
-        "Dataset templates (datasets/*/campaign.yaml::campaign_config) — pruned only",
-        "pruned" if apply else "would prune",
-    )
-
-    gone = snapshots.gone + templates.gone
+    gone: Counter[str] = Counter()
+    for tally in tallies:
+        gone += tally.gone
     if gone:
         print("\nDropped — knobs the engine no longer has, and the value each file held:")
         for entry, n in gone.most_common():
             print(f"  {n:4d}x  {entry}")
 
-    rewritten = snapshots.rewritten + templates.rewritten
+    rewritten = sum(t.rewritten for t in tallies)
     if not apply and rewritten:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
         "rewritten": rewritten,
-        "failed": snapshots.failed + templates.failed,
-        "skipped": snapshots.skipped + templates.skipped,
+        "failed": sum(t.failed for t in tallies),
+        "skipped": sum(t.skipped for t in tallies),
     }

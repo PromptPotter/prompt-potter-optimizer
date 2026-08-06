@@ -18,7 +18,7 @@ Three layers, repeating every round. L1 fires every round. L2 fires only when L1
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-L1 picks specific values. L2 reframes *how* L1 searches by writing onto the `OptSearchPoint` (`task_context` is the broadcast "what is this task" signal; persistent + accumulative). L3 writes a strategic framework to `OptSearchPoint.plan`. Higher layers don't replace lower ones — they constrain them. Every optimizer LLM call shares one path: per-call `InjectionBundle` → `NODE_LAYOUTS[node]` → `DispatchHub.fill`.
+L1 picks specific values. L2 reframes *how* L1 searches by writing L1's attention surface onto the `OptSearchPoint` — `memory.l1_layout` (which panels L1 sees) and `memory.l1_overrides` (how hard it explores). It does **not** write `task_context`: that framing is operator-authored and frozen for the run, structurally so (`TaskDecomposition.merge` refuses it and the L2 wire schema has no field for it). L3 writes a strategic framework to `OptSearchPoint.plan`. Higher layers don't replace lower ones — they constrain them. Every optimizer LLM call shares one path: per-call `InjectionBundle` → `NODE_LAYOUTS[node]` → `DispatchHub.fill`.
 
 The critique step is the only place in the loop that reads raw per-sample results; it feeds forward to next-round L1 (primary) and to L2 (operating context on escalation). **`l1_critique → l1_generate` is performance-driven feedback, not failure-driven healing** — different mechanism from self-healing.
 
