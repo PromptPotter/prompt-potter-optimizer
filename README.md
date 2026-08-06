@@ -6,11 +6,9 @@
 
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
-**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early using statistical confidence (population-aware Bayesian best-arm identification — *Posterior-of-Being-Best, PoBB*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
+**PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early on statistical confidence (*Posterior-of-Being-Best — [PoBB](docs/methods/candidate-elimination.md)*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
 
 ## How to Optimize LLM Prompts in 3 Steps
-
-Works for RAG pipelines, LLM agents, and any multi-step LLM workflow.
 
 Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. Each round, PromptPotter generates variations 🧪, scores them ⚖️, and keeps the winners 🏆. It stops when results plateau. ✨ **Prompt optimized.**
 
@@ -43,7 +41,7 @@ The code-evolution systems mutate source; the prompt-evolution systems mutate a 
 
 PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZero-shaped MCTS over the lineage**: [PoBB](docs/research/related-work.md#best-arm-identification--sequential-testing) prunes losers *within* a round, each round's ability backpropagates to its ancestors, and a UCB rule picks the ancestor to re-expand once a branch is spent. Rollouts give way to deterministic evaluation on your dataset, as in AlphaZero. [Comparison](docs/research/related-work.md#comparison-to-mcts).
 
-**AlphaEvolve** is the closest published peer — same loop, same memory across runs — but it evolves *source code* where PromptPotter evolves *the prompts and pipeline parameters around it*. A different target, not a missing feature: read row one as scope, the rest as capability.
+**AlphaEvolve** is the closest published peer — same loop, same memory across runs; read row one as scope (a different target, not a missing feature), the rest as capability.
 
 | | AlphaEvolve | PromptPotter |
 |---|---|---|
@@ -106,8 +104,6 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](docs/manual/04-reading-the-output.md).
 
-PromptPotter's inner **generate → score → critique** loop mirrors the classic **plan / implement / validate (PIV)** developer workflow, driven by an LLM at scale.
-
 > [!TIP]
 > <details>
 > <summary><b>What a round actually looks like</b> (click to expand)</summary>
@@ -117,7 +113,7 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > ├─ c0  seed                             acc=0.62  [origin]
 > ├─ c1  +thinking_style:step-by-step     acc=0.74  ✓
 > ├─ c2  +thinking_style:socratic          acc=0.71
-> ├─ c3  +persona:domain expert           acc=0.68  ✗ eliminated @ q18 (t-test)
+> ├─ c3  +persona:domain expert           acc=0.68  ✗ eliminated @ q18 (PoBB)
 > └─ c4  model:gpt-oss-120b→… ⚠ invalid   acc=0.00  ↳ validation_failure
 >                                                      → L2 brief next round
 > 
@@ -128,7 +124,7 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > 
 > </details>
 
-# Five ways to run it
+## Five ways to run it
 
 1. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
 2. **CLI** — `python -m promptpotter new <name>` / `resume`.
@@ -138,11 +134,11 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 
 **Direction — the sixth way: a tool another agent calls.** The aim is parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — can invoke PromptPotter as its *try-harness-first* move before reaching for fine-tuning. Why + a same-dataset head-to-head: [related-work § PromptPotter × NVIDIA AutoResearch](docs/research/related-work.md); tracked as [roadmap § Agent-tool parity](docs/specs/roadmap.md) (C5, MCP server mode).
 
-# Roadmap
+## Roadmap
 
 Status and the full forward plan live in one place: [`docs/specs/roadmap.md`](docs/specs/roadmap.md). Documentation index: [`docs/README.md`](docs/README.md).
 
-# Citation
+## Citation
 
 ```bibtex
 @software{promptpotter,
