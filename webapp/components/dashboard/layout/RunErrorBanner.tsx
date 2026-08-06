@@ -3,9 +3,9 @@
 //   * ``error`` — the fatal crash summary (CRASHED / RENDER_ERROR / DIVERGED),
 //     projected from the canonical ``ErrorRecord`` by ``_handle_error``.
 //   * ``recent_loop_warnings`` — non-fatal optimizer-loop degradations the
-//     self-healing rails recovered from (zero-candidate round, L2 soft-reject,
-//     injection truncation), projected from ``RoundWarningRecord`` by
-//     ``_handle_round_warning``. Shown in a warn-toned variant of the same box.
+//     self-healing rails recovered from (every ``RoundWarningKind``), projected
+//     from ``RoundWarningRecord`` by ``_handle_round_warning``. Shown in a
+//     warn-toned variant of the same box.
 // Both absent on a clean run, so the component is always safe to mount.
 
 import { useDashboard } from "@/lib/hooks/useDashboard";

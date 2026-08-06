@@ -437,9 +437,9 @@ components:
           type: string
           enum:
             - l1_zero_candidates
-            - l2_validator_soft_reject
             - injection_budget_overrun
             - layer_parse_failure
+            - optimizer_deadline_retry
           description: Which degradation class this record reports.
         severity:
           type: string
@@ -461,8 +461,8 @@ components:
           additionalProperties: true
           description: |
             Per-kind structured context (e.g. `reason` + `model` for
-            `l1_zero_candidates`, `validator_ids` for the L2 soft-reject,
-            `injection`/`rendered_chars`/`cap` for the budget overrun).
+            `l1_zero_candidates`, `injection`/`rendered_chars`/`cap` for the
+            budget overrun, `node`/`budget_s`/`attempt` for a deadline retry).
         timestamp:
           type: string
           format: date-time
