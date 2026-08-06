@@ -1,7 +1,7 @@
 "use client";
 import { useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
+import { type DatasetItem, type HardSamplesScope, type SampleSeries } from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
@@ -15,6 +15,9 @@ interface Props {
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
   perSample?: Map<number, HeatDot[]>;
+  // The served per-sample series — what the Fitness column reports on. Kept
+  // apart from `perSample`, which folds in the in-flight tail for the strip.
+  servedSeries?: Map<number, SampleSeries>;
   // Compact = tiny default height (~3 rows visible). User can still drag
   // the resize handle to grow it. Off = standard preset height.
   compact?: boolean;
@@ -32,6 +35,7 @@ interface Props {
 
 export function HardSamplesTable({
   perSample,
+  servedSeries,
   compact,
   datasetName,
   datasetItems,
@@ -46,7 +50,7 @@ export function HardSamplesTable({
   // optimizer process dies, `current_sample_id` is stranded in dashboard.json;
   // `isLive` goes false once freshness lapses, so the blink stops on its own.
   const { dash, isLive } = useDashboard();
-  const m = useHardSamplesTableModel({ datasetItems, perSample });
+  const m = useHardSamplesTableModel({ datasetItems, perSample, servedSeries });
   const {
     stablePerSample,
     columns,
@@ -233,7 +237,7 @@ export function HardSamplesTable({
                     const isMeas = col.id === "measurements";
                     const cell = isRank
                       ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
-                      : cellFor(col.id, item, meas);
+                      : cellFor(col.id, item, meas, servedSeries?.get(item.sample_id) ?? null);
                     const isExpandable =
                       !isRank &&
                       !isMeas &&

@@ -15,15 +15,30 @@ import {
   fetchMeasurementSeries,
   type DatasetItem,
   type HardSamplesScope,
-  type MeasurementDot,
+  type MeasurementSeriesResponse,
+  type SampleSeries,
 } from "../api";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
+
+// The roster-wide outcome numbers, straight off `MeasurementSeriesResponse` — a
+// projection of the wire type, never a second declaration of it.
+export type SeriesTotals = Pick<
+  MeasurementSeriesResponse,
+  "total_measurements" | "total_hits" | "mean_fitness"
+>;
 
 interface ScopeSlice {
   items: DatasetItem[];
   measuredCount: number;
   unmeasuredCount: number;
-  archivePerSample: Map<number, MeasurementDot[]>;
+  // Keyed by sample_id, holding the SERIES — dots and the served aggregates over
+  // exactly those dots, which is why they travel as one object rather than a dot
+  // list beside a tally that could answer for some other set.
+  archivePerSample: Map<number, SampleSeries>;
+  // Served totals over this scope's series. Null when the series read failed or
+  // returned nothing — an unread scope and a scope with zero measurements are
+  // different facts, and the roster headline must not spell them the same way.
+  totals: SeriesTotals | null;
 }
 
 interface DatasetPreviewState extends ScopeSlice {
@@ -50,23 +65,19 @@ const EMPTY_SLICE: ScopeSlice = {
   measuredCount: 0,
   unmeasuredCount: 0,
   archivePerSample: new Map(),
+  totals: null,
 };
 
 const EMPTY: DatasetPreviewState = {
+  ...EMPTY_SLICE,
   splitTest: null,
-  items: [],
-  measuredCount: 0,
-  unmeasuredCount: 0,
-  archivePerSample: new Map(),
   isStale: false,
   error: null,
 };
 
-function dotMap(
-  items: { sample_id: number; measurements: MeasurementDot[] }[] | undefined,
-): Map<number, MeasurementDot[]> {
-  const m = new Map<number, MeasurementDot[]>();
-  if (items) for (const s of items) m.set(s.sample_id, s.measurements);
+function seriesMap(series: MeasurementSeriesResponse | null): Map<number, SampleSeries> {
+  const m = new Map<number, SampleSeries>();
+  if (series) for (const s of series.items) m.set(s.sample_id, s);
   return m;
 }
 
@@ -75,18 +86,25 @@ function dotMap(
 // would hide.
 function sliceFrom(
   items: DatasetItem[],
-  series: { sample_id: number; measurements: MeasurementDot[] }[] | undefined,
+  series: MeasurementSeriesResponse | null,
 ): ScopeSlice {
-  const archivePerSample = dotMap(series);
+  const archivePerSample = seriesMap(series);
   let measured = 0;
   for (const it of items) {
-    if ((archivePerSample.get(it.sample_id)?.length ?? 0) > 0) measured += 1;
+    if ((archivePerSample.get(it.sample_id)?.measurements.length ?? 0) > 0) measured += 1;
   }
   return {
     items,
     measuredCount: measured,
     unmeasuredCount: items.length - measured,
     archivePerSample,
+    totals: series
+      ? {
+          total_measurements: series.total_measurements,
+          total_hits: series.total_hits,
+          mean_fitness: series.mean_fitness,
+        }
+      : null,
   };
 }
 
@@ -142,10 +160,8 @@ export function useDatasetPreview(
         setLoaded({
           key: unitKey,
           splitTest: dsPreview.split_test,
-          dataset: sliceFrom(dsPreview.items, dsSeries?.items),
-          campaign: cmpPreview
-            ? sliceFrom(cmpPreview.items, cmpSeries?.items)
-            : EMPTY_SLICE,
+          dataset: sliceFrom(dsPreview.items, dsSeries),
+          campaign: cmpPreview ? sliceFrom(cmpPreview.items, cmpSeries) : EMPTY_SLICE,
           error: null,
         });
       } catch (e) {

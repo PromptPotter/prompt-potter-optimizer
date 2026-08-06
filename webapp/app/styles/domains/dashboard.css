@@ -158,6 +158,7 @@
 .rsv-group-head:hover{background:var(--color-background-hover)}
 .rsv-cand-label{color:var(--color-text-primary);font-weight:600}
 .rsv-tally{display:inline-flex;gap:8px;font-weight:500}
+.rsv-tally-score{color:var(--color-text-secondary)}
 .rsv-empty-row{padding:4px 8px;color:var(--color-text-tertiary)}
 .rsv-rows{display:flex;flex-direction:column}
 .rsv-row{padding:2px 8px;display:block;border-bottom:0.5px dotted transparent}

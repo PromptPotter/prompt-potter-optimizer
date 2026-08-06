@@ -123,12 +123,16 @@ export function RoundSamplesBody({
                       {g.samples.length} {g.samples.length === 1 ? "cell" : "cells"}
                     </span>
                   ) : (
-                    <>
-                      <span>{g.samples.length} samples</span>
-                      {g.candidate.accuracy != null && (
-                        <span className="tag-cached">{fmtPct0(g.candidate.accuracy)}</span>
-                      )}
-                    </>
+                    /* Both numbers are SERVED and share ONE denominator: the
+                       candidate's scored-sample count and the accuracy over it.
+                       `g.samples.length` is the count AFTER the HIT/MISS filter,
+                       so pairing it with an unfiltered rate would caption the
+                       rate with someone else's denominator; the filter's effect
+                       stays legible in the rows and in the roster count above. */
+                    <span className="rsv-tally-score">
+                      {g.candidate.n_samples ?? g.samples.length} scored
+                      {g.candidate.accuracy != null && ` · ${fmtPct0(g.candidate.accuracy)}`}
+                    </span>
                   )}
                   {cached > 0 && (
                     <span

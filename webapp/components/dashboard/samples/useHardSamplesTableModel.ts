@@ -6,7 +6,7 @@
 // and only renders.
 
 import { useEffect, useMemo, useState, type PointerEvent } from "react";
-import { type DatasetItem } from "@/lib/api";
+import { type DatasetItem, type SampleSeries } from "@/lib/api";
 import { useStableContent } from "@/lib/stable";
 import { compareHardSamples } from "./hard-sample-order";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
@@ -33,11 +33,16 @@ export function wrappable(col: ColDef): boolean {
 interface HardSamplesTableModelInput {
   datasetItems: DatasetItem[];
   perSample?: Map<number, HeatDot[]>;
+  // The served per-sample series behind the Fitness column. Separate from
+  // `perSample` because that one carries the in-flight tail the strip draws,
+  // and an aggregate must answer for the measurements the backend scored.
+  servedSeries?: Map<number, SampleSeries>;
 }
 
 export function useHardSamplesTableModel({
   datasetItems,
   perSample,
+  servedSeries,
 }: HardSamplesTableModelInput) {
   // The Map identity churns every 2 s poll even when content is unchanged.
   // Stabilise it once at the top — every memo below that depends on perSample
@@ -140,10 +145,10 @@ export function useHardSamplesTableModel({
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
     for (const col of columns) {
-      w[col.id] = autoWidthFor(col, items, stablePerSample, ordCols.length);
+      w[col.id] = autoWidthFor(col, items, stablePerSample, servedSeries, ordCols.length);
     }
     return w;
-  }, [items, columns, stablePerSample, ordCols.length]);
+  }, [items, columns, stablePerSample, servedSeries, ordCols.length]);
 
   // Live-sort ("Auto-sort"): the shared hard-sample ranking (`compareHardSamples`) —
   // the same comparator the heatmap uses, so the two surfaces cannot disagree.
@@ -160,7 +165,12 @@ export function useHardSamplesTableModel({
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
-      const v = cellFor(col, it, stablePerSample?.get(it.sample_id) ?? []).raw;
+      const v = cellFor(
+        col,
+        it,
+        stablePerSample?.get(it.sample_id) ?? [],
+        servedSeries?.get(it.sample_id) ?? null,
+      ).raw;
       if (v === null) return Number.NEGATIVE_INFINITY;
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
@@ -173,7 +183,7 @@ export function useHardSamplesTableModel({
         return String(ka).localeCompare(String(kb)) * sign;
       })
       .map((it) => it.sample_id);
-  }, [liveSortActive, sortBy, items, stablePerSample]);
+  }, [liveSortActive, sortBy, items, stablePerSample, servedSeries]);
 
   // Index items by sample_id so the row loop projects via stable order
   // without a second sortedItems memo.

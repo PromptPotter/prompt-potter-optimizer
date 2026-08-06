@@ -29,6 +29,7 @@ from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_l
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
+from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_views import (
     campaign_measurement_series,
@@ -585,12 +586,50 @@ class MeasurementDot(StrictModel):
 class SampleSeries(StrictModel):
     sample_id: int
     measurements: list[MeasurementDot]
+    n_hits: int = Field(
+        description="How many of THIS series' measurements maxed out the active scorer "
+        "(`domain.scoring.is_hit`, the one definition of that threshold). Served rather than "
+        "counted client-side so the tally and the dots it summarises cannot disagree — and so "
+        "a graded scorer, whose ceiling is unreachable, reports 0 against a mean that is not 0.",
+    )
+    mean_fitness: float | None = Field(
+        description="Mean graded fitness over this series; `None` when it holds no measurement. "
+        "The rate to read on a graded scorer, where `n_hits` is structurally 0.",
+    )
 
 
 class MeasurementSeriesResponse(StrictModel):
     name: str
     scope: HeatmapScope
     items: list[SampleSeries]
+    total_measurements: int = Field(
+        description="Measurements across every series in `items` — the denominator of the "
+        "roster's headline, served so the reader adds nothing up.",
+    )
+    total_hits: int = Field(
+        description="`SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded "
+        "scorer; read `mean_fitness` there.",
+    )
+    mean_fitness: float | None = Field(
+        description="Mean graded fitness across every measurement in `items`; `None` when the "
+        "scope holds none. The headline rate on any scorer, graded or binary.",
+    )
+
+
+def _sample_series(sample_id: int, dots: list[dict[str, Any]]) -> SampleSeries:
+    """One sample's dots plus the aggregates over exactly those dots.
+
+    Aggregating here rather than at the reader is what makes `n_hits` / `mean_fitness`
+    answer for the series they ship with: every scope builds its dots from a different
+    source, so a second pass anywhere else would be counting a different set.
+    """
+    fitness = [float(d["fitness"]) for d in dots]
+    return SampleSeries(
+        sample_id=sample_id,
+        measurements=[MeasurementDot(**d) for d in dots],
+        n_hits=sum(1 for f in fitness if is_hit(f)),
+        mean_fitness=sum(fitness) / len(fitness) if fitness else None,
+    )
 
 
 @datasets_router.get(
@@ -670,14 +709,20 @@ def get_dataset_measurement_series(
             ).items()
         }
 
-    items = [
-        SampleSeries(
-            sample_id=sid,
-            measurements=[MeasurementDot(**m) for m in series.get(sid, [])],
-        )
-        for sid in selected
-    ]
-    return MeasurementSeriesResponse(name=raw["name"], scope=scope, items=items)
+    items = [_sample_series(sid, series.get(sid, [])) for sid in selected]
+    n_meas = sum(len(it.measurements) for it in items)
+    return MeasurementSeriesResponse(
+        name=raw["name"],
+        scope=scope,
+        items=items,
+        total_measurements=n_meas,
+        total_hits=sum(it.n_hits for it in items),
+        mean_fitness=(
+            sum(float(d.fitness) for it in items for d in it.measurements) / n_meas
+            if n_meas
+            else None
+        ),
+    )
 
 
 class DatasetPipelineResponse(StrictModel):

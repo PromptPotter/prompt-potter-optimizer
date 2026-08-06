@@ -59,7 +59,14 @@ LEDGER_BASELINE = {
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
     "domain_any_maps": 72,
-    "param_decls": 4051,
+    # 4051 -> 4053 (2026-08-06): `_sample_series(sample_id, dots)` in the datasets router.
+    # A deliberate raise, for two params that buy the deletion of a rule the webapp could
+    # not keep: the hard-sample roster counted its own hit rate off the dots in hand, which
+    # on a graded scorer (`is_hit` = `fitness >= 1.0`, unreachable there) printed 0/N on
+    # every row of a healthy campaign. Serving the aggregate beside the series it aggregates
+    # is what makes the two unable to disagree — a reader-side sum over a different set is
+    # exactly the failure this replaces, so the surface moves to the side that owns it.
+    "param_decls": 4053,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,
