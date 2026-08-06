@@ -15,9 +15,9 @@ predates the facade) and ``intelligence/hard_sample_archive.py`` (``archive.base
 as a memo key, no I/O).
 
 Placement in ``infrastructure/store/`` (not ``application/scoring/``): the archive
-IS a store, so its single-writer facade lives beside the leaf it wraps. The four
-writes below (append / compact / reset / maintain-index) are the whole write
-surface — any new one means a new function here, not a sidecar."""
+IS a store, so its single-writer facade lives beside the leaf it wraps. The five
+writes below (append / compact / reset / maintain-index / sample-fold) are the whole
+write surface — any new one means a new function here, not a sidecar."""
 
 from __future__ import annotations
 
@@ -25,8 +25,9 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import append_jsonl, read_json_tolerant, write_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import instrument_mode
 
@@ -51,6 +52,8 @@ __all__ = [
     "reset_measurement_run",
     "reusable_results",
     "runs_since",
+    "sample_fold_rows",
+    "write_sample_fold",
 ]
 
 
@@ -276,6 +279,40 @@ def reindex_measurements(stores: Stores) -> dict[str, int]:
     """Rebuild the append-only measurement index from the detail files and GC orphans.
     A maintenance verb — the index is derived, so this loses nothing; returns counts."""
     return stores.archive.reindex()
+
+
+def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
+    return stores.archive.base_dir / "derived" / f"sample_fold__{dataset_name}.jsonl"
+
+
+def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[dict[str, Any]]:
+    """The persisted ``SampleIndex`` derivation for *dataset_name*, **in append order**.
+
+    Read with :func:`iter_jsonl`, not folded last-wins: one consumer
+    (``persistent_failures``) reads a sample's trailing observations as a streak, so the
+    replay sequence is part of the answer and a map would lose it.
+    """
+    return iter_jsonl(_sample_fold_path(stores, dataset_name))
+
+
+def write_sample_fold(
+    stores: Stores, *, dataset_name: str, rows: Iterable[dict[str, Any]], append: bool
+) -> None:
+    """Persist per-run derivation *rows* — ``append`` for runs newly folded this process,
+    else replace (the on-disk fold failed revalidation and was rebuilt from the details).
+
+    Skipped inside an instrument for the reason :func:`maintain_measurement_index` states:
+    an inner L4 cycle shares this archive with the campaign that spawned it, so it must not
+    write tenant-global storage.
+    """
+    if instrument_mode() is not None:
+        return
+    path = _sample_fold_path(stores, dataset_name)
+    if append:
+        for row in rows:
+            append_jsonl(path, row)
+        return
+    write_jsonl(path, rows)
 
 
 # ---------------------------------------------------------------------------

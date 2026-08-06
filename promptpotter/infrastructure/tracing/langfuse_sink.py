@@ -6,6 +6,7 @@ resumes produce one continuous trace.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -131,23 +132,35 @@ class LangfuseSink:
                 len(event.items),
             )
             return
-        self._lf.create_dataset(
-            name=event.dataset_name,
-            description="Ground truth queries for prompt evaluation",
-            metadata={"n_items": len(event.items)},
-        )
-        for query, ground_truth in event.items:
-            if not query:
-                continue
-            cloud_id = self._lf.create_dataset_item(
-                dataset_name=event.dataset_name,
-                input={"query": query},
-                expected_output=ground_truth,
-                metadata={"source": "dataset"},
+
+        # Off the run path: this is up to a hundred sequential POSTs, each retried behind a
+        # blocking sleep, fired from run start — so the operator waited on a price of pure
+        # observability before the campaign made its first call. Nothing the loop does depends
+        # on the result (tracing is fan-out only), and a query whose item has not landed yet
+        # simply skips its link-back in `on_query_scored`. The mint lands in one `update`
+        # rather than key-by-key so a concurrent `_persist` cannot observe the dict mid-growth.
+        def _register() -> None:
+            self._lf.create_dataset(
+                name=event.dataset_name,
+                description="Ground truth queries for prompt evaluation",
+                metadata={"n_items": len(event.items)},
             )
-            if cloud_id:
-                self._dataset_item_ids[(event.dataset_name, query)] = cloud_id
-        self._persist()
+            minted: dict[tuple[str, str], str] = {}
+            for query, ground_truth in event.items:
+                if not query:
+                    continue
+                cloud_id = self._lf.create_dataset_item(
+                    dataset_name=event.dataset_name,
+                    input={"query": query},
+                    expected_output=ground_truth,
+                    metadata={"source": "dataset"},
+                )
+                if cloud_id:
+                    minted[(event.dataset_name, query)] = cloud_id
+            self._dataset_item_ids.update(minted)
+            self._persist()
+
+        threading.Thread(target=_register, name="langfuse-dataset", daemon=True).start()
 
     def on_dataset_run(self, event: DatasetRun) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)

@@ -143,6 +143,9 @@ class AxisIndex:
         self._unscoreable_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._top_runs: list[RunRecord] = []
+        # Whether the persisted per-run fold was replayed instead of re-derived. Decides
+        # append-vs-replace when this refresh writes back; `None` until the first refresh.
+        self._fold_seeded: bool | None = None
 
     # ----- axis analytics -----
 
@@ -336,6 +339,46 @@ class AxisIndex:
 
     # ----- ingest / refresh -----
 
+    def _seed_from_fold(self, stores: Stores, dataset_name: str | None, formula_key: str) -> bool:
+        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust.
+
+        The cursor this seeds (``SampleIndex._seen_runs``) used to be in-process only, so every
+        start re-read and re-scored the entire dataset slice of the archive — 3.7 s of detail
+        reads plus a compiled-expression eval per measurement on a 1076-run store, growing
+        forever. The fold is the same derivation, already paid for.
+
+        **Validation is all-or-nothing, and that is the point.** A row is trustworthy only if it
+        was derived under the active formula (the fitness it folded is otherwise from a dead
+        vocabulary) and its detail has not changed since (the scoring walk re-saves a run after
+        every sample, so details grow under a reader). Rejecting the whole file on the first bad
+        row — rather than re-deriving that run and appending it — keeps the replay ORDER equal to
+        the original ingest order, which ``persistent_failures`` reads as a streak off the tail
+        of each sample's observations. A cheaper repair would silently reorder that.
+        """
+        if not dataset_name:
+            return False
+        rows = archive_views.sample_fold_rows(stores, dataset_name=dataset_name)
+        if not rows:
+            return False
+
+        signatures = archive_views.run_signatures(stores)
+        for row in rows:
+            run_id = row.get("run_id") or ""
+            if row.get("fk") != formula_key:
+                return False
+            if list(signatures.get(run_id) or ()) != list(row.get("sig") or ()):
+                return False
+
+        for row in rows:
+            run_id = row["run_id"]
+            if row.get("unscoreable"):
+                self._unscoreable_runs.add(run_id)
+            else:
+                self.sample_index.replay_row(row)
+            self.sample_index.mark_seen(run_id)
+        logger.debug("AxisIndex seeded %d run(s) from the persisted fold", len(rows))
+        return True
+
     def refresh(
         self,
         stores: Stores,
@@ -364,11 +407,22 @@ class AxisIndex:
         skip binds BOTH halves of the refresh:** the axis fold below reads the same skip set, so
         a run this formula cannot score reaches neither the per-sample index nor the axis
         rankings and the top-runs leaderboard."""
+        formula_key = f"{scorer_id}\x1f{scorer_formula or ''}"
+        if self._fold_seeded is None:
+            self._fold_seeded = self._seed_from_fold(stores, dataset_name, formula_key)
+
+        # Captured BEFORE the details are read, never after: a run whose log grows between the
+        # two must end up stamped with the OLDER signature, so the next process re-derives it.
+        # Stamping the newer one would leave a fold that silently omits the rows it gained.
+        signatures = archive_views.run_signatures(stores)
+
         added = 0
         skipped: list[str] = []
+        folded: list[dict[str, Any]] = []
         for run_id, detail in archive_views.runs_since(
             stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
+            stamp = {"fk": formula_key, "sig": list(signatures.get(run_id) or ())}
             if scorer is not None:
                 try:
                     rescore_results(
@@ -378,6 +432,7 @@ class AxisIndex:
                     skipped.append(run_id)
                     self._unscoreable_runs.add(run_id)
                     self.sample_index.mark_seen(run_id)
+                    folded.append({"run_id": run_id, "unscoreable": True, **stamp})
                     logger.warning(
                         "axis refresh: archived run %r is unscoreable under the active formula "
                         "— skipping it (it predates the current observation vocabulary). %s",
@@ -385,9 +440,17 @@ class AxisIndex:
                         exc,
                     )
                     continue
-            self.sample_index.ingest_run(detail)
+            folded.append({**self.sample_index.ingest_run(detail), **stamp})
             self.sample_index.mark_seen(run_id)
             added += 1
+
+        # Replace rather than append whenever the seed was rejected: what this process just
+        # derived IS the whole fold, and appending would leave the rejected rows in front of it.
+        if dataset_name and (folded or not self._fold_seeded):
+            archive_views.write_sample_fold(
+                stores, dataset_name=dataset_name, rows=folded, append=self._fold_seeded
+            )
+            self._fold_seeded = True
         if skipped:
             logger.warning(
                 "axis refresh: %d archived run(s) skipped as unscoreable under the active "

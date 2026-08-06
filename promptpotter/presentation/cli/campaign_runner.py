@@ -13,6 +13,7 @@ fires.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 
@@ -21,44 +22,32 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.config.settings import settings
-from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
-from promptpotter.presentation.cli.commands.ab import cmd_ab
-from promptpotter.presentation.cli.commands.lifecycle import (
-    cmd_archive,
-    cmd_delete,
-    cmd_pause,
-    cmd_unarchive,
-)
-from promptpotter.presentation.cli.commands.new import cmd_new
-from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
-from promptpotter.presentation.cli.commands.rank_optimizer_prompts import cmd_rank_optimizer_prompts
-from promptpotter.presentation.cli.commands.reindex import cmd_reindex
-from promptpotter.presentation.cli.commands.reset import cmd_reset
-from promptpotter.presentation.cli.commands.restamp import cmd_restamp
-from promptpotter.presentation.cli.commands.resume_command import cmd_resume
-from promptpotter.presentation.cli.commands.seed_screen import cmd_seed_screen
-from promptpotter.presentation.cli.commands.verify import cmd_verify
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 
-__all__ = ["_DIVERGENCE_HINT", "main", "set_verbose"]
+__all__ = ["main"]
 
 
+# Verb -> "module:attr", resolved on dispatch rather than bound at module scope. Importing all
+# fourteen command bodies up front made every invocation pay for every other verb's dependency
+# tree before argparse had looked at argv — `ab` alone dragged in numpy, `new` dragged in httpx —
+# so `pause` cost the same second of imports as a full campaign launch.
 COMMANDS = {
-    "new": cmd_new,
-    "resume": cmd_resume,
-    "ab": cmd_ab,
-    "reset": cmd_reset,
-    "reindex": cmd_reindex,
-    "restamp": cmd_restamp,
-    "verify": cmd_verify,
-    "noise-floor": cmd_noise_floor,
-    "seed-screen": cmd_seed_screen,
-    "rank-optimizer-prompts": cmd_rank_optimizer_prompts,
-    "archive": cmd_archive,
-    "delete": cmd_delete,
-    "unarchive": cmd_unarchive,
-    "pause": cmd_pause,
+    "new": "promptpotter.presentation.cli.commands.new:cmd_new",
+    "resume": "promptpotter.presentation.cli.commands.resume_command:cmd_resume",
+    "ab": "promptpotter.presentation.cli.commands.ab:cmd_ab",
+    "reset": "promptpotter.presentation.cli.commands.reset:cmd_reset",
+    "reindex": "promptpotter.presentation.cli.commands.reindex:cmd_reindex",
+    "restamp": "promptpotter.presentation.cli.commands.restamp:cmd_restamp",
+    "verify": "promptpotter.presentation.cli.commands.verify:cmd_verify",
+    "noise-floor": "promptpotter.presentation.cli.commands.noise_floor:cmd_noise_floor",
+    "seed-screen": "promptpotter.presentation.cli.commands.seed_screen:cmd_seed_screen",
+    "rank-optimizer-prompts": (
+        "promptpotter.presentation.cli.commands.rank_optimizer_prompts:cmd_rank_optimizer_prompts"
+    ),
+    "archive": "promptpotter.presentation.cli.commands.lifecycle:cmd_archive",
+    "delete": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete",
+    "unarchive": "promptpotter.presentation.cli.commands.lifecycle:cmd_unarchive",
+    "pause": "promptpotter.presentation.cli.commands.lifecycle:cmd_pause",
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
@@ -67,7 +56,8 @@ COMMANDS = {
 # no parser row is unreachable, reported by argparse as an unknown verb rather than a missing
 # one. An import-time assert beside the table (`tests/CLAUDE.md`: structural invariants live in
 # production, not tests) costs nothing to maintain and fails before `main()` can dispatch.
-_declared = parser_verbs(build_parser())
+_PARSER = build_parser()
+_declared = parser_verbs(_PARSER)
 assert _declared == COMMANDS.keys(), (
     "CLI verb drift between COMMANDS and parsers.py — "
     f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
@@ -76,9 +66,10 @@ assert _declared == COMMANDS.keys(), (
 
 
 def main() -> None:
+    from promptpotter.presentation.cli.commands._shared import set_verbose
     from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
-    parser = build_parser()
+    parser = _PARSER
     args = parser.parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
 
@@ -89,6 +80,7 @@ def main() -> None:
     # instead of letting resume fail with a confusing error.
     if args.command is None:
         from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+        from promptpotter.config.settings import settings
         from promptpotter.infrastructure.store.layout import tenant_workspace
         from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
         from promptpotter.presentation.cli.commands._shared import identity_from_args
@@ -129,8 +121,11 @@ def main() -> None:
 
         ensure_api_key()
 
+    module_path, _, attr = COMMANDS[args.command].partition(":")
+    handler = getattr(importlib.import_module(module_path), attr)
+
     try:
-        result = asyncio.run(COMMANDS[args.command](args))
+        result = asyncio.run(handler(args))
     except (RequestTooLargeError, PotterError) as exc:
         # Operator-facing input errors (e.g. `resume --from N` past the last
         # completed round → BadRequestError) surface as a clean message, not a

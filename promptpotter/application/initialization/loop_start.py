@@ -356,6 +356,10 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
+    from promptpotter.shared.statistics import warm_stats_backend
+
+    warm_stats_backend()
+
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(

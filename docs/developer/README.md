@@ -84,10 +84,14 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 
 ## 4. Cross-run memory
 
-`archive/` is the database. `MeasurementArchive` is the only gateway. Two in-memory views (`SampleIndex`, `AxisIndex`) are rebuilt from disk on every `refresh()` and never persisted.
+`archive/` is the database. `MeasurementArchive` is the only gateway. Two derived views
+(`SampleIndex`, `AxisIndex`) are folded from it by `refresh()`. `SampleIndex`'s per-run
+derivation is persisted (`derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
+process re-reads and re-scores only runs it has not folded before; the fold is revalidated
+against the active formula and each detail's signature, and rebuilt whole if either moved.
 
 ```
-ON DISK (the database)                IN MEMORY (rebuilt from disk)
+ON DISK (the database)                DERIVED (folded from disk)
 ──────────────────────────            ─────────────────────────────
 measurements/                       MeasurementArchive
   index.jsonl        ← append-only                   │
@@ -117,7 +121,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 |---|---|
 | New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`application/datasets/loaders.py`), `_to_measurement()` (`infrastructure/store/measurement_archive.py`) |
 | New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
-| New derived index | Class with `_seen_runs` cursor + `ingest_run()`, register on `AxisIndex.refresh()` |
+| New derived index | Class with `_seen_runs` cursor + `ingest_run()` returning its per-run row, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `read_model` (`infrastructure/store/read_model.py`) — never a second mechanism |
 
 **The one rule:** `node_configs` is canonical identity — must be deterministic from pipeline params. Don't break determinism.
 

@@ -299,10 +299,19 @@ class LiveDashboardView(DerivedView):
             super().on_record(record, offset)
 
     def _schedule_persist(self) -> None:
-        """Mark dirty and arm a 250 ms debounce. Caller must hold `_persist_lock`."""
+        """Mark dirty and ensure a 250 ms flush is armed. Caller must hold `_persist_lock`.
+
+        An already-armed timer is left to run rather than cancelled and replaced: it will pick
+        this mutation up when it fires, because the flush reads `_persist_dirty` and not the
+        event that armed it. Re-arming per event span a fresh OS thread for each of the four
+        events a sample emits — ~960 create/cancel pairs a round — and made the window
+        *trailing*, so a dense enough burst kept pushing the deadline out and `dashboard.json`
+        went stale exactly while the most was happening. A fixed window bounds staleness at
+        `_DASHBOARD_DEBOUNCE_S` from the first unwritten mutation instead of the last.
+        """
         self._persist_dirty = True
         if self._persist_timer is not None:
-            self._persist_timer.cancel()
+            return
         timer = threading.Timer(_DASHBOARD_DEBOUNCE_S, self._fire_debounced_persist)
         timer.daemon = True
         self._persist_timer = timer
@@ -314,10 +323,13 @@ class LiveDashboardView(DerivedView):
         propagate into the daemon-thread default handler."""
         try:
             with self._persist_lock:
+                # Unconditionally, and before the dirty test: this slot is what `_schedule_persist`
+                # reads to decide whether a flush is already armed, so leaving it set on the
+                # not-dirty path would disarm the debounce for the rest of the run.
+                self._persist_timer = None
                 if not self._persist_dirty:
                     return
                 self._persist_dirty = False
-                self._persist_timer = None
                 self._persist()
         except Exception:
             logger.exception("debounced dashboard persist failed")

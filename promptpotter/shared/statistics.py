@@ -6,9 +6,29 @@ Requires ``scipy`` (``pip install -e ".[stats]"``).
 
 from __future__ import annotations
 
+import contextlib
 import math
+import threading
 
-import numpy as np
+
+def warm_stats_backend() -> None:
+    """Import ``scipy.stats`` on a daemon thread so the round loop never pays for it.
+
+    Every scipy site in this package imports inside its function, deliberately — a CLI verb
+    that never reaches statistics should not pay a ~4 s import. But the cost does not vanish,
+    it relocates: the first PoBB check of round 1 triggers it, where it reads as the loop
+    freezing mid-candidate. Run init is already blocked on network I/O, so warming there is
+    free, and the import lock makes the later in-loop import reuse this one.
+
+    A missing scipy is swallowed — the real call site raises with the message that names the
+    ``[stats]`` extra, and a daemon thread has nowhere useful to report it.
+    """
+
+    def _warm() -> None:
+        with contextlib.suppress(ImportError):
+            import scipy.stats  # noqa: F401
+
+    threading.Thread(target=_warm, name="stats-warm", daemon=True).start()
 
 
 def t_critical(df: int, alpha: float = 0.05) -> float:
@@ -55,6 +75,9 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     n = len(scores)
     if n == 0:
         return (0.0, 1.0)
+
+    import numpy as np
+
     arr = np.asarray(scores, dtype=np.float64)
     mean = float(arr.mean())
     if n == 1:
@@ -109,4 +132,5 @@ __all__ = [
     "min_detectable_effect",
     "paired_diff_posterior",
     "t_critical",
+    "warm_stats_backend",
 ]

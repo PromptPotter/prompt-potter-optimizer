@@ -271,12 +271,6 @@ async def _process_fresh_sample(
         )
         if ctx.on_sample_scored is not None:
             ctx.on_sample_scored(display_cached, idx, dataset_len)
-        from promptpotter.infrastructure.llm.rate_limit import (
-            DEPR_RETRY_COOLDOWN_SEC,
-            wait_with_countdown,
-        )
-
-        await wait_with_countdown(DEPR_RETRY_COOLDOWN_SEC, "deprecated retry")
 
     result = await measure_sample(
         sample,

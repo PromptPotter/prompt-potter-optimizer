@@ -22,7 +22,6 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.jobs.mint import CyclePlan
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
@@ -43,7 +42,6 @@ class ScorerSetup:
     round_scorer: RoundScorer | None = None
     scorer_round_formula: str | None = None
     scoring_set: list[Sample] = field(default_factory=list)
-    sample_index: SampleIndex | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
 
 

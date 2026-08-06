@@ -114,7 +114,22 @@ LEDGER_BASELINE = {
     # readings from their mean; make a dropped cell loud), `model_cls` on `restamp._process`
     # (the verb was hardcoded to one on-disk model while the forbid flip obliges every one),
     # and `is_electable`. Against those, `backfill_spend_rates` + `_cycle_spend` were deleted.
-    "param_decls": 4069,
+    #
+    # -1: `SampleIndex.register_many`. Its only caller stood behind
+    # `if session.scoring.sample_index is not None`, and that field was a `ScorerSetup` default
+    # of `None` that nothing ever assigned — a reader with no writer, so the pre-registration its
+    # comment described had never once run. `ingest_run` is the sole registrar in fact, which is
+    # what the persisted sample index has to be built against.
+    #
+    # +12, deliberately: the per-run SampleIndex fold is now persisted
+    # (`archive_views._sample_fold_path` / `sample_fold_rows` / `write_sample_fold`,
+    # `SampleIndex.replay_row`, `AxisIndex._seed_from_fold`). `_seen_runs` was an in-process
+    # cursor, so EVERY process start re-read and re-scored the whole dataset slice of the
+    # archive — 3.7 s of detail reads plus a compiled-expression eval per measurement at 1076
+    # runs, and growing with the archive forever. This is the read-model shape
+    # `infrastructure/store/read_model.py` declares for derived-index persistence, not a
+    # sidecar; the surface it costs buys a start cost that stops scaling.
+    "param_decls": 4080,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

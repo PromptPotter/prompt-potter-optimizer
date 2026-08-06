@@ -434,12 +434,6 @@ async def score_search_point(
         candidate's fitness move in real time, not sit at 0 until it completes."""
         return _composite(results)
 
-    # Pre-register Samples so the SampleIndex carries primitives for any
-    # query that lands. ``Sample.run_ids`` accumulates later, when
-    # ``AxisIndex.refresh`` ingests this run from the archive.
-    if session.scoring.sample_index is not None:
-        session.scoring.sample_index.register_many(dataset)
-
     batch = await run_query_loop(
         search_point,
         dataset,

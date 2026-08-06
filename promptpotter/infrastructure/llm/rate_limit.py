@@ -22,8 +22,6 @@ from promptpotter.shared.errors import RequestTooLargeError
 logger = logging.getLogger(__name__)
 
 MAX_429_ATTEMPTS: int = 5
-# Visible cooldown between deprecated-cache row and fresh remeasurement — UX signal, not a throttle.
-DEPR_RETRY_COOLDOWN_SEC: float = 1.0
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
 
@@ -412,7 +410,6 @@ def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
 __all__ = [
     "ANTHROPIC_RPM_HEADER",
     "ANTHROPIC_TPM_HEADER",
-    "DEPR_RETRY_COOLDOWN_SEC",
     "MAX_429_ATTEMPTS",
     "OPENAI_RPM_HEADER",
     "OPENAI_TPM_HEADER",

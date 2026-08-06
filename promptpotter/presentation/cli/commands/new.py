@@ -476,9 +476,9 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     below (backend → dataset → pipeline → task → origin → loop) is one path.
     Live state: ``cycles/{cycle_id}/dashboard.json``; digest: ``campaigns/{campaign_id}/log.md``;
     final: ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C."""
-    from promptpotter.shared.spend import refresh_rates
+    from promptpotter.shared.spend import refresh_rates_in_background
 
-    refresh_rates()
+    refresh_rates_in_background()
 
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
         session, campaign_config, dataset_name, session_id = await _ingest_and_prepare_checkin(args)

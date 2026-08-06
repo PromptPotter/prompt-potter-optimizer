@@ -34,10 +34,13 @@ class FailureCluster:
 class SampleIndex:
     """Per-sample state keyed by ``sample.id: int``.
 
-    Pure derived view over the ``MeasurementArchive``: holds Sample
-    primitives plus per-sample aggregate tables that are populated by
-    :meth:`ingest_run` during ``AxisIndex.refresh``. ``_seen_runs`` is an
-    in-process delta cursor — it is never persisted across processes.
+    Pure derived view over the ``MeasurementArchive``: holds Sample primitives plus
+    per-sample aggregate tables, populated by :meth:`ingest_run` during ``AxisIndex.refresh``.
+
+    ``_seen_runs`` is a delta cursor over the archive, and it DOES survive the process: the
+    per-run derivation :meth:`ingest_run` returns is persisted beside the archive and replayed
+    by ``AxisIndex._seed_from_fold``, which is what stops every start re-reading and re-scoring
+    the whole dataset slice. Both paths mutate through :meth:`replay_row` so they cannot drift.
     """
 
     def __init__(self) -> None:
@@ -55,10 +58,6 @@ class SampleIndex:
         """Register a Sample at dataset-load time."""
         self._samples[sample.id] = sample
 
-    def register_many(self, samples: list[Sample]) -> None:
-        for s in samples:
-            self.register(s)
-
     def sample(self, sample_id: int) -> Sample | None:
         return self._samples.get(sample_id)
 
@@ -66,34 +65,58 @@ class SampleIndex:
         """Live view of registered sample ids — iterates without copying."""
         return self._samples.keys()
 
-    def ingest_run(self, run_detail: dict[str, Any]) -> None:
-        """Replay a measurement-archive entry into the index."""
-        items = run_detail.get("measurements", [])
-        run_id = run_detail.get("run_id", "")
+    def ingest_run(self, run_detail: dict[str, Any]) -> dict[str, Any]:
+        """Derive a measurement-archive entry into the index, returning the derived row.
 
-        for item in items:
+        The row is what the archive persists (``archive_views.write_sample_fold``) so a later
+        process can rebuild this index without re-reading and re-scoring every detail file.
+        It carries only what :meth:`replay_row` consumes — never the measurements themselves,
+        which is the difference between a fold that stays small and a second copy of the archive.
+        """
+        run_id = run_detail.get("run_id", "")
+        cells: list[list[Any]] = []
+        new_samples: list[list[Any]] = []
+        seen_new: set[int] = set()
+
+        for item in run_detail.get("measurements", []):
             sid = item.get("sample_id")
             if sid is None:
                 continue
-
-            if sid not in self._samples:
-                query = item.get("query", "")
-                gt = item.get("ground_truth", "")
-                self.register(Sample(id=sid, query=query, ground_truth=gt))
+            if sid not in self._samples and sid not in seen_new:
+                seen_new.add(sid)
+                new_samples.append([sid, item.get("query", ""), item.get("ground_truth", "")])
 
             hit = is_hit(item.get("fitness"))
+            pd = item.get("pipeline_data") or {}
+            degraded = bool((pd.get("diagnostics") or {}).get("warnings"))
+            # `None` means "contributes no failure mode" — an error result is not a
+            # bottleneck reading, and neither is a hit.
+            failure_mode = (
+                None if (hit or is_error_result(item)) else pd.get("terminated_at", "unknown")
+            )
+            cells.append([sid, hit, degraded, failure_mode])
+
+        row: dict[str, Any] = {"run_id": run_id, "cells": cells, "new_samples": new_samples}
+        self.replay_row(row)
+        return row
+
+    def replay_row(self, row: dict[str, Any]) -> None:
+        """Apply one derived row — the SOLE mutation path, so the live derivation above and
+        the on-disk replay cannot drift into disagreeing about what a run contributed."""
+        run_id = row.get("run_id") or ""
+
+        for sid, query, ground_truth in row.get("new_samples") or []:
+            if sid not in self._samples:
+                self.register(Sample(id=sid, query=query, ground_truth=ground_truth))
+
+        for sid, hit, degraded, failure_mode in row.get("cells") or []:
             self._hits[sid].append(hit)
             if hit and run_id:
                 self._hit_run_ids[sid].append(run_id)
-
-            pd = item.get("pipeline_data") or {}
-            if (pd.get("diagnostics") or {}).get("warnings"):
+            if degraded:
                 self._degradation_counts[sid] += 1
-
-            if not hit and not is_error_result(item):
-                terminated = pd.get("terminated_at", "unknown")
-                self._failure_modes[sid].append(terminated)
-
+            if failure_mode is not None:
+                self._failure_modes[sid].append(failure_mode)
             sample = self._samples.get(sid)
             if sample is not None and run_id and run_id not in sample.run_ids:
                 sample.run_ids.append(run_id)

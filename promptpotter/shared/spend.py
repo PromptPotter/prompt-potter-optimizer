@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -31,6 +32,7 @@ __all__ = [
     "load_rates",
     "lookup_rate",
     "refresh_rates",
+    "refresh_rates_in_background",
 ]
 
 
@@ -125,6 +127,21 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
     load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True
+
+
+def refresh_rates_in_background() -> None:
+    """Start :func:`refresh_rates` on a daemon thread and return at once.
+
+    The fetch is a synchronous ``urlopen`` with a 30 s timeout, and both run verbs called it
+    as their first statement — so once a day, and on every flaky or proxied network, the
+    operator watched the campaign do nothing while a price table downloaded. Nothing on the
+    run path consumes the result: a failure already logs and leaves the prior cache or the
+    bundled floor in place, and every reader resolves through that same chain.
+
+    Abandoning the thread at process exit is safe in both directions — a half-written cache
+    fails ``json.loads`` in :func:`_cache_fresh`, which reports stale and refetches.
+    """
+    threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
 def _read_models(path: Path) -> dict[str, Any] | None:

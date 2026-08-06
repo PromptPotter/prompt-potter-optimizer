@@ -7,9 +7,14 @@ A trace records what the pipeline did (query, prediction, ground truth, node ran
 ```
 MeasurementArchive   ← facts (append-only, persisted at measurements/runs/{run_id}.jsonl)
    │
-   ├── SampleIndex   ← per-sample derived view (in-memory; rebuilt every refresh)
-   └── AxisIndex     ← axis-keyed derived view (in-memory; rebuilt every refresh)
+   ├── SampleIndex   ← per-sample derived view; its per-run fold is persisted beside the
+   │                   archive and replayed at start, so a process re-reads only NEW runs
+   └── AxisIndex     ← axis-keyed derived view, folded from the index rows each refresh
 ```
+
+The fold is revalidated all-or-nothing against the active scoring formula and each detail's
+signature; either failing rebuilds it from the details. Derived, so deleting it costs only
+the rebuild.
 
 One row = one **measurement** = `(sample × config → outcome)`. Two natural keys, both first-class: `measurements_for_sample(sample_id)` and `measurements_for_config(predicate)`. Files are content-addressed by `JobSearchPoint.content_hash(dataset)` — same config + same dataset upserts the same file. This is what makes the archive cross-cycle.
 
