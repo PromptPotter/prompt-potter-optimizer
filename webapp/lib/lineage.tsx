@@ -227,9 +227,10 @@ export function LineageProvider({
             if (signal.aborted) return;
             // A key unsubscribed mid-flight must not be resurrected by its own response.
             if (!registry.has(key)) return;
-            registry.setEtag(key, res.validator);
-            // 304 — the body we hold is still current; nothing to re-render.
+            // 304 — the body we hold is still current; nothing to re-render, and the etag
+            // we sent is what proved it, so it stays untouched.
             if (res.kind !== "ok") return;
+            registry.setEtag(key, res.validator);
             setEntries((prev) => {
               const next = new Map(prev);
               next.set(key, { root: res.data, loaded: true, failed: false });

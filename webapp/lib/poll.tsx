@@ -389,10 +389,6 @@ function useCycleStreamSource(
       // Any answer at all proves the address exists, so only an UNBROKEN run of
       // 404s can reach the confirm limit.
       goneRef.current = 0;
-      // This route validates on mtime, so the validator IS a Last-Modified date. The
-      // lineage-tree route validates on an ETag through the same helper — hence the
-      // neutral field name.
-      if (resp.validator) lastModifiedRef.current = resp.validator;
 
       // 304 — file mtime hasn't advanced since the last fetch. Skip the
       // setState entirely unless the age bucket crossed a threshold
@@ -414,6 +410,11 @@ function useCycleStreamSource(
         });
         return;
       }
+
+      // Only a 200 carries one. This route validates on mtime, so the validator IS a
+      // Last-Modified date; the lineage-tree route validates on an ETag through the same
+      // helper — hence the neutral field name.
+      if (resp.validator) lastModifiedRef.current = resp.validator;
 
       // Fresh-campaign warming_up payload (server returns this at 200 when
       // dashboard.json doesn't exist yet — typically while origin is running). It is a

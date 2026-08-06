@@ -97,7 +97,12 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
 // field that lies about what it holds is how the two got conflated.
 export type Conditional<T> =
   | { kind: "ok"; data: T; validator: string | null }
-  | { kind: "not_modified"; validator: string | null };
+  // No validator on this arm, deliberately. A 304 asserts that the one the caller SENT is
+  // still current, so there is nothing new to report and the caller already holds the answer.
+  // Carrying a field here meant a response whose header a proxy stripped handed back `null`,
+  // and a caller that stored it went out unconditional forever after — a permanent full-body
+  // refetch every tick, with no error anywhere. Absent, that is unrepresentable.
+  | { kind: "not_modified" };
 
 async function jgetWithValidator<T>(
   url: string,
@@ -111,10 +116,9 @@ async function jgetWithValidator<T>(
   const init: RequestInit = { cache: "no-store", headers };
   if (signal) init.signal = signal;
   const r = await fetch(url, init);
-  const next = r.headers.get(responseHeader);
-  if (r.status === 304) return { kind: "not_modified", validator: next };
+  if (r.status === 304) return { kind: "not_modified" };
   if (!r.ok) throw await toApiError(r, url);
-  return { kind: "ok", data: (await r.json()) as T, validator: next };
+  return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get(responseHeader) };
 }
 
 export function jgetIfModified<T>(

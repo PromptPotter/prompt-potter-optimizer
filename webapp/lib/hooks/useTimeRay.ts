@@ -95,13 +95,13 @@ export function useTimeRay(path: CyclePath | null, enabled: boolean): TimeRaySta
       try {
         const res = await fetchTimeRay(path, { limit: WINDOW }, known, signal);
         if (signal.aborted) return;
-        etagRef.current = { key, etag: res.validator };
         if (res.kind === "not_modified") {
           setState((prev) =>
             prev.key !== key || prev.loaded ? prev : { ...prev, loaded: true },
           );
           return;
         }
+        etagRef.current = { key, etag: res.validator };
         setState((prev) => {
           if (prev.key !== key) return prev;
           return {
