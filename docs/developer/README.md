@@ -31,7 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
@@ -148,7 +148,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
 2. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
-3. [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md) — L3 plan + per-layer agent contracts.
+3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
 ---
