@@ -13,7 +13,6 @@ import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory
 import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { compareHardSamples } from "./hard-sample-order";
-import { isHit } from "@/lib/fitness";
 
 interface Props {
   datasetName: string | null;
@@ -163,15 +162,7 @@ export function HardSamplesHeatmap({
     );
   }
 
-  const totalHits = [...perSample.values()].reduce(
-    (n, ms) => n + ms.filter((m) => isHit(m.fitness)).length,
-    0,
-  );
-  const totalMeas = [...perSample.values()].reduce((n, ms) => n + ms.length, 0);
-
-  const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples${
-    totalMeas > 0 ? ` · ${totalHits}/${totalMeas} hit` : ""
-  }`;
+  const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples`;
 
   return (
     <div className="hs-heat-wrap">

@@ -102,11 +102,6 @@ export function RoundSamplesBody({
             g.candidate.round,
             g.candidate.candidate_id,
           );
-          const hits = g.samples.reduce(
-            (n, s) => n + (s.status === "HIT" ? 1 : 0),
-            0,
-          );
-          const misses = g.samples.length - hits;
           const cached = g.samples.reduce((n, s) => n + (s.cached ? 1 : 0), 0);
           const display = g.samples.slice(0, PER_GROUP_CAP);
           const truncated = g.samples.length - display.length;
@@ -123,18 +118,16 @@ export function RoundSamplesBody({
               >
                 <span className="rsv-cand-label">{g.candidate.label}</span>
                 <span className="rsv-tally">
-                  {/* An L4 cell carries no `is_hit` — it was optimized by a whole
-                      campaign, not scored — so a HIT/MISS tally here counted every
-                      null as a miss and read "HIT 0 / MISS 7" beside a 39%
-                      headline. The panel's own count is the honest reading. */}
                   {panel ? (
                     <span className="tag-cached" title="Each cell is an inner campaign">
                       {g.samples.length} {g.samples.length === 1 ? "cell" : "cells"}
                     </span>
                   ) : (
                     <>
-                      <span className="tag-hit">HIT {hits}</span>
-                      <span className="tag-miss">MISS {misses}</span>
+                      <span>{g.samples.length} samples</span>
+                      {g.candidate.accuracy != null && (
+                        <span className="tag-cached">{fmtPct0(g.candidate.accuracy)}</span>
+                      )}
                     </>
                   )}
                   {cached > 0 && (
