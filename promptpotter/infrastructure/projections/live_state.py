@@ -1,11 +1,9 @@
 """LiveStateCore + spend bookkeeping — shared accumulators for live subscribers.
 
 ``LiveDisplay`` and ``LiveDashboardView`` both subscribe to the same ledger;
-the overlap (round number, origin/best anchors, PoBB snapshot, spend
-bucket shapes + resume backfill) lives here. The per-record spend-bucket
-mutator lives on ``LiveDashboardView`` (the sole writer) — what stays
-here is the bucket *shape* + the resume-time rate backfill that runs once
-on construction."""
+the overlap (round number, origin/best anchors, PoBB snapshot) lives here.
+Spend has one owner and it is not this module: ``LiveDashboardView`` prices
+each ``TokenUsageRecord`` as it lands, off that record's own model."""
 
 from __future__ import annotations
 
@@ -13,46 +11,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.shared.spend import compute_usd
 
 __all__ = [
     "LiveStateCore",
     "apply_p_best_update",
     "apply_phase",
-    "backfill_spend_rates",
     "roll_p_best_at_round_complete",
     "top_n_p_best",
 ]
-
-
-def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
-    """Recompute ``used_usd`` on buckets whose rate now resolves.
-
-    Covers a bucket whose model had no rate on file when it was written (a new model,
-    a stale rate table). Re-resolves on load rather than replaying the ledger —
-    per-event historical drift accepted. Touches the BILL only; ``incurred_usd`` carries
-    no ``rate_known`` flag, and an unpriced incurred cost is surfaced by
-    ``incurred_unpriced_tokens`` instead of silently back-filled."""
-    for b in spend.values():
-        if not isinstance(b, dict):
-            continue
-        if b.get("rate_known") is True:
-            continue
-        model = b.get("model")
-        in_tok = int(b.get("input_tokens") or 0)
-        out_tok = int(b.get("output_tokens") or 0)
-        if not model or (in_tok == 0 and out_tok == 0):
-            continue
-        usd = compute_usd(model, in_tok, out_tok)
-        if usd is None:
-            continue
-        b["used_usd"] = round(float(usd), 6)
-        b["rate_known"] = True
-    spend["total_used_usd"] = round(
-        sum(float(b.get("used_usd") or 0.0) for b in spend.values() if isinstance(b, dict)),
-        6,
-    )
-    return spend
 
 
 @dataclass

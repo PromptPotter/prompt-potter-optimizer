@@ -20,7 +20,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, RoundSummary
+from promptpotter.domain.results import CycleSpend, HeadlineMetric, RoundSummary
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -107,6 +107,24 @@ class SpendRollup(StrictModel):
             + self.backend.output_tokens
             + self.loop.input_tokens
             + self.loop.output_tokens
+        )
+
+    def totals(self) -> CycleSpend:
+        """The two buckets summed — a finished cycle's terminal spend.
+
+        Bucket→total is written HERE, beside the buckets, because every billed field has an
+        incurred twin and the pair has to move together. Written at the far end of the chain
+        instead, a half somebody forgot to map reads as a zero rather than an error — and
+        zero is the answer a replayed cycle legitimately gives, so nothing looks wrong.
+        """
+        b, lp = self.backend, self.loop
+        return CycleSpend(
+            input_tokens=b.input_tokens + lp.input_tokens,
+            output_tokens=b.output_tokens + lp.output_tokens,
+            cost_usd=self.total_used_usd,
+            unpriced_tokens=b.unpriced_tokens + lp.unpriced_tokens,
+            incurred_usd=self.total_incurred_usd,
+            incurred_unpriced_tokens=b.incurred_unpriced_tokens + lp.incurred_unpriced_tokens,
         )
 
 

@@ -156,9 +156,8 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 #### 4. Spend feature
 
-- **Per-cycle aggregator.** One `Spend` dataclass per cycle, owned by `LiveStateCore` (already exists — see `infrastructure/projections/live_state.py`).
 - **Resolution.** `shared/spend.py` shipped as-is — three layers, stdlib only.
-- **Dashboard projection.** `dashboard.json::spend = {backend, loop, total_used_usd}` — two `{used_usd, input_tokens, output_tokens, rate_known, model}` buckets, sole writer `LiveDashboardView._handle_token_usage` (see § Highway architecture). Bar, publication, and `log.md` all read `total_used_usd`; the budget lives on `run_limits.spend_budget_usd`, not in the spend block.
+- **Dashboard projection.** `dashboard.json::spend` is the per-cycle aggregator: a `SpendRollup` over two `SpendBucket`s (`live_dashboard/state.py` owns the shape — read it there, it moves), sole writer `LiveDashboardView._handle_token_usage` (see § Highway architecture), with `SpendRollup.totals()` the one bucket→cycle-total sum. Bar, publication, and `log.md` all read `total_used_usd`; the budget lives on `run_limits.spend_budget_usd`, not in the spend block.
 - **Budget config + halt.** `OptimizationConfig.spend_budget_usd: float | None`. `StopReason.SPEND_BUDGET` (root `CLAUDE.md`: no back-compat). `_probe_cycle_spend` halts the **current cycle only** at round boundary; the **per-user, cross-cycle** host-wallet gate is the **coupon** (see § Host coupon below), not a daily cap.
 - **Ledger event shape.** `TokenUsageRecord` stays cycle-scoped (already keyed on the ledger which is per-cycle). Identity is resolved at aggregation time by reading `Session.identity` — no `tenant_id` field on the event. The cycle dir's tenant prefix is the ground truth; the event doesn't need to duplicate it.
 
@@ -263,7 +262,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | ContextVar lifecycle | `promptpotter/application/run_observers.py` |
 | Token shape | `promptpotter/domain/run_records.py` |
 | Sole spend writer + halt accessor | `promptpotter/infrastructure/projections/live_dashboard/view.py` |
-| Bucket shapes + resume backfill | `promptpotter/infrastructure/projections/live_state.py` |
+| Bucket shapes + cycle totals | `promptpotter/infrastructure/projections/live_dashboard/state.py` |
 | Budget config | `promptpotter/application/config.py` |
 | Stop reason | `promptpotter/domain/phases.py` |
 | Budget probe + halt | `promptpotter/application/runner/entry.py` |

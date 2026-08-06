@@ -336,27 +336,6 @@ async def _prepare_run(
     )
 
 
-def _cycle_spend(observers: RunObservers) -> CycleSpend:
-    """This cycle's total spend, read from the live dashboard state in memory.
-
-    The token/USD records mutate ``dashboard.state.spend`` throughout the run, so
-    at finalize (before ``drain_all``) the in-memory rollup is complete and
-    authoritative — no need to re-read the debounced ``dashboard.json``. Summed
-    across the backend + optimizer-loop buckets; the L4 outer loop rolls an inner
-    campaign's total up onto its own backend-cost channel from this."""
-    sp = observers.dashboard.state.spend
-    return CycleSpend(
-        input_tokens=sp.backend.input_tokens + sp.loop.input_tokens,
-        output_tokens=sp.backend.output_tokens + sp.loop.output_tokens,
-        cost_usd=sp.total_used_usd,
-        unpriced_tokens=sp.backend.unpriced_tokens + sp.loop.unpriced_tokens,
-        incurred_usd=sp.total_incurred_usd,
-        incurred_unpriced_tokens=(
-            sp.backend.incurred_unpriced_tokens + sp.loop.incurred_unpriced_tokens
-        ),
-    )
-
-
 def _level_of(rr: RoundResult) -> tuple[float, float] | None:
     """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if it was never fit.
 
@@ -606,7 +585,10 @@ async def _run_single_cycle(
         cycle_error=cycle_error,
         started_at=started_at,
         finished_at=finished_at,
-        spend=_cycle_spend(observers),
+        # In-memory, not the debounced ``dashboard.json``: at finalize (before ``drain_all``)
+        # the live rollup is complete, and the L4 outer loop rolls this up onto its own
+        # backend-cost channel.
+        spend=observers.dashboard.state.spend.totals(),
     )
     langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
     if langfuse_trace_id is not None:

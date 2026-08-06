@@ -14,7 +14,6 @@ from pathlib import Path
 
 from promptpotter.domain.results import best_round_by_measured_accuracy
 from promptpotter.infrastructure.projections.live_dashboard.state import LiveDashboardState
-from promptpotter.infrastructure.projections.live_state import backfill_spend_rates
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 
@@ -62,10 +61,6 @@ def resolve_resume_state(
     raw = read_json_tolerant(CycleLayout(seed_dir).dashboard)
     if not isinstance(raw, dict):
         return None
-
-    # An optimizer cache hit short-circuits ``emit_token_usage``, so a re-run never
-    # re-fires the loop bucket's TokenUsageRecords — re-resolve any rate that now prices.
-    backfill_spend_rates(raw["spend"])
 
     prior = LiveDashboardState.model_validate(raw)
     surviving = [
