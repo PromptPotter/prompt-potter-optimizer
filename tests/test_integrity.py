@@ -2416,7 +2416,9 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     )
 
 
-def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone() -> None:
+def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A price is a property of WHO billed it. The table registers one model under many
     vendors at prices that differ several-fold, so a model-only lookup answers with
     somebody else's list — and the old chain did exactly that, matching across providers
@@ -2428,15 +2430,35 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone() -> None
     returns no wire cost on that route, so the estimate was the only number and nothing
     could contradict it. ``None`` is the honest answer; it arms the "USD cap inactive"
     warning instead of quoting a 1.6x guess as a measurement.
+
+    Driven from a FIXTURE table, not the shipped one. The claim is about the resolution
+    rule, and pinning it to today's prices makes it assert two things at once — the first
+    version read the operator's local ``.promptpotter/rates.json`` (2519 keys) and would
+    have gone red against the checked-in bundled floor (2253, no ``deepseek-v4-flash``)
+    on CI and on every fresh clone, with its own "table unavailable" guard unable to see
+    the difference. Upstream re-keying a model must not be able to red this.
     """
-    from promptpotter.shared.spend import compute_usd, load_rates, lookup_rate
+    import promptpotter.shared.spend as spend_mod
 
-    rates = load_rates()
-    if not rates:  # no bundled table in this environment — nothing to assert about keys
-        pytest.skip("rate table unavailable")
+    table = {
+        # The defect in one row: DeepSeek's own first-party key, character-for-character
+        # OpenRouter's model id, and OpenRouter has NO key of its own here — which is
+        # exactly the shipped table's shape for this model, and why the old chain's
+        # cross-provider match had something wrong to reach for.
+        "deepseek/deepseek-v4-flash": (0.00000014, 0.00000028),
+        "openrouter/openai/gpt-oss-20b": (0.00000004, 0.00000015),
+        # Groq answers a provider-less model id while the table keys it prefixed.
+        "groq/openai/gpt-oss-120b": (0.00000015, 0.0000006),
+        # The bare namespace the table keeps first-party OpenAI/Anthropic in.
+        "gpt-4o": (0.0000025, 0.00001),
+    }
+    monkeypatch.setattr(spend_mod, "load_rates", lambda: table)
+    lookup_rate, compute_usd = spend_mod.lookup_rate, spend_mod.compute_usd
 
-    # 1. The defect. The bare key exists and is a DIFFERENT vendor's price.
-    assert lookup_rate("deepseek/deepseek-v4-flash") is not None, "fixture drift — bare key gone"
+    # 1. The defect. The bare key exists and is a DIFFERENT vendor's price, so a
+    #    provider-less lookup answers with it — and asking AS OpenRouter must refuse
+    #    rather than quote it, even though OpenRouter's own key is right there.
+    assert lookup_rate("deepseek/deepseek-v4-flash") == table["deepseek/deepseek-v4-flash"]
     assert lookup_rate("deepseek/deepseek-v4-flash", "openrouter") is None
 
     # 2. A routing suffix selects another upstream provider with its own rate (measured ~6x
@@ -2444,13 +2466,14 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone() -> None
     assert lookup_rate("openai/gpt-oss-20b:nitro", "openrouter") is None
 
     # 3. Composition still resolves what it should: the provider-prefixed convention...
-    assert lookup_rate("openai/gpt-oss-20b", "openrouter") is not None
+    assert lookup_rate("openai/gpt-oss-20b", "openrouter") == table["openrouter/openai/gpt-oss-20b"]
     #    ...the wire echoing its own provider back inside the model id...
     assert lookup_rate("groq:openai/gpt-oss-120b", "groq") == lookup_rate(
         "openai/gpt-oss-120b", "groq"
     )
     #    ...and the bare namespace the table keeps first-party OpenAI/Anthropic in.
-    assert lookup_rate("gpt-4o", "openai") is not None
+    assert lookup_rate("gpt-4o", "openai") == table["gpt-4o"]
 
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
+    assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
