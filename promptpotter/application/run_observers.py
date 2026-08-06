@@ -222,7 +222,7 @@ class RunCallbacks:
                 "current_id": str(snapshot.current_id),
                 "n_samples": int(snapshot.n_samples),
                 "p_best": float(snapshot.p_best),
-                "paired_breakdown": dict(snapshot.paired_breakdown or {}),
+                "paired_breakdown": dict(snapshot.paired_breakdown),
             },
             round_num=round_num,
             sample_idx=int(snapshot.n_samples) - 1,
