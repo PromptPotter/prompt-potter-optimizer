@@ -4,7 +4,7 @@ Every optimizer LLM call, backend match, and escalation check emits a structured
 
 ## What's traced, and where
 
-Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter`/`exit` pairs into the per-cycle ledger; the `escalation` phase emits `rule_fired` whenever a post-round rule matches. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
+Phase events (`init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter`/`exit` pairs into the per-cycle ledger; the `escalation` phase emits `rule_fired` whenever a post-round rule matches. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
 | Source | Event | Payload |
 |--------|-------|---------|

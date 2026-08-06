@@ -2312,6 +2312,18 @@
             "title": "Items",
             "type": "array"
           },
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness across every measurement in `items`; `None` when the scope holds none. The headline rate on any scorer, graded or binary.",
+            "title": "Mean Fitness"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2324,12 +2336,25 @@
             ],
             "title": "Scope",
             "type": "string"
+          },
+          "total_hits": {
+            "description": "`SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded scorer; read `mean_fitness` there.",
+            "title": "Total Hits",
+            "type": "integer"
+          },
+          "total_measurements": {
+            "description": "Measurements across every series in `items` — the denominator of the roster's headline, served so the reader adds nothing up.",
+            "title": "Total Measurements",
+            "type": "integer"
           }
         },
         "required": [
           "name",
           "scope",
-          "items"
+          "items",
+          "total_measurements",
+          "total_hits",
+          "mean_fitness"
         ],
         "title": "MeasurementSeriesResponse",
         "type": "object"
@@ -2887,12 +2912,29 @@
       "SampleSeries": {
         "additionalProperties": false,
         "properties": {
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness over this series; `None` when it holds no measurement. The rate to read on a graded scorer, where `n_hits` is structurally 0.",
+            "title": "Mean Fitness"
+          },
           "measurements": {
             "items": {
               "$ref": "#/components/schemas/MeasurementDot"
             },
             "title": "Measurements",
             "type": "array"
+          },
+          "n_hits": {
+            "description": "How many of THIS series' measurements maxed out the active scorer (`domain.scoring.is_hit`, the one definition of that threshold). Served rather than counted client-side so the tally and the dots it summarises cannot disagree — and so a graded scorer, whose ceiling is unreachable, reports 0 against a mean that is not 0.",
+            "title": "N Hits",
+            "type": "integer"
           },
           "sample_id": {
             "title": "Sample Id",
@@ -2901,7 +2943,9 @@
         },
         "required": [
           "sample_id",
-          "measurements"
+          "measurements",
+          "n_hits",
+          "mean_fitness"
         ],
         "title": "SampleSeries",
         "type": "object"

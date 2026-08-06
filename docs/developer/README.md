@@ -31,7 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
@@ -62,7 +62,7 @@ Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/
 
 ### Injection registry — what's in `INJECTIONS`
 
-Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). **22 slots**, each registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/injections/{layer_state,panels,catalogues,wounds}.py`) — the renderer beneath each `@signal` line is the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
+Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). The slots are whatever `INJECTIONS` holds — no count is repeated here, because one stated in prose drifts on the next capability that registers a signal. Each is registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/injections/{layer_state,panels,catalogues,wounds}.py`) — the renderer beneath each `@signal` line is the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
 
 L2 owns the L1-only injection subset via `l1_layout`; see [`dispatch-hub.md`](dispatch-hub.md) § L1 layout. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
@@ -148,7 +148,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
 2. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
-3. [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md) — L3 plan + per-layer agent contracts.
+3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
 ---

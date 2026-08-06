@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
+import type { DatasetItem, HardSamplesScope, SampleSeries } from "@/lib/api";
+import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
@@ -46,7 +47,8 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
-  archivePerSample: Map<number, MeasurementDot[]>;
+  archivePerSample: Map<number, SampleSeries>;
+  datasetTotals: SeriesTotals | null;
   // True while the displayed dataset slice is from a prior (unit, scope) and
   // a fresh fetch is in flight — lets the table dim instead of blanking.
   datasetStale: boolean;
@@ -95,6 +97,7 @@ export function ChatPane({
   datasetUnmeasuredCount,
   datasetSplitTest,
   archivePerSample,
+  datasetTotals,
   datasetStale,
   datasetError,
   hardSamplesScope,
@@ -312,6 +315,7 @@ export function ChatPane({
               datasetUnmeasuredCount={datasetUnmeasuredCount}
               datasetSplitTest={datasetSplitTest}
               archivePerSample={archivePerSample}
+              datasetTotals={datasetTotals}
               datasetStale={datasetStale}
               datasetError={datasetError}
               hardSamplesScope={hardSamplesScope}

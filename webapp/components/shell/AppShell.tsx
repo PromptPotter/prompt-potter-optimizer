@@ -196,6 +196,7 @@ function AppShellInner() {
     unmeasuredCount: datasetUnmeasuredCount,
     splitTest: datasetSplitTest,
     archivePerSample,
+    totals: datasetTotals,
     isStale: datasetStale,
     error: datasetError,
   } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope);
@@ -432,6 +433,7 @@ function AppShellInner() {
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
+            datasetTotals={datasetTotals}
             datasetStale={datasetStale}
             datasetError={datasetError}
             hardSamplesScope={hardSamplesScope}

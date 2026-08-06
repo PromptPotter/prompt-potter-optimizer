@@ -3,8 +3,10 @@ import { useMemo, useState } from "react";
 import {
   type DatasetItem,
   type HardSamplesScope,
-  type MeasurementDot,
+  type SampleSeries,
 } from "@/lib/api";
+import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
+import { fmtPct0 } from "@/lib/format";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -13,7 +15,6 @@ import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory
 import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { compareHardSamples } from "./hard-sample-order";
-import { isHit } from "@/lib/fitness";
 
 interface Props {
   datasetName: string | null;
@@ -25,7 +26,12 @@ interface Props {
   // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
   // all campaigns on the dataset) is owned by AppShell and re-fetches
   // this map; the heat-map merges live mid-round samples on top.
-  archivePerSample: Map<number, MeasurementDot[]>;
+  archivePerSample: Map<number, SampleSeries>;
+  // Served roster-wide outcome totals for the scope in view. The headline reads
+  // these rather than folding the strip's dots down: the live tail merged into
+  // the strip is TEXT-reconstructed to 0/1 endpoints (see `liveMeasurements`),
+  // so summing it would mix reconstructed endpoints into a graded rate.
+  datasetTotals: SeriesTotals | null;
   // True while the displayed dataset slice is from a prior (unit, scope).
   datasetStale: boolean;
   // Set when the roster read failed for the unit in view. Distinct from an empty
@@ -87,6 +93,7 @@ export function HardSamplesHeatmap({
   datasetUnmeasuredCount,
   datasetSplitTest,
   archivePerSample,
+  datasetTotals,
   datasetStale,
   datasetError,
   hardSamplesScope,
@@ -104,10 +111,10 @@ export function HardSamplesHeatmap({
   // in case a live measurement has already landed in the archive.
   const perSample = useMemo(() => {
     const out = new Map<number, HeatDot[]>();
-    for (const [sid, ms] of archivePerSample) {
+    for (const [sid, s] of archivePerSample) {
       out.set(
         sid,
-        ms.map((m) => ({ fitness: m.fitness, ord: m.ord })),
+        s.measurements.map((m) => ({ fitness: m.fitness, ord: m.ord })),
       );
     }
     const live = liveMeasurements(dash, dashRound);
@@ -136,7 +143,7 @@ export function HardSamplesHeatmap({
   // scope the two surfaces disagreed — while this comment claimed they agreed.
   const sortedItems = useMemo(() => {
     const measuredIn = (it: DatasetItem): boolean =>
-      (archivePerSample.get(it.sample_id)?.length ?? 0) > 0;
+      (archivePerSample.get(it.sample_id)?.measurements.length ?? 0) > 0;
     return [...datasetItems].sort((a, b) => compareHardSamples(a, b, measuredIn));
   }, [datasetItems, archivePerSample]);
 
@@ -163,15 +170,15 @@ export function HardSamplesHeatmap({
     );
   }
 
-  const totalHits = [...perSample.values()].reduce(
-    (n, ms) => n + ms.filter((m) => isHit(m.fitness)).length,
-    0,
-  );
-  const totalMeas = [...perSample.values()].reduce((n, ms) => n + ms.length, 0);
-
-  const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples${
-    totalMeas > 0 ? ` · ${totalHits}/${totalMeas} hit` : ""
-  }`;
+  // Mean fitness, not a hit rate: on a binary scorer the two are the same number
+  // (the mean of 0/1 IS the hit rate), and on a graded one only this reports
+  // anything — the hit ceiling is unreachable there, which is what made the old
+  // "0/N hit" headline read as a dead pipeline on a working campaign.
+  const outcome =
+    datasetTotals && datasetTotals.mean_fitness != null
+      ? ` · ${datasetTotals.total_measurements} measurements · ${fmtPct0(datasetTotals.mean_fitness)} mean fitness`
+      : "";
+  const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples${outcome}`;
 
   return (
     <div className="hs-heat-wrap">
@@ -215,6 +222,7 @@ export function HardSamplesHeatmap({
             <div className="hs-expand-wrap">
               <HardSamplesTable
                 perSample={perSample}
+                servedSeries={archivePerSample}
                 datasetName={datasetName}
                 datasetItems={datasetItems}
                 datasetMeasuredCount={datasetMeasuredCount}

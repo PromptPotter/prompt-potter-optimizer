@@ -3,9 +3,8 @@
 // No React — HardSamplesTable owns the rendering and the interaction state.
 
 import { type CSSProperties } from "react";
-import { type DatasetItem } from "@/lib/api";
+import { type DatasetItem, type SampleSeries } from "@/lib/api";
 import { fmtPct0, fmtPct1 } from "@/lib/format";
-import { isHit } from "@/lib/fitness";
 
 export const STORAGE_KEY = "hs-grid:v1";
 export const FOLDED_WIDTH = 28;
@@ -36,7 +35,7 @@ export type ColId =
   | "rank"
   | "sample_id"
   | "measurements"
-  | "hit_rate"
+  | "mean_fitness"
   | "pick_score"
   | "p_hat"
   | "delta"
@@ -62,7 +61,7 @@ export const COLUMNS: ColDef[] = [
   { id: "rank",          label: "#",          align: "right",  numeric: true  },
   { id: "sample_id",     label: "ID",         align: "right",  numeric: true  },
   { id: "measurements",  label: "History",    align: "left",   numeric: true  },
-  { id: "hit_rate",      label: "Hit rate",   align: "right",  numeric: true  },
+  { id: "mean_fitness",  label: "Fitness",    align: "right",  numeric: true  },
   { id: "pick_score",    label: "Info gain",  align: "right",  numeric: true  },
   // Diagnostic columns — what feeds the Info gain. Promoted from the
   // Info-gain tooltip so the operator can read the queue mechanism's inputs
@@ -102,12 +101,12 @@ export const EMPTY_PERSISTED: PersistedState = {
   hideUnmeasured: false,
 };
 
-// Hit-rate → hue. 1 = cool green (always-hit), 0.5 = neutral grey
-// (mixed), 0 = warm red (always-miss). Rows with zero measurements skip
+// Mean fitness → hue. 1 = cool green (always solved), 0.5 = neutral grey
+// (mixed), 0 = warm red (never solved). Rows with zero measurements skip
 // the style.
-function hitRateStyle(hitRate: number): CSSProperties {
-  const hue = 5 + hitRate * 125;
-  const alpha = 0.18 + Math.abs(hitRate - 0.5) * 0.4;
+function fitnessStyle(fitness: number): CSSProperties {
+  const hue = 5 + fitness * 125;
+  const alpha = 0.18 + Math.abs(fitness - 0.5) * 0.4;
   return { background: `hsla(${hue},70%,45%,${alpha.toFixed(3)})` };
 }
 
@@ -124,6 +123,11 @@ export function cellFor(
   col: ColId,
   item: DatasetItem,
   meas: HeatDot[],
+  // The SERVED series for this sample — dots plus the backend's aggregates over
+  // exactly those dots. `meas` is the strip's merged view (served history + the
+  // in-flight tail), so the two answer different questions and neither stands in
+  // for the other: `meas` is what is DRAWN, this is what is MEASURED.
+  series: SampleSeries | null,
 ): CellValue {
   switch (col) {
     case "rank":
@@ -134,22 +138,26 @@ export function cellFor(
       // Sort key is the measurement count; the heat-map canvas does the
       // visual rendering (see MeasHeatCell), not this text.
       return { text: meas.length > 0 ? String(meas.length) : "—", raw: meas.length };
-    case "hit_rate": {
-      // Empirical hit rate over every measurement of this sample —
-      // ``hits/total``. The strongest bug-spotting signal: a 0/N row with
-      // a large N is a sample the pipeline never solves (genuinely hard,
-      // or a broken ground truth / scorer); a full N/N row is trivial.
-      // Cell hue tracks the rate: green for always-hit, red for
-      // always-miss, grey in between.
-      const n = meas.length;
-      if (n === 0) return { text: "—", raw: null };
-      const hits = meas.reduce((k, m) => k + (isHit(m.fitness) ? 1 : 0), 0);
-      const rate = meas.reduce((k, m) => k + m.fitness, 0) / n;
+    case "mean_fitness": {
+      // Served mean fitness over this sample's measurements, shown with its
+      // count (`62%/12`). The strongest bug-spotting signal: a 0% row with a
+      // large N is a sample the pipeline never solves (genuinely hard, or a
+      // broken ground truth / scorer); a 100% row is trivial. Cell hue tracks
+      // the rate: green for always-solved, red for never, grey in between.
+      //
+      // It reads mean fitness rather than a hit tally because a HIT is
+      // `fitness >= 1.0` — unreachable on a graded scorer, where the tally
+      // printed 0/N for every row of a healthy campaign. On a binary scorer the
+      // mean of 0/1 IS the hit rate, so nothing is lost there; `n_hits` rides
+      // the tooltip for the case where the two differ.
+      const n = series?.measurements.length ?? 0;
+      const mean = series?.mean_fitness ?? null;
+      if (n === 0 || mean === null) return { text: "—", raw: null };
       return {
-        text: `${hits}/${n}`,
-        raw: rate,
-        title: `${hits} hit of ${n} measurements — mean fitness ${fmtPct0(rate)}`,
-        style: hitRateStyle(rate),
+        text: `${fmtPct0(mean)}/${n}`,
+        raw: mean,
+        title: `${n} measurements — mean fitness ${fmtPct0(mean)} · ${series?.n_hits ?? 0} maxed the scorer`,
+        style: fitnessStyle(mean),
       };
     }
     case "pick_score": {
@@ -258,6 +266,7 @@ export function autoWidthFor(
   col: ColDef,
   items: DatasetItem[],
   perSample: Map<number, HeatDot[]> | undefined,
+  servedSeries: Map<number, SampleSeries> | undefined,
   ordColsCount: number,
 ): number {
   const headerCh = col.label.length + HEADER_PADDING_CH;
@@ -275,7 +284,12 @@ export function autoWidthFor(
     return Math.max(96, Math.min(12 + ordColsCount * 8, 280));
   } else {
     for (const item of items) {
-      const text = cellFor(col.id, item, perSample?.get(item.sample_id) ?? []).text;
+      const text = cellFor(
+        col.id,
+        item,
+        perSample?.get(item.sample_id) ?? [],
+        servedSeries?.get(item.sample_id) ?? null,
+      ).text;
       const ch = Math.min(text.length, MAX_AUTO_CH);
       if (ch > maxCh) maxCh = ch;
     }

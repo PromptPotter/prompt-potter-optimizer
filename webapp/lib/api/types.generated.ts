@@ -515,12 +515,30 @@ export interface MeasurementDot {
 export interface SampleSeries {
   sample_id: number;
   measurements: MeasurementDot[];
+  /** How many of THIS series' measurements maxed out the active scorer
+   * (`domain.scoring.is_hit`, the one definition of that threshold). Served
+   * rather than counted client-side so the tally and the dots it summarises
+   * cannot disagree — and so a graded scorer, whose ceiling is unreachable,
+   * reports 0 against a mean that is not 0. */
+  n_hits: number;
+  /** Mean graded fitness over this series; `None` when it holds no measurement. The
+   * rate to read on a graded scorer, where `n_hits` is structurally 0. */
+  mean_fitness: number | null;
 }
 
 export interface MeasurementSeriesResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
   items: SampleSeries[];
+  /** Measurements across every series in `items` — the denominator of the roster's
+   * headline, served so the reader adds nothing up. */
+  total_measurements: number;
+  /** `SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded
+   * scorer; read `mean_fitness` there. */
+  total_hits: number;
+  /** Mean graded fitness across every measurement in `items`; `None` when the scope
+   * holds none. The headline rate on any scorer, graded or binary. */
+  mean_fitness: number | null;
 }
 
 /** One param a node carries — the COMPLETE per-node list, which is what lets */

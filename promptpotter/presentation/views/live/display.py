@@ -137,7 +137,7 @@ class LiveDisplay(DerivedView):
     # --- Ledger subscription (via DerivedView) ---------------------
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        payload = record.payload or {}
+        payload = record.payload
         if record.phase == "round" and record.event == "display":
             # Full RoundResult rides the in-memory-only field; the persisted
             # payload['round_result'] is the lean 3-scalar form for the SSE tail.
@@ -203,7 +203,7 @@ class LiveDisplay(DerivedView):
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         """Paired LLM-completion marker; reports duration + tokens; tags cached."""
-        payload = record.payload or {}
+        payload = record.payload
         cached = bool(payload.get("cached"))
         started = self._pending_calls.pop(record.call_id, None) if record.call_id else None
         duration_s = payload.get("duration_s")
@@ -223,7 +223,7 @@ class LiveDisplay(DerivedView):
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
-        payload = record.payload or {}
+        payload = record.payload
         ci = int(record.candidate_idx or 0)
         ct = int(record.candidate_total or 0)
         qi = int(record.sample_idx or 0)
