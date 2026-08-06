@@ -319,22 +319,6 @@ def _verify_outer_panel_contract(
             "a sample: every candidate must run every cell or the comparison is not paired. "
             "Set sp_budget_ttest to the cell count, or change the panel."
         )
-    # `replicate_survivors` promises "independent draws, cache bypassed" — true for an HTTP
-    # backend, false here, where the backend IS the recursion and the draw is content-addressed
-    # twice over: `inner_campaign_id` carries no replicate dimension, so every replicate
-    # resolves to the campaign `_open_inner_campaign` finds finished and replays for $0, and
-    # even a distinct campaign replays each call from the `shared_root` caches. k replicates
-    # return one reading k times, whose pooled SD is exactly 0.0 — an instrument of perfect
-    # resolving power. A knob that answers "how noisy is this?" with "not at all" is worse off.
-    if campaign_config.optimization.replicate_survivors > 0:
-        raise ValueError(
-            f"{dataset_dir.name} sets replicate_survivors="
-            f"{campaign_config.optimization.replicate_survivors}, which cannot mean what it "
-            "says at L4: the inner draw is content-addressed, so every replicate replays the "
-            "same finished campaign for $0 and the within-cell spread it exists to measure "
-            "comes back 0.0 — a fabricated certainty, not a measurement. Leave it 0 until a "
-            "replicate carries its own identity end to end."
-        )
 
 
 def _clip(text: str, cap: int) -> str:

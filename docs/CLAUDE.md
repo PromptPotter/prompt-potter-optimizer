@@ -44,7 +44,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 L4 (PromptPotter optimizing its own optimizer prompts) is the project's closing focus: finishing the recursion into a **distributable `promptpotter-self`**.
 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, what the outer fitness measures today (`mean_round_delta`) and what is still open about it, cost realism.
-2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan.** Read § Finish line first; it is the single owner of L4 status, and of the panel's resolving power, which is read before any outer number is trusted.
+2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan.** Read § Finish line first; it is the single owner of L4 status, and of what the panel may claim about a leader — read before any outer number is trusted.
 3. The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
 
 ## Editing a doc

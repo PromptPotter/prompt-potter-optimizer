@@ -38,7 +38,6 @@ campaign_config:
   optimization:
     optimizer_set: self_optimizing
     prompt_block_catalogue: 'off'
-    replicate_survivors: 0
     l1_patience: 2
     # Deliberately short, and NOT the thing to raise first: nothing has yet shown the outer loop
     # improving across even one round. Raise it when there is something to extend, and re-add

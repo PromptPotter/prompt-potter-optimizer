@@ -137,9 +137,15 @@ class OuterVerdict(StrictModel):
     cells_dropped: list[str] = Field(default_factory=list)
 
 
-def cell_readings(rows: list[dict[str, Any]]) -> dict[str, list[float]]:
-    """``{cell_query: [each replicate's composite_fitness]}`` — the one definition of what
-    counts as a MEASUREMENT of a cell, serving both the paired verdict and the noise series.
+def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """``{cell_query: mean composite_fitness}`` — the one definition of what counts as a
+    MEASUREMENT of a cell, and the only projection of it: one point per cell however many
+    rows a cell has, so the blocked-paired diff carries one point either way.
+
+    A cell CAN hold more than one row — ``verify`` re-scores a candidate on more samples and
+    appends them — and averaging is the right collapse, because the cell is the unit the
+    paired verdict compares. There is deliberately no accessor for the un-averaged spread:
+    the readings behind one cell are not independent re-measurements of it.
 
     Errored rows are dropped: an outer "sample" is a whole inner campaign and its fitness is a
     transform of ``mean_round_delta``, so the floor asserts the optimizer prompt drove the
@@ -147,6 +153,10 @@ def cell_readings(rows: list[dict[str, Any]]) -> dict[str, list[float]]:
     timed out measured nothing. Asking the typed error channel also covers both row shapes,
     since a freshly measured error row has no ``fitness`` key while a rescored one is stamped
     at the floor. Same discipline as :func:`cell_measurand` below, for the same reason.
+
+    The one shared pure extraction: callers reading a fresh round (``compute_outer_verdict``)
+    and callers reading an archived round doc off disk
+    (``application/optimizer_prompt_ranking.py``) walk the same row shape.
     """
     acc: dict[str, list[float]] = {}
     for r in rows:
@@ -156,24 +166,12 @@ def cell_readings(rows: list[dict[str, Any]]) -> dict[str, list[float]]:
         fit = r.get("fitness")
         if isinstance(cell, str) and isinstance(fit, int | float):
             acc.setdefault(cell, []).append(float(fit))
-    return acc
-
-
-def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell_query: mean composite_fitness}`` — :func:`cell_readings` collapsed to one point
-    per cell, so the blocked-paired diff carries one point at any replication depth.
-
-    The one shared pure extraction: callers reading a fresh round (``compute_outer_verdict``)
-    and callers reading an archived round doc off disk
-    (``application/optimizer_prompt_ranking.py``) walk the same row shape. A caller that needs
-    the SPREAD asks :func:`cell_readings` — averaging here is what hides replicate variance.
-    """
-    return {cell: sum(v) / len(v) for cell, v in cell_readings(rows).items()}
+    return {cell: sum(v) / len(v) for cell, v in acc.items()}
 
 
 def cell_measurand(rows: list[dict[str, Any]], key: str) -> dict[str, tuple[float, float]]:
     """``{cell: (measurand, its within-cell SE)}`` on the measurand's OWN scale, from the rows'
-    ``pipeline_data``. Replicates average, matching :func:`cell_fitness`.
+    ``pipeline_data``. Multiple rows for a cell average, matching :func:`cell_fitness`.
 
     ``key`` is passed in rather than imported: ``domain.results`` imports this module and
     ``proxies`` imports ``domain.results``, so reading the proxy's name here would close a cycle.
@@ -332,6 +330,5 @@ __all__ = [
     "OuterVerdict",
     "cell_fitness",
     "cell_measurand",
-    "cell_readings",
     "compute_outer_verdict",
 ]

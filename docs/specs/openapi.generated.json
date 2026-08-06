@@ -2538,15 +2538,15 @@
             "title": "N Cycles Scanned",
             "type": "integer"
           },
-          "snr": {
-            "$ref": "#/components/schemas/OuterSnr"
+          "spread": {
+            "$ref": "#/components/schemas/OuterSpread"
           }
         },
         "required": [
           "generated_at",
           "n_cycles_scanned",
           "candidates",
-          "snr"
+          "spread"
         ],
         "title": "OptimizerPromptRanking",
         "type": "object"
@@ -2638,16 +2638,11 @@
         "title": "OriginListResponse",
         "type": "object"
       },
-      "OuterSnr": {
+      "OuterSpread": {
         "additionalProperties": false,
-        "description": "Can the panel resolve one optimizer prompt from another yet — and if not, by how much.\n\nFinish-line item 7's \"two series, not one ratio\", derived from the corpus this module\nalready walks rather than bought with re-runs. Both series fall out of the same\naccumulators: a state measured more than once on the SAME cell gives the NOISE (the panel\nre-reading one arm), and the spread of ``anchor_effect`` across states gives the SIGNAL\n(arms genuinely differing).\n\nUntil this existed the ratio was hand-computed off a corpus snapshot and written into prose\n— which is how the spec came to state two different answers for the same question (§4's\n\"~35 cells\" against item 7's own ``(2.8·σ/d)²``, which gives roughly half that). A number\nthe loop recomputes on every read cannot drift from the disk it was derived from.\n\nEvery field is ``None`` when the corpus cannot support it: fewer than two states, or no\ncell measured twice under one state. Absent is the honest answer — a fabricated 0 noise\nreads as a panel that can resolve anything.",
+        "description": "How far apart the ranked arms actually are — the SD of ``anchor_effect`` across states.\n\n**Not a signal-to-noise ratio, and deliberately not one.** The noise half would be\nrepeated readings of ONE (state, cell), and the inner instrument cannot produce them: it\nis content-addressed end to end — the campaign key, the ``shared_root`` caches, the seeded\nbank draw, CRN, the optimizer clamp — so a second ask replays the first answer and its\nspread is zero by construction, which reads as a perfect instrument. Manufacturing a\nsecond reading (numbering the draw to miss every cache) measures how noisy an LLM is,\nwhich is not a quantity the loop can optimise against.\n\nMeasuring a candidate HARDER is ``verify``'s job: it re-scores one candidate on MORE\nsamples, tightening the estimate of the thing being compared instead of sampling the same\nquestion twice. So the error bar on a comparison is the paired one this module already\nreports across cells, and this is the other half a reader needs — how much the arms differ\nat all. ``None`` when fewer than two states have been measured.",
         "properties": {
-          "between_n_states": {
-            "default": 0,
-            "title": "Between N States",
-            "type": "integer"
-          },
-          "between_sd": {
+          "arm_effect_sd": {
             "anyOf": [
               {
                 "type": "number"
@@ -2656,37 +2651,15 @@
                 "type": "null"
               }
             ],
-            "title": "Between Sd"
+            "title": "Arm Effect Sd"
           },
-          "n_cells_to_verdict": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "N Cells To Verdict"
-          },
-          "within_n_groups": {
+          "n_states": {
             "default": 0,
-            "title": "Within N Groups",
+            "title": "N States",
             "type": "integer"
-          },
-          "within_sd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Within Sd"
           }
         },
-        "title": "OuterSnr",
+        "title": "OuterSpread",
         "type": "object"
       },
       "QuotaStatus": {

@@ -21,7 +21,7 @@ from promptpotter.application.optimizer_prompt_ranking import (
     CellEffect,
     EffectProvenance,
     OptimizerPromptRanking,
-    OuterSnr,
+    OuterSpread,
     RankedOptimizerPrompt,
 )
 from promptpotter.domain.cycle_paths import CycleHop
@@ -146,7 +146,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---
     CellEffect,
     EffectProvenance,
-    OuterSnr,
+    OuterSpread,
     RankedOptimizerPrompt,
     OptimizerPromptRanking,
     # --- campaigns/files router ---

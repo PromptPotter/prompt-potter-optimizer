@@ -109,7 +109,7 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 
 **What remains is (mostly) empirical, (mostly) not structural** — the loop, seams, recursion and scoring gateway all exist and are green; what remains is making the optimizer *behave well*, which is found by running L3 campaigns as well as `promptpotter-self`, read what the loop produced, fix, re-run. **Every fix still goes to its ROOT (`<root-fix>` above)** — in this phase the root is usually a prompt or dispatch-hub. **Supervise every run actively — never fire-and-wait. (3 min intervals first, then adjust case dependent)** How to run + supervise + when to reach past prompts to code: [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Running & supervising.
 
-⚠️ **Read the panel's resolving power before its result** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; no outer number is quoted from this repo without it.
+⚠️ **Read a leader against its own interval, never against its rank** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; deepen a candidate with `verify`, never by re-asking a cell it already answered.
 
 **When adding a state, ask what DERIVES it — not just what writes it.** The costliest bugs in this package have all been one shape: a *state the system could enter but not report*, downstream of a predicate that conflated two facts, invisible because the failure mode was silence rather than an error. A writer with no reader is not a state; it is a note nobody reads.
 

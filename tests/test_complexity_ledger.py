@@ -51,7 +51,7 @@ LEDGER_BASELINE = {
     # knob the halt would be unconditional, and the operator who genuinely wants to elect on
     # a short panel would have no way to say so — which is the shape a gate needs to be a
     # policy rather than a law.
-    "config_leaf_fields": 39,
+    "config_leaf_fields": 38,
     # 16 -> 19 (2026-08-05): `BRAND_SHORT_NAME` / `BRAND_SERVICE_NAME` / `BRAND_DOCS_URL`.
     # A deliberate raise. They are the engine's half of the whitelabel declaration —
     # `deploy-linux/deploy.config`'s brand block, fanned out by `brand-env.sh` into `.env`
@@ -83,7 +83,7 @@ LEDGER_BASELINE = {
     # layer — a relocation, not a new surface. The pool is folded by the live loop, by resume,
     # and by the mask record rebuilt from disk; leaving it beside the loop obliged a READ path
     # to import the whole loop to re-fold what it had already read.
-    "domain_any_maps": 77,
+    "domain_any_maps": 76,
     # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
     # bloat source. What the current number buys, newest first:
@@ -127,8 +127,7 @@ LEDGER_BASELINE = {
     # of quality were reachable only by hand-parsing the archive.
     #
     # Earlier the same day: `_sample_series` (serve the aggregate beside the series it
-    # aggregates), `cell_readings` + `_cell_reading_lists` + `cells_dropped` (split a cell's
-    # readings from their mean; make a dropped cell loud), `model_cls` on `restamp._process`
+    # aggregates), `cells_dropped` (make a dropped cell loud), `model_cls` on `restamp._process`
     # (the verb was hardcoded to one on-disk model while the forbid flip obliges every one),
     # and `is_electable`. Against those, `backfill_spend_rates` + `_cycle_spend` were deleted.
     #
@@ -146,7 +145,7 @@ LEDGER_BASELINE = {
     # runs, and growing with the archive forever. This is the read-model shape
     # `infrastructure/store/read_model.py` declares for derived-index persistence, not a
     # sidecar; the surface it costs buys a start cost that stops scaling.
-    "param_decls": 4083,
+    "param_decls": 4073,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

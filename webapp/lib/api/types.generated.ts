@@ -726,13 +726,10 @@ export interface EffectProvenance {
   candidate_id: string;
 }
 
-/** Can the panel resolve one optimizer prompt from another yet — and if not, by how much. */
-export interface OuterSnr {
-  within_sd: number | null;
-  within_n_groups: number;
-  between_sd: number | null;
-  between_n_states: number;
-  n_cells_to_verdict: number | null;
+/** How far apart the ranked arms actually are — the SD of ``anchor_effect`` across states. */
+export interface OuterSpread {
+  arm_effect_sd: number | null;
+  n_states: number;
 }
 
 /** One unique optimizer prompt state, aggregated across every occurrence in the corpus. */
@@ -754,7 +751,7 @@ export interface OptimizerPromptRanking {
   generated_at: string;
   n_cycles_scanned: number;
   candidates: RankedOptimizerPrompt[];
-  snr: OuterSnr;
+  spread: OuterSpread;
 }
 
 export interface FileEntry {

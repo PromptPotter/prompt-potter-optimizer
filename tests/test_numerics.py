@@ -1436,9 +1436,10 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     # ...and at floor 6 it must: 2 evidence cells, not 7 attempted ones.
     assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, {})[0] == ""
 
-    # Replicates: an errored replicate adds no coverage, a clean one carries the cell.
-    replicated = [clean(0, 1.0), clean(1, 1.0), errored(0), errored(1)]
-    assert _distinct_valid_cells(replicated) == 2
+    # Repeated rows for one cell (what `verify` leaves behind): an errored row adds no
+    # coverage, a clean one carries the cell, and the pair counts once.
+    repeated = [clean(0, 1.0), clean(1, 1.0), errored(0), errored(1)]
+    assert _distinct_valid_cells(repeated) == 2
 
 
 # ===========================================================================
@@ -3360,68 +3361,3 @@ def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
     # Every arm refused — the round measured nothing it can attribute, so there is no subject.
     # Reported as absence, never as the least-bad conviction.
     assert compute_outer_verdict(measured, [], origin) is None
-
-
-def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
-    # Turns the hand-computed "the panel needs ~N cells" into a number derived from disk. It
-    # reads UNKNOWN on today's corpus (no state has ever been measured twice on one cell), so a
-    # wrong formula here stays invisible until the first repeat lands and then quietly sets the
-    # spend. SILENT both ways: too small an N says a coin-flip panel can crown a winner; too
-    # large says a working panel cannot.
-    from promptpotter.application.optimizer_prompt_ranking import (
-        RankedOptimizerPrompt,
-        _Accum,
-        _outer_snr,
-    )
-
-    def state(cells: dict[str, list[float]]) -> _Accum:
-        a = _Accum({}, "s")
-        # The noise series is `replicate_groups`; `cand_by_cell` pools across occurrences and
-        # feeds the effect estimate only.
-        a.replicate_groups = list(cells.values())
-        return a
-
-    def ranked(effect: float) -> RankedOptimizerPrompt:
-        return RankedOptimizerPrompt(
-            state_hash=f"h{effect}",
-            label="C1.1",
-            prompt_state={},
-            provenance=[],
-            per_cell_effects=[],
-            anchor_effect=effect,
-            ci_lo=effect,
-            ci_hi=effect,
-            n_cells=1,
-            n_measurements=1,
-        )
-
-    # Two groups with the SAME spread pool to that spread — not to something between it and 0.
-    snr = _outer_snr({"a": state({"c1": [0.0, 2.0], "c2": [1.0, 3.0]})}, [ranked(0.0), ranked(2.0)])
-    assert snr.within_n_groups == 2 and snr.within_sd == pytest.approx(2**0.5)
-    assert snr.between_sd == pytest.approx(2**0.5) and snr.between_n_states == 2
-    # Equal noise and contrast ⇒ (2.8·σ/d)² ≈ 7.8 cells, rounded UP: a fractional cell cannot be
-    # run, and rounding down would report a panel as sufficient one cell before it is.
-    assert snr.n_cells_to_verdict == 8
-
-    # A bigger group must carry more weight than a small one — pooling is on (n−1) df, never a
-    # mean over per-group SDs, which would let one noisy pair outvote nine clean readings.
-    lopsided = _outer_snr(
-        {"a": state({"c1": [0.0, 0.0, 0.0, 0.0, 0.0], "c2": [0.0, 4.0]})},
-        [ranked(0.0), ranked(1.0)],
-    )
-    assert lopsided.within_sd is not None
-    assert lopsided.within_sd == pytest.approx((8.0 / 5) ** 0.5)  # ss=8, df=4+1
-
-    # NEVER guessed. One reading of one cell has no spread; one state has no contrast. A 0.0 in
-    # either slot reads as a perfectly sharp instrument and would argue for crowning a winner.
-    lone = _outer_snr({"a": state({"c1": [0.5]})}, [ranked(0.0)])
-    assert lone.within_sd is None and lone.between_sd is None
-    assert lone.n_cells_to_verdict is None and lone.within_n_groups == 0
-
-    # A σ of EXACTLY zero arrives looking like data — the group is populated, so `within_sd`
-    # is not None — and (2.8·0/d)² is a required sample size of ZERO: "resolves any difference
-    # with no cells at all". Identical readings are what a replay looks like, so it is
-    # reachable. A σ nobody measured must not become a spend decision.
-    replayed = _outer_snr({"a": state({"c1": [0.5, 0.5]})}, [ranked(0.0), ranked(1.0)])
-    assert replayed.within_sd == 0.0 and replayed.within_n_groups == 1
-    assert replayed.n_cells_to_verdict is None

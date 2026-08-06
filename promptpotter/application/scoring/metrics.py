@@ -111,8 +111,8 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     grades an errored row as a 0.0 cell so an all-errored origin still yields overlap
     (``theta_lift_over_origin`` is the guard for the ability itself).
 
-    Replicate draws of one cell collapse to that cell's mean, so the CI's independent unit is
-    the sample, not the re-draw (identity at the ``rep_k=0`` default). ``(None, None)`` when
+    Repeated rows for one cell collapse to that cell's mean, so the CI's independent unit is
+    the sample, not the row (identity when each cell was measured once). ``(None, None)`` when
     no cell was measured — nothing to bracket.
     """
     # Lazy: scoring → optimization circular.
@@ -295,8 +295,8 @@ def compute_composite_fitness(
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
       non-duplicate) L1 variants. **A pass no L1 batch produced leaves it at the 1.0
       default — the vacuous value, exactly like ``opt_sp=None`` above, and for the same
-      reason.** Three such passes rely on it: the ``round_parent`` floor, the PoBB backfill,
-      the replicate draw. Both readings are sayable — "no batch produced this" vs "vacuously
+      reason.** Two such passes rely on it: the ``round_parent`` floor and the PoBB backfill.
+      Both readings are sayable — "no batch produced this" vs "vacuously
       perfect" — but they cannot both be right, and ``0.0`` breaks the pairing those sites
       establish: the parent floor would carry the term at zero while every candidate it is
       differenced against carries its real yield, so a formula naming ``l1_diversity`` would
@@ -413,10 +413,10 @@ def matched_origin_stats(
 
 
 def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
-    """``{sample_id: mean composite fitness}``, collapsing REPLICATE rows (same
-    ``sample_id``, multiple measurements under ``replicate_survivors``) to their per-cell
-    mean. At the n=1 default this is the identity — one row per cell. A degraded sample
-    with no recorded fitness contributes 0 (the score it earned), not a dropped row.
+    """``{sample_id: mean composite fitness}``, collapsing repeated rows for one
+    ``sample_id`` to their per-cell mean — the shape ``verify`` leaves behind when it
+    re-scores a candidate on more samples. One row per cell is the identity case. A degraded
+    sample with no recorded fitness contributes 0 (the score it earned), not a dropped row.
 
     **Un-predicated on purpose** — it is the origin-overlap population, not the display one.
     ``elect_round_winner`` relies on an errored row counting as a 0.0 cell (see its docstring):
@@ -436,10 +436,9 @@ def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
     """Distinct cells (``sample_id``) carrying real evidence — non-deprecated AND
     non-errored, the same rows the election θ fit consumes (``candidate_abilities``
     drops ``is_error_result`` rows), so coverage can never be satisfied by cells the
-    fit throws away. The coverage notion under ``replicate_survivors``: k replicates
-    of one cell count once, so replication can never falsely satisfy
-    ``coverage_floor``; a cell with one errored and one clean replicate still counts
-    (the clean row carries the evidence). Identity with row count at n=1.
+    Counted per CELL, not per row: repeated rows for one cell count once, so extra rows can
+    never falsely satisfy ``coverage_floor``; a cell with one errored and one clean row still
+    counts, the clean row carrying the evidence.
     """
     from promptpotter.application.optimization.pobb.classification import is_deprecated
 

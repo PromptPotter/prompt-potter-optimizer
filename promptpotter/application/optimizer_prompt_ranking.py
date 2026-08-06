@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.verdict import cell_fitness, cell_readings
+from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_rows_from_disk,
@@ -27,7 +26,6 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import (
-    min_detectable_effect,
     paired_diff_posterior,
     t_critical,
 )
@@ -73,34 +71,26 @@ class RankedOptimizerPrompt(StrictModel):
     n_measurements: int
 
 
-class OuterSnr(StrictModel):
-    """Can the panel resolve one optimizer prompt from another yet — and if not, by how much.
+class OuterSpread(StrictModel):
+    """How far apart the ranked arms actually are — the SD of ``anchor_effect`` across states.
 
-    Finish-line item 7's "two series, not one ratio", derived from the corpus this module
-    already walks rather than bought with re-runs. Both series fall out of the same
-    accumulators: a state measured more than once on the SAME cell gives the NOISE (the panel
-    re-reading one arm), and the spread of ``anchor_effect`` across states gives the SIGNAL
-    (arms genuinely differing).
+    **Not a signal-to-noise ratio, and deliberately not one.** The noise half would be
+    repeated readings of ONE (state, cell), and the inner instrument cannot produce them: it
+    is content-addressed end to end — the campaign key, the ``shared_root`` caches, the seeded
+    bank draw, CRN, the optimizer clamp — so a second ask replays the first answer and its
+    spread is zero by construction, which reads as a perfect instrument. Manufacturing a
+    second reading (numbering the draw to miss every cache) measures how noisy an LLM is,
+    which is not a quantity the loop can optimise against.
 
-    Until this existed the ratio was hand-computed off a corpus snapshot and written into prose
-    — which is how the spec came to state two different answers for the same question (§4's
-    "~35 cells" against item 7's own ``(2.8·σ/d)²``, which gives roughly half that). A number
-    the loop recomputes on every read cannot drift from the disk it was derived from.
-
-    Every field is ``None`` when the corpus cannot support it: fewer than two states, or no
-    cell measured twice under one state. Absent is the honest answer — a fabricated 0 noise
-    reads as a panel that can resolve anything.
+    Measuring a candidate HARDER is ``verify``'s job: it re-scores one candidate on MORE
+    samples, tightening the estimate of the thing being compared instead of sampling the same
+    question twice. So the error bar on a comparison is the paired one this module already
+    reports across cells, and this is the other half a reader needs — how much the arms differ
+    at all. ``None`` when fewer than two states have been measured.
     """
 
-    # Pooled SD of repeated readings of the SAME (state, cell) — measurement noise, σ.
-    within_sd: float | None = None
-    within_n_groups: int = 0  # (state, cell) pairs with ≥2 readings behind `within_sd`
-    # SD of `anchor_effect` across distinct states — how far apart the arms actually are, d.
-    between_sd: float | None = None
-    between_n_states: int = 0
-    # (2.8·σ/d)² — cells a verdict needs at the current noise and contrast. `2.8` is
-    # `min_detectable_effect`'s z(0.975)+z(0.8). Compare against the panel you actually run.
-    n_cells_to_verdict: int | None = None
+    arm_effect_sd: float | None = None
+    n_states: int = 0
 
 
 class OptimizerPromptRanking(StrictModel):
@@ -109,7 +99,7 @@ class OptimizerPromptRanking(StrictModel):
     generated_at: str
     n_cycles_scanned: int
     candidates: list[RankedOptimizerPrompt]  # ranked desc by anchor_effect
-    snr: OuterSnr
+    spread: OuterSpread
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
@@ -131,13 +121,6 @@ def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, 
     return cell_fitness(rows)
 
 
-def _cell_reading_lists(round_doc: dict[str, Any], candidate_id: str) -> dict[str, list[float]]:
-    """Every reading per cell for one candidate, un-averaged — the replicate spread
-    :func:`_cell_composites` collapses. Same rows, one projection apart."""
-    rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
-    return cell_readings(rows)
-
-
 class _Accum:
     """Mutable per-state accumulator collected during the disk walk."""
 
@@ -148,8 +131,6 @@ class _Accum:
         # cell -> paired (candidate_fit, origin_fit) lists across occurrences
         self.cand_by_cell: dict[str, list[float]] = {}
         self.orig_by_cell: dict[str, list[float]] = {}
-        # The noise series: each entry is one cell's replicate readings from ONE occurrence.
-        self.replicate_groups: list[list[float]] = []
 
 
 def _pp_self_campaign_dirs(stores: Stores) -> list[Path]:
@@ -208,7 +189,7 @@ def rank_optimizer_prompts(stores: Stores) -> OptimizerPromptRanking:
         generated_at=utcnow_iso(),
         n_cycles_scanned=n_cycles,
         candidates=rows,
-        snr=_outer_snr(accums, rows),
+        spread=_outer_spread(rows),
     )
 
 
@@ -221,41 +202,11 @@ def _sample_sd(xs: list[float]) -> float | None:
     return float((sum((x - mean) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5)
 
 
-def _outer_snr(accums: dict[str, _Accum], rows: list[RankedOptimizerPrompt]) -> OuterSnr:
-    """Split the corpus into the noise series and the signal series (see :class:`OuterSnr`).
-
-    Noise is POOLED across replicate groups rather than averaged over their SDs: a group of
-    2 readings and a group of 9 say different amounts about σ, and averaging their SDs would
-    weight them equally. Pooling on (n−1) degrees of freedom is the standard way to say so.
-    """
-    ss, df = 0.0, 0
-    groups = 0
-    for acc in accums.values():
-        for vals in acc.replicate_groups:
-            if len(vals) < 2:
-                continue
-            mean = sum(vals) / len(vals)
-            ss += sum((v - mean) ** 2 for v in vals)
-            df += len(vals) - 1
-            groups += 1
-    within = (ss / df) ** 0.5 if df > 0 else None
-    between = _sample_sd([r.anchor_effect for r in rows])
-    n_needed: int | None = None
-    # A σ of exactly zero makes the required sample size 0 — "this panel resolves any
-    # difference with no cells at all" — and is reachable whenever a group holds identical
-    # readings, which is what a replay looks like. Withhold rather than print the sharpest
-    # possible instrument at the moment the corpus proved nothing.
-    if within is not None and within > 0.0 and between is not None and between > 0.0:
-        # `min_detectable_effect(σ)` IS `2.8·σ` — call it rather than re-typing the constant,
-        # so the alpha/power this planning number assumes can never drift from the alpha/power
-        # the verdict's own `mde_remaining` reports.
-        n_needed = math.ceil((min_detectable_effect(within) / between) ** 2)
-    return OuterSnr(
-        within_sd=within,
-        within_n_groups=groups,
-        between_sd=between,
-        between_n_states=len(rows),
-        n_cells_to_verdict=n_needed,
+def _outer_spread(rows: list[RankedOptimizerPrompt]) -> OuterSpread:
+    """The spread of the ranked arms' effects (see :class:`OuterSpread`)."""
+    return OuterSpread(
+        arm_effect_sd=_sample_sd([r.anchor_effect for r in rows]),
+        n_states=len(rows),
     )
 
 
@@ -267,14 +218,10 @@ def _accumulate_round(
 ) -> None:
     """Fold one round doc into the per-state accumulators.
 
-    **A repeated READING is k replicates within one occurrence — never a union across
-    occurrences.** Two occurrences of one (state, cell) are not two measurements: a repair
-    fork replays its parent's banked rounds without setting the row's ``cached`` flag, and the
-    inner instrument is content-addressed end to end (campaign key, the ``shared_root``
-    caches, the seeded bank draw, CRN, the optimizer clamp), so a second campaign on the same
-    cell is designed to replay. Pooling them yields a spread of zero, which reads as a perfect
-    instrument. The effect estimate still averages across occurrences; only the noise series
-    is restricted to groups one occurrence produced on purpose.
+    Two occurrences of one (state, cell) are not two measurements — the inner instrument is
+    content-addressed end to end, so the second is designed to replay the first. The effect
+    estimate averages across occurrences anyway, which is sound; what cannot be built out of
+    them is a noise series, and :class:`OuterSpread` says why none is attempted.
     """
     round_num = int(doc.get("round", 0) or 0)
     for cand in doc.get("candidate_scores") or []:
@@ -304,9 +251,6 @@ def _accumulate_round(
         for cell, cand_fit in paired.items():
             acc.cand_by_cell.setdefault(cell, []).append(cand_fit)
             acc.orig_by_cell.setdefault(cell, []).append(origin_cells[cell])
-        for cell, readings in _cell_reading_lists(doc, cand_id).items():
-            if cell in paired and len(readings) >= 2:
-                acc.replicate_groups.append(readings)
 
 
 def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:

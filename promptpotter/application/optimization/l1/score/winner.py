@@ -13,7 +13,6 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.application.optimization.l1.population import parse_population
 from promptpotter.application.optimization.l1.score.loop import (
-    replicate_survivors_pass,
     score_population,
 )
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
@@ -25,8 +24,6 @@ from promptpotter.application.optimization.validators.l1_strict import L1YieldSt
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
-    composite_ci,
-    compute_composite_fitness,
     count_degraded_samples,
     elect_round_winner,
     matched_origin_stats,
@@ -120,20 +117,6 @@ async def l1_score(
         for ind in opt_sp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
-    # Opt-in successive-halving replication: give survivors extra independent draws BEFORE the
-    # estimators run, so the per-cell mean (and the θ fit) averages out an idiosyncratic
-    # single-run inner draw. Losers were already PoBB-eliminated (not in `scored`), so only
-    # survivors pay the k× spend. Off by default (`replicate_survivors == 0`).
-    rep_k = cycle.config.optimization.replicate_survivors
-    if rep_k > 0 and scored:
-        await replicate_survivors_pass(
-            cycle,
-            scored,
-            {ind.lineage.id: params_by_id[ind.lineage.id] for ind in scored},
-            all_candidate_results,
-            dataset,
-            rep_k,
-        )
     # The parent floor, scored on the round's WHOLE panel — the samples this round drew, not
     # the union the candidates happened to reach before elimination truncated them.
     #
@@ -150,21 +133,12 @@ async def l1_score(
     # series. The added spend is the truncated tail only, and a retained champion replays from
     # cache whatever it has already measured.
     parent = await rescore_parent(cycle, dataset, round_num, callbacks=callbacks)
-    # Opt-in replication of the PARENT reference — the shared comparison anchor for the
-    # θ election + paired diff, so its single-draw noise floods every candidate's comparison
-    # (correlated across arms — the 0.808 the variance read found). Give it `rep_k` extra
-    # force_fresh draws too, but thread them ONLY into the decision estimators
-    # (`parent_election_results`); the base single draw stays the matched DISPLAY floor so
-    # its cell count stays honest.
+    # The PARENT reference — the shared comparison anchor for the θ election + paired diff.
+    # Its single-draw noise is correlated across arms, so it floods every candidate's
+    # comparison equally rather than favouring one (the 0.808 the variance read found).
     parent_election_results: list[QueryMeasurement] = list(
         cast("list[QueryMeasurement]", parent.results)
     )
-    if rep_k > 0:
-        for _ in range(rep_k):
-            extra = await rescore_parent(
-                cycle, dataset, round_num, callbacks=callbacks, force_fresh=True
-            )
-            parent_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set parent stats — fallback for `matched_origin` when every candidate ran every sample.
     # No-winner headline = the RETAINED incumbent re-scored on THIS round's touched subset
     # (`rescore_parent`, above) — one configuration, on named samples, actually measured.
@@ -238,40 +212,6 @@ async def l1_score(
             continue
         electable.append(ind.lineage.id)
 
-    # Replicated candidate: its pass-1 composite/accuracy/CI predate the extra draws, but the θ
-    # election read every row — recompute the displayed point, and the whisker around it, over
-    # ALL rows so they match the decision. Guarded on genuine replication (rows > distinct
-    # cells); at the ``rep_k=0`` default nothing here fires and every candidate keeps the CI
-    # its OWN report stamped when it finished scoring (``build_score_report``), which is what
-    # lets a mid-round bar carry a whisker at all.
-    if rep_k > 0:
-        opt_sp_by_id = {ind.lineage.id: ind for ind in opt_sp_population}
-        for cs_idx, cs in enumerate(candidate_scores):
-            rows = all_candidate_results.get(cs.candidate_id)
-            opt_sp = opt_sp_by_id.get(cs.candidate_id)
-            if not rows or opt_sp is None:
-                continue
-            n_cells = len({r.get("sample_id") for r in rows if r.get("sample_id") is not None})
-            if len(rows) <= n_cells:
-                continue
-            s = compute_composite_fitness(
-                rows,
-                schema,
-                opt_sp=opt_sp,
-                round_scorer=session.scoring.round_scorer,
-                l1_diversity=yield_stats.l1_yield,
-            )
-            ci_lo, ci_hi = composite_ci(rows)
-            candidate_scores[cs_idx] = cs.model_copy(
-                update={
-                    "composite_fitness": s["composite_fitness"],
-                    "accuracy": s["accuracy"],
-                    "total": s["total"],
-                    "composite_ci_lo": ci_lo,
-                    "composite_ci_hi": ci_hi,
-                }
-            )
-
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
     winner_id, abilities = elect_round_winner(
@@ -333,9 +273,8 @@ async def l1_score(
         best_matched_origin_composite = matched["composite_fitness"] if matched else None
 
     base = _compute_accuracy(best_results)
-    # The headline sample count rides the winner's ScoredCandidate row — the replication
-    # block above updates it over ALL rows, so the round header and the
-    # per-candidate table cannot disagree under ``replicate_survivors > 0``.
+    # The headline sample count rides the winner's ScoredCandidate row, so the round header
+    # and the per-candidate table cannot disagree.
     best_total = winner_cs.total if winner_id else base["total"]
     p_value: float | None = None
     if base["total"] > 0 and winner_id:

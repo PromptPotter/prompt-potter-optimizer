@@ -23,7 +23,7 @@ def rescore_results(
 
     **That floor is a display convention, not a verdict, and no estimator may read it as one** —
     every consumer meaning "measurement" filters on the typed ``error_category`` channel itself
-    (``compute_accuracy``, ``composite_ci``, the θ fit, ``domain/l4/verdict.py::cell_readings``).
+    (``compute_accuracy``, ``composite_ci``, the θ fit, ``domain/l4/verdict.py::cell_fitness``).
     Nothing depends on the stamp: ``compute_accuracy`` excludes error rows, and
     ``_mean_fitness_by_cell`` reads an absent key identically. It also makes a row's shape depend
     on whether it was replayed, since a freshly measured error row has no ``fitness`` key at all;
