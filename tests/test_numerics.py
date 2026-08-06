@@ -3109,6 +3109,27 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
     )
     assert bare is not None and bare.variance is None
 
+    # An ERRORED cell measured nothing, and here "nothing" is not a low score: outer fitness
+    # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the
+    # inner loop maximally DOWN. SILENT: the row looks like any other, the verdict still
+    # prints, and the arm is convicted on a cell that never ran.
+    errored = compute_outer_verdict(
+        {
+            "v1": [
+                {"query": "a", "fitness": 0.9},
+                {"query": "b", "fitness": 0.0, "error_category": "UNKNOWN", "predicted": "ERROR"},
+            ]
+        },
+        cand,
+        [{"query": "a", "fitness": 0.5}, {"query": "b", "fitness": 0.5}],
+    )
+    assert errored is not None
+    assert [c.cell for c in errored.per_cell] == ["a"] and errored.n_cells == 1
+    # And the loss is REPORTED: the panel is a census, so a narrowed comparison that says
+    # nothing about which cells it lost is indistinguishable from a genuinely small panel.
+    assert errored.cells_dropped == ["b"]
+    assert errored.effect == pytest.approx(0.4)  # not dragged toward the floor by cell b
+
 
 def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
     # Turns the hand-computed "the panel needs ~N cells" into a number derived from disk. It
@@ -3124,7 +3145,9 @@ def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
 
     def state(cells: dict[str, list[float]]) -> _Accum:
         a = _Accum({}, "s")
-        a.cand_by_cell = dict(cells)
+        # The noise series is `replicate_groups`; `cand_by_cell` pools across occurrences and
+        # feeds the effect estimate only.
+        a.replicate_groups = list(cells.values())
         return a
 
     def ranked(effect: float) -> RankedOptimizerPrompt:
@@ -3163,3 +3186,11 @@ def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
     lone = _outer_snr({"a": state({"c1": [0.5]})}, [ranked(0.0)])
     assert lone.within_sd is None and lone.between_sd is None
     assert lone.n_cells_to_verdict is None and lone.within_n_groups == 0
+
+    # A σ of EXACTLY zero arrives looking like data — the group is populated, so `within_sd`
+    # is not None — and (2.8·0/d)² is a required sample size of ZERO: "resolves any difference
+    # with no cells at all". Identical readings are what a replay looks like, so it is
+    # reachable. A σ nobody measured must not become a spend decision.
+    replayed = _outer_snr({"a": state({"c1": [0.5, 0.5]})}, [ranked(0.0), ranked(1.0)])
+    assert replayed.within_sd == 0.0 and replayed.within_n_groups == 1
+    assert replayed.n_cells_to_verdict is None

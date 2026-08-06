@@ -18,9 +18,16 @@ def rescore_results(
     formula: str | None = None,
 ) -> list[dict[str, Any]]:
     """Apply *scorer* to each result, accumulating the multi-scorer audit map. Error rows can't be
-    scored (no prediction) → stamped at the floor (``fitness=0.0``) rather than skipped, matching the
-    implicit default ``compute_accuracy`` already reads — so the value is unchanged but now explicit
-    and always present."""
+    scored (no prediction) → stamped at the floor (``fitness=0.0``) rather than skipped, so the key
+    is always present on a served row.
+
+    **That floor is a display convention, not a verdict, and no estimator may read it as one** —
+    every consumer meaning "measurement" filters on the typed ``error_category`` channel itself
+    (``compute_accuracy``, ``composite_ci``, the θ fit, ``domain/l4/verdict.py::cell_readings``).
+    Nothing depends on the stamp: ``compute_accuracy`` excludes error rows, and
+    ``_mean_fitness_by_cell`` reads an absent key identically. It also makes a row's shape depend
+    on whether it was replayed, since a freshly measured error row has no ``fitness`` key at all;
+    collapsing both into an honest ``None`` is the blocked pass in ``docs/specs/code-debt-cleanup.md``."""
     from promptpotter.shared.errors import is_error_result
 
     for r in results:

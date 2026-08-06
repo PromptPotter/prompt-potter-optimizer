@@ -136,6 +136,16 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
               ? ` CI spans 0 — smallest effect this panel could still resolve ≈ ${verdict.mde_remaining.toFixed(3)}.`
               : ""}
           </p>
+          {/* The panel is a census, so a verdict over fewer cells is a NARROWED comparison, not
+              a small panel — `n_cells` alone cannot tell those apart. */}
+          {verdict.cells_dropped.length > 0 ? (
+            <p className="l4-lede">
+              {verdict.cells_dropped.length} cell
+              {verdict.cells_dropped.length === 1 ? "" : "s"} measured nothing and could not be
+              paired: <strong>{verdict.cells_dropped.join(", ")}</strong>. The effect above is
+              narrower than the declared panel.
+            </p>
+          ) : null}
           {/* Which lever the spread above actually calls for. `se` alone cannot separate cells
               that each measured themselves badly from cells that genuinely disagree, and those
               take opposite next steps — sharpen the instrument, or widen the panel/candidates.

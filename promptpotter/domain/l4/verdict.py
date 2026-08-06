@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     paired_diff_posterior,
@@ -121,24 +122,45 @@ class OuterVerdict(StrictModel):
     # ``None`` until both arms carry per-cell precision, or below two shared cells (one cell has
     # no spread to decompose). Absent is honest; a fabricated 0.0 would read as "all signal".
     variance: OuterVariance | None = None
+    # Cells either arm attempted that produced no measurement, so no pair could form. The panel
+    # is a census (`_verify_outer_panel_contract`), so `n_cells` alone cannot say whether the
+    # panel was small or the round lost cells. Ids rather than a count: the id is what an
+    # operator re-measures, and `dashboard.json` carries no rows to recover it from.
+    cells_dropped: list[str] = Field(default_factory=list)
 
 
-def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell_query: mean composite_fitness}`` from a candidate's per-cell rows, averaging
-    REPLICATE rows per cell (``replicate_survivors``) so the blocked-paired diff carries one
-    point per cell at any replication depth. Identity with last-wins at the n=1 default.
+def cell_readings(rows: list[dict[str, Any]]) -> dict[str, list[float]]:
+    """``{cell_query: [each replicate's composite_fitness]}`` — the one definition of what
+    counts as a MEASUREMENT of a cell, serving both the paired verdict and the noise series.
 
-    The one shared pure extraction — callers reading a fresh round (``compute_outer_verdict``
-    below) and callers reading an archived round doc off disk
-    (``application/optimizer_prompt_ranking.py``) both walk the same row shape.
+    Errored rows are dropped: an outer "sample" is a whole inner campaign and its fitness is a
+    transform of ``mean_round_delta``, so the floor asserts the optimizer prompt drove the
+    inner loop maximally DOWN — the strongest negative claim the scale carries. A cell that
+    timed out measured nothing. Asking the typed error channel also covers both row shapes,
+    since a freshly measured error row has no ``fitness`` key while a rescored one is stamped
+    at the floor. Same discipline as :func:`cell_measurand` below, for the same reason.
     """
     acc: dict[str, list[float]] = {}
     for r in rows:
+        if is_error_result(r):
+            continue
         cell = r.get("query")
         fit = r.get("fitness")
         if isinstance(cell, str) and isinstance(fit, int | float):
             acc.setdefault(cell, []).append(float(fit))
-    return {cell: sum(v) / len(v) for cell, v in acc.items()}
+    return acc
+
+
+def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """``{cell_query: mean composite_fitness}`` — :func:`cell_readings` collapsed to one point
+    per cell, so the blocked-paired diff carries one point at any replication depth.
+
+    The one shared pure extraction: callers reading a fresh round (``compute_outer_verdict``)
+    and callers reading an archived round doc off disk
+    (``application/optimizer_prompt_ranking.py``) walk the same row shape. A caller that needs
+    the SPREAD asks :func:`cell_readings` — averaging here is what hides replicate variance.
+    """
+    return {cell: sum(v) / len(v) for cell, v in cell_readings(rows).items()}
 
 
 def cell_measurand(rows: list[dict[str, Any]], key: str) -> dict[str, tuple[float, float]]:
@@ -275,6 +297,13 @@ def compute_outer_verdict(
         decision=decision,
         mde_remaining=min_detectable_effect(se),
         variant_is_winner=variant_is_winner,
+        cells_dropped=sorted(
+            (
+                {r["query"] for r in variant_rows if isinstance(r.get("query"), str)}
+                | {r["query"] for r in origin_rows if isinstance(r.get("query"), str)}
+            )
+            - set(shared)
+        ),
         variance=(
             _variance_split(
                 cell_measurand(variant_rows, measurand_key),
@@ -294,5 +323,6 @@ __all__ = [
     "OuterVerdict",
     "cell_fitness",
     "cell_measurand",
+    "cell_readings",
     "compute_outer_verdict",
 ]

@@ -75,10 +75,18 @@ worst case. The **USD budget governs** (`spend_budget_usd`); `token_budget` is
 outer ledger, so a token cap would trip after a couple of inner campaigns while
 USD budget remains (see l4-outer-loop § Live-run learnings).
 
-**An absolute dollar total is not quotable yet.** How many inner rounds each
-campaign actually runs depends on the `justlogic-d234` inner origin→target gap, and that
-origin is **unmeasured** on this engine. Re-measure it (`noise-floor --k 3`) before
-sizing a real run.
+**An absolute campaign total is not quotable** — how many inner rounds each cell runs
+depends on the `justlogic-d234` origin→target gap and on where the lives brake stops it.
+The per-cell rate is, and it comes off the ledger, never a stopwatch: group `token_usage`
+records by `(kind, node, cached)` and price them with `shared/spend.py::compute_usd`.
+
+**`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed
+caches are tenant-global, so a replayed cell costs $0 while doing the same search — on the
+banked corpus that was roughly half the bill. All records give the cold-equivalent
+(incurred) figure, `cached=False` alone gives what was billed; a clock cannot say which it
+measured, and the last figure taken that way was an order of magnitude optimistic. One
+trap: the duration distribution of *completing* cells is censored, since a cell that hits
+its wall-clock deadline emits no record at all.
 
 **Do not thin below the floor.** The θ winner-election needs **≥6 inner tasks** to
 crown a winner on signal rather than noise (l4-outer-loop § Live-run learnings), and

@@ -70,6 +70,7 @@ export interface OuterVerdict {
   mde_remaining: number;
   variant_is_winner: boolean;
   variance: OuterVariance | null;
+  cells_dropped: string[];
 }
 
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */

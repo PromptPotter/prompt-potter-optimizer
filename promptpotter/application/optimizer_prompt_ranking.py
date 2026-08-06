@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.verdict import cell_fitness
+from promptpotter.domain.l4.verdict import cell_fitness, cell_readings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_rows_from_disk,
@@ -131,6 +131,13 @@ def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, 
     return cell_fitness(rows)
 
 
+def _cell_reading_lists(round_doc: dict[str, Any], candidate_id: str) -> dict[str, list[float]]:
+    """Every reading per cell for one candidate, un-averaged — the replicate spread
+    :func:`_cell_composites` collapses. Same rows, one projection apart."""
+    rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
+    return cell_readings(rows)
+
+
 class _Accum:
     """Mutable per-state accumulator collected during the disk walk."""
 
@@ -141,6 +148,8 @@ class _Accum:
         # cell -> paired (candidate_fit, origin_fit) lists across occurrences
         self.cand_by_cell: dict[str, list[float]] = {}
         self.orig_by_cell: dict[str, list[float]] = {}
+        # The noise series: each entry is one cell's replicate readings from ONE occurrence.
+        self.replicate_groups: list[list[float]] = []
 
 
 def _pp_self_campaign_dirs(stores: Stores) -> list[Path]:
@@ -215,14 +224,14 @@ def _sample_sd(xs: list[float]) -> float | None:
 def _outer_snr(accums: dict[str, _Accum], rows: list[RankedOptimizerPrompt]) -> OuterSnr:
     """Split the corpus into the noise series and the signal series (see :class:`OuterSnr`).
 
-    Noise is POOLED across (state, cell) groups rather than averaged over their SDs: a group of
+    Noise is POOLED across replicate groups rather than averaged over their SDs: a group of
     2 readings and a group of 9 say different amounts about σ, and averaging their SDs would
     weight them equally. Pooling on (n−1) degrees of freedom is the standard way to say so.
     """
     ss, df = 0.0, 0
     groups = 0
     for acc in accums.values():
-        for vals in acc.cand_by_cell.values():
+        for vals in acc.replicate_groups:
             if len(vals) < 2:
                 continue
             mean = sum(vals) / len(vals)
@@ -232,7 +241,11 @@ def _outer_snr(accums: dict[str, _Accum], rows: list[RankedOptimizerPrompt]) -> 
     within = (ss / df) ** 0.5 if df > 0 else None
     between = _sample_sd([r.anchor_effect for r in rows])
     n_needed: int | None = None
-    if within is not None and between is not None and between > 0.0:
+    # A σ of exactly zero makes the required sample size 0 — "this panel resolves any
+    # difference with no cells at all" — and is reachable whenever a group holds identical
+    # readings, which is what a replay looks like. Withhold rather than print the sharpest
+    # possible instrument at the moment the corpus proved nothing.
+    if within is not None and within > 0.0 and between is not None and between > 0.0:
         # `min_detectable_effect(σ)` IS `2.8·σ` — call it rather than re-typing the constant,
         # so the alpha/power this planning number assumes can never drift from the alpha/power
         # the verdict's own `mde_remaining` reports.
@@ -252,6 +265,17 @@ def _accumulate_round(
     hop: CycleHop,
     accums: dict[str, _Accum],
 ) -> None:
+    """Fold one round doc into the per-state accumulators.
+
+    **A repeated READING is k replicates within one occurrence — never a union across
+    occurrences.** Two occurrences of one (state, cell) are not two measurements: a repair
+    fork replays its parent's banked rounds without setting the row's ``cached`` flag, and the
+    inner instrument is content-addressed end to end (campaign key, the ``shared_root``
+    caches, the seeded bank draw, CRN, the optimizer clamp), so a second campaign on the same
+    cell is designed to replay. Pooling them yields a spread of zero, which reads as a perfect
+    instrument. The effect estimate still averages across occurrences; only the noise series
+    is restricted to groups one occurrence produced on purpose.
+    """
     round_num = int(doc.get("round", 0) or 0)
     for cand in doc.get("candidate_scores") or []:
         cand_id = str(cand.get("candidate_id", ""))
@@ -280,6 +304,9 @@ def _accumulate_round(
         for cell, cand_fit in paired.items():
             acc.cand_by_cell.setdefault(cell, []).append(cand_fit)
             acc.orig_by_cell.setdefault(cell, []).append(origin_cells[cell])
+        for cell, readings in _cell_reading_lists(doc, cand_id).items():
+            if cell in paired and len(readings) >= 2:
+                acc.replicate_groups.append(readings)
 
 
 def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:

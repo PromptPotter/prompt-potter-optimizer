@@ -66,7 +66,11 @@ LEDGER_BASELINE = {
     "any_params": 65,
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
-    "domain_any_maps": 72,
+    # 72 -> 73 (2026-08-06): `cell_readings`. A deliberate raise that buys a subtraction — it
+    # is the SOLE definition of what counts as a measurement of an outer cell, with
+    # `cell_fitness` a mean over it. The paired verdict and the noise series used to decide
+    # that separately, and the noise series decided it wrong.
+    "domain_any_maps": 73,
     # 4051 -> 4053 (2026-08-06): `_sample_series(sample_id, dots)` in the datasets router.
     # A deliberate raise, for two params that buy the deletion of a rule the webapp could
     # not keep: the hard-sample roster counted its own hit rate off the dots in hand, which
@@ -74,7 +78,12 @@ LEDGER_BASELINE = {
     # every row of a healthy campaign. Serving the aggregate beside the series it aggregates
     # is what makes the two unable to disagree — a reader-side sum over a different set is
     # exactly the failure this replaces, so the surface moves to the side that owns it.
-    "param_decls": 4053,
+    # 4053 -> 4056 (2026-08-06): `cell_readings` + `_cell_reading_lists` + `cells_dropped`.
+    # A deliberate raise. The first two split "every reading of a cell" from "its mean" so
+    # replicate spread survives to the consumer whose job is measuring spread; `cells_dropped`
+    # is the loud half of the error exclusion, since a census panel that quietly returns fewer
+    # cells cannot be told from a small one.
+    "param_decls": 4056,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,
