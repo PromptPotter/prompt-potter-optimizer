@@ -33,13 +33,36 @@ marketing).
    If the pull isn't fast-forward, abort and report.
 3. **Gate at HEAD for the BASELINE, in the *pinned* environment** (so local-green ⇒ CI-green —
    the sweep must see what CI sees, not a stale local resolve):
-   `pip install -q uv` (if absent) → `python -m uv sync --extra stats --extra dev --frozen` →
-   `python -m uv run ruff check promptpotter/ tests/ && python -m uv run mypy promptpotter/ &&
-   python -m uv run pytest -q`. The `--frozen` flag installs the exact `uv.lock` graph CI uses;
-   never gate against an ad-hoc `pip install` set. **A failure already present at HEAD is the
-   baseline, not a finding and not an abort** — only what the sweep's own edits break blocks it
-   (Phase 5). `main`'s CI status is never read: whether the last push went green is not this
-   skill's business, and a sweep that spends its run diagnosing CI did not sweep.
+   `pip install -q uv` (if absent) → `python -m uv sync --extra stats --extra dev --frozen`, then
+   **every step of the `check` job, in order — a subset is not the gate.** CI steps MASK each
+   other: a chain that stops at `ruff check` reports green while the step after it is what would
+   have gone red.
+
+   ```
+   ruff check promptpotter/ tests/          ruff format --check promptpotter/ tests/
+   deptry .                                 mypy promptpotter/
+   build_ts_types.py                        → git diff --exit-code webapp/lib/api/types.generated.ts
+   build_optimizer_schemas.py               → git diff --exit-code …/resolved_schemas.json
+   build_openapi.py                         → git diff --exit-code docs/specs/openapi.generated.json
+   pytest -q
+   ```
+
+   The `--frozen` flag installs the exact `uv.lock` graph CI uses; never gate against an ad-hoc
+   `pip install` set. **A failure already present at HEAD is the baseline, not a finding and not
+   an abort** — only what the sweep's own edits break blocks it (Phase 5). `main`'s CI status is
+   never read: whether the last push went green is not this skill's business, and a sweep that
+   spends its run diagnosing CI did not sweep.
+3b. **The three generated files are OUTPUT, never edits.** `types.generated.ts`,
+   `resolved_schemas.json` and `openapi.generated.json` are derived from the Pydantic models by
+   the scripts above; CI regenerates each and fails on a non-empty diff, so the committed copy
+   can never be stale. Two consequences, and they pull opposite ways:
+   - **Never hand-edit one, and never report drift in one as a finding.** The fix is always in
+     the model it came from.
+   - **If the sweep's own edits change a served model, the regenerated file is PART of that
+     edit** — leave it in the tree and name it in the report like any other touched path.
+     Omitting it does not keep the sweep clean; it hands the operator a change that cannot
+     merge. "Generated, so CI handles it" is the misreading to avoid: CI regenerates in order
+     to *compare*, not to publish.
 4. **Stay on `main`.** There is no sweep branch — the audit runs on `main` itself and the
    fixes stay uncommitted in the tree. Prior fixes can't be re-flagged because they either
    landed (the operator committed them) or are still in the tree in front of you; anything
