@@ -5,7 +5,7 @@ genealogy, `GET /campaigns/{c}/cycles/{cy}/tree` (code is the SoT — see § Shi
 read-side). This spec keeps the framing, the
 design decisions, and the deferred **write-side** (fork-from-divergence, roadmap
 **Lane C8**, [`roadmap.md`](roadmap.md) § Lineage mask). Divergence is projection
-logic and is backend-owned ([R-36]).
+logic and is backend-owned — the webapp never recomputes a score.
 
 ## What a mask is (the framing)
 
@@ -44,7 +44,7 @@ living where its math already is), never the fold. It does **not** build a secon
 alternative tree — uncomputable past the first divergence, which is the point.
 
 Vocabulary: **record / mask / divergence point**; the partition is **invariant /
-divergent**. Scoring authority is backend ([R-36], [R-12]) — mask math lives
+divergent**. Scoring authority is backend, through the one `score_search_point()` gateway — mask math lives
 behind the gateway / archive and is served; the webapp renders, never recomputes.
 
 ## Design decisions (the non-derivable rationale)
@@ -99,7 +99,7 @@ via `LineageProvider`
 live: **scoring** (re-elected leader under a swapped formula ≠ `is_winner`; the
 only verdict with a value face) and **abort** (`make_abort_verdict(suppress)` —
 did a suppressed PoBB contributor fire, read off `elimination_context`; names no
-one-step alternative). Composite-fitness chain + R-36: `architecture.md` §0.5.
+one-step alternative). Composite-fitness chain + scoring authority: `architecture.md` §0.5.
 
 Two non-derivable boundaries to preserve:
 
@@ -152,8 +152,8 @@ measured** fork the operator chose to run — never a stored forecast tail.
   mid-campaign; diff against the formula in effect at each round.
 - **One-step counterfactual** (decision 3). **Record unchanged** — a mask is a
   projection on top; the realized lineage + winners never change.
-- **One scoring home** — no mask math in TypeScript ([R-36]); `score_search_point()`
-  untouched ([R-12]); the fold is a read-time `application/` service, never an
-  infrastructure ledger-projection ([R-14]); no mask state persisted (decision 1).
+- **One scoring home** — no mask math in TypeScript; `score_search_point()` stays the
+  single gateway, untouched; the fold is a read-time `application/` service, never an
+  infrastructure ledger-projection; no mask state persisted (decision 1).
 - **Selection unchanged.** Divergent nodes stay clickable; dimming is opacity +
   label, never a disabled interaction.

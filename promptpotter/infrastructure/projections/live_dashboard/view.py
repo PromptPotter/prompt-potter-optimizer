@@ -22,7 +22,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.run_records import (
@@ -87,11 +87,9 @@ _DASHBOARD_DEBOUNCE_S = 0.25
 
 
 # L1_SCORE absent: driven by sample_started / sample_scored.
-# The VALUES used to be bare strings, and they were the only declaration the
-# `dashboard.json::state` vocabulary had anywhere — the webapp mirrored them by hand against
-# no source. The key stays `str` because `PhaseEvent.phase` is genuinely wider than
-# `CampaignPhase` (a round-boundary event carries "round"); the members below say which
-# subset is mapped.
+# The VALUES are the sole declaration of the `dashboard.json::state` vocabulary — keep them
+# typed, or the webapp mirrors bare strings against no source. The key stays `str` because
+# `PhaseEvent.phase` is wider than `CampaignPhase` (a round-boundary event carries "round").
 _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
@@ -110,8 +108,7 @@ class LiveDashboardView(DerivedView):
         cycle_dir: CycleDir,
         session_dir: Path,
         *,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         session_id: str,
         l1_patience: int,
         n_variants: int,
@@ -133,8 +130,7 @@ class LiveDashboardView(DerivedView):
         # stamps fresh. See LiveDashboardState.for_run.
         self.state = LiveDashboardState.for_run(
             resume_from,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
             session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
@@ -169,11 +165,10 @@ class LiveDashboardView(DerivedView):
     @classmethod
     def for_session(
         cls,
-        cycle_id: str | None,
+        hop: CycleHop,
         *,
         tenant_root: str,
         session_id: str,
-        campaign_id: str,
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
@@ -192,14 +187,14 @@ class LiveDashboardView(DerivedView):
         the cut while counting its own (copied) round files; ``None`` seeds from
         the cycle's own dir (root / resume).
         """
-        if not (tenant_root and session_id and campaign_id and cycle_id):
+        if not (tenant_root and session_id and hop.campaign_id and hop.cycle_id):
             return None
 
         root = WorkspaceDir(Path(tenant_root))
         session_dir = session_dir_for(root, session_id)
-        cycle_dir = CycleDir(cycle_dir_for(root, campaign_id, cycle_id))
+        cycle_dir = CycleDir(cycle_dir_for(root, hop))
         seed_dir = (
-            cycle_dir_for(root, campaign_id, seed_from_cycle_id)
+            cycle_dir_for(root, CycleHop(campaign_id=hop.campaign_id, cycle_id=seed_from_cycle_id))
             if seed_from_cycle_id
             else Path(cycle_dir)
         )
@@ -216,8 +211,7 @@ class LiveDashboardView(DerivedView):
         return cls(
             cycle_dir,
             session_dir,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
             session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
@@ -234,8 +228,7 @@ class LiveDashboardView(DerivedView):
         cls,
         cycle_dir: CycleDir,
         *,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         session_id: str = "",
         exc: BaseException,
         interrupted: bool,
@@ -252,8 +245,8 @@ class LiveDashboardView(DerivedView):
         ``mark_finished`` only for a crash — a ``finished_at`` makes the pause unresumable."""
         cycle_path = Path(cycle_dir)
         state = resolve_resume_state(cycle_path, cycle_path, None) or LiveDashboardState(
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
             session_id=session_id,
             state_since=utcnow_iso(),
             n_variants=0,
@@ -478,11 +471,9 @@ class LiveDashboardView(DerivedView):
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
-        # One debounced flush for EVERY snapshot event. Each branch mutates live
-        # state, so the cadence is uniform and no branch can forget to flush —
-        # candidate_scored previously did, leaving a finished candidate's scores
-        # (and the last/eliminated candidate of a round) unwritten until the next
-        # event or round-complete. That gap was the intermittent "didn't update".
+        # One debounced flush for EVERY snapshot event. Each branch mutates live state, so
+        # the cadence is uniform and no branch can forget to flush — a branch that does
+        # leaves a finished candidate's scores unwritten until the next event.
         self._schedule_persist()
 
     # -- Scalar mutations -----------------------------------------------------

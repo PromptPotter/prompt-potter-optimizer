@@ -1,7 +1,4 @@
-"""Tracing package — events + sinks + bridge.
-
-Public API surface preserved across the previous monolithic
-``infrastructure/tracing.py`` split. Submodule layout:
+"""Tracing package — events + sinks + bridge. Submodule layout:
 
 - :mod:`events` — frozen dataclasses + ``Event`` union (no I/O)
 - :mod:`file_sink` — ``FileSink`` (per-cycle JSONL log)

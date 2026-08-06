@@ -317,6 +317,7 @@ RoundWarningKind = Literal[
     "l1_zero_candidates",
     "injection_budget_overrun",
     "layer_parse_failure",
+    "optimizer_deadline_retry",
 ]
 
 
@@ -326,12 +327,14 @@ class RoundWarningRecord(StrictModel):
     Distinct from :class:`ErrorRecord` (a fatal run halt) and from
     ``RoundDiagnostics`` (post-scoring analytics): these are mid-round
     self-heal events — the optimizer LLM returning empty/truncated output and
-    the round recording zero candidates, an over-budget injection truncation.
-    A fourth kind, ``l2_validator_soft_reject``, sat in the closed set with no
-    emitter: it named the L2 task_context stale-repeat validator, which left with
-    the framing-rewrite surface it existed for (a stale repeat is unrepresentable
-    now that the framing is frozen). The rails recover and the
-    run continues, so stdout alone would leave the operator never knowing.
+    the round recording zero candidates, an over-budget injection truncation, an
+    optimizer call that blew its wall-clock deadline and was retried. The rails
+    recover and the run continues, so stdout alone would leave the operator
+    never knowing.
+
+    **Never re-add ``l2_validator_soft_reject``** — it named the L2 task_context
+    stale-repeat validator, and a stale repeat is unrepresentable now that the
+    framing is frozen. A kind with no emitter is a state nothing can enter.
 
     Rides the canonical ledger via :func:`emit_round_warning` over the
     ``_CYCLE_LEDGER`` ContextVar — the same shape as :func:`emit_error_record`

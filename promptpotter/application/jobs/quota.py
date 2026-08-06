@@ -134,7 +134,7 @@ def effective_spend_cap_usd(
     """
     caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
     if user.spend_budget_usd_daily is not None:
-        spent = sum_user_spend(store=stores, since=start_of_utc_day(), until=time.time())
+        spent = sum_user_spend(stores=stores, since=start_of_utc_day(), until=time.time())
         caps.append(max(0.0, user.spend_budget_usd_daily - spent))
     return min(float(c) for c in caps) if caps else None
 

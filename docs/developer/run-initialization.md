@@ -29,7 +29,7 @@ calling them out-of-order leaves the session under-wired.
 │    ├─ auto_scorer_id(formula)         → session.scoring.scorer_id    │
 │    ├─ compile_round_scorer(formula)?  → session.scoring.round_scorer │
 │    ├─ session.state.obs = obs                                        │
-│    └─ session.experiment_id from cycle_id                            │
+│    └─ session.source = source                                        │
 │    ↓                                                                 │
 │  postcondition: session.scoring fully populated; obs wired           │
 └──────────────────────────────────────────────────────────────────────┘
@@ -37,7 +37,7 @@ calling them out-of-order leaves the session under-wired.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  init_cycle                (loop_start.py)                           │
 │    ├─ resolve cycle_id      (from override or content-hash)          │
-│    ├─ store.campaigns.load(cycle_id)                                 │
+│    ├─ store.load(hop)                                                │
 │    ├─ rewind_to_round?      (when --from N)                          │
 │    ├─ HIT  → resumed_from_round = N+1  (snapshot refresh lives in    │
 │    │           resume_with_divergence_check, classifier-driven)      │
@@ -61,7 +61,7 @@ calling them out-of-order leaves the session under-wired.
 | Step | Reads | Writes |
 |---|---|---|
 | `init_services` | `datasets/{name}/pipeline.yaml`, `.env` (provider keys), backend `/pipeline` | `Session.{store, backend_client, pipeline_schema, samples, index_terms, tenant, langfuse}` |
-| `populate_session_scoring` | `CampaignConfig.scoring`, `cycle_id` | `Session.{scoring, state.obs, experiment_id, source}` |
+| `populate_session_scoring` | `CampaignConfig.scoring` | `Session.{scoring, state.obs, source}` |
 | `init_cycle` | `Session.{store, backend_id, samples}`, `origin_jsp` | the cycle's `campaigns/{campaign_id}/cycles/{cycle_id}/` directory; returns `(cycle_id, resumed_from_round)` |
 | `init_optimization_loop` | everything above + `origin_accuracy` | `Cycle.{ledger, escalation, opt_sp, tracking, axes}`; emits INIT.exit |
 

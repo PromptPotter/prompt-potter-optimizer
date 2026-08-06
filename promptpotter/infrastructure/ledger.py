@@ -14,19 +14,32 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
-from promptpotter.domain.cycle_paths import CycleDir, Projection, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog"]
+__all__ = ["CycleEventLog", "Projection"]
 
 
 _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
+
+
+class Projection(Protocol):
+    """A subscriber to the ledger's record stream.
+
+    Projections receive every appended record via ``on_record``. They
+    persist whatever projection-specific view they own (a JSON dashboard,
+    a markdown log, an in-memory index). Projections never call
+    ``append`` — the ledger is single-writer from the campaign loop.
+    """
+
+    def on_record(self, record: CycleRecord, offset: int) -> None: ...
 
 
 class CycleEventLog:

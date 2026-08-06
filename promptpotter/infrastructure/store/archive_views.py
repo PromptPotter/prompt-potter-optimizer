@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.shared.errors import is_error_result
@@ -143,11 +144,9 @@ def measurement_series_for_samples(
                 {
                     "ord": f"{created_at}/{run_id}/{idx:04d}",
                     "fitness": float(item.get("fitness") or 0.0),
-                    # Emitted HERE so all three scopes of the measurement-series endpoint
-                    # hand back the same `{ord, fitness, label}` dot. The router used to
-                    # re-map this arm alone to synthesize the label the round-file arms
-                    # emit natively — one wire shape with two authors, and the odd one
-                    # out lived in a presentation-layer dict comprehension.
+                    # Emitted HERE so all three scopes of the measurement-series endpoint hand
+                    # back the same `{ord, fitness, label}` dot — never re-map this arm in the
+                    # router, which gives one wire shape two authors.
                     "label": f"run {run_id[:8]}",
                     "run_id": run_id,
                     "created_at": created_at,
@@ -292,16 +291,15 @@ def reindex_measurements(stores: Stores) -> dict[str, int]:
 
 
 def cycle_measurement_series(
-    store: Stores,
-    campaign_id: str,
-    cycle_id: str,
+    stores: Stores,
+    hop: CycleHop,
     sample_ids: set[int],
 ) -> dict[int, list[dict[str, Any]]]:
     """Walk one cycle's ``rounds/round_*.json`` → per-sample series.
 
     Ord = ``{round:04d}/{cand_idx:02d}``; candidates absent from the scoreboard sink to slot 99.
     """
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    cycle_dir = cycle_dir_for(stores.base_dir, hop)
     rounds_dir = CycleLayout(cycle_dir).rounds
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     if not rounds_dir.is_dir():
@@ -351,17 +349,19 @@ def cycle_measurement_series(
 
 
 def campaign_measurement_series(
-    store: Stores,
+    stores: Stores,
     campaign_id: str,
     sample_ids: set[int],
 ) -> dict[int, list[dict[str, Any]]]:
     """Pool every cycle's round-file series across one campaign; ord prefixed by cycle id."""
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
-    for entry in store.campaigns.enumerate_cycles():
+    for entry in stores.campaigns.enumerate_cycles():
         if entry["campaign_id"] != campaign_id:
             continue
         cid = entry["cycle_id"]
-        per_cycle = cycle_measurement_series(store, campaign_id, cid, sample_ids)
+        per_cycle = cycle_measurement_series(
+            stores, CycleHop(campaign_id=campaign_id, cycle_id=cid), sample_ids
+        )
         for sid, dots in per_cycle.items():
             for d in dots:
                 out[sid].append(

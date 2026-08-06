@@ -89,8 +89,8 @@ collects everything else.
 ## Git
 
 - **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, etc.
-- **Commit messages: hard cap 800 chars** total (incl. trailer); title <70.
-  Terse bullets — no motivation essays. Over 800 → rewrite, do not
+- **Commit messages: aim 900 chars** total (incl. trailer), 950 tolerated; title <70.
+  Terse bullets — no motivation essays. Past 950 → rewrite, do not
   commit-and-fix-later.
 - **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. Two pre-convention commits marked it in the subject instead (`docs: manual edit…`, `docs: maunal pass`); don't copy that — `manual` collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
 
@@ -121,10 +121,10 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 <surface-ledger>
 **The AI blind spot this guards against:** told to "simplify", an AI reaches for *additive-but-safe* moves — extract a helper, fold two copies into a `shared/` util, split a big file — each of which adds a module + an import line per call site, so the **total grows** while every commit says "refactor". The genuinely shrinking moves (delete a mechanism, re-inline a single-use module, drop a dead knob) are riskier, so they get skipped. Four rules counter the drift:
 
-1. **Lower the ledger.** Run `python -m promptpotter.diagnostics`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason there. `tests/test_complexity_ledger.py` is where that reason lands; its log of prior raises is the precedent.
+1. **Lower the ledger.** Run `python -m promptpotter.diagnostics`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason there. `tests/test_complexity_ledger.py` is where that reason lands; its log of prior raises is the precedent. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
 2. **Subtract a concept, don't relocate one.** Every simplification commit removes ≥1 *named* thing (module, class, public symbol, config field, code path). Moving code between files counts as zero.
 3. **Extraction threshold.** Default: a shared helper earns its place at **≥3 call sites**, or when it removes a concept; at ≤2 callers inline is usually right. A default, not a bar — extract below it when the shared thing is an invariant callers must not diverge from, and say that's why. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
-4. **Lock the wins.** When a deletion lowers a dimension, lower the baseline in the same commit so it can't drift back. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.
+4. **Lock the wins** — enforced, not advised. The ratchet asserts EQUALITY, so a deletion that lowers a dimension goes red until you lower the baseline in the same commit. Asserting only `<=` re-pins on raises alone: an unrecorded drop becomes silent headroom for the next raise, the baselines drift loose from the package they claim to measure, and the pass that earned the win has no number to show for it. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.
 </surface-ledger>
 
 **When you changed what the engine *decides* (a gate, metric, or state), or added a capability at any entry point → `<entry-point-parity>`:**

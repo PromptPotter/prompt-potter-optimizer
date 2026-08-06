@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     read_json_optional,
@@ -55,7 +55,9 @@ class FileSink:
 
     def _scope_dir(self) -> Path:
         if self._campaign_id and self._cycle_id:
-            return cycle_dir_for(self._tenant_root, self._campaign_id, self._cycle_id)
+            return cycle_dir_for(
+                self._tenant_root, CycleHop(campaign_id=self._campaign_id, cycle_id=self._cycle_id)
+            )
         # Orphan fallback for out-of-campaign file_only() emits — tucked
         # under archive/obs/ so it doesn't compete with operator views.
         return self._tenant_root / "archive" / "obs"

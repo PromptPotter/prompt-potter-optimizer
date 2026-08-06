@@ -21,7 +21,7 @@ from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
@@ -229,8 +229,8 @@ class CommandDispatcher:
     the launcher commands ``mint-campaign`` / ``start-run``.
     """
 
-    def __init__(self, store: Stores, job_registry: Any | None = None) -> None:
-        self._store = store
+    def __init__(self, stores: Stores, job_registry: Any | None = None) -> None:
+        self._stores = stores
         self._job_registry = job_registry
 
     # ------------------------------------------------------------------
@@ -261,7 +261,7 @@ class CommandDispatcher:
         of it, so both webapp buttons and both CLI verbs stayed dead while the
         store-level test passed."""
         self._load_owned_campaign(campaign_id)
-        ledger = CycleEventLog.open_workspace(self._store.base_dir)
+        ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -285,7 +285,7 @@ class CommandDispatcher:
         edit; it lands on the WORKSPACE ledger (the campaign-scoped audit home). Owner-gated
         via ``CAP_FOR_KIND`` at ``_record_and_apply`` (``CAMPAIGN_LIFECYCLE_CAP``)."""
         self._load_owned_campaign(campaign_id)
-        ledger = CycleEventLog.open_workspace(self._store.base_dir)
+        ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -298,7 +298,7 @@ class CommandDispatcher:
         self, campaign_id: str, allowed_models: list[str]
     ) -> dict[str, Any]:
         """Write the frozen snapshot's allow-list; echo the applied value for the ack."""
-        self._store.campaigns.set_allowed_models(campaign_id, allowed_models)
+        self._stores.campaigns.set_allowed_models(campaign_id, allowed_models)
         return {"campaign_id": campaign_id, "allowed_models": list(allowed_models)}
 
     # ------------------------------------------------------------------
@@ -317,7 +317,8 @@ class CommandDispatcher:
         """Cycle-scoped inline-apply dispatch. ``Expected-Version`` validated
         when present; absent header skips the check (v0 relaxation)."""
         campaign = self._load_owned_campaign(campaign_id)
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+        cycle_dir = self._stores.campaigns.cycle_dir(hop)
         if not CycleLayout(cycle_dir).manifest.is_file():
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
@@ -339,13 +340,10 @@ class CommandDispatcher:
         # emit on the parent's root ledger as the audit destination.
         if kind == "delete-cycle":
             return await self._dispatch_delete_cycle(
-                campaign=campaign,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
-                idempotency_key=idempotency_key,
+                campaign=campaign, hop=hop, idempotency_key=idempotency_key
             )
 
-        applier = self._build_cycle_applier(kind, campaign, campaign_id, cycle_id, payload_extras)
+        applier = self._build_cycle_applier(kind, campaign, hop, payload_extras)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -358,8 +356,7 @@ class CommandDispatcher:
         self,
         *,
         campaign: Campaign,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         idempotency_key: str,
     ) -> CommandOutcome:
         """delete-cycle writes its audit trail on the campaign's root cycle
@@ -381,15 +378,15 @@ class CommandDispatcher:
         stopped — inside ``RUN_FRESH_S`` of the index write that makes a just-minted stub
         read ``running``, so a refusal down there would block the cleanup it exists for.
         """
-        if cycle_id in self._store.campaigns.live_cycle_ids(campaign_id):
+        if hop.cycle_id in self._stores.campaigns.live_cycle_ids(hop.campaign_id):
             raise ConflictError(
-                f"refusing to delete {cycle_id}: it has a live producer — pause or stop it first"
+                f"refusing to delete {hop.cycle_id}: it has a live producer — pause or stop it first"
             )
 
-        index = self._store.campaigns.load(campaign_id, cycle_id) or {}
+        index = self._stores.campaigns.load(hop) or {}
         parent_cycle_id = str(index.get("parent_cycle_id") or campaign.root_cycle_id)
 
-        root_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
+        root_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
         root_ledger = CycleEventLog.open(CycleDir(root_dir))
 
         from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
@@ -398,9 +395,8 @@ class CommandDispatcher:
 
         def _apply() -> None:
             deleted, reason = cleanup_stub_fork_if_empty(
-                campaign_store=self._store.campaigns,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
+                campaign_store=self._stores.campaigns,
+                hop=hop,
                 parent_cycle_id=parent_cycle_id,
             )
             if not deleted:
@@ -409,7 +405,7 @@ class CommandDispatcher:
         return await self._record_and_apply(
             ledger=root_ledger,
             kind="delete-cycle",
-            payload={"campaign_id": campaign_id, "cycle_id": cycle_id},
+            payload={"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id},
             idempotency_key=idempotency_key,
             applier=_apply,
         )
@@ -428,7 +424,7 @@ class CommandDispatcher:
         that have no cycle target. ``CommandRecord`` lands on the workspace
         ledger (``projects/{tenant}/.workspace/events.jsonl``) per the §0
         Persistence sibling. No ``Expected-Version``."""
-        ledger = CycleEventLog.open_workspace(self._store.base_dir)
+        ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         applier: Applier
         if kind == "register-backend":
             applier = lambda: self._apply_register_backend(payload)  # noqa: E731
@@ -476,7 +472,7 @@ class CommandDispatcher:
         active`` lifecycle is already the retry guard.
         """
         campaign = self._load_owned_campaign(campaign_id)
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
+        cycle_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
         if not CycleLayout(cycle_dir).manifest.is_file():
             raise NotFoundError(
                 f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
@@ -591,8 +587,7 @@ class CommandDispatcher:
         self,
         kind: CycleScopedKind,
         campaign: Campaign,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         payload_extras: dict[str, Any],
     ) -> Any:
         if kind == "fork-cycle":
@@ -610,7 +605,7 @@ class CommandDispatcher:
                 seed.pipeline_overlay, allowed_models
             )
             if steers_disallowed_model and not has_capability(
-                self._store.identity, CAMPAIGN_BABYSIT_CAP
+                self._stores.identity, CAMPAIGN_BABYSIT_CAP
             ):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
@@ -623,23 +618,21 @@ class CommandDispatcher:
                 # Mint the operator-steered fork (writes the cycle + seed,
                 # retargets the active pointer), THEN launch it. Minting alone is
                 # just disk I/O — without the launch the fork sits seeded-but-idle
-                # (the old design assumed a manual CLI `resume`, which never comes
-                # when steering from the web). One gesture = stop parent → mint →
+                # waiting on a manual CLI `resume` that never comes when steering
+                # from the web. One gesture = stop parent → mint →
                 # continue optimizing from the edited searchpoint. Pass no
                 # spend/halt: the seed's reconciled limits govern at the runner
                 # seam (runner/entry.py::_apply_config_overrides).
                 new_cycle_id = mint_operator_fork(
-                    stores=self._store,
-                    campaign_id=campaign_id,
-                    cycle_id=cycle_id,
+                    stores=self._stores,
+                    hop=hop,
                     from_round=int(payload_extras.get("round", 0)),
                     from_candidate_id=str(payload_extras.get("candidate_id", "")),
                     seed=seed,
                     steered_by=str(payload_extras.get("steered_by", "")),
                 )
                 await self._apply_start_run(
-                    campaign_id=campaign_id,
-                    cycle_id=new_cycle_id,
+                    hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
                     kind="resume",
                     halt_at_accuracy=None,
                     spend_budget_usd=None,
@@ -653,26 +646,25 @@ class CommandDispatcher:
             rounds = payload_extras.get("rounds", 1)
             steps = int(rounds) if isinstance(rounds, int | float) else 1
             return lambda: self._apply_start_run(
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
+                hop=hop,
                 kind="resume",
                 halt_at_accuracy=None,
                 spend_budget_usd=None,
                 stop_after_rounds=max(1, steps),
             )
         if kind == "skip-searchpoint":
-            return lambda: self._apply_skip_searchpoint(campaign_id, cycle_id)
+            return lambda: self._apply_skip_searchpoint(hop)
         if kind == "cleanup-empty-cycles":
-            return lambda: self._apply_cleanup_empty(campaign_id, cycle_id)
+            return lambda: self._apply_cleanup_empty(hop)
         if kind == "pause-cycle":
-            return lambda: self._apply_pause_cycle(campaign_id, cycle_id)
+            return lambda: self._apply_pause_cycle(hop)
         if kind == "origin-gate-decision":
             decision = str(payload_extras.get("decision", ""))
             if decision not in ("rescore", "proceed", "abort"):
                 raise PayloadInvalidError(
                     "origin-gate-decision requires decision ∈ {rescore, proceed, abort}."
                 )
-            return lambda: self._apply_origin_gate_decision(campaign_id, cycle_id, decision)
+            return lambda: self._apply_origin_gate_decision(hop, decision)
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
             max_tokens = payload_extras.get("max_tokens")
@@ -695,9 +687,7 @@ class CommandDispatcher:
                 )
             usd_val = float(max_usd) if max_usd is not None else None
             tok_val = int(max_tokens) if max_tokens is not None else None
-            return lambda: self._apply_change_spend_budget(
-                campaign_id, cycle_id, max_usd=usd_val, max_tokens=tok_val
-            )
+            return lambda: self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
         if kind == "start-run":
             run_kind = str(payload_extras.get("kind", ""))
             halt = payload_extras.get("halt_at_accuracy")
@@ -705,8 +695,7 @@ class CommandDispatcher:
 
             async def _apply() -> None:
                 await self._apply_start_run(
-                    campaign_id=campaign_id,
-                    cycle_id=cycle_id,
+                    hop=hop,
                     kind=run_kind,
                     halt_at_accuracy=float(halt) if isinstance(halt, int | float) else None,
                     spend_budget_usd=float(spend) if isinstance(spend, int | float) else None,
@@ -721,7 +710,7 @@ class CommandDispatcher:
         self, kind: LifecycleKind, campaign_id: str, reason: str, keep_results: bool
     ) -> None:
         changed_at = utcnow_iso()
-        campaigns = self._store.campaigns
+        campaigns = self._stores.campaigns
         if kind == "archive-campaign":
             campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
         elif kind == "unarchive-campaign":
@@ -732,7 +721,7 @@ class CommandDispatcher:
                 keep_results=keep_results,
                 changed_at=changed_at,
                 reason=reason,
-                inner_sandbox_root=inner_sandboxes_dir(self._store.shared_root),
+                inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
@@ -747,11 +736,11 @@ class CommandDispatcher:
             if isinstance(explicit_id, str) and explicit_id
             else _slugify_backend_id(name)
         )
-        if self._store.backends.get(backend_id) is not None:
+        if self._stores.backends.get(backend_id) is not None:
             raise ConflictError(
                 f"Backend '{backend_id}' already exists", details={"backend_id": backend_id}
             )
-        self._store.backends.register(
+        self._stores.backends.register(
             BackendConnection(
                 id=backend_id,
                 name=name,
@@ -760,46 +749,41 @@ class CommandDispatcher:
             )
         )
 
-    def _apply_skip_searchpoint(self, campaign_id: str, cycle_id: str) -> None:
+    def _apply_skip_searchpoint(self, hop: CycleHop) -> None:
         """Write a one-shot ``.runtime/skip.flag``; ``Session.skip_check`` polls it at
         the next per-sample checkpoint, accepts the partial searchpoint, consumes the
         flag, and the cycle keeps running. A manual skip is a human intervention — the
         cycle is marked ``human_intervened`` (no longer purely reproducible)."""
-        flag = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).skip_flag
+        flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).skip_flag
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
-        self._store.campaigns.mark_human_intervened(
-            campaign_id, cycle_id, kind="skip", at=utcnow_iso()
-        )
+        self._stores.campaigns.mark_human_intervened(hop, kind="skip", at=utcnow_iso())
 
-    def _apply_pause_cycle(self, campaign_id: str, cycle_id: str) -> None:
+    def _apply_pause_cycle(self, hop: CycleHop) -> None:
         """Write ``.runtime/pause.flag`` — the single operator-interrupt flag.
         ``Session.pause_check`` polls it at the next checkpoint; the worker then
         exits cleanly and the cycle stays resumable (``_finalize_run`` skips
         terminal marking on ``StopReason.PAUSED``). Resuming is the ``start-run``
         / ``resume`` launcher relaunching from the last completed round — not an
         in-place flag delete, since the worker is gone. Idempotent."""
-        flag = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).pause_flag
+        flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).pause_flag
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
-    def _apply_origin_gate_decision(self, campaign_id: str, cycle_id: str, decision: str) -> None:
+    def _apply_origin_gate_decision(self, hop: CycleHop, decision: str) -> None:
         """Write ``.runtime/gate_decision.json`` (``{decision}``); the runner's
         origin-gate wait-loop polls it (``run_origin_gate``) and acts: ``rescore``
         re-scores force-fresh and re-evaluates the gate in place, ``proceed`` enters
         L1, ``abort`` ends the cycle with ``StopReason.ORIGIN_GATE``. The one
         decision channel all three surfaces write; the runner clears the file after
         consuming it. Last write wins."""
-        gate_path = CycleLayout(
-            self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        ).gate_decision
+        gate_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).gate_decision
         gate_path.parent.mkdir(parents=True, exist_ok=True)
         write_json(gate_path, {"decision": decision})
 
     def _apply_change_spend_budget(
         self,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         *,
         max_usd: float | None,
         max_tokens: int | None,
@@ -809,7 +793,7 @@ class CommandDispatcher:
         leaves that ceiling untouched (merge into the existing file). Setting a
         ceiling to ``0`` halts at the next round boundary; raising above current
         usage releases."""
-        cap_path = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).spend_cap
+        cap_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).spend_cap
         cap_path.parent.mkdir(parents=True, exist_ok=True)
         caps: dict[str, float | int] = {}
         existing = read_json_tolerant(cap_path, {})  # missing/malformed → start clean
@@ -843,7 +827,7 @@ class CommandDispatcher:
         # origin_override here. Quota (429) / Launch (422) / BackendUnreachable
         # (503) are PotterErrors the central catch in _record_and_apply maps.
         await mint_campaign_command(
-            stores=self._store,
+            stores=self._stores,
             dataset_name=dataset_name,
             job_registry=self._job_registry,
             halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
@@ -853,8 +837,7 @@ class CommandDispatcher:
     async def _apply_start_run(
         self,
         *,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         kind: str,
         halt_at_accuracy: float | None,
         spend_budget_usd: float | None,
@@ -875,39 +858,40 @@ class CommandDispatcher:
         # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
         # by _record_and_apply — no per-applier arm here.
         await start_run_command(
-            stores=self._store,
+            stores=self._stores,
             job_registry=self._job_registry,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
             kind=kind,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
             stop_after_rounds=stop_after_rounds,
         )
 
-    def _apply_cleanup_empty(self, campaign_id: str, cycle_id: str) -> None:
+    def _apply_cleanup_empty(self, hop: CycleHop) -> None:
         """Batch-delete every empty-stub sibling under ``root_cycle_id(cycle_id)``;
         leaves-first via two passes. Reasons for skipped entries surface via
         the audit ack detail string."""
-        root_id = root_cycle_id(cycle_id)
-        _, active_cmp, active_cid = read_active_pointer(self._store.base_dir)
+        root_id = root_cycle_id(hop.cycle_id)
+        _, active_cmp, active_cid = read_active_pointer(self._stores.base_dir)
         deleted_ids: list[str] = []
         for _pass in range(2):
             progress = False
-            entries = self._store.campaigns.enumerate_cycles()
+            entries = self._stores.campaigns.enumerate_cycles()
             family_ids = [
                 e["cycle_id"]
                 for e in entries
-                if e["campaign_id"] == campaign_id
+                if e["campaign_id"] == hop.campaign_id
                 and e["cycle_id"] != root_id
                 and e["parent_cycle_id"] == root_id
             ]
             for cid in family_ids:
                 if cid in deleted_ids:
                     continue
-                if campaign_id == active_cmp and cid == active_cid:
+                if hop.campaign_id == active_cmp and cid == active_cid:
                     continue
-                deleted, _reason = self._store.campaigns.try_delete_stub_cycle(campaign_id, cid)
+                deleted, _reason = self._stores.campaigns.try_delete_stub_cycle(
+                    CycleHop(campaign_id=hop.campaign_id, cycle_id=cid)
+                )
                 if deleted:
                     deleted_ids.append(cid)
                     progress = True
@@ -921,10 +905,10 @@ class CommandDispatcher:
         """The id recorded as a command's issuer. For a delegated sub-principal
         (ADR-0005) that is its own `claims["principal"]`, not the delegator whose
         tenant it acts in — so the audit trail names the real actor."""
-        principal = self._store.identity.claims.get("principal")
+        principal = self._stores.identity.claims.get("principal")
         if isinstance(principal, str) and principal:
             return principal
-        return str(self._store.identity.user_id)
+        return str(self._stores.identity.user_id)
 
     def _require_capability_for(self, kind: str) -> None:
         """Per-verb capability gate — the one seam every command funnels through.
@@ -936,7 +920,7 @@ class CommandDispatcher:
         tier; a delegated sub-principal an attenuated subset.
         """
         cap = CAP_FOR_KIND.get(kind)
-        if cap is None or not has_capability(self._store.identity, cap):
+        if cap is None or not has_capability(self._stores.identity, cap):
             logger.warning(
                 "command %r denied for principal %s (missing %s)",
                 kind,
@@ -946,7 +930,9 @@ class CommandDispatcher:
             raise NotFoundError("Not found", code="not_found")
 
     def _load_owned_campaign(self, campaign_id: str) -> Any:
-        campaign = self._store.campaigns.load_owned(campaign_id, str(self._store.identity.user_id))
+        campaign = self._stores.campaigns.load_owned(
+            campaign_id, str(self._stores.identity.user_id)
+        )
         if campaign is None:
             raise NotFoundError(
                 f"Campaign not found: {campaign_id}", code="command_target_not_found"

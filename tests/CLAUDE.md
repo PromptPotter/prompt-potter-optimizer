@@ -26,7 +26,7 @@ for any test is not "does this guard a contract?" — almost everything does —
 | `test_security.py` | A leak. A key reaching the logs, dataset content reaching the optimizer LLM unfenced (prompt injection), a path-segment escaping its tenant dir — no error, just harm, often irreversible in a multi-tenant product. |
 | `test_resume.py` | Lost / corrupted measurement data. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, an aborted-run merge that shrinks an already-fuller archive. A killed-and-restarted run raises nothing — it just loses or mis-carries expensive, irreplaceable data. |
 | `test_reaper.py` | A reap that clobbers a paused, check-in, or reopened-for-continuation cycle's resumability — with no error. The last is the widest window: clearing a cycle's terminal latch to continue it makes it derive `DETACHED` until its producer writes again. |
-| `test_complexity_ledger.py` | Conceptual-surface creep. The ratchet: the package's counted surface never grows *unexamined* — a raise is allowed, it just costs a baseline edit and a written reason. It is the enforcement teeth behind the `<surface-ledger>` doctrine, and root `CLAUDE.md` tells you to run it on any "refactor"/LOC pass. |
+| `test_complexity_ledger.py` | Conceptual-surface creep, and its quieter twin — a win nobody recorded. The ratchet asserts EQUALITY, so the counted surface never moves *unexamined* in either direction; each costs a baseline edit and a written reason. One-way, it re-pins only on raises, so an unrecorded drop becomes silent headroom for the next. It is the enforcement teeth behind the `<surface-ledger>` doctrine, and root `CLAUDE.md` tells you to run it on any "refactor"/LOC pass. |
 
 That is the suite — **six files**. No structural / wire / persistence / identity /
 quota / lifecycle / event-stream / display / shape tests — all of those fail loud.
@@ -42,10 +42,10 @@ run reveals; each test's docstring carries the detail.
 - `test_claude_md_claims_resolve` — **nothing but an agent reads a `CLAUDE.md`, and an agent
   following a dead pointer does not raise.** It reads a rule that is not there, or misses one
   that is, and edits accordingly with every gate green throughout. A claim scan, not a shape
-  scan: only that what the files claim still resolves. Its **line-number ban runs wider —
-  every tracked `docs/**/*.md`** — because that half enforces the Recompute Test, which
-  governs all docs rather than the CLAUDE.md shape; scoping it narrow is what let one
-  backlog collect nine refs that had all rotted.
+  scan: only that what the files claim still resolves. Its **banned tokens (a `file.py:<line>`
+  ref, an `R-NN` tag) run wider — every tracked `docs/**/*.md`** — because those govern all
+  docs rather than the CLAUDE.md shape; scoping them narrow is what let one backlog collect
+  nine refs that had all rotted, and twelve tags outlive the registry that defined them.
 
 Neither can be an import-time assert: no production module owns the repo's file bytes.
 

@@ -29,7 +29,7 @@ import pytest
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -52,8 +52,8 @@ _CYCLE = "cycle-0"
 def _mint(
     stores: Stores, *, checkin: bool = False, paused: bool = False, dashboard: bool = False
 ) -> Path:
-    stores.campaigns.create(_CAMPAIGN, _CYCLE, {})
-    cycle_dir = stores.campaigns.cycle_dir(_CAMPAIGN, _CYCLE)
+    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {})
+    cycle_dir = stores.campaigns.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     layout = CycleLayout(cycle_dir)
     layout.runtime.mkdir(parents=True, exist_ok=True)
     if checkin:
@@ -77,15 +77,25 @@ def _age(cycle_dir: Path, seconds_ago: float) -> None:
 
 def test_mark_producer_vanished_skips_checkin_cycle(built_stores: Stores) -> None:
     _mint(built_stores, checkin=True)
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is False
+    )
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and "finished_at" not in data
 
 
 def test_mark_producer_vanished_skips_paused_cycle(built_stores: Stores) -> None:
     _mint(built_stores, paused=True)
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is False
+    )
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and "finished_at" not in data
 
 
@@ -107,22 +117,42 @@ def test_a_pause_that_set_no_flag_is_still_never_reaped(built_stores: Stores) ->
 
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.PAUSED
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is False
+    )
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and "finished_at" not in data
 
 
 def test_mark_producer_vanished_is_idempotent_once_finished(built_stores: Stores) -> None:
     _mint(built_stores)
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is True
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is True
+    )
     # Second call: already carries finished_at — no-op.
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is False
+    )
 
 
 def test_mark_producer_vanished_stamps_via_mark_finished_shape(built_stores: Stores) -> None:
     _mint(built_stores)
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is True
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is True
+    )
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None
     reason = StopReason.PRODUCER_VANISHED.value
     assert data["status"] == reason
@@ -139,7 +169,7 @@ def test_sweep_dead_cycles_reaps_a_stale_cycle(built_stores: Stores) -> None:
     _age(cycle_dir, seconds_ago=1000.0)
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0)
     assert reaped == 1
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and data["finished_at"]
 
 
@@ -147,7 +177,7 @@ def test_sweep_dead_cycles_spares_a_fresh_cycle(built_stores: Stores) -> None:
     _mint(built_stores, dashboard=True)
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=900.0)
     assert reaped == 0
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and "finished_at" not in data
 
 
@@ -158,14 +188,14 @@ def test_sweep_dead_cycles_reaps_an_inner_sandbox_cycle(built_stores: Stores) ->
     directories `.inner/` holds."""
     inner_tenant_dir = inner_sandboxes_dir(built_stores.projects_root) / "outer-cycle-1" / "tenant"
     inner_store = CampaignStore(WorkspaceDir(inner_tenant_dir))
-    inner_store.create(_CAMPAIGN, _CYCLE, {})
-    cycle_dir = inner_store.cycle_dir(_CAMPAIGN, _CYCLE)
+    inner_store.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {})
+    cycle_dir = inner_store.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
     _age(cycle_dir, seconds_ago=1000.0)
 
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0)
     assert reaped == 1
-    data = inner_store.load(_CAMPAIGN, _CYCLE)
+    data = inner_store.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and data["finished_at"]
 
 
@@ -183,8 +213,13 @@ def test_a_cycle_held_at_the_origin_gate_is_never_reaped(built_stores: Stores) -
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is False
-    data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is False
+    )
+    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert data is not None and "finished_at" not in data
 
 
@@ -316,7 +351,9 @@ def _sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -> Pat
     than leaving the reaper tested against a shape nothing writes.
     """
     sandbox = inner_sandbox_dir(
-        stores.shared_root, str(stores.tenant_id), owner_campaign_id, owner_cycle_id
+        stores.shared_root,
+        str(stores.tenant_id),
+        CycleHop(campaign_id=owner_campaign_id, cycle_id=owner_cycle_id),
     )
     write_json(
         sandbox_owner_path(sandbox),
@@ -327,7 +364,7 @@ def _sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -> Pat
         },
     )
     inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
-    inner.create("innerds__20260101-000000", "inner-cycle-0", {})
+    inner.create(CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"), {})
     return sandbox
 
 
@@ -348,7 +385,12 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_still_exists(built_stores: S
     _mint(built_stores)  # owner cycle _CYCLE, on disk
     sandbox = _sandbox(built_stores, _CAMPAIGN, _CYCLE)
     # Terminal owner: the tempting-but-wrong reclamation trigger.
-    assert built_stores.campaigns.mark_producer_vanished(_CAMPAIGN, _CYCLE) is True
+    assert (
+        built_stores.campaigns.mark_producer_vanished(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
+        )
+        is True
+    )
 
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
     assert (sandbox / "tenant").is_dir()
@@ -358,7 +400,9 @@ def test_reclaim_spares_a_sandbox_it_cannot_prove_is_an_orphan(built_stores: Sto
     """No owner record ⇒ KEEP. The key is a hash, so a sandbox missing its ``owner.json``
     cannot have an owner derived from its name — and this function is the package's only
     unattended recursive delete. It must act on a fact, never on the absence of one."""
-    sandbox = inner_sandbox_dir(built_stores.shared_root, "t", "c__aaaaaa", "cycle-x")
+    sandbox = inner_sandbox_dir(
+        built_stores.shared_root, "t", CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle-x")
+    )
     (sandbox / "tenant").mkdir(parents=True)
 
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
@@ -379,10 +423,13 @@ def test_two_campaigns_on_one_origin_do_not_share_a_sandbox(built_stores: Stores
     b = _sandbox(built_stores, "ppself__bbbbbb", shared_origin_cycle)
     assert a != b
 
-    built_stores.campaigns.create("ppself__aaaaaa", shared_origin_cycle, {})
+    built_stores.campaigns.create(
+        CycleHop(campaign_id="ppself__aaaaaa", cycle_id=shared_origin_cycle), {}
+    )
     # Finished, so the delete guard is about the sandbox key and not about liveness.
     built_stores.campaigns.update(
-        "ppself__aaaaaa", shared_origin_cycle, {"finished_at": "2026-01-01T00:00:00Z"}
+        CycleHop(campaign_id="ppself__aaaaaa", cycle_id=shared_origin_cycle),
+        {"finished_at": "2026-01-01T00:00:00Z"},
     )
     write_json(
         built_stores.campaigns.campaign_root_dir("ppself__aaaaaa") / "campaign.json",
@@ -418,7 +465,10 @@ def _lifecycle_fixture(stores: Stores, *, running: bool) -> tuple[Path, Path]:
     tenant_root = cycle_dir.parents[3]
     campaign_dir = cycle_dir.parents[1]
     if not running:
-        stores.campaigns.update(_CAMPAIGN, _CYCLE, {"finished_at": "2026-01-01T00:00:00Z"})
+        stores.campaigns.update(
+            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE),
+            {"finished_at": "2026-01-01T00:00:00Z"},
+        )
     write_json(
         campaign_dir / "campaign.json",
         {
@@ -476,8 +526,10 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
 
     tenant_root, _ = _lifecycle_fixture(built_stores, running=True)
     stub = "cycle-0_fork_deadbeef"
-    built_stores.campaigns.create(_CAMPAIGN, stub, {"parent_cycle_id": _CYCLE, "n_rounds": 0})
-    stub_dir = built_stores.campaigns.cycle_dir(_CAMPAIGN, stub)
+    built_stores.campaigns.create(
+        CycleHop(campaign_id=_CAMPAIGN, cycle_id=stub), {"parent_cycle_id": _CYCLE, "n_rounds": 0}
+    )
+    stub_dir = built_stores.campaigns.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=stub))
     write_json(stub_dir / "dashboard.json", {"run_phase": "running"})
     write_json(
         tenant_root / ".workspace" / "active_session.json",
@@ -549,15 +601,17 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     This pins the hazard that ordering exists for.
     """
     cycle_dir = _mint(built_stores, dashboard=True)
-    built_stores.campaigns.update(_CAMPAIGN, _CYCLE, {"finished_at": "2026-08-02T20:30:00Z"})
+    built_stores.campaigns.update(
+        CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {"finished_at": "2026-08-02T20:30:00Z"}
+    )
     _age(cycle_dir, seconds_ago=10_000.0)
 
     # Terminal: stale, but the latch protects it.
     assert derive_run_phase(cycle_dir, is_terminal=True, fresh_s=1.0) is RunPhase.TERMINAL
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
 
-    built_stores.campaigns.reopen_for_continuation(_CAMPAIGN, _CYCLE)
-    reopened = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    built_stores.campaigns.reopen_for_continuation(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    reopened = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert reopened is not None
     assert "finished_at" not in reopened, "the terminal latch survived the reopen"
     assert "final" not in reopened, "a stale winner block outlived the round that justified it"
@@ -571,5 +625,5 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=60.0) is RunPhase.RUNNING
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=60.0) == 0
-    still = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
+    still = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
     assert still is not None and "finished_at" not in still

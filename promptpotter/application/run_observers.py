@@ -16,7 +16,7 @@ from promptpotter.application.origin import (
 )
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -358,21 +358,16 @@ def build_run_observers(
             "jobs.mint.prepare_fresh_cycle — it needs both cycle_id and store"
         )
 
-    cycle_dir = CycleDir(
-        session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-    )
+    cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     audit = AuditTrailView.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
-    # The trace id is created at CampaignStart (during init, before this),
-    # so it's already on the obs bridge — hand it to the dashboard as a set-once
-    # identity stamp (like session_id), not a tracing-stream read (fan-out-only
-    # stays intact). None when Langfuse is disabled. Keyed by `tracing_campaign_id`
-    # — the stable root-cycle key the trace was stored under (`CampaignStart`); a
-    # fork reassigns `cycle_id` but emits into the same root trace, so the live
-    # `cycle_id` would miss the lookup and drop the fork's deep link.
+    # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
+    # stays intact. None when Langfuse is disabled. Keyed by `tracing_campaign_id`, the stable
+    # root-cycle key the trace was stored under: a fork reassigns `cycle_id` but emits into
+    # the same root trace, so the live `cycle_id` misses the lookup.
     obs = session.state.obs
     trace_url = (
         langfuse_trace_url(obs.get_langfuse_trace_id(session.state.tracing_campaign_id))
@@ -399,7 +394,9 @@ def build_run_observers(
             langfuse_trace_url=trace_url,
         )
         parent_dir = CycleDir(
-            session.store.campaigns.cycle_dir(session.campaign_id, fork.parent_cycle_id)
+            session.store.campaigns.cycle_dir(
+                CycleHop(campaign_id=session.campaign_id, cycle_id=fork.parent_cycle_id)
+            )
         )
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)

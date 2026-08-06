@@ -246,24 +246,24 @@ class _Reads:
         # walkers against a `parent_cycle_id` that points back up the chain.
         self.seen: set[tuple[Path, str, str]] = set()
 
-    def cycles(self, store: Stores) -> list[dict[str, object]]:
-        if (key := store.base_dir) not in self._cycles:
-            self._cycles[key] = store.campaigns.enumerate_cycles()
+    def cycles(self, stores: Stores) -> list[dict[str, object]]:
+        if (key := stores.base_dir) not in self._cycles:
+            self._cycles[key] = stores.campaigns.enumerate_cycles()
         return self._cycles[key]
 
-    def campaign(self, store: Stores, campaign_id: str) -> Campaign | None:
-        if (key := (store.base_dir, campaign_id)) not in self._campaigns:
-            self._campaigns[key] = store.campaigns.load_campaign(campaign_id)
+    def campaign(self, stores: Stores, campaign_id: str) -> Campaign | None:
+        if (key := (stores.base_dir, campaign_id)) not in self._campaigns:
+            self._campaigns[key] = stores.campaigns.load_campaign(campaign_id)
         return self._campaigns[key]
 
 
-def _layout(store: Stores, hop: CycleHop) -> CycleLayout:
+def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
     """This hop's cycle paths — ``CycleLayout`` owns every filename in the dir."""
-    return CycleLayout(cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id))
+    return CycleLayout(cycle_dir_for(stores.base_dir, hop))
 
 
-def _read_index(store: Stores, hop: CycleHop) -> dict[str, object]:
-    index = read_json_optional(_layout(store, hop).manifest)
+def _read_index(stores: Stores, hop: CycleHop) -> dict[str, object]:
+    index = read_json_optional(_layout(stores, hop).manifest)
     return index if isinstance(index, dict) else {}
 
 
@@ -359,10 +359,10 @@ def _float_or_none(value: object) -> float | None:
 
 
 def _course_scalars(
-    store: Stores, hop: CycleHop, index: dict[str, object], reads: _Reads
+    stores: Stores, hop: CycleHop, index: dict[str, object], reads: _Reads
 ) -> dict[str, object]:
     """The course's own facts: topology from ``index.json``, live ♥ from the dashboard."""
-    layout = _layout(store, hop)
+    layout = _layout(stores, hop)
     dash = read_json_optional(layout.dashboard)
     dash = dash if isinstance(dash, dict) else {}
 
@@ -370,12 +370,12 @@ def _course_scalars(
     limits = dash.get("run_limits") if isinstance(dash.get("run_limits"), dict) else {}
     best, hearts = index.get("best_accuracy"), dash.get("hearts")
     cap = limits.get("lives_cap") if isinstance(limits, dict) else None
-    campaign = reads.campaign(store, hop.campaign_id)
+    campaign = reads.campaign(stores, hop.campaign_id)
 
     # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no
     # `spawned_by`, and calling it "root" puts two roots in one tree.
     kind: CourseKind = sibling_kind(hop.cycle_id)
-    if kind == "root" and (spawned or ".inner" in store.projects_root.parts):
+    if kind == "root" and (spawned or ".inner" in stores.projects_root.parts):
         kind = "inner"
 
     return {
@@ -398,33 +398,33 @@ def _course_scalars(
     }
 
 
-def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
+def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
     """Every course hanging off *path* — forks AND inner runs, one list, so callers never
     branch on which. Only sandbox ROOTS (an inner run's own forks are ITS children), and both
     matches on the full ``(campaign_id, cycle_id)``: a bare cycle_id reaches into another
     campaign minted on the same declaration."""
     leaf = path[-1]
-    reads.seen.add((store.base_dir, leaf.campaign_id, leaf.cycle_id))
+    reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
-    for entry in reads.cycles(store):
+    for entry in reads.cycles(stores):
         if entry.get("parent_cycle_id") != leaf.cycle_id:
             continue
         if entry.get("campaign_id") != leaf.campaign_id:
             continue
         hop = CycleHop(campaign_id=str(entry["campaign_id"]), cycle_id=str(entry["cycle_id"]))
-        if (key := (store.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
+        if (key := (stores.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
             continue
         reads.seen.add(key)
         out.append(
             FamilyCourse(
-                store=store,
+                store=stores,
                 path=(*path[:-1], hop),
-                manifest=_read_index(store, hop),
+                manifest=_read_index(stores, hop),
                 inner=False,
             )
         )
 
-    sandbox = inner_sandbox_store(store, leaf.campaign_id, leaf.cycle_id)
+    sandbox = inner_sandbox_store(stores, leaf.campaign_id, leaf.cycle_id)
     if sandbox is not None:
         for entry in reads.cycles(sandbox):
             if entry.get("parent_cycle_id"):
@@ -444,12 +444,12 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
     return out
 
 
-def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
+def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
     """The whole family rooted at *path* — the FLAT view of what :func:`_build` walks
     recursively, same helpers, so membership has one answer. Order is stable so the
     time-ray's ETag holds across identical requests."""
     reads = _Reads()
-    root_store, _ = resolve_cycle_path(store, path)
+    root_store, _ = resolve_cycle_path(stores, path)
     root = FamilyCourse(
         store=root_store,
         path=path,
@@ -703,12 +703,12 @@ def _candidate_node(
     )
 
 
-def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
+def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
     leaf = path[-1]
-    index = _read_index(store, leaf)
-    ledger_path = _layout(store, leaf).ledger
+    index = _read_index(stores, leaf)
+    ledger_path = _layout(stores, leaf).ledger
     candidates = scan_ledger_candidates(ledger_path)
-    children = _child_courses(store, path, reads)
+    children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
     # Mint order IS the campaign's timeline, so it is what positions a fork on it.
     forks = sorted(
@@ -753,7 +753,7 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
         contributions,
     )
 
-    scalars = _course_scalars(store, leaf, index, reads)
+    scalars = _course_scalars(stores, leaf, index, reads)
     # A course whose line MOVED does not answer for run-state; the LAST such cut speaks, and
     # each branch delegates onward, so a chain resolves to its tip. `origin_accuracy` stays
     # OURS — round 0 is the shared prefix, not the cut.
@@ -779,10 +779,10 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
     )
 
 
-def build_lineage_tree(store: Stores, path: CyclePath) -> LineageNode:
+def build_lineage_tree(stores: Stores, path: CyclePath) -> LineageNode:
     """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`.
 
     Each level costs one ledger scan plus two small JSON reads per course.
     """
-    store_at, _ = resolve_cycle_path(store, path)
+    store_at, _ = resolve_cycle_path(stores, path)
     return _build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads())

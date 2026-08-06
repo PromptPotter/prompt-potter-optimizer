@@ -4,7 +4,8 @@
 #
 # The webapp half is not redundant with `npm run build` — next.config sets
 # `typescript.ignoreBuildErrors` and Next 16 dropped build-time linting, so the
-# build checks neither. It costs ~30s; python-only commits pay nothing.
+# build checks neither. It costs ~30s; a python-only commit pays the ~8s
+# generated-surface pass instead.
 
 set -e
 
@@ -14,6 +15,19 @@ staged_py=$(echo "$changed" | grep -E '\.py$' || true)
 if [ -n "$staged_py" ]; then
     python -m ruff format --check $staged_py
     python -m ruff check $staged_py
+
+    # Three surfaces are generated FROM Python. CI regenerates them and fails on a
+    # diff, so a docstring edit that skips this reds `main` after the push instead of
+    # here. Whole-tree like tsc below — the generators read the worktree, not the index.
+    generated="webapp/lib/api/types.generated.ts promptpotter/assets/optimizer/resolved_schemas.json docs/specs/openapi.generated.json"
+    python scripts/build_ts_types.py > /dev/null
+    python scripts/build_optimizer_schemas.py > /dev/null
+    python scripts/build_openapi.py > /dev/null
+    if ! git diff --quiet -- $generated; then
+        echo "pre-commit: generated surfaces were stale — regenerated in place, 'git add' and re-commit:" >&2
+        git diff --name-only -- $generated >&2
+        exit 1
+    fi
 fi
 
 # Paths arrive repo-relative; eslint and tsc both want to run from webapp/.

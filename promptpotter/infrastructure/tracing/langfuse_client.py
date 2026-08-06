@@ -45,8 +45,8 @@ class LangfuseLogger:
         # ``enabled=False`` force-disables regardless of credentials. Used for
         # ephemeral L4 inner campaigns: their cloud traces have no operator value
         # (the self-potter-hop reads the LOCAL FileSink traces, not the cloud),
-        # they burn Langfuse quota (429s), and — before this — piled payload-bearing
-        # span objects in ``_trace_metadata`` until the process OOM-killed.
+        # they burn Langfuse quota (429s), and unfiltered they pile payload-bearing
+        # span objects in ``_trace_metadata`` until the process OOM-kills.
         self.enabled = bool(
             enabled
             and settings.LANGFUSE_ENABLED

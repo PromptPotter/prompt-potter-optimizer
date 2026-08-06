@@ -9,28 +9,26 @@ that drive the inner PromptPotter cycle. Connector boundary:
 Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
 
 Each outer "sample" is one entry in `inner_tasks.yaml`: it mints and runs a full
-inner PromptPotter campaign on **`justlogic`** (high-depth logic reasoning — chosen
-because the inner model is far from what prompting can get out of it there, so the
-inner loop has room to climb and outer candidates score differently. No target
-score is declared: the panel says what an inner cycle may SPEND, never what it is
-expected to REACH). Each inner run reports a vector of proxy
+inner PromptPotter campaign on **`justlogic-d234`** (3-class deductive reasoning over an
+iid mix of depths 2-4 — chosen because the inner model is far from what prompting can get
+out of it there, so the inner loop has room to climb and outer candidates score
+differently. No target score is declared: the panel says what an inner cycle may SPEND,
+never what it is expected to REACH). Each inner run reports a vector of proxy
 measurement (`domain/l4/proxies.py::OuterSampleProxies`): `mean_round_delta`, the mean
 over rounds of the ability the inner search ADOPTED, minus its origin, in logits on one
 difficulty-adjusted ruler. It averages that staircase rather than reading its last step
-because the mean measured a 26% quieter instrument on the banked 39-cell panel while
-ranking the same arms (r = +0.941) — and because it rewards lifting early.
+because the mean is the quieter instrument at the same ranking — and because it rewards
+lifting early.
 
 The outer scoring formula in `campaign.yaml::scoring` re-anchors that one term into
-[0,1] and nothing else. It used to compose four factors over eight emitted proxies;
-a 39-cell panel then measured each, and only this one discriminated between
-optimizer prompts — the quality terms carried more SEED variance than arm variance while
-holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
+[0,1] and nothing else: it is the only proxy that discriminated between optimizer prompts,
+the quality terms having carried more SEED variance than arm variance while holding
+authority over the ordering. The rationale lives on `OuterSampleProxies`.
 
 ## Status
 
-The recursion is SHIPPED & live-validated; status + remaining work live in ONE
-place — [`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md)
-§ Finish line.
+Status + remaining work live in ONE place —
+[`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § Finish line.
 
 ## Files
 
@@ -41,7 +39,7 @@ Knob values live in the files, not here — read them there.
 - `campaign.yaml` — outer campaign config: the composite scoring formula,
   `optimizer_set: "self_optimizing"`, the USD budget (`token_budget` is `null` on purpose —
   see Cost shape).
-- `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic` bank +
+- `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic-d234` bank +
   the `inner_benchmark_config` ladder (a REQUIRED file; all four ladder keys
   must be present or the inner cycle is unscoreable).
 - `task_description.md` / `task_context.yaml` — outer L1 framing.
@@ -78,10 +76,9 @@ outer ledger, so a token cap would trip after a couple of inner campaigns while
 USD budget remains (see l4-outer-loop § Live-run learnings).
 
 **An absolute dollar total is not quotable yet.** How many inner rounds each
-campaign actually runs depends on the `justlogic` inner origin→target gap, and that
-origin is currently **unmeasured** on this engine (the prior reading is void —
-pre-2026-07-10-reset and pre-seed-determinism). Re-measure it (`noise-floor --k 3`)
-before sizing a real run.
+campaign actually runs depends on the `justlogic-d234` inner origin→target gap, and that
+origin is **unmeasured** on this engine. Re-measure it (`noise-floor --k 3`) before
+sizing a real run.
 
 **Do not thin below the floor.** The θ winner-election needs **≥6 inner tasks** to
 crown a winner on signal rather than noise (l4-outer-loop § Live-run learnings), and

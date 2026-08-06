@@ -58,7 +58,7 @@ from promptpotter.application.optimization.task_context import (
 )
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import (
@@ -85,8 +85,7 @@ def launch_interrupted(exc: BaseException) -> bool:
 def _record_launch_stop(
     *,
     stores: Stores,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     session_id: str,
     exc: BaseException,
 ) -> None:
@@ -97,26 +96,24 @@ def _record_launch_stop(
 
     interrupted = launch_interrupted(exc)
     try:
-        cycle_dir = CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))
+        cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
         LiveDashboardView.write_launch_stop(
             cycle_dir,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
             session_id=session_id,
             exc=exc,
             interrupted=interrupted,
         )
         if not interrupted:
             stores.campaigns.mark_finished(
-                campaign_id,
-                cycle_id,
+                hop,
                 status="failed",
                 stop_reason=f"{type(exc).__name__}: {exc}",
                 finished_at=utcnow_iso(),
                 crash_traceback=traceback.format_exc(),
             )
     except Exception:
-        logger.exception("failed to record launch stop for %s/%s", campaign_id, cycle_id)
+        logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
 
 
 # The one outcome → JobStatus mapping. Sole bridge from the StopReason outcome
@@ -342,18 +339,19 @@ async def mint_campaign_command(
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
-        job_registry.update_target(job.job_id, campaign_id=campaign_id, cycle_id=cycle_id)
 
         # Run-start framing: read the committed ``task_context.yaml`` (written at
         # commit from the check-in's decomposition) — or decompose a benchmark's
         # ``task_description.md`` once on first sight. No second LLM call once the
-        # file exists; the web mint path previously ran with EMPTY framing.
+        # file exists, and never mint with empty framing.
         _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(
             stores,
             session.dataset_name,
             campaign_id=campaign_id,
-            context=checkin_call_context(stores, campaign_id, cycle_id),
+            context=checkin_call_context(
+                stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+            ),
         )
         logger.info(
             "mint-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
@@ -371,8 +369,7 @@ async def mint_campaign_command(
         if campaign_id and cycle_id:
             _record_launch_stop(
                 stores=stores,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
+                hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
                 session_id="",
                 exc=exc,
             )
@@ -451,8 +448,7 @@ async def start_run_command(
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     kind: str,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
@@ -471,9 +467,9 @@ async def start_run_command(
     # Same recovery guard as the mint path — a resumed cycle must not resolve a
     # pin a crashed Replace left dangling (see ``recover_pending_replacements``).
     recover_pending_replacements(stores=stores)
-    campaign = stores.campaigns.load_campaign(campaign_id)
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
-        raise LaunchError(f"campaign not found or not owned: {campaign_id}")
+        raise LaunchError(f"campaign not found or not owned: {hop.campaign_id}")
 
     try:
         dataset_root = readable_dataset_dir(stores, campaign.dataset_name)
@@ -494,8 +490,7 @@ async def start_run_command(
         job_registry.reserve(
             user_id=str(stores.identity.user_id),
             dataset_name=dataset_name,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
         )
     )
 
@@ -537,7 +532,7 @@ async def start_run_command(
         campaign_config = apply_inherited_overlay(
             build_cycle_config(session, dataset_root),
             campaign.config,
-            stores.campaigns.read_cycle_seed(campaign_id, cycle_id),
+            stores.campaigns.read_cycle_seed(hop),
         )
 
         train_data = session.samples
@@ -546,8 +541,8 @@ async def start_run_command(
         task_context = await load_or_build_task_context(
             stores,
             session.dataset_name,
-            campaign_id=campaign_id,
-            context=checkin_call_context(stores, campaign_id, cycle_id),
+            campaign_id=hop.campaign_id,
+            context=checkin_call_context(stores, hop),
         )
         logger.info(
             "start-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
@@ -561,12 +556,12 @@ async def start_run_command(
         # stranding an operator-steered fork in its real campaign. The campaign was
         # already loaded above, so auto-mint must never fire from this path.
         # Mirrors CLI `cmd_resume`.
-        session.campaign_id = campaign_id
-        session.state.cycle_id = cycle_id
-        index = stores.campaigns.load(campaign_id, cycle_id) or {}
+        session.campaign_id = hop.campaign_id
+        session.state.cycle_id = hop.cycle_id
+        index = stores.campaigns.load(hop) or {}
         session_id = str(index.get("parent_session_id") or "")
         if not session_id:
-            raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
+            raise LaunchError(f"cycle {hop.cycle_id} in {hop.campaign_id} has no parent_session_id")
         session.session_id = session_id
     except BaseException as exc:
         stopped = launch_interrupted(exc)
@@ -577,8 +572,7 @@ async def start_run_command(
         )
         _record_launch_stop(
             stores=stores,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
             session_id="",
             exc=exc,
         )
@@ -644,12 +638,10 @@ async def _run_in_background(
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = result.stop_reason
-        # Job terminal status derives from the single StopReason outcome table —
-        # the SAME classification index.json / dashboard.json / the webapp read.
-        # No private reconciler: a cycle can no longer read "failed" here and
-        # "completed" there (the optimizer_timeout split is gone). For a FAILED
-        # outcome, ``result.error.message`` is the operator-facing string the
-        # runner picked at the throw site (same as dashboard.json::error.message).
+        # Job terminal status derives from the single StopReason outcome table — the SAME
+        # classification index.json / dashboard.json / the webapp read. No private
+        # reconciler, or a cycle reads "failed" here and "completed" there. For a FAILED
+        # outcome ``result.error.message`` is the runner's throw-site string.
         outcome = stop_reason_outcome(stop_reason)
         status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
         if outcome is StopOutcome.FAILED and result.error is not None:
@@ -686,8 +678,7 @@ async def _run_in_background(
         # frozen at `init` in the file tree and the webapp.
         _record_launch_stop(
             stores=session.store,
-            campaign_id=session.campaign_id,
-            cycle_id=session.state.cycle_id or "",
+            hop=session.hop,
             session_id=session.session_id,
             exc=exc,
         )

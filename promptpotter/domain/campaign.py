@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -52,6 +53,17 @@ class Campaign(StrictModel):
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def root_hop(self) -> CycleHop:
+        """This campaign's root cycle as the pair that addresses it.
+
+        Both halves already live on the manifest, so re-pairing them at a call site is
+        a second spelling of a fact this object owns — and the shape that goes wrong is
+        pairing one campaign's id with another's root cycle, which a content-addressed
+        ``root_cycle_id`` makes easy: siblings minted from one declaration share it.
+        """
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
 
 
 __all__ = ["Campaign"]

@@ -110,6 +110,85 @@ def _count_any_params(py_files: list[Path]) -> int:
     return total
 
 
+def _count_domain_any_maps(py_files: list[Path]) -> int:
+    """String-keyed ``Any`` maps declared at a ``domain/`` signature — parameter or return.
+
+    Package-wide there are ~830 and counting them all is unactionable: most are the
+    node-keyed ``pipeline_params`` shape ``architecture.md`` declares, whose keys the backend
+    invents at runtime, so a count flagging them gets muted. Scoped here instead — the layer
+    contracted to "frozen models, pure types", at the position where a fact is PASSED between
+    two pieces of our own code rather than held (a model *field* legitimately carries the
+    backend's overlay). ``Mapping`` counts too, at any depth: same surface, and omitting it
+    would let a rename retire the number.
+
+    A high FLOOR. Honest: the pipeline overlay (``opt_search_point``, ``pipeline_parsing``,
+    ``pipeline_schema``, ``search_point``, ``connector``), a node's output (``rendering``,
+    ``validators``), a dataset row (``sample``). Retirable: ``results``, ``results_health``,
+    ``l4.verdict``, ``measurement_provenance`` — rows of PP's OWN on-disk shapes, taken as bags.
+    """
+    import ast
+
+    domain_root = _PACKAGE_ROOT / "domain"
+    total = 0
+    for path in (p for p in py_files if domain_root in p.parents):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            args = node.args
+            annotations = [a.annotation for a in args.posonlyargs + args.args + args.kwonlyargs]
+            annotations.append(node.returns)
+            total += sum(
+                1
+                for ann in annotations
+                if ann is not None
+                and any(
+                    spelling in ast.unparse(ann)
+                    for spelling in ("dict[str, Any]", "Mapping[str, Any]")
+                )
+            )
+    return total
+
+
+def _count_param_decls(py_files: list[Path]) -> int:
+    """Every named parameter declared by every function in the package (``self``/``cls`` excluded).
+
+    The dimension for values that travel by being RE-DECLARED at each level they pass
+    through rather than riding a carrier. Nothing else here can see that: a value threaded
+    six deep adds no module, no class, no config leaf and no ``Any``, so every other count
+    reads flat while each new fact costs an edit at N signatures, N call sites and N
+    docstrings. It is also the one shape ``<surface-ledger>`` rule 2 cannot satisfy by
+    accident — moving code between files leaves this number exactly where it was.
+
+    A TOTAL, not the >N tail this started as. The tail could not see the thing it was
+    added for: bundling ``(campaign_id, cycle_id)`` onto ``CycleHop`` retired ~80
+    declarations and the tail read flat, because pair-threading lives in three- and
+    four-parameter functions, not in the handful of monsters. A total sees both — a
+    fifteen-parameter function is fifteen of it — which is also why the threshold is
+    gone: there is no cut-off left to re-aim the ratchet by moving.
+
+    Marches to a FLOOR. Most of this number is functions taking their real arguments;
+    width that ``conventions.md`` § Code shape REQUIRES — a parameter that changes what a
+    number MEANS taking no default, so the signature does the enforcing — is the rule
+    working, not debt. What a pass can retire is the rest: transport.
+    """
+    import ast
+
+    total = 0
+    for path in py_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            args = node.args
+            total += sum(
+                1
+                for a in args.posonlyargs + args.args + args.kwonlyargs
+                if a.arg not in ("self", "cls")
+            )
+    return total
+
+
 def _count_lax_models(py_files: list[Path]) -> int:
     """Pydantic models that do NOT end up ``extra="forbid"`` — i.e. that silently drop
     unknown keys.
@@ -120,11 +199,14 @@ def _count_lax_models(py_files: list[Path]) -> int:
     green. Inheriting :class:`~promptpotter.domain.strict_model.StrictModel` inverts that
     default; this count is what stops the lax ones growing back.
 
-    It is not meant to reach zero. Two shapes must stay lax, and each says so on the model:
-    a ``@computed_field`` round-trip (``model_dump()`` writes the field, ``model_validate()``
-    must not reject it back), and a sub-object whose vocabulary the *backend* owns and PP
-    reads a subset of. What the floor buys is that those stay countable and argued for,
-    instead of being whatever Pydantic happened to default to.
+    A FLOOR, and the 4 each name their reason on the model itself. ``RoundResult`` /
+    ``ScoredCandidate``: a ``@computed_field`` round-trip — Pydantic serializes such a field
+    OUT and rejects it back IN, so writing the round file and reading it back agree only
+    while extras are ignored (forbid breaks every real round file on disk). ``NodePromptInfo``:
+    the BACKEND owns that sub-object's vocabulary, and a backend PP does not own must be able
+    to describe itself without crashing PP. ``Sample``: a dataset row carries whatever columns
+    the operator's file had. ``ObservationMapping`` is deliberately NOT lax though it also
+    parses ``pipeline.yaml`` — PP owns that vocabulary, so an unknown key there is a typo.
 
     Resolved by AST, not by import: enumerating models at runtime means importing every
     module, and the eager ``store/__init__`` aggregator makes import order a live hazard.
@@ -188,6 +270,16 @@ def _count_lax_models(py_files: list[Path]) -> int:
 
 
 def _is_reexport_shim(init_file: Path) -> bool:
+    """An ``__init__`` that is only ``__all__`` + imports — a package indirecting to its leaves.
+
+    A FLOOR, not debt: the 5 survivors are not shims and emptying them breaks the app.
+    ``connectors`` IS the connector registry (import-time guards).
+    ``presentation/api/routers/campaigns`` IS the route registry — its submodule imports run
+    the ``@campaigns_router`` decorators, so emptying it mounts ZERO routes; it is the one
+    that reads like a pure re-export and is not. ``shared``,
+    ``application/scoring/formula`` and ``application/views/render`` have real code in the
+    body, which this text test cannot see.
+    """
     text = init_file.read_text(encoding="utf-8")
     has_all = "__all__" in text
     has_import = any(line.lstrip().startswith(("import ", "from ")) for line in text.splitlines())
@@ -216,6 +308,8 @@ def compute_ledger() -> dict[str, int]:
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
         "any_params": _count_any_params(py_files),
+        "domain_any_maps": _count_domain_any_maps(py_files),
+        "param_decls": _count_param_decls(py_files),
         "models_lax": _count_lax_models(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),

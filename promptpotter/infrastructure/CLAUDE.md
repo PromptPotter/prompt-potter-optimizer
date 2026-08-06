@@ -166,7 +166,10 @@ leaf import dragged in `CampaignStore` and cycled back through `runtime_flags`
 itself went. The
 `CycleDir` / `WorkspaceDir` write-target newtypes live in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
-not raw `str`/`Path`. `archive/` is cross-cycle/cross-tenant;
+not raw `str`/`Path` — as does `CycleHop`, which every per-cycle
+`CampaignStore` method takes in place of a `(campaign_id, cycle_id)`
+pair (both `str`, so a swapped call read as "no data" rather than
+raising). Build it from the carrier that owns both, never by re-pairing. `archive/` is cross-cycle/cross-tenant;
 `MeasurementArchive` is the DB core.
 
 `CampaignStore` (`store/campaign_store/store.py`) exposes
@@ -204,3 +207,15 @@ adapters live in `promptpotter/connectors/`.
 
 `tracing/` exposes no read API. State reaches the optimizer via the
 ledger; tracing is fan-out only.
+
+## Identity — the OIDC foundation
+
+`identity/` holds the sign-in machinery: provider config + the two issuers
+(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `allowlist.py`, `grants.py`,
+browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAMES
+`projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
+that `build_stores` takes; the capability vocabulary that reads it lives one layer out
+in `shared/identity.py`. **The access model itself is a constitution, not a layer
+note** — tiers, boundaries and enforcement are owned by
+[`docs/adr/0002-identity-foundation.md`](../../docs/adr/0002-identity-foundation.md) and
+[`docs/operations/access-model.md`](../../docs/operations/access-model.md).

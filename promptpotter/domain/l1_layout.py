@@ -196,9 +196,9 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # only where it means something: a miss selects `sample_transcripts`, and one level up
     # a miss is a placeholder-label artifact the outer critique is told to ignore — there
     # the raw source is `inner_narratives`, the same stories ordered by lift and paired
-    # against the origin's delta on that seed. The critique used to see neither (it was not
-    # even in this node's search space, so L4 could not add it) and prescribed a steer the
-    # inner loops had already measured and lost.
+    # against the origin's delta on that seed. A critique shown neither — and unable to be
+    # given one, if the panel is not even in this node's search space for L4 to add —
+    # prescribes steers the inner loops have already measured and lost.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(

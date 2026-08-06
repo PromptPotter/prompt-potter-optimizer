@@ -38,9 +38,16 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen
   `CampaignConfig` snapshot.
-- `cycle_paths.py` — `CycleDir`, `WorkspaceDir` newtypes (used by stores +
-  projections; passed through, never reconstructed from `str`). `dashboard.json`
-  is per-cycle — projections bind to `CycleDir`.
+- `cycle_paths.py` — how a cycle is ADDRESSED. `CycleHop` (the `(campaign, cycle)`
+  pair) and its root→leaf chain `CyclePath` are the address type for the campaign
+  store *and* the served tree: a cycle_id is content-addressed on the origin and
+  repeats across sibling `.inner` sandboxes, so neither half names an entity alone
+  and a pair of loose `str`s can be passed swapped with every gate green. **An object
+  holding both exposes it as a property** — `Campaign.root_hop`, `Session.hop`,
+  `SessionCtx.hop`, `Job.hop` — because re-pairing them at a call site is a second
+  spelling of a fact that object owns. Plus the `CycleDir` / `WorkspaceDir`
+  write-target newtypes (passed through, never reconstructed from `str`);
+  `dashboard.json` is per-cycle, so projections bind to `CycleDir`.
 - `pipeline_parsing.py` — pure dict → `PipelineSchema` parser.
 - `validators.py`, `phases.py`, `escalation_signals.py`, `round_diagnostics.py`,
   `scoring.py`, `connector.py`, `backend.py`, `sample.py`, `l1_layout.py` —

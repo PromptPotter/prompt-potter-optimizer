@@ -14,6 +14,7 @@ import logging
 
 from promptpotter.application.noise_floor import NoiseFloorError, measure_noise_floor
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -41,8 +42,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
         outcome = await measure_noise_floor(
             stores=stores,
             identity=identity,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             k=args.k,
             log=logger.info if get_verbose() else None,
         )

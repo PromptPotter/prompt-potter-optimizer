@@ -246,17 +246,10 @@ fixed δ ruler. Seed is the origin (R1) or the prior round's winner (R2+);
 coverage of the candidate's measured samples is guaranteed by the backfill
 above.
 
-**A paired-margin futility gate ran ahead of it until 2026-07-27.** It counted
-discordant binary wins against the seed and killed on a stratified-binomial
-ε-test. It was deleted as a second comparator: the election ranks on
-difficulty-adjusted ability, so a gate answering "can it still be ADOPTED" in
-binary win-counts disagreed with the ruler by construction, re-encoded
-`improvement_threshold` a second time, and went inert on a graded backend
-where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill
-payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible`
-read as a PoBB loss — so a margin-cut candidate was silently barred from the
-round election. Full account + the measured cost:
-[`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
+**One comparator, one stop rule** — owned by
+[`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)
+§ The full elimination ladder. PoBB's paired `P(best) < ε` is the only futility test;
+this layer must not add a second one beside the θ ruler.
 
 ## Related concepts
 
@@ -264,8 +257,7 @@ round election. Full account + the measured cost:
 * `docs/concepts/scoring-and-memory.md` — the MeasurementArchive that
   catches every backfilled `(leader_sp, sample)` measurement.
 * `docs/operations/persistence-and-state.md` — how decision replay drives
-  divergence + fork behavior (the `rewind-and-fork.md` this used to name has
-  never existed; it is the only broken doc link in the tree).
+  divergence + fork behavior.
 * `git log` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` contestedness snapshot.

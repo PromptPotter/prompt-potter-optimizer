@@ -20,7 +20,7 @@ from pydantic import Field
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import FileKind, classify
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
@@ -98,12 +98,12 @@ class CampaignStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/storage", response_model=CampaignStorageResponse)
-def get_campaign_storage(store: StoreDep, campaign_id: str) -> CampaignStorageResponse:
+def get_campaign_storage(stores: StoresDep, campaign_id: str) -> CampaignStorageResponse:
     """On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user."""
-    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    acc = _campaign_split(store.campaigns.campaign_root_dir(campaign_id))
+    acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
     return CampaignStorageResponse(
         campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
     )
@@ -129,15 +129,15 @@ class DatasetStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/workspace/storage-by-dataset", response_model=DatasetStorageResponse)
-def get_storage_by_dataset(store: StoreDep) -> DatasetStorageResponse:
+def get_storage_by_dataset(stores: StoresDep) -> DatasetStorageResponse:
     """Per-dataset on-disk leaf breakdown (the Files-view 'cake') — every campaign of a
     dataset pooled, then split into the six MECE leaves. Includes archived campaigns; the
     shared measurement store is excluded (it's not per-dataset-owned)."""
-    owner = str(store.identity.user_id)
+    owner = str(stores.identity.user_id)
     by_dataset: dict[str, dict[str, int]] = {}
-    for campaign in store.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
+    for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
         acc = by_dataset.setdefault(campaign.dataset_name, dict.fromkeys(_LEAVES, 0))
-        split = _campaign_split(store.campaigns.campaign_root_dir(campaign.campaign_id))
+        split = _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id))
         for k in _LEAVES:
             acc[k] += split[k]
     entries = [
@@ -180,16 +180,16 @@ class WorkspaceStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/workspace/storage", response_model=WorkspaceStorageResponse)
-def get_workspace_storage(store: StoreDep) -> WorkspaceStorageResponse:
+def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
     """Per-campaign on-disk slices across the caller's whole workspace, fattest first,
     plus the shared caches and a residual ``other`` slice so the grand total equals the
     tenant's real footprint — answers "where did the bucket sizes go?", nothing excluded.
     Includes archived campaigns (they live in the ``archive/`` recycle bin)."""
-    owner = str(store.identity.user_id)
+    owner = str(stores.identity.user_id)
     entries: list[WorkspaceStorageEntry] = []
     campaigns_total = 0
-    for campaign in store.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
-        acc = _campaign_split(store.campaigns.campaign_root_dir(campaign.campaign_id))
+    for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
+        acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id))
         on_disk = sum(acc.values())
         campaigns_total += on_disk
         entries.append(
@@ -202,7 +202,7 @@ def get_workspace_storage(store: StoreDep) -> WorkspaceStorageResponse:
             )
         )
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
-    base = store.base_dir
+    base = stores.base_dir
     shared = _dir_size(base / "measurements") + _dir_size(base / "archive" / "optimizer_calls")
     total = _dir_size(base)
     return WorkspaceStorageResponse(

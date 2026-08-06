@@ -140,7 +140,7 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 
 # Roadmap
 
-Short version: [`docs/README.md`](docs/README.md) § Status & roadmap. Full development plan with milestones + specs: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+Status and the full forward plan live in one place: [`docs/specs/roadmap.md`](docs/specs/roadmap.md). Documentation index: [`docs/README.md`](docs/README.md).
 
 # Citation
 

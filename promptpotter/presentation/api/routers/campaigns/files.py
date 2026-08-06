@@ -15,7 +15,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
-from promptpotter.presentation.api.deps import StoreDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
@@ -104,7 +104,7 @@ def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] 
     response_model=FilesResponse,
 )
 def list_cycle_files(
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
@@ -116,10 +116,10 @@ def list_cycle_files(
     inner cycle's tree. Absent/empty ``descend`` is a plain per-cycle read.
     """
     leaf_store, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
-    leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
-    cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
+    leaf_campaign = leaf.campaign_id
+    cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf)
     if not cycle_dir.is_dir():
         raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
     campaign_dir = campaign_root_dir_for(leaf_store.base_dir, leaf_campaign)
@@ -157,7 +157,7 @@ def list_cycle_files(
     response_model=FileContentResponse,
 )
 def get_cycle_file(
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     scope: Literal["cycle", "campaign"] = Query(..., description="cycle | campaign"),
@@ -172,11 +172,11 @@ def get_cycle_file(
     dir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.
     """
     leaf_store, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
-    leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
+    leaf_campaign = leaf.campaign_id
     if scope == "cycle":
-        scope_root = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
+        scope_root = cycle_dir_for(leaf_store.base_dir, leaf)
     else:
         scope_root = campaign_root_dir_for(leaf_store.base_dir, leaf_campaign)
     if not scope_root.exists():

@@ -42,6 +42,7 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
@@ -528,10 +529,9 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         return None
 
     store = session.store.campaigns
-    campaign_id = session.campaign_id
     cycle_id = session.state.cycle_id
-    cycle_dir = store.cycle_dir(campaign_id, cycle_id)
-    campaign_dir = store.campaign_root_dir(campaign_id)
+    cycle_dir = store.cycle_dir(session.hop)
+    campaign_dir = store.campaign_root_dir(session.campaign_id)
 
     cycle_artifact = build_hard_samples_artifact(
         cycle.rounds,
@@ -717,25 +717,22 @@ def write_log_md(session: Session, *, hard_samples_artifact: dict[str, Any] | No
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        campaign_id = session.campaign_id
-        cycle_id = session.state.cycle_id
-        _render_cycle_log_md(store, campaign_id, cycle_id, hard_samples_artifact)
-        _render_campaign_log_md(store, campaign_id)
+        _render_cycle_log_md(store, session.hop, hard_samples_artifact)
+        _render_campaign_log_md(store, session.campaign_id)
 
 
 def _render_cycle_log_md(
     store: CampaignStore,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     hard_samples_artifact: dict[str, Any] | None,
 ) -> None:
     """Per-cycle ``cycles/{cycle_id}/log.md`` — this cycle's rounds only."""
-    index = store.load(campaign_id, cycle_id)
+    index = store.load(hop)
     if not index:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
-    rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
-    layout = CycleLayout(store.cycle_dir(campaign_id, cycle_id))
+    rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
+    layout = CycleLayout(store.cycle_dir(hop))
     content = to_markdown(
         from_disk_log(
             index,
@@ -757,14 +754,14 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
     campaign = store.load_campaign(campaign_id)
     if campaign is None:
         return
-    root_id = campaign.root_cycle_id
-    index = store.load(campaign_id, root_id)
+    root = campaign.root_hop
+    index = store.load(root)
     if not index:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
-    rounds = store.load_rounds_range(campaign_id, root_id, 0, n_rounds - 1) if n_rounds else []
-    streams_dir = CycleLayout(store.cycle_dir(campaign_id, root_id)).streams
-    fork_indices = _load_sibling_indices(store, campaign_id, exclude=root_id)
+    rounds = store.load_rounds_range(root, 0, n_rounds - 1) if n_rounds else []
+    streams_dir = CycleLayout(store.cycle_dir(root)).streams
+    fork_indices = _load_sibling_indices(store, campaign_id, exclude=root.cycle_id)
     content = to_markdown(
         from_disk_log(
             index,
@@ -800,14 +797,12 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         return
     with graceful("review.md render failed"):
         store = session.store.campaigns
-        campaign_id = session.campaign_id
-        cycle_id = session.state.cycle_id
-        index = store.load(campaign_id, cycle_id)
+        index = store.load(session.hop)
         if not index:
             return
         n_rounds = int(index.get("n_rounds", 0) or 0)
-        rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
-        cycle_dir = store.cycle_dir(campaign_id, cycle_id)
+        rounds = store.load_rounds_range(session.hop, 0, n_rounds - 1) if n_rounds else []
+        cycle_dir = store.cycle_dir(session.hop)
         round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
         td = cycle.opt_sp.memory.task_context
         context_object = [

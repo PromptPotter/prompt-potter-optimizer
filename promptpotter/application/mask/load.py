@@ -24,6 +24,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import ScoredCandidate, is_leader_eligible
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -105,7 +106,7 @@ def _abort_contributor(sc: ScoredCandidate) -> str | None:
 
 
 def load_mask_record(
-    store: Stores, campaign_id: str, samples: frozenset[int] | None = None
+    stores: Stores, campaign_id: str, samples: frozenset[int] | None = None
 ) -> MaskRecord:
     """Read every cycle in *campaign_id* into a :class:`MaskRecord` (read-only).
 
@@ -114,14 +115,14 @@ def load_mask_record(
     the election re-runs on the subset and the fold finds where the subset-best
     diverges from the recorded (full-set) winner. ``None`` ⇒ stored full-set values.
     """
-    entries = [e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
+    entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
     # Pass 1: read each cycle's round files (keyed by round number) + tree edges.
     files: dict[str, dict[int, dict[str, Any]]] = {}
     edges: dict[str, tuple[str | None, int | None]] = {}
     for e in entries:
         cid = e["cycle_id"]
-        cdir = cycle_dir_for(store.base_dir, campaign_id, cid)
+        cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
         index = read_json_tolerant(CycleLayout(cdir).manifest)
         if not isinstance(index, dict):
             continue

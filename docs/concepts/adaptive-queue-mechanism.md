@@ -37,18 +37,15 @@ resumed round re-derives it exactly — no recorded sidecar. Shared prefixes
 across candidates keep the paired running stats comparable and the running
 score display honest.
 
-### Why not the online adaptive picker (deleted 2026-07-04)
+### Why the order is shared, not per-candidate
 
-The previous mechanism re-ranked the unscored samples after every
-measurement by per-candidate information gain. Measured live (justlogic,
-cycle_f72747c26407), it front-loaded **exactly the seed's hit set**: every
-early paired comparison was a tie, p_best pinned at 0.5 (or spiked on one
-lucky win), the raw-rate futility gate extrapolated an easy-prefix-inflated
-hit rate — and across the whole cycle **zero eliminations ever fired**;
-every dead candidate rode its full budget. Ordering for θ-measurement
-efficiency and ordering for the keep/kill decision are different
-objectives; the shared order optimizes the latter, which is what the
-evaluation budget should buy down.
+**Ordering for θ-measurement efficiency and ordering for the keep/kill decision are
+different objectives**, and the evaluation budget should buy down the latter. Re-ranking
+the unscored samples per candidate after every measurement optimizes the former, and
+measured live it front-loads the seed's own hit set: every early paired comparison ties,
+`p_best` pins at 0.5, and no elimination ever fires — every dead candidate rides its full
+budget. The shared deterministic order (`build_round_order`) is what makes an early
+comparison decisive.
 
 ## Between-round CAT primitives (`pick_value`)
 

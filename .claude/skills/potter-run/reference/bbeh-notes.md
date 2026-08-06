@@ -1,6 +1,6 @@
 # BBEH — Dataset-Specific Notes
 
-Source of truth: `notebooks/bbeh_potter.ipynb`. `datasets/bbeh/dataset.md` and `campaign.json` are partially stale — see "Known doc drift".
+Source of truth: `notebooks/bbeh_potter.ipynb`.
 
 ## Entry point
 
@@ -54,10 +54,9 @@ Single-node `llm_only` (`datasets/bbeh/pipeline.yaml`): `openai/gpt-oss-120b` vi
 
 `note` is conventionally `"unmeasured starting hyperparameters — pre-sweep"` so comparison tooling flags the number as a floor.
 
-## Known doc drift (2026-04-27)
+## The notebook shadows the committed campaign config
 
-- `datasets/bbeh/dataset.md`: "Per-task loop: 23 separate campaigns" — wrong, one global.
-- `datasets/bbeh/campaign.json`: diverges on `max_rounds`, `n_variants`, `sp_budget_ttest`, `l2_patience`, `l3_patience` — notebook's `build_campaign_config()` shadows it, safe to ignore for notebook runs. CLI path → flag and ask whether to sync first.
+`build_campaign_config()` overrides `datasets/bbeh/campaign.json` on `max_rounds`, `n_variants`, `sp_budget_ttest`, `l2_patience` and `l3_patience`, so the two disagree by design — ignore the divergence for notebook runs. On the CLI path the committed file governs: flag the difference and ask whether to sync before launching.
 
 ## "Empty predictions" bug (deferred)
 

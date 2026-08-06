@@ -200,8 +200,7 @@ def persist_round(
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
             session.store.campaigns.save_round_file(
-                session.campaign_id,
-                session.state.cycle_id,
+                session.hop,
                 round_result,
             )
         hard_samples_artifact = write_hard_samples_artifacts(session, cycle)

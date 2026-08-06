@@ -23,6 +23,7 @@ from promptpotter.application.config import configure_and_apply_pipeline, resolv
 from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:
@@ -188,26 +189,23 @@ def prepare_fresh_cycle(
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
-    # No inner-sandbox sweep here, and that is the fix rather than an omission. A sweep stood
-    # at this line because the sandbox key was the content-addressed ``cycle_id`` alone, so a
-    # fresh mint on an unchanged origin landed on a PRIOR campaign's sandbox and had to clear
-    # it first. The key now carries the campaign too (``store/layout.py::inner_sandbox_key``)
-    # and a fresh mint always has a fresh ``campaign_id``, so the sandbox it will use cannot
-    # exist yet — there is nothing to sweep, and the rmtree that used to run here could only
-    # ever destroy a DIFFERENT campaign's inner history. It did: 39 banked inner campaigns.
+    # **Never sweep the inner sandbox here.** A fresh mint has a fresh ``campaign_id`` and the
+    # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
+    # only destroy a DIFFERENT campaign's inner history. One did: 39 banked inner campaigns.
     _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,
-        campaign_id=campaign_id,
-        cycle_id=plan.cycle_id,
+        hop=CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
         origin_prompt_fields=plan.origin.prompt_field_dict(),
         dataset_size=len(dataset),
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
     )
     if seed is not None:
-        session.store.campaigns.write_cycle_seed(campaign_id, cycle_id, seed)
+        session.store.campaigns.write_cycle_seed(
+            CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), seed
+        )
     return MintedCycle(
         cycle_id=cycle_id,
         session_id=session_id,

@@ -204,7 +204,7 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
     return bt.lower()
 
 
-def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
+def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     """Connector kind of *dataset_name*, or ``""`` when it cannot be resolved.
 
     THE predicate for "which connector does this dataset use?" for every read-side caller —
@@ -218,7 +218,7 @@ def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
     there a missing kind means the run cannot pick a connector at all.
     """
     try:
-        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(store, dataset_name)))
+        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
     except (OSError, ValueError, DatasetAccessError):
         return ""
     bt = (raw or {}).get("backend_type")
@@ -304,7 +304,7 @@ async def init_services(
     backend_id: str = "",
     on_status: Callable[[str], None] | None = None,
     identity: IdentityContext | None = None,
-    store: Stores | None = None,
+    stores: Stores | None = None,
     enable_tracing: bool = True,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — step 1 of run init.
@@ -332,12 +332,12 @@ async def init_services(
 
     resolved_identity = identity if identity is not None else default_identity()
 
-    if store is None:
-        store = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    if stores is None:
+        stores = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
-    maintain_measurement_index(store)
+    maintain_measurement_index(stores)
 
-    dataset_config_dir = readable_dataset_dir(store, dataset_name)
+    dataset_config_dir = readable_dataset_dir(stores, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
     client = build_backend_client(connector, backend_url)
@@ -359,14 +359,14 @@ async def init_services(
         existing = next(
             (
                 b
-                for b in store.backends.list_all()
+                for b in stores.backends.list_all()
                 if b.base_url.rstrip("/") == norm and b.backend_type == backend_type
             ),
             None,
         )
         backend_id = existing.id if existing else DEFAULT_BACKEND_ID
-    if not store.backends.get(backend_id):
-        store.backends.register(
+    if not stores.backends.get(backend_id):
+        stores.backends.register(
             BackendConnection(
                 id=backend_id,
                 name=pipeline_schema.name,
@@ -378,14 +378,14 @@ async def init_services(
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     session = Session(
-        store=store,
+        store=stores,
         backend_id=backend_id,
         backend_client=client,
         pipeline_schema=pipeline_schema,
         dataset_name=dataset_name,
         dataset_config_dir=dataset_config_dir,
         identity=resolved_identity,
-        tenant_root=str(store.base_dir),
+        tenant_root=str(stores.base_dir),
         # ``enable_tracing=False`` (L4 inner campaigns) force-disables the cloud
         # Langfuse logger so ``bridge.from_settings`` skips ``LangfuseSink`` — no
         # cloud spans, no ``_trace_metadata`` accumulation, no quota burn. The

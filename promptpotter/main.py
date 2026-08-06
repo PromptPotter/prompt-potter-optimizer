@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # OS-style dock and the on-disk truth honest — a vanished producer is not a
     # live unit. See application/jobs/reaper.py.
     def _on_reap(job: Job) -> None:
-        reap_cycle_by_id(DEFAULT_PROJECTS_ROOT, job.campaign_id, job.cycle_id)
+        reap_cycle_by_id(DEFAULT_PROJECTS_ROOT, job.hop)
 
     registry = JobRegistry(
         default_jobs_dir(), capacity=settings.MACHINE_RUN_CAPACITY, on_reap=_on_reap

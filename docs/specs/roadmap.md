@@ -8,7 +8,7 @@
 
 ## Hard ordering (violate → rebuild)
 
-- ~~**state-sync P3 (`GET /api/v1/sessions/active/live-state`) before any new webapp data panel**~~ — **RETIRED.** The endpoint no longer exists (it died with the session tier, `2b92b2ca`), so the gate guarded a seam that isn't there. `dashboard.json` polling + the SSE ledger-tail are the shipped design, not "the old seam" awaiting a cutover — build new panels on them.
+- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for.
 - **Host coupon + BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota with no per-user ceiling. The fix: a per-user **coupon** (host-key spend up to a fixed size + expiry), then **BYO keys** to continue on their own money. Present liability → Lane A2.
 - **HTTP-edge abuse protection scales with the allowlist.** Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound the public surface now; app-level rate-limiting (C6) is due the moment the allowlist is removed.
 
@@ -62,7 +62,7 @@ Terse landing for the per-milestone specs that were consolidated here. Status is
 ### Origin-resolution check-in
 LLM proposer + deterministic readiness gate resolve a messy CSV into a complete origin (no hidden defaults, no literal-column requirement); `high`-confidence fields auto-promote `proposed→confirmed` before mint. Non-derivable kernels: reuses the `checkin/2` node (no separate `origin_resolve` node/model); **deliberately off the operator surface** — `reasoning_floor/ceiling` (backend-node-only); model/provider are always optimizer-locked (an invariant, no knob). Concept: [`../architecture.md`](../architecture.md) §0.5 (Origin vs check-in vs round-0/C0); mechanics in `git log`.
 
-### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; chat Arc 1 done — activity + control)
+### Ingest + chat-first web
 > **Chat-first front door** (thread model, activity-stream translator, copilot decision
 > buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md).
 > This note keeps only the ingest / draft-campaign detail.
@@ -72,9 +72,9 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 - **Draft-campaign object:** `DraftCampaign` negotiates both the Dataset and campaign config; smart defaults `connector=termnorm`/`exact_match`/`max_rounds=5`; model + `reasoning_effort` resolved from the dataset-reasoning-matrix at *commit*, not pinned on the draft. Chat + panel are two views over one server-side draft, synced via `edit-draft-campaign` + SSE `DraftUpdatedRecord` (declare in asyncapi before the handler).
 - **Endpoints:** `POST /datasets/ingest` (multipart; 409 `slug_collision`→`{slug,suggested_slug}`, version-and-repoint Replace never overwrites; 422 parse). `GET /datasets` flat list with `tier: yours|install` (install content is tracked in git and ungated; a tenant slug shadows an install one). **Durable check-in (shipped):** ingest mints a real disk-backed campaign in the `checkin` lifecycle on the first action (the draft's `draft_id` IS the `campaign_id`, working state under `campaigns/{id}/checkin/` via `CheckinDraftStore` — no in-memory registry); it shows in the sidebar + survives a restart. Start path = `start-checkin` (gate → commit dataset → flip `checkin`→`active` → run); the CLI `new <file>` shares the commit/flip body (`prepare_checkin_run`) and runs inline.
 
-### Connectors + L4 inner-cycle execution — partially shipped (boundary + TermNorm + self-connector + control plane + composite-P1 done; L4 run + composite P2–P4 + competitor numbers open)
+### Connectors + L4 inner-cycle execution
 - **Connector contract:** `Connector` dataclass (`connectors/protocol.py`), 3 hooks `wire_adapter`/`session_factory`/`extract_experiment`; `backend_type` read from `pipeline.yaml`, never hardcoded.
-- **Execution mode (the L4 self-recursion seam) — SHIPPED:** `Connector.execution = remote_http (default) | in_process`, dispatched on the *declared mode*, never the connector name. The in-process **`llm_only`** connector this seam also yielded is **withdrawn** (zero dataset adopters; the single-node case rides the TermNorm connector with an `llm_only` pipeline). Mechanism + what's still open: [`l4-outer-loop.md`](l4-outer-loop.md) §1–§2 + § Finish line. Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
+- **Execution mode (the L4 self-recursion seam):** `Connector.execution = remote_http (default) | in_process`, dispatched on the *declared mode*, never the connector name. `llm_only` is a node name, never a connector — the single-node case rides the TermNorm connector with an `llm_only` pipeline. Mechanism + what's still open: [`l4-outer-loop.md`](l4-outer-loop.md) §1–§2 + § Finish line. Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
 - **Composite fitness phases:** P1 surface (done) · P2 per-candidate rollup + scatter · P3 `compile_post_aggregate_fitness(formula)` + `campaign.yaml::scoring_post_aggregate` · P4 Pareto-PoBB (stretch).
 - **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types + L1/critique injection-echo validators + a repeat-detection circuit breaker.
 
@@ -86,13 +86,13 @@ Today PromptPotter is driven by a human or by Claude via `/potter-run` (the entr
 
 Full argument + a same-dataset, same-base-model head-to-head experiment: [related-work.md](../research/related-work.md) § PromptPotter × NVIDIA AutoResearch. Tracked as **C5**.
 
-### Prompt-iteration framework + exit gate — partially shipped (gate not yet met)
+### Prompt-iteration framework + exit gate
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
 - `_mint_fork` (`resume_and_fork/fork_siblings.py`) is the single entry for all 7 `ForkTrigger` variants (one `ForkSpec` + `CycleSeed`); L2/L3 auto-rebase capped at `MAX_AUTO_REBASES = 10`/invocation, gated by `OptimizationConfig.rebase_capability`.
 - **Round-1 verdict (conformance-anchored):** 0 ✗ → healthy · 1 ✗ → degraded · ≥2 ✗ → broken; behavior checks are pure `(round_dict, ctx) → CheckResult`. (Model/provider locking is not a behavior check — it's structural: `node_param_keys` never emits the axes, + the `validate_overrides` backstop.) The Track-7 L2 self-diagnosis rule turns a missing `evidence_grounding` citation into an L2 `task_context` nudge.
 - Sweep batches: one fork per `OperatorSweepFile` under `datasets/{name}/sweep/*.json` via `new --sweep-batch` (`application/sweep.py`), landing under `campaigns/{id}/sweeps/{batch_id}`. The separate `sweep` verb + its `archive/sweeps/` tree were deleted (2026-07-17) — a second harness for the same job, never once run. Live self-improvement mechanism = **L4** (`new promptpotter-self`).
 
-### Host coupon + BYO per-user API keys — spec-only (Lane A2)
+### Host coupon + BYO per-user API keys
 Full contract: [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon. The host runs users on its own keys up to a **coupon** (fixed USD size + expiry, per user); past it, a user uploads their **own** key and continues on their own money. Two separated concerns: the **coupon** protects the host wallet; concurrency/rate-limit (`jobs/quota.py`) protects the machine — untouched.
 - **Coupon (`grant.json`):** per user at `projects/{tenant}/grant.json` = `{amount_usd, issued_at, expires_at}`; remaining is **derived from the host-key ledger**, not a counter. Install defaults (size, validity window, `coupon_void_on_byo`) in `config/settings.py`.
 - **Ledger:** `TokenUsageRecord` gains `key_source: host|user` so host-key spend sums separately (declared on `TokenUsagePayload` in the asyncapi).
@@ -104,15 +104,15 @@ Full contract: [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon. Th
 ### Operator-steered fork
 Rides the existing `fork-cycle` command (no new verb); payload extended to `{from_searchpoint, pipeline_overlay, origin_prompt_fields, config_overrides, steered_by}`. `config_overrides` is the fork's whole `OptimizationConfig` delta — run limits **plus** two policy toggles (`mechanisms.selection.per_round_resubset` and `schema_field_rename`), so a fork-at-offset-0 can A/B a behaviour knob in isolation (the "behaviour-knob change → sibling cycle" workflow) without touching the global default. `fork-cycle` **mints then launches** (minting alone left web forks idle). The override seed is appended to the fork's own ledger as a read-once `CycleSeedRecord` (read once at the runner seam via `read_cycle_seed`); origin resolves fork-seed-first; no dataset-origin mutation. `max_rounds` is an absolute target (the fork's counter continues from the parent), reconciled consumed-vs-remaining in the dialog.
 
-### State-sync — SHIPPED
+### State-sync
 Two state surfaces: `active_session.json` (ground truth for what's running) + per-cycle `dashboard.json` (live read-out; `run_phase` is server-owned via a `control` `PhaseRecord`). **Teardown-only design was rejected — do not re-propose** (it reverses the folder-UI §0 commitment). Detail lives in `docs/operations/persistence-and-state.md` + the code.
 
-### Run admission + concurrent serving — capacity-1 seam shipped / N>1 spec-only
+### Run admission + concurrent serving
 Campaigns run in sequence behind the atomic `JobRegistry.reserve` slot (`capacity = settings.MACHINE_RUN_CAPACITY`, 1 today); a busy launch 409s `machine_busy` → `CriticalAlertBanner`.
 - **Open / gated — `capacity > 1`:** hard predecessors are **Lane A2 (BYO per-user keys)** + a **per-tenant `RateLimiter`** (today process-global) + backend throughput. Raising capacity before these cross-bills the shared key and throttles everyone.
 - **Open — durable cross-process lock:** the in-process lock only guards one process; `--workers > 1` or web↔CLI mutual exclusion needs a disk CAS slot file (`O_EXCL` create + heartbeat + stale-reclaim). Same `capacity` knob; durable substrate.
 
-### Lineage mask — M1 + abort verdict shipped (read-side); write-side deferred
+### Lineage mask
 Full design: [`mask-projection.md`](mask-projection.md); code SoT `application/mask/`. Shipped: the scoring verdict (`?lens=score:<formula>`) + the abort verdict (`?lens=abort:…`) on the one shared `find_divergences` fold. Deferred: constraint + order masks; the write-side fork-from-divergence (Lane C8), where persisted mask identity finally earns its keep.
 
 ### Plus-backlog (opportunistic, unscheduled)

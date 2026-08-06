@@ -103,9 +103,9 @@ across different axes (e.g. C1.1 puts "verify" in instruction, C1.2
 puts "cross-check" in persona, C1.3 puts "validate" in thinking_style
 — all the same idea, different slots).
 
-Not enforced by validator today (the L2 stale-repeat detector at
-`L2_TASK_CONTEXT_STALE_REPEAT` checks L2's output, not L1's; the
-operator could request an L1-side equivalent as a follow-up).
+Not enforced by any validator — there is no L1-side re-proposal check, and no
+L2-side one to borrow from (see the note under the validator table below). The
+operator could request one as a follow-up.
 
 Manual check using the same token-set Jaccard heuristic the L2 detector
 uses:
@@ -152,12 +152,12 @@ and worth flagging.
 |---|---|
 | Schema compliance (allowed-models, param_allowed_values, type) | `L1_SCHEMA_COMPLIANCE` |
 | Forbidden axes (`model`, `provider`) | `validate_overrides()` (always locked) |
-| Re-propose known-failing config | `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` (this PR) |
+| Re-propose known-failing config | `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` |
 | L3 plan length floor / verbatim repeat | `L3_PLAN_LENGTH_FLOOR`, `L3_PLAN_VERBATIM_REPEAT` |
 
-(Two rows naming L2 task_context validators used to sit here under that *today*.
-They were never written, and the surface they policed is gone — L2 cannot write
-`task_context` at all. L2's framing output is checked by `l2_behavior.py`.)
+(There are no L2 `task_context` validators: L2 cannot write `task_context` at all —
+`TaskDecomposition.merge` refuses it — so the breach is not representable. L2's framing
+output is checked by `l2_behavior.py`.)
 
 Everything else above is your analysis responsibility.
 

@@ -59,7 +59,7 @@ def resolve_identity(request: Request) -> IdentityContext:
     the registered tenant was the drift. Otherwise consume the
     :class:`IdentityContext` populated by :func:`install_oidc_middleware`;
     missing/expired session raises 401 ``unauthenticated``. Every other API
-    site keeps consuming :data:`IdentityDep` / :data:`StoreDep` unchanged.
+    site keeps consuming :data:`IdentityDep` / :data:`StoresDep` unchanged.
     """
     if _auth_off() or _dev_without_providers(request):
         return registered_or_default_identity()
@@ -82,24 +82,24 @@ def build_stores_from_identity(identity: IdentityDep) -> Stores:
     return build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
 
-StoreDep = Annotated[Stores, Depends(build_stores_from_identity)]
+StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 
 
-def get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
+def get_backend_or_404(backend_id: str, stores: Stores) -> BackendConnection:
     """Return the registered backend or raise 404."""
-    backend = store.backends.get(backend_id)
+    backend = stores.backends.get(backend_id)
     if not backend:
         raise NotFoundError(f"Backend '{backend_id}' not found")
     return backend
 
 
-def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, store: Stores) -> Path:
+def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, stores: Stores) -> Path:
     """Resolve the per-cycle dir or raise 404 if it doesn't exist.
 
     The shared seam for the routers that read under a cycle dir — folds the
     repeated ``cycle_dir_for(...)`` + ``exists()`` + ``NotFoundError`` block.
     """
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    cycle_dir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     if not cycle_dir.exists():
         raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
     return cycle_dir
@@ -160,7 +160,7 @@ JobRegistryDep = Annotated[JobRegistry, Depends(get_job_registry)]
 __all__ = [
     "IdentityDep",
     "JobRegistryDep",
-    "StoreDep",
+    "StoresDep",
     "build_stores_from_identity",
     "decode_descend",
     "get_backend_or_404",

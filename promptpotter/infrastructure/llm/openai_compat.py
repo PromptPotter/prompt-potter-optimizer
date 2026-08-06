@@ -287,13 +287,10 @@ class OpenAICompatibleClient(LLMClientBase):
                 # The cause names the FIRST attempt's failure — the repair's own emptiness
                 # is downstream of it and is already in `diagnosis()`.
                 #
-                # This layer does NOT say what the caller will do about it. It used to end
-                # "Round will record the failure and continue with zero candidates", which
-                # is true only for `l1_generate`: an `l1_critique` failure is swallowed by
-                # `graceful(...)` and an L2/L3 one never touches candidates at all. Of the
-                # ten such lines on disk, seven came from `l1_critique` — so the logs
-                # reported ~10 zero-candidate rounds where the loop had 3, and the model
-                # swap that fixed the real ones looked like it had not worked.
+                # This layer does NOT say what the caller will do about it — that is true only
+                # for `l1_generate`. An `l1_critique` failure is swallowed by `graceful(...)`
+                # and an L2/L3 one never touches candidates, so naming a consequence here
+                # misreports most of these lines as zero-candidate rounds.
                 logger.error(
                     "%s: %s parse failed AGAIN after repair retry (%d errors, "
                     "%d content chars on the repair) — %s. Raising to the caller. [%s]",

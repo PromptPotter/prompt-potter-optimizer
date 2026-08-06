@@ -29,7 +29,7 @@ def start_of_utc_day() -> float:
     return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
-def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[dict[str, Any]]:
+def iter_user_token_usage(*, stores: Stores, since: float, until: float) -> list[dict[str, Any]]:
     """Walk every per-cycle ledger under the user's workspace — archived included,
     via ``CampaignStore.iter_cycle_ledgers`` (archiving a campaign must not free
     daily-cap budget).
@@ -48,7 +48,7 @@ def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[
     ``cached`` through; the caller resolves both via :func:`record_cost_usd`.
     """
     out: list[dict[str, Any]] = []
-    for ledger_path in store.campaigns.iter_cycle_ledgers():
+    for ledger_path in stores.campaigns.iter_cycle_ledgers():
         for rec in iter_jsonl(ledger_path):
             if rec.get("record_type") != "token_usage":
                 continue
@@ -103,10 +103,10 @@ def record_cost_usd(rec: dict[str, Any]) -> float:
     return usd if usd is not None else 0.0
 
 
-def sum_user_spend(*, store: Stores, since: float, until: float) -> float:
+def sum_user_spend(*, stores: Stores, since: float, until: float) -> float:
     """Total billed USD over ``[since, until)`` from the user's per-cycle ledgers."""
     return sum(
-        record_cost_usd(r) for r in iter_user_token_usage(store=store, since=since, until=until)
+        record_cost_usd(r) for r in iter_user_token_usage(stores=stores, since=since, until=until)
     )
 
 

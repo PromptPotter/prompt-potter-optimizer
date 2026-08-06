@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
@@ -56,7 +56,8 @@ class LangfuseSink:
 
     def _session_state_path(self, session_id: str) -> Path:
         # session_id == cycle_id here; langfuse state lives in the cycle dir.
-        return cycle_dir_for(self._base, self._campaign_id, session_id) / "langfuse" / "state.json"
+        hop = CycleHop(campaign_id=self._campaign_id, cycle_id=session_id)
+        return cycle_dir_for(self._base, hop) / "langfuse" / "state.json"
 
     def _bind_session(self, session_id: str) -> None:
         if self._state_session_id == session_id:

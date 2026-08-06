@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord, candidate_label
@@ -44,8 +45,7 @@ async def measure_noise_floor(
     *,
     stores: Stores,
     identity: IdentityContext,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     k: int,
     log: Callable[[str], None] | None = None,
 ) -> NoiseFloorOutcome:
@@ -66,23 +66,25 @@ async def measure_noise_floor(
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
-    campaign = stores.campaigns.load_campaign(campaign_id)
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
-        raise NoiseFloorError(f"campaign {campaign_id!r} has no manifest on disk.")
+        raise NoiseFloorError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
 
-    round_file = stores.campaigns.load_round_file(campaign_id, cycle_id, 0)
+    round_file = stores.campaigns.load_round_file(hop, 0)
     if round_file is None:
         raise NoiseFloorError(
-            f"round_0000.json missing in {campaign_id}/{cycle_id} — the origin was never scored."
+            f"round_0000.json missing in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
         )
     if not round_file.all_candidate_results:
-        raise NoiseFloorError(f"round_0000.json in {campaign_id}/{cycle_id} carries no origin arm.")
+        raise NoiseFloorError(
+            f"round_0000.json in {hop.campaign_id}/{hop.cycle_id} carries no origin arm."
+        )
     origin_id = next(iter(round_file.all_candidate_results))
     origin_rows = round_file.all_candidate_results[origin_id]
     sample_ids = {int(r["sample_id"]) for r in origin_rows if r.get("sample_id") is not None}
     if not sample_ids:
         raise NoiseFloorError(
-            f"origin arm in {campaign_id}/{cycle_id} round 0 carries no scored samples."
+            f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
     opt_sp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
 
@@ -90,10 +92,10 @@ async def measure_noise_floor(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
         identity=identity,
-        store=stores,
+        stores=stores,
     )
-    session.campaign_id = campaign_id
-    session.state.cycle_id = cycle_id
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
     # A pp-self origin's backend IS the inner recursion — the `promptpotter` connector
     # needs this cycle published as the spawn context before it can dispatch an inner
     # campaign per sample. Normally done once by `run_optimization`; this use-case
@@ -110,8 +112,7 @@ async def measure_noise_floor(
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id=cycle_id,
-        source=f"noise_floor:{campaign_id}",
+        source=f"noise_floor:{hop.campaign_id}",
     )
 
     schema = session.pipeline_schema
@@ -126,8 +127,8 @@ async def measure_noise_floor(
 
     logger.info(
         "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
-        campaign_id,
-        cycle_id,
+        hop.campaign_id,
+        hop.cycle_id,
         k,
         len(scoring_set),
     )
@@ -146,7 +147,7 @@ async def measure_noise_floor(
             measured=None,
             on_sample_scored=lambda *_a, **_k: None,
             on_sample_starting=lambda *_a, **_k: None,
-            source=f"noise_floor:{campaign_id}:C0:{i}",
+            source=f"noise_floor:{hop.campaign_id}:C0:{i}",
             force_fresh=True,
         )
         # `scores["accuracy"]` — never `.get(..., 0.0)`. A rescore that measured nothing must
@@ -163,8 +164,8 @@ async def measure_noise_floor(
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
         dataset=campaign.dataset_name,
-        source_campaign=campaign_id,
-        source_cycle=cycle_id,
+        source_campaign=hop.campaign_id,
+        source_cycle=hop.cycle_id,
         source_label=candidate_label(0, 0),
         source_candidate_id=origin_id,
         config_hash=config_hash[:12],

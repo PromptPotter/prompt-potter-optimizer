@@ -23,7 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import validate_path_component
 
 # The roots (``REPO_ROOT`` + its two derivatives) moved to
@@ -122,9 +122,9 @@ def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
     return campaign_cycles_dir(campaign_root) / validate_path_component(cycle_id)
 
 
-def cycle_dir_for(tenant_root: WorkspaceDir, campaign_id: str, cycle_id: str) -> Path:
+def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
-    return cycle_dir_under(campaign_root_dir_for(tenant_root, campaign_id), cycle_id)
+    return cycle_dir_under(campaign_root_dir_for(tenant_root, hop.campaign_id), hop.cycle_id)
 
 
 def sweep_batch_dir_for(tenant_root: WorkspaceDir, campaign_id: str, batch_id: str) -> Path:
@@ -159,7 +159,7 @@ def inner_sandboxes_dir(workspace_projects_root: Path) -> Path:
     return workspace_projects_root.parent / ".inner"
 
 
-def inner_sandbox_key(tenant_id: str, campaign_id: str, cycle_id: str) -> str:
+def inner_sandbox_key(tenant_id: str, hop: CycleHop) -> str:
     """Directory name of one cycle's inner sandbox: ``inner_<16 hex>``.
 
     Keyed on the FULL owner identity, because no part of it identifies the owner alone.
@@ -177,19 +177,18 @@ def inner_sandbox_key(tenant_id: str, campaign_id: str, cycle_id: str) -> str:
     (:func:`sandbox_owner_path`), which is also what lets a reader resolve ownership exactly
     instead of guessing at it from a path.
     """
-    for part in (tenant_id, campaign_id, cycle_id):
+    for part in (tenant_id, hop.campaign_id, hop.cycle_id):
         validate_path_component(part)
-    blob = json.dumps([tenant_id, campaign_id, cycle_id], sort_keys=True)
+    # The three names go in as they always did — this hash IS the sandbox directory name,
+    # so serializing the carrier instead of its components would rename every sandbox on
+    # disk and orphan what they hold, silently.
+    blob = json.dumps([tenant_id, hop.campaign_id, hop.cycle_id], sort_keys=True)
     return "inner_" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def inner_sandbox_dir(
-    workspace_projects_root: Path, tenant_id: str, campaign_id: str, cycle_id: str
-) -> Path:
+def inner_sandbox_dir(workspace_projects_root: Path, tenant_id: str, hop: CycleHop) -> Path:
     """The one sandbox owned by ``(tenant, campaign, cycle)`` — THE path, built once here."""
-    return inner_sandboxes_dir(workspace_projects_root) / inner_sandbox_key(
-        tenant_id, campaign_id, cycle_id
-    )
+    return inner_sandboxes_dir(workspace_projects_root) / inner_sandbox_key(tenant_id, hop)
 
 
 def sandbox_owner_path(sandbox_dir: Path) -> Path:

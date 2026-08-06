@@ -243,8 +243,7 @@ async def _ingest_and_prepare_checkin(
 
     prepared = await prepare_checkin_run(
         stores,
-        campaign_id=campaign_id,
-        cycle_id=campaign.root_cycle_id,
+        hop=campaign.root_hop,
         draft=draft,
         make_session=make_session,
     )
@@ -283,7 +282,7 @@ async def _checkin_task(
     # `_ingest_and_prepare_checkin` run first), so the decomposition bills the
     # campaign it seeds rather than going unrecorded.
     campaign_id = session.campaign_id
-    context = checkin_call_context(session.store, campaign_id, session.state.cycle_id or "")
+    context = checkin_call_context(session.store, session.hop)
 
     if task_file:
         override: str | None = Path(task_file).read_text(encoding="utf-8")

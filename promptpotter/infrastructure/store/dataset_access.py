@@ -82,7 +82,7 @@ def is_dataset_dir(dataset_dir: Path) -> bool:
     return dataset_pipeline_path(dataset_dir).is_file()
 
 
-def readable_dataset_dir(store: Stores, name: str) -> Path:
+def readable_dataset_dir(stores: Stores, name: str) -> Path:
     """Resolve *name*'s directory — tenant content first, then install content.
 
     The one resolver every read AND every mint goes through (see the module
@@ -91,19 +91,19 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
     no dataset dir on either tier.
     """
     try:
-        tenant_dir = store.tenant_datasets.dataset_dir(name)  # validates the slug
+        tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
     if is_dataset_dir(tenant_dir):
         return tenant_dir
 
-    install_dir = store.benchmarks_root / name  # name validated above
+    install_dir = stores.benchmarks_root / name  # name validated above
     if is_dataset_dir(install_dir):
         return install_dir
     raise DatasetAccessError(name)
 
 
-def readable_dataset_rows(store: Stores, name: str) -> dict[str, Any] | None:
+def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
     """The materialized rows for *name*, or ``None`` — the row half of the resolver.
 
     A dataset dir is a DEFINITION (ours under a wheel, read-only) and its rows are a
@@ -121,19 +121,19 @@ def readable_dataset_rows(store: Stores, name: str) -> dict[str, Any] | None:
        has fetched nothing. Read-only, like everything else on that tier.
     """
     try:
-        tenant = store.tenant_datasets.load_dataset(name)
+        tenant = stores.tenant_datasets.load_dataset(name)
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
     if tenant and tenant.get("items"):
         return tenant
-    rows = store.tenant_datasets.load_benchmark_rows(name)
+    rows = stores.tenant_datasets.load_benchmark_rows(name)
     if rows and rows.get("items"):
         return rows
-    shipped = read_json_tolerant(store.benchmarks_root / name / "cache.json")
+    shipped = read_json_tolerant(stores.benchmarks_root / name / "cache.json")
     return shipped if isinstance(shipped, dict) and shipped.get("items") else None
 
 
-def readable_task_context(store: Stores, name: str) -> dict[str, Any] | None:
+def readable_task_context(stores: Stores, name: str) -> dict[str, Any] | None:
     """The task framing for *name*, or ``None`` — resolved like the rows, and for the
     same reason.
 
@@ -151,20 +151,20 @@ def readable_task_context(store: Stores, name: str) -> dict[str, Any] | None:
        ship one; the other four are what made the missing tier-split visible.
     """
     try:
-        tenant_dir = store.tenant_datasets.dataset_dir(name)  # validates the slug
+        tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
     for candidate in (
         read_yaml_optional(dataset_task_context_path(tenant_dir)),
-        store.tenant_datasets.load_task_context(name),
-        read_yaml_optional(dataset_task_context_path(store.benchmarks_root / name)),
+        stores.tenant_datasets.load_task_context(name),
+        read_yaml_optional(dataset_task_context_path(stores.benchmarks_root / name)),
     ):
         if isinstance(candidate, dict) and candidate:
             return candidate
     return None
 
 
-def list_readable_datasets(store: Stores) -> list[DatasetRef]:
+def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
     """Every dataset this identity may pick — tenant content, then install content.
 
     A tenant slug shadows an install slug of the same name, matching the resolver's
@@ -177,15 +177,15 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
     """
     refs: list[DatasetRef] = []
     own: set[str] = set()
-    for slug in store.tenant_datasets.list_slugs():
-        dataset_dir = store.tenant_datasets.dataset_dir(slug)
+    for slug in stores.tenant_datasets.list_slugs():
+        dataset_dir = stores.tenant_datasets.dataset_dir(slug)
         own.add(slug)
         refs.append(
-            DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(store, slug), "yours")
+            DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(stores, slug), "yours")
         )
 
-    if store.benchmarks_root.is_dir():
-        for entry in sorted(store.benchmarks_root.iterdir()):
+    if stores.benchmarks_root.is_dir():
+        for entry in sorted(stores.benchmarks_root.iterdir()):
             if entry.name in own:
                 continue  # tenant copy already won
             if not entry.is_dir() or not dataset_pipeline_path(entry).is_file():
@@ -196,7 +196,7 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
                 continue
             refs.append(
                 DatasetRef(
-                    entry.name, _read_title(entry), _read_n_samples(store, entry.name), "install"
+                    entry.name, _read_title(entry), _read_n_samples(stores, entry.name), "install"
                 )
             )
     return refs
@@ -214,10 +214,10 @@ def _read_title(dataset_dir: Path) -> str | None:
     return None
 
 
-def _read_n_samples(store: Stores, name: str) -> int:
+def _read_n_samples(stores: Stores, name: str) -> int:
     """``row_count`` off the resolved rows (falls back to ``items`` length); ``0`` when
     unmaterialized — a benchmark nobody has fetched yet, or a pipeline-only L4 dataset."""
-    raw = readable_dataset_rows(store, name)
+    raw = readable_dataset_rows(stores, name)
     if raw is None:
         return 0
     row_count = raw.get("row_count")

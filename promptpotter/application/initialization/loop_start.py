@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import Session
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
@@ -64,9 +65,10 @@ def init_cycle(
     store = session.store.campaigns
     campaign_id = session.campaign_id
     resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=resolved)
     if resume_from_round_override is not None:
-        store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
-    existing = store.load(campaign_id, resolved)
+        store.rewind_to_round(hop, resume_from_round_override)
+    existing = store.load(hop)
     if existing is not None:
         # No origin_accuracy stamp here — the index derives it from rounds[0]
         # (`origin_accuracy_of`); any re-measure re-emits round 0 through
@@ -85,7 +87,7 @@ def init_cycle(
             # already refreshed `dashboard.json`, so the cycle steps TERMINAL → RUNNING;
             # clearing while the producer was stale would derive DETACHED — what the
             # reaper's `_is_dead` collects.
-            store.reopen_for_continuation(campaign_id, resolved)
+            store.reopen_for_continuation(hop)
         return resolved, next_resume_round(existing["rounds"])
     return resolved, 1
 
@@ -97,7 +99,6 @@ def populate_session_scoring(
     scoring_formula: str | None,
     scoring_round_formula: str | None = None,
     scorer_id: str | None = None,
-    cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
@@ -241,7 +242,6 @@ def _start_observability_and_scoring(
     populate_session_scoring(
         session,
         obs=obs,
-        cycle_id=resolved_cycle_id,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
@@ -269,8 +269,7 @@ async def _apply_resume_fork(
     if resumed_from_round > 1 and resolved_cycle_id:
         fork_result = await resume_with_divergence_check(
             session.store.campaigns,
-            session.campaign_id,
-            resolved_cycle_id,
+            CycleHop(campaign_id=session.campaign_id, cycle_id=resolved_cycle_id),
             resumed_from_round,
             session,
             cycle,

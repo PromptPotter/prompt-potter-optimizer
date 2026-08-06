@@ -32,21 +32,23 @@ Optional:
 
 The roster is the directory listing; each dataset's connector is read off its own `pipeline.yaml::nodes` — don't mirror either here. The special cases worth knowing:
 
-- **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only — the connector that once shared the name was deleted (zero adopters), so there is nothing left to confuse it with.
+- **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only, never a connector.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
-- **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
-- **The optimizer's own prompt homes are not in this directory.** They sat here as `_optimizer/` + `_optimizer_meta/` until 2026-07-30 — which is why the listing once needed an `_`-prefix filter — and moved under the package as install content: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`, shipped in the wheel. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
+- **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset.
+- **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
 ## Re-cutting a dataset needs a NEW name
 
-**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place; that is why the dead `justlogic` (d6-7) and `justlogic-d23` cuts above still exist. Key + the requirement that scopes it: `infrastructure/store/archive_views.py::reusable_results`.
+**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_views.py::reusable_results`.
 
 ## L4 — `promptpotter-self`
 
 `datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
 
 L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
+
+**The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name`, so a measurement taken on one cut shares no cache key with another's — comparing "bands" across cuts reads a keying difference as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 
 Status + the remaining work live in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Finish line (don't restate it here; it re-goes-stale every slice). Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
 
@@ -66,7 +68,7 @@ A file *here* is the SHIPPED bank (only `email-tagging` has one); a fetched one 
 operator's, written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by
 `resolve_dataset_items` → `TenantDatasetStore.save_benchmark_rows`, since this tier is
 read-only under a wheel. Both resolve through `readable_dataset_rows`. It is **not** an
-origin score cache, though this file described it as one for a long time: measurements
+origin score cache: measurements
 live in the tenant-global content-addressed `measurements/` archive
 (`infrastructure/store/archive_views.py`), which is what replays origin rows across
 cycles, forks and resumes. `sp_budget_origin` breadth is cheap *because* of that archive,

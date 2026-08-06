@@ -103,7 +103,7 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 `cycle.opt_sp.wounds.l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — written by `apply_side_effects` off `TransitionResult.l2_guard_breaches`. **Any** breach after L2 runs makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
-There is **no `L2_OUTPUT_VALIDATORS` registry, no `validators/l2_output.py`, and no soft-reject tier.** This section described all three — plus `l2_task_context_stale_repeat` and `_L2_SOFT_REJECT_VALIDATOR_IDS` — and none has ever existed in the tree as written. The shape they belonged to left with the framing-rewrite surface: `task_context` framing is now frozen for the run (`TaskDecomposition.merge` refuses it), so a stale repeat is unrepresentable and there is no inert breach left to except. `escalation/firing.py` is an unconditional `if breaches:`. Same correction as [`l2-internals.md`](l2-internals.md) § Wound 4, which this page used to contradict.
+**Every breach is hard** — owned by [`l2-internals.md`](l2-internals.md) § Wound 4. This layer must route every breach straight to L3; it has no soft-reject tier to fall back to.
 
 ## Validators are Evaluator-shaped
 

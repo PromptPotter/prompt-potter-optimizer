@@ -18,6 +18,7 @@ import pytest
 
 
 def test_path_builders_reject_traversal(tmp_path: Path) -> None:
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.layout import (
         campaign_root_dir_for,
         cycle_dir_for,
@@ -28,12 +29,14 @@ def test_path_builders_reject_traversal(tmp_path: Path) -> None:
         campaign_root_dir_for(tmp_path, "../escape")
 
     with pytest.raises(ValueError):
-        cycle_dir_for(tmp_path, "ok_campaign", "../escape")
+        cycle_dir_for(tmp_path, CycleHop(campaign_id="ok_campaign", cycle_id="../escape"))
 
     with pytest.raises(ValueError):
         sweep_batch_dir_for(tmp_path, "ok_campaign", "../escape")
 
-    out = cycle_dir_for(tmp_path, "ds__20260101-000000", "cycle_abc_fork_def_xyz")
+    out = cycle_dir_for(
+        tmp_path, CycleHop(campaign_id="ds__20260101-000000", cycle_id="cycle_abc_fork_def_xyz")
+    )
     assert out == (
         tmp_path / "campaigns" / "ds__20260101-000000" / "cycles" / "cycle_abc_fork_def_xyz"
     )
@@ -261,12 +264,12 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     write_json(
         tmp_path / "inner_tasks.yaml",
         {
-            "inner_benchmark": "justlogic",
+            "inner_benchmark": "justlogic-d234",
             "inner_benchmark_config": {
                 "n_samples_per_inner_round": 24,
                 "max_inner_rounds": 7,
             },
-            "tasks": [{"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0}],
+            "tasks": [{"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}],
         },
     )
     cycle._INNER_SPAWN.set(
@@ -283,7 +286,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
     with pytest.raises(cycle.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await cycle.run_inner_cycle("justlogic-d67/seed-0", {})
+        await cycle.run_inner_cycle("justlogic-d234/seed-0", {})
 
     assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"

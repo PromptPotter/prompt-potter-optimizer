@@ -121,7 +121,7 @@ def _accumulate(round_doc: dict[str, Any], acc: dict[tuple[str, str, str], list[
                 acc[(fit, field, block)].append(lift)
 
 
-def mine_earned_blocks(store: Stores) -> dict[str, list[EarnedBlock]]:
+def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
     """Walk every campaign's rounds and return earned blocks keyed by answer-space fit.
 
     ``{fit_signature: [EarnedBlock, ...]}`` — each fit's blocks ranked by mean credible lift,
@@ -142,7 +142,7 @@ def mine_earned_blocks(store: Stores) -> dict[str, list[EarnedBlock]]:
         return {}
 
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-    for campaign_dir in store.campaigns.iter_campaign_dirs():
+    for campaign_dir in stores.campaigns.iter_campaign_dirs():
         cycles_dir = campaign_cycles_dir(campaign_dir)
         if not cycles_dir.is_dir():
             continue
@@ -164,14 +164,14 @@ def mine_earned_blocks(store: Stores) -> dict[str, list[EarnedBlock]]:
 
 
 def earned_library_for(
-    store: Stores, fit_signature: str, *, per_field_cap: int = 3
+    stores: Stores, fit_signature: str, *, per_field_cap: int = 3
 ) -> dict[str, tuple[str, ...]]:
     """The `guidance` library for one run: ``{field: (block, ...)}``, earned + fitting only.
 
     Empty dict when no block earned credible lift on this answer-space shape — the injection
     renders nothing, which is the correct silence for a task with no transferable history yet.
     """
-    earned = mine_earned_blocks(store).get(fit_signature, [])
+    earned = mine_earned_blocks(stores).get(fit_signature, [])
     by_field: dict[str, list[str]] = defaultdict(list)
     for block in earned:
         if len(by_field[block.field]) < per_field_cap:

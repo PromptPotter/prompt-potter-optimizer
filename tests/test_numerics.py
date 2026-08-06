@@ -53,6 +53,7 @@ from promptpotter.application.scoring.metrics import (
     matched_origin_stats,
     value_with_mask_applied,
 )
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
     NodeType,
@@ -1071,10 +1072,9 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     from promptpotter.infrastructure.store.layout import cycle_dir_for, session_dir_for
 
     view = LiveDashboardView(
-        cycle_dir=CycleDir(cycle_dir_for(tmp_path, "c1", "cyc1")),
+        cycle_dir=CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1"))),
         session_dir=session_dir_for(tmp_path, "s1"),
-        campaign_id="c1",
-        cycle_id="cyc1",
+        hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),
         session_id="s1",
         l1_patience=2,
         n_variants=2,

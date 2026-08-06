@@ -19,6 +19,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
     rescored_prior_tail,
 )
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.scoring import is_hit
@@ -163,10 +164,11 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     fork = "cycle_inherit_parent_fork_abc123"
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
 
-    stores.campaigns.create(_CAMPAIGN, parent, {"sibling_kind": "root"})
+    stores.campaigns.create(
+        CycleHop(campaign_id=_CAMPAIGN, cycle_id=parent), {"sibling_kind": "root"}
+    )
     stores.campaigns.save_round_file(
-        _CAMPAIGN,
-        parent,
+        CycleHop(campaign_id=_CAMPAIGN, cycle_id=parent),
         _round(
             round=1,
             label="C1.1",
@@ -188,8 +190,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         ),
     )
     stores.campaigns.create(
-        _CAMPAIGN,
-        fork,
+        CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         {
             "sibling_kind": "fork",
             "parent_cycle_id": parent,
@@ -205,6 +206,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         store=stores,
         campaign_id=_CAMPAIGN,
         state=SimpleNamespace(cycle_id=fork),
+        hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         experiment_extract={},
         dataset_config_dir=None,
     )
@@ -501,22 +503,24 @@ def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
     intact even after later records land (the scan doesn't assume it's the last line)."""
     stores = built_stores
     cyc = "cycle_seed_roundtrip"
-    stores.campaigns.create(_CAMPAIGN, cyc, {"sibling_kind": "root"})
-    assert stores.campaigns.read_cycle_seed(_CAMPAIGN, cyc) is None  # unseeded → None
+    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), {"sibling_kind": "root"})
+    assert (
+        stores.campaigns.read_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc)) is None
+    )  # unseeded → None
 
     seed = CycleSeed(
         origin_prompt_fields={"instruction": "do the thing"},
         origin_source="campaign_origin",
     )
-    stores.campaigns.write_cycle_seed(_CAMPAIGN, cyc, seed)
+    stores.campaigns.write_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), seed)
     # A second seed after the first must win (last-wins), proving the scan spans the file.
     final_seed = CycleSeed(
         origin_prompt_fields={"instruction": "do it precisely"},
         origin_source="campaign_origin",
     )
-    stores.campaigns.write_cycle_seed(_CAMPAIGN, cyc, final_seed)
+    stores.campaigns.write_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), final_seed)
 
-    got = stores.campaigns.read_cycle_seed(_CAMPAIGN, cyc)
+    got = stores.campaigns.read_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc))
     assert got == final_seed
     assert got is not None and got.origin_source == "campaign_origin"
 

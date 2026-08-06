@@ -11,6 +11,7 @@ from promptpotter.application.config import CampaignConfig
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.config.settings import DATASET_NAME
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import (
     IndividualLineage,
     OptSearchPoint,
@@ -101,11 +102,8 @@ async def rescore_parent(
     return RoundParent(
         opt_sp=cycle.opt_sp,
         results=results,
-        # The gateway's OWN answer, not a second computation of it. This used to discard
-        # `scores` and re-run `compute_composite_fitness` over the same rows with the same
-        # scorer — a second code path producing what the single scoring gateway had just
-        # returned, and one that dropped the evaluator namespace on the way (leaving
-        # `RoundParent.evaluators` a declared field with no writer).
+        # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
+        # rows, which drops the evaluator namespace on the way.
         report=build_score_report(
             cycle.opt_sp,
             None,
@@ -140,10 +138,9 @@ def build_campaign_emitter(
 
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
-        session.state.cycle_id,
+        session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        campaign_id=session.campaign_id,
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
@@ -215,7 +212,7 @@ def try_inherit_fork_origin(
         return None
 
     store = session.store.campaigns
-    index = store.load(session.campaign_id, session.state.cycle_id)
+    index = store.load(session.hop)
     if not isinstance(index, dict):
         return None
     fork = index.get("fork")
@@ -227,7 +224,9 @@ def try_inherit_fork_origin(
     if not isinstance(from_round, int) or not isinstance(from_candidate_id, str):
         return None
 
-    parent_round = store.load_round_file(session.campaign_id, parent, from_round)
+    parent_round = store.load_round_file(
+        CycleHop(campaign_id=session.campaign_id, cycle_id=parent), from_round
+    )
     if parent_round is None:
         return None
     cand = next(
@@ -410,8 +409,8 @@ async def prepare_scoring_context(
     )
 
     if not (campaign_config is not None and svc is not None and dataset):
-        # Nothing to score. The resolved origin still travels — the old empty-list branch
-        # dropped it and handed back a blank OptSearchPoint(instruction="").
+        # Nothing to score. The resolved origin still travels — dropping it here hands back
+        # a blank OptSearchPoint(instruction="").
         return (
             CampaignOrigin(
                 resolved_origin=resolved_origin,
@@ -513,12 +512,9 @@ async def prepare_scoring_context(
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
-        # Origin is candidate 0 of round 0, and it is measured ONCE, here, into the same
-        # `ScoredCandidate` report every L1 candidate gets. This object is both what the
-        # ledger receives and what round 0's row is built from, so the two cannot be two
-        # computations of one measurement — `Cycle.start` used to re-derive the composite
-        # and the evaluator namespace from these same rows, beside the gateway that had
-        # just returned them.
+        # Origin is candidate 0 of round 0, measured ONCE, here. This object is both what the
+        # ledger receives and what round 0's row is built from — never re-derive either from
+        # these rows a second time.
         report = build_score_report(
             resolved_origin,
             None,

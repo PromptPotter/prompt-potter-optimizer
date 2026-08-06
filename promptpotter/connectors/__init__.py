@@ -6,40 +6,12 @@ ships a package declaring a :data:`ENTRY_POINT_GROUP` entry point
 "registered" means precisely the same thing for a connector we wrote and one we have
 never seen. That equivalence is why this module has a body at all.
 
-To add one HERE: write ``connectors/<name>.py`` exporting a ``Connector(...)`` binding,
-then add an import + a :data:`_BUILTIN` entry below. No import side effects.
+The object an entry point names must be a :class:`Connector`, and **its ``name`` field is
+the registry key** — the entry-point name is only a label, so a package cannot claim a key
+its connector does not declare.
 
-To add one from OUTSIDE, in your own package::
-
-    [project.entry-points."promptpotter.connectors"]
-    anything = "my_package.connector:CONNECTOR"
-
-The object named must be a :class:`Connector`, and **its ``name`` field is the registry
-key** — the entry-point name is only a label, so a package cannot claim a key its
-connector does not declare.
-
-**Discovery is two paths; validation is one. Deliberately.** Declaring our own two as
-entry points would be the tidier "single path", and it is wrong here: it makes
-``import promptpotter.connectors`` depend on this distribution's installed metadata, so
-a plain source-tree run would find zero backends. The property worth protecting is the
-one below — a half-wired connector fails at import, never mid-campaign — and that lives
-in the validator, not in the channel it arrived through.
-
-**A plugin may not shadow a built-in, and a broken one is fatal.**
-``CONNECTORS["promptpotter"]`` is read by name by the L4 inner runner
-(``application/runner/inner/tasks.py``), so which object answers that key is not a third
-party's call. And a plugin that fails to import raises here rather than being skipped:
-skipping would trade a loud error naming the package for ``connector 'x' not
-registered`` at mint time, with nothing pointing at the cause.
-
-**A connector is trusted code, not sandboxed — and that is stated, not implied.** Loading
-one imports its module into this process, where it sees the provider API keys, the tenant
-tree and the identity store, exactly as a module we ship does. Entry points do not weaken
-that boundary (anything that can install a distribution into this environment can already
-run code here), but they do make the trust *explicit*: installing a connector package is
-trusting its publisher completely, and this repo's capability scoping (ADR-0005) governs
-API principals, not in-process code. :data:`CONNECTOR_ORIGINS` is the audit surface — it
-names the distribution behind every registered key, including the ones that are ours.
+Why discovery is two paths while validation is one, why a plugin may not shadow a built-in,
+and what trusting a connector actually grants it: ``promptpotter/connectors/CLAUDE.md``.
 """
 
 from __future__ import annotations

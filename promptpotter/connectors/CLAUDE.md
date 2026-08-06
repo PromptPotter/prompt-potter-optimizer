@@ -101,6 +101,30 @@ connector that was never validated, which is the one thing the module exists to 
 A connector shipped from **another** package declares the entry point instead and touches
 nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 
+## A connector is trusted code, not sandboxed — and that is stated, not implied
+
+Loading one imports its module into this process, where it sees the provider API keys, the
+tenant tree and the identity store, exactly as a module we ship does. Entry points do not
+weaken that boundary (anything that can install a distribution into this environment can
+already run code here), but they do make the trust *explicit*: installing a connector package
+is trusting its publisher completely, and this repo's capability scoping (ADR-0005) governs
+API principals, not in-process code. **`CONNECTOR_ORIGINS` is the audit surface** — it names
+the distribution behind every registered key, including the ones that are ours.
+
+Two rules follow, both enforced in `_load` / `_validate`. **A plugin may not shadow a
+built-in:** `CONNECTORS["promptpotter"]` is read by name by the L4 inner runner
+(`application/runner/inner/tasks.py`), so which object answers that key is not a third
+party's call. **A broken plugin is fatal, never skipped:** skipping would trade a loud error
+naming the package for `connector 'x' not registered` at mint time, with nothing pointing at
+the cause.
+
+**Discovery is two paths; validation is one. Deliberately.** Declaring our own two as entry
+points would be the tidier "single path", and it is wrong here: it makes
+`import promptpotter.connectors` depend on this distribution's installed metadata, so a plain
+source-tree run would find zero backends. The property worth protecting — a half-wired
+connector fails at import, never mid-campaign — lives in the validator, not in the channel it
+arrived through.
+
 ## The credential rides the connector
 
 **`Connector.auth_token() -> str | None` is the ONLY route by which a bearer token reaches

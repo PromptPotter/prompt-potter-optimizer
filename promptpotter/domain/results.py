@@ -481,7 +481,7 @@ class RoundResult(StrictModel):
     cumulative_theta_se: float | None = None
     # Which IRT model the δ ruler above was fitted under ("1PL" | "2PL"), so the operator
     # reads the model the engine chose. None = the ruler is cold (flat δ) and θ is plain
-    # logit-accuracy — neither model, and the state a hardcoded "1PL" used to misreport.
+    # logit-accuracy — neither model, and the state a hardcoded "1PL" would misreport.
     calibration_model: CalibrationModel | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
@@ -898,10 +898,9 @@ class RoundSummary(StrictModel):
     # as a false "great start → decay". The trend/sparkline plot THIS series so progress is
     # honest; the per-round measured number stays on `candidates[]` (badged with its count).
     #
-    # It used to be a `cumulative_accuracy` beside it — a mean over a sample-keyed union of
-    # rows from DIFFERENT configurations, which fixed the swing by fabricating a number no
-    # individual scored. θ solves the same problem legitimately, by modelling per-sample
-    # difficulty instead of averaging across provenance. Mirrors `RoundResult.cumulative_theta`.
+    # Never add a `cumulative_accuracy` beside it: a mean over rows from DIFFERENT
+    # configurations fabricates a number no individual scored. Mirrors
+    # `RoundResult.cumulative_theta`.
     cumulative_theta: float | None = None
     # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
     calibration_model: CalibrationModel | None = None

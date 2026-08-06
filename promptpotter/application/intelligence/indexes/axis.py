@@ -338,7 +338,7 @@ class AxisIndex:
 
     def refresh(
         self,
-        store: Stores,
+        stores: Stores,
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
@@ -367,7 +367,7 @@ class AxisIndex:
         added = 0
         skipped: list[str] = []
         for run_id, detail in archive_views.runs_since(
-            store, self.sample_index._seen_runs, dataset_name=dataset_name
+            stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             if scorer is not None:
                 try:
@@ -402,7 +402,7 @@ class AxisIndex:
         # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
         # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
         all_entries: list[dict[str, Any]] = []
-        for entry in archive_views.list_runs(store, dataset_name=dataset_name):
+        for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
             run_id = entry.get("run_id", "")
             if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
                 continue
@@ -488,7 +488,7 @@ class AxisIndex:
     @classmethod
     def ensure_for(
         cls,
-        store: Stores | None,
+        stores: Stores | None,
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
@@ -496,11 +496,11 @@ class AxisIndex:
         dataset_name: str | None,
     ) -> AxisIndex | None:
         """Fresh ``AxisIndex`` + refresh once. Returns ``None`` when the store is missing."""
-        if store is None:
+        if stores is None:
             return None
         idx = cls()
         idx.refresh(
-            store,
+            stores,
             scorer=scorer,
             scorer_id=scorer_id,
             scorer_formula=scorer_formula,

@@ -258,17 +258,10 @@ def _calibrate_delta_ruler(
             if model == "2PL":
                 logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
     # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES — the whole point of this line.
-    # The warm branch used to hand back ``post.theta[ORIGIN_ABILITY_ID]``, the JOINT fit's
-    # ability, while every round level is a ``fit_theta_given_delta`` MAP at the locked ruler
-    # (``_cumulative_theta``). ``fit_theta_given_delta``'s own docstring disqualifies the joint
-    # θ for exactly this: ``fit_rasch`` re-anchors ``mean(θ)==0`` and re-estimates σ_θ by EB on
-    # every call, so its scale is set by whichever arms happened to be in the pool. The L4 law
-    # then differenced two abilities from two estimators — one shrunk toward a pool mean with a
-    # data-dependent σ_θ, the other toward 0 with a fixed one — and the anchor's bias moved with
-    # the arm measuring it. Measured on the 50 banked cells: the ruler's shift is ~87% common-mode
-    # and does cancel in the difference (r=+0.75 within seed), so this is worth ~2% of the delta's
-    # variance — but the residual is a BIAS channel, not noise, and bias does not average out over
-    # a panel. It also makes the cold and warm branches agree: one expression, one estimator.
+    # Never hand back the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch``
+    # re-anchors ``mean(θ)==0`` and re-estimates σ_θ per call, so its scale is set by whichever
+    # arms were in the pool, and the L4 law then differences two abilities from two estimators
+    # — a BIAS channel, which does not average out over a panel.
     # ``obs``, not ``origin_obs``: the deduped set carries every origin row the archive holds too.
     origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
     return ruler, fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID), model
@@ -544,11 +537,9 @@ class Cycle:
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
             priors, key=lambda rr: rr.round
         )
-        # The seed round: the last L1 round, or round 0 when the list carries only the
-        # origin. That case used to return early on the grounds that ``start`` had already
-        # seeded tracking — true on a FIRST call and false on every later one, which left
-        # the cycle holding the trajectory of whichever longer list it was last replayed
-        # with. Re-seeding it here is what makes replaying rounds 0..k for ascending k
+        # The seed round: the last L1 round, or round 0 when the list carries only the origin.
+        # Never return early there on the grounds that ``start`` seeded tracking — true on a
+        # FIRST call only. Re-seeding is what makes replaying rounds 0..k for ascending k
         # reconstruct each state instead of decorating the previous one.
         last_rr = self.rounds[-1]
         if last_rr.opt_sp is None or last_rr.pipeline_params is None:
@@ -656,20 +647,12 @@ class Cycle:
                 c.model_copy(update={"theta": o_theta, "theta_se": o_se})
                 for c in self.origin_round.candidate_scores
             ]
-            # …and every L1 round that already closed, which is the same argument one line up
-            # and used to be skipped. A round that closed while the ruler was flat had its θ
-            # fit at δ≡0, where ``fit_theta_given_delta`` degenerates to logit-accuracy on that
-            # round's own subset — a DIFFERENT scale from the one every later round lands on.
-            #
-            # This walk restamps the ROUND's frontier θ, and ``calibration_model`` beside it
-            # describes exactly that series. It does not reach those rounds' per-candidate θ,
-            # and does not need to: ``l1_score`` no longer stamps one on a cold ruler, for the
-            # same reason stated here — so there is no cold candidate value left to contradict
-            # the warm stamp. That pairing was the defect; the round file claimed 1PL over rows
-            # whose θ was logit-accuracy.
-            # Left unrestamped they sit side by side in ``round_adopted_levels``, and the L4 law
-            # averages the mixture and differences it against a warm-ruler origin. Free to fix:
-            # the rows are all in hand, and this is the walk ``_bind_rounds`` already does.
+            # …and every L1 round that already closed, same argument one line up. A round that
+            # closed on a flat ruler had its θ fit at δ≡0 — logit-accuracy on its own subset, a
+            # DIFFERENT scale from every later round. Left unrestamped they sit side by side in
+            # ``round_adopted_levels`` and the L4 law averages the mixture. This walk restamps
+            # the ROUND's frontier θ only; ``l1_score`` stamps no candidate θ on a cold ruler,
+            # so there is no cold value left to contradict the warm stamp.
             frontier: list[dict[str, Any]] = []
             for rr in self.rounds:
                 frontier = _merge_known_outcomes(frontier, list(rr.results))

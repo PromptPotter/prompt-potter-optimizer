@@ -15,6 +15,7 @@ import logging
 
 from promptpotter.application.verify import VerifyError, verify_candidate
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -59,8 +60,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         outcome = await verify_candidate(
             stores=stores,
             identity=identity,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             round_num=round_num,
             cand_idx=cand_idx,
             label=args.label,

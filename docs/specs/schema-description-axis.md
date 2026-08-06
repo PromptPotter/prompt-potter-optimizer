@@ -11,7 +11,7 @@ Not excluded by a decision anyone defended — **invisible**, for one reason:
 
 But *no lift is needed*. Every target node already carries its schema (`NodeOutputSchema.field_descriptions`, `pipeline_schema.py`) and it already reaches the model — the node's `output_schema` rides the wire to the backend, which sends it as `response_schema`. The strings need only be **reachable as an override** and **folded into the wire schema** — not stored as new data.
 
-**Two schema-declaration shapes, not one.** A node declares its output schema either INLINE (`config.output_schema` — `justlogic`'s `llm_only`) or by REGISTRY IDENTITY (`config.schema_family` — TermNorm's `entity_profiling` / `llm_ranking`, resolved into the `resolved_schemas` block of `GET /pipeline`). Only the inline shape has a schema *in the node config* for the fold to write on. The registry shape must be materialized from `PipelineNode.output_schema.json_schema` at fold time — otherwise the descriptions are popped and silently dropped, and every proposal on those nodes hashes to its parent.
+**Two schema-declaration shapes, not one.** A node declares its output schema either INLINE (`config.output_schema` — `justlogic-d234`'s `llm_only`) or by REGISTRY IDENTITY (`config.schema_family` — TermNorm's `entity_profiling` / `llm_ranking`, resolved into the `resolved_schemas` block of `GET /pipeline`). Only the inline shape has a schema *in the node config* for the fold to write on. The registry shape must be materialized from `PipelineNode.output_schema.json_schema` at fold time — otherwise the descriptions are popped and silently dropped, and every proposal on those nodes hashes to its parent.
 
 ## Mechanism
 
@@ -43,7 +43,7 @@ Ride the existing lock. `PARAM_FORBIDDEN_KEYS` already implements exactly this s
 | **Free** — the axis | `description` strings; field order; `enum` order + per-value gloss | **On.** The optimizer *should* propose better descriptions — that is the point. |
 | **Locked** — contract | field names, dot-paths, `enum` values | **Off.** Not via `PARAM_FORBIDDEN_KEYS` — `L1Variant`'s field names are not `pipeline_params`; the lock is that the rename object is never grafted, so the key does not exist to emit. Unlock forks the cycle (§ Unlocking the name). |
 
-The overlay exposes description strings and a field permutation, **never a raw schema.** An optimizer handed a whole schema renames `candidate` and takes the pipeline down ([`../concepts/structured-output.md`](../concepts/structured-output.md) § which levers are free).
+The overlay exposes description strings and a field permutation, **never a raw schema.** An optimizer handed a whole schema renames `candidate` and takes the pipeline down ([`../concepts/structured-output.md`](../concepts/structured-output.md) § Which levers are actually free).
 
 **L2 unlocks through the surface it already has.** Its control vocabulary stays closed at `fork_proposal` + `terminate_proposal` ([`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)) — a *third* control output would be an architectural amendment. But `fork_proposal` is the right vehicle regardless of L2: `schema_field_rename` declares itself `Knob(Scope.POLICY, Estimand.SEARCH)` on its own `CampaignConfig` field, so unlocking an axis invalidates search comparability and **must** mint a sibling cycle rather than mutate the running one. It rides `ConfigOverrides` — the same channel `per_round_resubset` already uses for the operator's "behaviour-knob change → fork-at-offset-0" workflow.
 
@@ -60,7 +60,7 @@ The field **name** is the strongest lever and the one that breaks things (`../co
 
 ## The open slice — the sweep gate
 
-`--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and revert. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
+`--sweep` on `justlogic-d234`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and revert. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
 
 **One comparability caveat.** Turning the axis on adds `output_schema_descriptions` to the emittable params of any target node that ships a schema, which changes that dataset's L1 in-context tokens. A dataset's C0 therefore shifts, and its runs from before this commit are not comparable to runs after it. With no override bound the wire schema is byte-identical, so only the *emittable-surface* text moves, not the origin's actual schema.
 

@@ -11,7 +11,7 @@ L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3
 1. Improved best fitness → escalation counters reset.
 2. Otherwise `l1_stall_count++`. When it hits `l1_patience`, L2 fires.
 
-Three preemptors fire L2 *before* patience (rules in `escalation/rules.py`): `l1_mandatory_breach` (a dropped mandatory placeholder), `l2_axis_yield_drought` (no axis yields above noise), and `l1_evidence_starved` (a node failed across ~all of a round's samples — `evidence_starved_node` ≥ `EVIDENCE_STARVED_RATE`). The last is the self-heal-vs-HITL fork: a starved round is routed to L2 not to chase it, but so L2 can read the `evidence_health` panel and either refine or **terminate** (see Outputs → `terminate_proposal`). Deterministic rules only route; they never diagnose or stop (R-48).
+Three preemptors fire L2 *before* patience (rules in `escalation/rules.py`): `l1_mandatory_breach` (a dropped mandatory placeholder), `l2_axis_yield_drought` (no axis yields above noise), and `l1_evidence_starved` (a node failed across ~all of a round's samples — `evidence_starved_node` ≥ `EVIDENCE_STARVED_RATE`). The last is the self-heal-vs-HITL fork: a starved round is routed to L2 not to chase it, but so L2 can read the `evidence_health` panel and either refine or **terminate** (see Outputs → `terminate_proposal`). Deterministic rules only route; they never diagnose or stop — termination authority belongs to the most-general reader, and a backend-coupled deterministic check only WARNS.
 
 Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheckpointKind.L2_ESCALATION_TRIGGER`, gated **ARCHIVAL** — the trigger is a fold over the cycle's escalation history (counters bump once per escalation *request* and reset on each fire), not a function of one round's measurements, which is what a replayer is pure over. On resume the counters are rebuilt by `EscalationFSM.from_ledger`, not re-derived; the trigger's scorer-dependence rides `improved`, hence the round measurements, whose own decisions are `REPLAYED`.
 
@@ -74,7 +74,7 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 
 `l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — and **any** breach after `_apply_l2` force-triggers L3 to heal. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
-There is no soft-reject tier and no task_context validator. This section described `run_l2_output_validators` / `validators/l2_output.py` / `L2_TASK_CONTEXT_STALE_REPEAT` / `_L2_SOFT_REJECT_VALIDATOR_IDS` for a long time; none of those has ever existed in the tree as written, and the last of the shape they belonged to left with the framing-rewrite surface — a stale task_context repeat is unrepresentable now that the framing is frozen, so there is no inert breach left to except (`escalation/firing.py`, above its unconditional `if breaches:`).
+**Every breach is hard — there is no soft-reject tier, and no `task_context` validator.** `task_context` framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so a stale-repeat breach is not representable and there is nothing inert to except: `escalation/firing.py` is an unconditional `if breaches:`. Do not add a tier to re-admit one.
 
 ## File-line anchors
 

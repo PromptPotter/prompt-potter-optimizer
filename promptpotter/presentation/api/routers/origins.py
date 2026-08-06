@@ -47,7 +47,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
@@ -81,15 +81,15 @@ class OriginListResponse(StrictModel):
     total: int = Field(description="Number of origins")
 
 
-def _campaign_backed_origins(store: Stores) -> list[OriginEntry]:
+def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
     """Group the caller's active campaigns by origin identity → one entry each."""
-    samples_by_dataset = {r.name: r.n_samples for r in list_readable_datasets(store)}
+    samples_by_dataset = {r.name: r.n_samples for r in list_readable_datasets(stores)}
     # Tenant-scoped (no owner_user_id filter), matching the dashboard's `/cycles`
     # surface: a CLI-minted campaign is owned by the registered-developer user_id,
     # which differs from a browser OIDC session's user_id even within the SAME
     # tenant — owner-filtering would hide the operator's own origins in the web UI.
     # `Stores.identity` still enforces tenant isolation (no cross-tenant leak).
-    campaigns = store.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
+    campaigns = stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
     by_origin: dict[str, list[Campaign]] = {}
     for c in campaigns:
         # Empty hash (a `checkin` campaign still authoring its origin) → keep the campaign as
@@ -105,8 +105,7 @@ def _campaign_backed_origins(store: Stores) -> list[OriginEntry]:
         accs = [
             a
             for c in group
-            if (a := origin_accuracy_of(store.campaigns.load(c.campaign_id, c.root_cycle_id) or {}))
-            is not None
+            if (a := origin_accuracy_of(stores.campaigns.load(c.root_hop) or {})) is not None
         ]
         out.append(
             OriginEntry(
@@ -123,7 +122,7 @@ def _campaign_backed_origins(store: Stores) -> list[OriginEntry]:
     return out
 
 
-def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
+def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
     """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint
     would stamp (``configure_and_apply_pipeline`` merge → ``build_origin_cycle_id``),
     computed from disk without a Session. Returns the bare hash, or ``None`` if the dataset
@@ -145,7 +144,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(), dataset_dir=dataset_dir
         )
-        items = resolve_dataset_items(store, dataset_name)
+        items = resolve_dataset_items(stores, dataset_name)
         if not items:
             return None
         samples = [Sample(**it) for it in items]
@@ -155,7 +154,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
         return None
 
 
-def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry]:
+def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntry]:
     """Each ready tenant dataset as its CURRENT config-aware origin, shown as *prepared*
     when that exact config has no campaign yet (its prospective origin id isn't
     campaign-backed). So an edited-but-unrun config (a model swap, a potter-run prep)
@@ -163,10 +162,10 @@ def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry
     folds into campaign-backed once run. Only the operator's own (``tier="yours"``) datasets
     — a benchmark stub is not a prepared origin to run."""
     out: list[OriginEntry] = []
-    for ref in list_readable_datasets(store):
+    for ref in list_readable_datasets(stores):
         if ref.tier != "yours" or ref.n_samples <= 0:
             continue
-        d = store.tenant_datasets.dataset_dir(ref.name)
+        d = stores.tenant_datasets.dataset_dir(ref.name)
         # Ready = ships a prompts/ dir (any node-named or default.yaml prompt — the
         # origin OSP resolves the per-node file like the mint does, see
         # `resolve_origin_opt_search_point`) + a pipeline.yaml. Hardcoding
@@ -174,7 +173,7 @@ def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry
         # (e.g. termnorm's `entity_profiling.json`).
         if not has_dataset_prompts(d) or not is_dataset_dir(d):
             continue
-        origin_id = _dataset_origin_id(store, d, ref.name)
+        origin_id = _dataset_origin_id(stores, d, ref.name)
         if origin_id is None or origin_id in campaign_ids:
             continue
         out.append(
@@ -193,7 +192,7 @@ def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry
 
 
 @origins_router.get("", response_model=OriginListResponse)
-def list_origins(store: StoreDep) -> OriginListResponse:
+def list_origins(stores: StoresDep) -> OriginListResponse:
     """Every runnable origin in the caller's tenant — campaign-backed + prepared, newest first.
 
     Tenant-scoped (like the dashboard's ``/cycles``), NOT owner-filtered: a
@@ -203,15 +202,15 @@ def list_origins(store: StoreDep) -> OriginListResponse:
     datasets with no campaign yet) sort to the top so freshly-prepared work is
     seen first.
     """
-    campaign_backed = _campaign_backed_origins(store)
-    prepared = _prepared_origins(store, {o.origin_id for o in campaign_backed})
+    campaign_backed = _campaign_backed_origins(stores)
+    prepared = _prepared_origins(stores, {o.origin_id for o in campaign_backed})
     campaign_backed.sort(key=lambda o: o.created_at, reverse=True)
     return OriginListResponse(
         origins=[*prepared, *campaign_backed], total=len(prepared) + len(campaign_backed)
     )
 
 
-def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
+def _campaign_for_origin(stores: Stores, origin_id: str) -> Campaign | None:
     """The canonical (earliest) active campaign whose origin identity is ``origin_id``.
 
     Mirrors :func:`_campaign_backed_origins`' grouping key (``root_content_hash``, or
@@ -220,14 +219,14 @@ def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
     """
     matches = [
         c
-        for c in store.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
+        for c in stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
         if (c.root_content_hash or c.campaign_id) == origin_id
     ]
     return min(matches, key=lambda c: c.created_at) if matches else None
 
 
 @origins_router.post("/{origin_id}/draft")
-def draft_from_origin(origin_id: str, store: StoreDep) -> dict[str, Any]:
+def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]:
     """Open a chosen prior origin as a prefilled check-in campaign — the picker's
     "Reuse an origin" path for a campaign-backed origin.
 
@@ -239,16 +238,16 @@ def draft_from_origin(origin_id: str, store: StoreDep) -> dict[str, Any]:
     via ``origin_override`` and stamps the ``campaign_origin`` lineage. Nothing
     runs until the operator starts the check-in.
     """
-    match = _campaign_for_origin(store, origin_id)
+    match = _campaign_for_origin(stores, origin_id)
     if match is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
-    dataset_dir = readable_dataset_dir(store, match.dataset_name)
-    seed = store.campaigns.read_cycle_seed(match.campaign_id, match.root_cycle_id)
+    dataset_dir = readable_dataset_dir(stores, match.dataset_name)
+    seed = stores.campaigns.read_cycle_seed(match.root_hop)
     overrides: dict[str, Any] = {"reused_origin_id": origin_id}
     if seed is not None and seed.origin_prompt_fields:
         overrides["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
     draft = draft_from_dataset(
-        stores=store,
+        stores=stores,
         dataset_dir=dataset_dir,
         dataset_name=match.dataset_name,
         overrides=overrides,

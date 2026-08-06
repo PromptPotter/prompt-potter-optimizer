@@ -39,6 +39,7 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
@@ -194,7 +195,7 @@ def _read_cycle_seed(session: Session) -> CycleSeed | None:
     root mint; ``None`` otherwise."""
     if not session.state.cycle_id:
         return None
-    return session.store.campaigns.read_cycle_seed(session.campaign_id, session.state.cycle_id)
+    return session.store.campaigns.read_cycle_seed(session.hop)
 
 
 @dataclass(frozen=True)
@@ -268,20 +269,15 @@ async def _prepare_run(
     # cycle could never be resumed). Then bind the hooks, so the origin pass below
     # is pausable like every other phase.
     if session.state.cycle_id:
-        launch_cycle_dir = session.store.campaigns.cycle_dir(
-            session.campaign_id, session.state.cycle_id
-        )
+        launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
         clear_run_control_flags(launch_cycle_dir)
         _bind_run_controls(session, launch_cycle_dir)
 
-    # Cycle seed: the chosen searchpoint, declared at mint, rides the ledger as a
-    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id —
-    # set before this seam by the CLI resume, the API start-run launchers, and the
-    # campaign-from-origin mint). It re-homes the origin (`origin_prompt_fields`)
-    # and layers its `pipeline_overlay` ON TOP of the dataset overlay
-    # (seed > dataset > backend). Read here — the single runner seam every launch
-    # path funnels through — not threaded through each launcher + every
-    # `configure_and_apply_pipeline` caller.
+    # Cycle seed: the chosen searchpoint, declared at mint, riding the ledger as a
+    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id). It re-homes the
+    # origin (`origin_prompt_fields`) and layers its `pipeline_overlay` ON TOP of the dataset
+    # overlay (seed > dataset > backend). Read HERE — the single runner seam every launch path
+    # funnels through — never threaded through each launcher.
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
         # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
@@ -308,19 +304,17 @@ async def _prepare_run(
             # and flag the session so every run it scores grades non-clean. A steer to a
             # SANCTIONED model reaches this seam but is clean: no stamp, no taint.
             session.store.campaigns.mark_human_intervened(
-                session.campaign_id,
-                session.state.cycle_id,
+                session.hop,
                 kind="disallowed_model_override",
                 at=utcnow_iso(),
             )
             session.human_intervened = True
 
     if origin is None:
-        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like
-        # any other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns
-        # (token records, the L4 heartbeat, an inner cycle's provenance stamp). Only
-        # `run_round_loop` used to call this, so the origin scored with the round
-        # unbound and every measurement it produced was stamped `None`.
+        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like any
+        # other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns (token
+        # records, the L4 heartbeat, an inner cycle's provenance stamp). Leave it to
+        # `run_round_loop` alone and every origin measurement is stamped `None`.
         cb.set_round(0)
         # Establish C0 through the single origin seam: a no-edit operator fork inherits
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
@@ -533,9 +527,7 @@ async def _run_single_cycle(
         # probes re-read `.runtime/spend_cap.json` each tick so the
         # `change-spend-budget` command can move a ceiling mid-flight.
         cycle_dir_for_probe = (
-            session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-            if session.state.cycle_id
-            else Path()
+            session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
         )
         # Re-bind per rebase/fork iteration so the hooks track a fork's OWN cycle dir
         # (`_prepare_run` bound the launch cycle's; a fork mints a different one).
@@ -628,8 +620,7 @@ async def _run_single_cycle(
     if forked_in_this_run and cycle_result.n_l1_rounds == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
-            campaign_id=session.campaign_id,
-            cycle_id=session.state.cycle_id,
+            hop=session.hop,
             parent_cycle_id=pre_loop_cycle_id,
         )
 
@@ -674,9 +665,8 @@ def _mint_and_rebase_fork(
         seed = CycleSeed(config_overrides=rebase_req.config_overrides)
     new_cycle_id = _mint_fork(
         campaign_store=session.store.campaigns,
-        campaign_id=session.campaign_id,
+        parent=CycleHop(campaign_id=session.campaign_id, cycle_id=parent_cycle_id),
         session_id=session.session_id or "",
-        parent_cycle_id=parent_cycle_id,
         fork_from_round=rebase_req.fork_from_round,
         payload=ForkSpec(
             trigger=rebase_req.trigger,
@@ -759,14 +749,11 @@ async def run_optimization(
             spend_budget_usd=spend_budget_usd,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # Prep is the only phase outside `_run_single_cycle`'s finalize, and it is also the
-        # longest: origin scoring on the L4 panel runs for hours. An interrupt landing here
-        # used to escape the whole function, so nothing declared a phase and nothing drained —
-        # the cycle's `dashboard.json` kept the last flushed `run_phase: "running"` and the
-        # `index.json` its `active`, and every non-live reader reported a dead run as healthy
-        # until the liveness reaper eventually stamped `producer_vanished` over it. Declaring
-        # + draining here is the whole fix: PAUSED is not terminal, so the cycle stays
-        # resumable and `resume` replays the seeds already banked at no cost.
+        # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest —
+        # origin scoring on the L4 panel runs for hours. An interrupt escaping here declares
+        # no phase and drains nothing, so `dashboard.json` keeps `run_phase: "running"` and
+        # every non-live reader reports a dead run as healthy. PAUSED is not terminal, so the
+        # cycle stays resumable and `resume` replays the banked seeds at no cost.
         declare_run_phase(session, RunPhase.PAUSED)
         observers.drain_all()
         raise
@@ -883,9 +870,9 @@ def _finalize_run(
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            # The ORIGIN's composite, on the origin's own samples. This used to read
-            # `rounds[0].matched_origin_composite` — round 1's winner's matched floor,
-            # a different sample basis under the origin's name.
+            # The ORIGIN's composite, on the origin's own samples — never
+            # `rounds[0].matched_origin_composite`, which is round 1's winner's matched floor
+            # on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
             # The formula EVERY number above was computed under. `log.md` has always read
             # this key (`output.py::LogMdView.formula`) and nothing had ever written it, so
@@ -906,8 +893,7 @@ def _finalize_run(
             "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }
         session.store.campaigns.mark_finished(
-            session.campaign_id,
-            session.state.cycle_id,
+            session.hop,
             status=cycle_status,
             stop_reason=stop_reason,
             finished_at=cycle_result.finished_at,

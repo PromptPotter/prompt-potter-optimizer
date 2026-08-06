@@ -51,6 +51,7 @@ from promptpotter.application.optimization.task_context import (
     load_or_build_task_context,
 )
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
@@ -157,8 +158,7 @@ def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[str, Draft
 async def prepare_checkin_run(
     stores: Stores,
     *,
-    campaign_id: str,
-    cycle_id: str,
+    hop: CycleHop,
     draft: DraftCampaign,
     make_session: Callable[[str], Awaitable[Session]],
 ) -> PreparedCheckinRun:
@@ -177,9 +177,9 @@ async def prepare_checkin_run(
             raise LaunchError(
                 f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
             )
-        bank = stores.checkin.load_bank(campaign_id)
+        bank = stores.checkin.load_bank(hop.campaign_id)
         if bank is None:
-            raise LaunchError(f"campaign {campaign_id} has no sample bank to materialize")
+            raise LaunchError(f"campaign {hop.campaign_id} has no sample bank to materialize")
         materialize_and_write_origin(stores, draft, bank_items=list(bank.get("items", [])))
         dataset_name = draft.slug
         pipeline_overlay: dict[str, Any] = {}
@@ -198,39 +198,39 @@ async def prepare_checkin_run(
     train_data = session.samples
     plan = resolve_cycle_plan(session, campaign_config, train_data, origin_override=origin_override)
 
-    index = stores.campaigns.load(campaign_id, cycle_id) or {}
+    index = stores.campaigns.load(hop) or {}
     session_id = str(index.get("parent_session_id") or "")
     if not session_id:
-        raise LaunchError(f"checkin cycle {cycle_id} in {campaign_id} has no parent_session_id")
+        raise LaunchError(
+            f"checkin cycle {hop.cycle_id} in {hop.campaign_id} has no parent_session_id"
+        )
 
     finalize_checkin_to_active(
         session,
         campaign_config,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
+        hop=hop,
         session_id=session_id,
         cycle_plan=plan,
         dataset_size=len(train_data),
     )
     if origin_override:
         stores.campaigns.write_cycle_seed(
-            campaign_id,
-            cycle_id,
+            hop,
             CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin"),
         )
 
     task_context = await load_or_build_task_context(
         stores,
         session.dataset_name,
-        campaign_id=campaign_id,
-        context=checkin_call_context(stores, campaign_id, cycle_id),
+        campaign_id=hop.campaign_id,
+        context=checkin_call_context(stores, hop),
     )
     return PreparedCheckinRun(
         session=session,
         campaign_config=campaign_config,
         train_data=train_data,
         task_context=task_context,
-        cycle_id=cycle_id,
+        cycle_id=hop.cycle_id,
         session_id=session_id,
     )
 
@@ -282,8 +282,7 @@ async def start_checkin_campaign(
 
         prepared = await prepare_checkin_run(
             stores,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             draft=draft,
             make_session=make_session,
         )
@@ -299,8 +298,7 @@ async def start_checkin_campaign(
         )
         _record_launch_stop(
             stores=stores,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             session_id="",
             exc=exc,
         )

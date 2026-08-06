@@ -29,7 +29,7 @@ from promptpotter.infrastructure.store.lineage_views import (
 )
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
-    StoreDep,
+    StoresDep,
     decode_descend,
     warming_payload,
 )
@@ -62,7 +62,7 @@ def serve_dashboard_response(
     roots — so the 304 / warming-fallback / atomic-read semantics can't drift
     between the outer and inner dashboards.
     """
-    cycle_path = cycle_dir_for(base_dir, campaign_id, cycle_id)
+    cycle_path = cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     # WARMING is "no dashboard YET"; a cycle dir that isn't there is GONE. Answering
     # both with the warming placeholder conflates a transient state with a terminal
     # one: a deleted campaign then reads "initialising" forever, and the webapp gets
@@ -104,7 +104,7 @@ def serve_dashboard_response(
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
 def get_cycle_dashboard(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
@@ -127,7 +127,7 @@ def get_cycle_dashboard(
     answers 404, because those are different facts.
     """
     stores, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
     return serve_dashboard_response(request, stores.base_dir, leaf.campaign_id, leaf.cycle_id)
 
@@ -141,7 +141,9 @@ def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> i
     ``index.json`` covers a fork or an inner run appearing beneath. Scoped to this course:
     a child course's own poll validates itself.
     """
-    layout = CycleLayout(cycle_dir_for(base_dir, campaign_id, cycle_id))
+    layout = CycleLayout(
+        cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
+    )
     return newest_mtime_ns(layout.ledger, layout.manifest)
 
 
@@ -181,7 +183,7 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 
 
 def _mask_records(
-    store: Stores, tree: LineageNode, samples: frozenset[int] | None
+    stores: Stores, tree: LineageNode, samples: frozenset[int] | None
 ) -> dict[str, MaskRecord]:
     """One :class:`MaskRecord` per CAMPAIGN the tree spans, keyed by campaign id.
 
@@ -201,8 +203,8 @@ def _mask_records(
 
     def visit(node: LineageNode) -> None:
         if node.kind == "course" and node.path and node.path[-1].campaign_id not in out:
-            stores, leaf = resolve_cycle_path(store, tuple(node.path))
-            out[leaf.campaign_id] = load_mask_record(stores, leaf.campaign_id, samples)
+            leaf_store, leaf = resolve_cycle_path(stores, tuple(node.path))
+            out[leaf.campaign_id] = load_mask_record(leaf_store, leaf.campaign_id, samples)
         for kid in node.children:
             visit(kid)
 
@@ -289,7 +291,7 @@ class _Overlay:
 )
 def get_lineage_tree(
     request: Request,
-    store: StoreDep,
+    stores: StoresDep,
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
@@ -314,8 +316,8 @@ def get_lineage_tree(
     live in ``store/lineage_views.py``.
     """
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
-    stores, leaf = resolve_cycle_path(store, path)
-    if not cycle_dir_for(stores.base_dir, leaf.campaign_id, leaf.cycle_id).is_dir():
+    stores, leaf = resolve_cycle_path(stores, path)
+    if not cycle_dir_for(stores.base_dir, leaf).is_dir():
         raise NotFoundError(f"Cycle '{leaf.campaign_id}/{leaf.cycle_id}' not found")
 
     # ONE conditional path for every query: the validator folds the mask in with the
@@ -327,7 +329,7 @@ def get_lineage_tree(
     if mtime_ns is not None and client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=headers)
 
-    tree = build_lineage_tree(store, path)
+    tree = build_lineage_tree(stores, path)
     sample_ids = _parse_samples(samples)
     if lens or sample_ids:
         # One record read per campaign: an `abort:` lens reads the firing log rather than
@@ -335,5 +337,5 @@ def get_lineage_tree(
         # the subset re-score — no double-score.
         is_abort = bool(lens and lens.startswith("abort:"))
         masked = sample_ids if not is_abort else None
-        tree = _Overlay(_mask_records(store, tree, masked), lens, masked).apply(tree)
+        tree = _Overlay(_mask_records(stores, tree, masked), lens, masked).apply(tree)
     return JSONResponse(tree.model_dump(mode="json"), headers=headers)

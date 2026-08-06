@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, RoundSummary
 from promptpotter.domain.strict_model import StrictModel
@@ -315,8 +316,7 @@ class LiveDashboardState(StrictModel):
         cls,
         prior: LiveDashboardState | None,
         *,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         session_id: str,
         l1_patience: int,
         n_variants: int,
@@ -340,19 +340,17 @@ class LiveDashboardState(StrictModel):
         printed beside it.
         """
         mine: dict[str, Any] = {
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
+            "campaign_id": hop.campaign_id,
+            "cycle_id": hop.cycle_id,
             "session_id": session_id,
             "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "patience": f"0/{l1_patience}",
-            # Stamped by the STARTING process, not carried from `prior`, and not waiting
-            # for INIT:exit. Round 0 runs before any INIT event reaches the ledger, so a
-            # campaign whose headline is `ability` used to publish `accuracy` for the whole
-            # origin pass — hours of it on the L4 panel, and the one stretch where the two
-            # disagree most, since round 0 is the only round measured on the full bank.
+            # Stamped by the STARTING process, not carried from `prior`, and not waiting for
+            # INIT:exit — round 0 runs before any INIT event reaches the ledger, so waiting
+            # publishes the wrong headline for the whole origin pass.
             "headline_metric": headline_metric,
             "run_phase": RunPhase.RUNNING,
             "stop_reason": None,

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 
 if TYPE_CHECKING:
@@ -21,6 +22,16 @@ class SessionCtx:
     session_id: str
     campaign_id: str
     cycle_id: str
+
+    @property
+    def hop(self) -> CycleHop:
+        """This context's cycle as the pair that addresses it.
+
+        Derived, never stored: ``cycle_id`` is reassigned in place when a verb forks
+        (``_maybe_fork_diag_sibling``), so a stored copy would name the pre-fork cycle
+        from the moment it stopped being the one running.
+        """
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
     @property
     def init_params(self) -> dict[str, Any]:
@@ -74,7 +85,7 @@ class SessionCtx:
             self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None
         )
         if campaign is not None:
-            seed = self.store.campaigns.read_cycle_seed(self.campaign_id, self.cycle_id)
+            seed = self.store.campaigns.read_cycle_seed(self.hop)
             config = apply_inherited_overlay(config, campaign.config, seed)
         return config
 

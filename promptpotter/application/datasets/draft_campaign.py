@@ -149,9 +149,8 @@ class DraftCampaign:
     # The check-in's decomposition half also authors the decomposed task context —
     # the 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
     # layer (L1/L1_CRITIQUE/L2/L3) reads via the ``task_context`` injection. It
-    # rides the draft to commit, lands in ``{slug}/task_context.yaml``, and the
-    # run reads it instead of re-decomposing at run-start (the second LLM call
-    # that used to recompute exactly this). Empty until the check-in fills it.
+    # rides the draft to commit, lands in ``{slug}/task_context.yaml``, and the run reads it
+    # instead of paying a second LLM call to re-decompose at run-start. Empty until check-in.
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
     # The chosen active pipeline (``pipeline.yaml::pipelines.default``) — e.g. the
     # full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``. Empty =

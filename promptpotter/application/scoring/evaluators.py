@@ -319,9 +319,8 @@ class Evaluator:
     scope: Scope
     # ``None`` = this round/sample carried nothing to measure. The materializers below OMIT
     # the key rather than substituting a default, so a formula naming an unmeasured term halts
-    # loud (``round_scorer``) instead of scoring the round on a number nobody computed. Every
-    # empty-collection default here used to read as PERFECT — no errors, no latency, maximal
-    # compactness — precisely inverted for a health term a formula reads as a positive signal.
+    # loud (``round_scorer``) instead of scoring on a number nobody computed. An
+    # empty-collection default reads as PERFECT here — inverted for every health term.
     compute: Callable[..., float | None]
     # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
     direction: Literal["high", "low"] = "high"

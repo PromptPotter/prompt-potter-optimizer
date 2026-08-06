@@ -234,7 +234,7 @@ async def screen_inner_seeds(
     from promptpotter.infrastructure.store.io import write_json
 
     log_fn = log or (lambda *_a, **_k: None)
-    session = await init_services(dataset_name=dataset_name, identity=identity, store=stores)
+    session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
     all_samples = session.samples
     if not all_samples:
         raise SeedScreenError(f"dataset {dataset_name!r} loaded zero samples.")
@@ -253,7 +253,6 @@ async def screen_inner_seeds(
         scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
-        cycle_id="",
         source=f"seed_screen:{dataset_name}",
     )
     origin_sp = resolve_origin_opt_search_point(

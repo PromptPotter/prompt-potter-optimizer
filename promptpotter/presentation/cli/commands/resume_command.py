@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.jobs.mint import resolve_cycle_plan
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
@@ -174,7 +175,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
         and getattr(args, "resume_from_round", None) is None
     ):
         return
-    existing_index = session.store.campaigns.load(ctx.campaign_id, ctx.cycle_id) or {}
+    existing_index = session.store.campaigns.load(ctx.hop) or {}
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
     from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
@@ -183,9 +184,8 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     tenant_id = session.identity.tenant_id
     new_cycle_id = _mint_fork(
         session.store.campaigns,
-        ctx.campaign_id,
+        ctx.hop,
         ctx.session_id,
-        ctx.cycle_id,
         0,
         ForkSpec(
             trigger=ForkTrigger.OPERATOR_DIAG,
@@ -226,9 +226,8 @@ def _maybe_fork_operator_rewind(
     parent_cycle_id = ctx.cycle_id
     new_cycle_id = _mint_fork(
         session.store.campaigns,
-        ctx.campaign_id,
+        CycleHop(campaign_id=ctx.campaign_id, cycle_id=parent_cycle_id),
         ctx.session_id,
-        parent_cycle_id,
         rewind_to,
         ForkSpec(
             trigger=ForkTrigger.OPERATOR_REWIND,
@@ -252,7 +251,9 @@ def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> st
     fork inherits its C0 from. A param-only origin's round 0 holds exactly the origin
     candidate; return the single (or first) recorded candidate. Empty string when the
     round file is missing or holds no candidate (the inherit path then re-scores)."""
-    round_file = session.store.campaigns.load_round_file(session.campaign_id, cycle_id, from_round)
+    round_file = session.store.campaigns.load_round_file(
+        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id), from_round
+    )
     scores = getattr(round_file, "candidate_scores", None) or [] if round_file else []
     return scores[0].candidate_id if scores else ""
 
@@ -326,8 +327,7 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
     parent_cycle_id = ctx.cycle_id
     new_cycle_id = mint_operator_fork(
         stores=session.store,
-        campaign_id=ctx.campaign_id,
-        cycle_id=parent_cycle_id,
+        hop=CycleHop(campaign_id=ctx.campaign_id, cycle_id=parent_cycle_id),
         from_round=0,
         # The origin candidate in the parent's round 0 — the C0 the fork inherits
         # (skips the origin re-score, straight to L1 on the steered model).

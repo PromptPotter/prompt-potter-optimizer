@@ -27,6 +27,8 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 | **Engine code (Python)** | [`conventions.md`](docs/developer/conventions.md) | Green locally, red in CI — gated in the wrong env. |
 | **Webapp code** | [`webapp/CLAUDE.md`](webapp/CLAUDE.md) · [`frontend-surface-contract.md`](docs/specs/frontend-surface-contract.md) · `/design` | A number computed in the browser. |
 
+**Two pointer kinds below, deliberately not merged.** A `§` names a PLACE to go read. A `` `<tag>` `` names a delimited block you recall whole — cross-linked from inside other blocks, and cited by name from source (`diagnostics.py`, `seed_screen.py`, `test_complexity_ledger.py`), so it is an identifier, not a location. Don't convert one into the other.
+
 ## Load-bearing
 
 What this file owns, and where each rule is stated. Names only — the section is the text.
@@ -67,7 +69,7 @@ When a fix would compensate for something an upstream layer should already have 
 Four *situational* guardrails against recurring AI blind spots live in [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine; reach for them by trigger:
 - **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, in both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, and is asked for explicitly. When the budget binds, get more from measurements already paid for.
 - **slow / costly / token-heavy LLM call** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens; the timeout, cap and provider are safety rails, not the fix.
-- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. A raise that ships a feature is fine, it just costs a baseline edit and a written reason.
+- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason — a win nobody re-pinned rots the baseline exactly as an unexamined raise does.
 - **changed what the engine DECIDES, or added a capability at one entry point** → `<entry-point-parity>`: four ways in — CLI, AIs (skill: `/potter-run`), REST API, Js-Webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it.
 
 ## Commands
@@ -75,7 +77,7 @@ Four *situational* guardrails against recurring AI blind spots live in [`docs/de
 ```bash
 pip install -e ".[all,dev]"
 ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain; run ruff format+check before any commit — CI fails on format drift
-git config core.hooksPath .githooks                           # one-time per clone: pre-commit ruff (py) + tsc & eslint (webapp — `next build` checks neither)
+git config core.hooksPath .githooks                           # one-time per clone: pre-commit ruff + the generated surfaces (py), tsc & eslint (webapp — `next build` checks neither)
 python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from datasets/<name>/, run from round 0
 python -m promptpotter new <file.csv> --set task_description=…  # fresh from RAW file: ingest → resolve origin check-in → run
 python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st pauses (resumable, exit 130), 2nd force-quits

@@ -339,9 +339,6 @@ def to_text(view: AnyView) -> str:
             return ""
 
 
-__all__ = ["to_text"]
-
-
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
@@ -480,4 +477,4 @@ def render_sp_diff(view: SpDiffView) -> str:
     return "\n".join(out)
 
 
-__all__ = ["render_sp_diff"]
+__all__ = ["render_sp_diff", "to_text"]

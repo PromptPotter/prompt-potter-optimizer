@@ -24,10 +24,15 @@ from pathlib import Path
 from typing import Literal
 
 from promptpotter.config.paths import user_data_root
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
+
+# A reservation admitted BEFORE the mint resolves its ids — the slot is held, the cycle it
+# will name does not exist yet. `update_target` fills it in once the mint returns.
+UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
 
 JobStatus = Literal["pending", "running", "completed", "failed", "stopped"]
 
@@ -46,6 +51,15 @@ class Job:
     started_at: str | None
     finished_at: str | None
     stop_reason: str | None
+
+    @property
+    def hop(self) -> CycleHop:
+        """The cycle this job runs, as the pair that addresses it.
+
+        Reads :data:`UNRESOLVED_HOP` between admission and mint — the slot is held
+        before the cycle it will name exists.
+        """
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
 
 @dataclass(frozen=True)
@@ -109,8 +123,7 @@ class JobRegistry:
         self,
         *,
         user_id: str,
-        campaign_id: str,
-        cycle_id: str,
+        hop: CycleHop,
         dataset_name: str,
     ) -> Job:
         job_id = secrets.token_urlsafe(12)
@@ -118,8 +131,8 @@ class JobRegistry:
         job = Job(
             job_id=job_id,
             user_id=user_id,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
             dataset_name=dataset_name,
             status="pending",
             created_at=now,
@@ -135,8 +148,7 @@ class JobRegistry:
         *,
         user_id: str,
         dataset_name: str,
-        campaign_id: str = "",
-        cycle_id: str = "",
+        hop: CycleHop = UNRESOLVED_HOP,
     ) -> ReserveResult:
         """Atomically admit a run against ``capacity``, or report the holder.
 
@@ -156,19 +168,18 @@ class JobRegistry:
                 return ReserveResult(job=None, holder=holder)
             job = self.create(
                 user_id=user_id,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
+                hop=hop,
                 dataset_name=dataset_name,
             )
             return ReserveResult(job=job, holder=None)
 
-    def update_target(self, job_id: str, *, campaign_id: str, cycle_id: str) -> None:
+    def update_target(self, job_id: str, *, hop: CycleHop) -> None:
         """Fill the campaign/cycle ids on a reservation once the mint resolves them."""
         job = self.get(job_id)
         if job is None:
             return
-        job.campaign_id = campaign_id
-        job.cycle_id = cycle_id
+        job.campaign_id = hop.campaign_id
+        job.cycle_id = hop.cycle_id
         self._persist(job)
 
     def attach_task(self, job_id: str, task: asyncio.Task[None]) -> None:

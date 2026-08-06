@@ -46,4 +46,7 @@ string equality. Registered in
   for the per-dataset matrix.
 - Optimization target: prompt template, `reasoning_effort`, `temperature`,
   `max_tokens`. The optimizer can re-discover higher reasoning settings if they pay.
-- Per-task loop: 23 separate campaigns, one `cycle_id` per task
+- **One global campaign, not one per task.** A single winner is optimized across the
+  pooled train split and then evaluated per-task over the 23 tasks at test time —
+  `results_potter.json` carries `optimized_prompts = {"__global__": winner}` beside a
+  `per_task` accuracy map.
