@@ -97,7 +97,7 @@ Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against D
 | [State record](docs/concepts/state-record.md) | [Backend integration](docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
 | [Self-healing](docs/developer/self-healing-internals.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
 | [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |
-| [Campaign tree](docs/concepts/campaign-tree.md) | | |
+| [Campaign tree](docs/concepts/campaign-tree.md) | [Whitelabel — run it under your own name](docs/developer/whitelabel.md) *(draft)* | |
 | [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
 
 Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).

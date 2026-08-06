@@ -66,7 +66,7 @@ State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs
 
 ## Brand identity / "About this unit"
 
-`lib/brand.ts` is the single source of brand identity, each field `NEXT_PUBLIC_*`-overridable for whitelabel, feeding the Web App Manifest, the schema.org JSON-LD, and the Account → "About this unit" pane. **`publisher`** = the distributing host (overridable); **`provider`** = PromptPotter (fixed — it is the provenance fact). Version is not duplicated here: it is server-owned (`APP_VERSION`), read live from `/api/v1/health`. **Never render a "verified" state while `BRAND.verification` says `self-declared`.**
+`lib/brand.ts` is the single source of brand identity, each field `NEXT_PUBLIC_*`-overridable for whitelabel, feeding the Web App Manifest, the schema.org JSON-LD, and the Account → "About this unit" pane. **`publisher`** = the distributing host (overridable); **`provider`** = PromptPotter (fixed — it is the provenance fact). Version is not duplicated here: it is server-owned (`APP_VERSION`), read live from `/api/v1/health`. **Never render a "verified" state while `BRAND.verification` says `self-declared`.** **Where a distributor's values come from** — owned by [`../docs/developer/whitelabel.md`](../docs/developer/whitelabel.md); a new field here is unreachable until `deploy-linux/brand-env.sh` exports its `NEXT_PUBLIC_*`.
 
 ## Stack-drift warning
 

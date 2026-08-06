@@ -18,13 +18,10 @@
 // the auth domain stylesheet.
 
 import { useState } from "react";
-import { instance } from "@/lib/brand";
+import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
 import { acceptTerms } from "@/lib/api/mutations";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
-
-const TERMS_URL = `${instance.marketing_url}/terms`;
-const PRIVACY_URL = `${instance.marketing_url}/privacy`;
 
 const NOOP = () => {};
 
@@ -84,11 +81,21 @@ export function ConsentGate() {
             />
             <span>
               I agree to the{" "}
-              <a className="auth-link" href={TERMS_URL} target="_blank" rel="noopener noreferrer">
+              <a
+                className="auth-link"
+                href={BRAND.legal.terms}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 Terms
               </a>{" "}
               and{" "}
-              <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">
+              <a
+                className="auth-link"
+                href={BRAND.legal.privacy}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 Privacy Policy
               </a>
               , I won&rsquo;t submit sensitive, confidential, or third-party data, and I consent

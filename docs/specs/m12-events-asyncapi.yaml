@@ -47,7 +47,7 @@ servers:
     protocol: http
     description: Local dev (uvicorn + auth-off, Stage 0 / Profile B default).
   hosted:
-    host: '{install}.promptpotter.dev'
+    host: '{install}.promptpotter.com'
     protocol: https
     description: Hosted hub (Profile D - placeholder, OIDC required).
     variables:

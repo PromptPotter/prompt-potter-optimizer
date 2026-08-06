@@ -20,15 +20,15 @@ export const BRAND = {
   description:
     process.env.NEXT_PUBLIC_BRAND_DESCRIPTION ||
     "LLM-driven program evolution for prompts and pipeline parameters.",
-  url: process.env.NEXT_PUBLIC_BRAND_URL || "https://app.promptpotter.dev",
+  url: process.env.NEXT_PUBLIC_BRAND_URL || "https://app.promptpotter.com",
   applicationCategory: "DeveloperApplication",
   publisher: {
     name: process.env.NEXT_PUBLIC_PUBLISHER_NAME || "PromptPotter",
-    url: process.env.NEXT_PUBLIC_PUBLISHER_URL || "https://promptpotter.dev",
+    url: process.env.NEXT_PUBLIC_PUBLISHER_URL || "https://promptpotter.com",
   },
   provider: {
     name: "PromptPotter",
-    url: "https://promptpotter.dev",
+    url: "https://promptpotter.com",
   },
   // The origin marketing site this unit links home to. OUR hosted instance
   // points back to promptpotter.com; a whitelabel distributor who resells /
@@ -48,8 +48,18 @@ export const BRAND = {
   supportUrl:
     process.env.NEXT_PUBLIC_SUPPORT_URL ||
     "https://github.com/PromptPotter/prompt-potter-optimizer/issues",
-  legalUrl: process.env.NEXT_PUBLIC_LEGAL_URL || "https://promptpotter.dev/legal",
-  license: process.env.NEXT_PUBLIC_LICENSE || "https://promptpotter.dev/legal/license",
+  // The three legal pages, each its own override. A whitelabel host answers for
+  // its own terms, so these are NOT derived from `marketing.url` — that field is
+  // clearable to drop the login showcase, which must not take the consent links
+  // with it. The onboarding consent gate and the lockout modal read them.
+  legal: {
+    terms: process.env.NEXT_PUBLIC_TERMS_URL || "https://promptpotter.com/terms",
+    privacy: process.env.NEXT_PUBLIC_PRIVACY_URL || "https://promptpotter.com/privacy",
+    imprint: process.env.NEXT_PUBLIC_IMPRINT_URL || "https://promptpotter.com/imprint",
+  },
+  license:
+    process.env.NEXT_PUBLIC_LICENSE ||
+    "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE",
   // Mirrors the dark-theme body background in app/styles/foundation/themes.css + layout's
   // themeColor — the install/splash chrome a browser paints from the manifest.
   themeColor: "#0d0d0d",
@@ -74,16 +84,6 @@ interface SoftwareApplicationLd {
   provider: { "@type": "Organization"; name: string; url: string };
   publisher: { "@type": "Organization"; name: string; url: string };
 }
-
-// Single source of truth for owner / hosting identity. Template forks
-// override these values; everything else in the webapp reads from here.
-export const instance = {
-  owner: {
-    name: "David Streuli",
-    linkedin: "https://www.linkedin.com/in/david-streuli/",
-  },
-  marketing_url: "https://promptpotter.dev",
-} as const;
 
 export function softwareApplicationLd(): SoftwareApplicationLd {
   return {

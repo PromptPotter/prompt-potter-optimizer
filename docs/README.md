@@ -6,7 +6,7 @@ PromptPotter tunes prompts and pipeline configs against a labelled dataset. The 
 
 **Chat-first.** The front door is a chat: you talk to the Potter, it shows its work inline as it runs — what it's scoring, which call it's making, how each round landed — and it raises a button when a decision is yours to make. This repository also doubles as a **canonical chat-app template**: keep the chat core (thread model + activity stream + transport) and delete the panes you don't need to build your own app on top. Design contract: [`specs/chat-foundation.md`](specs/chat-foundation.md).
 
-**Status & roadmap.** Multi-user beta, live at `app.promptpotter.dev`. Shipped: the three-layer optimizer loop, statistical early-stopping, cross-run measurement memory, the live dashboard + control plane, chat (activity + control), ingest, and the connector boundary (TermNorm first). In flight: BYO keys (Lane A); chat write-path, L4 self-optimization, composite fitness (Lane C). The full execution-ordered plan: [`specs/roadmap.md`](specs/roadmap.md).
+**Status & roadmap.** Multi-user beta, live at `app.promptpotter.com`. Shipped: the three-layer optimizer loop, statistical early-stopping, cross-run measurement memory, the live dashboard + control plane, chat (activity + control), ingest, and the connector boundary (TermNorm first). In flight: BYO keys (Lane A); chat write-path, L4 self-optimization, composite fitness (Lane C). The full execution-ordered plan: [`specs/roadmap.md`](specs/roadmap.md).
 
 | Folder | Purpose |
 |--------|---------|

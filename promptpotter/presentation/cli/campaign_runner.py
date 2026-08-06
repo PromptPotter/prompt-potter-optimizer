@@ -21,6 +21,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.config.settings import settings
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
 from promptpotter.presentation.cli.commands.ab import cmd_ab
 from promptpotter.presentation.cli.commands.lifecycle import (
@@ -95,7 +96,7 @@ def main() -> None:
         identity = identity_from_args(args)
         if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
             print(
-                "Welcome to PromptPotter.\n\n"
+                f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"
                 "Pick a verb to get started:\n"
                 "  promptpotter new <dataset>   mint a fresh campaign on the named dataset\n"
                 "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
@@ -103,7 +104,7 @@ def main() -> None:
                 "  promptpotter verify          re-score a candidate on more samples\n"
                 "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
-                "Docs: https://github.com/PromptPotter/prompt-potter-optimizer"
+                f"Docs: {settings.BRAND_DOCS_URL}"
             )
             return
         args = parser.parse_args([*sys.argv[1:], "resume"])

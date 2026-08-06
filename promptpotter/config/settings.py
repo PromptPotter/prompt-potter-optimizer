@@ -164,6 +164,16 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
 
+    # Display identity — the name a fork paints on the terminal and API surfaces.
+    # `deploy-linux/deploy.config`'s brand block is the ONE declaration a fork
+    # edits: `brand-env.sh` mirrors it into `.env` for these, and exports the
+    # `NEXT_PUBLIC_*` twins for the webapp build (`webapp/lib/brand.ts`). The
+    # package, the CLI verb and the state dir are NOT brand — renaming those is a
+    # different tier, and `docs/developer/whitelabel.md` says what it costs.
+    BRAND_SHORT_NAME: str = "PromptPotter"
+    BRAND_SERVICE_NAME: str = "PromptPotter Optimizer"
+    BRAND_DOCS_URL: str = "https://github.com/PromptPotter/prompt-potter-optimizer"
+
     # CORS - comma-separated allowlist, parsed via property. Empty by default:
     # the webapp is same-origin (mounted at `/`) and the `npm run dev` proxy is
     # same-origin too, so cross-origin access is opt-in. A cross-origin API

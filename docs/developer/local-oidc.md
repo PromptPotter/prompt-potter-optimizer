@@ -36,7 +36,7 @@ Any bug that only reproduces under an authenticated session. Examples:
 - An OIDC claim shape variation (Dex emits a slightly different
   `email_verified` arm than Google in some configs).
 
-If the bug only shows on `app.promptpotter.dev`, mirror it here first —
+If the bug only shows on `app.promptpotter.com`, mirror it here first —
 that's where the debugging is fast.
 
 ## Why this exists

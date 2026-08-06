@@ -21,6 +21,7 @@ import argparse
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
+    settings,
 )
 
 
@@ -365,7 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
-        description="PromptPotter optimization CLI. Bare invocation runs "
+        description=f"{settings.BRAND_SHORT_NAME} optimization CLI. Bare invocation runs "
         "`resume` (continue the active session). `new [DATASET|FILE]` mints a "
         "fresh campaign — from a dataset name or a raw file it ingests + "
         "origin-resolves. Reads happen by opening the artifact tree "

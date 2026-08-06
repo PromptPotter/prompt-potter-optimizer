@@ -21,6 +21,14 @@ $EDITOR deploy.config        # set APP_NAME, APP_MODULE, REPO_URL, PUBLIC_HOSTNA
 Every value can also be overridden inline for a one-off, e.g.
 `PUBLIC_HOSTNAME=staging.example.com ./install-tunnel.sh`.
 
+**Running it under your own name?** The file's `--- brand ---` block is the one
+declaration: `brand-env.sh` writes the engine's copy into `.env` and exports the
+webapp's `NEXT_PUBLIC_*` twins before the build, on both `bootstrap.sh` and
+`update.sh` — so editing the block and re-deploying repaints the install, and an
+update never repaints it back. Anything *outside* that block (the package, the
+CLI verb, the `.promptpotter/` state tree) is a different tier with a real cost:
+[`docs/developer/whitelabel.md`](../docs/developer/whitelabel.md).
+
 ## One-time prep (on Cloudflare's side, ~3 min)
 
 Cloudflare must be the authoritative DNS for `$PUBLIC_HOSTNAME`. On the Free plan

@@ -1,6 +1,6 @@
 /* ─── Mobile (≤640px) ────────────────────────────────────────────
    Chat tab doubles as the public landing surface at
-   app.promptpotter.dev. Every desktop rule above was written for an
+   app.promptpotter.com. Every desktop rule above was written for an
    operator viewport (≥980px). This block adapts the chat-tab tree
    (Topbar + ChatPane + WelcomeLockoutModal) for a 375px phone.
    Other tabs (Dashboard / Verify / Files) remain desktop-shaped — a

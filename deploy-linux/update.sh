@@ -19,6 +19,9 @@ BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 
+# set_env_kv + the brand fan-out, shared with bootstrap.sh.
+source "$HERE/brand-env.sh"
+
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[1;31m✗\033[0m %s\n' "$*"; }
@@ -57,6 +60,11 @@ say "data: re-stamp configs onto the synced schema"
 if ! ( cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
+# Brand rides every update: a sync overwrites tracked files, and the webapp bakes
+# NEXT_PUBLIC_* in at build time — so skipping this would silently repaint the
+# install upstream at the next deploy.
+[[ -f "$INSTALL_DIR/.env" ]] && brand_write_env "$INSTALL_DIR/.env"
+brand_export_webapp
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"
 

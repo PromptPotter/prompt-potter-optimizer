@@ -52,7 +52,15 @@ LEDGER_BASELINE = {
     # a short panel would have no way to say so — which is the shape a gate needs to be a
     # policy rather than a law.
     "config_leaf_fields": 39,
-    "settings_env": 16,
+    # 16 -> 19 (2026-08-05): `BRAND_SHORT_NAME` / `BRAND_SERVICE_NAME` / `BRAND_DOCS_URL`.
+    # A deliberate raise. They are the engine's half of the whitelabel declaration —
+    # `deploy-linux/deploy.config`'s brand block, fanned out by `brand-env.sh` into `.env`
+    # here and into `NEXT_PUBLIC_*` for the webapp build — and what they replace is five
+    # hardcoded product names a distributor could not repaint at all (the CLI greeting, the
+    # first-run key prompt, the argparse description, the FastAPI title, `/health`'s
+    # `service`). Env is the right channel because the value is per-INSTALL, chosen by the
+    # distributor at deploy time; a campaign-scoped knob would have been the wrong tier.
+    "settings_env": 19,
     "settings_const": 15,
     "opt_search_point_fields": 25,
     "any_params": 65,

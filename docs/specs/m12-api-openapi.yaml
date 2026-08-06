@@ -65,7 +65,7 @@ info:
 servers:
   - url: http://localhost:8001
     description: Local dev (uvicorn + auth-off, Stage 0 / Profile B default).
-  - url: https://{install}.promptpotter.dev
+  - url: https://{install}.promptpotter.com
     description: Hosted hub (Profile D — placeholder, OIDC required).
     variables:
       install:

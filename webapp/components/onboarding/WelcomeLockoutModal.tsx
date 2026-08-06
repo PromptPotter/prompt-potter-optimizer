@@ -12,7 +12,7 @@
 // .account-pane-body + .account-close, plus .auth-headline / .auth-note /
 // .auth-link / .auth-legal-row from the auth domain stylesheet.
 
-import { instance } from "@/lib/brand";
+import { BRAND } from "@/lib/brand";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { AuthCore } from "@/components/login/AuthCore";
 
@@ -22,10 +22,6 @@ interface Props {
   errorCode?: string | null;
   errorEmail?: string | null;
 }
-
-const TERMS_URL = `${instance.marketing_url}/terms`;
-const PRIVACY_URL = `${instance.marketing_url}/privacy`;
-const IMPRINT_URL = `${instance.marketing_url}/imprint`;
 
 export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Props) {
   // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
@@ -58,7 +54,7 @@ export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Pr
           </p>
           <p className="auth-note">
             By continuing, you agree to our{" "}
-            <a className="auth-link" href={PRIVACY_URL}>
+            <a className="auth-link" href={BRAND.legal.privacy}>
               Privacy Policy
             </a>
             .
@@ -69,15 +65,15 @@ export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Pr
           <div style={{ flex: 1 }} />
 
           <nav className="auth-legal-row" aria-label="Legal">
-            <a className="auth-link" href={TERMS_URL}>
+            <a className="auth-link" href={BRAND.legal.terms}>
               Terms
             </a>
             <span aria-hidden="true">&middot;</span>
-            <a className="auth-link" href={PRIVACY_URL}>
+            <a className="auth-link" href={BRAND.legal.privacy}>
               Privacy
             </a>
             <span aria-hidden="true">&middot;</span>
-            <a className="auth-link" href={IMPRINT_URL}>
+            <a className="auth-link" href={BRAND.legal.imprint}>
               Imprint
             </a>
           </nav>

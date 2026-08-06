@@ -28,7 +28,7 @@ configured as the Google slot — see § "How it works" below), enter:
 
 You land on `/` with a real authenticated session cookie. Subsequent
 page loads, API calls, and any post-auth bug repros run exactly as they
-would on `app.promptpotter.dev`.
+would on `app.promptpotter.com`.
 
 ## How it works
 

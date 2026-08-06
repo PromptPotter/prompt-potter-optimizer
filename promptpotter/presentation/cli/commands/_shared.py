@@ -175,8 +175,8 @@ def backend_unreachable_result(backend_url: str) -> CommandResult:
         data={"error": "backend_unreachable", "backend_url": backend_url},
         human=(
             f"Backend unreachable at {backend_url}.\n\n"
-            "The TermNorm backend ships in a sibling repo. Clone it next to "
-            "PromptPotter, then start it:\n"
+            "The TermNorm backend ships in a sibling repo. Clone it beside "
+            "this checkout, then start it:\n"
             "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
             "Install guide: docs/manual/02-install.md"
         ),

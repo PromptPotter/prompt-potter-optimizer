@@ -132,7 +132,7 @@ export function AboutUnit() {
         <div className="account-row-main">
           <ul className="about-unit-links">
             <li>
-              <ResourceLink href={BRAND.legalUrl} label="Data handling & legal" />
+              <ResourceLink href={BRAND.legal.privacy} label="Data handling & legal" />
             </li>
             <li>
               <ResourceLink href={BRAND.license} label="License" />

@@ -57,3 +57,49 @@ ALLOWED_ORIGINS="https://app.example.com"
 
 # OAuth callback path appended to PUBLIC_HOSTNAME for the OIDC redirect URI.
 OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
+
+# --- brand (whitelabel) — DRAFT ------------------------------------------
+# Wired and gate-green, but no fork has been built from it yet. If you are the
+# first, read docs/developer/whitelabel.md's draft banner: it says exactly which
+# half is proven and which is only intended.
+#
+# The ONE declaration of the name this unit wears. `brand-env.sh` fans it out
+# both ways: the engine's copy into `.env`, the `NEXT_PUBLIC_*` twins exported
+# for the webapp build. Leave a line commented to keep the upstream default —
+# an unset value is never written, so nothing here half-brands the install.
+#
+# Read docs/developer/whitelabel.md before renaming anything NOT in this block:
+# the package, the CLI verb and the .promptpotter/ state tree are a different
+# tier, and renaming the state tree orphans every campaign under it.
+
+# Spoken name — CLI greeting, argparse description, login wordmark.
+#BRAND_SHORT_NAME="PromptPotter"
+# Full product name — web app manifest, schema.org JSON-LD.
+#BRAND_NAME="PromptPotter Live Unit"
+# Service title — FastAPI /docs title and the `service` field of /health.
+#BRAND_SERVICE_NAME="PromptPotter Optimizer"
+#BRAND_DESCRIPTION="LLM-driven program evolution for prompts and pipeline parameters."
+
+# Who DISTRIBUTES this unit — yours to repaint. (Who POWERS it is a provenance
+# fact with no override; see whitelabel.md.)
+#PUBLISHER_NAME="PromptPotter"
+#PUBLISHER_URL="https://promptpotter.com"
+
+# Your marketing site. EMPTY STRING drops the login showcase entirely, so a
+# reseller never funnels its paying users upstream.
+#MARKETING_URL="https://promptpotter.com"
+#MARKETING_TITLE="PromptPotter"
+#MARKETING_TAGLINE="..."
+
+# Where your users go for help, docs and the legal pages. TERMS/PRIVACY/IMPRINT
+# are separate on purpose: a distributor answers for its own terms, and clearing
+# MARKETING_URL must not take the consent links down with it.
+#SUPPORT_URL="https://github.com/PromptPotter/prompt-potter-optimizer/issues"
+#DOCS_URL="https://github.com/PromptPotter/prompt-potter-optimizer"
+#TERMS_URL="https://promptpotter.com/terms"
+#PRIVACY_URL="https://promptpotter.com/privacy"
+#IMPRINT_URL="https://promptpotter.com/imprint"
+#LICENSE_URL="https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE"
+
+# The unit's own public address. Defaults to https://$PUBLIC_HOSTNAME.
+#BRAND_URL=""

@@ -59,8 +59,8 @@ Two prior instincts were wrong and are worth recording so they don't recur:
 
 ## Considered Options
 
-* **A — Public admin HTTP endpoint + bearer token.** A route on `app.promptpotter.dev`
-  that edits the allowlist, authed by a static token n8n holds.
+* **A — Public admin HTTP endpoint + bearer token.** A route on the unit's public
+  hostname (`$PUBLIC_HOSTNAME`) that edits the allowlist, authed by a static token n8n holds.
 * **B — Ride the campaign Control-remote highway** (`allowlist-add` / `-remove` as
   command kinds + a machine-token branch in `resolve_identity`).
 * **C — n8n drives, via a brokered conduit.** Keep n8n as orchestrator, but the admin

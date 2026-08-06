@@ -70,11 +70,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await sweep_task
-    logger.info("Shutting down PromptPotter Optimizer")
+    logger.info("Shutting down %s", settings.BRAND_SERVICE_NAME)
 
 
 app = FastAPI(
-    title="PromptPotter Optimizer",
+    title=settings.BRAND_SERVICE_NAME,
     description="API-first prompt optimization service",
     version=APP_VERSION,
     docs_url=None,
@@ -251,7 +251,7 @@ _health = APIRouter(tags=["Health"])
 async def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
-        "service": "PromptPotter Optimizer",
+        "service": settings.BRAND_SERVICE_NAME,
         "timestamp": utcnow_iso(),
         "version": APP_VERSION,
     }

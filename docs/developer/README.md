@@ -164,6 +164,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 | [Node standard](node-standard.md) | Node JSON declaration format |
 | [Pipeline JSON contract](pipeline-contract.md) | Strict field-level `pipeline.yaml` shape |
 | [Stable API v1](stable-api.md) | Fork-readiness surface |
+| [Whitelabel](whitelabel.md) **(draft)** | Running the unit under another name — the four rename tiers, what each breaks, what must never be renamed. Parked: wired and gate-green, never walked end to end |
 | [Run initialization](run-initialization.md) | The INIT phase: the four-step chain `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop` with pre/postconditions and an ASCII diagram |
 | [Concept map](concept-map.md) | "Where does concept X live" table |
 | [Event stream](event-stream.md) | SSE Profile-A contract |
