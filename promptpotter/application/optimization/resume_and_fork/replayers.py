@@ -1,7 +1,7 @@
 """Decision replayers — re-derive each ``REPLAYED`` decision under the active scorer.
 
 ``replay_decisions`` walks ``round_data['decisions']`` and returns the
-first :class:`Divergence`. Replayers are pure over :class:`ReplayContext`;
+first :class:`ReplayMismatch`. Replayers are pure over :class:`ReplayContext`;
 MUST NOT touch the live ``Cycle`` or ledger. Import-time check below
 catches any ``REPLAYED`` kind without a registered replayer.
 """
@@ -30,18 +30,27 @@ if TYPE_CHECKING:
 
 __all__ = [
     "REPLAYERS",
-    "Divergence",
     "ReplayContext",
+    "ReplayMismatch",
     "Replayer",
-    "replay_all_divergences",
+    "replay_all_mismatches",
     "replay_decisions",
 ]
 
 logger = logging.getLogger(__name__)
 
 
-class Divergence(NamedTuple):
-    """A recorded decision re-derived to a different outcome under the current scorer."""
+class ReplayMismatch(NamedTuple):
+    """A recorded value that no longer re-derives — recorded vs current, and where.
+
+    Three producers, none of them the loop: this module's decision replay, and resume's
+    optimizer-identity and package-drift checks. So it is not "a decision" — it is any
+    recorded fact re-derivation contradicts.
+
+    **A mismatch is evidence, not a departure point.** Where a branch stops carrying over
+    is a *divergence*, and that word belongs to the mask fold
+    (``application/mask/divergence.py::Divergence``). Two names, two concepts.
+    """
 
     round_num: int
     kind: str
@@ -71,7 +80,7 @@ class ReplayContext(NamedTuple):
 Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 
 
-def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
+def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     """Yield every recorded decision in ``ctx.round_data`` whose replayer re-derives a
     different outcome under the active scorer/engine — in record order."""
     round_data = ctx.round_data
@@ -79,7 +88,7 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
         try:
             kind = ResumeCheckpointKind(rec["kind"])
         except ValueError:
-            # Not a known checkpoint kind — corrupt/foreign decision record; skip (not a divergence).
+            # Not a known checkpoint kind — corrupt/foreign decision record; skip (no mismatch).
             continue
         fn = REPLAYERS.get(kind)
         if fn is None:
@@ -88,17 +97,17 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
         try:
             current = fn(ctx, rec["inputs_ref"], rec["data"])
         except Exception:
-            # Non-divergence on replayer crash, but surface — silent skip hides scorer drift.
+            # No mismatch on replayer crash, but surface — silent skip hides scorer drift.
             logger.warning(
-                "replayer for decision kind %r crashed during divergence "
-                "check; treating as non-divergence",
+                "replayer for decision kind %r crashed during the replay check; "
+                "treating as a match",
                 kind,
                 exc_info=True,
             )
             continue
         recorded = rec["outcome"]
         if current != recorded:
-            yield Divergence(
+            yield ReplayMismatch(
                 round_num=round_data.round,
                 kind=kind,
                 recorded_outcome=recorded,
@@ -123,21 +132,21 @@ def replay_decisions(
     round_data: RoundResult,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
-) -> Divergence | None:
+) -> ReplayMismatch | None:
     """Walk ``round_data.decisions`` in order; return the FIRST mismatch (resume's halt seam)."""
     ctx = _replay_context(round_data, origin_results, delta_scale)
-    return next(_iter_divergences(ctx), None)
+    return next(_iter_mismatches(ctx), None)
 
 
-def replay_all_divergences(
+def replay_all_mismatches(
     round_data: RoundResult,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
-) -> list[Divergence]:
+) -> list[ReplayMismatch]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round
     diff (collect-all, where ``replay_decisions`` short-circuits at the first)."""
     ctx = _replay_context(round_data, origin_results, delta_scale)
-    return list(_iter_divergences(ctx))
+    return list(_iter_mismatches(ctx))
 
 
 def _replay_round_winner(

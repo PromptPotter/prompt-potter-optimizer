@@ -67,7 +67,10 @@ LEDGER_BASELINE = {
     # `_truncate._v` carries — a Pydantic `BeforeValidator` runs before coercion, so the
     # value it inspects is genuinely untyped. Typing it narrower would be a claim the parse
     # boundary cannot make.
-    "any_params": 66,
+    # 66 -> 65 (2026-08-06): `ab_replay_cycle`'s local `_rescore(items: Any)`. Its rescore now
+    # happens inside the replay verdict, on a typed `RoundResult` the fold hands it, so the
+    # `Any` that existed only to swallow "results or all_candidate_results, whichever" is gone.
+    "any_params": 65,
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
     # 73 -> 74 (2026-08-06): `modal_answer_share`. A deliberate raise for the CONTINUOUS
@@ -75,10 +78,24 @@ LEDGER_BASELINE = {
     # needs a literal single label, so a model answering one label 95% of the time passed
     # every check and graded `healthy`. It reports and never gates: hedging is the failure
     # the loop corrects, so the number's value is its round-over-round series.
-    "domain_any_maps": 74,
+    # 74 -> 77 (2026-08-06): `merge_known_outcomes` moved here from
+    # `application/optimization/cycle.py`. Three maps that already existed, now counted in this
+    # layer — a relocation, not a new surface. The pool is folded by the live loop, by resume,
+    # and by the mask record rebuilt from disk; leaving it beside the loop obliged a READ path
+    # to import the whole loop to re-fold what it had already read.
+    "domain_any_maps": 77,
     # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
     # bloat source. What the current number buys, newest first:
+    #
+    # +3, deliberately: the engine/scorer replay is now a verdict on the mask fold, so it
+    # inherits the tree walk (`with_replay` on `load_mask_record`; `_make_replay_verdict`'s
+    # bound ruler and its mismatch sink). `ab_replay_cycle` handed one back — the
+    # `campaign_store` it no longer needs. What the surface buys is the question the `ab` verb
+    # could not previously ask: not which decisions moved, but which FORKS a change
+    # invalidates. The fold stops at the first departure per branch, so what it replays is the
+    # part of the record the change still carries over, and the rest is named counterfactual
+    # instead of re-derived into a history that would not have happened.
     #
     # +2: `_keep_known_keys(allowed)` + its `_v`, closing the one channel where an LLM could
     # grow a rendered surface without limit. `L2ContextOutput.l1_overrides` is a
@@ -129,7 +146,7 @@ LEDGER_BASELINE = {
     # runs, and growing with the archive forever. This is the read-model shape
     # `infrastructure/store/read_model.py` declares for derived-index persistence, not a
     # sidecar; the surface it costs buys a start cost that stops scaling.
-    "param_decls": 4080,
+    "param_decls": 4083,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

@@ -288,9 +288,9 @@ def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
 
     The pool seeds PoBB and resume's election floor; shrinking it loses measurement.
     It is NOT a score — its rows come from different configurations, so a mean over it
-    belongs to no individual (``cycle.py::_merge_known_outcomes``).
+    belongs to no individual (``domain/results.py::merge_known_outcomes``).
     """
-    from promptpotter.application.optimization.cycle import _merge_known_outcomes as _merge
+    from promptpotter.domain.results import merge_known_outcomes as _merge
 
     prior = [{"sample_id": i, "fitness": 1.0 if i < 10 else 0.0, "hit": i < 10} for i in range(20)]
     winner_hits = {10, 12, 15}

@@ -10,6 +10,8 @@ read cannot describe a leaf below depth 1.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
@@ -20,6 +22,7 @@ from promptpotter.application.mask.verdicts import make_abort_verdict, make_scor
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import (
@@ -43,7 +46,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 # Abort-lens variants → the PoBB contributor(s) to switch off (the thin API-edge selector
-# for the abort verdict; see docs/specs/mask-projection.md).
+# for the abort verdict; see docs/operations/mask-projection.md).
 _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
     "epsilon_off": frozenset({"epsilon"}),
     "lock_in_off": frozenset({"lock_in"}),
@@ -147,10 +150,21 @@ def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> i
     return newest_mtime_ns(layout.ledger, layout.manifest)
 
 
-def _resolve_verdict(lens: str | None) -> Verdict:
+class _Lens(NamedTuple):
+    """One parse of the ``lens`` param: what to fold, and what to serve as ``lens_value``."""
+
+    verdict: Verdict
+    criterion: RoundScorer | None
+
+
+def _resolve_lens(lens: str | None) -> _Lens:
     """The thin API-edge selector: one ``lens`` value → its verdict strategy.
     ``abort:<variant>`` → the abort verdict; ``score:<formula>`` (or empty ⇒ the accuracy
-    default, used by a samples-only mask) → the scoring verdict. A bad value is a clean 400."""
+    default, used by a samples-only mask) → the scoring verdict. A bad value is a clean 400.
+
+    Parsed **once**: the criterion the fold asks and the criterion served per node are the
+    same object, so a formula cannot be validated on one path and waved through on the other.
+    """
     if lens and lens.startswith("abort:"):
         variant = lens.removeprefix("abort:")
         suppress = _ABORT_SUPPRESS.get(variant)
@@ -158,16 +172,18 @@ def _resolve_verdict(lens: str | None) -> Verdict:
             raise BadRequestError(
                 f"Unknown abort lens: {variant!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
             )
-        return make_abort_verdict(suppress)
+        return _Lens(make_abort_verdict(suppress), None)
     if lens and not lens.startswith("score:"):
         raise BadRequestError(
             f"Unknown lens: {lens!r} (expected 'score:<formula>' or 'abort:<variant>')"
         )
-    formula = lens.removeprefix("score:") if lens else None
     try:
-        return make_scoring_verdict(compile_round_scorer(formula))
+        criterion = compile_round_scorer(lens.removeprefix("score:") if lens else None)
     except (ValueError, SyntaxError) as exc:
         raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+    # No lens at all ⇒ a samples-only mask: the accuracy default folds, but nothing is served
+    # as `lens_value` — the operator named no alternative to show it against.
+    return _Lens(make_scoring_verdict(criterion), criterion if lens else None)
 
 
 def _parse_samples(samples: str | None) -> frozenset[int] | None:
@@ -228,7 +244,7 @@ class _Overlay:
         lens: str | None,
         sample_ids: frozenset[int] | None,
     ):
-        verdict = _resolve_verdict(lens)
+        verdict, self.criterion = _resolve_lens(lens)
         self.diverged: dict[tuple[str, str, int], LineageDivergence] = {}
         self.subset: dict[tuple[str, str, str], tuple[float | None, int]] = {}
         dimmed: set[tuple[str, str, int]] = set()
@@ -253,11 +269,6 @@ class _Overlay:
                             cand.n_scored,
                         )
         self.dimmed: frozenset[tuple[str, str, int]] = frozenset(dimmed)
-        self.criterion = (
-            compile_round_scorer(lens.removeprefix("score:"))
-            if lens and lens.startswith("score:")
-            else None
-        )
 
     def apply(self, node: LineageNode) -> LineageNode:
         """Decorate one node, then its children — the tree walk."""

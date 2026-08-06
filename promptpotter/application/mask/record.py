@@ -12,15 +12,19 @@ the record supplies the data; the fold supplies the traversal.
 
 Pure data — no I/O, no schema. The loader that reads round files into this shape
 lives beside it (the read-time service the API calls); these models are what it
-produces and what the self-consistency test builds by hand. The verdict re-scores
-from the **stored evaluator namespace** (a formula swap), so the record carries no
-raw measurements and needs no ``PipelineSchema`` — which is never persisted.
+produces and what the self-consistency test builds by hand. The scoring and abort
+verdicts re-score from the **stored evaluator namespace** (a formula swap), so
+neither needs raw measurements or a ``PipelineSchema`` — which is never persisted.
+A *replay* verdict does need the rows, and pays for them by asking at load time.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -76,6 +80,13 @@ class MaskRound(StrictModel):
     candidates: list[MaskCandidate] = Field(default_factory=list)
     anchor_evaluators: dict[str, float] = Field(default_factory=dict)
     anchor_accuracy: float = 0.0
+    # The recorded round itself, and the pool of known per-sample outcomes as it stood
+    # BEFORE this round ran — the substrate a REPLAY verdict re-derives from, and the only
+    # thing on this model that is a raw measurement rather than a summary of one. Carried
+    # only when the caller asked (``load_mask_record(..., with_replay=True)``): a scoring or
+    # abort lens reads neither, and a lens should not pay for rows it never touches.
+    round_data: RoundResult | None = None
+    known_outcomes: list[dict[str, Any]] = Field(default_factory=list)
     # The round's Rasch ability frontier (``RoundResult.cumulative_theta``) — the
     # backprop fold's value signal. Subset-invariant BY CONSTRUCTION, which is what
     # makes it the only honest thing to average up a lineage whose rounds scored

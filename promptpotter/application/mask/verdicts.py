@@ -7,6 +7,11 @@ under an alternative formula through the single re-evaluation seam
 schema, no re-run) and re-runs the *exact* realized election to ask "would this
 round have elected someone else?". The abort verdict (a log-read over
 ``elimination_context``, no value face) lands here too when it migrates.
+
+The third verdict lives elsewhere for the same reason these two live here: **replay**
+asks whether a changed ENGINE re-derives the recorded decisions, and that math is the
+replayers', so ``resume_and_fork/ab_replay.py`` builds it. The fold is what is shared;
+a verdict belongs beside the math it asks.
 """
 
 from __future__ import annotations

@@ -25,7 +25,11 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import ScoredCandidate, is_leader_eligible
+from promptpotter.domain.results import (
+    ScoredCandidate,
+    is_leader_eligible,
+    merge_known_outcomes,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
@@ -106,7 +110,11 @@ def _abort_contributor(sc: ScoredCandidate) -> str | None:
 
 
 def load_mask_record(
-    stores: Stores, campaign_id: str, samples: frozenset[int] | None = None
+    stores: Stores,
+    campaign_id: str,
+    samples: frozenset[int] | None = None,
+    *,
+    with_replay: bool = False,
 ) -> MaskRecord:
     """Read every cycle in *campaign_id* into a :class:`MaskRecord` (read-only).
 
@@ -114,6 +122,14 @@ def load_mask_record(
     those sample ids — the carried-forward winner threads its subset accuracy too, so
     the election re-runs on the subset and the fold finds where the subset-best
     diverges from the recorded (full-set) winner. ``None`` ⇒ stored full-set values.
+
+    *with_replay* additionally carries each round's own ``RoundResult`` and the pool of
+    known per-sample outcomes as it stood before that round ran — what a replay verdict
+    re-derives from. Off by default because those are the raw rows: a scoring or abort
+    lens reads none of them, and the tree endpoint serves one of those on every request.
+    It also reads each round through the store's TYPED loader, which raises on a document
+    the current models cannot parse — a replay must re-derive from a document it can read,
+    where a lens is happy with the summary fields.
     """
     entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
@@ -163,18 +179,25 @@ def load_mask_record(
     # it carries unchanged. The winner's evaluators live on its candidate_scores
     # row, NOT the (often-empty) top-level round ``evaluators`` field.
     winner_at: dict[tuple[str, int], tuple[dict[str, float], float]] = {}
+    # The known-outcomes pool threads the SAME way the anchor does — inherited across the
+    # fork edge from the branch point, then folded round by round. Each round is handed the
+    # pool as it stood BEFORE it ran, which is what the live election saw (`Cycle.absorb_round`
+    # merges the round's own rows only after it finished).
+    pool_at: dict[tuple[str, int], list[dict[str, Any]]] = {}
     cycles: list[MaskCycle] = []
     for cid in order:
         parent, from_round = edges.get(cid, (None, None))
-        carried: tuple[dict[str, float], float] = (
-            winner_at.get((parent, from_round), ({}, 0.0))
-            if parent is not None and from_round is not None
-            else ({}, 0.0)
-        )
+        carried: tuple[dict[str, float], float] = ({}, 0.0)
+        pool: list[dict[str, Any]] = []
+        if parent is not None and from_round is not None:
+            carried = winner_at.get((parent, from_round), carried)
+            pool = list(pool_at.get((parent, from_round), pool))
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
-            candidates = _candidates(files[cid][rn], samples)
-            theta = files[cid][rn].get("cumulative_theta")
+            round_file = files[cid][rn]
+            candidates = _candidates(round_file, samples)
+            theta = round_file.get("cumulative_theta")
             rounds.append(
                 MaskRound(
                     cycle_id=cid,
@@ -183,12 +206,22 @@ def load_mask_record(
                     anchor_evaluators=carried[0],
                     anchor_accuracy=carried[1],
                     cumulative_theta=float(theta) if isinstance(theta, int | float) else 0.0,
+                    # Through the store's typed read, not a second ``model_validate`` here:
+                    # that one is the sole typed read of a round document, and it RAISES on a
+                    # file the current models cannot parse. Correct for a replay, which
+                    # re-derives from the document — while the summary fields above stay
+                    # tolerant, so a scoring or abort lens still serves a drifted cycle.
+                    round_data=stores.campaigns.load_round_file(hop, rn) if with_replay else None,
+                    known_outcomes=pool if with_replay else [],
                 )
             )
             winner = next((c for c in candidates if c.is_winner and c.evaluators), None)
             if winner is not None:
                 carried = (dict(winner.evaluators), winner.accuracy)
             winner_at[(cid, rn)] = carried
+            if with_replay:
+                pool = merge_known_outcomes(pool, list(round_file.get("results") or []))
+            pool_at[(cid, rn)] = pool
         cycles.append(
             MaskCycle(
                 cycle_id=cid, parent_cycle_id=parent, fork_from_round=from_round, rounds=rounds

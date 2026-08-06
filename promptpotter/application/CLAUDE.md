@@ -27,7 +27,7 @@ does not fix the cycle, it hides this rule.
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, composite-fitness metrics. Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |
 | `views/` | The **emit contract**: frozen typed View dataclasses (`view_models.py`), the live `PhaseEvent → View` builder (`ingress.py::from_phase_event` — needs same-layer `optimizer_model` + scoring formula evaluators), and markdown rendering (`render/` — `to_markdown` + heatmap + `render_sweep_summary`). Producing these views *is* an orchestration job, so they live here; `presentation/views` imports them upward for terminal (`to_text`) rendering. |
 | `jobs/` | The launcher + job registry (capacity-1 machine slot), the spend cap, and the liveness reaper. `jobs/launcher/` is the shared mint/start seam CLI `new` and the web Start both funnel through. |
-| `mask/` | The mask projection — record / divergence / invariant-vs-divergent, plus `backprop.py::select_rewind_round` (UCB1 over the lineage tree; the layer decides *whether* to rewind, this decides *where*). **The code SoT** for `docs/specs/mask-projection.md`. |
+| `mask/` | The mask projection — record / divergence / invariant-vs-divergent, plus `backprop.py::select_rewind_round` (UCB1 over the lineage tree; the layer decides *whether* to rewind, this decides *where*). **The code SoT** for `docs/operations/mask-projection.md`. |
 
 ## Top-level modules
 

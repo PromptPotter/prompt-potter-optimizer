@@ -22,7 +22,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
     _mint_fork,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import (
-    Divergence,
+    ReplayMismatch,
     replay_decisions,
 )
 from promptpotter.application.scoring.formula import rescore_results
@@ -324,7 +324,7 @@ def _stale_generation(
     hop: CycleHop,
     prior: list[RoundResult],
     resumed_from_round: int,
-) -> Divergence | None:
+) -> ReplayMismatch | None:
     """Is the round about to run holding candidates its own predecessor no longer matches?
     Both sides are persisted, so unlike the package differential this survives a restart. No
     recorded digest ⇒ UNVOUCHED ⇒ a divergence, not a shrug."""
@@ -345,7 +345,7 @@ def _stale_generation(
         consumed or "(unrecorded)",
         current,
     )
-    return Divergence(
+    return ReplayMismatch(
         round_num=resumed_from_round,
         kind="stale_generation",
         recorded_outcome=consumed,
@@ -354,7 +354,7 @@ def _stale_generation(
     )
 
 
-def _optimizer_divergences(prior: list[RoundResult]) -> dict[int, Divergence]:
+def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]:
     """Rounds produced by a DIFFERENT optimizer than the one loaded now. Template, layout and
     node config re-derive in any process, unlike a rendered panel. Asked PER ROUND so an edit
     forks from where it bites; an unstamped round is REPORTED, never guessed."""
@@ -363,7 +363,7 @@ def _optimizer_divergences(prior: list[RoundResult]) -> dict[int, Divergence]:
     )
 
     current = compute_optimizer_prompt_hashes()
-    out: dict[int, Divergence] = {}
+    out: dict[int, ReplayMismatch] = {}
     unstamped = [t.round for t in prior if not t.optimizer_prompt_hashes]
     if unstamped:
         logger.warning(
@@ -376,7 +376,7 @@ def _optimizer_divergences(prior: list[RoundResult]) -> dict[int, Divergence]:
         moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
         if not moved:
             continue
-        out[t.round] = Divergence(
+        out[t.round] = ReplayMismatch(
             round_num=t.round,
             kind=f"optimizer_identity:{','.join(moved)}",
             recorded_outcome={n: recorded[n] for n in moved},
@@ -463,11 +463,11 @@ def _package_drift(
     by_round: dict[int, RoundResult],
     campaign_store: CampaignStore,
     hop: CycleHop,
-) -> tuple[dict[int, Divergence], list[RoundResult]]:
-    """What the correction REACHED: ``({round that consumed a moved package: divergence},
+) -> tuple[dict[int, ReplayMismatch], list[RoundResult]]:
+    """What the correction REACHED: ``({round that consumed a moved package: mismatch},
     [rounds whose own package moved])``. Raised at the CONSUMER (``rn + 1``), never the
     producer, and only where it owns something — a cached candidate set counts."""
-    divergences: dict[int, Divergence] = {}
+    mismatches: dict[int, ReplayMismatch] = {}
     drifted: list[RoundResult] = []
     for rn, now in sorted(after.items()):
         moved = sorted(n for n, h in now.items() if before.get(rn, {}).get(n) != h)
@@ -483,15 +483,15 @@ def _package_drift(
         )
         nxt = rn + 1
         owns = nxt in by_round or campaign_store.load_round_candidates(hop, nxt) is not None
-        if owns and nxt not in divergences:
-            divergences[nxt] = Divergence(
+        if owns and nxt not in mismatches:
+            mismatches[nxt] = ReplayMismatch(
                 round_num=nxt,
                 kind=f"node_package:{','.join(moved)}",
                 recorded_outcome={n: before.get(rn, {}).get(n) for n in moved},
                 current_outcome={n: now[n] for n in moved},
                 inputs_ref={"drifted_round": rn, "nodes": moved},
             )
-    return divergences, drifted
+    return mismatches, drifted
 
 
 async def _apply_correction(
@@ -555,7 +555,7 @@ async def _apply_correction(
         ", ".join(str(r) for r in repaired),
     )
     by_round = {t.round: t for t in prior}
-    divergences, drifted = _package_drift(
+    mismatches, drifted = _package_drift(
         packages_before,
         _round_packages(cycle, prior),
         by_round,
@@ -579,7 +579,7 @@ async def _apply_correction(
     # GRADE the cut now its consequence is known, by RE-SERIALIZING the spec it was minted
     # from — `update` replaces `index.json::fork` wholesale, so a hand-built dict dropped
     # `from_candidate_id` and `_retired_by` then had no cut to place.
-    equivalent = not divergences
+    equivalent = not mismatches
     direction = ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
     campaign_store.update(
         branch,
@@ -651,13 +651,13 @@ async def resume_with_divergence_check(
         # Both ABOVE the config short-circuit, deliberately: optimizer prompts and layouts are
         # not KNOBS, so `DiffScope.NONE` says nothing about them; and a stale generation is the
         # one check answering for an EARLIER resume, which by now diffs clean.
-        optimizer_divergences = _optimizer_divergences(prior)
+        optimizer_mismatches = _optimizer_mismatches(prior)
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         frozen = campaign.config if campaign is not None else {}
         scope, diffed = classify_config_diff(cycle.config, frozen)
         if (
-            not optimizer_divergences
+            not optimizer_mismatches
             and stale is None
             and scope in (DiffScope.NONE, DiffScope.POLICY_ONLY)
         ):
@@ -680,7 +680,7 @@ async def resume_with_divergence_check(
             )
 
         def _branch_or_halt(
-            div: Divergence, survivors: list[RoundResult], *, self_inflicted: bool
+            div: ReplayMismatch, survivors: list[RoundResult], *, self_inflicted: bool
         ) -> ForkResult:
             """The ONE exit every divergence takes: branch at ``div.round_num``, or halt. A
             ``SCORING_DIVERGENCE`` supersedes, and nothing here deletes — what the old package
@@ -726,8 +726,8 @@ async def resume_with_divergence_check(
 
         for i, t in enumerate(prior):
             # A different OPTIMIZER produced it, or its OUTCOME no longer re-derives. One
-            # `Divergence`, one exit. Both come from outside this resume.
-            div = optimizer_divergences.get(t.round) or replay_decisions(
+            # `ReplayMismatch`, one exit. Both come from outside this resume.
+            div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t, origin_results=origin_results_rescored, delta_scale=cycle.delta_scale
             )
             if div is not None:

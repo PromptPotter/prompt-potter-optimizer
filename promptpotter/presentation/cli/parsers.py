@@ -394,10 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "ab",
-        help="Deterministic A/B replay of the active cycle: re-derive every recorded "
-        "decision (winner / eliminations / L2-L3 triggers) under the CURRENT engine + "
-        "scorer over the recorded measurements, and report where they flip. Zero LLM "
-        "calls — run a cycle under one engine/scorer, then `ab` under another to diff.",
+        help="Deterministic A/B replay of the active cycle's campaign: re-derive every "
+        "recorded decision (winner / eliminations / L2-L3 triggers) under the CURRENT "
+        "engine + scorer, and report where the change stops carrying over — which "
+        "branches survive it and where a fork is needed. Zero LLM calls — run a cycle "
+        "under one engine/scorer, then `ab` under another to diff.",
     )
     _add_reset_args(
         sub.add_parser(

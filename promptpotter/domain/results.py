@@ -57,6 +57,7 @@ __all__ = [
     "is_electable",
     "is_leader_eligible",
     "is_round_winner",
+    "merge_known_outcomes",
     "unscoreable_cells",
 ]
 
@@ -123,7 +124,7 @@ def best_round_by_measured_accuracy(
     This replaced an argmax over ``cumulative_accuracy``, a sample-keyed union of rows
     measured by DIFFERENT configurations. That published ``57%→78%`` for a cycle whose best
     candidate ever measured 0.679, and crowned a round whose two candidates scored 0.0 and
-    0.481. See ``cycle.py::_merge_known_outcomes``.
+    0.481. See :func:`merge_known_outcomes`.
 
     Sole definition of the headline-best derivation — the cycle index (`_apply_best`) and
     the resume/fork trajectory rebuild (`resolve_resume_state`) both call this so
@@ -322,6 +323,37 @@ def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for r in results if is_error_result(r))
 
 
+def merge_known_outcomes(
+    prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
+
+    **This pool is not a score, and must never be scored.** Its rows are measured by
+    DIFFERENT configurations — round N's winner on the samples it ran, whatever ran them
+    last everywhere else — so an accuracy over it belongs to no individual. It exists to
+    decide what to measure NEXT (PoBB seeding, resume's election floor, replay parity),
+    which is a question the pool's mixed provenance does not spoil.
+
+    Scoring it is what published ``57%→78%`` on a cycle whose best candidate ever measured
+    0.679: the round-7 number was 12 rows from round 6's config glued to 28 from round 7's,
+    and because the round subset is the CONTESTED one, the carried rows are the easy tail
+    the previous config scored 12/12 on. Every configuration inherits its predecessor's
+    perfect easy-tail score, so a mutation that regresses there is invisible.
+
+    Pure and here rather than beside the loop that folds it most, because the read side
+    folds it too: replay and the mask record both rebuild this pool from disk, and reaching
+    into ``optimization/cycle`` for it would pull the whole loop into a read path.
+    """
+    by_sid: dict[Any, dict[str, Any]] = {
+        r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
+    }
+    for r in incoming:
+        sid = r.get("sample_id")
+        if sid is not None:
+            by_sid[sid] = r
+    return list(by_sid.values())
+
+
 # ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
 # ``candidate_scores`` dump beside it in the same file (no θ / composite_ci): scoreboard =
 # the display table, candidate_scores = the complete record. The mutation text rides
@@ -500,7 +532,7 @@ class RoundResult(StrictModel):
     # There is deliberately no `cumulative_accuracy` beside it. θ is an ability fitted against
     # an explicit per-sample δ, so pooling rows of mixed provenance is a modelled operation;
     # a plain mean over the same rows is not — it silently attributes one configuration's
-    # score to another. See `cycle.py::_merge_known_outcomes`.
+    # score to another. See `merge_known_outcomes`.
     cumulative_theta: float | None = None
     # That θ's own standard error, dispersion-corrected, straight off the same fit. It is how
     # sharply THIS round measured the frontier — a precision, never a penalty: the spec forbids

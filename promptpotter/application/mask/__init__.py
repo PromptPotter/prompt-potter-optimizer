@@ -10,5 +10,5 @@ Two folds over one **record**, both tree-recursive, neither building a second tr
   a stalled L2/L3 should re-expand from). The lineage forest is the search tree; this is
   the phase that makes it one.
 
-Design + invariants: ``docs/specs/mask-projection.md``.
+Design + invariants: ``docs/operations/mask-projection.md``.
 """

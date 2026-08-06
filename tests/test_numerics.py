@@ -624,6 +624,86 @@ def test_mask_abort_verdict_rides_the_same_fold():
     assert no_abort.divergent == ["cyc::r2"]
 
 
+def _flip_spine(cycle_id: str, *, n_rounds: int = 3) -> list[MaskRound]:
+    """A spine whose round 1 flips leader under ``1 - accuracy``: anchor 0.5, A=0.75 wins,
+    B=0.25 loses. Round 2 exists only to be claimed as the divergent tail."""
+    rounds = [
+        MaskRound(cycle_id=cycle_id, round=0, candidates=[_mask_cand("C0", 0.5, is_winner=True)]),
+        MaskRound(
+            cycle_id=cycle_id,
+            round=1,
+            anchor_evaluators={"accuracy": 0.5},
+            anchor_accuracy=0.5,
+            candidates=[_mask_cand("A", 0.75, is_winner=True), _mask_cand("B", 0.25)],
+        ),
+        MaskRound(
+            cycle_id=cycle_id,
+            round=2,
+            anchor_evaluators={"accuracy": 0.75},
+            anchor_accuracy=0.75,
+            candidates=[_mask_cand("D", 1.0, is_winner=True)],
+        ),
+    ]
+    return rounds[:n_rounds]
+
+
+def test_mask_fold_claims_a_forks_subtree_only_when_it_is_rooted_at_or_after():
+    """Where a fork sits relative to the divergence decides whether it is real or fiction.
+
+    A wrong answer here is the fold's silent class: the tree still renders, every node
+    still carries a number, and the operator reads "this change reaches here" off a
+    partition nothing contradicts. Rooted BEFORE the divergence, a fork branched off data
+    the change never touched — it stays invariant and is analysed for its own divergence.
+    Rooted AT or AFTER, its every round descends from a choice the change would have made
+    differently, so the whole subtree is counterfactual and is claimed WITHOUT being asked
+    — including a grandchild, which is what makes the claim recursive rather than one-deep.
+
+        root  r0 → r1 ✗ → r2                (✗ = where `1 - accuracy` flips the leader)
+          ├─ early (cut at 0)  r0 → r1 ✗ → r2     rooted before → analysed, diverges itself
+          └─ late  (cut at 2)  r0 → r1            rooted after  → claimed whole, never asked
+               └─ grand        r0 → r1            claimed with it
+
+    ``late``'s r1 carries the same flipping shape as the others, so it WOULD report a
+    divergence if the fold walked it. That it does not is the assertion.
+    """
+    root = MaskCycle(cycle_id="root", rounds=_flip_spine("root"))
+    early = MaskCycle(
+        cycle_id="early", parent_cycle_id="root", fork_from_round=0, rounds=_flip_spine("early")
+    )
+    late = MaskCycle(
+        cycle_id="late",
+        parent_cycle_id="root",
+        fork_from_round=2,
+        rounds=_flip_spine("late", n_rounds=2),
+    )
+    grand = MaskCycle(
+        cycle_id="grand",
+        parent_cycle_id="late",
+        fork_from_round=1,
+        rounds=_flip_spine("grand", n_rounds=2),
+    )
+    record = MaskRecord(cycles=[root, early, late, grand])
+
+    # Self-consistency holds across the forest, not just one spine: fed the realizing
+    # criterion every cycle IS walked — `late` included — and none of them departs.
+    realized = find_divergences(record, make_scoring_verdict("accuracy"))
+    assert realized.divergences == [] and realized.divergent == []
+
+    swapped = find_divergences(record, make_scoring_verdict("1 - accuracy"))
+    assert [(d.node_key, d.alternative_candidate_id) for d in swapped.divergences] == [
+        ("root::r1", "B"),
+        ("early::r1", "B"),  # rooted before ⇒ still analysed, and departs on its own
+    ]
+    assert swapped.divergent == [
+        "root::r2",
+        "early::r2",
+        "late::r0",  # claimed wholesale — note r0, which no verdict ever rules on
+        "late::r1",
+        "grand::r0",
+        "grand::r1",
+    ]
+
+
 def test_composite_fitness_zeroed_on_validation_failure():
     # A REAL OptSearchPoint, not a namespace stub. The stub carried a bare `object()`
     # where a `ValidationFailure` goes and had no `render()` — it only ever type-checked

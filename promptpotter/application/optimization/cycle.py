@@ -30,6 +30,7 @@ from promptpotter.domain.results import (
     RoundParent,
     RoundResult,
     ScoredCandidate,
+    merge_known_outcomes,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -47,32 +48,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["Cycle", "CycleRoundState"]
-
-
-def _merge_known_outcomes(
-    prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
-
-    **This pool is not a score, and must never be scored.** Its rows are measured by
-    DIFFERENT configurations — round N's winner on the samples it ran, whatever ran them
-    last everywhere else — so an accuracy over it belongs to no individual. It exists to
-    decide what to measure NEXT (PoBB seeding, resume's election floor, replay parity),
-    which is a question the pool's mixed provenance does not spoil.
-
-    Scoring it is what published ``57%→78%`` on a cycle whose best candidate ever measured
-    0.679: the round-7 number was 12 rows from round 6's config glued to 28 from round 7's,
-    and because the round subset is the CONTESTED one, the carried rows are the easy tail
-    the previous config scored 12/12 on. Every configuration inherits its predecessor's
-    perfect easy-tail score, so a mutation that regresses there is invisible."""
-    by_sid: dict[Any, dict[str, Any]] = {
-        r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
-    }
-    for r in incoming:
-        sid = r.get("sample_id")
-        if sid is not None:
-            by_sid[sid] = r
-    return list(by_sid.values())
 
 
 def _origin_round(
@@ -561,7 +536,7 @@ class Cycle:
         # best_round = high-water-mark over what each round actually MEASURED, walked from
         # round 0 (the origin floor) forward. It is the round NUMBER, which is now also its
         # index. Each round's own scalars — never a score over `acc_cum`, whose rows come
-        # from different configurations (see `_merge_known_outcomes`); the pool is rebuilt
+        # from different configurations (see `domain/results.py::merge_known_outcomes`); the pool is rebuilt
         # here only to reseed `current_results` and `best_theta` below.
         # Re-seed the mark from the origin floor first — see the re-runnable note above.
         origin_rr = self.rounds[0]
@@ -574,7 +549,7 @@ class Cycle:
         ).to_job_search_point(base_pipeline_params=origin_rr.pipeline_params, schema=schema)
         acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
-            acc_cum = _merge_known_outcomes(acc_cum, list(rr.results))
+            acc_cum = merge_known_outcomes(acc_cum, list(rr.results))
             if rr.composite_fitness > tr.best_composite_fitness:
                 tr.best_composite_fitness = rr.composite_fitness
                 tr.best_accuracy = rr.accuracy
@@ -655,7 +630,7 @@ class Cycle:
             # so there is no cold value left to contradict the warm stamp.
             frontier: list[dict[str, Any]] = []
             for rr in self.rounds:
-                frontier = _merge_known_outcomes(frontier, list(rr.results))
+                frontier = merge_known_outcomes(frontier, list(rr.results))
                 if rr.round > 0:
                     restamped = _cumulative_theta(frontier, delta_scale)
                     rr.cumulative_theta, rr.cumulative_theta_se = (
@@ -715,9 +690,9 @@ class Cycle:
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
-        tr.current_results = _merge_known_outcomes(tr.current_results, list(rr.results))
+        tr.current_results = merge_known_outcomes(tr.current_results, list(rr.results))
         # "Current" is what the incumbent SCORED — its own measurement on its own samples,
-        # never an accuracy over the mixed-provenance pool above (see `_merge_known_outcomes`).
+        # never an accuracy over the mixed-provenance pool above (see `domain/results.py::merge_known_outcomes`).
         # On a held round `rr` already carries the incumbent's re-score for this round's
         # subset (`rescore_parent`), so this stays a real measurement either way.
         tr.current_accuracy, tr.current_composite_fitness = rr.accuracy, rr.composite_fitness
