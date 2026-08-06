@@ -1,23 +1,5 @@
-"""MeasurementArchive facade — sole gateway to the cross-cycle archive.
-
-The archive is the database core (per ``docs/architecture.md``): cross-cycle,
-content-addressed measurements indexed by sample + node-config, and **tenant-global
-— never backend-scoped**, so nothing here takes a ``backend_id``. Every archive
-WRITE lives behind this module; reaching ``stores.archive`` outside it to write is
-drift. **Nothing enforces that mechanically, and this file must not claim otherwise** —
-naming a guard that does not exist is worse than claiming none: a fourth write
-(``maintain_index``) sat at a caller for a year with the facade bypassed and nobody
-looking, because the docstring said something was watching.
-
-Two READS remain outside, both narrow and both honest about it:
-``datasets/dataset_replace.py::restamp_dataset`` (a dataset-lifecycle operation that
-predates the facade) and ``intelligence/hard_sample_archive.py`` (``archive.base_dir``
-as a memo key, no I/O).
-
-Placement in ``infrastructure/store/`` (not ``application/scoring/``): the archive
-IS a store, so its single-writer facade lives beside the leaf it wraps. The five
-writes below (append / compact / reset / maintain-index / sample-fold) are the whole
-write surface — any new one means a new function here, not a sidecar."""
+"""MeasurementArchive facade — the sole WRITE gateway, tenant-global and never backend-scoped.
+Nothing enforces that mechanically, and claiming a guard that does not exist is worse."""
 
 from __future__ import annotations
 
@@ -82,12 +64,8 @@ def _evidence_epoch() -> frozenset[str]:
 
 
 def capture_evidence_epoch(stores: Stores) -> frozenset[str]:
-    """Every run-id banked right now — the epoch an instrument-mode cycle hides.
-
-    Reads the RAW index, deliberately NOT `list_runs`: that one is already filtered by the
-    *caller's* epoch, so a nested instrument would capture only what its parent could see
-    and would then treat its grandparent's runs as its own evidence. An epoch has to be
-    absolute, not relative to whoever is asking."""
+    """Every run-id banked right now — the epoch an instrument-mode cycle hides. Reads the RAW
+    index: ``list_runs`` is already epoch-filtered, and an epoch must be absolute."""
     return frozenset(e["run_id"] for e in stores.archive.list_all())
 
 
@@ -115,20 +93,8 @@ def measurement_series_for_samples(
     *,
     dataset_name: str,
 ) -> dict[int, list[dict[str, Any]]]:
-    """Per-sample chronological series, one archive walk for the whole set.
-
-    ``{sample_id: [{ord, hit, run_id, created_at}, ...]}`` sorted ascending by
-    ``ord`` = ``created_at``/``run_id``/item-index. Errored items dropped
-    (matches ``build_archive_observations``'s Rasch-fit filter so the
-    dashboard hit-rate column and δ_s estimate see the same observations).
-    Powers the ``/datasets/{name}/measurement-series`` endpoint.
-
-    *dataset_name* is REQUIRED, exactly as on :func:`reusable_results`: **a ``sample_id``
-    only identifies a sample within one dataset.** It was `str | None = None`, and the one
-    caller — the dataset-scope arm of that endpoint, the arm that most needs the scope —
-    omitted it, so the walk crossed EVERY dataset's archive and spliced another dataset's
-    sample-14 measurements into this dataset's sample-14 series. No default, so the next
-    caller cannot forget it either; that optional-with-a-None-default WAS the bug."""
+    """Per-sample chronological series, one archive walk for the whole set. *dataset_name* is
+    REQUIRED with no default: a ``sample_id`` only identifies a sample within one dataset."""
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
     for entry in stores.archive.list_all(dataset_name=dataset_name):
@@ -167,7 +133,6 @@ def measurements_for_config(
     run_ids: set[str] | list[str] | None = None,
     dataset_name: str | None = None,
 ) -> list[Measurement]:
-    """Every measurement under configs matching *predicate*, across all samples."""
     return stores.archive.measurements_for_config(
         predicate,
         run_ids=run_ids,
@@ -176,9 +141,8 @@ def measurements_for_config(
 
 
 def load_run(stores: Stores, run_id: str) -> dict[str, Any] | None:
-    """Load one run's detail file by ``run_id``; ``None`` if absent.
-    Dataset-agnostic — run_id encodes its dataset via the index;
-    callers needing the stamp read ``detail['dataset_name']`` themselves."""
+    """Load one run's detail file by ``run_id``; ``None`` if absent. Dataset-agnostic — a caller
+    needing the stamp reads ``detail['dataset_name']`` itself."""
     return stores.archive.load_by_id(run_id)
 
 
@@ -222,9 +186,8 @@ def reusable_results(
     *,
     dataset_name: str,
 ) -> dict[int, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_id``.
-    *dataset_name* is required — it scopes the slice, and ``sample_id`` only identifies a sample
-    within one dataset."""
+    """Per-sample cache reuse from prior runs sharing *node_configs*. *dataset_name* is required:
+    a ``sample_id`` only identifies a sample within one dataset."""
     return stores.archive.load_reusable_results(
         node_configs,
         is_fatal=is_fatal,
@@ -241,9 +204,8 @@ def record_measurement_run(
     data: dict[str, Any],
     new_measurements: Iterable[dict[str, Any]],
 ) -> Path:
-    """Sole write entry point — append the rows the caller has not persisted yet, a fresh
-    header, and the index upsert. *new_measurements* is what is NEW: the detail log is
-    append-only, so the rows already on disk are never rewritten."""
+    """Sole write entry point. *new_measurements* is what is NEW — the detail log is append-only,
+    so rows already on disk are never rewritten."""
     return stores.archive.append_run(run_id, data, new_measurements)
 
 
@@ -260,16 +222,8 @@ def reset_measurement_run(stores: Stores, run_id: str) -> None:
 
 
 def maintain_measurement_index(stores: Stores) -> bool:
-    """Compact the index's superseded rows at run start; ``True`` if it rewrote anything.
-
-    **Silently skipped inside an instrument**, and the gate lives here rather than at the
-    caller for the same reason every other epoch rule does: an instrument cycle is a
-    measurement, not a campaign, so it must not mutate tenant-global storage — the outer
-    campaign that spawned it already did this. Wrapped around the disk touch, so a second
-    caller inherits the rule instead of having to remember it (this one did not: the gate
-    was an ``if`` in ``initialization/wiring.py``, which is also how the call ended up being the
-    archive's only write reaching past this facade).
-    """
+    """Compact the index's superseded rows at run start. **Silently skipped inside an instrument**,
+    wrapped around the disk touch so a second caller inherits the rule instead of restating it."""
     if instrument_mode() is not None:
         return False
     return stores.archive.maintain_index()
@@ -286,25 +240,16 @@ def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
 
 
 def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[dict[str, Any]]:
-    """The persisted ``SampleIndex`` derivation for *dataset_name*, **in append order**.
-
-    Read with :func:`iter_jsonl`, not folded last-wins: one consumer
-    (``persistent_failures``) reads a sample's trailing observations as a streak, so the
-    replay sequence is part of the answer and a map would lose it.
-    """
+    """The persisted ``SampleIndex`` derivation, **in append order**: one consumer reads a sample's
+    trailing observations as a streak, so the replay sequence is part of the answer."""
     return iter_jsonl(_sample_fold_path(stores, dataset_name))
 
 
 def write_sample_fold(
     stores: Stores, *, dataset_name: str, rows: Iterable[dict[str, Any]], append: bool
 ) -> None:
-    """Persist per-run derivation *rows* — ``append`` for runs newly folded this process,
-    else replace (the on-disk fold failed revalidation and was rebuilt from the details).
-
-    Skipped inside an instrument for the reason :func:`maintain_measurement_index` states:
-    an inner L4 cycle shares this archive with the campaign that spawned it, so it must not
-    write tenant-global storage.
-    """
+    """Persist per-run derivation *rows* — ``append`` for runs newly folded, else replace. Skipped
+    inside an instrument, which shares this archive with the campaign that spawned it."""
     if instrument_mode() is not None:
         return
     path = _sample_fold_path(stores, dataset_name)
@@ -332,10 +277,8 @@ def cycle_measurement_series(
     hop: CycleHop,
     sample_ids: set[int],
 ) -> dict[int, list[dict[str, Any]]]:
-    """Walk one cycle's ``rounds/round_*.json`` → per-sample series.
-
-    Ord = ``{round:04d}/{cand_idx:02d}``; candidates absent from the scoreboard sink to slot 99.
-    """
+    """Walk one cycle's ``rounds/round_*.json`` → per-sample series; ord is
+    ``{round:04d}/{cand_idx:02d}``, and a candidate absent from the scoreboard sinks to slot 99."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     rounds_dir = CycleLayout(cycle_dir).rounds
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}

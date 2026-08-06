@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def fmt_elapsed(seconds: float) -> str:
-    """Wall-clock duration as ``Xm YYs`` or ``Xh YYm``."""
     s = int(seconds)
     if s < 60:
         return f"{s}s"
@@ -36,7 +35,6 @@ def fmt_elapsed(seconds: float) -> str:
 
 
 def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
-    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau."""
     if not rounds:
         return ""
 
@@ -81,7 +79,6 @@ def render_round_stats(
     round_result: RoundResult,
     pipeline_schema: PipelineSchema | None,
 ) -> str:
-    """accuracy over N samples, candidate count, pipeline terminations, degradation%, recall@1/5."""
     lines: list[str] = []
     accuracy = round_result.accuracy
     total = round_result.total
@@ -188,7 +185,6 @@ def render_round_stats(
 
 
 def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
-    """Green tick on improvement; yellow patience counter on stall (informational only)."""
     if improved:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
     return _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")

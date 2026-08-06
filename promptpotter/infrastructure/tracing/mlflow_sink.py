@@ -1,10 +1,5 @@
-"""Per-cycle MLflow sink — user-requested integration, opt-in.
-
-Logs each round as an MLflow run under ``archive/mlruns/``. Disabled by
-default; flip ``settings.MLFLOW_ENABLED`` to turn on. Kept on purpose
-even when off — operators have requested MLflow as a first-class
-observability target.
-"""
+"""Per-cycle MLflow sink — opt-in, disabled by default. Kept on purpose even when off: operators have asked for MLflow
+as a first-class observability target."""
 
 from __future__ import annotations
 

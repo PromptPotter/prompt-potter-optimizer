@@ -1,9 +1,5 @@
-"""The project's Pydantic base — unknown keys are an error, not a shrug.
-
-Why, and when a model may stay lax: ``domain/CLAUDE.md`` § Conventions. One
-cost of the extra hop: ruff resolves ``BaseModel`` per file, so a subclass here
-loses RUF012's Pydantic exemption — write ``Field(default_factory=list)``.
-"""
+"""The project's Pydantic base — unknown keys are an error, not a shrug. One cost of the extra hop: ruff resolves
+``BaseModel`` per file, so a subclass here loses RUF012's exemption — write ``Field(default_factory=list)``."""
 
 from __future__ import annotations
 
@@ -13,6 +9,4 @@ __all__ = ["StrictModel"]
 
 
 class StrictModel(BaseModel):
-    """A :class:`~pydantic.BaseModel` that rejects unknown keys."""
-
     model_config = ConfigDict(extra="forbid")

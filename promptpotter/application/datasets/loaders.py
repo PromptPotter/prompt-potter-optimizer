@@ -1,8 +1,3 @@
-"""Ground-truth loaders + dataset registry.
-
-Loaders return ``list[Sample]``; ``DATASET_LOADERS`` is the name → loader map;
-``build_dataset_run_data`` builds the measurement-batch dict."""
-
 from __future__ import annotations
 
 import hashlib
@@ -28,17 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
-    """Convert dicts → Samples; assigns positional ``id`` when missing, ignores extras."""
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
-    """Top-``sample_size`` slice; datasets already shuffled at creation (deterministic prefix, no second RNG).
-
-    A *sample_size* above ``len(dataset)`` yields the whole bank — deliberate, and what the
-    origin path relies on: ``sp_budget_origin`` defaults above ``sp_budget_ttest``, so on a
-    small bank "score the origin on everything" is the right answer, not an error.
-    """
+    """Top-``sample_size`` slice; the bank is already shuffled at creation, so no second RNG. A size above
+    the bank yields ALL of it — deliberate, and what ``sp_budget_origin`` above ``sp_budget_ttest`` needs."""
     if sample_size <= 0:
         # Both budgets land here (`sp_budget_ttest` per round, `origin_budget()` at C0), so
         # the message names neither — it named `sp_budget_ttest` and sent anyone hitting it
@@ -48,10 +38,7 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
 
 
 def load_gsm8k(split: str = "train") -> list[Sample]:
-    """Load GSM8K from HuggingFace.
-
-    Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
-    """
+    """Load GSM8K from HuggingFace. Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``."""
     try:
         from datasets import load_dataset
     except ModuleNotFoundError:
@@ -72,10 +59,7 @@ def load_gsm8k(split: str = "train") -> list[Sample]:
 
 
 def load_aime_2025() -> list[Sample]:
-    """Load AIME 2025 from HuggingFace.
-
-    Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
-    """
+    """Load AIME 2025 from HuggingFace. Requires ``datasets``: ``pip install -e ".[benchmarks]"``."""
     try:
         from datasets import load_dataset
     except ModuleNotFoundError:
@@ -140,11 +124,8 @@ _JUSTLOGIC_CUT_RE = re.compile(r"^justlogic-d(\d+)$")
 
 
 def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
-    """The depth cut *dataset_name* denotes, or ``None`` when it names no JustLogic cut.
-
-    ``justlogic-d234`` → ``(2, 3, 4)`` — one digit per depth, since JustLogic ships depths
-    1-7. Every cut names its depths; there is no irregular spelling to special-case.
-    """
+    """The depth cut *dataset_name* denotes, or ``None`` when it names none. One digit per depth, since
+    JustLogic ships 1-7 — every cut names its depths and there is no irregular spelling to special-case."""
     m = _JUSTLOGIC_CUT_RE.match(dataset_name)
     if m is None:
         return None
@@ -153,7 +134,6 @@ def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
 
 
 def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sample]:
-    """Filter to *depths*, deterministic per-depth train/test split, format queries."""
     if split not in ("train", "test"):
         raise ValueError(f"JustLogic split must be 'train' or 'test', got {split!r}")
     try:
@@ -226,12 +206,8 @@ a bare membership test here reports False for every valid ``justlogic-dNNN``.
 
 
 def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
-    """The zero-arg loader for *dataset_name*, or ``None`` when nothing can load it.
-
-    The one resolver over both shapes: the fixed-cut registry above, and the JustLogic
-    depth family, whose cut comes off the name (``justlogic-d234`` → depths 2,3,4). So a
-    new depth combination needs a dataset dir and no code at all.
-    """
+    """The zero-arg loader for *dataset_name*, or ``None``. The one resolver over both shapes: the fixed
+    registry, and the JustLogic depth family read off the name — so a new cut needs a dir and no code."""
     fixed = DATASET_LOADERS.get(dataset_name)
     if fixed is not None:
         return fixed
@@ -242,10 +218,8 @@ def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
 
 
 def loadable_dataset_names() -> list[str]:
-    """Names a caller can offer today — the fixed loaders plus every JustLogic cut that
-    ships a dataset dir, DERIVED from the dirs rather than listed here. A new
-    ``justlogic-dNNN/`` therefore appears with no edit to this module. The family is open,
-    so this is a *listing*, never a validity test; ask :func:`dataset_loader` for that."""
+    """Names a caller can offer today, DERIVED from the dirs on disk. The family is open, so this is a
+    *listing* and never a validity test — ask :func:`dataset_loader` for that."""
     root = benchmark_datasets_root()
     cuts = (
         sorted(p.name for p in root.iterdir() if p.is_dir() and _JUSTLOGIC_CUT_RE.match(p.name))
@@ -261,19 +235,8 @@ def resolve_dataset_items(
     *,
     status: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Resolved rows → ``DATASET_LOADERS`` fallback (fetch + persist).
-
-    Returns normalized item dicts (``Sample.model_dump()`` shape); ``[]`` only when
-    no cached source exists AND no loader is registered. The single materialization
-    seam shared by the run-time init (``_load_dataset_into_session``) and the
-    webapp ingest-from-dataset path (``draft_from_dataset``), so both reach the same
-    samples — a benchmark whose rows are absent on this machine is fetched +
-    persisted here, exactly as a fresh clone would.
-
-    The fetch lands in the TENANT tree, never beside the definition it materializes:
-    under a wheel that definition sits in ``site-packages``
-    (``store/dataset_access.py::readable_dataset_rows``).
-    """
+    """Resolved rows → ``DATASET_LOADERS`` fallback (fetch + persist). The single materialization seam
+    for run-time init AND webapp ingest, so both reach the same samples on a machine missing the rows."""
     ds: dict[str, Any] | None = readable_dataset_rows(stores, dataset_name)
     loader = dataset_loader(dataset_name)
     if not (ds and ds.get("items")) and loader is not None:
@@ -300,12 +263,8 @@ def build_dataset_run_data(
     pipeline_schema: PipelineSchema,
     human_intervened: bool = False,
 ) -> dict[str, Any]:
-    """Measurement-batch dict ready for ``Stores.archive.save()``.
-    ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes.
-    ``human_intervened`` marks a babysat cycle's run non-clean (grade ``C``).
-    ``pipeline_schema`` is required: it picks the ``sp_hash`` algorithm behind
-    ``prompt_fields_id`` and supplies ``node_configs``, so a batch written without one
-    is filed under a second identity for the same searchpoint."""
+    """Measurement-batch dict for ``Stores.archive.save()``. ``pipeline_schema`` is REQUIRED: it picks the
+    ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
     from promptpotter.domain.measurement_provenance import grade_run
 
     rendered_prompt = search_point.render()

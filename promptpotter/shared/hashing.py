@@ -1,8 +1,5 @@
-"""Content-addressed hashing for measurement deduplication.
-
-Leaf module shared by both models and services. Lives in ``promptpotter/shared/``
-to avoid circular imports between search_point.py and opt_search_point.py.
-"""
+"""Content-addressed hashing for measurement deduplication. In ``shared/`` to avoid a circular import between the two
+searchpoint modules."""
 
 from __future__ import annotations
 
@@ -23,13 +20,8 @@ def content_hash(
     dataset: list[Any],
     pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """``sha256(rendered_prompt + sorted_query_gt_pairs
-    + pipeline_params)[:HASH_TRUNCATE]``
-
-    Order of dataset samples does not affect the hash.
-    ``pipeline_params`` is included when non-empty so that different
-    pipeline configurations produce distinct hashes.
-    """
+    """``sha256`` over rendered prompt + sorted query/ground-truth pairs + ``pipeline_params``. Sample ORDER does not affect
+    it; ``pipeline_params`` is included when non-empty, so different pipeline configs hash distinctly."""
     pairs = sorted((d.query, d.ground_truth) for d in dataset)
     blob_dict: dict[str, Any] = {
         "prompt": rendered_prompt,

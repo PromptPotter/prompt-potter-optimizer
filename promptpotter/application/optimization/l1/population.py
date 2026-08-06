@@ -1,7 +1,4 @@
-"""L1 population shaping: project proposals → OSP + build score reports.
-
-Sits between L1 generation (``CandidateProposal``) and L1 scoring (``ScoredCandidate``).
-"""
+"""L1 population shaping — between generation (``CandidateProposal``) and scoring (``ScoredCandidate``)."""
 
 from __future__ import annotations
 
@@ -42,16 +39,8 @@ def merge_pipeline_params(
     overrides: dict[str, Any] | None,
     schema: PipelineSchema | None,
 ) -> dict[str, Any] | None:
-    """The ONE candidate-override merge: overlay ``overrides`` onto a DEEP COPY of
-    ``base``, then drop overrides for nodes outside active steps.
-
-    The per-node merge is the shared ``apply_node_overlay`` (declaration-driven: a
-    ``param_types: object`` param merges one level, so a candidate that names one nested
-    key does not revert its parent's siblings); the deep copy
-    (the candidate's params must not alias the origin's nested config) and the
-    inactive-node drop are this operation's own edge cases, kept around the helper.
-    Shared by the live L1 path (:func:`parse_population`) and the ``verify``/``ab``
-    replay verbs, so a re-derived candidate hashes the same config the loop did."""
+    """The ONE candidate-override merge: overlay onto a DEEP COPY, then drop overrides for inactive nodes. Shared by the
+    live L1 path and the ``verify`` / ``ab`` replays, so a re-derived candidate hashes the config the loop did."""
     if not overrides:
         return base
     merged = apply_node_overlay(copy.deepcopy(base or {}), overrides, schema)
@@ -71,13 +60,8 @@ def parse_population(
     *,
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
-    """Project proposals → OptSearchPoints + merged pp; attach validation failures.
-
-    ``model``/``provider`` mutations are always rejected (operator-owned axes, never
-    on L1's surface). ``prompt_block_catalogue`` gates the same rejection for a
-    prompt-field value proposed outside the block library — only under ``restrict``
-    (see the same-named knob).
-    """
+    """Project proposals into searchpoints. ``model`` / ``provider`` mutations are ALWAYS rejected — operator-owned axes,
+    never on L1's surface. An off-library prompt-field value is rejected only under ``restrict``."""
     opt_sp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
     for cp in proposals:
@@ -151,18 +135,8 @@ def build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
 ) -> ScoredCandidate:
-    """Typed candidate score report — stable shape, defaults always present.
-
-    ``label`` is the persisted display identity (``C0`` origin / ``CN.M`` L1).
-    ``elimination_context`` (PoBB cut) and ``degradation_context``
-    (DegradationCheck abort) are mutually exclusive — renderer branches on which is non-empty.
-
-    The composite CI is stamped HERE, from this candidate's own rows, because that is what
-    it is a fact about — it reads nothing else in the round. Computed at the round-close
-    election instead, it missed the ``candidate_scored`` payload and therefore the ledger,
-    so a finished candidate carried no whisker until its round ended. ``l1_score`` still
-    overrides it with the tighter θ-implied band where the ruler is warm.
-    """
+    """Typed candidate score report. The composite CI is stamped HERE, off this candidate's own rows, so a finished candidate
+    carries a whisker before its round ends; ``l1_score`` overrides it with the θ band on a warm ruler."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.scoring.metrics import composite_ci
 
@@ -200,14 +174,8 @@ def pobb_decision_data(
     candidate_sample_ids: list[str] | None = None,
     prior_histories: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
-    """Archival data for PoBB elimination + leader-lock decisions.
-
-    ``candidate_sample_ids`` + ``prior_histories`` (per-prior per-sample GRADED
-    responses) = the θ-PoBB snapshot at decision time; replay re-fits θ from
-    exactly these grades without crawling prior rounds. ``paired_breakdown``
-    per-prior comparison feeds round audit + live PoBB stream so the operator
-    can spot one sticky prior.
-    """
+    """Archival data for PoBB decisions — the per-prior per-sample GRADED responses ARE the snapshot at decision time,
+    so replay re-fits θ from exactly these without crawling prior rounds."""
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
         "leader_id": str(candidate_score.get("leader_id", "")),

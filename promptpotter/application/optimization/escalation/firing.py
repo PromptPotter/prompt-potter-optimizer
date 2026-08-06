@@ -1,14 +1,5 @@
-"""L2/L3 transition runner + `escalate_l2` cascade + per-layer parse/apply.
-
-V1 contract:
-* L2 writes optional `axis_targeted` / `l1_layout` / `l1_overrides`. It does NOT
-  write `task_context`: the framing is operator-authored and frozen (`FRAMING_FIELDS`).
-* L3 writes `plan` (required) + optional `note` (sticky L3→L2; wholesale-replaced on each L3 fire).
-
-`TransitionResult` (one fire's output) + `LayerStrategy` (static per-layer spec) are
-defined below; the L2/L3 instances + their parse/apply/enter/exit are the module-level
-constants `L2` and `L3`.
-"""
+"""L2/L3 transition runner + the `escalate_l2` cascade + per-layer parse/apply. What each layer may
+write, and why the framing is not among it: ``application/optimization/CLAUDE.md``."""
 
 from __future__ import annotations
 
@@ -81,16 +72,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TransitionResult:
-    """L2/L3 transition result.
-
-    L2 writes ``l1_layout``/``l1_overrides`` + ``axis_targeted`` (prose naming the axis
-    it routed the failure cluster to — its evidence anchor, not a lever). L3 writes
-    ``plan``, optional ``l3_note`` (sticky until next L3 fire). Both layers may emit
-    ``fork_proposal`` — the ``_run_transition`` post-apply hook stashes it on
-    ``cycle.rebase_request`` and raises ``StopLoop(StopReason.REBASED)``;
-    ``runner.entry`` resolves the request post-finalize into an automatic
-    ``_mint_fork`` + observer rebuild + loop re-entry on the new fork.
-    """
+    """One fire's output. Either layer may emit a ``fork_proposal``: the post-apply hook stashes it on
+    ``cycle.rebase_request`` and raises ``StopLoop(REBASED)``, which ``runner.entry`` resolves to a fork."""
 
     opt_sp: OptSearchPoint
     l3_note: str = ""
@@ -113,12 +96,6 @@ ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
 
 @dataclass(frozen=True)
 class LayerStrategy:
-    """Static per-layer spec for one escalation layer (L2 or L3).
-
-    Pure data read by ``_run_transition``; the ``L2``/``L3`` instances and
-    their parse/apply/enter/exit callables are the module-level constants below.
-    """
-
     layer_id: Literal["L2", "L3"]
     template_name: str
     phase: CampaignPhase
@@ -312,9 +289,7 @@ L3 = LayerStrategy(
 
 
 def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
-    """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes. Assumes
-    `payload.l1_layout is not None` (callers without deltas guard at the call site).
-    """
+    """Stamp a fork payload's L1-surface deltas on the OSP — the same shape L2 writes."""
     if payload.l1_layout is not None:
         layout = coerce_l1_layout(payload.l1_layout)
         if layout is None:
@@ -349,8 +324,7 @@ async def _run_transition(
     tracing_campaign_id: str,
 ) -> None:
     """enter → LLM → parse → adopt → LayerApplied → side-effects → exit.
-    Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec.
-    """
+    Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
     assert cycle.tracking.current_sp is not None
     current_pp = cycle.tracking.current_sp.pipeline_params
 
@@ -482,26 +456,8 @@ async def _run_transition(
 def _stash_rebase_request(
     cycle: Cycle, layer_id: str, proposal: ForkProposal, round_num: int
 ) -> bool:
-    """Stash an L2/L3 fork_proposal as a Cycle.rebase_request. False ⇒ do not fork.
-
-    **The layer decides WHETHER to rewind; UCB decides WHERE.** The layer sees that its
-    subtree is exhausted — a judgment no rule makes well — and says so. Which ancestor
-    to re-expand from is then a statistical question with a right answer, and it is
-    answered by :func:`select_rewind_round`: UCB1 over the backpropagated lineage,
-    balancing each ancestor's mean θ against how little it has been explored.
-
-    The runner resolves the request post-finalize: ``_mint_fork`` then rebuilds observers
-    around the new fork's ledger and re-enters the optimize loop (capped at
-    ``MAX_AUTO_REBASES`` per CLI invocation). Stashing here keeps the old cycle's
-    finalize using the un-retargeted ``session.state.cycle_id`` — a crash mid-finalize
-    leaves the old cycle clean and the rebase un-minted, which the operator can
-    re-trigger by re-invoking ``resume``.
-
-    An ``unlock_schema_field_rename`` request widens into the fork's ``ConfigOverrides``
-    here — the unlock rides the rewind and cannot travel without it, so the parent keeps
-    its frozen config and its comparability. Re-requesting a lock that is already open is
-    dropped: it would change nothing and still cost a whole sibling cycle.
-    """
+    """Stash an L2/L3 ``fork_proposal`` as a ``Cycle.rebase_request``. **The layer decides WHETHER to
+    rewind; UCB decides WHERE** — :func:`select_rewind_round` over the backpropagated lineage."""
     session = cycle.session
     record = load_mask_record(session.store, session.campaign_id)
     target_round = select_rewind_round(
@@ -547,7 +503,6 @@ def _trigger_payload(
     *,
     layer: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """(inputs_ref, data) for an L2/L3 escalation-trigger decision."""
     esc = cycle.escalation
     counter_round = getattr(esc, f"{layer}_round")
     inputs_ref = {
@@ -575,9 +530,6 @@ async def escalate_l2(
     obs: ObservabilityBridge | None = None,
     tracing_campaign_id: str = "",
 ) -> StopReason | None:
-    """Run the L2/L3 patience cascade + L3 force-trigger heal on L2 validator failures.
-    Called via `escalate_or_stop` (`runner/round.py`) on the `FIRE_L2` decision.
-    """
     opt = config.optimization
     esc = cycle.escalation
 

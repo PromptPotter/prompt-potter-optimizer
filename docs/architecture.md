@@ -601,6 +601,13 @@ the PR description.
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.
+- **`RoundResult.results` duplicating `all_candidate_results[winner_id]`**
+  (`domain/results.py`) — deriving either from the other silently corrupts
+  the difficulty ruler. `exploration.build_observations` flattens
+  `all_candidate_results` across every round with no round filter and no
+  dedup, so a retained incumbent — one lineage id held across k no-winner
+  rounds — would contribute each observation k+1 times to a subset-invariant
+  fit. `all_candidate_results` means "measured in THIS round".
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
   injections**
   (`application/optimization/dispatch/injections/catalogues.py`) — the

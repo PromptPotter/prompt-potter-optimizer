@@ -1,11 +1,5 @@
-"""Per-round formula compiler.
-
-Returns a ``RoundScorer`` callable over the per-round evaluator-name map. A name the map
-doesn't carry is an **unmeasured term**, not a zero: the registry omits an evaluator's key
-when it had nothing to measure (``evaluators.py`` — a round with no latency samples has no
-``latency_norm``), so a formula naming it must halt loud rather than score the round on a
-default nobody measured.
-"""
+"""Per-round formula compiler. A name the map lacks is an UNMEASURED term, not a zero — the registry omits an evaluator's
+key when it had nothing to measure, so a formula naming it halts rather than scoring on a default nobody measured."""
 
 from __future__ import annotations
 

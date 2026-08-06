@@ -1,17 +1,5 @@
-"""``ProjectionEnvelope`` — the wire frame for outbound SSE projections.
-
-The closed outbound set declared in ``docs/specs/m12-events-asyncapi.yaml``.
-Every Server-Sent Events frame on the cycle stream is a ``ProjectionEnvelope``
-(security box 13). The envelope wraps either a ledger ``CycleRecord``
-(``kind`` = its ``record_type``) or a projection-synthesized payload
-(``stream_snapshot`` at subscribe time).
-
-``sequence`` is the ledger offset at which the underlying record was
-appended; subscribers detect gaps by sequence and request replay from
-``GET /campaigns/{c}/cycles/{cy}/ray`` — the family-wide chronology.
-``cycle_id`` redundantly stamps the target cycle so multi-cycle clients can
-demultiplex a fan-in subscription.
-"""
+"""The closed outbound SSE set declared in ``docs/specs/m12-events-asyncapi.yaml``. ``sequence`` is the ledger
+offset — a subscriber detects gaps by it and replays from the family ray, never via a ``since=`` on the tail."""
 
 from __future__ import annotations
 
@@ -59,12 +47,8 @@ ProjectionKind = Literal[
 
 
 class ProjectionEnvelope(StrictModel):
-    """One outbound SSE frame.
-
-    Frozen wire shape — receivers MUST treat unknown future fields as a
-    drift signal, not as forward-compat slack. New fields require an
-    AsyncAPI YAML update first (security box 1).
-    """
+    """One outbound SSE frame. Frozen wire shape — a receiver MUST treat an unknown field as a DRIFT SIGNAL, not as
+    forward-compat slack, and a new field requires the AsyncAPI update first."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -1,15 +1,5 @@
-"""Composite ``Stores`` bundle + content-addressed ``OptimizerCallCache``, and the
-descent that reaches a nested one.
-
-Cache is SHA-256-keyed, cross-cycle/cross-fork; file-per-record at
-``<base_dir>/archive/optimizer_calls/{hash}.json`` (mirror of MeasurementArchive).
-
-:func:`inner_sandbox_store` / :func:`descend_store` / :func:`resolve_cycle_path` live
-here because they CONSTRUCT stores — they are :func:`build_stores` re-entered at a
-deeper root, not request plumbing. Keep them out of the FastAPI dep module: a
-``store/`` view could then not recurse without an ``infrastructure -> presentation``
-import.
-"""
+"""The store CONSTRUCTORS live here rather than in the FastAPI dep module — a ``store/`` view
+could then not recurse without an ``infrastructure -> presentation`` import."""
 
 from __future__ import annotations
 
@@ -55,12 +45,8 @@ def hash_call(
     response_model: str | None = None,
     seed: int | None = None,
 ) -> str:
-    """SHA-256 (24 hex) of byte-identical LLM-call inputs.
-
-    ``response_model`` (Pydantic ``__name__``) in the key lets typed + dict
-    responses cohabit without colliding. ``seed`` is a decoding input like
-    ``temperature`` — omitting it would serve one seed's answer to another.
-    """
+    """``response_model`` in the key lets typed and dict responses cohabit. ``seed`` is a decoding
+    input like ``temperature`` — omitting it would serve one seed's answer to another."""
     blob = json.dumps(
         {
             "messages": messages,
@@ -89,51 +75,17 @@ class OptimizerCallCache:
         return self._dir() / f"{key}.json"
 
     def load(self, key: str) -> dict[str, Any] | None:
-        """Return the cached ``LLMResponse.model_dump()`` dict, or ``None``."""
         return read_json_optional(self._path(key))
 
     def save(self, key: str, value: dict[str, Any]) -> None:
-        """Persist ``value`` under ``key``. ``value`` is ``LLMResponse.model_dump()``."""
         write_json(self._path(key), value)
         logger.debug("OptimizerCallCache: saved %s", key)
 
 
 @dataclass(frozen=True)
 class Stores:
-    """Composite of focused stores rooted at the tenant ``base_dir``.
-
-    Sessions + campaigns are peer trees under the tenant; campaign records its
-    parent session via ``index.json::parent_session_id``. Construct via :func:`build_stores`.
-
-    ``identity`` carries the full Stage-0 :class:`IdentityContext` — read
-    ``identity.tenant_id`` for the tenant slug. There is no ``Stores.tenant_id``
-    field (per identity-foundation no-drift gate #4: ``IdentityContext.tenant_id``
-    is the only source of tenant scope).
-
-    ``projects_root`` is the parent-of-all-tenant-dirs; ``base_dir`` is this tenant's
-    own root under it, a :data:`WorkspaceDir` (``store/layout.py::tenant_workspace``
-    owns the relation — do not re-derive it, and do not re-walk ``base_dir.parent``).
-    The two differ by one segment and are both ``Path`` on disk, which is why the
-    newtype exists: everything keyed on a tenant — the active-session pointer, the
-    workspace ledger, every ``*_dir_for`` builder — takes ``base_dir``, and passing
-    ``projects_root`` there is now a type error rather than a silent tenant escape.
-
-    ``shared_root`` is the workspace root holding the two CONTENT-ADDRESSED caches
-    (``archive`` + ``optimizer_calls``). It equals ``projects_root`` for every normal
-    run and DIVERGES only inside an L4 inner sandbox, where campaign state is rooted at
-    ``.inner/<key>`` but the caches must stay tenant-global. Keys are content
-    hashes, so a hit is the same measurement by construction — isolating them would not
-    make a run safer, only re-pay for it (and redraw the origin's stochastic score, which
-    the outer fitness subtracts). It is a field rather than a re-walk of ``projects_root``
-    so it survives recursion: an L5 sandbox reads its parent's ``shared_root``, not its own.
-
-    ``benchmarks_root`` is the install-global benchmark DEFINITIONS dir (repo
-    benchmarks, shared across tenants) — and **read-only**: under a wheel it resolves
-    inside ``site-packages`` (``config/paths.py::benchmark_datasets_root``). Nothing
-    writes there; a benchmark's materialized rows are the operator's and land in the
-    tenant tree. Access is capability-gated — go through ``store/dataset_access.py``,
-    never read this path directly from a handler.
-    """
+    """``base_dir`` is this tenant's own root and a ``WorkspaceDir``, not ``projects_root`` one
+    segment up: everything keyed on a tenant takes it, so a mix-up is a type error, not an escape."""
 
     base_dir: WorkspaceDir
     projects_root: Path
@@ -163,27 +115,8 @@ def build_stores(
     benchmarks_root: Path | None = None,
     shared_root: Path | None = None,
 ) -> Stores:
-    """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
-
-    ``projects_root`` is REQUIRED, and that is the whole point: defaulted to the
-    process-global ``DEFAULT_PROJECTS_ROOT`` it goes unpassed by nearly every caller, and
-    a store built anywhere inside an L4 sandbox silently addresses the operator's real
-    workspace. An entry point that genuinely means the process-global workspace says so
-    out loud, and every caller downstream of one is forced by mypy to pass the root it
-    already holds. The tenant slug rides
-    ``identity.tenant_id``; use :func:`~promptpotter.shared.identity.default_identity`
-    for Stage-0 single-operator callers.
-
-    ``benchmarks_root`` defaults to the install-global benchmark definitions
-    (``<repo>/datasets`` in a checkout, ``assets/benchmarks/`` under a wheel) — that one
-    is a property of the INSTALL, not of the workspace, so it has no tenant to escape.
-
-    ``shared_root`` roots the two content-addressed caches (``archive`` +
-    ``optimizer_calls``) somewhere other than ``projects_root``. Its ONE caller is the
-    L4 inner sandbox (``runner/inner``), which must isolate campaign STATE without
-    isolating the tenant-global measurement cache. Omit it and the caches sit under
-    ``projects_root``, as they do for every non-recursive run.
-    """
+    """``projects_root`` is REQUIRED on purpose — defaulted, it goes unpassed, and a store built
+    inside an L4 sandbox then silently addresses the operator's real workspace."""
     root = projects_root
     tenant_dir = tenant_workspace(root, identity.tenant_id)
     shared = shared_root if shared_root is not None else root
@@ -211,28 +144,8 @@ def build_stores(
 def inner_sandbox_store(
     stores: Stores, outer_campaign_id: str, outer_cycle_id: str
 ) -> Stores | None:
-    """A :class:`Stores` rooted at the inner sandbox of ``(outer_campaign_id, outer_cycle_id)``.
-
-    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under a flat,
-    off-registry sandbox. That sandbox is structurally a normal projects tree, so pointing
-    :func:`build_stores` at it lets every existing read work verbatim. ``None`` when the
-    cycle spawned no inner campaigns (non-L4, or the loop hasn't recursed yet) — callers
-    degrade to an empty list / 404, never an error.
-
-    **The campaign is half of the key, not decoration.** ``cycle_id`` is content-addressed
-    on the origin and so is shared by every campaign minted from it; keyed on the cycle
-    alone, two campaigns on one origin served each other's inner fan-out through
-    ``?descend=`` / ``/tree`` / ``events:subscribe``. :func:`descend_store` validated
-    ``hop.campaign_id`` and then dropped it — the caller always knew, the key just refused
-    to take it.
-
-    Anchored on ``shared_root`` — the REAL workspace root, invariant across depth — exactly
-    as the writer is, and carried into the sandbox store for the same reason.
-    ``projects_root`` is NOT a valid anchor: inside a sandbox it already IS the sandbox, so
-    an L5 hop would read ``.inner/.inner/…`` while the writer wrote one level up, and the
-    sandbox's ``archive`` + ``optimizer_calls`` would root under the sandbox instead of
-    staying tenant-global. The two roots coincide at depth 1, which is why neither had fired.
-    """
+    """The campaign is half of the key, not decoration. Anchored on ``shared_root`` — the real
+    workspace root, invariant across depth — exactly as the writer is."""
     sandbox_root = inner_sandbox_dir(
         stores.shared_root,
         str(stores.tenant_id),
@@ -244,15 +157,8 @@ def inner_sandbox_store(
 
 
 def descend_store(stores: Stores, hops: CyclePath) -> Stores:
-    """Fold ``.inner/<key>`` over *hops* — THE recursive step, and the one
-    place a nested store is reached.
-
-    Each hop descends INTO that hop's cycle, so the returned store is the one whose
-    tree contains the hop chain's last sandbox; ``()`` is the caller's own store.
-    :func:`inner_sandbox_store` is re-entrant, so depth is unbounded by construction
-    (L4, L5, … all fold identically). Every component is char-validated before any
-    filesystem touch (400 on bad chars); a missing sandbox is a 404.
-    """
+    """THE recursive step. Each hop descends INTO that hop's cycle and ``()`` is the caller's own
+    store; :func:`inner_sandbox_store` is re-entrant, so depth is unbounded by construction."""
     cur = stores
     for hop in hops:
         try:
@@ -268,12 +174,8 @@ def descend_store(stores: Stores, hops: CyclePath) -> Stores:
 
 
 def resolve_cycle_path(stores: Stores, path: CyclePath) -> tuple[Stores, CycleHop]:
-    """Resolve a :data:`CyclePath` (root → leaf) to ``(Stores, leaf)``.
-
-    What makes an inner cycle addressable exactly like a top-level one: the leaf
-    names an entity, and every hop before it is a descent (:func:`descend_store`).
-    Hop 0 is a cycle in the caller's own tree.
-    """
+    """What makes an inner cycle addressable exactly like a top-level one: the leaf names an entity
+    and every hop before it is a descent. Hop 0 is a cycle in the caller's own tree."""
     if not path:
         raise BadRequestError("empty cycle path")
     leaf = path[-1]

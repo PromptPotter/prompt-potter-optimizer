@@ -32,11 +32,8 @@ __all__ = [
 
 
 def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
-    """The ONE ``BackendClient`` construction — every wire fact comes off the connector.
-
-    Transport, payload shape, session AND credential are per-backend facts, so they are
-    all read from the one place that declares them.
-    """
+    """The ONE ``BackendClient`` construction — every wire fact comes off the connector. Transport, payload shape, session
+    and credential are all per-backend, so they are read from the one place that declares them."""
     return BackendClient(
         base_url,
         wire_adapter=connector.wire_adapter,
@@ -48,15 +45,8 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
 
 
 def _is_session_error(resp: httpx.Response) -> bool:
-    """True when a 400 body signals a missing/invalid session (→ recover + retry).
-
-    The session-loss contract over the PP↔backend highway: the backend either
-    stamps a machine-readable ``code: "no_session"`` (the stable signal — survives
-    message rewording) OR carries the word ``session`` in its human message. We
-    accept either, and across both error envelopes — TermNorm's
-    ``{"status","message","code"}`` and FastAPI's default ``{"detail": …}`` — so a
-    backend restart/reload (which wipes the in-memory session, e.g. on every
-    ``--reload``) self-heals instead of aborting the round."""
+    """True when a 400 body signals a missing session (→ recover + retry). Accepts either the machine-readable ``no_session`` code or the
+    word in the message, across BOTH error envelopes, so a backend reload self-heals instead of aborting the round."""
     try:
         body = resp.json()
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -106,16 +96,11 @@ class BackendClient:
 
     @property
     def http(self) -> httpx.AsyncClient:
-        """Public accessor for the shared httpx client.
-
-        Used by init-side helpers (e.g. connector revision check) that
-        need the same authenticated client without round-tripping through
-        ``BackendClient``'s own methods.
-        """
+        """Public accessor for the shared httpx client — for init-side helpers that need the same authenticated client without
+        round-tripping through ``BackendClient``'s own methods."""
         return self._get_http()
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
-        """GET ``{base_url}{path}`` and return parsed JSON."""
         kwargs: dict[str, Any] = {"params": params} if params else {}
         resp = await self._get_http().get(
             f"{self.base_url}{path}",
@@ -160,7 +145,6 @@ class BackendClient:
     # -- pipeline config ---------------------------------------------------
 
     async def fetch_pipeline(self) -> dict[str, Any]:
-        """GET /pipeline — full pipeline configuration with registry data."""
         return await self._get_json("/pipeline")
 
     # -- replay operations ------------------------------------------------

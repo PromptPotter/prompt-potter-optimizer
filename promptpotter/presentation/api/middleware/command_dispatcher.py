@@ -1,11 +1,5 @@
-"""``CommandDispatcher`` — sole writer of ``CommandRecord`` at the API seam.
-
-One order, always: validate, dedupe by ``Idempotency-Key``, append the
-``CommandRecord``, apply inline, append the ``CommandAckRecord``. Which ledger a
-kind lands on, and whether it honours ``Expected-Version``, is on each
-``dispatch_*`` method. Closed inbound set: ``docs/specs/m12-api-openapi.yaml``;
-permanent contract: ``docs/adr/0001-m12-control-plane.md``.
-"""
+"""Sole writer of ``CommandRecord`` at the API seam. One order, always: validate, dedupe by
+``Idempotency-Key``, append the record, apply inline, append the ``CommandAckRecord``."""
 
 from __future__ import annotations
 
@@ -60,12 +54,6 @@ from promptpotter.shared.identity import (
 
 
 class _DeleteCycleRejectedError(Exception):
-    """Internal signal: ``cleanup_stub_fork_if_empty`` returned ``(False, reason)``.
-
-    ``_record_and_apply`` translates this into a rejected ack + 409 response
-    so the audit trail stays on the ledger and the caller gets the guard's
-    reason in the error envelope."""
-
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -78,21 +66,14 @@ class _IdempotentMatch(StrictModel):
 
 
 def _optional_float(raw: object) -> float | None:
-    """Best-effort cast for optional `mint-campaign` / `start-run` knobs."""
     if isinstance(raw, int | float):
         return float(raw)
     return None
 
 
 def _parse_cycle_seed(raw: object) -> CycleSeed:
-    """Validate the required ``fork-cycle`` seed into a typed :class:`CycleSeed`.
-
-    Every operator fork is `operator_steered` and carries a seed (the edited
-    searchpoint + reconciled limits). The wire payload is always a fork, so the
-    C0 lineage provenance is stamped ``origin_source="fork_seed"`` here (the wire
-    schema `OperatorForkOverride` doesn't carry it). A missing or malformed seed
-    is a 422 (the typed schema is the contract; `ConfigOverrides` bounds ride
-    `m12-api-openapi.yaml`)."""
+    """Stamps the C0 lineage provenance ``origin_source="fork_seed"``: every operator fork
+    carries a seed, and the wire schema ``OperatorForkOverride`` does not carry the tag."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")
     try:
@@ -102,22 +83,16 @@ def _parse_cycle_seed(raw: object) -> CycleSeed:
 
 
 def _slugify_backend_id(name: str) -> str:
-    """Lowercase + collapse non-alphanumerics into hyphens; strip ends.
-
-    Mirrors the auto-derivation that ``POST /backends`` used pre-migration;
-    documented in ``RegisterBackendPayload.id`` ("auto-derived from `name`
-    when omitted")."""
+    """Mirrors the auto-derivation ``RegisterBackendPayload.id`` documents — "auto-derived
+    from `name` when omitted"."""
     return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
 
 
 def _find_idempotent_command(
     ledger: CycleEventLog, idempotency_key: str
 ) -> _IdempotentMatch | None:
-    """Scan the ledger for a prior ``CommandRecord`` with the same key.
-
-    O(n) over the cycle ledger; acceptable for the lifecycle + sanctioned-POST
-    paths (a cycle ledger holds thousands of records, not millions, and
-    commands are operator-paced)."""
+    """O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
+    commands are operator-paced."""
     for offset, record in enumerate(ledger.iter()):
         if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
             return _IdempotentMatch(command_id=record.command_id, offset=offset)
@@ -209,25 +184,13 @@ class CommandAcceptedBody(StrictModel):
 
 @dataclass(frozen=True, slots=True)
 class CommandOutcome:
-    """A dispatched command's audit body plus the applier's value.
-
-    ``result`` is ``None`` for the 202 kinds and a domain object for the check-in
-    kinds, whose 200 bodies are declared in ``m12-api-openapi.yaml``. Carrying it
-    here is what let those three stop bypassing the dispatcher — each applied
-    inline purely so it could return something.
-    """
-
     accepted: CommandAcceptedBody
     result: Any = None
 
 
 class CommandDispatcher:
-    """One per request. Carries the request-scoped ``Stores`` (identity-bound).
-
-    ``job_registry`` is the process-wide singleton (stashed on
-    ``app.state.job_registry`` at startup); required when dispatching
-    the launcher commands ``mint-campaign`` / ``start-run``.
-    """
+    """One per request, carrying the request-scoped ``Stores``. ``job_registry`` is the
+    process-wide singleton stashed on ``app.state.job_registry`` at startup."""
 
     def __init__(self, stores: Stores, job_registry: Any | None = None) -> None:
         self._stores = stores
@@ -245,21 +208,8 @@ class CommandDispatcher:
         idempotency_key: str,
         keep_results: bool = False,
     ) -> CommandOutcome:
-        """Workspace-scoped inline-apply dispatch for campaign lifecycle commands.
-
-        The ``CommandRecord`` lands on the WORKSPACE ledger
-        (``projects/{tenant}/.workspace/events.jsonl``), not the campaign's own —
-        ``archive`` MOVES that tree into the recycle bin and ``delete`` REMOVES it,
-        so the campaign's own ledger can't be the audit home. Owner-gated by
-        ``Stores.identity`` (cross-user reads 404, not 403).
-
-        There is no active-campaign pre-check here, and its absence is the fix. One
-        stood at this line refusing any campaign the pointer named — telling the
-        operator to "switch first", a gesture that exists in neither the command
-        vocabulary nor the webapp. The store's own guard was corrected to refuse only a
-        LIVE producer and to RELEASE the pointer otherwise, but this copy sat in front
-        of it, so both webapp buttons and both CLI verbs stayed dead while the
-        store-level test passed."""
+        """The ``CommandRecord`` lands on the WORKSPACE ledger because ``archive`` MOVES the
+        campaign tree and ``delete`` REMOVES it — its own ledger cannot be the audit home."""
         self._load_owned_campaign(campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
@@ -278,12 +228,8 @@ class CommandDispatcher:
         allowed_models: list[str],
         idempotency_key: str,
     ) -> CommandOutcome:
-        """Campaign-scoped IN-PLACE config edit — rewrites the frozen ``allowed_models``
-        allow-list, the single source of truth both the fork cap-gate (``campaign.config``)
-        and the runner's grade-C stamp (via ``apply_inherited_overlay``) read. The campaign
-        stays in place, so — unlike lifecycle — the ``CommandRecord`` is a normal admin
-        edit; it lands on the WORKSPACE ledger (the campaign-scoped audit home). Owner-gated
-        via ``CAP_FOR_KIND`` at ``_record_and_apply`` (``CAMPAIGN_LIFECYCLE_CAP``)."""
+        """Rewrites the frozen ``allowed_models`` that both the fork cap-gate and the runner's
+        grade-C stamp read. In place, so its record is an ordinary workspace-ledger admin edit."""
         self._load_owned_campaign(campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
@@ -297,7 +243,6 @@ class CommandDispatcher:
     def _apply_set_allowed_models(
         self, campaign_id: str, allowed_models: list[str]
     ) -> dict[str, Any]:
-        """Write the frozen snapshot's allow-list; echo the applied value for the ack."""
         self._stores.campaigns.set_allowed_models(campaign_id, allowed_models)
         return {"campaign_id": campaign_id, "allowed_models": list(allowed_models)}
 
@@ -314,8 +259,8 @@ class CommandDispatcher:
         idempotency_key: str,
         expected_version: int | None,
     ) -> CommandOutcome:
-        """Cycle-scoped inline-apply dispatch. ``Expected-Version`` validated
-        when present; absent header skips the check (v0 relaxation)."""
+        """``Expected-Version`` is checked only when the header is present — the v0 relaxation of
+        ADR-0001, which mandates it."""
         campaign = self._load_owned_campaign(campaign_id)
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
         cycle_dir = self._stores.campaigns.cycle_dir(hop)
@@ -359,25 +304,8 @@ class CommandDispatcher:
         hop: CycleHop,
         idempotency_key: str,
     ) -> CommandOutcome:
-        """delete-cycle writes its audit trail on the campaign's root cycle
-        ledger — the target cycle's own ledger goes away as part of the apply.
-
-        **The guard here is LIVENESS, not activeness — the two are the inverted pair.**
-        Refusing whenever the target is the ACTIVE cycle ("switch first" — a gesture in
-        neither the command vocabulary nor the webapp) checks nothing about whether a
-        producer is writing into the dir about to be removed. ``try_delete_stub_cycle``
-        only ever removes a cycle with ``n_rounds == 0``, which is *precisely* the
-        just-minted window before round 1 commits, so the one deletion this verb can
-        perform is the one most likely to be live. Being the cycle you happen to be
-        looking at is not a hazard: the pointer is retargeted to the parent, exactly as
-        the runner's own stub cleanup does, through that same single helper.
-
-        Liveness lives at this entry rather than inside the store method because the two
-        callers differ in what they know. This one is a third party asking about someone
-        else's run. The runner's is the OWNER, calling immediately after its own process
-        stopped — inside ``RUN_FRESH_S`` of the index write that makes a just-minted stub
-        read ``running``, so a refusal down there would block the cleanup it exists for.
-        """
+        """Liveness, not activeness — and gated HERE rather than in the store, because the runner
+        calls the same helper as the OWNER, inside ``RUN_FRESH_S`` of its own index write."""
         if hop.cycle_id in self._stores.campaigns.live_cycle_ids(hop.campaign_id):
             raise ConflictError(
                 f"refusing to delete {hop.cycle_id}: it has a live producer — pause or stop it first"
@@ -420,10 +348,6 @@ class CommandDispatcher:
         payload: dict[str, Any],
         idempotency_key: str,
     ) -> CommandOutcome:
-        """Tenant-scoped inline-apply dispatch — backend-registry mutations
-        that have no cycle target. ``CommandRecord`` lands on the workspace
-        ledger (``projects/{tenant}/.workspace/events.jsonl``) per the §0
-        Persistence sibling. No ``Expected-Version``."""
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         applier: Applier
         if kind == "register-backend":
@@ -457,20 +381,8 @@ class CommandDispatcher:
         dedupe: bool = True,
         effect_fn: Callable[[], dict[str, Any]] | None = None,
     ) -> CommandOutcome:
-        """Inline-apply dispatch for the three commands that author an origin.
-
-        Target is the check-in campaign's root cycle — ``cycle_chk_*``, minted with
-        its own ``.runtime/`` by ``mint_checkin_skeleton`` and retained across the
-        flip to ``active``, so an origin edit lands on the same ledger the run later
-        appends its rounds to and a fork inherits it via ``inherit_from``. No
-        ``Expected-Version`` — a draft is authored, not raced.
-
-        ``on_replay`` rebuilds the 200 body from disk on a deduped
-        ``Idempotency-Key`` retry (``draft.json`` + ``cache.json::resolution``
-        reconstruct both draft verbs exactly). ``start-checkin`` alone passes
-        ``dedupe=False``: its ``job_id`` has no disk home, and the ``checkin →
-        active`` lifecycle is already the retry guard.
-        """
+        """``on_replay`` rebuilds the 200 body from disk on a deduped retry. ``start-checkin``
+        alone passes ``dedupe=False`` — its ``job_id`` has no disk home."""
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
         if not CycleLayout(cycle_dir).manifest.is_file():
@@ -725,8 +637,6 @@ class CommandDispatcher:
             )
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
-        """Mint a ``BackendConnection`` from the request payload and persist
-        it via ``BackendStore.register``. Duplicate id surfaces as 409."""
         name = str(payload["name"])
         backend_type = str(payload["backend_type"])
         base_url = str(payload["base_url"])
@@ -750,33 +660,21 @@ class CommandDispatcher:
         )
 
     def _apply_skip_searchpoint(self, hop: CycleHop) -> None:
-        """Write a one-shot ``.runtime/skip.flag``; ``Session.skip_check`` polls it at
-        the next per-sample checkpoint, accepts the partial searchpoint, consumes the
-        flag, and the cycle keeps running. A manual skip is a human intervention — the
-        cycle is marked ``human_intervened`` (no longer purely reproducible)."""
+        """``Session.skip_check`` consumes the flag at the next per-sample checkpoint and the cycle
+        keeps running, marked ``human_intervened`` — no longer purely reproducible."""
         flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).skip_flag
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
         self._stores.campaigns.mark_human_intervened(hop, kind="skip", at=utcnow_iso())
 
     def _apply_pause_cycle(self, hop: CycleHop) -> None:
-        """Write ``.runtime/pause.flag`` — the single operator-interrupt flag.
-        ``Session.pause_check`` polls it at the next checkpoint; the worker then
-        exits cleanly and the cycle stays resumable (``_finalize_run`` skips
-        terminal marking on ``StopReason.PAUSED``). Resuming is the ``start-run``
-        / ``resume`` launcher relaunching from the last completed round — not an
-        in-place flag delete, since the worker is gone. Idempotent."""
         flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).pause_flag
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
     def _apply_origin_gate_decision(self, hop: CycleHop, decision: str) -> None:
-        """Write ``.runtime/gate_decision.json`` (``{decision}``); the runner's
-        origin-gate wait-loop polls it (``run_origin_gate``) and acts: ``rescore``
-        re-scores force-fresh and re-evaluates the gate in place, ``proceed`` enters
-        L1, ``abort`` ends the cycle with ``StopReason.ORIGIN_GATE``. The one
-        decision channel all three surfaces write; the runner clears the file after
-        consuming it. Last write wins."""
+        """The one decision channel all three surfaces write; ``run_origin_gate`` polls it, acts
+        (rescore / proceed / abort) and clears the file. Last write wins."""
         gate_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).gate_decision
         gate_path.parent.mkdir(parents=True, exist_ok=True)
         write_json(gate_path, {"decision": decision})
@@ -788,11 +686,8 @@ class CommandDispatcher:
         max_usd: float | None,
         max_tokens: int | None,
     ) -> None:
-        """Write ``.runtime/spend_cap.json`` (``{max_usd, max_tokens}``); the
-        round loop's BudgetGate re-reads it every clean round. A ``None`` arg
-        leaves that ceiling untouched (merge into the existing file). Setting a
-        ceiling to ``0`` halts at the next round boundary; raising above current
-        usage releases."""
+        """The round loop's BudgetGate re-reads this every clean round. A ``None`` arg leaves that
+        ceiling untouched; ``0`` halts at the next round boundary."""
         cap_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).spend_cap
         cap_path.parent.mkdir(parents=True, exist_ok=True)
         caps: dict[str, float | int] = {}
@@ -806,15 +701,8 @@ class CommandDispatcher:
         write_json(cap_path, caps)
 
     async def _apply_mint_campaign(self, payload: dict[str, Any]) -> None:
-        """Mint a fresh campaign + cycle and spawn the runner in background.
-
-        The 202 returns as soon as ``auto_mint_session`` writes the campaign
-        manifest + root cycle index; the run proceeds via JobRegistry. The
-        webapp discovers the new ids by polling ``/api/v1/active``.
-
-        ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
-        for the central 503 mapping (R2).
-        """
+        """The 202 returns once the manifest + root cycle index are written; the run proceeds via
+        JobRegistry and the webapp discovers the new ids by polling ``/api/v1/active``."""
         from promptpotter.application.jobs.launcher.mint_and_start import mint_campaign_command
 
         if self._job_registry is None:
@@ -843,12 +731,7 @@ class CommandDispatcher:
         spend_budget_usd: float | None,
         stop_after_rounds: int | None = None,
     ) -> None:
-        """Spawn the runner against an existing cycle. ``kind`` ∈ {new, resume}.
-        ``stop_after_rounds`` bounds it to that many rounds in place (``step-round``).
-
-        ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
-        for the central 503 mapping (R2).
-        """
+        """``stop_after_rounds`` bounds the run in place — the ``step-round`` verb's mechanism."""
         from promptpotter.application.jobs.launcher.mint_and_start import start_run_command
 
         if self._job_registry is None:
@@ -868,9 +751,6 @@ class CommandDispatcher:
         )
 
     def _apply_cleanup_empty(self, hop: CycleHop) -> None:
-        """Batch-delete every empty-stub sibling under ``root_cycle_id(cycle_id)``;
-        leaves-first via two passes. Reasons for skipped entries surface via
-        the audit ack detail string."""
         root_id = root_cycle_id(hop.cycle_id)
         _, active_cmp, active_cid = read_active_pointer(self._stores.base_dir)
         deleted_ids: list[str] = []
@@ -902,23 +782,16 @@ class CommandDispatcher:
     # Helpers
     # ------------------------------------------------------------------
     def _acting_principal_id(self) -> str:
-        """The id recorded as a command's issuer. For a delegated sub-principal
-        (ADR-0005) that is its own `claims["principal"]`, not the delegator whose
-        tenant it acts in — so the audit trail names the real actor."""
+        """For a delegated sub-principal (ADR-0005) this is its own ``claims["principal"]``, not
+        the delegator whose tenant it acts in — so the audit trail names the real actor."""
         principal = self._stores.identity.claims.get("principal")
         if isinstance(principal, str) and principal:
             return principal
         return str(self._stores.identity.user_id)
 
     def _require_capability_for(self, kind: str) -> None:
-        """Per-verb capability gate — the one seam every command funnels through.
-
-        Maps the closed command *kind* to its tier capability (``CAP_FOR_KIND``)
-        and checks the request identity holds it. Absence raises 404 — the
-        existence-hiding posture the cross-user reads use: a principal without the
-        cap is told the verb does not exist, never 403. A tenant owner holds every
-        tier; a delegated sub-principal an attenuated subset.
-        """
+        """Absence raises 404, never 403 — the existence-hiding posture cross-user reads use.
+        A tenant owner holds every tier; a delegated sub-principal an attenuated subset."""
         cap = CAP_FOR_KIND.get(kind)
         if cap is None or not has_capability(self._stores.identity, cap):
             logger.warning(

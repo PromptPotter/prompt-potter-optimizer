@@ -1,9 +1,5 @@
-"""Observability bridge — fans events from :mod:`events` to file + Langfuse + MLflow sinks
-under :func:`graceful` so observability never crashes the loop.
-
-LangfuseSink persists id state to ``campaigns/{cycle_id}/langfuse/state.json``
-after every mutation so CLI-interrupted resumes produce one continuous trace.
-"""
+"""Observability bridge — fans events to file + Langfuse + MLflow under :func:`graceful`, so observability never crashes
+the loop. Langfuse id state persists after every mutation, so an interrupted resume produces one continuous trace."""
 
 from __future__ import annotations
 
@@ -106,13 +102,8 @@ class ObservabilityBridge:
         )
 
     def _fan(self, event: _E, *handlers: tuple[str, Callable[[_E], None] | None]) -> None:
-        """Call each sink handler bound to ``event`` under :func:`graceful`.
-
-        Handlers are passed as literal bound-method references by :meth:`emit`, so a
-        sink's participation in an event is greppable at the call site (and its absence
-        from an arm means it genuinely isn't called — no silent ``getattr`` skip). A
-        ``None`` handler is a disabled optional sink (Langfuse / MLflow off).
-        """
+        """Call each sink handler bound to ``event`` under :func:`graceful`. Handlers are passed as literal bound methods, so a
+        sink's participation is greppable and its ABSENCE from an arm means it genuinely isn't called — no silent skip."""
         for label, fn in handlers:
             if fn is None:
                 continue
@@ -226,7 +217,6 @@ class ObservabilityBridge:
     def register_dataset(
         self, dataset_name: str, dataset: Sequence[Sample | dict[str, Any]]
     ) -> dict[str, str]:
-        """Emit ``DatasetRegistered``, return ``{query: file_item_id}``."""
         if not self._enabled:
             return {}
 
@@ -263,8 +253,6 @@ class ObservabilityBridge:
         langfuse_session_id: str | None,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge | None:
-        """Build a bridge, emit ``CampaignStart``, register the dataset."""
-
         if not (tenant_root and backend_id):
             return None
 
@@ -302,7 +290,6 @@ class ObservabilityBridge:
         stop_reason: str,
         best_round: int,
     ) -> str | None:
-        """Emit ``CampaignEnd``, flush, return the Langfuse trace id."""
         langfuse_trace_id: str | None = None
         with graceful("Bridge campaign end failed"):
             self.emit(
@@ -329,7 +316,6 @@ async def observed_node(
     round_num: int,
     as_type: str = "generation",
 ) -> AsyncIterator[NodeTrace]:
-    """Time a node and emit ``NodeStart`` / ``NodeEnd`` (Langfuse generation or span observation) around the body."""
     trace = NodeTrace()
     opened = False
 

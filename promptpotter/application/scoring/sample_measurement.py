@@ -85,7 +85,6 @@ def interpolate_pipeline_params(
     pipeline_params: dict[str, Any],
     query_data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Return a shallow copy of *pipeline_params* with prompts interpolated."""
     has_templates = False
     for v in pipeline_params.values():
         if isinstance(v, dict) and "prompt" in v:
@@ -138,12 +137,8 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 
 
 class StepTokenUsage(TypedDict):
-    """Per-LLM-node ``step_tokens`` entry. The ``NotRequired`` keys are forwarded
-    from the backend wire only when the provider surfaced them (TermNorm
-    ``record_step_tokens``); absent on estimated-fallback entries. ``finish_reason``
-    + ``reasoning`` are the raw response shape ``classify_result`` reads to tell a
-    truncation (route to infra, don't fast-eliminate at n=1) from a genuinely empty
-    response (fatal)."""
+    """Per-LLM-node ``step_tokens`` entry; the ``NotRequired`` keys arrive only when the provider
+    surfaced them. ``finish_reason`` + ``reasoning`` are what ``classify_result`` reads."""
 
     input: int
     output: int
@@ -161,14 +156,8 @@ def emit_step_token_usage(
     *,
     cached: bool,
 ) -> None:
-    """Fan one sample's per-node backend token usage onto the canonical ledger.
-
-    Called on BOTH measurement paths: a fresh backend call (``cached=False``) and a
-    measurement-cache hit (``cached=True``, metered from the archived row's own
-    ``step_tokens``, which survive ``_materialize_cached`` intact). A hit spent no
-    money but the search still made the call, and only metering the misses would make
-    an outer arm's cost depend on our cache history rather than on the arm.
-    """
+    """Fan one sample's per-node backend token usage onto the ledger, on BOTH paths. A cache hit
+    spent no money but the search still made the call, so metering only misses prices our cache."""
     for node_name, entry in step_tokens.items():
         in_tok = entry["input"]
         out_tok = entry["output"]
@@ -197,28 +186,13 @@ def _compute_step_tokens(
     pipeline_schema: PipelineSchema,
     wire_params: dict[str, Any],
 ) -> dict[str, StepTokenUsage]:
-    """Collect per-LLM-node token counts from the backend response.
-
-    Seeds from ``resp_data["step_tokens"]`` when the backend provides it
-    (marks each entry ``estimated=False``). For any LLM node still missing
-    a count, falls back to a chars/4 heuristic over the interpolated prompt
-    and the node's observed output text (marks ``estimated=True``).
-
-    Every entry carries the node's ``model``: the backend's upstream id when it
-    reports one, else the model the overlay pinned for that node
-    (``wire_params[node]["model"]`` — the dataset OWNS its task model, so this is
-    never absent for an LLM node). Downstream reads ``entry["model"]`` directly.
-
-    Returns an empty dict when the schema carries no LLM nodes.
-    """
+    """Per-LLM-node token counts, seeded from the backend's own ``step_tokens`` and falling back to
+    a chars/4 heuristic. Every entry carries the node's ``model`` — the overlay always pinned one."""
     out: dict[str, StepTokenUsage] = {}
 
     def _configured(node_name: str, key: str) -> str | None:
-        """A string the dataset overlay pinned for this node — ``model`` or ``provider``.
-
-        Both are mandatory on an LLM node, and neither is guessable downstream: the
-        provider is half of a price (``shared/spend.py::lookup_rate``), so a node whose
-        provider is dropped here is billed by whichever vendor's key happens to match."""
+        """A string the dataset overlay pinned for this node. Neither ``model`` nor ``provider`` is
+        guessable downstream: the provider is half of a price, so dropping it bills the wrong vendor."""
         cfg = wire_params.get(node_name)
         value = cfg.get(key) if isinstance(cfg, dict) else None
         return value if isinstance(value, str) else None
@@ -311,13 +285,8 @@ def _error_result(
     *,
     category: ErrorCategory,
 ) -> QueryMeasurement:
-    """Build a standard error result dict.
-
-    ``category`` is the typed error channel — it owns "this sample errored"
-    (``is_error_result`` reads it); ``error`` is the plain human message.
-    Error rows intentionally carry no ``hit``/``score`` — those fields are
-    owned exclusively by ``rescore_results``, which skips error rows.
-    """
+    """``category`` is the typed error channel and owns "this sample errored"; ``error`` is the human
+    message. Error rows carry no ``hit``/``score`` — those belong to ``rescore_results`` alone."""
     return QueryMeasurement(
         sample_id=sample.id,
         query=sample.query,
@@ -331,21 +300,8 @@ def _error_result(
 
 
 def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
-    """Pull the structured upstream summary out of a backend error response.
-
-    Backends that propagate provider 4xx errors send a JSON body of shape::
-
-        {"detail": {"upstream_status": 400, "upstream_provider": "openrouter",
-                    "upstream_model": "...", "upstream_message": "...",
-                    "error_code": "..."}}
-
-    (FastAPI's ``HTTPException(detail=dict)`` serializes as ``detail`` key.)
-    When that shape is present, return a compact one-liner — the operator
-    needs to see what the upstream provider actually complained about (e.g.
-    ``"temperature: Invalid input: expected number, received string"``)
-    instead of a bare ``'502 Bad Gateway'``. Falls back to a truncated body
-    when the response isn't structured.
-    """
+    """Pull the structured upstream summary out of a backend error body, so the operator sees what
+    the provider actually complained about instead of a bare ``502 Bad Gateway``."""
     body_text = (exc.response.text or "").strip()
     if not body_text:
         return ""
@@ -369,7 +325,6 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
 
 
 def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
-    """Classify an HTTP error into ``(category, plain message)``."""
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
     if code == 429:
@@ -582,22 +537,8 @@ def _rerun_would_repeat_token_budget_failure(
     cached_result: Mapping[str, Any],
     rerun_pipeline_params: dict[str, Any] | None,
 ) -> bool:
-    """Short-circuit gate: skip the rerun branch when the cached failure was
-    a token-budget exhaustion (``finish_reason=length``) AND the rerun's
-    ``llm_only.max_tokens`` is no larger than the cached run's actual
-    output token count.
-
-    Rationale: when the LLM emits exactly its ``max_tokens`` budget and
-    still finishes ``length`` (with reasoning tokens > 0, or just truncated
-    output), the cap was binding. A rerun at the same-or-tighter budget
-    will exhaust at least as fast — burning another LLM call for the
-    same DEPR result. The stale-data ladder is built for *transient*
-    failures (rate-limit flake, model glitch); config-fundamental
-    failures don't recover and don't deserve the retry budget. The
-    ``samplescan`` branch is not gated because it runs with the schema
-    defaults, which can carry a larger ``max_tokens`` than the
-    candidate's pinch.
-    """
+    """Skip the rerun when the cached failure was a binding token budget and the rerun's cap is no
+    larger: the ladder exists for TRANSIENT failures, and a config-fundamental one will not recover."""
     from promptpotter.domain.rendering import classify_result
 
     # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is read
@@ -642,18 +583,8 @@ async def execute_stale_data_protocol(
     pipeline_params: dict[str, Any] | None = None,
     axes: AxisIndex | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Walk the stale data load protocol ladder for a degraded cached query.
-
-    Hyperparameters are module-level constants
-    (``RERUN_TRIGGER_COUNT``, ``SAMPLESWITCH_MIN_DEGRADATION_RATE``).
-
-    Observation counts come from ``axes.sample_index`` (degradation
-    tables ingested from the measurement archive at round boundaries). Within a round
-    the count is constant; no mutable state is passed through the scorer.
-
-    Returns ``(result_dict, step_taken)`` where *step_taken* is the step
-    that resolved the query, or ``"exhausted"``.
-    """
+    """Walk the stale-data ladder for a degraded cached query, returning ``(result, step_taken)``.
+    Observation counts come from ``axes.sample_index``, constant within a round — no mutable state."""
     result = cached_result
 
     for step in protocol_steps:

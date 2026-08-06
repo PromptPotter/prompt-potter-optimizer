@@ -1,15 +1,5 @@
-"""L1 behaviour checks — programmatic conformance for one round of L1 output.
-
-Each check is a pure ``(round_dict, ctx) -> CheckResult`` function with no
-I/O. ``round_dict`` is one ``.runtime/cache/rounds/round_NNNN.json`` payload as
-written by ``AuditTrailView.flush``; ``ctx`` carries the per-round
-context the check needs (prior rounds, OSP at round-start, the three
-``context_object`` items).
-
-Adding a new check is one function plus one entry in ``CHECK_REGISTRY``.
-The registry is the single source of truth, so every surface that enumerates the
-checks (``review.md``, the round-1 verdict) reads the same set.
-"""
+"""Each check is a pure ``(round_dict, ctx) -> CheckResult`` over one round's L1 output.
+``CHECK_REGISTRY`` is the single source, so every surface that enumerates them agrees."""
 
 from __future__ import annotations
 
@@ -44,13 +34,8 @@ __all__ = [
 
 
 def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Walk ``nodes.l1_generate.output.response.variants`` on a round/audit dict.
-
-    The same shape rides on both the round-summary dict (as written into
-    ``index.json::rounds[N]``) and the per-round audit dict
-    (``round_NNNN.json``); both are read by this codepath. Empty list when L1
-    didn't fire or the response is malformed.
-    """
+    """The same shape rides both the round-summary dict and the per-round audit dict, and both
+    reach this codepath. Empty list when L1 did not fire or the response is malformed."""
     if not container:
         return []
     nodes = container.get("nodes") or {}
@@ -70,18 +55,8 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class ValidatorContext:
-    """Context shared by all behaviour checks for one round.
-
-    ``prior_rounds`` are the round dicts strictly before ``round_num``,
-    in order; ``opt_sp`` is the OSP snapshot at round-start
-    (carries ``task_context`` + the live prompt fields); ``context_object``
-    is the three task-decomposition strings L1's prompt was shown.
-    ``exploration_budget`` is the round's escalation-panel exploration
-    budget (``tight`` / ``normal`` / ``wide``) — read by
-    ``evidence_grounding_present`` to gate the ``stall_exploration``
-    escape hatch. ``None`` means the wiring layer could not determine it,
-    in which case ``stall_exploration`` citations fail-open (no flag).
-    """
+    """``exploration_budget`` gates the ``stall_exploration`` escape hatch; ``None`` means the
+    wiring layer could not determine it, and those citations then fail open."""
 
     round_num: int
     prior_rounds: list[dict[str, Any]] = field(default_factory=list)
@@ -109,13 +84,8 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    """All free-form variant text checks may scan against.
-
-    The prose reaches ``variant_prose_written`` so BOTH carriers count. Reading
-    ``prompt_fields_override`` alone left an L4 variant's blob as its
-    ``changes_description`` and nothing else — a one-sentence summary against which one
-    measured "pass" was the substring ``prompt`` inside a Chinese sentence.
-    """
+    """Both carriers count — on an L4 cycle the prose rides ``changes_description`` and no
+    override slot, so scanning the overrides alone leaves a one-sentence blob to match against."""
     parts = [str(variant.get("changes_description") or "")]
     parts.extend(variant_prose_written(variant).values())
     for value in (variant.get("task_context_override") or {}).values():
@@ -124,7 +94,6 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
 
 
 def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[str]:
-    """Extract candidate noun phrases from a brief — substring-match seeds."""
     seen: list[str] = []
     for token in _PHRASE_TOKEN_RE.findall(text or ""):
         lowered = token.lower()
@@ -208,27 +177,8 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
 def _check_evidence_grounding_present(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """Each L1 variant must cite a panel field that justifies its mutation.
-
-    Per ``promptpotter/CLAUDE.md`` L1 contract: *no data justifying a choice
-    ⇒ do not gamble*. Fails when:
-
-    - ``evidence_grounding`` is missing / not a dict, or
-    - ``field`` names a panel this round's prompt did not render (including
-      ``stall_exploration`` under a ``tight`` budget), or
-    - ``citation`` is empty / whitespace, or
-    - ``citation`` quotes text that is **nowhere in the prompt L1 was shown**.
-
-    The citable set is re-derived from the round-start layout — the same
-    :func:`citable_fields` call that built the prompt's menu. Membership in a
-    hand-maintained list was checkable while the panel was absent from the prompt, which
-    is the shape of a fabricated citation the check exists to catch.
-
-    That derivation checks the NAME; the containment test checks the TEXT, and until it
-    existed a variant could name a rendered panel and quote something invented — 3 of one
-    live round's 6 citations were fabricated or misattributed and all six passed. The
-    prompt is on disk in this same round file (``nodes.l1_generate.input.template_fields``,
-    filled), so the evidence needs no new context."""
+    """Per the L1 contract: *no data justifying a choice ⇒ do not gamble*. The citable set is
+    re-derived from the round-start layout, and the citation must also QUOTE the shown prompt."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
@@ -275,12 +225,8 @@ def _check_evidence_grounding_present(
 def _check_not_only_param_variants(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """≥1 variant per round must mutate a prompt-field axis, WHEREVER it rides.
-
-    Asking for ``prompt_fields_override`` specifically read the carrier, not the axis:
-    on a cycle whose prose levers are node params (L4) that slot is structurally absent,
-    so the check failed every round in which the generator did exactly what it was told.
-    """
+    """≥1 variant per round must mutate a prompt-field axis WHEREVER it rides — asking for
+    ``prompt_fields_override`` reads the carrier, which an L4 cycle structurally lacks."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
@@ -302,15 +248,8 @@ def _check_not_only_param_variants(
 def _check_changes_description_english(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """``changes_description`` must stay in the language its optimizer prompt is written in.
-
-    It is the loop's ONLY record of what a candidate intended — every downstream reader
-    (``review.md``, the ALREADY TRIED panel, an operator triaging a round) is a reader of
-    this string. A live round returned it entirely in Chinese: the payload was still valid
-    English, every gate passed, and only the audit trail went dark. Majority non-ASCII
-    letters, so a quoted foreign term costs nothing and a wholesale flip is caught. A
-    behaviour check, not a rejection — an unreadable note is a bad record, not a bad edit.
-    """
+    """The loop's ONLY record of what a candidate intended, so every downstream reader reads this
+    string. A behaviour check, not a rejection — an unreadable note is a bad record, not a bad edit."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("changes_description_english", True, "no variants emitted")
@@ -346,18 +285,8 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
 
 
 def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
-    """Run every registered check against one round, in registry order.
-
-    **Empty list when L1 emitted NO variants** — there is nothing to score, and an absent
-    yield must not count as a conformance PASS. Every check short-circuits to
-    ``passed=True`` ("no variants emitted") on an empty variant list, so running them anyway
-    scored 4/4 and turned the worst L1 outcome — an optimizer prompt that makes its own children
-    unreadable (``RoundResult.l1_parse_failure``) — into a perfect ``behavior_pass_rate`` of
-    1.0 and a ``healthy`` round-1 verdict, which is the gate that authorises another round of
-    real spend. "Nothing to check" is not "nothing wrong".
-
-    Mirrors :func:`run_all_l2_checks`, which has always gated on whether L2 actually fired.
-    """
+    """**Empty list when L1 emitted NO variants.** Every check short-circuits to ``passed=True``
+    on an empty list, so running them anyway scores 4/4: "nothing to check" is not "nothing wrong"."""
     if not extract_l1_variants(round_dict):
         return []
     return [fn(round_dict, ctx) for fn in CHECK_REGISTRY.values()]
@@ -367,12 +296,8 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
 
 
 def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
-    """The panels this round's l1_generate prompt rendered — the same derivation that built
-    its citation menu, replayed off the round-start OSP snapshot.
-
-    Falls open to every citable panel when the snapshot carries no layout (an older round
-    file, or a wiring layer that couldn't supply one): a missing snapshot must not fail
-    every variant in the round."""
+    """The same derivation that built the round's citation menu, replayed off the round-start OSP.
+    Falls open to every citable panel when the snapshot carries no layout."""
     memory = ctx.opt_sp.get("memory") or {}
     layout = coerce_l1_layout(memory.get("l1_layout") if isinstance(memory, dict) else None)
     if layout is None:
@@ -390,30 +315,20 @@ _CITATION_MIN_RUN = 12
 
 
 def _normalize_quote(text: str) -> str:
-    """Lowercase alphanumerics joined by single spaces — the form a quote survives in.
-
-    A citation re-types a panel line, so it drifts on the things that carry no meaning:
-    line wrapping, smart quotes, an em-dash the model rendered as a hyphen. Normalizing
-    both sides means only the WORDS have to match.
-    """
+    """A citation re-types a panel line, so it drifts on what carries no meaning — wrapping, smart
+    quotes, an em-dash rendered as a hyphen. Normalizing both sides matches only the WORDS."""
     return _NORMALIZE_RE.sub(" ", text.lower()).strip()
 
 
 def _rendered_l1_prompt(round_dict: dict[str, Any]) -> str:
-    """The filled ``l1_generate`` prompt this round actually sent, normalized."""
     node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
     fields = ((node.get("input") or {}).get("template_fields")) or {}
     return _normalize_quote(" ".join(str(v) for v in fields.values() if isinstance(v, str)))
 
 
 def _citation_in_prompt(citation: str, shown: str) -> bool:
-    """Did this quote come out of the prompt? Abstains when it cannot tell.
-
-    An honest citation may ELIDE (``"…"``), so the test is the longest ellipsis-free run
-    rather than the whole string — a fabricated citation has no matching run at any length.
-    Abstains (True) when the prompt is unavailable, so an older round file or a
-    generation-only peek never fails every variant it holds.
-    """
+    """An honest citation may ELIDE, so the test is the longest ellipsis-free run. Abstains (True)
+    when the prompt is unavailable — an older round file must not fail every variant it holds."""
     if not shown:
         return True
     longest = max((_normalize_quote(part) for part in re.split(r"[.]{3}|…", citation)), key=len)
@@ -423,7 +338,6 @@ def _citation_in_prompt(citation: str, shown: str) -> bool:
 
 
 def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
-    """Why this citation is not admissible — the three cases read very differently."""
     if not field_name:
         return "no_field"
     if field_name == STALL_EXPLORATION:
@@ -451,17 +365,8 @@ _REBUT_SIGNALS: tuple[str, ...] = (
 def _cited_peaked_axis(
     variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
 ) -> str | None:
-    """Return the first peaked axis that this variant's evidence_grounding
-    + override fields appear to mutate, or None.
-
-    The match is intentionally permissive: we look for the peaked-axis
-    name as a substring in the citation OR as a key inside
-    ``pipeline_params_override`` (e.g. ``llm_only.temperature`` matches
-    ``temperature`` keyed under ``llm_only``). The validator only fires
-    when ``field_name == "axis_memory"`` — citations grounded in other
-    panels (critique, task_context, etc.) are independent evidence
-    and not rejected by this rule.
-    """
+    """Permissive on purpose — the axis name as a substring of the citation, or a key inside
+    ``pipeline_params_override``. Fires only when ``field_name == "axis_memory"``."""
     if not ctx.peaked_axes or field_name != "axis_memory":
         return None
     pp = variant.get("pipeline_params_override") or {}
@@ -482,12 +387,8 @@ def _cited_peaked_axis(
 
 
 def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> bool:
-    """True iff the variant's citation/changes_description cites a real
-    rebut for the peaked-axis guard: the critique naming the axis
-    (priority_fix / suggested_axes), or an explicit wide-exploration
-    budget. Permissive substring match — the prompt instructs L1 to name
-    the rebut verbatim.
-    """
+    """The critique naming the axis, or an explicit wide budget. Permissive substring match —
+    the prompt instructs L1 to name the rebut verbatim."""
     if ctx.exploration_budget == "wide":
         return True
     blob = " ".join(
@@ -511,11 +412,7 @@ def _touches_param_scope(pp_override: dict[str, Any]) -> bool:
 
 
 def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
-    """Return a prompt-string field name unchanged for the past 2 rounds, or None.
-
-    A field that appears in zero variants for the last two rounds is "stale"
-    and triggers the param-scope lock.
-    """
+    """A field appearing in zero variants for two rounds is stale and triggers the param-scope lock."""
     if len(ctx.prior_rounds) < 2:
         return None
     recent_two = ctx.prior_rounds[-2:]

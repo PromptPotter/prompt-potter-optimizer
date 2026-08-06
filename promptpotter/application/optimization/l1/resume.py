@@ -1,5 +1,3 @@
-"""L1 candidate loading — fresh-generate or replay-from-disk."""
-
 from __future__ import annotations
 
 import logging
@@ -45,7 +43,6 @@ async def generate_or_load_candidates(
     *,
     obs: ObservabilityBridge | None = None,
 ) -> tuple[list[CandidateProposal], L1YieldStats]:
-    """Load persisted candidates or generate fresh ones via LLM; detect no-op + duplicate variants."""
     session = cycle.session
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.

@@ -1,5 +1,3 @@
-"""Backend registration + sync + execution + connector profile."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,15 +13,8 @@ from promptpotter.infrastructure.store.io import (
 
 
 class BackendStore:
-    """Backend registration + synced API responses.
-
-    Backends: ``archive/backends/{backend_id}/``. It also held a named-dataset row
-    cache, writing ``{datasets_root}/{name}/cache.json`` outside the tenant tree —
-    which is what made the install tier have to be writable, and it is not once the
-    definitions ship inside a wheel. Rows are the operator's and now live with the
-    rest of their data (``TenantDatasetStore.save_benchmark_rows``); a HuggingFace
-    fetch was never a backend fact.
-    """
+    """Backend registration + synced API responses. It also held a named-dataset row cache OUTSIDE the tenant tree, which is
+    what made the install tier need to be writable; rows are the operator's and live with the rest of their data."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir

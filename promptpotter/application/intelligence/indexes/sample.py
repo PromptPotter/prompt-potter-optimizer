@@ -1,5 +1,3 @@
-"""SampleIndex — per-sample derived view + record dataclasses."""
-
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -14,8 +12,6 @@ from promptpotter.shared.errors import is_error_result
 
 @dataclass
 class SampleRecord:
-    """Per-sample pattern summary across measurements."""
-
     query: str
     sample_id: int
     hit_rate: float
@@ -24,24 +20,14 @@ class SampleRecord:
 
 @dataclass
 class FailureCluster:
-    """Samples grouped by shared failure reason."""
-
     failure_mode: str
     sample_count: int
     fraction: float
 
 
 class SampleIndex:
-    """Per-sample state keyed by ``sample.id: int``.
-
-    Pure derived view over the ``MeasurementArchive``: holds Sample primitives plus
-    per-sample aggregate tables, populated by :meth:`ingest_run` during ``AxisIndex.refresh``.
-
-    ``_seen_runs`` is a delta cursor over the archive, and it DOES survive the process: the
-    per-run derivation :meth:`ingest_run` returns is persisted beside the archive and replayed
-    by ``AxisIndex._seed_from_fold``, which is what stops every start re-reading and re-scoring
-    the whole dataset slice. Both paths mutate through :meth:`replay_row` so they cannot drift.
-    """
+    """Per-sample derived view over the archive. ``_seen_runs`` is a delta cursor that SURVIVES the process — the per-run derivation is
+    persisted and replayed — and both paths mutate through :meth:`replay_row` so they cannot drift."""
 
     def __init__(self) -> None:
         self._samples: dict[int, Sample] = {}
@@ -55,7 +41,6 @@ class SampleIndex:
         self._cache_records: list[SampleRecord] | None = None
 
     def register(self, sample: Sample) -> None:
-        """Register a Sample at dataset-load time."""
         self._samples[sample.id] = sample
 
     def sample(self, sample_id: int) -> Sample | None:
@@ -66,13 +51,8 @@ class SampleIndex:
         return self._samples.keys()
 
     def ingest_run(self, run_detail: dict[str, Any]) -> dict[str, Any]:
-        """Derive a measurement-archive entry into the index, returning the derived row.
-
-        The row is what the archive persists (``archive_views.write_sample_fold``) so a later
-        process can rebuild this index without re-reading and re-scoring every detail file.
-        It carries only what :meth:`replay_row` consumes — never the measurements themselves,
-        which is the difference between a fold that stays small and a second copy of the archive.
-        """
+        """Derive an archive entry into the index, RETURNING the derived row — which the archive persists, so a later process
+        rebuilds without re-scoring every detail file. It carries only what ``replay_row`` consumes, never the measurements."""
         run_id = run_detail.get("run_id", "")
         cells: list[list[Any]] = []
         new_samples: list[list[Any]] = []
@@ -130,7 +110,6 @@ class SampleIndex:
         prev_results: list[dict[str, Any]],
         new_results: list[dict[str, Any]],
     ) -> int:
-        """Record hit/miss flips between rounds; return the count."""
         prev_hits: dict[int, bool] = {}
         for r in prev_results:
             sid = r.get("sample_id")
@@ -212,7 +191,6 @@ class SampleIndex:
         include_always_hit: bool = True,
         include_always_miss: bool = True,
     ) -> list[SampleRecord]:
-        """Zero-signal samples — always-hit and/or always-miss."""
         out: list[SampleRecord] = []
         for r in self.records():
             if len(self._hits.get(r.sample_id, [])) < min_observations:
@@ -224,11 +202,9 @@ class SampleIndex:
         return out
 
     def discriminating(self, min_variance: float = 0.1) -> list[SampleRecord]:
-        """Samples whose outcome varies across configurations."""
         return [r for r in self.records() if r.variance >= min_variance]
 
     def persistent_failures(self, min_streak: int = 3) -> list[SampleRecord]:
-        """Intractable (hit_rate == 0) + chronic (failed last ``min_streak``) samples."""
         records = []
         for r in self.records():
             hits = self._hits.get(r.sample_id, [])
@@ -243,14 +219,8 @@ class SampleIndex:
         max_hits: int = 3,
         min_observations: int = 10,
     ) -> list[tuple[int, str, int, int, list[str]]]:
-        """Samples hit by ≤ ``max_hits`` candidates out of ≥ ``min_observations``.
-
-        Each rare hit is a *recipe pointer* — the one or two runs that cracked
-        a chronically-failing sample. Returns
-        ``(sample_id, query_stem, hit_count, total_observations, hit_run_ids)``
-        sorted by hit_count asc, then total desc. ``min_observations`` filters
-        out the cold-start case (one cycle, n=4) where every sample is "rare".
-        """
+        """Samples hit by ≤ ``max_hits`` candidates — each rare hit is a RECIPE POINTER to the run that cracked a
+        chronically-failing sample. ``min_observations`` filters out the cold start, where every sample looks rare."""
         out: list[tuple[int, str, int, int, list[str]]] = []
         for sid, hits in self._hits.items():
             total = len(hits)
@@ -267,7 +237,6 @@ class SampleIndex:
         return out
 
     def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
-        """Samples grouped by dominant failure mode."""
         mode_samples: dict[str, list[int]] = defaultdict(list)
         for sid, modes in self._failure_modes.items():
             if modes:

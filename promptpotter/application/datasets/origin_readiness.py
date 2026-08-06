@@ -1,12 +1,5 @@
-"""``origin_readiness`` — the deterministic gate between ingest and mint, plus the
-projection of what a draft would commit (``origin_projection`` / ``origin_delta``).
-
-Pure, no I/O. Two parties answer "is this origin complete": an LLM resolver *proposes*
-(the ``checkin`` node) and this checklist *gates* — a false ``ready`` is rejected and the
-open gaps fed back. What each item requires is on its ``_check_*`` helper. Only what the
-operator must genuinely state is gated; config carrying a sane default (connector,
-scorer, round cap, optimizer model) is not, because a default is not a hidden gap.
-"""
+"""The deterministic gate between ingest and mint. An LLM resolver PROPOSES and this checklist
+GATES; only what the operator must genuinely state is gated, since a default is not a gap."""
 
 from __future__ import annotations
 
@@ -32,12 +25,8 @@ _LLM_CALL_KEYS: frozenset[str] = PARAM_FORBIDDEN_KEYS | PARAM_SCOPE_KEYS
 
 @dataclass(frozen=True, slots=True)
 class FieldGap:
-    """One origin field that still blocks mint.
-
-    ``reason`` is ``"unset"`` (no value resolved) or ``"proposed_unconfirmed"``
-    (an inference is waiting on operator confirmation). ``hint`` is one
-    operator-facing line on how to close it.
-    """
+    """One origin field that still blocks mint. ``reason`` is ``"unset"`` or
+    ``"proposed_unconfirmed"``; ``hint`` is one operator-facing line on how to close it."""
 
     field: str
     reason: str
@@ -49,8 +38,6 @@ class FieldGap:
 
 @dataclass(frozen=True, slots=True)
 class OriginReadiness:
-    """Checklist verdict: ``complete`` iff no field still blocks mint."""
-
     complete: bool
     gaps: tuple[FieldGap, ...]
 
@@ -97,7 +84,6 @@ def _check_column(
     label: str,
     gaps: list[FieldGap],
 ) -> None:
-    """A column field is satisfied iff CONFIRMED *and* a member of the headers."""
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED and value in draft.headers:
         return
@@ -129,10 +115,8 @@ def _check_confirmed(
     hint: str,
     gaps: list[FieldGap],
 ) -> None:
-    """``task_description`` is satisfied by CONFIRMED provenance over a non-empty
-    value. PROPOSED (low confidence) blocks until the operator confirms or corrects
-    the framing. Provenance records *who settled* a field, never that it holds
-    anything — so a CONFIRMED blank is ``unset``, not a passing gate."""
+    """Satisfied by CONFIRMED provenance over a NON-EMPTY value: provenance records who settled a
+    field, never that it holds anything, so a CONFIRMED blank is ``unset``, not a passing gate."""
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED and value.strip():
         return
@@ -142,24 +126,14 @@ def _check_confirmed(
 
 
 def _label_present(label: str, haystack: str) -> bool:
-    """Whole-token membership — so the label ``other`` isn't matched inside
-    ``another``/``mother``. Boundaries are non-alphanumeric, so multi-word
-    labels (``technical support``) and numeric labels still match cleanly."""
+    """Whole-token membership, so the label ``other`` is not matched inside ``another``. Boundaries
+    are non-alphanumeric, so multi-word and numeric labels still match cleanly."""
     return re.search(rf"(?<![a-z0-9]){re.escape(label.lower())}(?![a-z0-9])", haystack) is not None
 
 
 def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """Closed-label datasets must enumerate every target label in the prompt.
-
-    When the target column is a fixed taxonomy (:meth:`DraftCampaign.answer_space`),
-    the origin stays open until each label appears verbatim in the prompt that
-    will be committed — :meth:`DraftCampaign.committed_prompt_fields`, the one
-    encoding the prompt writer also uses. The check-in proposer (handed the same
-    answer space in its raw context) authors the enumeration; a proposer that
-    drops a label surfaces here as an open gap rather than minting a campaign whose
-    prompt can never emit it (the failure that left every non-``financial`` row
-    unscoreable). No-op for an open-ended target — there's no small fixed set to
-    enumerate."""
+    """A closed-label dataset stays open until every target label appears verbatim in the prompt
+    that will be committed — otherwise the campaign mints a prompt that can never emit them."""
     labels = draft.answer_space()
     if not labels:
         return
@@ -183,19 +157,8 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
 
 def _check_commit_format(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """An extract-then-compare scorer needs a non-empty ``answer_format``.
-
-    When the draft's scorer reads a label out of the raw output (it carries an
-    :data:`~promptpotter.application.scoring.formula.matchers.EXTRACTION_NOTES`
-    entry — ``exact_match`` bolds, ``aime_match`` boxes, …), the committed prompt
-    MUST carry the commit instruction in ``answer_format``. The sibling
-    :func:`_check_answer_space` proves the labels appear *somewhere*, but the
-    resolver can enumerate them in ``task_intent`` while leaving ``answer_format``
-    empty (LLM authoring is non-deterministic): the labels are present yet the model
-    is never told to commit one, so the scorer can't isolate the answer and every
-    prediction misses. This is the *completeness* counterpart to the empirical
-    round-0 health grade — caught pre-mint as a check-in nudge, not after spending
-    round 0. No-op for a compare-raw scorer (no note): the output IS the label."""
+    """An extract-then-compare scorer needs a non-empty ``answer_format``: its sibling proves the
+    labels appear somewhere, but a model never told to COMMIT one leaves the scorer nothing to cut."""
     if not extraction_note_for_scoring(draft.scoring_composite):
         return
     if str(draft.committed_prompt_fields().get("answer_format", "")).strip():
@@ -215,19 +178,8 @@ def _check_commit_format(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
 
 def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """Every active node configured as an LLM call must own a ``model`` before mint.
-
-    The dataset owns its task model (``application/CLAUDE.md § Backend overlay``);
-    a missing one crashes loudly at mint (``config.py`` LLM-node model check). Pre-
-    mint the backend schema (``is_llm``) isn't available, so this reasons over the
-    connector-merged config instead: a node whose resolved ``config`` block carries
-    any LLM-call axis (model/provider/reasoning_effort/…) but no non-empty ``model``
-    is the exact pre-crash state — surfaced here as a check-in nudge, model-only
-    (provider is derivable / connector-defaulted). CANDIDATE_SOURCE and other
-    non-LLM nodes carry no such block and are not flagged; an LLM node with no seed
-    config at all (rarer) the mint crash still backstops. Connector lookup is an
-    in-memory registry read (no I/O); an unregistered connector is left for the
-    commit path to reject."""
+    """Every active LLM node must own a ``model`` before mint. Pre-mint the backend schema is not
+    available, so this reads the connector-merged config for the exact pre-crash state."""
     try:
         connector = connectors.get(draft.connector)
     except KeyError:
@@ -253,11 +205,8 @@ def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
 
 def field_values(draft: DraftCampaign) -> dict[str, Any]:
-    """Current value of every closed-set field, keyed by the checklist field id.
-
-    Surfaced into ``cache.json`` so the operator (and the AI) reads *what* each
-    field is set to alongside its provenance, without re-deriving from the draft.
-    """
+    """Current value of every closed-set field, surfaced into ``cache.json`` so the operator reads
+    what each field is set to beside its provenance, without re-deriving from the draft."""
     getters: dict[str, Callable[[DraftCampaign], Any]] = {
         "column.query": lambda d: d.column_query,
         "column.ground_truth": lambda d: d.column_ground_truth,
@@ -268,20 +217,8 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
-    """The origin ``draft`` would commit, flattened to comparable field ids.
-
-    The gate above decides whether a draft *may* mint; this describes *what* it
-    would mint. Only CONFIRMED values project — a PROPOSED column pick has not
-    moved the origin, it is a proposal awaiting an operator.
-
-    **Not hash-equivalent to the committed origin.** :func:`content_hash` folds the
-    rendered prompt, the FULL dataset's ``(query, ground_truth)`` pairs, and the
-    connector-merged ``pipeline_params``; a draft carries only ``sample_preview``
-    and an unmerged overlay. So a provenance-only confirm shows here as a change
-    yet is hash-neutral, and any "the replayed origin reproduces its recorded
-    ``content_hash``" assertion must run end-to-end through
-    ``materialize_and_write_origin``, never against this dict.
-    """
+    """What the draft WOULD commit — the gate above decides whether it may. **Not hash-equivalent to
+    the committed origin**, so any content_hash assertion must run through the real commit path."""
     projection: dict[str, Any] = {
         "slug": draft.slug,
         "connector": draft.connector,
@@ -305,9 +242,8 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
-    """Projected fields that moved, as ``{field: {"from": x, "to": y}}``. A field
-    absent on one side reads ``None`` there, so confirming a column is a change
-    from ``None``."""
+    """Projected fields that moved, as ``{field: {"from": x, "to": y}}``. A field absent on one side
+    reads ``None`` there, so confirming a column is a change from ``None``."""
     return {
         key: {"from": before.get(key), "to": after.get(key)}
         for key in before.keys() | after.keys()
@@ -316,14 +252,8 @@ def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
 
 
 def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
-    """Serialize the draft's checklist state for the on-disk ``cache.json``.
-
-    ``{complete, provenance: {field: tag}, values: {field: value},
-    gaps: [{field, reason, hint}]}`` — the AI-readable record of what blocks
-    mint, the current value + provenance of every gated field, and why each
-    blocks. The resolver additionally stamps its last resolution alongside
-    this block.
-    """
+    """Serialize the checklist state for the on-disk ``cache.json`` — the AI-readable record of what
+    blocks mint, each gated field's value and provenance, and why each one blocks."""
     readiness = origin_readiness(draft)
     return {
         "complete": readiness.complete,

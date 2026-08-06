@@ -1,11 +1,5 @@
-"""Noise-floor use-case — re-score a campaign's cached origin *k* times to measure
-the backend's own run-to-run noise.
-
-Not a cycle/fork/sweep and not a loop mechanism: no config field, no L1 injection, no
-``detect_invariants`` exemption. This is a fenced, Claude-Code-invoked debug diagnostic —
-the loop never learns it exists. Persistence mirrors ``application/verify.py``: workspace
-``archive/`` sidecar only, no ledger event.
-"""
+"""Re-score a cached origin *k* times to measure the backend's own run-to-run noise. A fenced debug diagnostic,
+not a loop mechanism — the loop never learns it exists, and persistence is an ``archive/`` sidecar only."""
 
 from __future__ import annotations
 
@@ -49,13 +43,8 @@ async def measure_noise_floor(
     k: int,
     log: Callable[[str], None] | None = None,
 ) -> NoiseFloorOutcome:
-    """Re-score the cycle's cached round-0 origin *k* times with ``force_fresh=True``
-    and report the spread as a :class:`DiagnosticRunRecord`.
-
-    On a pp-self cycle the origin's backend IS the inner recursion, so this measures
-    the true inner noise floor; on a plain cycle it measures backend run-to-run noise.
-    ``k``x real spend — deliberate and operator-visible, never triggered by the loop.
-    """
+    """Re-score the cached round-0 origin *k* times with ``force_fresh`` and report the spread. On a pp-self cycle the
+    origin's backend IS the recursion, so this reads the inner noise floor. ``k``× real spend, never loop-triggered."""
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,

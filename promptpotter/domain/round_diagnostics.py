@@ -1,13 +1,5 @@
-"""RoundDiagnostics — typed post-scoring deterministics.
-
-Lifted from inline ``compile_critique_context`` + ``_section_l1c_round_report``
-+ scattered ``formatting.py`` helpers into one typed structure computed once
-per round (in ``application/optimization/round_analysis.py``) and attached
-to ``RoundResult``.
-
-Pure data — rendering lives in the dispatch hub's ``diagnostics`` signal,
-which is **layer-agnostic**: same renderer for every layer that subscribes.
-"""
+"""Typed post-scoring deterministics, computed once per round and attached to ``RoundResult``. Pure data — rendering lives in the
+dispatch hub's ``diagnostics`` signal, which is layer-agnostic."""
 
 from __future__ import annotations
 
@@ -31,8 +23,6 @@ class NearMiss:
 
 @dataclass(frozen=True)
 class EvolutionRow:
-    """One row of the cycle's accuracy-over-rounds table."""
-
     round: int
     accuracy: float
     delta: float
@@ -42,8 +32,6 @@ class EvolutionRow:
 
 @dataclass(frozen=True)
 class SampleDiag:
-    """Per-sample diagnostics surfaced for tactical reasoning (L2)."""
-
     query: str
     ground_truth: str
     predicted: str
@@ -57,14 +45,8 @@ class SampleDiag:
 
 @dataclass(frozen=True)
 class RoundDiagnostics:
-    """Post-scoring deterministics computed once per round.
-
-    Renderers in the dispatch hub read this; they do not recompute. The
-    plan field ``trajectory`` widens the existing 4-class model with
-    ``ceiling`` (long-running stall at known best) — the field type
-    encodes which classifications the renderer must handle. The classifier
-    itself is ``optimization/round_analysis.py::_trajectory``.
-    """
+    """Post-scoring deterministics computed once per round; renderers READ this and never recompute. The ``trajectory``
+    field type encodes which classifications the renderer must handle."""
 
     # Rank distribution — where does GT land in candidates?
     rank_buckets: dict[str, int] = field(default_factory=dict)

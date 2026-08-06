@@ -1,22 +1,3 @@
-"""Scoring formula compiler + match/display primitives.
-
-- `compiler.py` — compiles a `campaign.json::scoring` expression into a scorer.
-- `round_scorer.py` — `compile_round_scorer`, the per-round formula over the
-  evaluator namespace.
-- `matchers.py` — `SCORING_FUNCTIONS` (the per-sample matchers) + `EXTRACTION_NOTES`,
-  the `answer_format` contract each extract-then-compare matcher imposes on the
-  committed prompt.
-- `rescore.py` — re-derives stored measurements under a changed formula.
-
-**Answer extraction is a double seam; this is only one arm.** Here a matcher pulls
-the LABEL out of the model's prose (last bold span, last `\\boxed{N}`) and decides
-HIT/MISS. The other arm runs earlier and in the BACKEND: TermNorm's
-`_step_llm_only` destructures the structured-output SLOT named by `answer_field`
-before the body is posted back. Slot first, label second — a task that returns JSON
-is shaped over the wire, and no matcher here will ever see the raw envelope.
-Display-side extraction is a third thing again (`domain/rendering.py`).
-"""
-
 from __future__ import annotations
 
 from typing import Any

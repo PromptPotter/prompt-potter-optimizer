@@ -1,10 +1,5 @@
-"""Typed addresses for a cycle and the directories one is written to.
-
-A cycle's address is a ``CyclePath``, never an id: cycle ids repeat across
-sibling ``.inner`` sandboxes, so only the root → leaf hop chain (every hop but
-the last a DESCENT) names one entity. ``CycleDir`` / ``WorkspaceDir`` are
-newtypes so a write target can never be an unmarked ``Path``.
-"""
+"""A cycle's address is a ``CyclePath``, never an id: ids repeat across sibling ``.inner`` sandboxes, so only the
+root→leaf hop chain names one entity. ``CycleDir`` / ``WorkspaceDir`` are newtypes so a write target is never bare."""
 
 from __future__ import annotations
 
@@ -52,11 +47,6 @@ CyclePath = tuple[CycleHop, ...]
 
 
 def encode_cycle_path(path: CyclePath) -> str:
-    """A path as its one string form: ``~``-joined ``campaign::cycle``, root → leaf.
-
-    The same codec as the wire's ``descend`` tail (:func:`presentation.api.deps.decode_descend`)
-    and the webapp's ``encodeCyclePath`` — the difference is only which slice is encoded, never
-    the grammar. Used wherever a path has to be a dict key or a cursor component, because a
-    ``list[CycleHop]`` is not hashable and a bare ``cycle_id`` is not unique across sandboxes.
-    """
+    """A path as its one string form: ``~``-joined ``campaign::cycle``, root → leaf. The SAME codec as the wire's
+    ``descend`` tail and the webapp's encoder — only the slice encoded differs, never the grammar."""
     return "~".join(f"{hop.campaign_id}::{hop.cycle_id}" for hop in path)

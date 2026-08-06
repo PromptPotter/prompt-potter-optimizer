@@ -1,9 +1,5 @@
-"""Run observers + callbacks — single ingress for CLI/notebook/webapp.
-
-- ``RunCallbacks`` — typed-event constructor over ``CycleEventLog.append`` (writer API).
-- ``build_run_observers`` — wires audit + live dashboard + PoBB stream +
-  optional ``LiveDisplay`` to one ledger, auto-mints session+cycle, re-anchors on fork.
-"""
+"""Run observers + callbacks — the single ingress for CLI/notebook/webapp. ``build_run_observers``
+wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, re-anchoring a fork."""
 
 from __future__ import annotations
 
@@ -61,17 +57,8 @@ _DATA_KEYS_RUNTIME_ONLY = frozenset({"env", "state", "dataset"})
 
 @dataclass
 class RunCallbacks:
-    """Single ingress: callbacks → typed CycleRecord → ``CycleEventLog.append``.
-
-    Ledger required at construction (no deferred binding). PhaseRecord-view ctx
-    is owned here (``from_phase_event`` is stateful); the typed view it returns
-    rides ``PhaseRecord.payload['view']`` and Pydantic serialises it on persist.
-
-    ``_round_token`` is the reset handle for the ``_CURRENT_ROUND`` ContextVar
-    that ``emit_token_usage`` reads — set on every ``set_round`` call so the
-    next emission stamps the correct round; reset on ``drain_all`` so the
-    process doesn't leak round state into the next cycle.
-    """
+    """Single ingress: callbacks → typed ``CycleRecord`` → ``CycleEventLog.append``, ledger bound at
+    construction. ``_round_token`` resets the ``_CURRENT_ROUND`` ContextVar ``emit_token_usage`` reads."""
 
     ledger: CycleEventLog
     _phase_ctx: ViewContext = field(default_factory=ViewContext)
@@ -207,13 +194,8 @@ class RunCallbacks:
         self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: PoBBSnapshot) -> None:
-        """Per-sample PoBB snapshot — archive-only, not divergence-gated.
-
-        ``snapshot`` is TYPED, and that is load-bearing: it was ``Any``, so when
-        ``PoBBSnapshot.margin`` was deleted this body kept reading it and mypy stayed
-        green. Every candidate's first scored sample would have raised ``AttributeError``
-        at runtime — an `Any` on a seam that only destructures is a silent break waiting
-        for the next field removal."""
+        """Per-sample PoBB snapshot — archive-only, not divergence-gated. ``snapshot`` stays TYPED: an
+        ``Any`` on a seam that only destructures breaks silently on the next field removal."""
         self._snapshot(
             "p_best_update",
             ci,
@@ -237,12 +219,8 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """The round's shared deterministic scoring order, emitted at candidate
-        start — seed-miss (win-opportunity) samples front-loaded, a seed-hit
-        regression probe every 4th slot (``build_round_order``). Every candidate
-        walks the same order. Distinct from the heatmap's hardest-first
-        ``sample_order`` (absolute difficulty vs decision relevance here).
-        """
+        """The round's shared deterministic scoring order (``build_round_order``), emitted at candidate
+        start. Distinct from the heatmap's ``sample_order`` — absolute difficulty there, relevance here."""
         self._snapshot(
             "sample_order_preview",
             ci,
@@ -274,14 +252,8 @@ class RunCallbacks:
         )
 
     def set_round(self, round_num: int) -> None:
-        """Update the current-round marker stamped onto every subsequent
-        ``TokenUsageRecord`` via the ``_CURRENT_ROUND`` ContextVar.
-
-        We always ``set`` a fresh value rather than re-using the prior token —
-        the reset hand-off lives on ``drain_all`` (one reset per cycle), not
-        per-round. The previous reset token is dropped on the floor on
-        purpose: only the first ``set`` carries a meaningful default-restore
-        token, and that's the one ``drain_all`` keeps."""
+        """Update the round marker stamped onto every subsequent ``TokenUsageRecord``. Always a fresh
+        ``set``: only the first one carries a meaningful restore token, and ``drain_all`` holds that one."""
         self._current_round = round_num
         token = set_current_round(round_num)
         if self._round_token is None:
@@ -290,13 +262,8 @@ class RunCallbacks:
 
 @dataclass(frozen=True)
 class RunObservers:
-    """Frozen bundle: callbacks + projections + display, all bound to one ledger.
-
-    ``_ledger_token`` is the reset handle for the ``_CYCLE_LEDGER`` ContextVar
-    that ``emit_token_usage`` reads — set on construction so the next emission
-    finds the ledger; reset on ``drain_all`` so the process doesn't leak ledger
-    state into the next cycle (or into background tasks holding stale refs).
-    """
+    """Frozen bundle: callbacks + projections + display on one ledger. ``_ledger_token`` resets the
+    ``_CYCLE_LEDGER`` ContextVar, so no background task inherits a stale ledger from the last cycle."""
 
     callbacks: RunCallbacks
     audit: AuditTrailView
@@ -306,10 +273,8 @@ class RunObservers:
     _ledger_token: Token[CycleEventLog | None] | None = None
 
     def drain_all(self) -> None:
-        """``drain()`` every projection + reset both emission ContextVars; called
-        by ``_finalize_run`` on every stop reason so the audit cache reflects
-        the ledger even on interrupt and no stale ledger ref survives the
-        cycle."""
+        """``drain()`` every projection + reset both emission ContextVars. Called on EVERY stop reason, so
+        the audit cache reflects the ledger even on interrupt."""
         self.audit.drain()
         self.dashboard.drain()
         self.pobb.drain()
@@ -325,8 +290,7 @@ class RunObservers:
 
 @dataclass(frozen=True)
 class ForkInfo:
-    """Forked-cycle wiring: the parent cycle id to seed the fork's own
-    dashboard from (the fork gets a fresh per-cycle ``dashboard.json``)."""
+    """Forked-cycle wiring: the parent cycle to seed from — the fork gets its own ``dashboard.json``."""
 
     parent_cycle_id: str
 
@@ -341,17 +305,8 @@ def build_run_observers(
     origin_accuracy: float = 0.0,
     fork: ForkInfo | None = None,
 ) -> RunObservers:
-    """Open the ledger; build + bind every observer. The session MUST already be minted.
-
-    ``fork=None`` ⇒ fresh cycle (new dashboard in its own cycle dir).
-    ``fork=ForkInfo(...)`` ⇒ fresh per-cycle dashboard for the fork, seeded
-    from the parent's on-disk ``dashboard.json`` (drained by ``_finalize_run``
-    before this call), and inherit ledger from parent's current offset.
-    ``origin_accuracy`` is a seed; real value lands on the next ``INIT/exit``
-    event.
-
-    An unminted session is a loud programming error.
-    """
+    """Open the ledger; build + bind every observer. A fork inherits the parent's ledger at its current
+    offset and seeds a fresh dashboard from the parent's drained file. An unminted session is a bug."""
     if session.state.cycle_id is None or session.store is None:
         raise RuntimeError(
             "build_run_observers: session must already be minted via "

@@ -1,13 +1,3 @@
-"""Pure rendering + classification helpers shared by application + presentation.
-
-These functions (plus their tightly-coupled private helpers + the
-``ResultClassification`` dataclass) take plain dicts / scalars and return text or
-a verdict — no I/O, no orchestration state. They live in ``domain/`` so the
-display formatters in ``presentation/views/`` can render rounds without importing
-``application/`` (the layer rule, both directions). This module is the single home:
-callers import from here directly.
-"""
-
 from __future__ import annotations
 
 import re
@@ -25,21 +15,14 @@ from promptpotter.shared.errors import ErrorCategory, error_category, is_error_r
 
 
 def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
-    """THE composite-or-accuracy rule, one implementation: the active-formula composite
-    when present (an honest ``0.0`` — a validation-failed candidate — is a real score and
-    is kept), degrading to plain ``accuracy`` only on genuine absence (``None``, no active
-    formula). Every display + ranking site routes through this name, so an ``or`` can
-    never mask an honest ``0.0``.
-    """
+    """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
+    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here."""
     return composite_fitness if composite_fitness is not None else accuracy
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """Composite-first, accuracy-tiebreak. The point-estimate ordering used by the
-    mask lens (`application/mask`) to re-project candidates under an alternative
-    criterion — NOT the round-winner election (that's `elect_round_winner`'s
-    paired-delta LCB; the view reads the elected winner off the round result).
-    """
+    """Point-estimate ordering for the mask lens — NOT the round-winner election, which is
+    ``elect_round_winner``'s paired-delta LCB, read off the round result by every view."""
     return (display_fitness(composite_fitness, accuracy), accuracy)
 
 
@@ -66,9 +49,6 @@ def _valid_axis_set(schema: PipelineSchema) -> set[str]:
 def format_l1_critique_for_prompt(
     critique: CritiqueReadout | None, pipeline_schema: PipelineSchema | None = None
 ) -> str:
-    """L1 critique → compact text for L1_GENERATE + L2_CONTEXT. Three load-bearing fields:
-    `priority_fix`, schema-filtered `suggested_axes`, `failure_highlights`.
-    """
     if not critique:
         return ""
     parts: list[str] = []
@@ -95,18 +75,8 @@ def format_l1_critique_for_prompt(
 
 @dataclass(frozen=True)
 class ResultClassification:
-    """Three-bucket result classification.
-
-    ``advisory_codes`` — everything observed (warnings; informational).
-    ``infra_codes`` — sample-killing but **not candidate-fault** (provider
-        truncation, reasoning-budget exhaustion). Deprecates the sample for
-        accounting/display; does **not** participate in one-sighting fast
-        elimination, since the same sample tends to truncate regardless of
-        which candidate prompt is in play.
-    ``fatal_codes`` — deterministic-for-config candidate-quality failures
-        (empty stop, content filtered, etc.). One sighting suffices to
-        eliminate via ``dominant_fatal``.
-    """
+    """Three buckets: ``advisory`` observes; ``infra`` deprecates the sample without blaming the
+    candidate; ``fatal`` is candidate-quality and eliminates on one sighting."""
 
     advisory_codes: frozenset[str]
     infra_codes: frozenset[str]
@@ -123,12 +93,8 @@ class ResultClassification:
 
     @property
     def dominant_fatal(self) -> str | None:
-        """Pick a fatal code for one-sighting fast-elimination.
-
-        Reads from ``fatal_codes`` only — infra-driven deprecation (e.g. a
-        terminal-LLM ``<node>:output_truncated``) must NOT trigger fast-path
-        elimination.
-        """
+        """Pick a fatal code for one-sighting fast-elimination. Reads ``fatal_codes`` ONLY — infra-driven deprecation must
+        never trigger the fast path."""
         return next(iter(sorted(self.fatal_codes)), None)
 
 
@@ -142,18 +108,8 @@ real refusal opens with the apology, not buries it."""
 
 
 def _is_refusal(result: Mapping[str, Any]) -> bool:
-    """Detect head-anchored refusal patterns in the predicted answer.
-
-    The model occasionally returns a refusal as its full output (e.g.
-    ``"I'm sorry, but I cannot solve this problem."``) instead of an
-    actual answer. These slip past every existing advisory channel
-    because ``finish_reason=stop`` and there's no diagnostics warning —
-    the model "completed" normally, it just completed with a refusal.
-
-    L2 needs to see these as a distinct failure mode to propose
-    mitigations (different model, rephrased instruction). Plain ``MISS``
-    classification loses that signal.
-    """
+    """A refusal completes with ``finish_reason=stop`` and no warning, so every advisory channel
+    sees a plain MISS — L2 needs it as its own failure mode to propose a mitigation."""
     predicted = str(result.get("predicted") or "")
     if not predicted:
         return False
@@ -177,13 +133,8 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
 
 
 def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
-    """``"step:code"`` keys whose **source-stamped** ``kind`` is structural.
-
-    The backend (TermNorm ``WarningKind``) owns the structural/transient verdict;
-    PoBB reads it directly so elimination stays in lockstep with the degradation
-    verdict — one truth, no re-derivation from the code. A warning with no ``kind``
-    is NOT treated structural (no guessing): unstamped → under-counts, never
-    over-eliminates."""
+    """Keys whose SOURCE-STAMPED ``kind`` is structural. The backend owns that verdict and PoBB reads it directly, so
+    elimination stays in lockstep. A warning with no ``kind`` is NOT structural: under-count, never over-eliminate."""
     pd = result.get("pipeline_data") or {}
     keys: set[str] = set()
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
@@ -193,12 +144,8 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
 
 
 def _terminal_node(result: Mapping[str, Any]) -> str:
-    """The node this result terminated at — the terminal LLM node whose answer is
-    the prediction (``llm_only`` for a single-node pipeline, ``llm_ranking`` for
-    the multi-node default). Read from the result's own ``pipeline_data`` rather
-    than a literal node name, so truncation / empty-response classification keys on
-    *this* result's terminal node and fires for a multi-node terminal LLM too.
-    Falls back to ``llm_only`` when unstamped (the single-node default shape)."""
+    """The node this result terminated at, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
+    classification keys on this result's terminal node and fires for a multi-node terminal LLM too."""
     pd = result.get("pipeline_data") or {}
     return pd.get("terminated_at") or "llm_only"
 
@@ -214,21 +161,8 @@ def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
 
 
 def classify_result(result: Mapping[str, Any]) -> ResultClassification:
-    """Walk advisories + raw response shape; return advisory/infra/fatal codes.
-
-    Truncation-shaped failures (``finish_reason=length``) route to
-    ``infra_codes`` — the sample still counts as deprecated for display
-    and rate-based elimination, but does not fast-path eliminate a
-    candidate at n=1. Truncation is provider-ceiling-driven and tends to
-    recur on the same sample independent of the prompt.
-
-    Backend HTTP 4xx errors (``[CLIENT]``-tagged) are deterministic
-    candidate-config failures — the caller sent a wire payload the
-    upstream provider rejected (wrong type, unknown enum, missing
-    required field). These route to ``fatal_codes`` so DegradationCheck's
-    one-sighting fast-path eliminates the candidate immediately instead
-    of retrying every remaining sample with the same poisonous config.
-    """
+    """Advisories + response shape → advisory / infra / fatal codes. Truncation is INFRA (provider-ceiling, recurs per
+    sample); a backend 4xx is FATAL, so one sighting kills the candidate instead of poisoning every remaining one."""
     advisories = _collect_advisories(result)
     structural_advs = _structural_advisory_keys(result)
     infra: set[str] = set()

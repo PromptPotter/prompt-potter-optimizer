@@ -1,8 +1,5 @@
-"""L1Stats — per-cycle L1 fitness statistics. Pure aggregation over round_data + behaviour checks.
-
-Headline `rounds_to_95` (first round ≥ 0.95). `round_1_verdict` is the round-1 halt
-gate, read by ``review.md`` and the L4 outer loop.
-"""
+"""L1Stats — per-cycle L1 fitness statistics, pure aggregation. ``round_1_verdict`` is the round-1 halt gate, read by
+``review.md`` and the L4 outer loop."""
 
 from __future__ import annotations
 
@@ -20,9 +17,8 @@ HEADLINE_ACC = 0.95
 
 @dataclass(frozen=True)
 class L1Stats:
-    """``None`` on any rate means *not measured*, and renders as ``—``. It is never a 0.0
-    (nothing yielded) or a 1.0 (everything passed): a cycle with no rounds did not fail to
-    yield, and a conformance rate over zero checks is not a clean bill of health."""
+    """``None`` on any rate means NOT MEASURED and renders as a dash. Never 0.0 (nothing yielded) or 1.0 (all passed): a
+    cycle with no rounds did not fail to yield, and a rate over zero checks is not a clean bill of health."""
 
     rounds_to_95: int | None
     yield_rate: float | None
@@ -72,23 +68,8 @@ def _compute_round_1_verdict(
     *,
     round_1_behavior: list[CheckResult],
 ) -> str:
-    """Conformance-only round-1 verdict (yield/lift/regression are dataset-headroom-confounded).
-
-    - `healthy` — the checks RAN and zero failed.
-    - `degraded` — exactly one ✗.
-    - `broken` — ≥ 2 ✗, **or L1 emitted no variants at all**.
-    - `unknown` — no round 1 yet, or its checks never ran.
-
-    Two guards close the paths where ``failed_total == 0`` would report a false ``healthy``:
-
-    1. **L1 yielded nothing.** Zero variants is the WORST L1 outcome, not the cleanest — the
-       optimizer prompt made its own children unreadable. Each check short-circuits to
-       ``passed=True`` on an empty variant list, so ``run_all_checks`` returns ``[]`` there,
-       landing in guard 2.
-    2. **The checks never ran** (empty list — L1 yielded nothing, or the round's audit dict was
-       missing entirely). Zero failures out of zero checks is not a clean bill of health; the
-       same rule ``L1Stats`` states for every rate it carries.
-    """
+    """Conformance-only round-1 verdict — yield and lift are dataset-headroom-confounded. Zero failures out of
+    ZERO checks is not ``healthy``: L1 emitting no variants at all is the worst outcome, not the cleanest."""
     if not rounds:
         return "unknown"
 
@@ -115,8 +96,7 @@ def first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int
 
 
 def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
-    """Mean of per-round l1_yield (variants beating parent / variants generated).
-    ``None`` when the cycle ran no round — a cycle that generated nothing had no yield to
+    """Mean of per-round l1_yield. ``None`` when the cycle ran no round — a cycle that generated nothing had no yield to
     fall short of."""
     if not rounds:
         return None
@@ -155,5 +135,4 @@ def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | No
 
 
 def _round_source(rr: RoundResult) -> str:
-    """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a round."""
     return rr.opt_sp.lineage.source if rr.opt_sp else ""

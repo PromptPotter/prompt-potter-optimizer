@@ -1,5 +1,3 @@
-"""Campaign data loading and origin scoring."""
-
 from __future__ import annotations
 
 import logging
@@ -49,27 +47,8 @@ async def rescore_parent(
     callbacks: RunCallbacks,
     force_fresh: bool = False,
 ) -> RoundParent:
-    """Score the round's parent — the origin at round 0, the prior winner after — on THIS
-    round's ``scoring_set``, so winner election compares candidate-vs-parent on the SAME
-    hard-first samples the candidates ran.
-
-    Elimination truncates each candidate at a different depth of the shared round order, so
-    each is scored on a different prefix, while the
-    parent was only ever scored on its own earlier rounds; without this re-score,
-    ``matched_origin_stats`` intersects disjoint sample sets and returns a fake ``0.0``
-    floor. Re-scoring through the ``score_search_point`` gateway + content-hash cache
-    yields a real same-subset floor, and samples the parent already measured replay from
-    cache — so the cost is one measurement per *new* hard sample it hasn't seen.
-
-    ``force_fresh`` bypasses the measurement cache (see ``score_search_point``). The
-    winner-election path leaves it ``False``. The origin gate sets it ``True`` so a re-score
-    after a backend-code fix reflects the fix instead of replaying the stale origin.
-
-    This re-scores a PRIOR searchpoint, not a foreground candidate, so it fires **no**
-    per-sample display callbacks — wiring them would mint a bogus ``C{round}.0`` row. Its
-    spend rides the token ledger; ``degradation_checks=None`` blocks the floor from
-    aborting itself.
-    """
+    """Score the round's parent on THIS round's ``scoring_set``, so election compares on the SAME
+    samples. Without it ``matched_origin_stats`` intersects disjoint sets and returns a fake floor."""
     from promptpotter.application.optimization.l1.population import build_score_report
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -128,12 +107,8 @@ def build_campaign_emitter(
     seed_from_cycle_id: str | None = None,
     langfuse_trace_url: str | None = None,
 ) -> Any:
-    """Live dashboard projection from session + config (shared by CLI + runner).
-
-    ``seed_from_cycle_id`` (set when building a fork's dashboard) names the
-    parent cycle to seed prior trajectory from; ``None`` seeds from the cycle's
-    own dir. ``langfuse_trace_url`` is the set-once operator deep link.
-    """
+    """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
+    cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir."""
     from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
     opt = campaign_config.optimization
@@ -153,15 +128,8 @@ def build_campaign_emitter(
 
 
 class CampaignOrigin(NamedTuple):
-    """The scored origin. ``resolved_origin`` is the origin OptSearchPoint —
-    carrying its full lineage/memory, not just prompt strings — so the C0
-    individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream.
-
-    ``report`` is C0's measurement in the one shape every individual's measurement takes —
-    the same object deposited on the ledger, so round 0's row and the ledger's cannot be two
-    computations of one thing. A nothing-to-score origin still gets one, carrying the
-    ``total=0`` no-evidence marker the round-0 gate is there to catch.
-    """
+    """The scored origin. ``report`` is C0's measurement in the one shape every individual's takes —
+    the same object deposited on the ledger, so round 0's row cannot be a second computation."""
 
     resolved_origin: OptSearchPoint | None
     report: ScoredCandidate
@@ -174,28 +142,8 @@ def try_inherit_fork_origin(
     *,
     resolved_origin: OptSearchPoint,
 ) -> CampaignOrigin | None:
-    """Inherit an operator fork's C0 from its branch-point candidate — for a no-edit
-    fork OR a model/provider-only steer.
-
-    When an operator forks from a searchpoint whose PROMPT it does not edit, that
-    searchpoint *is* the fork's origin — its accuracy was already measured in the parent
-    round. Re-scoring would re-roll a different number under a nondeterministic backend
-    (the same prompt + samples does NOT reproduce the same accuracy), so C0 would no
-    longer equal the branch point and the lineage would jump. Instead we inherit the
-    recorded measurement and skip the origin scoring pass — straight to L1_generate.
-
-    A model/provider-only steer inherits too (the sanctioned babysit path): the origin
-    is unchanged in every respect but the steered axis, so its done C0 is inherited exact
-    and only the candidate is measured under the steered model. This is what lets the
-    param-only pp-self origin be steered without re-paying C0.
-
-    *resolved_origin* is the already-resolved fork origin (resolved once by
-    ``establish_campaign_origin``). Returns the inherited :class:`CampaignOrigin` only
-    when this is an operator-steered fork whose origin renders identically to the
-    ``from_candidate_id`` candidate in the parent's recorded round, under an overlay that
-    is empty or locked-axis-only. Any miss (non-fork, missing coords, edited prompt →
-    different render, non-locked param edit) returns ``None`` and the caller re-scores.
-    """
+    """Inherit an operator fork's C0 from its branch-point candidate — a no-edit fork or a
+    model/provider-only steer. Re-scoring would re-roll a different number and the lineage would jump."""
     if seed is None:
         return None
     # Overlay gate. `render()` below compares the PROMPT; it says nothing about the
@@ -291,16 +239,8 @@ def resolve_origin_opt_search_point(
     *,
     seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
-    """Resolve the origin OptSearchPoint by precedence, highest wins:
-    seed → {dataset_dir}/prompts → empty.
-
-    A *seed* with non-empty ``origin_prompt_fields`` wins outright — an
-    operator-steered fork's (or a campaign-from-origin's) origin *is* the chosen
-    searchpoint, so we build the OSP straight from those fields and short-circuit
-    (no dataset lookup), stamping the C0 lineage from ``seed.origin_source``.
-    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
-    tenant-first), so an ingested dataset's authored prompts are found the same way a
-    repo benchmark's are."""
+    """Resolve the origin OptSearchPoint by precedence: a seed with non-empty prompt fields wins
+    outright and short-circuits the dataset lookup, then ``{dataset_dir}/prompts``, then empty."""
     if seed is not None and seed.origin_prompt_fields:
         return OptSearchPoint.from_prompt_fields(
             seed.origin_prompt_fields,
@@ -344,9 +284,8 @@ async def establish_campaign_origin(
     seed: CycleSeed | None,
     listener: Any | None,
 ) -> CampaignOrigin:
-    """The single origin-establishment seam. The origin OSP is resolved exactly once and
-    shared by both branches (inherit a no-edit fork's recorded C0 vs score), which return
-    the same ``CampaignOrigin`` shape."""
+    """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
+    branches, which return the same :class:`CampaignOrigin` shape."""
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,

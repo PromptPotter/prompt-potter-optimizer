@@ -1,7 +1,5 @@
-"""Round-boundary helpers — persist, close, post-round, escalation hook.
-
-The ledger is the sole persistence ingress; display projections subscribe to it
-(bypassing this seam collapses display + audit for the round)."""
+"""Round-boundary helpers — persist, close, post-round, escalation hook. The ledger is the sole
+persistence ingress; bypassing this seam collapses the round's display AND its audit together."""
 
 from __future__ import annotations
 
@@ -44,18 +42,8 @@ async def emit_origin_round(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Close **round 0** — the origin's measurement — through the standard path.
-
-    The round itself is ``cycle.rounds[0]``, built by ``Cycle.start`` like any other
-    round is built by the L1 path. This runs the two things a round does at its close
-    and nothing else: seed the next round's critique, then ``close_round``, so the
-    public round file (``rounds/round_0000.json``), the ``index.json::rounds[]`` entry,
-    and the live ``dashboard.json::rounds[]`` summary all carry it in one shape.
-
-    Like every ``close_round`` caller it does **not** feed escalation (only
-    ``post_round`` observes). Idempotent at the call site: the loop guards on the
-    round-0 file already existing.
-    """
+    """Close **round 0**, the origin's measurement, through the standard path — seed the next critique,
+    then ``close_round``, so the round file, ``index.json`` and ``dashboard.json`` carry one shape."""
     round_result = cycle.origin_round
     # Seed round 1's L1 with a critique over the origin's misses. The loop runs
     # critique only at round end (``l1/execute.py``), so without this seed round 1
@@ -91,7 +79,6 @@ async def escalate_or_stop(
     round_num: int,
     cb: RunCallbacks,
 ) -> None:
-    """Run L2 escalation; raise ``StopLoop`` if it returned a stop reason."""
     stop = await escalate_l2(
         cycle,
         config,
@@ -106,25 +93,8 @@ async def escalate_or_stop(
 
 
 def _round_close_facts(round_result: RoundResult) -> dict[str, Any]:
-    """What the CLOSE knows and no candidate could — the adopted individual, and each
-    scored row's ``{theta, theta_se, composite_ci_lo, composite_ci_hi}`` (absent keys
-    omitted, rows with nothing to say dropped).
-
-    Those four are the only values a candidate's own ``candidate_scored`` snapshot cannot
-    carry in final form: θ comes from the round's joint fit (or, at round 0, from the ruler
-    calibration), and a warm ruler OVERRIDES the candidate's Wilson whisker with the tighter
-    θ-implied band. Reading them off ``candidate_scores`` rather than off the election is
-    what lets round 0 — which elects nothing — still report the origin's ability.
-
-    **Keyed by LABEL, the positional identity (`C{round}.{idx}`), never `candidate_id`.**
-    A lineage id is a fresh uuid per construction (`IndividualLineage.id`), so a resume
-    re-mints round 0's C0 under a new id while this round's already-written close still
-    names the old one — an id join then silently drops the crown and θ of every re-minted
-    candidate, C0 first. Position is the canonical genealogy and both sides carry it.
-
-    A held round's adopted individual is the retained incumbent, which is not among this
-    round's rows, so ``winner_label`` comes back empty and nobody is crowned.
-    """
+    """What the CLOSE knows and no candidate could — the adopted individual and each row's θ / CI.
+    **Keyed by LABEL** (`C{round}.{idx}`): a lineage id is re-minted on resume, so an id join drops it."""
     abilities: dict[str, dict[str, float]] = {}
     for cs in round_result.candidate_scores:
         vals = {
@@ -212,7 +182,7 @@ def persist_round(
 
 
 def count_positive_yield_axes(cycle: Cycle) -> int | None:
-    """Axes with effect_size > AxisIndex noise floor (= 0.02); ``None`` pre-first-round (no AxisIndex yet)."""
+    """Axes with effect_size above the AxisIndex noise floor; ``None`` pre-first-round (no AxisIndex yet)."""
     if cycle.axes is None:
         return None
     from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
@@ -227,17 +197,8 @@ async def close_round(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Round-completion bookkeeping every completed round runs.
-    Emits ``round:display`` (via ``cb.on_round_complete``) + ``round:complete`` (via ``persist_round``),
-    writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation.
-
-    SINGLE degradation-verdict compute site (origin + L1 both funnel here): stamp
-    ``round_result.health`` BEFORE the dashboard emit (``cb.on_round_complete`` reads
-    ``rr.health``) and the round-file write (``persist_round``), so the verdict reaches
-    every surface in one shape.
-
-    Track record = the prior rounds' verdicts, oldest first, starting at the origin's.
-    The round being closed is excluded (it is already in ``cycle.rounds``)."""
+    """Round-completion bookkeeping, and the SINGLE degradation-verdict compute site (origin and L1 both
+    funnel here): ``health`` is stamped BEFORE the dashboard emit and the round-file write."""
     round_result.health = compute_round_health(
         results=round_result.results,
         prior_healths=assemble_prior_healths(cycle.rounds, round_num),
@@ -265,14 +226,8 @@ async def post_round(
     *,
     is_final_round: bool = False,
 ) -> None:
-    """Clean-round escalation observation; raises ``StopLoop`` on stop condition.
-    State machine observes outcome (CONTINUE / FIRE_L2 / STOP_*), then closes the round and dispatches.
-    Probe rounds bypass observation and call ``close_round`` directly.
-
-    ``is_final_round`` suppresses the L2 fire: L2's refined ``task_context`` is read by the
-    NEXT round's L1, so on the last round it is a ~35s LLM call whose output dies with the
-    cycle. The lives-exhausted boundary needs no flag — ``observe_round`` sets
-    ``stop_reason`` and we raise before reaching the fire."""
+    """Clean-round escalation observation; raises ``StopLoop`` on a stop condition. ``is_final_round``
+    suppresses the L2 fire — its refined ``task_context`` is read by a NEXT round that never comes."""
     axes_with_positive_yield = count_positive_yield_axes(cycle)
     # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
     # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.

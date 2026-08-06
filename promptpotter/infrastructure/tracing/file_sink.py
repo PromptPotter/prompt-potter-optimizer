@@ -1,9 +1,5 @@
-"""Per-cycle file sink — Langfuse-shape trace + observation JSON under ``campaigns/{cycle_id}/langfuse/``.
-
-Append-only observation mirror: ``events.jsonl`` is never read back for
-state reconstruction. Resume + fork are driven by ``rounds/round_NNNN.json``
-via ``CampaignStore``.
-"""
+"""Per-cycle file sink — a Langfuse-shape mirror. Append-only: ``events.jsonl`` is NEVER read back for state
+reconstruction; resume and fork are driven by the round files."""
 
 from __future__ import annotations
 
@@ -185,11 +181,8 @@ class FileSink:
         self._log_event(payload)
 
     def on_layer_applied(self, event: LayerApplied) -> None:
-        """Append an ``l2_applied`` / ``l3_applied`` mirror to events.jsonl.
-
-        Event-name string (``l2_applied`` / ``l3_applied``) is preserved on
-        disk — downstream consumers key on that string, not the dataclass.
-        """
+        """Append an applied-layer mirror to the event log. The event-name STRING is preserved on disk, because downstream
+        consumers key on it rather than on the dataclass."""
         self._log_event(
             {
                 "event": f"{event.layer.lower()}_applied",

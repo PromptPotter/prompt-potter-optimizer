@@ -1,9 +1,4 @@
-"""Run init steps 2-4 — a wired ``Session`` to a running round loop.
-
-- ``populate_session_scoring`` — attach scorer + per-round scorer + obs to a Session.
-- ``init_cycle`` — resume existing cycle or create one.
-- ``init_optimization_loop`` — runner entry: preflight, origin OSP, Cycle.start,
-  fork-on-divergence, obs + scoring + axes, INIT.exit."""
+"""Run init steps 2-4 — a wired ``Session`` to a running round loop."""
 
 from __future__ import annotations
 
@@ -28,15 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
-    """Next L1 round to run on resume = highest persisted round NUMBER + 1.
-
-    Keyed on the round number, never ``len()``: the origin is round 0 in
-    ``index.json::rounds`` now, so counting entries over-counts by one and the loop
-    skips a round (round_0000, round_0002, never round_0001). A clean fresh start
-    (origin only) → max 0 → next round 1.
-
-    Entries are ``index.json::rounds`` (``RoundSummary``, ``round: int`` required),
-    so the key is read directly — no ``.get`` default papering over an absent key."""
+    """Next L1 round = highest persisted round NUMBER + 1. Keyed on the number, never ``len()``: the origin is round 0 in
+    ``index.json::rounds``, so counting entries over-counts by one and the loop skips a round."""
     return max((int(r["round"]) for r in round_summaries), default=0) + 1
 
 
@@ -48,16 +36,8 @@ def init_cycle(
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resolve cycle (step 3 of run init) → ``(cycle_id, resumed_from_round)``.
-    Drift handling lives in ``resume_with_divergence_check``.
-
-    A genuinely-absent cycle is the ``existing is None`` branch (``store.load``
-    returns ``None`` for a missing index) → a fresh start at round 1. A
-    *present-but-broken* state — a corrupt index (``JSONDecodeError``), a disk
-    fault (``OSError``), a malformed round summary (``KeyError`` in
-    ``next_resume_round``), or an invalid ``--from N`` rewind — is NOT caught: it
-    propagates and halts loud. Swallowing it would silently discard the prior
-    rounds and re-spend the campaign from scratch under a fresh anonymous cycle."""
+    """Resolve the cycle for run init. A genuinely-absent cycle starts fresh; a present-but-BROKEN one (corrupt index,
+    disk fault, bad ``--from``) propagates — swallowing it would silently re-spend the campaign from scratch."""
     from promptpotter.application.runner.campaign_ids import cycle_config_identity
 
     if not session.backend_id:
@@ -178,7 +158,6 @@ def _build_and_start_cycle(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, str | None, int]:
-    """Build origin OSP + Cycle.start + open storage; raise on missing resolved_origin."""
     from promptpotter.application.optimization.cycle import Cycle
 
     if origin.resolved_origin is None:
@@ -224,7 +203,6 @@ def _start_observability_and_scoring(
     scoring_round_formula: str | None,
     scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
-    """Start ObservabilityBridge + populate scoring; obs may be None on failure."""
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
     tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
@@ -259,7 +237,6 @@ async def _apply_resume_fork(
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    """Repair holed rounds, replay decisions, fork on divergence. Returns (id, round)."""
     from promptpotter.application.optimization.escalation.state import EscalationFSM
     from promptpotter.application.optimization.resume_and_fork.resume import (
         resume_with_divergence_check,

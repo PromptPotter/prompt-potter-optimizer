@@ -1,15 +1,5 @@
-"""``DiagnosticRunStore`` — on-demand candidate verification records.
-
-A diagnostic run is one operator-triggered re-evaluation of a single campaign
-candidate against more samples than the cycle's PoBB budget allowed. The
-per-sample measurements land in the cross-cycle ``measurements/`` via
-the existing scoring gateway; this store owns the workspace-scope verdict
-sidecars at ``archive/diagnostic_runs/{ts}_{config_hash[:12]}.json``.
-
-One file per record, listable for the Verify tab. File-per-record matches
-:class:`MeasurementArchive` / :class:`OptimizerCallCache` so the archive root
-stays uniformly content-addressed.
-"""
+"""Verdict sidecars for ``verify`` runs. The per-sample measurements land in the cross-cycle ``measurements/``
+through the ordinary scoring gateway; this store owns only the workspace-scope record."""
 
 from __future__ import annotations
 

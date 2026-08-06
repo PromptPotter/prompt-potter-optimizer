@@ -1,10 +1,3 @@
-"""Campaign configuration — CampaignConfig Pydantic model, pipeline setup, LLM factory.
-
-Backend-specific experiment-data extraction lives in
-:mod:`promptpotter.connectors`; ``initialization`` looks up a connector by name
-and reads ``connector.extract_experiment(extract)``.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -57,30 +50,16 @@ __all__ = [
 
 
 class Scope(StrEnum):
-    """What a knob shapes — the question resume asks of every config edit.
-
-    - ``POLICY``: a decision knob (patience, thresholds, ε, n_variants). Past
-      measurements and candidates stay valid; the new policy governs unevaluated rounds.
-    - ``DATA``: the knob shapes the data trace itself (JobSearchPoint inputs, scoring,
-      the dataset binding). Cached measurements may not apply — resume runs divergence
-      detection.
-    """
+    """What a knob shapes — ``POLICY`` leaves past measurements valid and governs unevaluated
+    rounds; ``DATA`` shapes the trace itself, so resume runs divergence detection."""
 
     POLICY = "policy"
     DATA = "data"
 
 
 class Estimand(StrEnum):
-    """The statistical quantity a knob moves — the axis a statistician groups by.
-
-    A knob may touch more than one. Couplings are *between knobs that share an
-    estimand*: that shared quantity is what goes ill-defined when they disagree.
-
-    **Declaration order IS presentation order.** Both the CLI config map and the
-    webapp's config panel iterate this enum directly. Never copy these members into
-    an ordering tuple: two such copies existed, both silently omitted
-    ``DISCRIMINATION``, and its group vanished from both surfaces.
-    """
+    """The statistical quantity a knob moves. **Declaration order IS presentation order** — the
+    CLI config map and the webapp panel iterate this enum; never copy members into an ordering tuple."""
 
     SELECTION = "selection"
     DIFFICULTY = "difficulty"
@@ -109,14 +88,11 @@ _ESTIMAND_DOC: dict[Estimand, str] = {
 
 
 def estimand_doc(estimand: Estimand) -> str:
-    """Plain-language one-liner for an estimand (teach, don't dump)."""
     return _ESTIMAND_DOC[estimand]
 
 
 def knob_label(path: str) -> str:
-    """Short display name for a knob — drops the ``optimization.`` /
-    ``optimization.mechanisms.<group>.`` prefix. Shared by the CLI diagnostic and
-    the webapp config-map so both name a knob identically."""
+    """Shared by the CLI diagnostic and the webapp config-map, so both name a knob identically."""
     short = path.removeprefix("optimization.")
     if short.startswith("mechanisms."):
         short = short.split(".", 2)[-1]
@@ -125,19 +101,8 @@ def knob_label(path: str) -> str:
 
 @dataclass(frozen=True, init=False)
 class Knob:
-    """A config field's self-description — what it shapes (:class:`Scope`) and which
-    statistical quantities it moves (:class:`Estimand`). Rides the field as
-    ``Annotated`` metadata, so a knob is declared exactly ONCE, where it is defined::
-
-        pobb_epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
-
-    A field carrying a ``Knob`` is a **leaf** of the config tree whatever its shape —
-    ``dataset_split`` is one knob, not two. A field without one whose annotation is a
-    nested model is descended into; a field without one that is *not* a model is an
-    undeclared knob and fails the walk in :mod:`promptpotter.application.knobs`.
-
-    Metadata on the field cannot go stale against the field.
-    """
+    """Rides the field as ``Annotated`` metadata, so a knob is declared exactly ONCE. A field
+    carrying one is a LEAF whatever its shape; one without that is not a model fails ``knobs``'s walk."""
 
     scope: Scope
     estimands: tuple[Estimand, ...]
@@ -148,9 +113,8 @@ class Knob:
 
 
 class SelectionMechanisms(StrictModel):
-    """Hard-sample sorting & selection — how each round's scoring subset is chosen
-    and ordered. Turn BOTH off to freeze the sample basis at campaign start: one
-    fixed subset, fixed order, identical for every round and candidate."""
+    """Turn BOTH off to freeze the sample basis at campaign start: one fixed subset, fixed order,
+    identical for every round and candidate."""
 
     per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
         Field(
@@ -172,10 +136,8 @@ class SelectionMechanisms(StrictModel):
 
 
 class EliminationMechanisms(StrictModel):
-    """Early-abort / candidate-elimination rules that stop measuring a candidate —
-    or gate round promotion — before the full sample budget is spent. Off → the
-    mechanism never fires; candidates run their full budget. Numeric tuning for an
-    enabled mechanism lives on the sibling `OptimizationConfig` fields."""
+    """Off → the mechanism never fires and candidates run their full budget; numeric tuning for an
+    enabled one lives on the sibling ``OptimizationConfig`` fields."""
 
     epsilon_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
@@ -206,25 +168,16 @@ class EliminationMechanisms(StrictModel):
 
 
 class MechanismConfig(StrictModel):
-    """Pluggable orchestration mechanisms, grouped by kind. Each toggle turns one
-    mechanism on/off; numeric tuning for an enabled mechanism lives on its
-    `OptimizationConfig` field (`pobb_epsilon`, `pobb_lock_in`, …). Add a mechanism
-    by adding a bool to the right group — it auto-surfaces to the webapp via the
-    schema. (Patience-driven L1/L2/L3 escalation is governed separately by
-    `l1_patience` / `l2_patience` / `l3_patience`; None disarms L2/L3.)"""
+    """Add a mechanism by adding a bool to the right group — it auto-surfaces to the webapp via
+    the schema. Patience-driven L1/L2/L3 escalation is governed separately (``None`` disarms L2/L3)."""
 
     selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
     elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
 
 
 class LivesConfig(StrictModel):
-    """Improvement-banked round budget ("hearts"). Opt-in alternative to the fixed
-    ``max_rounds`` calendar boundary: the run starts with ``start`` lives, banks one
-    each round that improves and loses one each round that doesn't, and stops when the
-    bank hits zero — so a compounding run chains itself more rounds and a stall dies
-    fast. Rides the SAME per-round ``improved`` verdict that drives ``l1_stall_count``
-    (no new verdict). ``max_rounds``/``HARD_CAP`` and the spend budget stay the absolute
-    ceilings. See docs/specs/l4-outer-loop.md."""
+    """Improvement-banked round budget: banks a life each round that improves, loses one each round
+    that doesn't, on the SAME ``improved`` verdict. ``max_rounds`` and spend stay the ceilings."""
 
     start: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
         2,
@@ -246,8 +199,6 @@ PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
 
 
 class OptimizationConfig(StrictModel):
-    """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
-
     max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
         Field(
             50,
@@ -481,14 +432,10 @@ class OptimizationConfig(StrictModel):
 
 
 class DatasetSplit(StrictModel):
-    """Held-out test fold size — display metadata for the dashboard footer."""
-
     test: int = Field(description="Held-out test fold size — not in the bank or the table")
 
 
 class CampaignConfig(StrictModel):
-    """Top-level user-authored campaign configuration (``datasets/{name}/campaign.json``)."""
-
     dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
     sp_budget_ttest: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         20,
@@ -559,7 +506,6 @@ class CampaignConfig(StrictModel):
     optimization: OptimizationConfig
 
     def origin_budget(self) -> int:
-        """Resolved origin eval budget — ``sp_budget_origin``, or the per-round budget."""
         return self.sp_budget_origin or self.sp_budget_ttest
 
 
@@ -570,21 +516,8 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
 
 
 def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
-    """Serialize *config* for the ``campaign.json::config`` snapshot — the **delta** from defaults.
-
-    Sole writer of the snapshot's shape. Only the leaves whose value differs from the code
-    default are persisted, so a knob nobody ever set never appears — and renaming or dropping
-    such a knob later cannot make the snapshot unloadable. Measured on 156 broken campaigns,
-    this alone would have spared 41 of them.
-
-    It is not a rename-proofing device: a field the operator *did* set still lands in the
-    snapshot and still breaks under ``extra="forbid"`` if it is later renamed. That case is
-    caught in CI by the frozen fixture in ``tests/test_resume.py`` and remedied by re-stamping
-    (``promptpotter restamp --apply``) — never by ``extra="allow"``, an alias, or a shim.
-
-    The two ``improvement_threshold`` / ``degradation_threshold`` leaves are declared without a
-    default, so they are always emitted and the delta always re-validates.
-    """
+    """Sole writer of the snapshot's shape, and it persists only the DELTA from defaults, so a knob
+    nobody set cannot make it unloadable. A set-then-renamed knob is re-stamped, never shimmed."""
     return config.model_dump(mode="json", exclude_defaults=True)
 
 
@@ -593,23 +526,8 @@ def apply_inherited_overlay(
     frozen_config: dict[str, Any],
     seed: CycleSeed | None,
 ) -> CampaignConfig:
-    """Re-apply the per-campaign overlay onto a config rebuilt from the live dataset.
-
-    Resume/fork rebuild ``config`` from the *live* dataset ``campaign.json`` so
-    declaration edits stay drift-detected — but that file never holds the
-    per-campaign ``pipeline_overrides`` (origin-floor values) or
-    ``optimizer_narrowing`` (param locks), which live only on the frozen
-    ``Campaign.config`` snapshot. Without this they silently revert to the dataset
-    defaults on every resume/fork (the lock-drop bug). A steered-fork *seed*'s
-    ``optimizer_narrowing`` overrides the campaign-wide narrowing per node — the
-    cycle-level lock edit.
-
-    Reads the two fields it consumes straight off the snapshot dict. Validating the
-    *whole* snapshot to recover two of its ~38 leaves made every resume hostage to
-    every other leaf: ``CampaignConfig`` is ``extra="forbid"``, so one renamed knob —
-    even one nobody ever set — raised ``extra_forbidden`` here and no campaign minted
-    before the rename could resume. A snapshot is a record of what was; only the
-    fields actually read need to still be a thing."""
+    """Resume/fork rebuild from the LIVE dataset, which holds neither ``pipeline_overrides`` nor
+    ``optimizer_narrowing`` — read off the snapshot DICT, so one renamed leaf cannot block a resume."""
     frozen_narrowing = {
         node: NodeSearchNarrowing.model_validate(raw)
         for node, raw in (frozen_config.get("optimizer_narrowing") or {}).items()
@@ -635,8 +553,6 @@ def apply_inherited_overlay(
 
 @dataclass(frozen=True)
 class PreflightWarning:
-    """Structured pre-run warning surfaced before a campaign kicks off."""
-
     code: str
     title: str
     detail: str
@@ -672,24 +588,14 @@ _PARAMS_B_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
 
 
 def _model_params_b(model_id: str) -> float | None:
-    """Best-effort parameter count (billions) parsed from a model id's last path
-    segment — ``openai/gpt-oss-120b`` → 120.0, ``mistral-small-3.2-24b`` → 24.0.
-    ``None`` when no ``<N>b`` token is present (e.g. ``gpt-4o``), so the inversion
-    check below stays silent rather than guessing."""
     segment = model_id.rsplit("/", 1)[-1]
     match = _PARAMS_B_RE.search(segment)
     return float(match.group(1)) if match else None
 
 
 def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWarning | None:
-    """Warn when the optimizer LLM is *smaller* than a target it optimizes.
-
-    The optimizer is meant to be the strong model that improves the pipeline;
-    running it on a model smaller than the target it optimizes is almost always an
-    accidental inversion — the bug class behind the email-tagging 20b optimizer
-    pin. Both sides must parse a ``<N>b`` size or the check is skipped (no guess).
-    The optimizer model is read from the install-global optimizer node config
-    (``promptpotter/assets/optimizer/pipeline.yaml``), not a per-campaign copy."""
+    """An optimizer smaller than the target it optimizes is almost always an accidental inversion.
+    Its model is the install-global optimizer node config, never a per-campaign copy."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 
     opt_model = optimizer_model()
@@ -714,11 +620,8 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
 
 
 def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
-    """Knob-collision warnings — config combinations where one knob makes another
-    statistical quantity ill-defined or inert. The declared map lives in ``knobs``
-    (also read by the webapp config-map endpoint);
-    this is its pre-run CLI leg. Imported lazily to keep the statistical-constant
-    imports off ``config``'s module-load path."""
+    """The declared map lives in ``knobs``, which the webapp config-map endpoint also reads; this is
+    its pre-run CLI leg."""
     from promptpotter.application.knobs import check_couplings
 
     return [
@@ -736,10 +639,8 @@ def run_preflight_checks(
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
 ) -> list[PreflightWarning]:
-    """Pure — no mutation, no I/O.
-
-    ``target_models`` are the resolved per-node target/scoring model ids (from
-    ``session.pipeline_params``); empty when the backend owns the model."""
+    """``target_models`` are the resolved per-node target/scoring model ids, empty when the backend
+    owns the model. Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
@@ -752,15 +653,8 @@ def run_preflight_checks(
 
 
 def _check_lives_have_headroom(config: CampaignConfig) -> PreflightWarning | None:
-    """``lives`` that cannot run out before ``max_rounds`` is an inert brake.
-
-    Hearts are the measurement-driven twin of the calendar cap: they exist so a stalling
-    run stops EARLY. Starting with at least as many as there are rounds means the stall
-    counter can never reach zero first, so the knob buys nothing — and worse, when the two
-    coincide the run stops with ``lives_exhausted`` on the same round ``max_rounds`` would
-    have ended it, so the stop reason no longer says which fact stopped it. Observed on
-    `promptpotter-self__af6252`: `lives.start` and `max_rounds` both 2, stopped
-    `lives_exhausted`, and nothing in the record distinguishes that from the calendar."""
+    """``lives`` that cannot run out before ``max_rounds`` is an inert brake — and when the two
+    coincide the stop reason no longer says which fact stopped the run."""
     lives = config.optimization.lives
     max_rounds = config.optimization.max_rounds
     # `max_rounds=None` is the unbounded case — there is no calendar for hearts to race.
@@ -782,16 +676,8 @@ def _check_lives_have_headroom(config: CampaignConfig) -> PreflightWarning | Non
 def check_model_reasoning_floors(
     node_configs: Iterable[tuple[str, Mapping[str, Any]]],
 ) -> list[str]:
-    """HARD-block violations: a node pinning a reasoning model with an EXPLICIT
-    ``max_tokens`` below that model's profile floor (``ModelProfile.min_max_tokens``).
-
-    Below the floor a reasoning model can spend its whole output budget thinking and
-    emit zero content — a paid-for failure the runtime only ever catches post-hoc
-    (``classify_result`` → ``reasoning_budget_exhausted``). Gating it here turns that
-    into a refuse-to-start. An **absent** ``max_tokens`` is NOT a violation: that is the
-    sanctioned default (provider ceiling, governed via ``reasoning_effort``), so this
-    only fires on a config that deliberately set a too-low numeric cap. Pure — the
-    per-model facts live in ``infrastructure/llm/registry.py::_MODEL_PROFILES``."""
+    """Below ``ModelProfile.min_max_tokens`` a reasoning model can spend its whole budget thinking
+    and emit nothing. An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
     from promptpotter.infrastructure.llm.registry import model_profile
 
     violations: list[str] = []
@@ -818,33 +704,8 @@ def apply_node_overlay(
     overlay: Mapping[str, Any],
     schema: PipelineSchema | None,
 ) -> dict[str, Any]:
-    """The ONE per-node overlay merge → a fresh dict (``base`` untouched).
-
-    For each ``node`` in *overlay*: when both the existing and the incoming value are
-    dicts, the incoming keys win over the existing (``{**existing, **incoming}``);
-    otherwise the incoming value is assigned as-is — so the reserved non-dict
-    top-level ``steps`` list can't be spread and simply replaces. Sequential calls
-    layer correctly (later overlay > earlier), which is how the resolution chain
-    stacks dataset < campaign-override < cycle-seed.
-
-    **A param declared ``param_types: object`` merges one level deeper**: the incoming
-    keys win, the siblings it did not name SURVIVE — a candidate improving one
-    ``output_schema_descriptions`` entry cannot revert the entries its parent earned, so
-    the description axis accumulates across generations. Depth is bounded by the
-    DECLARATION, never by sniffing ``isinstance``: an undeclared param keeps the
-    node-level shallow semantics, and ``array`` replaces wholesale because a merged
-    ordering is meaningless. This is the same per-slot contract ``resolve_node_layout``
-    hand-rolls (named slot replaces, unnamed keeps the floor) — one nesting contract,
-    not two.
-
-    ``schema`` supplies those declarations; ``None`` (the schema-less
-    backend-default path) declares nothing, so every param stays shallow.
-
-    Shared by the dataset/override resolution here, the cycle-seed overlay
-    (``runner/entry.py``) and the candidate-override merge
-    (``optimization/l1/population.py::merge_pipeline_params`` — which deep-copies its
-    base and drops inactive nodes AROUND this call, and is itself the single merge the
-    live loop and the ``verify``/``ab`` replay verbs both ride)."""
+    """The ONE per-node overlay merge. Depth is bounded by the DECLARATION (``param_types: object``
+    merges one level deeper, so a sibling entry a parent earned survives), never by sniffing types."""
     merged = dict(base)
     for node, cfg in overlay.items():
         existing = merged.get(node)
@@ -872,15 +733,8 @@ def resolve_pipeline_config_params(
     dataset_dir: Path | None,
     schema: PipelineSchema,
 ) -> dict[str, Any]:
-    """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
-    base layered with the per-dataset overlay (``pipeline.yaml::nodes.{name}.config``) and
-    the campaign's ``pipeline_overrides``, restricted to *active* nodes. Prompts and
-    model validation are NOT here — they ride the ``OptSearchPoint`` / live ``Session``.
-
-    This is the SINGLE definition of which node config a cycle id and measurement key hash.
-    Shared by :func:`configure_and_apply_pipeline` (which adds prompts + validation + the
-    session apply) and the ``GET /origins`` prospective-origin id, so the two can never
-    silently diverge. Takes no live ``Session`` — resolvable from disk."""
+    """The SINGLE definition of which node config a cycle id and a measurement key hash — shared
+    with ``GET /origins``, so the prospective origin and the real one cannot diverge."""
     from promptpotter.application.datasets.prompts import load_dataset_node_overlay
 
     pipeline_params: dict[str, Any] = {"steps": list(active)}
@@ -927,12 +781,6 @@ def resolve_pipeline_config_params(
 
 
 def _connector_identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    """The dataset's connector ``identity_config`` contribution, or ``{}``.
-
-    Reads ``backend_type`` from the dataset's ``pipeline.yaml`` (tolerant — a
-    dataset dir without one contributes nothing) and asks the registered
-    connector. Import is local to keep ``config.py`` free of a module-level
-    connectors dependency."""
     from promptpotter.connectors import CONNECTORS
     from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
     from promptpotter.infrastructure.store.io import read_yaml_optional
@@ -945,19 +793,8 @@ def _connector_identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
-    """Declared `{{vars}}` the backend injects by literal substitution but the rendered prompt drops.
-
-    A prompt-bearing node declares the `{{name}}` placeholders the backend fills
-    (query / research evidence / output-schema). If the rendered prompt omits one,
-    that injection silently no-ops and the model never sees it. The six-field
-    decomposition names (`PROMPT_STRING_FIELDS`) are excluded because `render()`
-    ASSEMBLES them — they are never `{{substituted}}`, whoever declares them. No
-    shipped pipeline does today (pp-self, the one that did, declares no `prompt_info`
-    at all now); the clause stays because it is a true statement about those names
-    rather than a patch for one dataset, and a live backend we cannot read from here
-    is the wrong place to learn otherwise. The SINGLE definition of "required
-    placeholder", shared by the mint-time setup check and the in-loop L1 candidate guard.
-    """
+    """The SINGLE definition of a required placeholder, shared by the mint-time setup check and the
+    in-loop L1 guard. ``PROMPT_STRING_FIELDS`` are excluded: ``render()`` ASSEMBLES them."""
     return [
         v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
     ]
@@ -969,13 +806,8 @@ def _resolve_active_schema(
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
 ) -> tuple[list[str], PipelineSchema]:
-    """Resolve the active node list + the exclude-filtered, campaign-narrowed schema.
-
-    ``steps`` is two shapes under one word. Here it is the BACKEND's
-    ``list[dict]`` (each ``{"name": ..., ...}``) out of ``GET /pipeline``. On
-    ``pipeline_params`` it is the reserved top-level ``list[str]`` of active node
-    names (``RESERVED_PIPELINE_PARAM_KEYS``). Hence the ``s["name"]`` below.
-    """
+    """``steps`` is two shapes under one word: here the BACKEND's ``list[dict]`` from ``GET
+    /pipeline``, on ``pipeline_params`` the reserved ``list[str]`` of active node names."""
 
     active = pipeline_schema.active_steps_excluding(exclude)
 
@@ -999,12 +831,7 @@ def _apply_starting_prompts(
     dataset_name: str,
     log: Callable[[str], None],
 ) -> None:
-    """Load each prompt-bearing node's starting prompt onto the wire payload.
-
-    Fails loud (``PayloadInvalidError``) when a rendered prompt omits a
-    ``{{var}}`` the node declares; warns when the dataset ships prompts but no
-    active node can carry one. Assumes the caller checked ``has_dataset_prompts``.
-    """
+    """Assumes the caller checked ``has_dataset_prompts``."""
     from promptpotter.application.datasets.prompts import load_node_prompt
 
     prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
@@ -1060,15 +887,8 @@ def _validate_model_ownership(
     active: list[str],
     dataset_name: str,
 ) -> None:
-    """LOUD invariant: every active LLM node must carry an owned ``model``.
-
-    The dataset OWNS its task model, sourced from its own `nodes.{node}.config`
-    overlay. A missing model is a setup bug, surfaced loudly here: the prior
-    silent fall-through let the backend's hidden GET /pipeline default decide
-    (TermNorm ships groq/120b), so a fresh drop ran the wrong model unnoticed.
-    In-process optimizer prompt nodes (L4) are not `is_llm` and are exempt — their
-    model is the install-global optimizer config.
-    """
+    """The dataset OWNS its task model; a missing one is a setup bug, because a silent fall-through
+    lets the backend's hidden ``GET /pipeline`` default decide. L4 optimizer nodes are exempt."""
     if filtered is None:
         return
     for name in active:
@@ -1083,15 +903,8 @@ def _validate_model_ownership(
 
 
 def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> str:
-    """Which dataset this run is against — the persisted campaign snapshot is
-    authoritative, the live session is the fallback.
-
-    One rule, one place. It was written out twice, here and at the mint seam that
-    stamps ``Campaign.dataset_name``, with a comment in the second asserting it matched
-    the first. The two feed the same identity (`mint_campaign_id` → `{dataset}__{rand6}`
-    and the archive's `dataset_name` key), so a divergence renames campaigns and files
-    their measurements under a name nothing else looks up.
-    """
+    """One rule, one place: this feeds the same identity as the mint seam's ``Campaign.dataset_name``,
+    so a divergence renames campaigns and files measurements under a name nothing looks up."""
     return campaign_config.dataset_name or session.dataset_name or ""
 
 
@@ -1101,7 +914,6 @@ def configure_and_apply_pipeline(
     *,
     log: Callable[[str], None] = logger.info,
 ) -> dict[str, Any]:
-    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
     from promptpotter.application.datasets.prompts import has_dataset_prompts
 
     exclude = list(campaign_config.exclude_nodes)

@@ -1,11 +1,5 @@
-"""Resume-checkpoint policy — gating modes + ledger-append helper.
-
-``RESUME_CHECKPOINT_GATING`` is the sole source of truth for ``REPLAYED`` (re-derived on
-resume; a mismatch halts or forks) vs ``ARCHIVAL`` (audit only, never compared). Every
-kind must appear exactly once or import fails here. **Adding a kind is two edits in one
-commit** — the enum in ``domain.run_records`` and this table — plus a registered replayer
-if it is ``REPLAYED``.
-"""
+"""``RESUME_CHECKPOINT_GATING`` is the sole source for ``REPLAYED`` vs ``ARCHIVAL``; every kind must appear exactly
+once or import fails. **Adding a kind is two edits in one commit**, plus a replayer if it is ``REPLAYED``."""
 
 from __future__ import annotations
 
@@ -24,11 +18,8 @@ __all__ = [
 
 
 class GatingMode(enum.StrEnum):
-    """Whether a decision kind drives resume-divergence checking.
-
-    REPLAYED: re-derived under the active scorer on resume; mismatch halts
-    or forks. ARCHIVAL: archived only; never compared on resume.
-    """
+    """Whether a decision kind drives resume-divergence checking. ``REPLAYED`` is re-derived under the active scorer and a
+    mismatch halts or forks; ``ARCHIVAL`` is never compared."""
 
     REPLAYED = "replayed"
     ARCHIVAL = "archival"
@@ -99,7 +90,6 @@ def record_decision(
     data: dict[str, Any] | None = None,
     round: int | None = None,
 ) -> Any:
-    """Build a ResumeCheckpointRecord and append to *sink*; return outcome for passthrough."""
     sink.append(
         ResumeCheckpointRecord(
             kind=kind,

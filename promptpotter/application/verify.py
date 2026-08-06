@@ -1,12 +1,5 @@
-"""Verify use-case — re-score one campaign candidate on N additional samples.
-
-Not a cycle/fork/sweep: no ledger event, no round_id; persistence is into the
-workspace ``archive/`` tree only. The CLI shell
-(``presentation/cli/commands/verify.py``) owns arg-parsing, needle resolution
-(campaign/cycle/label), and human-string formatting; this module owns
-resolving the candidate off disk, scoring it, and assembling the
-``DiagnosticRunRecord``.
-"""
+"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle, fork or sweep: no ledger event, no round id,
+and persistence lands in the workspace ``archive/`` tree only."""
 
 from __future__ import annotations
 
@@ -35,17 +28,14 @@ __all__ = ["VerifyError", "VerifyOutcome", "verify_candidate"]
 
 
 class VerifyError(Exception):
-    """A resolved-state failure: campaign/round/candidate missing on disk, or
-    the pipeline schema is unavailable. The CLI shell maps this to a clean
-    ``SystemExit`` — this module never raises ``SystemExit`` itself."""
+    """A resolved-state failure: campaign, round or candidate missing on disk. The CLI shell maps it to a clean exit — this
+    module never raises ``SystemExit`` itself."""
 
 
 @dataclass(frozen=True)
 class VerifyOutcome:
-    """``record`` is ``None`` on the "every sample already measured" path — both
-    human-readable verdict strings are formatted by the CLI shell from this
-    outcome, never here.
-    """
+    """``record`` is ``None`` on the "every sample already measured" path. Both verdict strings are formatted by the CLI
+    shell from this outcome, never here."""
 
     dataset_name: str
     already_measured: int
@@ -80,11 +70,8 @@ async def verify_candidate(
     seed: int | None,
     log: Callable[[str], None] | None = None,
 ) -> VerifyOutcome:
-    """Re-score the ``C{round_num}.{cand_idx+1}`` candidate on *samples* unmeasured samples.
-
-    Raises :class:`VerifyError` when the candidate can't be resolved off disk
-    (missing campaign manifest / round file / candidate / pipeline schema).
-    """
+    """Re-score one candidate on *samples* UNMEASURED samples. Raises :class:`VerifyError` when it cannot be resolved off
+    disk."""
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,

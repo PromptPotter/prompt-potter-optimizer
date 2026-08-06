@@ -1,13 +1,5 @@
-"""L2 behaviour checks — programmatic conformance for one ``l2_context`` fire.
-
-Conformance here is **dataset-independent** — it scores how well the optimizer LLM
-honoured the optimizer prompt's contract, not whether task accuracy moved, and that decoupling
-is what makes the metric a usable anchor for iterating the optimizer prompt across datasets.
-Adding a check is one function plus one ``L2_CHECK_REGISTRY`` entry; the registry is the
-SoT, so every surface enumerating the checks reads the same set. Rules the L2 schema
-already enforces structurally (no ``pipeline_params``, frozen ``task_context``) need no
-check here — a behaviour check for something ``extra="forbid"`` makes unreachable is noise.
-"""
+"""L2 behaviour checks — dataset-INDEPENDENT, which is what makes the metric a usable anchor for iterating the optimizer prompt across
+datasets. The registry is the SoT; a check for something ``extra="forbid"`` already makes unreachable is noise."""
 
 from __future__ import annotations
 
@@ -40,12 +32,8 @@ CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 
 def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:
-    """Return the parsed ``l2_context`` response on a round/audit dict.
-
-    Walks ``nodes.l2_context.output.response`` — the ``L2ContextOutput``
-    shape. Empty dict when L2 did not fire this round or the response is
-    malformed.
-    """
+    """The parsed ``l2_context`` response on a round dict. Empty dict when L2 did not fire this round, or the response
+    was malformed."""
     if not round_dict:
         return {}
     nodes = round_dict.get("nodes") or {}
@@ -55,7 +43,6 @@ def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def l2_fired(round_dict: dict[str, Any] | None) -> bool:
-    """True iff this round's audit carries a non-empty ``l2_context`` node."""
     return bool(extract_l2_output(round_dict))
 
 
@@ -75,13 +62,8 @@ def _check_rationale_substantive(round_dict: dict[str, Any], ctx: ValidatorConte
 
 
 def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """L2's refinement must be evidence-anchored — name a targeted axis or
-    cite a specific sample / number, not a speculative 'maybe try X'.
-
-    Per ``promptpotter/CLAUDE.md`` L2 contract: the refinement *cites a
-    specific axis, sample, or yield number*; speculative refinements are
-    out of contract.
-    """
+    """L2's refinement must be EVIDENCE-ANCHORED — a targeted axis or a cited sample / number, never a speculative
+    "maybe try X". The contract is stated in ``promptpotter/CLAUDE.md``."""
     out = extract_l2_output(round_dict)
     axis = str(out.get("axis_targeted") or "").strip()
     if axis:
@@ -96,16 +78,8 @@ def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) 
 
 
 def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """An L2 fire must change *something* L1 reads — ``l1_layout`` or ``l1_overrides``.
-    A fire that changes nothing is a wasted escalation.
-
-    **This is the instrument that decides whether the L2 call earns its cost.** If the pass
-    rate stays in the low single digits across a clean run, an ~11k-char optimizer call is
-    buying one bit and the rung should collapse to a computed gate. Read the rate off
-    ``review.md``.
-
-    ``axis_targeted`` is deliberately NOT a surface: it is prose naming a direction, and L1
-    reads its axes from ``axis_memory``, which is derived from measurement."""
+    """An L2 fire must change something L1 READS — ``l1_layout`` or ``l1_overrides``. **This is the instrument deciding whether
+    the L2 call earns its cost.** ``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
     out = extract_l2_output(round_dict)
     if not out:
         return CheckResult("l2_targets_l1_surface", True, "L2 did not fire")
@@ -125,11 +99,8 @@ L2_CHECK_REGISTRY: dict[str, CheckFn] = {
 
 
 def run_all_l2_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
-    """Run every L2 behaviour check against one round, in registry order.
-
-    Empty list when L2 did not fire this round — there is nothing to
-    score, and an absent fire must not count as a conformance failure.
-    """
+    """Run every L2 behaviour check in registry order. EMPTY when L2 did not fire this round — there is nothing to score,
+    and an absent fire must not count as a conformance failure."""
     if not l2_fired(round_dict):
         return []
     return [fn(round_dict, ctx) for fn in L2_CHECK_REGISTRY.values()]

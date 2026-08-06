@@ -1,11 +1,3 @@
-"""Render targets — typed View → markdown (application's emit contract).
-
-Genuinely-terminal rendering (ANSI ``to_text`` / ``render_sp_diff``) stays in
-``presentation/views/render`` — it's display-only. The markdown + heatmap +
-sweep-summary renderers here are part of what the application emits to disk
-(``log.md`` / ``summary.md``), so they live alongside the view models.
-"""
-
 from __future__ import annotations
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap

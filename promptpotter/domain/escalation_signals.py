@@ -1,5 +1,3 @@
-"""Escalation signals + self-healing failure types — pure data, no I/O."""
-
 from __future__ import annotations
 
 import enum
@@ -13,21 +11,13 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class EscalationTarget(enum.StrEnum):
-    """What a per-candidate PoBB check decides about the candidate in flight."""
-
     ELIMINATE_CANDIDATE = "eliminate_candidate"
     LEADER_LOCKED = "leader_locked"
 
 
 class ExplorationBudget(enum.StrEnum):
-    """How freely ``l1_generate`` may explore, widening with L1 stall depth.
-
-    The single source for the ``escalation_panel.exploration_budget`` signal the
-    l1_generate supplemental rules cite, and for the value
-    ``output.py::_compute_behavior_per_round`` feeds ``ValidatorContext`` so
-    ``evidence_grounding_present`` can gate the ``stall_exploration`` escape hatch
-    and the PEAKED-axis rebut.
-    """
+    """How freely ``l1_generate`` may explore. The single source for the ``escalation_panel.exploration_budget`` signal AND
+    for the value the review writer feeds ``ValidatorContext``, so prompt and validator cannot disagree."""
 
     TIGHT = "tight"  # improving — exploit the parent; speculative gambles rejected
     NORMAL = "normal"  # stalling — stall_exploration citations permitted
@@ -35,14 +25,8 @@ class ExplorationBudget(enum.StrEnum):
 
 
 def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
-    """Widen the budget with measured L1 stall depth (NOT a round-count schedule).
-
-    ``0`` stall → TIGHT; a partial stall → NORMAL; at/over ``l1_patience`` (the loop
-    is about to escalate to L2) → WIDE. Pure: both the bundle build (prompt side,
-    ``dispatch/facade.py``) and the review writer (validator side,
-    ``output.py::_compute_behavior_per_round``) call this with the stall depth in
-    effect for the round, so the two consumers can never disagree on the mapping.
-    """
+    """Widen the budget with MEASURED L1 stall depth, never a round-count schedule. Pure, and called by both the prompt side
+    and the validator side with the same stall depth, so the two consumers can never disagree on the mapping."""
     if stall_count <= 0:
         return ExplorationBudget.TIGHT
     if stall_count >= l1_patience:
@@ -51,16 +35,8 @@ def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
 
 
 class NurseOwner(enum.StrEnum):
-    """Who heals a wound: the in-loop generator (L1) or the operator.
-
-    Stamped on a :class:`RuntimeFailure` — the one wound whose owner genuinely
-    varies (an L1-retunable degradation vs an operator-terminal break no in-loop
-    layer can reach). The other two wounds carry no owner field because theirs is
-    structural, not a choice: a :class:`ValidationFailure` is always L1's own
-    malformed output, and a guard-breach :class:`ValidatorOutcome` always routes
-    to L3 via the non-empty-stream → ``escalate_l2`` mechanism. A member earns its
-    place only once a producer stamps it — `L3` isn't here because nothing does.
-    """
+    """Who heals a wound. Stamped only on ``RuntimeFailure`` — the one wound whose owner genuinely varies; the other two are structural.
+    A member earns its place once a producer stamps it, which is why ``L3`` is absent."""
 
     L1 = "l1"
     OPERATOR = "operator"
@@ -68,8 +44,6 @@ class NurseOwner(enum.StrEnum):
 
 @dataclass
 class EscalationSignal:
-    """Signal emitted when an escalation check triggers mid-round."""
-
     check_name: str
     target: EscalationTarget
     check_result: dict[str, Any]
@@ -215,10 +189,8 @@ class RuntimeFailure(StrictModel):
 
 
 def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    """Dedup key for a serialized :class:`RuntimeFailure`: ``(source, dominant_warning,
-    observed_config)``. Pure and canonical, so intra-cycle dedup (``Cycle``) and cross-cycle
-    sibling-wound inheritance (``intelligence/sibling_wounds``) match without a hand-synced
-    mirror. All three components are required fields, so a serialized row always carries them."""
+    """Dedup key for a serialized runtime failure. Pure and canonical, so intra-cycle dedup and cross-cycle sibling-wound
+    inheritance match without a hand-synced mirror."""
     return (
         rf_dict["source"],
         rf_dict["dominant_warning"],

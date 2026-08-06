@@ -1,10 +1,5 @@
-"""Complexity ledger — one exact number per dimension of the package's surface.
-
-Run: ``python -m promptpotter.diagnostics``. What a raise obliges you to write down:
-root ``CLAUDE.md`` § ``<surface-ledger>``. What a dimension counts — and which ones
-march to a floor rather than sit at one — is on its ``_count_*`` function. Every
-number is computed by introspection, never estimated, so two readers agree. Outside
-the layer tree because it counts every layer: inside one, an import would invert.
+"""Move a number here and you owe a written reason — root ``CLAUDE.md`` § ``<surface-ledger>``.
+Outside the layer tree because it counts every layer: inside one, an import would invert.
 """
 
 from __future__ import annotations
@@ -33,15 +28,6 @@ _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
 
 
 def _package_files(pattern: str) -> list[Path]:
-    """Files matching *pattern* under the package, excluding :data:`_ASSETS_ROOT`.
-
-    The exclusion is sound only while ``assets/`` holds no code, so that is asserted
-    rather than assumed: a ``.py`` landing there would be invisible to ``modules``,
-    ``any_params`` and ``models_lax`` at once — a ratchet with a hole in it is worse than
-    no ratchet. Two ways it could happen, and the message has to cover both: someone
-    places a module under ``assets/``, or a benchmark dataset picks up a helper script and
-    ``scripts/build_release.py`` stages it in.
-    """
     stowaways = sorted(_ASSETS_ROOT.rglob("*.py")) if _ASSETS_ROOT.is_dir() else []
     assert not stowaways, (
         f"Python files under {_ASSETS_ROOT.name}/ are excluded from every ledger count, so "
@@ -53,7 +39,6 @@ def _package_files(pattern: str) -> list[Path]:
 
 
 def _unwrap_optional(annotation: object) -> object:
-    """Strip ``X | None`` / ``Optional[X]`` down to ``X``; pass anything else through."""
     origin = typing.get_origin(annotation)
     if origin is typing.Union or origin is types.UnionType:
         non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
@@ -63,8 +48,6 @@ def _unwrap_optional(annotation: object) -> object:
 
 
 def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = None) -> int:
-    """Recursive leaf-field count. A nested ``BaseModel`` recurses; a scalar or a
-    container (``list[Model]``, ``dict``) counts as one leaf. Cycle-safe."""
     seen = _seen if _seen is not None else set()
     if model in seen:
         return 0
@@ -80,19 +63,8 @@ def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = N
 
 
 def _count_any_params(py_files: list[Path]) -> int:
-    """Bare ``x: Any`` / ``x: Any | None`` NAMED parameters across the package.
-
-    Excludes ``*args``/``**kwargs: Any`` (idiomatic passthrough) and container values
-    like ``dict[str, Any]`` (honest — raw JSON has no better type). What is left is the
-    actionable shape: a parameter whose real type exists and simply was not written.
-
-    Why it is a ledger dimension and not a mypy flag: ``disallow_any_explicit`` rejects
-    ``dict[str, Any]`` just as hard, so it cannot express "Any is fine for JSON, not for
-    a parameter with a known type". And ``strict``'s own ``warn_return_any`` does NOT
-    cover it — an ``Any`` param is a complete annotation, so ``disallow_untyped_defs``
-    is satisfied, and ``no-any-return`` is defeated by any expression that unions ``Any``
-    with a concrete type. This count is the only thing that sees the declaration.
-    """
+    """Not a mypy flag: ``disallow_any_explicit`` rejects an honest ``dict[str, Any]`` just as
+    hard, and ``warn_return_any`` cannot see a param at all — an ``Any`` IS a complete annotation."""
     import ast
 
     total = 0
@@ -111,21 +83,8 @@ def _count_any_params(py_files: list[Path]) -> int:
 
 
 def _count_domain_any_maps(py_files: list[Path]) -> int:
-    """String-keyed ``Any`` maps declared at a ``domain/`` signature — parameter or return.
-
-    Package-wide there are ~830 and counting them all is unactionable: most are the
-    node-keyed ``pipeline_params`` shape ``architecture.md`` declares, whose keys the backend
-    invents at runtime, so a count flagging them gets muted. Scoped here instead — the layer
-    contracted to "frozen models, pure types", at the position where a fact is PASSED between
-    two pieces of our own code rather than held (a model *field* legitimately carries the
-    backend's overlay). ``Mapping`` counts too, at any depth: same surface, and omitting it
-    would let a rename retire the number.
-
-    A high FLOOR. Honest: the pipeline overlay (``opt_search_point``, ``pipeline_parsing``,
-    ``pipeline_schema``, ``search_point``, ``connector``), a node's output (``rendering``,
-    ``validators``), a dataset row (``sample``). Retirable: ``results``, ``results_health``,
-    ``l4.verdict``, ``measurement_provenance`` — rows of PP's OWN on-disk shapes, taken as bags.
-    """
+    """Scoped to ``domain/`` because package-wide the shape is mostly the backend's own
+    runtime-keyed overlay, and a count that flags what nobody may fix gets muted."""
     import ast
 
     domain_root = _PACKAGE_ROOT / "domain"
@@ -151,27 +110,8 @@ def _count_domain_any_maps(py_files: list[Path]) -> int:
 
 
 def _count_param_decls(py_files: list[Path]) -> int:
-    """Every named parameter declared by every function in the package (``self``/``cls`` excluded).
-
-    The dimension for values that travel by being RE-DECLARED at each level they pass
-    through rather than riding a carrier. Nothing else here can see that: a value threaded
-    six deep adds no module, no class, no config leaf and no ``Any``, so every other count
-    reads flat while each new fact costs an edit at N signatures, N call sites and N
-    docstrings. It is also the one shape ``<surface-ledger>`` rule 2 cannot satisfy by
-    accident — moving code between files leaves this number exactly where it was.
-
-    A TOTAL, not the >N tail this started as. The tail could not see the thing it was
-    added for: bundling ``(campaign_id, cycle_id)`` onto ``CycleHop`` retired ~80
-    declarations and the tail read flat, because pair-threading lives in three- and
-    four-parameter functions, not in the handful of monsters. A total sees both — a
-    fifteen-parameter function is fifteen of it — which is also why the threshold is
-    gone: there is no cut-off left to re-aim the ratchet by moving.
-
-    Marches to a FLOOR. Most of this number is functions taking their real arguments;
-    width that ``conventions.md`` § Code shape REQUIRES — a parameter that changes what a
-    number MEANS taking no default, so the signature does the enforcing — is the rule
-    working, not debt. What a pass can retire is the rest: transport.
-    """
+    """The one dimension that sees a value threaded N deep rather than riding a carrier: that
+    costs no module, no class, no config leaf and no ``Any``, so every other count reads flat."""
     import ast
 
     total = 0
@@ -190,27 +130,8 @@ def _count_param_decls(py_files: list[Path]) -> int:
 
 
 def _count_lax_models(py_files: list[Path]) -> int:
-    """Pydantic models that do NOT end up ``extra="forbid"`` — i.e. that silently drop
-    unknown keys.
-
-    Pydantic's default is ``extra="ignore"``, so a model built with a misspelled keyword
-    returns a valid-looking instance. ``ObservationMapping(obs_key=…)`` — the field is
-    ``output_field`` — rode a real ``pipeline.json`` that way for months with every gate
-    green. Inheriting :class:`~promptpotter.domain.strict_model.StrictModel` inverts that
-    default; this count is what stops the lax ones growing back.
-
-    A FLOOR, and the 4 each name their reason on the model itself. ``RoundResult`` /
-    ``ScoredCandidate``: a ``@computed_field`` round-trip — Pydantic serializes such a field
-    OUT and rejects it back IN, so writing the round file and reading it back agree only
-    while extras are ignored (forbid breaks every real round file on disk). ``NodePromptInfo``:
-    the BACKEND owns that sub-object's vocabulary, and a backend PP does not own must be able
-    to describe itself without crashing PP. ``Sample``: a dataset row carries whatever columns
-    the operator's file had. ``ObservationMapping`` is deliberately NOT lax though it also
-    parses ``pipeline.yaml`` — PP owns that vocabulary, so an unknown key there is a typo.
-
-    Resolved by AST, not by import: enumerating models at runtime means importing every
-    module, and the eager ``store/__init__`` aggregator makes import order a live hazard.
-    """
+    """Models that do NOT end up ``extra="forbid"`` — Pydantic's default returns a valid-looking instance from a misspelled
+    keyword. AST, not import: eager package init makes import order a hazard."""
     import ast
 
     bases: dict[str, list[str]] = {}
@@ -270,20 +191,28 @@ def _count_lax_models(py_files: list[Path]) -> int:
 
 
 def _is_reexport_shim(init_file: Path) -> bool:
-    """An ``__init__`` that is only ``__all__`` + imports — a package indirecting to its leaves.
-
-    A FLOOR, not debt: the 5 survivors are not shims and emptying them breaks the app.
-    ``connectors`` IS the connector registry (import-time guards).
-    ``presentation/api/routers/campaigns`` IS the route registry — its submodule imports run
-    the ``@campaigns_router`` decorators, so emptying it mounts ZERO routes; it is the one
-    that reads like a pure re-export and is not. ``shared``,
-    ``application/scoring/formula`` and ``application/views/render`` have real code in the
-    body, which this text test cannot see.
-    """
+    """A TEXT test — it cannot see a body that also holds real code, or imports whose
+    side effect IS the registry, so what it flags is named in the baseline, not emptied."""
     text = init_file.read_text(encoding="utf-8")
     has_all = "__all__" in text
     has_import = any(line.lstrip().startswith(("import ", "from ")) for line in text.splitlines())
     return has_all and has_import
+
+
+def _count_docstring_lines(py_files: list[Path]) -> int:
+    import ast
+
+    total = 0
+    for path in py_files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(
+                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ):
+                continue
+            doc = ast.get_docstring(node, clean=False)
+            if doc is not None:
+                total += len(doc.strip().splitlines())
+    return total
 
 
 def compute_ledger() -> dict[str, int]:
@@ -311,6 +240,7 @@ def compute_ledger() -> dict[str, int]:
         "domain_any_maps": _count_domain_any_maps(py_files),
         "param_decls": _count_param_decls(py_files),
         "models_lax": _count_lax_models(py_files),
+        "docstring_lines": _count_docstring_lines(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),

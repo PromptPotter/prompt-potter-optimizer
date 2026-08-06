@@ -1,5 +1,3 @@
-"""L1 generation — LLM optimizer prompt call producing N candidate variants."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -48,10 +46,8 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
-    """Permissive parse — `field` is plain `str` (provider may ignore the JSON-Schema enum) and
-    `raw` may be None (missing citation). Missing groundings surface downstream as
-    `evidence_grounding_present` behavior-check failures.
-    """
+    """Permissive parse — ``field`` is a plain ``str`` (a provider may ignore the enum) and ``raw`` may be ``None``. A
+    missing grounding surfaces downstream as a behaviour-check failure."""
     if raw is None:
         logger.warning(
             "l1_generate: variant emitted without evidence_grounding — "
@@ -90,13 +86,8 @@ async def l1_generate(
     obs: ObservabilityBridge | None = None,
     round_num: int = 0,
 ) -> tuple[list[CandidateProposal], str | None]:
-    """Generate candidate variants via LLM optimizer prompt; context read from cycle.
-
-    Returns ``(candidates, parse_failure)``. ``parse_failure`` names the reason when the
-    optimizer prompt produced unparseable output — the round then carries zero candidates and
-    the reason travels with it (charged to the round, never to a candidate), rather than
-    vanishing into a bare ``[]``.
-    """
+    """Generate candidate variants. ``parse_failure`` names why the optimizer prompt produced unparseable output — the
+    round then carries zero candidates and the REASON travels with it, charged to the round, never to a candidate."""
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 

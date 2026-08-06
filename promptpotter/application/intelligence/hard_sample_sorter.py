@@ -1,7 +1,4 @@
-"""Hard-sample-sorter — ``(candidate, sample, fitness)`` → θ_c-ranked × δ_s-ranked matrix.
-
-Spec: ``git log``.
-"""
+"""Hard-sample sorter — ``(candidate, sample, fitness)`` into a θ-ranked × δ-ranked matrix."""
 
 from __future__ import annotations
 
@@ -55,10 +52,8 @@ def _pick_score_under_prior(
     seed_mu: float,
     seed_var: float,
 ) -> dict[int, float]:
-    """Per-sample pick-value for a fresh mutation centred at θ_seed (not population-mean 0).
-
-    Round-boundary snapshot of the same ``pick_value`` the live adaptive queue mechanism calls.
-    """
+    """Per-sample pick-value for a fresh mutation centred at θ_seed, not population-mean 0. A round-boundary snapshot of
+    the same ``pick_value`` the live queue mechanism calls."""
     var_theta = sigma_theta * sigma_theta
     return {
         sid: pick_value(seed_mu, var_theta, seed_mu, seed_var, d, delta_se[sid])
@@ -93,10 +88,8 @@ def _resolve_round_order(
     posterior: RaschPosterior,
     best_cid: str | None,
 ) -> list[int]:
-    """``pick_score.sample_order`` = what the engine will actually execute next round:
-    ``build_round_order`` seeded with the best candidate's per-sample grades (the
-    likely next-round seed). Miss-stratum (win opportunities) first, hit probes
-    every 4th slot."""
+    """What the engine will actually execute next round — ``build_round_order`` seeded with the best candidate's grades.
+    Miss-stratum first, hit probes every 4th slot."""
     best_grades: dict[int, float] = {}
     if best_cid is not None:
         best_grades = {
@@ -106,12 +99,8 @@ def _resolve_round_order(
 
 
 def empty_artifact(*, cycle_id: str | None = None) -> dict[str, Any]:
-    """Schema-valid stub for a zero-observation campaign; renderers short-circuit on
-    ``n_observations == 0``.
-
-    No ``disabled`` flag: it defaulted to False, the sole caller omitted it, and the other
-    producer hardcoded False — so the field was a constant, and the ``artifact.get("disabled")``
-    arm of the heatmap guard could never fire. ``n_observations == 0`` is the one real check."""
+    """Schema-valid stub for a zero-observation campaign; ``n_observations == 0`` is the one real check. There is no
+    ``disabled`` flag — it was a constant, so the arm of the heatmap guard reading it could never fire."""
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
@@ -137,7 +126,6 @@ def build_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
 ) -> dict[str, Any]:
-    """Thin wrapper — projects ``rounds`` to observations then delegates. Pure."""
     return build_hard_samples_artifact_from_observations(
         build_observations(rounds),
         cycle_id=cycle_id,
@@ -153,7 +141,6 @@ def build_hard_samples_artifact_from_observations(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
 ) -> dict[str, Any]:
-    """Pre-built-observations variant; fits Rasch over *observations*, truncates to top-K."""
     if not observations:
         return empty_artifact(cycle_id=cycle_id)
 

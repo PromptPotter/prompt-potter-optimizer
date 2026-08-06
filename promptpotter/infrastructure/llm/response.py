@@ -10,11 +10,8 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class LLMResponse(StrictModel):
-    """Standardized response from LLM providers.
-
-    ``reasoning`` is a **core, permanent** member of this shape — see its field note.
-    Do not "clean it up" because no gate reads it; that is the point of it.
-    """
+    """The standardized response every provider returns. ``reasoning`` is a CORE, permanent member: do not clean it up
+    because no gate reads it — that is the point of it."""
 
     content: str = Field(..., description="Response content")
     reasoning: str = Field(

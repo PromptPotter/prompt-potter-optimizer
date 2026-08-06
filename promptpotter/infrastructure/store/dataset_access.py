@@ -1,16 +1,5 @@
-"""Dataset access gateway — the single seam that resolves a dataset directory.
-
-Tenant content is isolated by path; install content carries **no capability check** —
-gating a read on bytes that ship with the software protects nothing and blanks every
-panel bound to that campaign. That rationale turns on DISTRIBUTION, not on git: since
-2026-07-30 the benchmark definitions ship inside the wheel as well as in the checkout
-(``config/paths.py::benchmark_datasets_root``), and the argument is unchanged either way
-— anyone holding the artifact already holds the bytes. A private cut is tenant content,
-never an install dir. Resolution is tenant-first, so a tenant may shadow an install slug, and
-the *list* and the *resolver* share one rule so the picker cannot surface what the read
-endpoints would deny. Presentation MUST NOT read :attr:`Stores.benchmarks_root` directly
-— every access comes through here, and no standing test enforces it.
-"""
+"""Dataset access gateway — the single seam that resolves a dataset directory, tenant content
+first. Install content carries NO capability check: gating bytes that ship protects nothing."""
 
 from __future__ import annotations
 
@@ -25,16 +14,8 @@ from promptpotter.shared.errors import NotFoundError
 
 
 class DatasetAccessError(NotFoundError):
-    """No dataset *name* this identity can resolve — invalid slug, or absent.
-
-    A :class:`NotFoundError`, so the central ``PotterError`` handler maps it to
-    404 with no per-route arm — a router catching it to rebuild that same 404 by hand
-    is drift. One exception because there is one reason: the dataset is not there.
-
-    404 rather than 403 is the existence-leak posture, and it belongs here rather
-    than at a router: a non-admin must not be able to tell a benchmark they may not
-    read from a dataset that does not exist.
-    """
+    """No dataset *name* this identity can resolve — invalid slug, or absent. A
+    :class:`NotFoundError`: 404 rather than 403 is the existence-leak posture."""
 
     def __init__(self, name: str) -> None:
         super().__init__(f"Dataset '{name}' not found")
@@ -50,46 +31,26 @@ class DatasetRef:
 
 
 def dataset_pipeline_path(dataset_dir: Path) -> Path:
-    """The dataset's node overlay. **The one place this filename is spelled.**
-
-    Every reader takes the resolved dir and asks here, so a rename cannot desync a
-    reader from an existence probe — which is the shape that lets a dataset silently
-    stop being a dataset instead of failing loudly.
-    """
+    """The dataset's node overlay. **The one place this filename is spelled** — a rename cannot
+    desync a reader from an existence probe, which is how a dataset stops being one silently."""
     return dataset_dir / "pipeline.yaml"
 
 
 def dataset_task_context_path(dataset_dir: Path) -> Path:
-    """The dataset's run-start framing — spelled once for every READER, same rule as
-    :func:`dataset_pipeline_path`, across all three tiers it can resolve from (see
-    :func:`readable_task_context`). The commit writer keeps its own literal: it lives
-    below this module in the import order and cannot reach up to it."""
+    """The dataset's run-start framing, spelled once for every READER across all three tiers.
+    The commit writer keeps its own literal: it sits below this module in the import order."""
     return dataset_dir / "task_context.yaml"
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
-    """A directory is a dataset iff it carries a pipeline overlay.
-
-    Public so no call site re-derives it with its own literal — the readiness probe in
-    the origins router among them — because then "is this a dataset" answers differently
-    depending on who asked.
-
-    A materialized ``cache.json`` does NOT count: that would disagree with
-    :func:`list_readable_datasets`, which asks for the overlay, and a row bank with no
-    definition would list nowhere yet resolve here. Rows live outside the dir entirely,
-    so the definition is the only thing left to ask for.
-    """
+    """A directory is a dataset iff it carries a pipeline overlay — public so no call site
+    re-derives it. A materialized ``cache.json`` does NOT count; rows live outside the dir."""
     return dataset_pipeline_path(dataset_dir).is_file()
 
 
 def readable_dataset_dir(stores: Stores, name: str) -> Path:
-    """Resolve *name*'s directory — tenant content first, then install content.
-
-    The one resolver every read AND every mint goes through (see the module
-    docstring for why install content needs no capability). Raises
-    :class:`DatasetAccessError` when *name* is an invalid slug or resolves to
-    no dataset dir on either tier.
-    """
+    """Resolve *name*'s directory — tenant content first, then install content. The one resolver
+    every read AND every mint goes through; raises :class:`DatasetAccessError` on neither tier."""
     try:
         tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
@@ -104,22 +65,8 @@ def readable_dataset_dir(stores: Stores, name: str) -> Path:
 
 
 def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
-    """The materialized rows for *name*, or ``None`` — the row half of the resolver.
-
-    A dataset dir is a DEFINITION (ours under a wheel, read-only) and its rows are a
-    MEASUREMENT INPUT the operator materialized (fetched, regenerable, 6.8 MB). Sharing
-    a directory is the only thing that would make the install tier need to be writable —
-    and writable it is not, once the definitions ship inside ``site-packages``. So they
-    resolve separately, in the same tenant-first order the dir resolver uses:
-
-    1. A committed tenant dataset's own ``cache.json`` — authored at commit time,
-       inside a dir the tenant owns outright.
-    2. This tenant's ``benchmark-rows/{name}.json`` — what
-       ``resolve_dataset_items`` persisted after fetching.
-    3. The install dir's shipped ``cache.json``. One dataset ships rows —
-       ``email-tagging``'s hand-authored demo samples — and it seeds a machine that
-       has fetched nothing. Read-only, like everything else on that tier.
-    """
+    """The materialized rows for *name*, or ``None`` — the row half of the resolver, on the same
+    tenant-first ladder: the committed dataset's own ``cache.json``, this tenant's fetch, ours."""
     try:
         tenant = stores.tenant_datasets.load_dataset(name)
     except ValueError as exc:
@@ -134,22 +81,8 @@ def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
 
 
 def readable_task_context(stores: Stores, name: str) -> dict[str, Any] | None:
-    """The task framing for *name*, or ``None`` — resolved like the rows, and for the
-    same reason.
-
-    ``task_context.yaml`` is DERIVED from the definition's ``task_description.md`` by
-    an LLM call the operator paid for. That makes it theirs, not ours, so it resolves
-    on its own tenant-first ladder rather than being written back beside a definition
-    that is read-only under a wheel:
-
-    1. A committed tenant dataset's own ``task_context.yaml`` — written at commit
-       from the check-in's decomposition, inside a dir the tenant owns outright.
-    2. This tenant's ``task-context/{name}.yaml`` — what
-       :func:`~promptpotter.application.optimization.task_context.load_or_build_task_context`
-       persisted after decomposing on first sight.
-    3. The install dir's shipped ``task_context.yaml``. Six of the ten benchmarks
-       ship one; the other four are what made the missing tier-split visible.
-    """
+    """The task framing for *name*, or ``None`` — resolved like the rows and for the same reason:
+    an LLM decomposition the operator paid for is theirs, so it never lands beside a definition."""
     try:
         tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
@@ -165,16 +98,8 @@ def readable_task_context(stores: Stores, name: str) -> dict[str, Any] | None:
 
 
 def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
-    """Every dataset this identity may pick — tenant content, then install content.
-
-    A tenant slug shadows an install slug of the same name, matching the resolver's
-    tenant-first precedence.
-
-    No name filter here, and none is needed: whatever sits in this tree is a dataset.
-    The optimizer's own pipeline lives under the package
-    (``config/paths.py::optimizer_assets_root``), not among the benchmark datasets, so
-    there is nothing a picker could offer "mint a campaign against" by mistake.
-    """
+    """Every dataset this identity may pick, tenant slugs shadowing install ones. No name filter
+    is needed — whatever sits in this tree is a dataset, and the optimizer's own is not here."""
     refs: list[DatasetRef] = []
     own: set[str] = set()
     for slug in stores.tenant_datasets.list_slugs():
@@ -203,7 +128,6 @@ def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
 
 
 def _read_title(dataset_dir: Path) -> str | None:
-    """First ``# `` heading of ``dataset.md``, or ``None``."""
     md = dataset_dir / "dataset.md"
     if not md.is_file():
         return None

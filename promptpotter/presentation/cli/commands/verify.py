@@ -1,12 +1,5 @@
-"""``cmd_verify`` — re-score one campaign candidate on more samples.
-
-Operator names campaign + candidate (``C{round}.{idx}`` or ``C0``); this shell
-resolves the needle-style CLI args to concrete ids/labels, calls the
-:mod:`application.verify` use-case (candidate resolution + scoring +
-``DiagnosticRunRecord`` sidecar), and formats the result.
-
-Not a cycle/fork/sweep: no ledger event, no round_id; persistence is into the
-workspace ``archive/`` tree only."""
+"""``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle, fork or sweep: no ledger event, no round id, and
+persistence lands in the workspace ``archive/`` tree only."""
 
 from __future__ import annotations
 

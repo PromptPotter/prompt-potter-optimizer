@@ -1,11 +1,5 @@
-"""Scoring domain types — pure data; compiler + ``rescore_results`` in ``application.scoring.formula``.
-
-Datasets declare a formula in ``campaign.json::scoring``:
-- string shorthand ⇒ ``per_sample`` (``per_round`` uses registry default);
-- twin form ``{"per_sample", "per_round"}``.
-
-Missing ``scoring`` raises in ``compile_scorer`` — no implicit default.
-"""
+"""Datasets declare the formula in ``campaign.json::scoring`` — string shorthand is
+``per_sample``, or the twin ``{"per_sample", "per_round"}``. Missing raises; no default."""
 
 from __future__ import annotations
 
@@ -18,8 +12,6 @@ from promptpotter.shared.errors import ErrorCategory
 
 
 class PipelineData(TypedDict, total=False):
-    """Nested pipeline execution details within a QueryMeasurement."""
-
     # The pipeline's result ranking — the terminal ranker's output, derived at
     # measurement time (``terminal_ranking``). The scorer + ``find_gt_rank`` read this.
     result_ranking: list[dict[str, Any]]
@@ -42,16 +34,8 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryMeasurement(TypedDict):
-    """Per-sample measurement.
-
-    Raw trace fields (query/ground_truth/predicted/error/pipeline_data) populated
-    at measurement time. ``fitness`` is the active-scorer projection, written
-    exclusively by ``rescore_results`` (which also populates the ``scored`` audit
-    map: ``{scorer_id: {fitness, formula}}``). ``NotRequired`` because a freshly
-    measured trace hasn't been scored yet. There is no ``hit`` — see :func:`is_hit`.
-
-    ``sample_id`` = foreign key to ``Sample.id``, stable across campaigns.
-    """
+    """``fitness`` is the active-scorer projection written only by ``rescore_results`` — a fresh
+    trace has none. ``sample_id`` is a foreign key to ``Sample.id``, stable across campaigns."""
 
     sample_id: int
     query: str
@@ -79,20 +63,8 @@ HIT_THRESHOLD = 1.0
 
 
 def is_hit(fitness: float | None) -> bool:
-    """Did this measurement max out the active scorer? The ONE definition of that threshold.
-
-    It says nothing about ability and is never evidence. On a graded formula (a bounded
-    product, ``rr``, ``sigmoid``) the ceiling is unreachable, so this reads ``False``
-    forever; on a binary one the mean of these bools is *exactly* ``accuracy`` (mean
-    fitness), which is what every aggregate already reports. Either way it adds no
-    information to the ``fitness`` sitting beside it.
-
-    So the only honest uses are **per-sample display** and **stratification** — never a
-    rate, a confidence interval, or a candidate comparison. θ, PoBB and the round election
-    all read graded ``fitness`` directly (``intelligence/exploration.py::graded_response``).
-
-    ``None`` — never measured — is not a hit.
-    """
+    """Per-sample display and stratification ONLY — never a rate, an interval or a comparison:
+    graded formulas never reach the ceiling, and on a binary one the mean is ``accuracy``."""
     return fitness is not None and fitness >= HIT_THRESHOLD
 
 
@@ -105,17 +77,8 @@ class ScoringSpec(NamedTuple):
 
 
 def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
-    """The ground-truth label tally, or ``None`` where the answer space has no repeated label.
-
-    ``None`` means "collapse is not a meaningful question here": above ``ANSWER_SPACE_CAP``
-    distinct truths the output is free-text, and when every row carries a DISTINCT truth the
-    answers are identity-keyed (an L4 outer round's per-seed inner-result tokens) — in both
-    cases every prediction is its own bucket and a constant answer cannot be detected.
-
-    One definition, four consumers: the ``answer_distribution`` panel that reports the constant
-    floor, :func:`is_answer_collapsed`'s two gates, and :func:`modal_answer_share`'s report.
-    Deriving the rule twice is how the panel could call a round collapsed while the scorer
-    called it clean."""
+    """The ground-truth label tally, or ``None`` where collapse is not a meaningful question —
+    above ``ANSWER_SPACE_CAP`` truths, or one truth per row, every prediction is its own bucket."""
     truth = Counter(str(v) for r in rows if (v := r.get("ground_truth")) not in (None, ""))
     if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
         return None
@@ -123,22 +86,8 @@ def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] |
 
 
 def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
-    """Fraction of predictions that went to the single commonest label; ``None`` where
-    collapse is not a meaningful question (:func:`enumerable_truth_labels`) or nothing
-    parsed.
-
-    The CONTINUOUS reading of what :func:`is_answer_collapsed` answers as a bool, and the
-    two are deliberately not merged. Elimination needs the bool: at 1.0 the responses
-    carry no information about ability at all, so θ fitted to them is an artifact and the
-    arm has to leave. Everything below 1.0 is a MEASUREMENT of hedging, and hedging is the
-    failure the loop exists to correct — a candidate that moved a parent from 1.00 to 0.95
-    is progress, and cutting it would delete the gradient. So this reports and never gates.
-
-    It is over PREDICTIONS. The ``answer_distribution`` panel's ``constant`` is over GROUND
-    TRUTHS — that is the floor, what a constant answerer would SCORE, a different quantity
-    that happens to share the word. Measured 2026-08-06: the shipped JustLogic worker put
-    95% of its answers on one label against a 0.400 floor and graded ``healthy``, because
-    every check in the package asked the bool."""
+    """Over PREDICTIONS — the ``answer_distribution`` panel's ``constant`` is over GROUND TRUTHS.
+    Reports and never gates: below 1.0 this measures hedging, the gradient the loop climbs."""
     if enumerable_truth_labels(rows) is None:
         return None
     said = Counter(str(v) for r in rows if (v := r.get("predicted")) not in (None, ""))
@@ -149,18 +98,8 @@ def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
 
 
 def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
-    """True when a candidate answered the SAME label to every sample while the truth varied.
-
-    This is **not** a low score — it is the ABSENCE of a measurement. A constant answerer's
-    responses carry no information about ability, so fitting θ to them reports an artifact: its
-    accuracy is decided by how much of the label it happens to emit appears in the drawn subset,
-    not by the candidate. Measured live: a candidate answering ``Uncertain`` to all 8 samples of a
-    4-TRUE/4-FALSE subset scored 0.0 and drew θ=-1.87, where the same behaviour scores ~0.27 on
-    the full bank. One such arm dragged its round 0.8 logits below origin.
-
-    Deliberately says nothing about WHY it collapsed, and carries no minimum sample count: the
-    ``len(truth) > 1`` clause self-normalizes, since a single-sample or single-truth round cannot
-    distinguish a constant answer from a correct one."""
+    """The ABSENCE of a measurement, not a low score — θ fitted to a constant answer is an
+    artifact, so the candidate is withheld from θ and eliminated by PoBB."""
     truth = enumerable_truth_labels(rows)
     if truth is None or len(truth) < 2:
         return False

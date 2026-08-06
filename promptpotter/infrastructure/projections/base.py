@@ -1,8 +1,5 @@
-"""DerivedView — typed-record dispatch for ledger subscribers.
-
-Owns ``isinstance(record, …)`` routing in one place; subclasses override
-only the hooks they care about. Adding a new ``CycleRecord`` subtype
-touches one file. Default hooks are no-ops."""
+"""``DerivedView`` — typed-record dispatch for ledger subscribers, owning the ``isinstance`` routing in ONE place so a
+new record subtype touches one file. Default hooks are no-ops."""
 
 from __future__ import annotations
 
@@ -59,6 +56,5 @@ class DerivedView:
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None: ...
 
     def drain(self) -> None:
-        """Settle buffered state to disk on cycle teardown so the ledger's
-        truth is mirrored even when no ``round:complete`` arrived. Default:
-        no-op for projections that already flush every event."""
+        """Settle buffered state to disk on teardown, so the ledger's truth is mirrored even when no ``round:complete`` arrived.
+        A no-op for projections that already flush every event."""

@@ -1,17 +1,5 @@
-"""Cross-command helpers + shared module state for the CLI commands.
-
-* ``CommandResult`` — the typed return shape every subcommand emits.
-* ``set_verbose`` / ``get_verbose`` — module-level verbose flag,
-  flipped once from :func:`main` before dispatch.
-* ``init_services_cli`` — CLI-style service init (logging style).
-* ``log_startup_summary`` — one-line pipeline/backend/dataset summary.
-* ``_DIVERGENCE_HINT`` — operator hint derived from the
-  ``ResumeCheckpointKind`` gating table.
-
-The mint prologue (pipeline → origin → cycle_id → mint) lives in the
-application layer at ``application/jobs/mint.py`` — both CLI ``new`` and the
-web mint call it.
-"""
+"""Cross-command helpers + shared module state for the CLI commands. The mint prologue
+(pipeline → origin → cycle_id → mint) is application work at ``application/jobs/mint.py``."""
 
 from __future__ import annotations
 
@@ -55,13 +43,11 @@ _VERBOSE = False
 
 
 def set_verbose(value: bool) -> None:
-    """Toggle verbose mode. Called once from ``main()`` before dispatch."""
     global _VERBOSE
     _VERBOSE = value
 
 
 def get_verbose() -> bool:
-    """Read the current verbose flag (other command modules consult this)."""
     return _VERBOSE
 
 
@@ -83,7 +69,6 @@ def log_startup_summary(
     backend_url: str,
     dataset_name: str | None,
 ) -> None:
-    """One-line collapsed summary of pipeline + backend + dataset + active nodes."""
     ds = f"{dataset_name or '?'} ({dataset_len} queries)"
     logger.info(
         "%s · backend %s · dataset %s", pipeline_summary(session, pipeline_params), backend_url, ds
@@ -91,12 +76,8 @@ def log_startup_summary(
 
 
 def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str | None) -> str:
-    """Operator-facing summary block for a finished ``new`` / ``resume`` run.
-
-    Names the dataset, campaign, and cycle. ``campaign.json`` + ``log.md``
-    live at the campaign dir; per-cycle ``dashboard.json`` and round detail
-    live under ``cycles/{cycle_id}/``.
-    """
+    """Operator-facing summary block for a finished ``new`` / ``resume`` run — dataset, campaign,
+    cycle, and where on disk each artifact landed."""
     return (
         f"Dataset:   {dataset_name}\n"
         f"Campaign:  {campaign_dir.name}\n"
@@ -115,15 +96,8 @@ async def init_services_cli(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
 ) -> Session:
-    """Initialize services for a CLI command (logging style + service init).
-
-    *identity* is REQUIRED, and every caller passes :func:`identity_from_args`. A
-    :func:`default_identity` default here would be the same conditional ``init_services``
-    performs one call down — redundant at best, and it disagrees: the CLI's rule is
-    ``registered_or_default_identity`` (explicit ``--tenant`` > the registered operator >
-    anonymous), while ``default_identity()`` is flatly ``default``. Reached, it writes a
-    terminal run into the anonymous workspace instead of the operator's.
-    """
+    """*identity* is REQUIRED: a :func:`default_identity` fallback here disagrees with the CLI's own
+    rule, and writes a terminal run into the anonymous workspace instead of the operator's."""
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.config.logging import setup_logging
 
@@ -138,31 +112,16 @@ async def init_services_cli(
 
 
 def identity_from_args(args: Any) -> IdentityContext:
-    """Build the Stage-0 :class:`IdentityContext` from CLI ``argparse`` flags.
-
-    Resolution order:
-
-    1. Explicit ``--tenant <slug>`` always wins (operator override).
-    2. Otherwise, if a developer has registered (the default-tenant claim
-       marker from first web sign-in records their ``user_id``), resolve to
-       *that* registered operator — so a terminal ``new`` / ``resume`` lands in
-       the same single workspace the authenticated web reads, instead of
-       recreating an orphaned anonymous ``projects/default/`` tree.
-    3. Otherwise fall back to anonymous ``default`` (never-registered install).
-
-    The CLI is the seam where the flag/marker becomes the
-    :class:`~promptpotter.domain.identity.TenantId`; everything past this point
-    passes :class:`IdentityContext`, never bare strings.
-    """
+    """Build the Stage-0 :class:`IdentityContext` from CLI flags — ``--tenant``, else the registered
+    operator, else anonymous. This is the seam where a flag becomes a :class:`TenantId`."""
     from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 
     return registered_or_default_identity(getattr(args, "tenant", None))
 
 
 def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
-    """Stamp a resumed/loaded session's identity (session/campaign/cycle id) onto
-    the freshly-initialized :class:`Session` — the shared bind every cycle-scoped
-    CLI command runs after :func:`init_services_cli`."""
+    """Stamp a resumed session's identity onto the freshly-initialized :class:`Session` — the shared
+    bind every cycle-scoped CLI command runs after :func:`init_services_cli`."""
     session.session_id = ctx.session_id
     session.campaign_id = ctx.campaign_id
     session.state.cycle_id = ctx.cycle_id
@@ -190,7 +149,6 @@ def _build_live_display(
     campaign_config: CampaignConfig,
     origin_acc: float,
 ) -> LiveDisplay:
-    """Build the CLI's LiveDisplay — verbose (-v) gets full notebook parity, else concise."""
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.presentation.views.display import set_display_tags
     from promptpotter.presentation.views.live.display import LiveDisplay as _LiveDisplay
@@ -222,7 +180,6 @@ def build_observers(
     train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
-    """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
     from promptpotter.application.run_observers import build_run_observers
 
     display = _build_live_display(
@@ -247,13 +204,8 @@ async def drive_cycle(
     *,
     mode: RunMode,
 ) -> tuple[CycleResult, RunObservers]:
-    """One pass through the optimization loop — the single CLI driver.
-
-    Owns the scaffolding every loop verb (``new`` / ``resume`` / sweep) shares:
-    observers and the spend fallback (CLI ``--spend-budget`` overrides
-    ``OptimizationConfig.spend_budget_usd``). Callers construct only the verb's
-    :class:`RunMode`.
-    """
+    """One pass through the optimization loop — the single CLI driver. It owns the scaffolding every
+    loop verb shares; callers construct only the verb's :class:`RunMode`."""
     from promptpotter.application.runner.entry import run_optimization
 
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
@@ -293,11 +245,8 @@ def cycle_result_command(
 
 
 def _build_divergence_hint() -> str:
-    """Derive the divergence-checked-kinds list from the RESUME_CHECKPOINT_GATING table.
-
-    Walking the enum means adding a kind (with its gating choice) updates the
-    operator message automatically.
-    """
+    """Derive the divergence-checked kinds from ``RESUME_CHECKPOINT_GATING``. Walking the enum means
+    adding a kind updates the operator message automatically."""
     from promptpotter.application.optimization.resume_and_fork.decisions import (
         RESUME_CHECKPOINT_GATING,
         GatingMode,
@@ -332,10 +281,8 @@ _DIVERGENCE_HINT = _build_divergence_hint()
 
 
 def resolve_campaign(stores: Stores, needle: str) -> str:
-    """Resolve *needle* to a campaign id; accepts full id, 6-hex suffix, or unambiguous prefix.
-
-    Shared by any command that names a campaign by needle (``verify``, ``noise-floor``) — one
-    resolver, not a copy per command."""
+    """Resolve *needle* to a campaign id — full id, 6-hex suffix, or unambiguous prefix. One
+    resolver shared by every command that names a campaign, not a copy per command."""
     ids = stores.campaigns.list_campaign_ids()
     if needle in ids:
         return needle
@@ -380,16 +327,8 @@ def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
 
 
 def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
-    """Ask y/N at the terminal. Returns:
-
-    * ``True`` if the operator typed y/Y/yes
-    * ``False`` if they typed n/N/no (or just Enter when ``default_no``)
-    * ``None`` if stdin is not a TTY (callers should fall back to a
-      non-interactive default — typically the same as ``no``).
-
-    Keeps interactive prompts at one shared site so non-TTY detection
-    (CI, piped invocations) is consistent across the CLI.
-    """
+    """Ask y/N at the terminal; ``None`` when stdin is not a TTY, so callers fall back to a
+    non-interactive default. One shared site keeps that detection consistent across the CLI."""
     if not sys.stdin.isatty():
         return None
     suffix = " [y/N]: " if default_no else " [Y/n]: "

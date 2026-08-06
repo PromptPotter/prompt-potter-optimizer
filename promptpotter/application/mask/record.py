@@ -1,22 +1,5 @@
-"""The **record** — the realized lineage as the mask fold reads it.
-
-A campaign is a *forest*: cycles linked parent→child by ``parent_cycle_id`` +
-``fork_from_round``, each cycle a spine of round-winners. The mask fold
-(:func:`promptpotter.application.mask.divergence.find_divergences`) walks this
-forest and asks a verdict, per round, "would an alternative criterion have gone
-differently here?". The record is the *read model* that walk needs — raw recorded
-facts only, no scoring math: each candidate's measured rows, whether it was the
-recorded winner, and whether it was a fair-measured eligible competitor. The
-verdict (bound with a pipeline schema + the swapped criterion) supplies the math;
-the record supplies the data; the fold supplies the traversal.
-
-Pure data — no I/O, no schema. The loader that reads round files into this shape
-lives beside it (the read-time service the API calls); these models are what it
-produces and what the self-consistency test builds by hand. The scoring and abort
-verdicts re-score from the **stored evaluator namespace** (a formula swap), so
-neither needs raw measurements or a ``PipelineSchema`` — which is never persisted.
-A *replay* verdict does need the rows, and pays for them by asking at load time.
-"""
+"""The **record** — the realized lineage as the mask fold reads it: raw recorded facts, no scoring
+math. The verdict supplies the math, the record the data, the fold the traversal. Pure data, no I/O."""
 
 from __future__ import annotations
 
@@ -29,20 +12,8 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class MaskCandidate(StrictModel):
-    """One round candidate as the fold sees it — recorded facts, no derived score.
-
-    ``evaluators`` is the candidate's stored, already-materialized per-round
-    evaluator namespace (``accuracy``, ``latency_norm``, ``*_recall``, the self-heal
-    rates, …) computed on the set it was actually measured on; the scoring verdict
-    re-scores *this* under the swapped formula, reproducing the realized composite
-    when fed the realizing formula. ``accuracy`` is the criterion-independent
-    tiebreak of ``round_winner_key``. ``is_eligible`` is the recorded election
-    eligibility — ``is_leader_eligible`` plus a guard against structurally-invalid /
-    validation-failed candidates whose realized composite was forced to 0.0 (not
-    honest competitors). Eligibility is a recorded fact, invariant under a *scoring*
-    swap — the verdict reuses it verbatim, which is what makes the self-consistency
-    gate hold by construction.
-    """
+    """One round candidate as the fold sees it; ``evaluators`` is the STORED namespace over the set it was
+    measured on. ``is_eligible`` is a recorded fact, invariant under a scoring swap — hence the gate."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -63,15 +34,8 @@ class MaskCandidate(StrictModel):
 
 
 class MaskRound(StrictModel):
-    """One round on a cycle's spine — its candidates plus the anchor they ran against.
-
-    ``anchor_evaluators`` / ``anchor_accuracy`` are the round's origin /
-    carried-forward-winner stored values (round ``N``'s anchor = round ``N-1``'s
-    elected winner; empty for the origin round 0). The realized winner is ``argmax
-    round_winner_key`` over ``{anchor} ∪ eligible candidates`` — origin holds when no
-    challenger beats it — so the verdict needs the anchor to reproduce the "origin
-    held, no promotion" outcome under the swap.
-    """
+    """One round on a cycle's spine. The anchor is round ``N-1``'s elected winner (empty at round 0), and
+    the verdict needs it to reproduce the "origin held, no promotion" outcome under a swap."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -100,12 +64,8 @@ class MaskRound(StrictModel):
 
 
 class MaskCycle(StrictModel):
-    """One cycle — a spine of rounds plus its edge to the parent it forked from.
-
-    ``fork_from_round`` is the parent round this cycle was cut at (parent
-    coordinates, even when the fork restarts its own numbering). ``None`` for roots
-    and for forks whose origin round the index didn't record.
-    """
+    """One cycle — a spine of rounds plus its edge to the parent. ``fork_from_round`` is in PARENT
+    coordinates, even when the fork restarts its own numbering."""
 
     model_config = ConfigDict(frozen=True)
 

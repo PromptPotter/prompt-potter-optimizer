@@ -133,10 +133,21 @@ there" attributes a measurement to the wrong fingerprint.
 
 **Route every recursive delete through `store/io.py::rmtree_robust`** (or
 `unlink_robust`, its by-arity sibling); **a bare `shutil.rmtree` in this package is a
-bug.** It cannot remove the trees this package writes, and with `ignore_errors=True` it
-fails *silently* — leaving a half-deleted cycle that later reads as a real one. The
-function's docstring carries the measurement and the failure mode; do not restate them
-here.
+bug.** It cannot remove the trees this package writes — an L4 inner sandbox nests langfuse
+observation dirs past Windows `MAX_PATH=260` (measured at 668 chars) — and with
+`ignore_errors=True` it fails *silently*, leaving a half-deleted cycle that later reads as a
+real one. That is how `.inner/` reached 343 MB with no code path able to reclaim it.
+
+## Dataset content has two tiers, and only one is writable
+
+**A dataset DEFINITION is install content; everything DERIVED from it is the operator's.**
+The definition ships read-only in the wheel (`config/paths.py::benchmark_datasets_root`); the
+rows a benchmark materializes and the `task_context.yaml` an LLM decomposed are measurement
+inputs the operator paid for, so they land in the tenant tree as flat keyed files
+(`benchmark-rows/{name}.json`, `task-context/{name}.yaml`) — never as
+`datasets/{name}/cache.json`, which satisfies the resolver's tenant-first rule and shadows the
+definition it was fetched for. Both halves resolve on one ladder (`store/dataset_access.py`);
+sharing a directory is the only thing that would make the install tier need to be writable.
 
 ## Picking a JSON reader is a decision
 
@@ -190,6 +201,11 @@ held to the round close; a `pause.flag` written mid-candidate pauses within seco
 as instances (no subclasses) parameterized by a `ProviderSpec` registry.
 `llm/anthropic.py::AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
 Retry-After.
+
+**Provider selection is always EXPLICIT** — the caller passes it to
+`registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No
+auto-detection and no env-var fallback: either would make a finished run's provider
+unrecoverable from the config that declared it.
 
 **`LLMResponse.reasoning` is a core field with no code reader — by design.** It captures
 the model's own thinking channel; a model with nowhere to put its internal process

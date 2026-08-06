@@ -1,18 +1,5 @@
-"""One canonical reader for an authored dataset's on-disk config.
-
-An authored dataset dir (``datasets/{name}/`` or a tenant upload at
-``projects/{tenant}/datasets/{slug}/``) carries ``campaign.yaml`` (config
-wrapped under the outer ``campaign_config`` key), ``pipeline.yaml``
-(``backend_type`` + per-node overlay), and ``task_description.md``. The CLI
-``new`` config-read, the launcher web-launch read, ``draft_from_dataset``, and
-``SessionCtx`` all share this single reader.
-
-Rows (``cache.json``) are deliberately NOT read here: the three row consumers
-source them differently (the draft reads a dir's ``cache.json`` directly;
-``new``/launcher go through ``TenantDatasetStore`` with a benchmark/registry
-download fallback), and folding that 3-tier sourcing policy in would force the
-reader to take ``Stores``. The reader stays file-only — dir in, dataclass out.
-"""
+"""One canonical reader for an authored dataset's on-disk config — dir in, dataclass out. Rows are
+deliberately absent: their 3-tier sourcing policy would force this reader to take ``Stores``."""
 
 from __future__ import annotations
 
@@ -33,8 +20,6 @@ from promptpotter.shared.errors import StoredConfigInvalidError
 
 @dataclass(frozen=True, slots=True)
 class AuthoredDataset:
-    """An authored dataset's validated config, parsed once from its files."""
-
     campaign_config: CampaignConfig
     """Validated ``campaign.yaml`` config — the outer ``campaign_config`` key already unwrapped."""
 
@@ -69,33 +54,14 @@ class AuthoredDataset:
 
 
 def dataset_campaign_path(dataset_dir: Path) -> Path:
-    """The dataset's campaign template. **The one place this filename is spelled.**
-
-    Deliberately NOT the same file as the minted manifest ``campaigns/{id}/campaign.json``
-    — that one is machine-written and stays JSON. The two carry incompatible schemas, so
-    the extension is now also the tell: a ``.yaml`` here is the template, a ``.json``
-    there is the manifest.
-    """
+    """The dataset's campaign TEMPLATE, and the one place this filename is spelled. NOT the minted
+    manifest ``campaigns/{id}/campaign.json`` — incompatible schemas, one stem, extension is the tell."""
     return dataset_dir / "campaign.yaml"
 
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
-    """Read a dataset's ``campaign.yaml`` → the config under its ``campaign_config`` key.
-    ``{}`` when the file is absent, empty, or whitespace-only.
-
-    **The sole reader of this file.** It is the dataset **template** at
-    ``datasets/{name}/campaign.yaml`` — always wrapped in ``campaign_config``, which is what
-    every writer emits (``draft_build._build_default_campaign_json``, ingest's
-    ``write_committed_dataset``) and what ``TenantDatasetStore._rewrite_campaign_self_ref``
-    requires. It is NOT the minted **manifest** at ``campaigns/{id}/campaign.json`` (a frozen
-    :class:`Campaign`, ``extra="forbid"``, owned by ``CampaignStore``). Two incompatible schemas
-    under one stem: check which tree the path is under before assuming a shape — and read the
-    template through here, never with a hand-rolled ``.get("campaign_config", data)``, which
-    quietly accepts an unwrapped shape no writer produces.
-
-    Unreadable bytes raise :class:`StoredConfigInvalidError` naming *path* — this is the
-    only layer that still knows which file it was, so a bare parse error escaping
-    here reaches the operator as a nameless 500."""
+    """The sole reader of that template, always wrapped in ``campaign_config``; a hand-rolled
+    ``.get("campaign_config", data)`` accepts an unwrapped shape no writer emits. Raises naming *path*."""
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()
@@ -110,21 +76,8 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
 
 
 def load_dataset_campaign_config(path: Path) -> CampaignConfig:
-    """A dataset's ``campaign.yaml`` → its validated :class:`CampaignConfig`.
-
-    The read-and-validate pair, owned once. Four call sites re-composed
-    ``load_campaign_config(read_campaign_config_file(path))`` by hand — three dataset
-    reads (``/datasets/{name}/pipeline``, ``/preview``, ``/origins``) plus
-    :func:`read_authored_dataset` behind the draft mint — and each dropped the path on
-    the floor, so the same stale key 500'd four ways with nothing naming the file.
-
-    ``CampaignConfig`` is ``extra="forbid"``: a knob dropped from the model makes every
-    file still naming it unloadable. That is a property of *our* deploy, not of the
-    caller's request, so it surfaces as :class:`StoredConfigInvalidError` carrying the
-    path and the offending key — and the remedy (``promptpotter restamp --apply``) runs
-    on every deploy. Callers wanting the raw dict to merge still use
-    :func:`read_campaign_config_file`.
-    """
+    """The read-and-validate pair, owned once. ``CampaignConfig`` is ``extra="forbid"``, so a dropped knob
+    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``."""
     try:
         return validate_campaign_config(read_campaign_config_file(path))
     except ValidationError as exc:
@@ -133,11 +86,6 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
-    """Validates ``campaign.yaml`` through :class:`CampaignConfig` (``extra="forbid"``)
-    — a malformed/extra-key config raises :class:`StoredConfigInvalidError` naming the
-    file and the key, rather than silently defaulting. Does not read ``cache.json`` /
-    rows (see module docstring).
-    """
     campaign_config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
 
     task_path = dataset_dir / "task_description.md"

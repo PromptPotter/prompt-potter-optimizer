@@ -1,12 +1,5 @@
-"""Per-cycle reads — the live dashboard and the lineage tree, for any cycle at any depth.
-
-All routes carry ``(campaign_id, cycle_id)`` plus an optional ``descend``, so ONE route
-serves a top-level cycle, an L4 inner cycle, or an L5+ descendant. ``dashboard.json`` is
-per-cycle — the dashboard route serves the viewed cycle's own file, so a fork's chart
-shows the fork's trajectory, not the session root's. The tree route is the same idea for
-lineage: rooted at a COURSE, because a campaign is a bag of courses and a campaign-rooted
-read cannot describe a leaf below depth 1.
-"""
+"""Per-cycle reads at ANY depth — one route serves a top-level cycle, an L4 inner one, or an L5+ descendant. The dashboard
+is per-cycle, so a fork's chart shows the fork's trajectory; the tree is rooted at a COURSE for the same reason."""
 
 from __future__ import annotations
 
@@ -57,14 +50,8 @@ _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
 def serve_dashboard_response(
     request: Request, base_dir: WorkspaceDir, campaign_id: str, cycle_id: str
 ) -> Response:
-    """304 / warming / atomic ``dashboard.json`` read under any tenant ``base_dir``.
-
-    The single dashboard-serving path: the outer per-cycle route passes the
-    caller's ``store.base_dir``; the inner-cycle route passes a sandbox store's
-    ``base_dir`` (``.inner/<key>/<tenant>``). One implementation, two
-    roots — so the 304 / warming-fallback / atomic-read semantics can't drift
-    between the outer and inner dashboards.
-    """
+    """The single dashboard-serving path — the outer route passes the caller's ``base_dir``, the inner a sandbox's. One
+    implementation, two roots, so 304 / warming / atomic-read semantics cannot drift between them."""
     cycle_path = cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     # WARMING is "no dashboard YET"; a cycle dir that isn't there is GONE. Answering
     # both with the warming placeholder conflates a transient state with a terminal
@@ -136,14 +123,8 @@ def get_cycle_dashboard(
 
 
 def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> int | None:
-    """Newest mtime across this course's lineage inputs.
-
-    The **ledger** is the validator that matters: it bumps the moment a candidate is
-    minted, so the 2 s poll picks up an in-flight candidate at its start — which
-    ``dashboard.json``'s mtime never guaranteed, because it only moved at round close.
-    ``index.json`` covers a fork or an inner run appearing beneath. Scoped to this course:
-    a child course's own poll validates itself.
-    """
+    """Newest mtime across this course's lineage inputs. The LEDGER is the validator that matters — it bumps when a candidate is
+    minted, which ``dashboard.json`` never did, since that only moves at round close."""
     layout = CycleLayout(
         cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     )
@@ -151,20 +132,13 @@ def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> i
 
 
 class _Lens(NamedTuple):
-    """One parse of the ``lens`` param: what to fold, and what to serve as ``lens_value``."""
-
     verdict: Verdict
     criterion: RoundScorer | None
 
 
 def _resolve_lens(lens: str | None) -> _Lens:
-    """The thin API-edge selector: one ``lens`` value → its verdict strategy.
-    ``abort:<variant>`` → the abort verdict; ``score:<formula>`` (or empty ⇒ the accuracy
-    default, used by a samples-only mask) → the scoring verdict. A bad value is a clean 400.
-
-    Parsed **once**: the criterion the fold asks and the criterion served per node are the
-    same object, so a formula cannot be validated on one path and waved through on the other.
-    """
+    """The API-edge selector: one ``lens`` value → its verdict strategy; a bad value is a clean 400. Parsed ONCE, so the
+    criterion the fold asks and the criterion served per node are the same object."""
     if lens and lens.startswith("abort:"):
         variant = lens.removeprefix("abort:")
         suppress = _ABORT_SUPPRESS.get(variant)
@@ -201,20 +175,8 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 def _mask_records(
     stores: Stores, tree: LineageNode, samples: frozenset[int] | None
 ) -> dict[str, MaskRecord]:
-    """One :class:`MaskRecord` per CAMPAIGN the tree spans, keyed by campaign id.
-
-    A record is campaign-scoped and the tree is not: an inner run is its own campaign in its
-    own ``.inner/`` sandbox, so reading a single record at the root leaves every inner
-    candidate unmasked. That is not the lens declining to speak — it is a read nobody made,
-    and the webapp fetches ONE tree per campaign rooted at the campaign root
-    (``lib/lineage.tsx``), so an operator drilled into an inner cycle sees exactly that hole:
-    the chip strip offers the inner cycle's own samples and every bar answers null.
-
-    Resolved from each COURSE node's own ``path`` — THE address, already on the node — so this
-    walks no second family and cannot disagree with the tree about who belongs to it. A fork
-    needs no entry: it is not a node, it lives in its parent's campaign dir, and the parent's
-    record enumerates its cycles.
-    """
+    """One ``MaskRecord`` per CAMPAIGN the tree spans — an inner run is its own campaign, so a single record at the root
+    leaves every inner candidate unmasked. Resolved from each course node's own ``path``, never a second walk."""
     out: dict[str, MaskRecord] = {}
 
     def visit(node: LineageNode) -> None:
@@ -229,14 +191,8 @@ def _mask_records(
 
 
 class _Overlay:
-    """The lens folded over the tree's records, indexed for the tree walk.
-
-    Every index is keyed by ``(campaign_id, cycle_id, …)``, never the cycle alone: a cycle_id
-    is content-addressed on the origin, so every campaign minted from one declaration shares
-    it, and inside a single ``.inner/`` sandbox every candidate that ran the same benchmark
-    cell mints it again. ``lineage_views._Reads.seen`` states the same rule for the walk that
-    produced these nodes.
-    """
+    """The lens folded over the tree's records. Every index is keyed by ``(campaign_id, cycle_id, …)``, NEVER the cycle alone: a
+    cycle_id is content-addressed, so it repeats across campaigns and inside one ``.inner/`` sandbox."""
 
     def __init__(
         self,
@@ -271,7 +227,6 @@ class _Overlay:
         self.dimmed: frozenset[tuple[str, str, int]] = frozenset(dimmed)
 
     def apply(self, node: LineageNode) -> LineageNode:
-        """Decorate one node, then its children — the tree walk."""
         kids = [self.apply(k) for k in node.children]
         if node.kind != "candidate" or node.round is None or not node.path:
             return node.model_copy(update={"children": kids})

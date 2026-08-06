@@ -1,8 +1,4 @@
-"""Pure statistics utilities — paired-difference posterior, t-critical, MDE, Bayesian PoBB.
-
-Leaf-level: depends only on stdlib + numpy + scipy. No domain or service imports.
-Requires ``scipy`` (``pip install -e ".[stats]"``).
-"""
+"""Pure statistics — leaf-level, depending only on stdlib + numpy + scipy. Requires the ``[stats]`` extra."""
 
 from __future__ import annotations
 
@@ -12,17 +8,8 @@ import threading
 
 
 def warm_stats_backend() -> None:
-    """Import ``scipy.stats`` on a daemon thread so the round loop never pays for it.
-
-    Every scipy site in this package imports inside its function, deliberately — a CLI verb
-    that never reaches statistics should not pay a ~4 s import. But the cost does not vanish,
-    it relocates: the first PoBB check of round 1 triggers it, where it reads as the loop
-    freezing mid-candidate. Run init is already blocked on network I/O, so warming there is
-    free, and the import lock makes the later in-loop import reuse this one.
-
-    A missing scipy is swallowed — the real call site raises with the message that names the
-    ``[stats]`` extra, and a daemon thread has nowhere useful to report it.
-    """
+    """Import ``scipy.stats`` on a daemon thread so the round loop never pays for it — otherwise the first PoBB check of round 1
+    triggers it and reads as a freeze. A missing scipy is swallowed; the real call site raises naming the ``[stats]`` extra."""
 
     def _warm() -> None:
         with contextlib.suppress(ImportError):
@@ -32,9 +19,8 @@ def warm_stats_backend() -> None:
 
 
 def t_critical(df: int, alpha: float = 0.05) -> float:
-    """Two-sided Student-t critical value ``t_{df, 1-alpha/2}`` for a mean whose SE was
-    estimated from the same few observations — the normal quantile understates the interval
-    at the panel sizes the paired verdicts run on (≈7 cells → 2.45 vs 1.96)."""
+    """Two-sided Student-t critical value for a mean whose SE was estimated from the same few observations — the normal
+    quantile understates the interval at the panel sizes the paired verdicts run on."""
     if df < 1:
         raise ValueError(f"t_critical: df must be >= 1, got {df}")
 
@@ -44,15 +30,8 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
 
 
 def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) -> float:
-    """Smallest effect detectable at *alpha* / *power*, given the estimator's OWN standard error.
-
-    Takes the SE rather than a sample count, because the caller always has it. The old form took
-    ``n`` and assumed worst-case BINOMIAL variance — ``(z_a + z_b)·sqrt(0.25/n)`` — which is the
-    right formula for a proportion and the wrong one for every caller this has: an L4 outer round
-    pairs graded composites, and the pairing is precisely what shrinks the variance below the
-    binomial worst case. Measured on the 6-cell panel it reported 0.57 where the paired MDE was
-    0.15, a 3.8x overstatement of how much headroom the panel still needed — while the correct
-    ``se`` sat three lines above the call site, already computed."""
+    """Smallest effect detectable given the estimator's OWN standard error — takes the SE, never a sample count. The ``n``-form assumes
+    binomial worst case, wrong for every caller here, and overstated the panel's MDE 3.8x."""
     if se <= 0.0:
         return 0.0
 
@@ -65,13 +44,8 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
 
 
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
-    """Normal posterior (mean, se) on the population mean of *scores*.
-
-    SE clipped to ``1/(4n)`` — Beta-Binomial worst-case SE on a [0,1]
-    bounded score. Protects against the small-n binary regime (e.g. 4/4
-    hits has empirical ``var=0`` and would collapse the posterior to a
-    point mass, prematurely stopping exploration).
-    """
+    """Normal posterior on the population mean of *scores*. SE is clipped to the Beta-Binomial worst case, which protects the
+    small-n binary regime — 4/4 hits has empirical variance 0 and would collapse to a point mass, stopping exploration."""
     n = len(scores)
     if n == 0:
         return (0.0, 1.0)
@@ -95,12 +69,8 @@ def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
 ) -> tuple[float, float, int]:
-    """Closed-form paired-difference posterior summary; for telemetry.
-
-    Returns ``(mean_d, se_d, n_paired)`` — the per-prior diff posterior the round
-    audit record (and the ``l1_score`` p_value diagnostic) carries, computed on
-    the candidate-vs-prior paired fitness differences over a shared sample set.
-    """
+    """Closed-form paired-difference posterior, for telemetry — the per-prior diff the round audit and the p_value diagnostic
+    carry, computed over a shared sample set."""
     n = len(candidate_scores)
     if len(prior_scores) != n:
         raise ValueError(
@@ -112,11 +82,8 @@ def paired_diff_posterior(
 
 
 def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float]:
-    """Normal-CLT confidence interval on the mean of *values* — the same posterior
-    ``_normal_posterior`` gives PoBB and ``paired_diff_posterior``, expressed as
-    ``(mean, ci_lo, ci_hi)`` on the values' own [0,1] scale (composite fitness), not a
-    difference. ``n=0`` is degenerate: ``(0.0, 0.0, 0.0)``.
-    """
+    """Normal-CLT interval on the mean of *values* — the same posterior PoBB gets, expressed on the values' own scale rather
+    than as a difference. ``n=0`` is degenerate."""
     if not values:
         return (0.0, 0.0, 0.0)
 

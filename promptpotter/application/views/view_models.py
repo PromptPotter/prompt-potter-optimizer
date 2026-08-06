@@ -1,12 +1,5 @@
-"""Frozen view-model dataclasses — unified type set across render targets.
-
-Producers: ``application.views.ingress`` (live PhaseEvents) + ``application.output``
-(post-hoc disk round_data). Consumers: ``render`` (``to_text``/``to_markdown``).
-Pure data — no I/O, no methods that emit text.
-
-``RoundCompleteView`` is the one event that lands on disk; live-only events
-(refine/plan/escalation) have no disk counterpart.
-"""
+"""Frozen view-model dataclasses — one type set across render targets. Pure data, no I/O. ``RoundCompleteView`` is the
+one event that lands on disk; the live-only events have no disk counterpart."""
 
 from __future__ import annotations
 
@@ -43,14 +36,8 @@ __all__ = [
 
 @dataclass
 class ViewContext:
-    """Mutable per-cycle scratch state threaded through ``from_phase_event``.
-
-    Owned by ``RunCallbacks._phase_ctx`` and serialized to the wire via
-    ``asdict`` on round-complete + candidate-scored emits so ledger subscribers
-    can re-sync their own dict-shaped copy. Distinct from the frozen ``*View``
-    dataclasses: those are immutable per-event payloads; this carries running
-    state the builders mutate as phase events flow in.
-    """
+    """Mutable per-cycle scratch threaded through ``from_phase_event``, serialized to the wire so ledger subscribers re-sync
+    their own copy. Distinct from the frozen ``*View`` payloads: this carries running state the builders mutate."""
 
     max_rounds: int = 0
     patience: int = 0
@@ -78,12 +65,8 @@ class WarningEntry:
 
 @dataclass(frozen=True)
 class InitEnterView:
-    """Pre-origin init banner — only warnings render to text.
-
-    ``composite_fitness_formula`` propagated here so ``LiveDashboardView``
-    stamps it on ``dashboard.json`` before origin scoring; otherwise the
-    What-If panel has no formula reference during origin.
-    """
+    """Pre-origin init banner. ``composite_fitness_formula`` rides here so the dashboard stamps it BEFORE origin scoring;
+    otherwise the What-If panel has no formula reference during the origin."""
 
     warnings: tuple[WarningEntry, ...] = ()
     max_rounds: int = 0
@@ -98,12 +81,8 @@ class InitEnterView:
 
 @dataclass(frozen=True)
 class InitExitView:
-    """Post-origin init exit — origin accuracy + cycle identity.
-
-    ``resumed_from_round`` = next L1 round (1 fresh, N+1 after replaying N).
-    ``cached_rounds_count`` = literal count of round artifacts on disk;
-    kept independent so the renderer can show "Resumed from N (M cached)" truthfully.
-    """
+    """Post-origin init exit. ``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` is a literal count of
+    round artifacts, kept independent so "Resumed from N (M cached)" can be truthful."""
 
     origin_acc: float
     cycle_id_short: str
@@ -169,8 +148,6 @@ class CandidatesGeneratedView:
 
 @dataclass(frozen=True)
 class ScoreEntry:
-    """One row in the round-end scoreboard."""
-
     label: str
     accuracy: float
     composite_fitness: float | None
@@ -279,8 +256,6 @@ class PlanExitView:
 
 @dataclass(frozen=True)
 class DigestStatusView:
-    """Top-of-log.md status block."""
-
     campaign_id: str
     parent_session_id: str | None
     status: str
@@ -298,8 +273,6 @@ class DigestStatusView:
 
 @dataclass(frozen=True)
 class RoundDigestView:
-    """Per-round entry in log.md (derived from round_data JSON)."""
-
     round: int
     label: str
     accuracy: float
@@ -329,8 +302,6 @@ class HardSamplesView:
 
 @dataclass(frozen=True)
 class FinalWinnerView:
-    """Final winner block at the end of log.md."""
-
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any]
 
@@ -351,8 +322,6 @@ class ForkSummaryView:
 
 @dataclass(frozen=True)
 class LogMdView:
-    """Composite — the full log.md document is one of these."""
-
     status: DigestStatusView
     rounds: tuple[RoundDigestView, ...]
     formula: str | None
@@ -365,8 +334,6 @@ class LogMdView:
 
 @dataclass(frozen=True)
 class SweepPayloadRow:
-    """One row in a sweep batch's ``summary.md`` payload table."""
-
     source_file: str
     status: str
     cycle_id: str
@@ -374,8 +341,6 @@ class SweepPayloadRow:
 
 @dataclass(frozen=True)
 class SweepSummaryView:
-    """``summary.md`` for a sweep batch dir — header + one row per payload."""
-
     batch_id: str
     parent_cycle_id: str
     family_root: str

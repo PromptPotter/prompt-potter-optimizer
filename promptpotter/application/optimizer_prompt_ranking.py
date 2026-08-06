@@ -1,12 +1,5 @@
-"""Rank every L4 optimizer prompt state on disk by how much it beat the origin.
-
-Zero LLM calls, every number re-derived from the on-disk round files, recomputed per read
-— nothing is persisted, nothing is crowned, and naming a leader is where this stops
-(graduating one is a hand-edit, not a verb). It ranks by the **anchor-to-origin**
-paired effect: the per-cell ``candidate − origin`` composite diff, paired on the shared
-cells that candidate was measured on. Absolute scores across runs are not comparable and
-only these paired effects are, which is the whole reason the metric looks like this.
-"""
+"""Rank every L4 optimizer prompt state on disk by its ANCHOR-TO-ORIGIN paired effect — absolute
+scores across runs are not comparable. Zero LLM calls; nothing persisted, nothing crowned."""
 
 from __future__ import annotations
 
@@ -111,19 +104,13 @@ def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
 
 
 def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, float]:
-    """Per-cell composite fitness for one candidate: ``{cell_query: fitness}``.
-
-    One row per outer sample: ``query`` is the cell id, ``fitness`` that cell's composite
-    (its mean equals the candidate's round ``composite_fitness``). Thin adapter over the
-    pure ``domain.l4.cell_fitness`` — input is an already-loaded round doc, not a disk read.
-    """
+    """Per-cell composite fitness for one candidate, one row per outer sample. A thin adapter over the
+    pure ``domain.l4.cell_fitness`` — the input is an already-loaded round doc, never a disk read."""
     rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
     return cell_fitness(rows)
 
 
 class _Accum:
-    """Mutable per-state accumulator collected during the disk walk."""
-
     def __init__(self, prompt_state: dict[str, dict[str, str]], label: str) -> None:
         self.prompt_state = prompt_state
         self.label = label
@@ -134,13 +121,8 @@ class _Accum:
 
 
 def _pp_self_campaign_dirs(stores: Stores) -> list[Path]:
-    """Campaign dirs whose bound dataset drives the L4 recursion connector.
-
-    Asks each dataset's ``pipeline.yaml::backend_type`` — the same predicate the sidebar's
-    ``isSelfOptimization`` reads — never a list of dataset NAMES. A name allowlist silently
-    skipped an A/B arm, a fork, or a renamed dataset instead of loudly rejecting it, and
-    widening it by hand is what made it wrong twice.
-    """
+    """Campaign dirs whose bound dataset drives the L4 recursion connector, asked via
+    ``pipeline.yaml::backend_type`` — a NAME allowlist silently skips an A/B arm, a fork, a rename."""
     kind_of: dict[str, str] = {}  # once per dataset, not once per campaign
     dirs: list[Path] = []
     for child in stores.campaigns.iter_campaign_dirs():
@@ -203,7 +185,6 @@ def _sample_sd(xs: list[float]) -> float | None:
 
 
 def _outer_spread(rows: list[RankedOptimizerPrompt]) -> OuterSpread:
-    """The spread of the ranked arms' effects (see :class:`OuterSpread`)."""
     return OuterSpread(
         arm_effect_sd=_sample_sd([r.anchor_effect for r in rows]),
         n_states=len(rows),
@@ -216,13 +197,6 @@ def _accumulate_round(
     hop: CycleHop,
     accums: dict[str, _Accum],
 ) -> None:
-    """Fold one round doc into the per-state accumulators.
-
-    Two occurrences of one (state, cell) are not two measurements — the inner instrument is
-    content-addressed end to end, so the second is designed to replay the first. The effect
-    estimate averages across occurrences anyway, which is sound; what cannot be built out of
-    them is a noise series, and :class:`OuterSpread` says why none is attempted.
-    """
     round_num = int(doc.get("round", 0) or 0)
     for cand in doc.get("candidate_scores") or []:
         cand_id = str(cand.get("candidate_id", ""))
@@ -254,7 +228,6 @@ def _accumulate_round(
 
 
 def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
-    """Coerce a candidate's ``pipeline_params_override`` to ``{node:{field:str}}``."""
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict[str, str]] = {}
@@ -265,16 +238,8 @@ def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
 
 
 def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
-    """Aggregate one optimizer prompt state's measurements into its ranked row.
-
-    **Aggregation is PER CELL, then across cells** — the same two-stage shape
-    ``domain/l4/verdict.py::compute_outer_verdict`` uses, and for the same reasons: the SE
-    comes from n = *cells* (a ~7-point panel), not n = total *measurements*, and a cell
-    measured five times cannot outweigh five cells measured once. Both matter because this
-    ranking is the ONLY thing standing between the corpus and a human hand-graduating a
-    optimizer prompt into ``promptpotter/assets/optimizer/``, so an overstated CI misleads a person
-    making an irreversible edit.
-    """
+    """Aggregate one state into its ranked row — **per cell, then across cells**, so the SE comes from
+    n = CELLS and a cell measured five times cannot outweigh five cells measured once."""
     per_cell: list[CellEffect] = []
     cell_cand: list[float] = []
     cell_orig: list[float] = []

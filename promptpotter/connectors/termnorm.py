@@ -1,13 +1,4 @@
-"""TermNorm connector — wire payload + session lifecycle + experiment extract.
-
-All TermNorm-specific code lives here:
-
-- ``termnorm_wire_adapter`` — outbound payload shape ``{query, steps, node_config}``.
-- ``TermNormSession`` — ``POST /sessions`` handshake with ``terms`` array.
-- ``_extract_*`` helpers — TermNorm experiment-data → ``(queries, index_terms)``.
-
-Exports the ``CONNECTOR`` binding consumed by :data:`promptpotter.connectors.CONNECTORS`.
-"""
+"""TermNorm connector — all TermNorm-specific code, exporting the ``CONNECTOR`` binding."""
 
 from __future__ import annotations
 
@@ -32,14 +23,8 @@ def termnorm_wire_adapter(
     query: str,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Outbound payload — TermNorm's ``{"query", "steps", "node_config"}``.
-
-    ``pipeline_params`` carries ``steps`` (which nodes to run) plus per-node
-    override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
-    which become the ``node_config`` key in the wire payload.
-    ``node_config_items`` owns the reserved-key/non-dict walk — the backend
-    contract is "everything beyond steps is a per-node config dict".
-    """
+    """Outbound payload — TermNorm's ``{"query", "steps", "node_config"}``. ``node_config_items`` owns the
+    reserved-key walk: the backend contract is "everything beyond ``steps`` is a per-node config dict"."""
     payload: dict[str, Any] = {"query": query}
 
     _pp = pipeline_params or {}
@@ -60,14 +45,8 @@ def termnorm_wire_adapter(
 
 
 class TermNormSession:
-    """TermNorm-shaped session lifecycle — implements ``SessionProtocol``.
-
-    ``POST /sessions`` handshake with a ``terms`` array. Keeps
-    ``BackendClient.run_query()`` free of session semantics: the HTTP
-    transport asks the session to initialize or recover; the session
-    owns the indexing terms, the idempotency check, and the reinit
-    handshake.
-    """
+    """TermNorm-shaped ``SessionProtocol``. Keeps ``BackendClient.run_query()`` free of session semantics:
+    the transport asks the session to init or recover; the session owns terms, idempotency, reinit."""
 
     __slots__ = ("_terms",)
 
@@ -92,7 +71,6 @@ class TermNormSession:
         return result
 
     async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
-        """Reinit the session using stored terms. Returns True on success."""
         if not self._terms:
             logger.error(
                 "Backend requires session but no terms available. "
@@ -112,10 +90,7 @@ class TermNormSession:
 
 
 def _split_query(query: str) -> tuple[str, str]:
-    """Split ``"bom_material / process"`` → ``(bom_material, process)``.
-
-    If no slash is present, process is an empty string.
-    """
+    """Split ``"bom_material / process"``; no slash ⇒ an empty process."""
     if "/" in query:
         last_slash = query.rfind("/")
         primary = query[:last_slash].strip()
@@ -127,7 +102,6 @@ def _split_query(query: str) -> tuple[str, str]:
 
 
 def _build_query_item(query: str) -> dict[str, Any]:
-    """Build a query dict with TermNorm bom_material/process fields."""
     primary, secondary = _split_query(query)
     return {
         "query": query,
@@ -138,7 +112,6 @@ def _build_query_item(query: str) -> dict[str, Any]:
 
 
 def _extract_index_terms(experiment_data: dict[str, Any]) -> list[str]:
-    """Extract unique non-empty ``dataset_entry`` values from mappings."""
     entries = set()
     for m in experiment_data.get("mappings", []):
         entry = m.get("dataset_entry", "").strip()
@@ -148,7 +121,6 @@ def _extract_index_terms(experiment_data: dict[str, Any]) -> list[str]:
 
 
 def _extract_ground_truth_map(experiment_data: dict[str, Any]) -> dict[str, str]:
-    """Build ``{bom_material: ground_truth}`` from experiment mappings."""
     gt_map: dict[str, str] = {}
     for m in experiment_data.get("mappings", []):
         bom = m.get("bom_material", "")
@@ -159,7 +131,7 @@ def _extract_ground_truth_map(experiment_data: dict[str, Any]) -> dict[str, str]
 
 
 def _extract_queries(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract queries with valid ground truth — joins evaluation_result queries to mappings via bom_material."""
+    """Queries with valid ground truth — joins evaluation_result queries to mappings via bom_material."""
     gt_map = _extract_ground_truth_map(experiment_data)
 
     runs = experiment_data.get("runs", [])
@@ -199,14 +171,8 @@ def _extract_experiment(
 
 
 async def _termnorm_preflight(backend_url: str) -> None:
-    """Ping ``GET /status`` before the launcher accepts a write command.
-
-    Raises :class:`BackendUnreachableError` on TCP-level connect failure
-    (``httpx.ConnectError`` / ``ConnectTimeout``). Other shapes
-    (``not_implemented`` / ``error`` for a partial response, HTTP 5xx, etc.)
-    pass through silently — the runner will surface them via the canonical
-    ``ErrorRecord`` if they recur mid-run.
-    """
+    """Ping ``GET /status`` before the launcher accepts a write command; only a TCP-level connect failure
+    raises. Every other shape passes silently — the runner surfaces it as an ``ErrorRecord`` if it recurs."""
     async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as http:
         try:
             resp = await http.get(f"{backend_url}/status")
@@ -236,12 +202,8 @@ async def _termnorm_version_check(
     http: httpx.AsyncClient,
     base_url: str,
 ) -> str | None:
-    """Read TermNorm's self-reported version from ``GET /status``.
-
-    Returns the ``version`` field (or ``revision``/``git_sha`` as fallbacks)
-    or ``None`` when the field is absent / the call fails. Init WARNs
-    on mismatch with :data:`CONNECTOR.expected_revision`.
-    """
+    """TermNorm's self-reported version (``version``, else ``revision``/``git_sha``), or ``None``. Init
+    WARNs on a mismatch with ``CONNECTOR.expected_revision``."""
     try:
         resp = await http.get(f"{base_url}/status")
         resp.raise_for_status()
@@ -266,9 +228,8 @@ _EXPECTED_REVISION: str | None = None
 
 
 def _termnorm_auth_token() -> str | None:
-    """TermNorm's bearer token. Read per client construction, so an env change
-    lands without a reimport; TermNorm gates it behind its own
-    ``TERMNORM_REQUIRE_AUTH`` flag, so an unset token is the normal local posture."""
+    """TermNorm's bearer token, read per client construction so an env change lands without a reimport.
+    TermNorm gates it behind its own flag, so an unset token is the normal local posture."""
     from promptpotter.config.settings import settings
 
     return settings.TERMNORM_TOKEN or None

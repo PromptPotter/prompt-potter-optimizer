@@ -1,10 +1,3 @@
-"""Typed records for the run ledger. Frozen Pydantic, `record_type` discriminator for JSON round-trip.
-
-The `CycleRecord` discriminated union lives here so the data shape stays with the domain;
-resume-checkpoint policy (gating, helpers, exhaustiveness check) lives in
-`application/optimization/resume_and_fork/decisions.py`.
-"""
-
 from __future__ import annotations
 
 import enum
@@ -45,8 +38,6 @@ __all__ = [
 
 
 class ResumeCheckpointKind(enum.StrEnum):
-    """Ledger-decision kinds; adding a member also requires extending `RESUME_CHECKPOINT_GATING` (import-time exhaustiveness check)."""
-
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
     LEADER_LOCK_IN = "leader_lock_in"
@@ -57,13 +48,8 @@ class ResumeCheckpointKind(enum.StrEnum):
 
 
 class DecisionRecord(TypedDict):
-    """Wire shape of one recorded decision as it rides ``RoundResult.decisions``.
-
-    The serialized projection of :meth:`ResumeCheckpointRecord.to_dict` — read by
-    the divergence-replay walker (``resume_and_fork/replayers.py``). ``kind`` is the
-    enum *value* string (not the enum), so a round file round-trips without the
-    optimization layer in scope.
-    """
+    """The serialized projection of :meth:`ResumeCheckpointRecord.to_dict`, read by the
+    divergence-replay walker; ``kind`` is the enum VALUE so a round file needs no optimization layer."""
 
     kind: str
     inputs_ref: dict[str, Any]
@@ -72,7 +58,7 @@ class DecisionRecord(TypedDict):
 
 
 class ResumeCheckpointRecord(StrictModel):
-    """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
+    """``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -85,7 +71,6 @@ class ResumeCheckpointRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     def to_dict(self) -> DecisionRecord:
-        """Wire shape for round_data-JSON ``decisions`` payload."""
         return {
             "kind": self.kind.value,
             "inputs_ref": dict(self.inputs_ref),
@@ -95,8 +80,6 @@ class ResumeCheckpointRecord(StrictModel):
 
 
 class PhaseRecord(StrictModel):
-    """A campaign-phase boundary event (round-start, l2-fired, origin-complete, …)."""
-
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["phase"] = "phase"
@@ -117,8 +100,6 @@ class PhaseRecord(StrictModel):
 
 
 class SnapshotRecord(StrictModel):
-    """In-flight live-state snapshot; `event` discriminates (sample/candidate started/scored)."""
-
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["snapshot"] = "snapshot"
@@ -133,26 +114,8 @@ class SnapshotRecord(StrictModel):
 
 
 class TokenUsageRecord(StrictModel):
-    """LLM token + cost telemetry → `dashboard.json::spend`.
-
-    `kind` splits `backend` (pipeline) vs `loop` (optimizer) for the
-    "Backend $X • Loop $Y" line. `cost_usd` from provider wire (OpenRouter
-    `usage.cost`) or `shared/spend.py` rate table; tokens always present for fallback.
-
-    EVERY call the search makes emits one of these, whether it reached the wire or
-    was served from a content-addressed cache. `cached` splits the two, because the
-    two questions they answer are different and only one of them is the bill:
-
-    - **billed** (`cached=False` only) — money that left the account. The headline,
-      and what `spend_budget_usd` gates.
-    - **incurred** (all records) — what this search would cost to run cold. A property
-      of the *candidate*, invariant to what we happened to have measured last week.
-
-    Collapsing them is not free: the L4 efficiency proxy divides by cost, and the caches
-    are tenant-global, so an outer arm that replays a prior run bills $0 and reads as
-    infinitely efficient — while a novel arm pays. That confound points one way (the
-    origin is always the warmest arm), so it is a bias, not noise.
-    """
+    """EVERY call emits one, wire or cache — ``cached`` splits the BILL from what the search
+    would cost cold. Collapsing them lets a replayed L4 arm read as infinitely efficient."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -186,10 +149,8 @@ class TokenUsageRecord(StrictModel):
 
 
 class LLMCallStartRecord(StrictModel):
-    """In-flight marker appended BEFORE the SDK call → `dashboard.json::in_flight`.
-
-    Pairs with `LLMCallRecord` via `call_id` (hex). Keeps a multi-minute call from looking frozen.
-    """
+    """Pairs with :class:`LLMCallRecord` via ``call_id``, so a multi-minute call does not
+    look frozen."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -206,7 +167,7 @@ class LLMCallStartRecord(StrictModel):
 
 
 class LLMCallProgressRecord(StrictModel):
-    """Heartbeat every `HEARTBEAT_INTERVAL_S` while the SDK call is blocked → `in_flight.elapsed_s`. Cache replays skip it."""
+    """Heartbeat while the SDK call is blocked; cache replays skip it."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -224,10 +185,8 @@ class LLMCallProgressRecord(StrictModel):
 
 
 class LLMCallRecord(StrictModel):
-    """Full I/O of one optimizer LLM call; ledger-resident so `round_NNNN.json::nodes` is derived.
-
-    `payload_kind='synthesized'` ⇒ replay where messages/response/usage are absent.
-    """
+    """Ledger-resident, so ``round_NNNN.json::nodes`` is derived rather than stored.
+    ``payload_kind='synthesized'`` marks a replay whose messages/response/usage are absent."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -243,22 +202,8 @@ class LLMCallRecord(StrictModel):
 
 
 class CommandRecord(StrictModel):
-    """Inbound HTTP command appended to the canonical ledger.
-
-    Sole writer at the API seam: `CommandDispatcher`. Three target ledgers:
-
-    - Cycle-scoped commands (fork / stop / delete / cleanup-empty) ride the
-      target cycle's ledger.
-    - Campaign-lifecycle commands (archive / delete / unarchive) ride the
-      campaign's root cycle ledger.
-    - Workspace-scoped backend commands (register-backend /
-      mint-campaign) ride the workspace ledger at
-      ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
-      sibling amendment.
-
-    The runner (cycle-scoped, async) or the dispatcher (inline-apply
-    workspace-scoped) emits a paired `CommandAckRecord` once applied.
-    """
+    """Sole writer at the API seam is ``CommandDispatcher``. Three target ledgers: the
+    target cycle's, its campaign root's, or the workspace's — never a fourth."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -272,18 +217,8 @@ class CommandRecord(StrictModel):
 
 
 class CommandAckRecord(StrictModel):
-    """Ack of a `CommandRecord` — emitted by the actuator that applied it.
-
-    `status="applied"` ⇒ the mutation landed; `"rejected"` ⇒ the actuator
-    refused (capability denied, target gone, etc.). `detail` is operator-
-    readable explanation, never load-bearing for clients.
-
-    `effect` is what the applier changed, keyed by domain field, each value a
-    `{from, to}` pair — as opposed to `CommandRecord.payload`, which is what was
-    asked for. The two diverge whenever the applier gates or infers: a
-    `resolve-origin` payload names only the draft, so the fields its LLM turn
-    moved are recorded nowhere else. Empty on rejection.
-    """
+    """``effect`` is what the applier CHANGED, against ``CommandRecord.payload`` which is what
+    was ASKED for; the two diverge whenever the applier gates or infers. Empty on rejection."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -296,19 +231,8 @@ class CommandAckRecord(StrictModel):
 
 
 class ErrorRecord(StrictModel):
-    """Structured runner failure on ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
-
-    Emitted from the runner's three ``except`` sites in
-    ``application/runner/{entry,loop}.py`` via the kwargs-only
-    :func:`emit_error_record` helper over the ``_CYCLE_LEDGER`` ContextVar.
-    Mirrors the ``emit_token_usage`` pattern from ADR-0003.
-
-    Sole writer of ``dashboard.json::error``:
-    :class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView._handle_error_record`.
-    The launcher reads the trailing record from :class:`CycleResult.error` to
-    populate :class:`JobRegistry` ``stop_reason`` / ``status`` without reaching
-    into projection state.
-    """
+    """Emitted from the runner's three ``except`` sites via :func:`emit_error_record` over the
+    ``_CYCLE_LEDGER`` ContextVar. Sole source of ``dashboard.json::error``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -338,28 +262,8 @@ RoundWarningKind = Literal[
 
 
 class RoundWarningRecord(StrictModel):
-    """Non-fatal, round-scoped degradation the operator must see on every channel.
-
-    Distinct from :class:`ErrorRecord` (a fatal run halt) and from
-    ``RoundDiagnostics`` (post-scoring analytics): these are mid-round
-    self-heal events — the optimizer LLM returning empty/truncated output and
-    the round recording zero candidates, an over-budget injection truncation, an
-    optimizer call that blew its wall-clock deadline and was retried. The rails
-    recover and the run continues, so stdout alone would leave the operator
-    never knowing.
-
-    **Never re-add ``l2_validator_soft_reject``** — it named the L2 task_context
-    stale-repeat validator, and a stale repeat is unrepresentable now that the
-    framing is frozen. A kind with no emitter is a state nothing can enter.
-
-    Rides the canonical ledger via :func:`emit_round_warning` over the
-    ``_CYCLE_LEDGER`` ContextVar — the same shape as :func:`emit_error_record`
-    /:func:`emit_token_usage`. Surfaced by ``LiveDashboardView`` (sole writer
-    of ``dashboard.json::recent_loop_warnings``), ``AuditTrailView``
-    (``round_NNNN.json::warnings``), and ``LiveDisplay`` (CLI/notebook line).
-    ``message`` is composed operator-readable at the emit site so no
-    downstream layer reformats it.
-    """
+    """Mid-round SELF-HEAL events, distinct from a fatal ``ErrorRecord``: the rails recover and the run continues, so stdout
+    alone leaves the operator never knowing. Never re-add a kind with no emitter."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -375,7 +279,7 @@ class RoundWarningRecord(StrictModel):
 
 
 class ForkTrigger(enum.StrEnum):
-    """Why a fork was minted — one value per caller of :func:`_mint_fork`."""
+    """One value per caller of :func:`_mint_fork`."""
 
     OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
@@ -442,25 +346,8 @@ del _undirected
 
 
 class ConfigOverrides(StrictModel):
-    """The fork's `OptimizationConfig` delta — every field optional (absent
-    inherits the parent), applied to the fork's snapshot at init; never
-    mutates the parent's frozen config. Three kinds of knob ride here:
-
-    - **Run limits** (`max_rounds` / `spend_budget_usd` / `token_budget` /
-      patiences / `pobb_epsilon`) — absolute values the fork-time reconcile
-      dialog re-sets ("3 of 6 rounds left" → confirm the fork's own ceiling).
-    - **Selection policy** (`per_round_resubset`) — the `mechanisms.selection` toggle.
-    - **Search-space policy** (`schema_field_rename`) — unlocks the field-NAME lever
-      on the inner `l1_generate`'s output schema.
-
-    The policy knob rides here because it declares itself
-    `Knob(Scope.POLICY, Estimand.SEARCH)` on its `CampaignConfig` field, so
-    changing it invalidates search comparability and MUST mint a sibling cycle
-    rather than mutate the running one (the operator's "behaviour-knob change →
-    sibling cycle" workflow). `schema_field_rename`'s two writers are the operator
-    fork and an L2/L3 `fork_proposal`.
-
-    Domain twin of the `ConfigOverrides` wire schema."""
+    """Every field optional — absent inherits the parent — applied to the fork's snapshot at
+    init; it never mutates the parent's frozen config."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -476,21 +363,8 @@ class ConfigOverrides(StrictModel):
 
 
 class CycleSeed(StrictModel):
-    """The chosen starting point a non-root cycle begins from — origin prompt +
-    config overlay + reconciled limits. `origin_prompt_fields` is a
-    `PromptTemplate.prompt_field_dict()` shape → becomes the origin `OptSearchPoint`
-    at init. `pipeline_overlay` merges ON TOP of the dataset overlay
-    (seed > dataset > backend default) for this cycle only — the dataset
-    `pipeline.yaml` stays immutable. `origin_source` stamps the C0 lineage
-    provenance: `fork_seed` for an operator-steered fork, `campaign_origin` for a
-    fresh campaign minted from a chosen prior origin, and **empty when the cycle
-    recovers its origin by replay** — an L2/L3 auto-rebase seeds a config delta,
-    never an origin, so it has no C0 provenance to stamp.
-
-    Carried by every `operator_steered` fork (the wire `OperatorForkOverride`
-    command payload deserializes into this), written by the mint seam for
-    campaign-from-origin, and written by an L2/L3 `fork_proposal` that carries a
-    `config_overrides` unlock; sweep + diag triggers carry no seed."""
+    """``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only.
+    ``origin_source`` is empty when the cycle recovers its origin by replay, which has no C0 to stamp."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -515,27 +389,16 @@ class CycleSeed(StrictModel):
 
     @model_validator(mode="after")
     def _origin_needs_provenance(self) -> CycleSeed:
-        """A seeded origin MUST name where it came from. `resolve_origin_opt_search_point`
-        looks `origin_source` up in `_SEED_ORIGIN_LINEAGE` the moment `origin_prompt_fields`
-        is non-empty — an unstamped origin would `KeyError` there, deep inside init.
-        Fail here instead, at the boundary that built the seed."""
+        """An unstamped origin would ``KeyError`` deep inside init, so it fails here instead — at
+        the boundary that built the seed."""
         if self.origin_prompt_fields and not self.origin_source:
             raise ValueError("origin_prompt_fields set without an origin_source stamp")
         return self
 
 
 class CandidateMintedRecord(StrictModel):
-    """A candidate's IDENTITY, written the moment it is minted — before it is scored.
-
-    **Identity is not a measurement and must not share the measurement's durability.**
-    Everything written by `close_round` (`rounds/round_NNNN.json`, its `dashboard.json`
-    projection) exists only where a round CLOSED — so a cycle whose producer dies
-    mid-flight must still leave its candidates nameable, their work, and at L4 their whole
-    inner campaigns, sitting finished on disk.
-
-    `label` rides here because it is a MINTED fact, not a read-time one — re-deriving
-    `C{round}.{idx+1}` from list position at read time is a positional guess.
-    """
+    """Identity is not a measurement and must not share its durability: a cycle whose producer
+    dies mid-flight must still leave its candidates nameable. ``label`` is MINTED, not read-time."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -557,20 +420,8 @@ CandidateState = Literal["minted", "measured"]
 
 
 class LedgerCandidate(StrictModel):
-    """The candidate tier as the ledger tells it — `CandidateMintedRecord` (identity) folded
-    onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
-    record: `scan_ledger_candidates` builds it, nothing appends it.
-
-    The snapshot carries a whole `ScoredCandidate.model_dump()`, so everything the candidate
-    knows about ITSELF comes free — the evaluator namespace, the sample counts, the composite
-    CI. **Election and θ do not appear here:** they are products of the round's joint fit, so
-    they arrive on the round's own close record (`LedgerRoundClose`), not on a candidate's.
-
-    Every field below is copied verbatim from the snapshot by name (`_SCORED_INCLUDE` in
-    `campaign_store/ledger_scan.py`), so adding one here is all it takes to carry it.
-    Hand-written per-key reads there are how the tree silently lacks a field the round
-    summary has.
-    """
+    """Derived, not a record. Every field is copied verbatim from the snapshot BY NAME
+    (``_SCORED_INCLUDE``), so declaring one here is all it takes to carry it."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -595,16 +446,8 @@ class LedgerCandidate(StrictModel):
 
 
 class LedgerRoundClose(StrictModel):
-    """What a round's CLOSE tells the ledger: which individual it adopted, the frontier it
-    advanced, and the ability fit. Derived, not a record — `scan_ledger_round_closes` folds
-    it from the closing `PhaseRecord`.
-
-    These are the facts no candidate can know alone, which is why they live here rather than
-    on `LedgerCandidate`. Both `winner_label` and the `abilities` keys are the POSITIONAL
-    identity (`C{round}.{idx}`), not `candidate_id`: a lineage id is a fresh uuid per
-    construction, so a resume re-mints a candidate under a new id while the close already
-    written names the old one.
-    """
+    """The facts no candidate can know alone. ``winner_label`` and the ``abilities`` keys are
+    POSITIONAL identity, never ``candidate_id`` — a resume re-mints a candidate under a fresh uuid."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -616,12 +459,8 @@ class LedgerRoundClose(StrictModel):
 
 
 class CycleSeedRecord(StrictModel):
-    """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
-    at mint / operator-steered fork / check-in flip, re-read at init. A fork inherits
-    its parent's seed record *virtually* (`inherit_from`) but appends its OWN, so a scan of
-    the cycle's own ledger file returns that cycle's seed — and `None` for a cycle that
-    carries none (sweep / diag). Not a progress event: the SSE tail skips it (not in
-    `ProjectionKind`)."""
+    """A fork inherits its parent's seed VIRTUALLY but appends its own, so a scan of one cycle's
+    ledger returns that cycle's seed. Not a progress event — the SSE tail skips it."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -657,10 +496,7 @@ UNATTRIBUTED_OPERATOR = "operator"
 
 
 class ForkSpec(StrictModel):
-    """Why + what-changed at a fork cut → `FORK_CUT.data.fork` + `index.json::fork`.
-    One typed record for every fork; `l1_layout` carries L2/L3 rebase deltas,
-    `seed` carries the operator-steered origin override. The single fork-provenance
-    model — no free-string `fork.trigger` twin."""
+    """The single fork-provenance model — there is no free-string ``fork.trigger`` twin."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -681,16 +517,8 @@ class ForkSpec(StrictModel):
 
 
 class RebaseRequest(StrictModel):
-    """In-loop rebase signal stashed by L2/L3 emission on the cycle, resolved
-    post-finalize by ``runner.entry`` into a ``_mint_fork`` call + observer
-    rebuild + loop re-entry on the new fork. ``trigger`` discriminates the
-    audit-trail label (``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND``).
-
-    ``config_overrides`` is the search-policy delta the layer asked to change
-    *while* rewinding. A policy change and a rewind are one move, not two: the
-    parent keeps its frozen config and its comparability, and the new axis is
-    searched only on the sibling. It rides the fork's ``CycleSeed``, so a later
-    ``resume`` of that fork reads the same unlock back off disk."""
+    """A policy change and a rewind are ONE move: the parent keeps its frozen config and its
+    comparability, and the new axis is searched only on the sibling."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -702,7 +530,7 @@ class RebaseRequest(StrictModel):
 
 
 class OperatorSweepFile(StrictModel):
-    """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkSpec(OPERATOR_SWEEP)``."""
+    """Operator JSON under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``."""
 
     model_config = ConfigDict(frozen=True)
 

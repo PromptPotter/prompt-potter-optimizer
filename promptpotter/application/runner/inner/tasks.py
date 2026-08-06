@@ -1,12 +1,5 @@
-"""``inner_tasks.yaml`` — the panel an outer dataset declares, and the spec one cell resolves to.
-
-The file IS the declaration: which inner benchmark the panel measures on, how much evidence each
-cell may buy, and one entry per cell. A dataset that owns this file IS an outer dataset — no name
-test recognises one.
-
-**The type is the validator** — ``extra="forbid"``, so a key nobody reads is
-unrepresentable rather than merely tidy.
-"""
+"""``inner_tasks.yaml`` — the panel an outer dataset declares. A dataset that OWNS this file IS an
+outer dataset; no name test recognises one. ``extra="forbid"`` throughout: the type is the validator."""
 
 from __future__ import annotations
 
@@ -27,17 +20,8 @@ if TYPE_CHECKING:
 
 
 class InnerBenchmarkConfig(StrictModel):
-    """What every cell of the panel may SPEND — never what it is expected to REACH.
-
-    There is no target score here, and deliberately so: declaring one asserts up front how much
-    room the inner benchmark has, and a task the inner model looks bad at is a task it has not
-    been tuned for yet, not a task with no headroom. The proxies normalize by the room to the
-    real ceiling instead (``domain/l4/proxies.py``).
-
-    The round cap and sample count set what the inner cycle is even ALLOWED to discover, so there
-    is no default ladder: defaulting them in code silently rescales every optimizer prompt candidate's
-    fitness against a benchmark nobody declared. Every required field is required.
-    """
+    """What every cell may SPEND — never what it is expected to REACH. No target score and no default
+    ladder: both would rescale every candidate's fitness against a benchmark nobody declared."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -69,13 +53,8 @@ class InnerBenchmarkConfig(StrictModel):
 
 
 class InnerTask(StrictModel):
-    """One panel cell. ``id`` is the outer query (e.g. ``"justlogic-d234/seed-0"``).
-
-    A cell that omits the override fields inherits the top-level benchmark and the dataset's own
-    model, so a single-benchmark panel needs no per-cell overrides. The model/provider overrides
-    are the panel's ENVIRONMENT axis and are operator-set — never chosen by the loop — so a
-    (model, dataset) cell is a fixed in-band resource, not a fuzzy pick.
-    """
+    """One panel cell; ``id`` is the outer query. Omitted overrides inherit the top-level benchmark and
+    model — and the model/provider pair is the panel's ENVIRONMENT axis, operator-set, never searched."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -88,8 +67,6 @@ class InnerTask(StrictModel):
 
 
 class InnerTasks(StrictModel):
-    """The whole file. ``extra="forbid"`` at every level — a key nobody reads cannot be written."""
-
     model_config = ConfigDict(frozen=True)
 
     inner_benchmark: str = Field(min_length=1)
@@ -98,8 +75,6 @@ class InnerTasks(StrictModel):
 
 
 class InnerTaskSpec(StrictModel):
-    """One outer query resolved against the panel → the inner campaign to run for it."""
-
     model_config = ConfigDict(frozen=True)
 
     inner_dataset: str
@@ -115,19 +90,15 @@ class InnerTaskSpec(StrictModel):
 
 
 def inner_tasks_path(dataset_dir: Path) -> Path:
-    """The dataset's inner-task panel, named by the connector that reads it.
-
-    One spelling, so the is-this-L4 probe and the loader cannot drift apart — a drift
-    that skips the observation contract rather than raising.
-    """
+    """The dataset's inner-task panel. ONE spelling, so the is-this-L4 probe and the loader cannot drift
+    apart — a drift that skips the observation contract rather than raising."""
     from promptpotter.connectors import CONNECTORS
 
     return dataset_dir / CONNECTORS["promptpotter"].experiment_file
 
 
 def load_inner_tasks(path: Path) -> InnerTasks:
-    """Read + validate the inner-task panel. The panel is the source of truth; an unreadable or
-    non-conforming one is unscoreable, never defaulted."""
+    """Read + validate the panel. It is the source of truth: an unreadable one is unscoreable, never defaulted."""
     raw = read_yaml_optional(path)
     if raw is None:
         raise InnerCycleUnscoreableError(
@@ -143,8 +114,8 @@ def load_inner_tasks(path: Path) -> InnerTasks:
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
-    """Map an outer query to its inner-campaign spec: the top-level benchmark + budget, overlaid
-    by the matching cell's overrides. A query with no matching cell runs the panel's default."""
+    """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
+    matching cell. A query with no matching cell runs the panel's default."""
     panel = load_inner_tasks(inner_tasks_path(ctx.dataset_config_dir))
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
@@ -171,30 +142,8 @@ def inner_instrument_config(
     llm_node: str,
     n_scored: int,
 ) -> CampaignConfig:
-    """The ``CampaignConfig`` an inner instrument runs under — a pure derivation of the panel
-    spec over the inner dataset's own committed config. The declared counterpart of the L4 law
-    in ``domain/l4/``; session-free, so ``llm_node`` (the prompt-bearing node) is passed in.
-
-    Two derivations are load-bearing:
-
-    - **Budget is the ROUND budget.** ``max_rounds`` caps the cell (the proxies are defined over
-      exactly that many rounds), and ``spend_budget_usd`` / ``token_budget`` are cleared: a cap
-      that trips on measured tokens truncates the trajectory nondeterministically. The ORIGIN is
-      scored on the whole drawn bank (``sp_budget_origin``) — its θ is the term every outer delta
-      subtracts, and the extra rows are shared cache across the cell's campaigns. Candidates are
-      scored on the panel's declared per-round count (``sp_budget_ttest``): with ``n_samples_origin``
-      unset the bank IS that count and every arm runs the whole bank; declaring it larger widens
-      only the origin — the operator's cost/precision trade, since candidate spend is per-candidate
-      while a wider candidate budget would also widen every θ-LCB comparison basis for no shared
-      cache payback.
-    - **CRN seed on the prompt-bearing node.** ``spec.seed`` is the per-cell data-draw seed, fixed
-      per cell and identical across every outer arm, so one seed makes the inner's run-to-run noise
-      common and cancel in the (variant − origin) paired diff — at zero extra spend. The node is
-      ASKED (``llm_node``), never assumed: a hardcoded name wrote the seed under a nonexistent key
-      on any dataset that named its node otherwise, silently dropping the cancellation. The
-      cancellation is conditional on the inner routing: a ``:nitro`` model draws freely regardless
-      of seed, so it is carried but buys nothing until ``:nitro`` is dropped from the inner dataset.
-    """
+    """The ``CampaignConfig`` an inner cell runs under. Budget is the ROUND budget — token and spend caps
+    are CLEARED, since one tripping on measured tokens truncates the trajectory nondeterministically."""
     opt_update: dict[str, Any] = {
         "max_rounds": spec.n_rounds,
         "spend_budget_usd": None,

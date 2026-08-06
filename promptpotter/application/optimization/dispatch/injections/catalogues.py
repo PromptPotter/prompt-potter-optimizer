@@ -16,14 +16,8 @@ from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, Pipel
 
 
 def _schema_description_block(node: PipelineNode) -> list[str]:
-    """The node's CURRENT output-schema `description` per field — the value space of the
-    ``output_schema_descriptions`` param, rendered the way an enum's values are.
-
-    Without it the lever is offered blind: its instruction says "describe only where the
-    current prose underspecifies", and a model that cannot read the current prose either
-    rewrites good text or skips the lever. An undescribed field is marked, because an empty
-    slot is the highest-value target, not an absent one.
-    """
+    """The node's CURRENT output-schema descriptions — the value space of the ``output_schema_descriptions`` param.
+    Without it the lever is offered blind; an UNDESCRIBED field is marked, being the highest-value target."""
     out_schema = node.output_schema
     if out_schema is None or not out_schema.fields:
         return []
@@ -100,19 +94,8 @@ _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
     citable=False,
 )
 def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
-    """The building-block library — what L1 picks from for `prompt_fields_override`.
-
-    Symmetric with `pipeline_param_catalogue` (the param menu): one names the value space
-    of a pipeline param, this one the value space of a prompt field.
-
-    `restrict` is a hard value space — an off-library value is a wound — so it shows every
-    admissible block from the static declared set or it rejects what it never offered.
-    `guidance` leaves the space open (L1 may write its own). It prefers the cycle's mined
-    `earned_blocks` (short field values that lifted a run of the same answer-space shape); when
-    none are earned yet it falls back to the task-AGNOSTIC general reasoning modules — NOT a
-    silence, because starving L1 of block context shifts its (temp-0) generation to weaker
-    mutations, and NOT the house seeds, which mis-cue off their ranking origin.
-    """
+    """The building-block library L1 picks from. ``restrict`` is a hard value space, ``guidance`` leaves it open. It
+    falls back to general reasoning modules — NEVER silence, which shifts temp-0 generation to weaker mutations."""
     mode = b.prompt_block_catalogue
     header = _BLOCK_LIBRARY_HEADERS.get(mode)
     if header is None:

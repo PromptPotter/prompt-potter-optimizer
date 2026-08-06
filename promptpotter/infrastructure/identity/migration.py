@@ -1,18 +1,5 @@
-"""Default-tenant claim — first sign-in rebinds `projects/default/`.
-
-One-shot, atomic, irreversible. When the first OIDC user signs in:
-
-* if `projects/default/` exists AND no claim marker present →
-  rename to `projects/{user_id}/` and rewrite every
-  ``campaign.json::owner_user_id`` field from ``"default"`` to the new
-  user_id (so the API's owner-gated reads return them), then write the
-  claim marker.
-* if `projects/default/` doesn't exist → still write the marker so the
-  next user doesn't try to claim a half-state.
-
-Marker schema (`.promptpotter/identity/default_claimed.json`):
-``{"user_id": "...", "claimed_at": "<iso-8601>"}``.
-"""
+"""Default-tenant claim — first sign-in renames ``projects/default/`` and rewrites every ``owner_user_id``.
+One-shot, atomic, irreversible; the marker is written even when there was nothing to claim."""
 
 from __future__ import annotations
 
@@ -59,14 +46,8 @@ def maybe_claim_default(
 
 
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
-    """Resolve the CLI's identity: explicit ``--tenant`` > registered user > ``default``.
-
-    The single entry every CLI command (``new`` / ``resume`` / the diagnostic
-    verbs) uses to decide which workspace a terminal run writes to. An explicit
-    ``--tenant`` wins; otherwise a registered developer (default-claim marker)
-    resolves to their own tenant so runs join the one workspace the
-    authenticated web reads; otherwise anonymous ``default``.
-    """
+    """The CLI's identity: explicit ``--tenant`` > registered user > ``default``. A registered developer resolves to their own
+    tenant, so terminal runs join the one workspace the authenticated web reads."""
     from promptpotter.infrastructure.identity.paths import default_identity_paths
     from promptpotter.shared.identity import default_identity
 
@@ -77,15 +58,8 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
 
 
 def registered_user_id(marker_path: Path) -> str | None:
-    """Return the claimed operator's ``user_id`` from the marker, or ``None``.
-
-    The default-claim marker is the single-operator "registration" record: once
-    written (first sign-in), the local developer *is* that user. The CLI reads
-    this to resolve its identity to the registered operator instead of
-    anonymous ``default``, so terminal runs land in the same one workspace the
-    authenticated web reads. ``None`` when never registered (no marker / no
-    ``user_id``) — callers fall back to :func:`default_identity`.
-    """
+    """The claimed operator's ``user_id`` from the marker, or ``None``. The marker is the single-operator registration record:
+    once written at first sign-in, the local developer IS that user."""
     if not marker_path.is_file():
         return None
     try:
@@ -96,12 +70,8 @@ def registered_user_id(marker_path: Path) -> str | None:
 
 
 def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
-    """Rewrite every `campaign.json::owner_user_id` from ``default`` to *user_id*.
-
-    Idempotent: campaigns already owned by *user_id* are skipped. Any
-    other owner is left alone (multi-user installs may have campaigns
-    that legitimately belong to a different user_id already).
-    """
+    """Rewrite every ``owner_user_id`` from ``default`` to *user_id*. Idempotent, and any OTHER owner is left alone: a
+    multi-user install may hold campaigns that legitimately belong to someone else already."""
     if not campaigns_root.is_dir():
         return
     rewritten = 0

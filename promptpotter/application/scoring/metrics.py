@@ -1,13 +1,3 @@
-"""Scoring and metric computation for measurement results.
-
-Driven by the evaluator registry in ``application/scoring/evaluators.py``.
-The per-round composite_fitness is whatever the dataset's per-round scoring formula
-resolves to; when no formula is set, the default formula is plain ``accuracy``
-(``default_per_round_formula``).
-
-Pure computation — no I/O, no backend dependencies.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -57,7 +47,7 @@ __all__ = [
 
 
 def find_rank(items: list[Any], ground_truth: str) -> int | None:
-    """Return 1-based rank of *ground_truth* in *items*, or None."""
+    """1-based rank, or ``None`` — diagnostics report the position 0-based."""
     if not items or not ground_truth:
         return None
     for i, c in enumerate(items):
@@ -67,18 +57,8 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
 
 
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
-    """Base scalars: total, accuracy, errors, deprecated.
-
-    ``total`` is the EVIDENCE denominator — scoreable rows only (not deprecated,
-    not errored): the same population ``compute_accuracy`` averages, the Wilson-CI
-    denominator, and what ``coverage_floor`` counts. Deprecated rows (fatal
-    ``classify_result()`` code) surface as ``deprecated``; errored rows (the
-    measurement never happened) surface as ``errors``. Neither carries a verdict,
-    so neither belongs in the denominator a rate is read against.
-
-    Kept as a thin function (not part of the registry) because several
-    consumers read ``total`` directly.
-    """
+    """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
+    carries no verdict, so neither belongs in the denominator a rate is read against."""
     from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     deprecated = sum(1 for r in results if is_deprecated(r))
@@ -97,24 +77,8 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
 
 
 def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
-    """95% normal-CLT CI on the mean per-cell composite ``fitness`` — the always-on
-    whisker every scored candidate carries so no composite point estimate stands alone.
-
-    The default CI, stamped for every scored candidate; ``l1_score`` overrides it with the
-    difficulty-adjusted θ band (``theta_accuracy_ci``) where the ruler is warm + the scorer is
-    plain accuracy — a tighter, honest whisker on the metric the election actually ranks by.
-
-    It brackets the population ``compute_accuracy`` averages — **scoreable cells**
-    (non-deprecated AND non-errored) — because that is the number it is drawn beside. Do
-    *not* filter ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the
-    un-predicated version — ``elect_round_winner``'s origin-**overlap** guard deliberately
-    grades an errored row as a 0.0 cell so an all-errored origin still yields overlap
-    (``theta_lift_over_origin`` is the guard for the ability itself).
-
-    Repeated rows for one cell collapse to that cell's mean, so the CI's independent unit is
-    the sample, not the row (identity when each cell was measured once). ``(None, None)`` when
-    no cell was measured — nothing to bracket.
-    """
+    """Brackets the SCOREABLE population, since that is the number it is drawn beside — but do
+    not push that filter into ``_mean_fitness_by_cell``, which the overlap guard needs un-predicated."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.classification import is_deprecated
     from promptpotter.shared.statistics import mean_ci
@@ -147,7 +111,6 @@ def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """Extract per-sample diagnostic signals; per-sample complement to ``compute_composite_fitness``."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {
@@ -178,8 +141,8 @@ def _diag_ranking(
     key: str,
     label: str,
 ) -> dict[str, float | bool | int | str | None]:
-    """Shared shape for candidate_source + ranker diagnostics. Diagnostics report the
-    ground-truth position 0-based; ``find_rank`` is the canonical 1-based walk."""
+    """Diagnostics report the ground-truth position 0-based; :func:`find_rank` is the canonical
+    1-based walk."""
     candidates = pd.get(key, [])
     rank = find_rank(candidates, gt)
     pos = rank - 1 if rank is not None else None
@@ -245,8 +208,8 @@ def _diag_cache(
 def _extract_node_diagnostics(
     node: PipelineNode, pd: Mapping[str, Any], gt: str
 ) -> dict[str, float | bool | int | str | None] | None:
-    """Per-node diagnostic extractor — None for node types without one. Explicit match so
-    ``grep _diag_ranker`` lands on the call site (no string-keyed dispatch table)."""
+    """Explicit match rather than a string-keyed table, so grepping a diagnostic's name lands on
+    its call site."""
     match node.node_type:
         case NodeType.CANDIDATE_SOURCE:
             return _diag_candidate_source(node, pd, gt)
@@ -273,44 +236,8 @@ def compute_composite_fitness(
     round_scorer: RoundScorer | str | None = None,
     l1_diversity: float = 1.0,
 ) -> dict[str, Any]:
-    """Compute round-level metrics from the evaluator registry.
-
-    Every per-round evaluator whose ``applies(schema)`` is True is
-    materialized into a flat ``evaluators`` dict; names are namespaced
-    when multiple nodes of the same type exist. The composite_fitness score is
-    the result of evaluating ``round_scorer`` against that namespace.
-
-    - ``round_scorer`` can be a compiled callable (via
-      ``domain.scoring.compile_round_scorer``), a formula string, or
-      ``None``. ``None`` uses the default formula produced by
-      ``default_per_round_formula(schema)`` — plain ``accuracy``
-      (no latency/recall/self-heal blend; degradation is gated separately).
-    - ``opt_sp`` is a **required keyword without a default** — it changes what the
-      composite means, so no caller may take a silent one. Given an ``OptSearchPoint``, its
-      ``memory.validation_failures`` forces composite_fitness to 0.0 (structurally invalid
-      candidates) and ``memory.runtime_failures`` feeds the ``runtime_failure_rate``
-      evaluator; ``None`` puts every opt_sp-aware evaluator on its vacuous fallback, which
-      is what a paired floor or a cross-searchpoint pool needs. Same rule, same reason as
-      the gateway's (``score_search_point``).
-    - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
-      non-duplicate) L1 variants. **A pass no L1 batch produced leaves it at the 1.0
-      default — the vacuous value, exactly like ``opt_sp=None`` above, and for the same
-      reason.** Two such passes rely on it: the ``round_parent`` floor and the PoBB backfill.
-      Both readings are sayable — "no batch produced this" vs "vacuously
-      perfect" — but they cannot both be right, and ``0.0`` breaks the pairing those sites
-      establish: the parent floor would carry the term at zero while every candidate it is
-      differenced against carries its real yield, so a formula naming ``l1_diversity`` would
-      score the two halves of one delta on different bases. ``matched_origin_stats`` — the
-      other paired floor — passes 1.0 beside ``opt_sp=None``; this is that rule, applied evenly.
-      (Free to settle today: no shipped dataset formula references the term.)
-
-    The composite_fitness is **recorded, not gating**: the round-winner
-    election compares candidates on difficulty-adjusted ability (``theta`` from
-    the joint Rasch fit, ``elect_round_winner``), which stays comparable when
-    each candidate is scored on a different signal-chased subset. ``accuracy``
-    and ``composite_fitness`` are subset-relative display numbers, persisted so
-    operators can see whether a win came with hidden costs.
-    """
+    """``opt_sp=None`` puts every searchpoint-aware evaluator on its vacuous fallback, and ``l1_diversity`` defaults to 1.0
+    for the same reason: 0.0 would score the two halves of one delta on different bases."""
     base = _compute_accuracy(results)
     evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
     # L1-generation quality is a batch property, not a per-result derivation —
@@ -365,28 +292,8 @@ def matched_origin_stats(
     *,
     round_scorer: RoundScorer | str | None = None,
 ) -> dict[str, Any] | None:
-    """The origin's accuracy/composite as this candidate's comparison floor — or ``None``.
-
-    ``None`` unless the candidate measured every cell the origin did. A candidate PoBB cut
-    early ran a PREFIX of ``build_round_order``, and that order is stratified on the
-    incumbent's own grades: every 4th slot is a cell the incumbent passed, all the rest are
-    cells it missed. So the origin's rate on a prefix is ``⌊n/4⌋/n`` — a function of where
-    the candidate stopped, not of the data. Over the truncated rows banked on disk that
-    prediction held exactly for 28 of 32; the 19 candidates cut at six samples each reported
-    the identical value.
-
-    Pairing does not rescue it, which is why there is no partial answer to return here. The
-    shared cells ARE the incumbent's failures, so a candidate of *identical* ability outscores
-    the origin on them by regression to the mean — both halves of the comparison are
-    conditioned on the outcome that selected the subset. What survives truncation is θ on the
-    cycle's fixed δ ruler, which every candidate in the election fit already carries; a cut
-    candidate reports where it stopped, never a standing.
-
-    Where it IS a measurement the restriction is vacuous — the candidate covered the panel —
-    so this returns the origin's own stats. ``opt_sp=None`` keeps opt_sp-aware evaluators
-    (e.g. ``prompt_compactness``) on their vacuous fallback in both numerator and denominator
-    of the delta, which is the one way it differs from ``parent.report``.
-    """
+    """``None`` unless the candidate measured EVERY cell the origin did. Pairing does not rescue a truncated prefix — the
+    shared cells ARE the incumbent's failures, so both halves are conditioned on what selected the subset."""
     origin_sids = {r.get("sample_id") for r in origin_results}
     if not origin_sids or not origin_sids <= {r.get("sample_id") for r in candidate_results}:
         return None
@@ -413,17 +320,8 @@ def matched_origin_stats(
 
 
 def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
-    """``{sample_id: mean composite fitness}``, collapsing repeated rows for one
-    ``sample_id`` to their per-cell mean — the shape ``verify`` leaves behind when it
-    re-scores a candidate on more samples. One row per cell is the identity case. A degraded
-    sample with no recorded fitness contributes 0 (the score it earned), not a dropped row.
-
-    **Un-predicated on purpose** — it is the origin-overlap population, not the display one.
-    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell (see its docstring):
-    overlap guard + non-gating p_value diagnostic only, never the rank key. Callers that need
-    the population ``composite_fitness`` averages must drop deprecated AND errored rows
-    first, as ``composite_ci`` does; do not add the filter here.
-    """
+    """Un-predicated ON PURPOSE — this is the origin-overlap population, not the display one, and
+    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell. Do not add the filter."""
     acc: dict[Any, list[float]] = {}
     for r in rows:
         sid = r.get("sample_id")
@@ -433,13 +331,8 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
 
 
 def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
-    """Distinct cells (``sample_id``) carrying real evidence — non-deprecated AND
-    non-errored, the same rows the election θ fit consumes (``candidate_abilities``
-    drops ``is_error_result`` rows), so coverage can never be satisfied by cells the
-    Counted per CELL, not per row: repeated rows for one cell count once, so extra rows can
-    never falsely satisfy ``coverage_floor``; a cell with one errored and one clean row still
-    counts, the clean row carrying the evidence.
-    """
+    """Counted per CELL, not per row, so replicate rows can never falsely satisfy
+    ``coverage_floor``; a cell with one errored and one clean row still counts."""
     from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     return len(
@@ -455,12 +348,8 @@ def paired_fitness(
     candidate_results: list[QueryMeasurement],
     origin_results: list[QueryMeasurement],
 ) -> tuple[list[float], list[float]]:
-    """Per-cell mean composite fitness for the candidate and origin on the SAME cells,
-    aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
-    fitness restricted to whatever prefix of the round order the candidate was scored on. Replicate
-    rows per cell are averaged first (``_mean_fitness_by_cell``), so one paired point per shared
-    cell regardless of replication depth; sorted by ``sample_id`` for replay determinism.
-    """
+    """The matched pairs the round-significance test runs on. Sorted by ``sample_id`` so a replay
+    is deterministic."""
     cand_by_sid = _mean_fitness_by_cell(candidate_results)
     origin_by_sid = _mean_fitness_by_cell(origin_results)
     cand_fit: list[float] = []
@@ -478,39 +367,8 @@ def elect_round_winner(
     coverage_floor: int,
     delta_scale: Ruler,
 ) -> tuple[str, RaschPosterior]:
-    """Elect the round winner: rank candidates by difficulty-adjusted ability lift over the
-    origin, tie-broken toward higher coverage. Every candidate **and** the origin gets θ on
-    the cycle's **fixed δ ruler** ``delta_scale`` (``candidate_abilities`` → ``fit_theta_given_delta``,
-    flat where the ruler is cold), so all arms share one cross-round-comparable scale; the rank
-    key is the **point-estimate** lift ``(θ_cand − θ_origin)`` — a candidate strictly above
-    origin wins, NO winner's-curse SE margin. (The prior ``− θ_se`` LCB shrink discarded
-    genuinely-better candidates whenever the θ posterior was wide — thin per-round budgets make
-    ``θ_se`` dwarf a real gain — so the loop never compounded a discovered improvement. Under-
-    probing is guarded independently by ``coverage_floor``, so no SE margin is needed to keep a
-    thin fluke out.) Origin is the floor at rank ``(0.0, 0)`` — only a candidate above origin
-    (lift > 0) with at least ``coverage_floor`` measured samples can win. Returns
-    ``("", abilities)`` when none clears the floor.
-
-    Returns ``(winner_id, abilities)`` — the fixed-ruler ``RaschPosterior`` rides out so the
-    caller stamps each candidate's θ onto its display row from the SAME fit the decision was
-    made on (no second fit), letting the operator see *why* a lower-accuracy candidate won.
-
-    This is the cross-candidate comparison that drifts under per-round resubset: with each
-    candidate on a different signal-chased subset, raw subset accuracy is difficulty-blind, so
-    the candidate handed the easier samples wins on paper. θ is subset-invariant and crowns the
-    genuinely abler candidate.
-
-    Two guards, and they cover different holes. ``paired_fitness`` is the origin-**overlap**
-    guard: a candidate sharing no sample with origin cannot win, else it would beat the floor on
-    rows the incumbent never ran. It does *not* guard the origin's ability, because it grades an
-    errored row as a 0.0 cell while the θ fit drops that row entirely — so an all-errored origin
-    still yields overlap. ``theta_lift_over_origin`` is the guard for that: no fitted origin θ,
-    no lift, no winner. And ``coverage_floor`` counts only θ-visible cells
-    (``_distinct_valid_cells`` excludes errored rows the same way the fit does), so an
-    error-flooded candidate cannot pass the floor on cells the fit discarded. Pure +
-    deterministic in its inputs, so the resume replayer re-elects the same winner under an
-    unchanged scorer.
-    """
+    """The rank key is the POINT-ESTIMATE lift, with no winner's-curse margin — under-probing is ``coverage_floor``'s job.
+    The overlap guard and the θ-lift guard cover different holes: one grades an errored row 0.0, the fit drops it."""
     from promptpotter.application.intelligence.exploration import (
         candidate_abilities,
         theta_lift_over_origin,
@@ -559,27 +417,8 @@ def elimination_p_best(
     candidate_sample_ids: Sequence[int],
     delta_scale: Ruler,
 ) -> tuple[float, dict[str, float]]:
-    """``P(candidate is the round's best)`` for PoBB mid-round elimination, on
-    difficulty-adjusted ability θ — the SAME quality metric the round-winner election ranks by,
-    so elimination and election never disagree on what "better" means (the boundary collapse).
-
-    Inputs are GRADED per-sample responses (fitness clamped to [0,1], ``graded_response``) —
-    the logistic MAP is valid for any y ∈ [0,1], so binary datasets are bit-identical to the
-    old hit vectors while graded backends (L4 outer proxies, reciprocal-rank matching) keep
-    their gradient instead of collapsing to an all-miss θ.
-
-    Candidate and each prior get θ **independently on the cycle's fixed δ ruler**
-    (``fit_theta_given_delta`` keyed by the candidate's real ``sample_id``s — the priors are
-    already aligned to exactly those samples by the caller), flat (δ=0) where the ruler is cold.
-    The ruler is the one the round-winner election reads, so elimination and election share a
-    single scale instead of PoBB's old per-call joint fit. Per prior the closed-form
-    ``P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))``; ``p_best = min`` over priors — the same
-    "bounded above by the hardest prior" criterion the paired-fitness rule used.
-
-    Returns ``(p_best, {prior_id: P(cand > prior)})``; empty priors → ``(1.0, {})`` (no prior to
-    lose to). Deterministic + closed-form (no Monte Carlo) — so the resume divergence replayer
-    re-derives the elimination cut bit-for-bit.
-    """
+    """Scores on the SAME θ the round-winner election ranks by, so elimination and election cannot
+    disagree on what better means. Closed-form, so the resume replayer re-derives the cut exactly."""
     if not paired_prior_grades:
         return 1.0, {}
 
@@ -612,33 +451,8 @@ def value_with_mask_applied(
     evaluators: Mapping[str, float],
     criterion: RoundScorer | str | None,
 ) -> float | None:
-    """A candidate's round value under an alternative scoring criterion, recomputed
-    from its **stored, already-materialized evaluator namespace** — no schema, no
-    re-run. ``None`` when the criterion names an evaluator absent from this record's
-    namespace (unscorable under this mask — *not* a fabricated score).
-
-    The single re-evaluation seam the scoring **mask** verdict routes through — the
-    mask layer owns no scoring math of its own, it asks here. The round score is a
-    formula over the per-round evaluator values (``accuracy``, ``latency_norm``,
-    ``*_recall``, ``prompt_compactness``, the self-heal rates, …); a *scoring swap* is
-    that same evaluator namespace under a different formula. Because the realized
-    ``composite_fitness`` was itself ``realized_formula(evaluators)``, feeding the
-    realizing criterion here reproduces it **exactly** — the mask's self-consistency
-    gate holds by construction, and the read path needs no ``PipelineSchema`` (which
-    is never persisted). ``criterion`` is a formula string (e.g. ``"accuracy"``), a
-    compiled ``RoundScorer``, or ``None`` (the round-scorer default = accuracy-only).
-
-    Missing-name resolution lives **here, once** — the only place the mask scores a
-    record under a criterion the record may not satisfy. A schema-bound evaluator
-    (``*_recall`` on a pipeline with no such node) genuinely doesn't apply to that
-    record; ``ScoringTermMissingError`` becomes ``None`` (the caller treats it like a
-    missing candidate, claims no divergence). Every OTHER scoring error still propagates,
-    and the live round scorer stays fail-loud — there the namespace is materialized fresh,
-    so a missing name is a broken formula.
-    Row-derivable evaluators are recomputed into every record's namespace upstream
-    (``load._candidates``), so this path only fires for genuinely-absent schema-bound
-    names, never for a stale record missing a newer row-derivable evaluator.
-    """
+    """``None`` when the criterion names an evaluator absent from this record's namespace —
+    unscorable under this mask, never a fabricated score. Every OTHER scoring error still propagates."""
     scorer = criterion if callable(criterion) else compile_round_scorer(criterion)
     try:
         return float(scorer(dict(evaluators)))

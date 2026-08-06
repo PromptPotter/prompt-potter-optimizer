@@ -1,19 +1,3 @@
-"""Connector registry — single lookup point for backend-specific hooks.
-
-**Two ways in, one gate.** Ours are declared as data in :data:`_BUILTIN`; anyone else
-ships a package declaring a :data:`ENTRY_POINT_GROUP` entry point
-(``docs/developer/stable-api.md`` §1). Both go through :func:`_validate`, so
-"registered" means precisely the same thing for a connector we wrote and one we have
-never seen. That equivalence is why this module has a body at all.
-
-The object an entry point names must be a :class:`Connector`, and **its ``name`` field is
-the registry key** — the entry-point name is only a label, so a package cannot claim a key
-its connector does not declare.
-
-Why discovery is two paths while validation is one, why a plugin may not shadow a built-in,
-and what trusting a connector actually grants it: ``promptpotter/connectors/CLAUDE.md``.
-"""
-
 from __future__ import annotations
 
 import typing
@@ -54,15 +38,8 @@ import-time guard below keeps the two from drifting."""
 
 
 def _validate(key: str, c: Connector, origin: str) -> None:
-    """Every invariant a registered connector satisfies, whoever wrote it.
-
-    Run over built-ins and plugins alike — that equivalence IS the contract. Registry key
-    must match ``name``, the three hooks must be callable, and ``execution`` must be a
-    declared mode ``BackendClient.run_query`` can dispatch on. Raises at import, so a
-    half-wired connector cannot reach a campaign. (The session contract —
-    ``session_factory()`` building a SessionProtocol — stays a behaviour test;
-    constructing a session is a side effect we don't want at import.)
-    """
+    """Every invariant a registered connector satisfies, built-in or plugin — that equivalence IS the contract. Raises at
+    IMPORT, so a half-wired connector cannot reach a campaign."""
     where = f"connector {key!r} [{origin}]"
     if c.name != key:
         raise RuntimeError(f"{where}: registry key != connector.name ({c.name!r}).")
@@ -86,12 +63,8 @@ def _validate(key: str, c: Connector, origin: str) -> None:
 
 
 def _load() -> tuple[dict[str, Connector], dict[str, str]]:
-    """Built-ins then plugins, each through :func:`_validate`. Returns (registry, origins).
-
-    A function rather than inline module code so the resolution rules are testable without
-    installing anything — ``tests/test_integrity.py`` monkeypatches :func:`entry_points`
-    and calls this directly.
-    """
+    """Built-ins then plugins, each through :func:`_validate`. A function rather than inline module code so the resolution
+    rules are testable without installing anything."""
     registry = dict(_BUILTIN)
     origins = dict.fromkeys(_BUILTIN, "built-in")
     for key, builtin in _BUILTIN.items():
@@ -142,7 +115,6 @@ if DEFAULT_CONNECTOR not in CONNECTORS:
 
 
 def get(name: str) -> Connector:
-    """Look up a connector by name. Raises ``KeyError`` when unknown."""
     if name not in CONNECTORS:
         known = ", ".join(f"{k} [{CONNECTOR_ORIGINS[k]}]" for k in sorted(CONNECTORS)) or "(none)"
         raise KeyError(f"connector {name!r} not registered. Known: {known}")

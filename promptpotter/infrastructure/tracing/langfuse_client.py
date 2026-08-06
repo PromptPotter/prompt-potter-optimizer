@@ -1,9 +1,5 @@
-"""Langfuse SDK wrapper — explicit-args client with project isolation via API keys.
-
-One root span per trace, child spans nested via ``start_observation``.
-Per-call observability failures log at DEBUG (a lost span is expected
-during network blips); setup + post-retry failures log at WARNING.
-"""
+"""Langfuse SDK wrapper with project isolation via API keys. A per-call failure logs at DEBUG (a lost span is expected
+during a blip); setup and post-retry failures log at WARNING."""
 
 from __future__ import annotations
 
@@ -30,9 +26,8 @@ FLUSH_TIMEOUT_SEC: float = 5.0
 
 
 def langfuse_trace_url(trace_id: str | None) -> str | None:
-    """The operator-facing deep link for a trace id, or ``None`` when there's
-    no id. Single source of the URL shape so the notebook box and the dashboard
-    surface never drift; ``{host}/trace/{id}`` redirects to the owning project."""
+    """The operator-facing deep link for a trace id. Single source of the URL shape, so the notebook box and the dashboard
+    never drift."""
     if not trace_id:
         return None
     return f"{settings.LANGFUSE_HOST.rstrip('/')}/trace/{trace_id}"
@@ -114,16 +109,8 @@ class LangfuseLogger:
             return None
 
     def _evict_orphans(self) -> None:
-        """Close the oldest still-open observations once the map exceeds its bound.
-
-        Every ``start_span`` is paired with an ``end_observation`` on the happy path, but an
-        error mid-node skips the pairing and the span object lingers — payload and all — until
-        the campaign's ``reset()``. That is fine for a 10-minute cycle and a slow leak for the
-        9-hour outer L4 campaign, which is exactly the shape that OOM-killed a run before. The
-        bound makes the map's size a property of the code, not of how often the run errors:
-        spans are opened sequentially (one LLM call at a time), so real concurrent depth is a
-        handful and anything below the oldest end of a 256-entry map is an orphan by
-        construction."""
+        """Close the oldest still-open observations past the bound. An error mid-node skips the ``end_observation`` pairing and the
+        span lingers with its payload — a slow leak that OOM-killed a 9-hour outer run."""
         while len(self._open_observations) >= _MAX_OPEN_OBSERVATIONS:
             orphan_id, orphan = next(iter(self._open_observations.items()))
             del self._open_observations[orphan_id]
@@ -132,7 +119,6 @@ class LangfuseLogger:
                 orphan.end()
 
     def _resolve_parent(self, trace_id: str, parent_observation_id: str | None) -> Any | None:
-        """Find an SDK observation to nest under: explicit open obs → root → None."""
         if parent_observation_id:
             parent = self._open_observations.get(parent_observation_id)
             if parent is not None:
@@ -206,7 +192,6 @@ class LangfuseLogger:
         model: str | None = None,
         usage_details: dict[str, int] | None = None,
     ) -> str | None:
-        """Log a closed observation nested under root or a parent obs."""
         if not self.enabled or not self.client or not trace_id:
             return None
 
@@ -263,7 +248,6 @@ class LangfuseLogger:
         output: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Push trace-level output/metadata via the root span's ``update_trace``."""
         if not self.enabled or not self.client or not trace_id:
             return False
 
@@ -296,14 +280,8 @@ class LangfuseLogger:
                 root.end()
 
     def reset(self) -> None:
-        """Drop this logger's retained span references without touching the SDK.
-
-        The Langfuse SDK client is a process-wide singleton (shared across every
-        campaign in the process) — it must NOT be shut down per campaign. But the
-        payload-bearing span objects this wrapper holds in ``_trace_metadata`` /
-        ``_open_observations`` are per-logger; any whose ``end_*`` hook never fired
-        (an error mid-node) would linger until GC. Called at a campaign boundary to
-        release them deterministically. Idempotent."""
+        """Drop this logger's retained span references without touching the SDK, whose client is a process-wide singleton and must
+        NOT be shut down per campaign. Called at a campaign boundary; idempotent."""
         self._trace_metadata.clear()
         self._open_observations.clear()
 
@@ -406,11 +384,8 @@ class LangfuseLogger:
         *,
         max_retries: int = 3,
     ) -> bool:
-        """Link trace/observation to a dataset item via REST (SDK only exposes a context manager).
-
-        429 with Retry-After > 300s sets ``rate_limited`` + returns False so
-        callers can stop early instead of retrying for hours.
-        """
+        """Link trace/observation to a dataset item via REST, since the SDK only exposes a context manager. A 429 with a long
+        ``Retry-After`` sets ``rate_limited`` and returns False, so callers stop early instead of retrying for hours."""
         if not self.enabled or not self.client:
             return False
         if self.rate_limited:

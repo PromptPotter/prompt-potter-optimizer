@@ -1,11 +1,5 @@
-"""Default escalation rule set — reproduces ``EscalationFSM.observe_round``.
-
-Each rule = (predicate over ``EscalationInputs``, action, priority). Higher
-priority wins; ties resolve by list order.
-
-``l2_axis_yield_drought`` is permanent — fires whenever AxisIndex shows
-zero productive axes; predicate is False when the signal is unavailable
-(early cycles), so other rules take over."""
+"""Default escalation rules — (predicate, action, priority); higher wins, ties by list order. A predicate is False
+when its signal is unavailable, so early cycles fall through to the other rules rather than firing blind."""
 
 from __future__ import annotations
 

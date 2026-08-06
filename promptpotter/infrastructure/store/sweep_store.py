@@ -1,9 +1,5 @@
-"""Per-batch sweep artifacts at ``campaigns/{campaign_id}/sweeps/{batch_id}/``.
-
-Batch-level (not cycle-level): one ``index.json`` + ``summary.md`` spans many
-sweep-fork cycles (which live flat under ``cycles/``). Keyed by
-``(campaign_id, batch_id)``.
-"""
+"""Per-batch sweep artifacts. Batch-level, not cycle-level: one ``index.json`` + ``summary.md`` spans many sweep-fork
+cycles, which live flat under ``cycles/``."""
 
 from __future__ import annotations
 
@@ -39,7 +35,6 @@ class SweepStore:
         started_at: str,
         payloads: list[dict[str, str]],
     ) -> Path:
-        """Write the running batch index. ``payloads`` is the per-source dispatch list."""
         path = self.batch_dir(campaign_id, batch_id) / "index.json"
         write_json(
             path,

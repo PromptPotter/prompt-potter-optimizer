@@ -1,16 +1,3 @@
-"""Parse a backend ``GET /pipeline`` response into a ``PipelineSchema``.
-
-Pure dict → domain transforms. No I/O, no async, no infrastructure
-dependency — the network fetch lives at the call site
-(``application/initialization/wiring.py``). Backends are self-describing
-(`pipelines.default` for step order, per-node ``optimizer`` sub-objects,
-top-level ``resolved_schemas`` / ``resolved_prompts`` registries keyed by
-``"{family}/{version}"``); zero hardcoded defaults.
-
-The task model is read ONLY from each node's ``config`` (``current_config``)
-here. The dataset owns its model in ``nodes.{node}.config.model``.
-"""
-
 from __future__ import annotations
 
 import copy
@@ -48,19 +35,8 @@ _MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
 
 
 def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Layer a partial ``nodes`` document over a fuller one → a fresh dict.
-
-    Operates on node DEFINITIONS (``{node: {"config": …, "optimizer": …, …}}``), one
-    level up from :func:`~promptpotter.application.config.apply_node_overlay`, which
-    merges ``pipeline_params`` (``{node: {param: value}}``). Both layerings existed
-    twice — the dataset overlay onto the backend's ``GET /pipeline`` response, and the
-    operator's draft edits onto a connector's node-config seed. One merged its dict
-    sub-blocks by NAME, the other by TYPE, so they disagreed on every dict-valued key
-    outside :data:`_MERGED_NODE_SUB_BLOCKS`.
-
-    A node the base doesn't declare is added; a sub-block outside the merge set wins
-    whole, so a fully-authored node block still fully overrides.
-    """
+    """Layers node DEFINITIONS — one level above ``application.config.apply_node_overlay``,
+    which merges ``pipeline_params``. Only :data:`_MERGED_NODE_SUB_BLOCKS` merge by name."""
     out = copy.deepcopy(base)
     for node_name, node_def in overlay.items():
         if not isinstance(node_def, dict):
@@ -75,16 +51,8 @@ def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
 
 
 def strip_lone_surrogates(obj: Any) -> Any:
-    """Recursively replace unpaired surrogate codepoints with ``?``.
-
-    Some dataset overlays carry description strings whose JSON escape
-    sequences point at lone low surrogates (e.g. ``\\udc9d``). Those
-    codepoints are valid Python strings
-    but cannot encode to UTF-8 when a downstream serializer (FastAPI,
-    ``json.dumps`` without ``ensure_ascii``) tries to send them — they
-    raise ``UnicodeEncodeError`` at the wire. Scrubbing at parse time so
-    the resulting :class:`PipelineSchema` is already wire-safe.
-    """
+    """A lone surrogate is a valid Python codepoint that raises ``UnicodeEncodeError`` at the
+    wire, so overlays are scrubbed at parse time and the schema is born wire-safe."""
     if isinstance(obj, str):
         return obj.encode("utf-8", errors="replace").decode("utf-8")
     if isinstance(obj, dict):
@@ -95,17 +63,8 @@ def strip_lone_surrogates(obj: Any) -> Any:
 
 
 def _derive_node_kind(node: PipelineNode | None) -> str:
-    """Pick a webapp render kind for one pipeline node.
-
-    Priority order: cache role wins because a hit short-circuits the
-    pipeline; then the LLM signal — :attr:`PipelineNode.runs_llm`, the ONE
-    broad "does this node run an LLM" predicate (``llm_only`` sentinel /
-    ``generation`` wire/langfuse type / ``is_llm`` mapping), shared with the
-    model-axis carrier so the render kind and the carrier never disagree.
-    ``node_role`` of ``"ranker"`` / ``"candidate_source"`` is intentionally
-    NOT checked — those roles can be LLM (``llm_ranking``) or pure algos
-    (``fuzzy_matching``); ``runs_llm`` is what discriminates.
-    """
+    """Cache role wins — a hit short-circuits the pipeline — then :attr:`PipelineNode.runs_llm`,
+    which the model-axis carrier also reads, so kind and carrier cannot disagree."""
     if node is None:
         return "tool"
     if str(node.node_type) == "cache":
@@ -120,11 +79,6 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
 
 
 def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
-    """Synthesize a webapp ``PipelineView`` from a ``PipelineSchema``.
-
-    Wraps ``schema.active_steps`` with synthetic ``input``/``output`` IO
-    bookends and chains a forward edge through them.
-    """
     interior_ids = list(schema.active_steps)
     nodes: list[PipelineViewNode] = [
         PipelineViewNode(id="input", label="Input", kind="io"),
@@ -143,24 +97,8 @@ def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
-    """Convert a ``{fields, json_schema}`` dict into a node's structured-output read-model.
-
-    Two declaration sources, one parser: a ``resolved_schemas`` registry entry (keyed by
-    the node's ``schema_family``) or the inline ``config.output_schema`` the wire payload
-    already carries. Same twin the prompt side has (``resolved_prompts`` / inline
-    ``prompt_info``).
-
-    ``fields`` **constrains** ``json_schema`` rather than summarising it. The schema is a
-    second prompt and field order is generation order (``docs/concepts/structured-output.md``),
-    so the properties are re-emitted in the declared order — a `fields` list that merely
-    described the schema, or (worse) alphabetised it, would silently teach a different
-    generation order than the one declared. A `fields` list that does not name exactly the
-    schema's properties is a load-time error, never a quietly dropped or invented field.
-
-    An EMPTY ``description`` is kept. Once ``description`` is a search axis, *deliberately
-    undescribed* is a distinct searchpoint from *absent*, and dropping the empty string
-    made the two inexpressible.
-    """
+    """``fields`` CONSTRAINS ``json_schema`` — it must name exactly its properties, and its
+    order is the generation order. An empty ``description`` is a searchpoint, not an absence."""
     json_schema = resolved.get("json_schema", {})
     props = json_schema.get("properties", {})
     fields = resolved.get("fields") or list(props)
@@ -191,12 +129,6 @@ def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
 def _extract_resolved_metadata(
     config: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Uses top-level ``resolved_schemas``/``resolved_prompts`` dicts keyed by
-    ``"{family}/{version}"``.  Each node references its schema/prompt via
-    ``schema_family``/``prompt_family`` config keys.
-
-    Returns mapping of ``node_name -> {"output_schema": ..., "prompt_info": ...}``.
-    """
     schemas_raw = config.get("resolved_schemas", {})
     prompts_raw = config.get("resolved_prompts", {})
 
@@ -225,6 +157,7 @@ def _extract_resolved_metadata(
     return metadata
 
 
+# Order matters: `isinstance(True, int)` is True, so bool must be matched first.
 _PY_TO_JSON_TYPE: dict[type, str] = {
     bool: "boolean",
     int: "integer",
@@ -236,29 +169,8 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
 
 
 def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict[str, str]:
-    """Resolve JSON-schema ``param_types`` for a node — covering EVERY key the
-    node carries, not just the optimizer-tunable ``param_keys``.
-
-    A node's ``config`` can hold keys not declared in ``param_keys`` (e.g.
-    ``provider: groq`` — set but not advertised as tunable). The operator-steer
-    panel bundles those too (``node_config_schema`` walks the union), so their
-    widget kind must resolve. Iteration is ``param_keys`` followed by the
-    config-only keys, both run through the same three-tier resolution,
-    highest-precedence first:
-
-    1. Explicit ``optimizer.param_types`` on the dataset overlay (rare; only
-       needed for backend-specific params with no project-wide convention).
-    2. ``WELL_KNOWN_PARAM_TYPES`` registry — universal LLM-call params
-       (``temperature``, ``max_tokens``, ``model``, ``provider``,
-       ``reasoning_effort``, ...) plus the six-field PromptTemplate scheme.
-       This is where every common param resolves; dataset overlays do not
-       re-declare these.
-    3. Inference from the Python type of the param's default in
-       ``node.config`` (e.g. ``threshold: 70`` → ``"integer"``). Last-resort
-       for backend-specific params where the default carries the type.
-       Booleans are matched before ints because ``isinstance(True, int)`` is
-       True in Python — dict-iteration order in ``_PY_TO_JSON_TYPE`` matters.
-    """
+    """Resolves every key the node carries, not only the tunable ``param_keys`` — the steer panel
+    bundles the config-only ones too, so their widget kind must resolve."""
     declared: dict[str, str] = dict(opt.get("param_types") or {})
     param_keys = list(opt.get("param_keys") or [])
     config_only = [k for k in node_config if k not in param_keys]
@@ -278,12 +190,6 @@ def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict
 
 
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
-    """Builds the schema entirely from the response — no hardcoded defaults.
-
-    Each node may carry an ``optimizer`` sub-object with param_keys,
-    observation_mappings, and other metadata consumed by PromptPotter
-    services.
-    """
     if not data:
         logger.warning("Empty pipeline response; returning empty schema")
         return PipelineSchema()

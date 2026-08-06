@@ -1,15 +1,5 @@
-"""PoBBStreamView — appends per-sample Posterior-of-Being-Best snapshots
-to each cycle's ``.runtime/streams/round_NNNN_p_best.jsonl``.
-
-Subscribed to the same ``CycleEventLog`` as the other projections. Filters on
-``SnapshotRecord.event == "p_best_update"`` and writes one JSONL record per
-PoBBCheck snapshot — operator-tailable in real time, replayable after the
-fact for trajectory plots and post-hoc analysis.
-
-Per-cycle scope: each fork's projection points at its own
-``.runtime/streams/`` directory under the fork's audit tree (parallel to
-``.runtime/cache/rounds/``). A runtime check rejects misrouted construction.
-"""
+"""Appends per-sample P(best) snapshots to each cycle's OWN ``.runtime/streams/``; a runtime check rejects
+misrouted construction, so a fork writes under its own audit tree."""
 
 from __future__ import annotations
 
@@ -31,19 +21,8 @@ _STREAMS_SUBPATH = (".runtime", "streams")
 
 
 class PoBBStreamView(DerivedView):
-    """Appends per-sample P(best) snapshots to one JSONL file per round.
-
-    File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
-    audit dir. Each line is a JSON object with ``round``, ``sample_idx``,
-    ``current_id``, ``n_samples``, ``p_best`` (that candidate's probability),
-    ``p_best_delta`` (its move since its own previous query), and
-    ``paired_breakdown`` (prior cid → {mean_d, se_d, n_paired, p_better}).
-
-    One line describes ONE candidate. ``p_best``/``p_best_delta`` were cid-keyed maps built
-    from a snapshot whose non-current entries meant *P(current beats that prior)*, so every
-    prior acquired a trajectory in this file made of numbers about somebody else — which
-    ``log.md``'s sparkline then drew as that prior's own progress.
-    """
+    """Per-sample P(best) snapshots, one JSONL per round. **One line describes ONE candidate** — a cid-keyed map gave every
+    prior a trajectory built out of numbers about somebody else."""
 
     def __init__(self, streams_dir: Path) -> None:
         if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:

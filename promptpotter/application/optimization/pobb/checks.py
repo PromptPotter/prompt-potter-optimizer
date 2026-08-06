@@ -49,7 +49,6 @@ def _eliminate(
 def _leader_locked(
     name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
 ) -> EscalationSignal:
-    """Stop measuring — posterior clears ``lock_in`` against every prior."""
     return EscalationSignal(
         check_name=name,
         target=EscalationTarget.LEADER_LOCKED,
@@ -127,22 +126,8 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """One candidate's mid-round PoBB standing after ``n_samples`` cells.
-
-    ``p_best`` is a SCALAR and the whole snapshot is about ``current_id`` alone. It was a
-    ``dict`` merging two different quantities under one name — ``[current_id]`` meant this
-    candidate's own P(best) while ``[prior_id]`` meant *P(current beats that prior)*, a fact
-    about ``current_id`` filed under someone else's key. Every round-wide consumer read the
-    whole dict as "each candidate's standing": the dashboard's top-5 leaderboard was built
-    from ONE candidate's snapshot (so it listed that candidate plus the priors it was measured
-    against, and the last candidate to score overwrote it), ``leader_prob`` maxed over the
-    mixture, and the p_best stream wrote a trajectory per prior that ``log.md`` then rendered
-    as a candidate line. A round winner holding P(best) 0.755 printed at 22.9%.
-
-    The per-prior numbers are not lost — they are in :attr:`paired_breakdown`, under a name
-    that says what they are, which is where they already were. Anything round-wide aggregates
-    across candidates; a snapshot cannot answer a question about a population of one.
-    """
+    """One candidate's mid-round PoBB standing. ``p_best`` is a SCALAR about ``current_id`` ALONE — a
+    snapshot cannot answer a round-wide question; the per-prior numbers are in :attr:`paired_breakdown`."""
 
     p_best: float
     current_id: str
@@ -152,8 +137,6 @@ class PoBBSnapshot:
 
 @dataclass(frozen=True)
 class PoBBConfig:
-    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
-
     n_min: int = 6
     epsilon: float = POBB_DEFAULT_EPSILON
     lock_in: float = 0.95  # threshold only; leader_lock_in owns on/off
@@ -164,10 +147,8 @@ class PoBBConfig:
 
 
 class PoBBCheck:
-    """Paired-sample PoBB stop rule. ``backfill_fn`` aligns leader's history to
-    candidate's sample set so comparison is always on identical sample IDs.
-    See ``docs/concepts/paired-sample-pobb.md``.
-    """
+    """Paired-sample PoBB stop rule; ``backfill_fn`` aligns the leader's history onto the candidate's
+    sample set so every comparison is on identical sample IDs. ``docs/concepts/paired-sample-pobb.md``."""
 
     name = "elimination"
 
@@ -206,7 +187,6 @@ class PoBBCheck:
         candidate_id: str,
         on_snapshot: Callable[[PoBBSnapshot], None] | None = None,
     ) -> None:
-        """Bind the candidate-under-evaluation; reset per-candidate snapshot state."""
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
 
@@ -217,13 +197,8 @@ class PoBBCheck:
         candidate_id: str,
         sp: JobSearchPoint,
     ) -> None:
-        """Add a completed candidate's per-sample graded-response map to the priors pool.
-
-        ``sp`` is retained so missing (prior, sample) pairs can be backfilled
-        on demand when a future candidate touches samples this prior never saw.
-        Error/deprecated samples are excluded — they carry no outcome for the
-        θ fit, matching how the round-winner election builds its observations.
-        """
+        """Add a completed candidate's per-sample grades to the priors pool; ``sp`` is retained so an unseen
+        (prior, sample) pair can be backfilled later. Error/deprecated rows carry no outcome for the θ fit."""
         grades_by_sample: dict[str, float] = {}
         for r in results:
             sid = r.get("sample_id")
@@ -236,15 +211,8 @@ class PoBBCheck:
             self.prior_ids.append(candidate_id)
 
     async def backfill_for_sample(self, sample: Sample) -> list[str]:
-        """Catch each prior up on ``sample``; score on miss. Returns priors that gained a measurement.
-
-        Idempotent: priors already covering ``sample.id`` are skipped. When
-        ``backfill_fn`` is None (e.g. unit tests), this is a no-op — paired
-        ``check()`` will see incomplete priors and skip them, surfacing the
-        gap rather than silently substituting 0. Fired per-sample by the
-        query loop's ``on_sample_pre_check`` hook so paired comparison sees
-        caught-up priors without an upfront full-dataset wall.
-        """
+        """Catch each prior up on ``sample``, scoring on a miss; idempotent. With no ``backfill_fn`` this
+        no-ops and paired ``check()`` skips the incomplete prior — surfacing the gap, never substituting 0."""
         if not self._backfill_fn:
             return []
         key = str(sample.id)
@@ -264,14 +232,8 @@ class PoBBCheck:
         return fresh
 
     def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:
-        """Return the per-prior graded-response map over ``sample_ids``; for decision archival.
-
-        Only sample IDs the prior actually covers are emitted (the caller
-        is asking "what did we know at decision time?"); missing entries
-        are omitted rather than substituted. The resume replayer re-fits θ
-        from exactly these recorded grades, so it must store the same outcomes
-        the live elimination read.
-        """
+        """The per-prior grades over ``sample_ids``, for decision archival — uncovered IDs are omitted, not
+        substituted. The resume replayer re-fits θ from exactly these, so they must be what live read."""
         keys = [str(sid) for sid in sample_ids]
         out: dict[str, dict[str, float]] = {}
         for cid in self.prior_ids:
@@ -425,18 +387,8 @@ def build_elimination_check(
     delta_scale: dict[int, RulerEntry],
     backfill_fn: BackfillFn | None,
 ) -> PoBBCheck:
-    """Build the round's leader-elimination check. Today: paired-sample PoBB.
-
-    **Swap point for alternative elimination strategies.** The mid-round
-    contract is the ``StopRule`` Protocol (``domain/validators.py``), but
-    PoBBCheck also exposes the per-candidate lifecycle the round loop drives
-    (``register_completed``, ``set_current``,
-    ``backfill_for_sample``, ``snapshot_priors``, ``priors_by_sample``).
-    A fundamentally different strategy may not match that lifecycle shape;
-    when one ships, this builder branches on config and the round loop gains
-    the per-strategy consumer split. Today there's one strategy so the body
-    + return type are direct.
-    """
+    """Build the round's leader-elimination check — the swap point for alternative strategies. The
+    mid-round contract is the ``StopRule`` Protocol, but the round loop also drives PoBB's lifecycle."""
     return PoBBCheck(
         config,
         n_samples=n_samples,

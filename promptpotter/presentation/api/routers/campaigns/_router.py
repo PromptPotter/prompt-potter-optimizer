@@ -1,10 +1,5 @@
-"""Shared APIRouter for the campaigns package.
-
-Every submodule (``registry``, ``cycles``, ``files``, ``storage``,
-``events``) decorates this one router object. The package ``__init__``
-imports the submodules so their route decorators run, then re-exports the
-populated router for ``main.py`` to mount.
-"""
+"""Shared ``APIRouter`` for the campaigns package — every submodule decorates this one object, and the package
+``__init__`` imports them so the decorators run before the populated router is re-exported."""
 
 from __future__ import annotations
 

@@ -1,13 +1,5 @@
-"""Server-side opaque session store.
-
-Each session is a JSON file at `.promptpotter/identity/sessions/{id}.json`.
-The cookie carries the opaque session_id only — no JWT, no signed
-envelope (per ADR-0002 no-drift gate #2: tokens never appear past the
-middleware). 32 bytes of `secrets.token_urlsafe` entropy is sufficient
-for unguessability.
-
-TTL: 7 days from creation; expired sessions are deleted on read miss.
-"""
+"""Server-side opaque session store, one JSON file per session. The cookie carries the session id ONLY — no JWT, no signed envelope
+(ADR-0002 gate #2). TTL is 7 days; an expired session is deleted on read miss."""
 
 from __future__ import annotations
 
@@ -41,12 +33,8 @@ class SessionData:
 
 
 class OIDCSessionStore:
-    """File-backed opaque store for BROWSER LOGIN sessions — the OIDC cookie a
-    request authenticates with.
-
-    NOT :class:`promptpotter.infrastructure.store.SessionStore`, which persists a
-    campaign run's session artifacts. Same word, two referents; the ``OIDC`` prefix
-    is what keeps a reader from grabbing the wrong one."""
+    """File-backed opaque store for BROWSER LOGIN sessions. NOT the campaign-run ``SessionStore`` — same word, two
+    referents, and the ``OIDC`` prefix is what stops a reader grabbing the wrong one."""
 
     def __init__(self, sessions_dir: Path, ttl_s: int = DEFAULT_SESSION_TTL_S) -> None:
         self._dir = sessions_dir
@@ -62,7 +50,6 @@ class OIDCSessionStore:
         email: str | None,
         provider: str,
     ) -> tuple[str, SessionData]:
-        """Mint a new session — random id, persisted; returns (session_id, data)."""
         session_id = secrets.token_urlsafe(32)
         now = int(time.time())
         data = SessionData(
@@ -120,7 +107,6 @@ class OIDCSessionStore:
         return data
 
     def delete(self, session_id: str) -> None:
-        """Idempotent logout."""
         if not session_id or "/" in session_id or "\\" in session_id:
             return
         self._path(session_id).unlink(missing_ok=True)

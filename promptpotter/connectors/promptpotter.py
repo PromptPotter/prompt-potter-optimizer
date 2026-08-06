@@ -1,11 +1,5 @@
-"""PromptPotter-as-connector — the optimizer-of-the-optimizer.
-
-An outer cycle optimizes an inner cycle's optimizer prompts, and each inner cycle is a real
-campaign run on a cheap proxy benchmark. The connector stays a THIN adapter: it declares
-``execution="in_process"`` — the capability the loop dispatches on — and delegates to
-``application/runner/inner/cycle.py``, because the recursion is heavy orchestration and
-does not belong in a wire binding. Design: ``docs/specs/l4-outer-loop.md`` § 2.
-"""
+"""PromptPotter-as-connector — the optimizer-of-the-optimizer. A THIN adapter: it declares
+``execution="in_process"`` and delegates, because the recursion is not a wire binding."""
 
 from __future__ import annotations
 
@@ -30,20 +24,8 @@ INNER_ORIGIN_KEY = "inner_origin"
 
 
 def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    """The inner optimizer's effective-revision fingerprint, as identity config.
-
-    The backend this connector runs IS the inner optimizer, so a measurement's
-    identity must change whenever the inner origin does: the shared optimizer prompt
-    text (``promptpotter/assets/optimizer/pipeline.yaml``) AND its response schemas, the
-    per-node information-flow
-    layouts, the engine version, the dataset's WHOLE ``inner_tasks.yaml`` spec — the inner
-    benchmark NAME + task list (which bank, which seeds) plus ``inner_benchmark_config``
-    (sample count, round / variant geometry, the ``inner_optimizer_temperature`` clamp) —
-    AND the inner benchmark's own per-node ``config`` (the worker model, temperature,
-    reasoning_effort, output schema). Otherwise an outer origin scored under an old
-    origin/config is silently reused against candidates run under the new one — a
-    stale-vs-fresh comparison that fabricates (or masks) outer signal.
-    """
+    """The inner optimizer's effective-revision fingerprint: the optimizer prompt text and response
+    schemas, the per-node layouts, the engine version, ``inner_tasks.yaml``, the benchmark's config."""
     from promptpotter.application.optimization.dispatch.injections.registry import (
         injection_source_digest,
     )
@@ -128,30 +110,8 @@ def promptpotter_wire_adapter(
     query: str,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Outbound payload describing an inner PromptPotter cycle to run.
-
-    ``query`` is the inner-benchmark task identifier (e.g.
-    ``"justlogic-d234/seed-0"``). ``pipeline_params`` carries the outer L1's
-    mutation surface — a nested dict keyed by inner-optimizer prompt node:
-
-    ```
-    {
-      "l1_generate":  {"instruction": "...", "model": "openai/gpt-oss-120b"},
-      "l1_critique":  {"negative_critique_framing": "..."},
-      "l2_context":   {"refinement_instruction": "..."},
-      "l3_plan":      {"replan_trigger": "..."},
-    }
-    ```
-
-    Each per-node dict overrides template fields on the inner cycle's
-    ``promptpotter/assets/optimizer/pipeline.yaml`` for that run. A ``model`` key (present only
-    when the operator directly set the inner-optimizer model on the carrier node — a
-    cap-gated babysit override, never the optimizer's own search) rides the same
-    channel untouched and is consumed at the inner optimizer's ``llm_call`` config
-    merge — it is not a ``PromptTemplate`` field, so the prose merge ignores it.
-    ``node_config_items`` owns the "reserved key or non-dict" question for every
-    adapter (matching the TermNorm convention).
-    """
+    """Outbound payload describing an inner cycle to run. ``pipeline_params`` is keyed by
+    inner-optimizer prompt node; a ``model`` key rides untouched and merges at the inner ``llm_call``."""
     payload: dict[str, Any] = {"query": query}
 
     optimizer_prompt_overrides: dict[str, dict[str, Any]] = {}
@@ -174,11 +134,8 @@ def promptpotter_wire_adapter(
 
 
 class PromptPotterSession:
-    """In-process noop session — implements ``SessionProtocol``.
-
-    PromptPotter-as-connector has no remote service, so there's no
-    handshake. ``set_terms`` and ``recover`` are no-ops.
-    """
+    """In-process noop session — there is no remote service, so there is no handshake and
+    ``set_terms`` / ``recover`` are no-ops."""
 
     __slots__ = ()
 
@@ -202,35 +159,8 @@ class PromptPotterSession:
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Inner-benchmark tasks → ``(queries, index_terms)``.
-
-    PromptPotter-self ``experiment_data`` is a small JSON describing the
-    inner-benchmark suite: a list of task identifiers + their target
-    scores. ``queries`` contains one item per inner task; ``index_terms``
-    is empty (no retrieval index on this connector).
-
-    Shape::
-
-        {
-          "tasks": [
-            {"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0},
-            ...
-          ]
-        }
-
-    **There is no label to match in L4.** The "sample" is an inner campaign
-    whose fitness is the proxy composite (``campaign.json::scoring``), not a
-    correct answer. So ``ground_truth`` is the inner-result token PREFIX the
-    runner emits (``inner:{query}``, ``runner/inner/cycle.py::run_inner_cycle``
-    — which appends a compact outcome suffix to its prediction; keep the prefix
-    in sync). Nothing matches predicted against ground_truth at the outer level —
-    the token exists so the outer optimizer stops reading every sample as a
-    label-miss ("node fails 100% — reduce parsing errors"), which is false
-    evidence for a proxy-scored sample.
-
-    There is no target score to match against either: ``inner_tasks.yaml`` declares
-    what an inner cycle may SPEND, never what it is expected to REACH.
-    """
+    """Inner-benchmark tasks → ``(queries, index_terms)``. **There is no label to match in L4**:
+    ``ground_truth`` is the ``inner:{query}`` token ``run_inner_cycle`` emits — keep the two in sync."""
     tasks = experiment_data.get("tasks", [])
     queries: list[dict[str, Any]] = []
     for t in tasks:
@@ -242,21 +172,8 @@ def _extract_experiment(
 
 
 async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Run an inner PromptPotter cycle and return its three proxy metrics — the L4
-    arm of the shared ``in_process`` seam.
-
-    Thin delegate: the recursion is heavy orchestration, so it lives in
-    ``application/runner/inner/cycle.py`` (the connector stays a thin adapter).
-    That runner calls ``run_optimization`` in its **own asyncio task** (so the
-    per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
-    — don't clobber the outer's; the inherited copy is what lets a pause on the outer
-    reach the inner loop) under a store sandbox rooted at
-    ``<workspace>/.inner/<key>/`` — a FLAT registry, owned by this cycle but
-    never nested under it, so the tree stays shallow at every depth and L5+ nests
-    logically rather than on disk (physical nesting blew Windows' ``MAX_PATH``). The spawning
-    cycle's context is published by the runner seam (``publish_inner_spawn_context``)
-    so this context-free hook can find where to sandbox + which inner benchmark to
-    run."""
+    """Run an inner cycle and return its three proxy metrics. The runner sandboxes it under a FLAT
+    ``<workspace>/.inner/<key>/`` registry — never nested, because physical nesting blew MAX_PATH."""
     from promptpotter.application.runner.inner.cycle import run_inner_cycle
 
     return await run_inner_cycle(query, payload)

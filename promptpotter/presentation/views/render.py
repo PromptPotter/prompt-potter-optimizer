@@ -1,13 +1,5 @@
-"""Terminal render target — typed View → ANSI string for live CLI/notebook.
-
-Per-view renderers + the ``to_text`` dispatch, plus the SearchPoint-diff table
-(``render_sp_diff``) it calls for ``candidates_generated``: per-candidate flat param
-diff, unchanged → ``·``, short inline, long → legend code. ANSI primitives come from
-``views.display``; the composite_fitness block from ``shared.composite``.
-
-The markdown / heatmap / sweep-summary renderers are the application's emit contract
-and live in ``promptpotter.application.views.render`` — import those from there.
-"""
+"""Terminal render target — typed View → ANSI. The markdown / heatmap / sweep-summary renderers are the APPLICATION's emit contract and
+live in ``promptpotter.application.views.render``; import those from there."""
 
 from __future__ import annotations
 
@@ -82,12 +74,8 @@ def _render_init_exit(v: InitExitView) -> str:
 
 
 def _heart_bar(hearts: int, cap: int | None) -> str:
-    """``♥♥♥♡♡`` — banked lives filled, the rest of the ceiling hollow; ``💀`` at zero.
-
-    The empty pips ARE the readout: ``♥♥♥`` alone cannot distinguish healthy-of-four from
-    nearly-dead-of-seven, and in lives mode there is no ``ROUND n/max`` left to carry the
-    scale. Falls back to a bare count when the cap is unknown (lives off, or a dashboard
-    written before ``run_limits.lives_cap`` existed)."""
+    """Banked lives filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three hearts alone cannot
+    distinguish healthy-of-four from nearly-dead-of-seven, and lives mode has no ``ROUND n/max`` to carry the scale."""
     if hearts <= 0:
         return "💀"
     if cap is None or cap < hearts:

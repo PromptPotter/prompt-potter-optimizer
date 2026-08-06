@@ -1,10 +1,5 @@
-"""Decision replayers — re-derive each ``REPLAYED`` decision under the active scorer.
-
-``replay_decisions`` walks ``round_data['decisions']`` and returns the
-first :class:`ReplayMismatch`. Replayers are pure over :class:`ReplayContext`;
-MUST NOT touch the live ``Cycle`` or ledger. Import-time check below
-catches any ``REPLAYED`` kind without a registered replayer.
-"""
+"""Decision replayers — re-derive each ``REPLAYED`` decision under the active scorer. A replayer is
+PURE over :class:`ReplayContext` and must never touch the live ``Cycle`` or ledger."""
 
 from __future__ import annotations
 
@@ -41,16 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 class ReplayMismatch(NamedTuple):
-    """A recorded value that no longer re-derives — recorded vs current, and where.
-
-    Three producers, none of them the loop: this module's decision replay, and resume's
-    optimizer-identity and package-drift checks. So it is not "a decision" — it is any
-    recorded fact re-derivation contradicts.
-
-    **A mismatch is evidence, not a departure point.** Where a branch stops carrying over
-    is a *divergence*, and that word belongs to the mask fold
-    (``application/mask/divergence.py::Divergence``). Two names, two concepts.
-    """
+    """A recorded value that no longer re-derives. Not "a decision" — three producers, none of them the
+    loop. **Evidence, not a departure point**: where a branch stops carrying over is a *divergence*."""
 
     round_num: int
     kind: str
@@ -60,17 +47,8 @@ class ReplayMismatch(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """Context passed to replayers — one round's measurements + the origin, all rescored.
-
-    This is the whole substrate: a replayer re-derives its decision from the round it was
-    taken in, and nothing else. A decision that needs the cycle's *history* to re-derive
-    (the L2/L3 layer triggers — a fold whose counters reset on each fire) is not
-    expressible here and is ``ARCHIVAL``, not ``REPLAYED``.
-
-    ``delta_scale`` is the cycle's FIXED difficulty ruler (``cycle.delta_scale``,
-    calibrated once at ``Cycle.start``) — the same scale the live election and PoBB gates
-    fit θ on, so replay re-derives them bit-for-bit. ``None`` ⇒ cold ruler.
-    """
+    """One round's measurements + the origin, all rescored — a replayer re-derives from its own round and
+    nothing else, so a decision needing the cycle's HISTORY is ``ARCHIVAL``, never ``REPLAYED``."""
 
     round_data: RoundResult
     origin_results: list[dict[str, Any]]
@@ -81,8 +59,6 @@ Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 
 
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
-    """Yield every recorded decision in ``ctx.round_data`` whose replayer re-derives a
-    different outcome under the active scorer/engine — in record order."""
     round_data = ctx.round_data
     for rec in round_data.decisions:
         try:
@@ -143,8 +119,8 @@ def replay_all_mismatches(
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> list[ReplayMismatch]:
-    """Every decision in this round that re-derives differently — the A/B engine's per-round
-    diff (collect-all, where ``replay_decisions`` short-circuits at the first)."""
+    """Every decision in this round that re-derives differently — the A/B engine's per-round diff, where
+    ``replay_decisions`` short-circuits at the first."""
     ctx = _replay_context(round_data, origin_results, delta_scale)
     return list(_iter_mismatches(ctx))
 
@@ -152,11 +128,8 @@ def replay_all_mismatches(
 def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> str:
-    """Re-derive the round winner under the canonical paired-LCB election — the SAME
-    ``elect_round_winner`` the live scorer ran (``l1/score/winner.py``), not a parallel rule. An
-    unchanged scorer therefore re-elects the recorded winner exactly; only a genuine scorer change
-    can diverge. ``coverage_floor`` rides the recorded inputs.
-    """
+    """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, never a
+    parallel rule — so an unchanged scorer re-elects exactly, and only a real scorer change diverges."""
     all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref["coverage_floor"])
@@ -173,16 +146,8 @@ def _replay_round_winner(
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> float | None:
-    """Re-derive this candidate's ``p_best`` for PoBB replay. ``None`` ⇒ not derivable.
-
-    Re-fits θ on the cycle's fixed δ ruler (``ctx.delta_scale``) over the recorded
-    per-prior GRADED responses + the candidate's rescored grades on
-    ``data.candidate_sample_ids`` and recomputes ``p_best`` via ``elimination_p_best``
-    — the same closed-form, MC-free rule the live ``PoBBCheck.check`` ran, so replay
-    is bit-for-bit when no scorer change moved the candidate's outcomes. Recorded
-    booleans from pre-graded decisions coerce to 0.0/1.0 — the identical values the
-    live path fed. ``None`` ⇒ rescored measurements aren't available.
-    """
+    """Re-derive ``p_best`` on the cycle's fixed δ ruler via the same closed-form ``elimination_p_best``
+    the live check ran. ``None`` when the rescored measurements are not available."""
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
     prior_histories: dict[str, dict[str, float]] = data.get("prior_histories") or {}
@@ -219,7 +184,6 @@ def _pobb_replay_snapshot(
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """PoBB ε-gate re-derived on θ ability under the current scorer (deterministic)."""
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if p_best is None:
         return False
@@ -229,7 +193,6 @@ def _replay_elimination_cut(
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """PoBB leader-lock re-derived on θ ability under the current scorer (deterministic)."""
     if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
         return False
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)

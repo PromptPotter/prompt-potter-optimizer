@@ -1,17 +1,5 @@
-"""Task-specific matchers + the public scoring registries.
-
-``SCORING_FUNCTIONS`` is the name → callable map injected into every compiled
-formula's namespace; ``EXTRACTION_NOTES`` is the answer-format contract each
-extract-then-compare matcher imposes on the committed prompt. (Display-side
-extraction lives in ``domain/rendering.py``.)
-
-**This is the LABEL arm of a two-arm extraction seam** — it parses the answer prose
-and decides HIT/MISS. It is NOT where a structured-output response is opened: the
-SHAPE arm runs earlier and is **not in this repo** — the backend destructures the
-slot named by ``answer_field`` (TermNorm ``_step_llm_only``) before the body is
-posted back. If a task returns JSON and scoring looks wrong, check that arm first
-— by the time a matcher here runs, the envelope is already gone.
-"""
+"""The LABEL arm of a two-arm extraction seam — it parses answer prose and decides HIT/MISS. The SHAPE arm is NOT
+in this repo: the backend destructures ``answer_field`` first, so check there when scoring looks wrong."""
 
 from __future__ import annotations
 
@@ -39,11 +27,8 @@ def _rr(k: int | None) -> float:
 
 
 def _aime_match(predicted: str, ground_truth: str) -> float:
-    """Match AIME integers in [0, 999]; prefers ``\\boxed{N}``, falls back to last number.
-
-    The extract-the-answer step is the shared :func:`extract_boxed_number` (the
-    same value the display side renders); this keeps the int-coercion +
-    ``OverflowError`` guard + ``[0, 999]``-int ground-truth semantics."""
+    """Match AIME integers in [0, 999]. Extraction is the SHARED ``extract_boxed_number`` — the same value the display side
+    renders — so this keeps only the int coercion, the overflow guard and the range semantics."""
     try:
         gt = int(ground_truth.strip())
     except (ValueError, AttributeError):
@@ -126,11 +111,8 @@ EXTRACTION_NOTES: dict[str, str] = {
 
 
 def extraction_note_for_scoring(scoring: str) -> str:
-    """The answer-format contract the committed prompt must satisfy for ``scoring``
-    to extract a label — the union of notes for every matcher named in the formula.
-
-    Empty when the formula uses no extract-then-compare matcher (the raw output is
-    compared as-is, so no commit format is required)."""
+    """The answer-format contract the committed prompt must satisfy — the union of notes for every matcher the formula
+    names. Empty when no extract-then-compare matcher is used, since the raw output is then compared as-is."""
     return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in (scoring or ""))
 
 

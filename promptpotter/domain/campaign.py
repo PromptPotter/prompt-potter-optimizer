@@ -1,14 +1,5 @@
-"""``Campaign`` — first-class optimization-effort entity (``campaign.json``).
-
-One declared effort: dataset + origin + context + optimizer prompts. Holds
-one session root (``cycle_<target_hash>``) plus fork/diag/sweep descendants, flat
-under ``cycles/``. Single owner of the frozen ``CampaignConfig`` snapshot.
-
-``campaign_id = {dataset}__{rand6_hex}`` — minted per ``new`` invocation. Two
-``new`` calls on an unchanged declaration share the content-addressed root cycle
-id + origin score but diverge from round 1 onward. ``root_content_hash`` +
-``optimizer_prompt_hash`` let resume detect target / optimizer-prompt drift.
-"""
+"""``Campaign`` — one declared effort, holding a root cycle plus fork/diag/sweep descendants FLAT under ``cycles/``. Two
+``new`` calls on an unchanged declaration share the root cycle id and origin score, then diverge from round 1."""
 
 from __future__ import annotations
 
@@ -21,22 +12,8 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class Campaign(StrictModel):
-    """Frozen manifest for one optimization campaign — ``campaign.json``.
-
-    Identity + config + operator visibility intent ONLY — no run state. Run
-    state is owned per-cycle (``index.json::status`` + ``run_phase``); campaign
-    surfaces derive "how is this campaign doing" from its cycles on read (the
-    old stored ``status``/``finished_at`` were overwritten by whichever cycle —
-    root, fork, sweep, diag — finalized last, and never reset on resume).
-
-    ``lifecycle_status`` / ``lifecycle_changed_at`` / ``lifecycle_reason`` =
-    *operator visibility intent*. ``"archived"`` hides from the default
-    sidebar; ``"deleted"`` is soft — data stays on disk so measurements
-    still cache-hit for siblings. ``"checkin"`` is a campaign still authoring
-    its origin (minted on first ingest action, no loop yet) — it flips to
-    ``"active"`` at Start; ``root_content_hash`` / ``config`` are empty until
-    then.
-    """
+    """Frozen manifest — identity, config and operator VISIBILITY INTENT only, never run state: that is per-cycle,
+    and a stored campaign status was overwritten by whichever cycle finalized last."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -56,13 +33,8 @@ class Campaign(StrictModel):
 
     @property
     def root_hop(self) -> CycleHop:
-        """This campaign's root cycle as the pair that addresses it.
-
-        Both halves already live on the manifest, so re-pairing them at a call site is
-        a second spelling of a fact this object owns — and the shape that goes wrong is
-        pairing one campaign's id with another's root cycle, which a content-addressed
-        ``root_cycle_id`` makes easy: siblings minted from one declaration share it.
-        """
+        """This campaign's root cycle as the pair that addresses it. Re-pairing at a call site risks one campaign's id with
+        another's root cycle — easy, because a content-addressed ``root_cycle_id`` is shared by siblings."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
 
 

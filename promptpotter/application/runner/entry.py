@@ -1,9 +1,5 @@
-"""``run_optimization`` — optimize-loop entry + teardown.
-
-Wires origin → ``init_optimization_loop`` → ``run_round_loop`` → ``_finalize_run``.
-Operator forks stamp L1-surface deltas on the fresh OSP; fork-on-divergence
-rebuilds observers + re-seeds ``phase_ctx`` so RoundStartView keeps reading
-parent's max_rounds + patience scalars."""
+"""``run_optimization`` — optimize-loop entry + teardown. Fork-on-divergence rebuilds observers
+and re-seeds ``phase_ctx``, so RoundStartView keeps reading the parent's limits."""
 
 from __future__ import annotations
 
@@ -75,14 +71,8 @@ MAX_AUTO_REBASES = 10
 
 @dataclass(frozen=True)
 class RunMode:
-    """The launch-shape flags that select a run's behaviour, grouped so the
-    runner seam and its callers pass one value instead of six loose booleans.
-
-    Everything else ``run_optimization`` takes is run *content* (dataset,
-    config, session, observers, origin, task_context) — these are the *mode*
-    knobs the CLI/API flags map onto: divergence handling, fork-on-divergence,
-    sweep vs full, diagnostic mode, the accuracy halt, and a resume offset.
-    """
+    """The launch-shape flags that select a run's behaviour, grouped so the runner seam takes one
+    value instead of six loose booleans. Everything else it takes is run CONTENT."""
 
     no_divergence_check: bool = False
     fork_on_divergence: bool = False
@@ -103,16 +93,8 @@ def _build_budget_gate(
     usd_cap: float | None,
     token_cap: int | None,
 ) -> BudgetGate | None:
-    """Assemble the cycle's :class:`BudgetGate` from the two starting ceilings.
-
-    A ceiling is armed iff its starting cap is non-``None``; if both are
-    disarmed the gate itself is ``None`` (no budget halt). ``observers`` is
-    bound here so the rebase loop's per-iteration observer rebuild can't leave
-    the spent-probes reading a stale reference. The cap probes re-read
-    ``.runtime/spend_cap.json`` (``{max_usd, max_tokens}``, written by the
-    ``change-spend-budget`` applier) each tick, falling back to the starting
-    cap when the file is absent / malformed — so a ceiling can be moved
-    mid-flight without restarting the loop."""
+    """A ceiling is armed iff its starting cap is non-``None``; both disarmed ⇒ no gate at all. The
+    probes re-read ``.runtime/spend_cap.json`` each tick, so a ceiling moves without a restart."""
     if usd_cap is None and token_cap is None:
         return None
     dashboard = observers.dashboard
@@ -138,17 +120,8 @@ def _apply_config_overrides(
     spend_budget_usd: float | None,
     overrides: ConfigOverrides,
 ) -> tuple[CampaignConfig, float | None]:
-    """Snapshot the fork's effective `OptimizationConfig`: parent frozen config
-    with the fork's overrides applied (absolute values; an absent knob inherits
-    the parent). A new-cycle snapshot only — the parent config is never mutated.
-    Reassigning the returned config at the runner seam propagates to every reader
-    (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the per-round subset
-    selection, ``build_l1_response_schema``'s emittable param surface, the
-    ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also becomes
-    the spend-cap probe's initial ceiling (``change-spend-budget`` can still move it
-    at runtime). The selection-policy override (``per_round_resubset``) rides the
-    nested ``mechanisms.selection``; ``schema_field_rename`` sits flat beside the
-    limits. All are policy, so a fork can A/B a behaviour knob in isolation."""
+    """Snapshot the fork's effective config — parent frozen config plus absolute overrides, never a
+    mutation. Reassigning it at the runner seam is what propagates to every reader."""
     opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
@@ -187,12 +160,8 @@ def _apply_config_overrides(
 
 
 def _read_cycle_seed(session: Session) -> CycleSeed | None:
-    """Read this cycle's declared-at-mint seed, or ``None`` for an unseeded run.
-
-    The cycle_id is known (active-pointer / override, not hashed) and set on
-    ``session.state`` before the runner seam, so the lookup is non-circular with
-    cycle-id derivation. Set for an operator-steered fork or a campaign-from-origin
-    root mint; ``None`` otherwise."""
+    """This cycle's declared-at-mint seed, or ``None`` when unseeded. The cycle_id is already on
+    ``session.state``, so the lookup is non-circular with cycle-id derivation."""
     if not session.state.cycle_id:
         return None
     return session.store.campaigns.read_cycle_seed(session.hop)
@@ -200,10 +169,8 @@ def _read_cycle_seed(session: Session) -> CycleSeed | None:
 
 @dataclass(frozen=True)
 class _PreparedRun:
-    """Resolved run inputs from :func:`_prepare_run` — the straight-line prep
-    (seed reconciliation + C0 origin + scoring/task_context resolution) done
-    once before the rebase loop. ``campaign_config`` / ``spend_budget_usd`` are
-    re-emitted because a cycle seed may reconcile new run limits onto them."""
+    """Resolved run inputs — the straight-line prep done once before the rebase loop.
+    ``campaign_config`` / ``spend_budget_usd`` re-emit because a seed may reconcile new limits."""
 
     origin: CampaignOrigin
     campaign_config: CampaignConfig
@@ -213,19 +180,8 @@ class _PreparedRun:
 
 
 def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
-    """Bind the control-local hooks (pause / skip) onto *cycle_dir*'s ``.runtime/`` flags.
-
-    The ONE binding seam for run control, called once per cycle the run touches: the launch
-    cycle in ``_prepare_run`` and again per fork in the rebase loop (a fork has its own dir).
-    Binding at an entry point instead (new.py / resume.py) leaves the API launcher's runs
-    unable to pause — the flag is written but never polled.
-
-    It binds BEFORE origin scoring because origin scoring is the longest interruptible phase
-    the package has (on the L4 panel, hours). Bound inside the rebase loop instead,
-    ``session.pause_check`` is still ``None`` throughout round 0, so the per-sample pause
-    checkpoint in ``run_query_loop`` cannot fire and the operator's only way out of a running
-    origin is to kill the process.
-    """
+    """The ONE binding seam for run control, called per cycle the run touches. It binds BEFORE origin
+    scoring — the longest interruptible phase — or the operator's only way out is killing the process."""
     if not session.state.cycle_id:
         return
     layout = CycleLayout(cycle_dir)
@@ -260,7 +216,6 @@ async def _prepare_run(
     task_context: TaskDecomposition | dict[str, Any] | None,
     spend_budget_usd: float | None,
 ) -> _PreparedRun:
-    """The once-per-launch prep ahead of the rebase loop."""
     cb = observers.callbacks
 
     # A fresh launch supersedes any prior run-control intent: drop a consumed
@@ -337,11 +292,8 @@ async def _prepare_run(
 
 
 def _level_of(rr: RoundResult) -> tuple[float, float] | None:
-    """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if it was never fit.
-
-    The two halves are written together by ``absorb_round`` and are only ever read together;
-    one present without the other would be a level with no precision, which is the state this
-    whole channel exists to end."""
+    """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if never fit. The halves are
+    written and read together: one alone is a level with no precision."""
     if rr.cumulative_theta is None or rr.cumulative_theta_se is None:
         return None
     return rr.cumulative_theta, rr.cumulative_theta_se
@@ -358,14 +310,8 @@ def _build_cycle_result(
     finished_at: str,
     spend: SpendRollup | None,
 ) -> CycleResult:
-    """Assemble the terminal :class:`CycleResult`. ``cycle is None`` is the
-    init-crash fallback (cycle_id was minted upstream so the run still finalizes);
-    the cycle-derived fields then read their empty defaults.
-
-    Both ``winner_*`` read from ``best_sp`` (the BEST round's frozen point) so the
-    prompt fields and pipeline_params describe the SAME round — ``cycle.opt_sp`` is
-    overwritten each round by absorb_round, so reading prompts off it would pair the
-    best params with the last round's text."""
+    """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback. Both
+    ``winner_*`` read ``best_sp``, since ``cycle.opt_sp`` is overwritten every round."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
     # The L4 outer proxy's single-scale inner-search signal: origin level + the ability of the
     # incumbent each round ADOPTED, every one a θ in logits on the cycle's fixed δ ruler — the
@@ -419,10 +365,8 @@ def _build_cycle_result(
 
 @dataclass
 class _CycleOutcome:
-    """One cycle run to completion: its finalized result, the ``Cycle`` (whose
-    ``rebase_request`` drives auto-rebase), and the observers — possibly REBUILT
-    mid-run by fork-on-divergence, so the driver keeps the live reference for its
-    next iteration rather than the stale one it passed in."""
+    """One cycle run to completion. The observers may have been REBUILT mid-run by fork-on-divergence,
+    so the driver keeps this live reference rather than the one it passed in."""
 
     cycle_result: CycleResult
     cycle: Cycle | None
@@ -440,10 +384,8 @@ async def _run_single_cycle(
     langfuse_session_id: str | None,
     started_at: str,
 ) -> _CycleOutcome:
-    """Run ONE cycle end-to-end: init → round loop → finalize, wrapped in the
-    init/loop crash handlers that land a broken bring-up in CRASHED / DIVERGED /
-    PAUSED. Loop-free by design — the auto-rebase loop lives in the caller; this
-    just returns the finalized result plus the live ``Cycle`` + ``observers``."""
+    """Run ONE cycle end-to-end: init → round loop → finalize, wrapped in the crash handlers that
+    land a broken bring-up in CRASHED / DIVERGED / PAUSED. Loop-free — auto-rebase is the caller's."""
     origin = prep.origin
     campaign_config = prep.campaign_config
     cb = observers.callbacks
@@ -623,18 +565,8 @@ def _mint_and_rebase_fork(
     rebase_req: RebaseRequest,
     rebase_count: int,
 ) -> tuple[_PreparedRun, RunObservers]:
-    """Mint the auto-rebase fork the just-finalized cycle stashed, and rebuild
-    observers around the new cycle's own ledger (carrying phase_ctx). Repoints
-    ``session.state`` at the fork and returns the fork's prep + rebuilt observers;
-    the caller loops back into :func:`_run_single_cycle` on the new cycle.
-
-    A rebase carrying a ``config_overrides`` delta (an L2/L3 search-policy unlock)
-    re-snapshots the config BEFORE the mint, so the seed written to disk and the
-    in-process config are the same delta: a later ``resume`` of this fork reads the
-    seed back through the same ``_apply_config_overrides``. Without the seed the
-    unlock would live only in memory and evaporate on the first resume; without the
-    re-snapshot it would live only on disk and never reach this run's L1. Neither
-    failure raises — the fork simply never searches the axis it was minted for."""
+    """Mint the auto-rebase fork and rebuild observers around the new cycle's ledger. A rebase
+    carrying ``config_overrides`` re-snapshots BEFORE the mint, so seed and in-process config agree."""
     parent_cycle_id = session.state.cycle_id
     seed: CycleSeed | None = None
     if rebase_req.config_overrides is not None:

@@ -1,21 +1,5 @@
-"""Deterministic A/B replay engine — re-derive a recorded campaign's decisions under the
-current engine/scorer, and find where the change stops carrying over.
-
-The honest A/B, and the reason it works: running a campaign twice cannot be one, because
-candidate generation is non-deterministic — but scoring, election and elimination are a
-pure function over a round's recorded measurements, so replaying those under a different
-engine/scorer is exact and costs zero LLM calls. Arm A is what is on disk, arm B is the
-current process; same code and scorer ⇒ no mismatch, which makes it a self-consistency
-check too. Caveat: the δ ruler is re-calibrated from the current archive rather than the
-start-of-cycle one (never persisted), so θ is reconstructed — fine for a decision diff.
-
-**Replay is a mask verdict** (``application/mask/``), and running it as one is what lets
-this answer the question an operator actually has: not "which decisions moved" but "how
-much of what I already paid for survives this change, and where must I fork instead?"
-The fold walks the whole campaign forest and stops at the first departure per branch,
-because past that point the recorded rounds descend from a choice the change would have
-made differently — re-deriving them describes a history that would not have happened.
-"""
+"""Deterministic A/B replay. Scoring, election and elimination are a pure function of a round's recorded
+measurements, so re-deriving them under another engine is exact and costs zero LLM calls."""
 
 from __future__ import annotations
 
@@ -51,15 +35,8 @@ __all__ = ["AbReport", "ab_replay_cycle"]
 
 @dataclass(frozen=True)
 class AbReport:
-    """What a changed engine/scorer does to a campaign's recorded lineage.
-
-    Two answers, and the second is the one that costs money. ``mismatches`` is the
-    EVIDENCE — recorded decisions that re-derive differently. ``divergences`` is the
-    CONSEQUENCE — the first round on each branch where the change departs from the record;
-    ``divergent`` names every round below those, which the change makes counterfactual.
-    Zero divergences means the whole forest still carries over, and every measurement in it
-    is still yours to build on.
-    """
+    """``mismatches`` is the EVIDENCE (decisions that re-derive differently); ``divergences`` is the CONSEQUENCE — the
+    first round per branch where the change departs, below which every round is counterfactual."""
 
     campaign_id: str
     cycle_id: str
@@ -117,14 +94,8 @@ def _make_replay_verdict(
     delta_scale: dict[int, RulerEntry] | None,
     sink: list[ReplayMismatch],
 ) -> Verdict:
-    """The replay as a verdict on the shared fold — the same question, per round.
-
-    Rescoring happens here rather than in a pass over the record first, because
-    ``rescore_results`` is idempotent under one ``scorer_id`` and the fold only asks about
-    rounds that are still on the carried-over side of the departure. ``sink`` collects the
-    per-decision evidence as the walk goes: the fold wants a yes/no, the operator wants to
-    know WHICH decision moved.
-    """
+    """The replay as a verdict on the shared fold. Rescoring happens HERE, not in a prior pass, because the fold only
+    asks about rounds still on the carried-over side of the departure."""
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for A/B replay"
@@ -165,18 +136,8 @@ def ab_replay_cycle(
     *,
     enable_2pl: bool,
 ) -> AbReport:
-    """Re-derive *hop*'s campaign under the session's active engine + scorer.
-
-    Deterministic, no LLM calls. ``n_min`` is the campaign's
-    ``optimization.elimination_n_min`` — the ruler-warmth floor (see ``_calibrate_delta_ruler``);
-    ``enable_2pl`` is ``optimization.enable_2pl_graduation`` — the same 1PL/2PL calibration
-    gate the live cycle ran, so the reconstructed ruler matches its model.
-
-    The walk is the CAMPAIGN's, not one cycle's: a fork shares its parent's measurements, so
-    an engine change that invalidates a round invalidates every branch below it, and a
-    per-cycle answer cannot say that. One ruler serves the forest — calibrated from *hop*'s
-    own round 0, which its forks inherit (a fork's origin is the parent's, content-addressed).
-    """
+    """Re-derive a campaign under the active engine + scorer; no LLM calls. The walk is the CAMPAIGN's — a fork shares its
+    parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
     # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
     # at module load would risk an import cycle through resume_and_fork/__init__.
     from promptpotter.application.intelligence.hard_sample_archive import (

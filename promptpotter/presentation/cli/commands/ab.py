@@ -1,11 +1,5 @@
-"""``cmd_ab`` — deterministic A/B replay of the active cycle's campaign.
-
-Re-derives every recorded decision (round winner, PoBB eliminations, L2/L3 triggers) under
-the CURRENT engine + active scorer over the recorded measurements, and reports where the
-change stops carrying over — the answer being how much of the lineage survives it, and
-where a fork is needed. Zero LLM calls. The honest engine/scorer A/B (running a campaign
-twice can't be — candidate generation is non-deterministic). Contract: ``ab_replay.py``.
-"""
+"""Deterministic A/B replay of the active cycle's campaign under the CURRENT engine + scorer; zero LLM calls. The honest
+engine/scorer A/B, since running a campaign twice cannot be one — candidate generation is non-deterministic."""
 
 from __future__ import annotations
 
@@ -26,7 +20,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
-    """Re-derive the active cycle's recorded decisions under the current engine; report flips."""
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.optimization.resume_and_fork.ab_replay import ab_replay_cycle

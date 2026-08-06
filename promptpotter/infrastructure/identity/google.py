@@ -25,7 +25,7 @@ GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 
 
 class GoogleTokenExchangeError(RuntimeError):
-    """Raised when the token endpoint refuses the auth code."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -39,14 +39,8 @@ class ProviderIdentity:
 
 
 class GoogleProviderClient:
-    """OIDC client — Authorization Code → ID Token verification.
-
-    Defaults to Google's production endpoints. Any URL may be overridden
-    in ``oidc.json`` (``issuer`` / ``authorize_url`` / ``token_url`` /
-    ``jwks_url``) so any OIDC-conformant IdP — Dex, Keycloak, Auth0,
-    Okta — rides the same client. The local dev harness in
-    ``dev/oidc-local/`` points all four at Dex.
-    """
+    """OIDC client — Authorization Code to ID Token verification. Every URL may be overridden in ``oidc.json``, so any
+    OIDC-conformant IdP (Dex, Keycloak, Auth0, Okta) rides the same client."""
 
     def __init__(self, config: OIDCProviderConfig, jwks_cache: JWKSCache) -> None:
         self._config = config

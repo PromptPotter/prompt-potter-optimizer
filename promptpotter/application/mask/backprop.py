@@ -1,14 +1,5 @@
-"""MCTS backpropagation + UCB selection over the lineage forest.
-
-AlphaZero-shaped: *expansion* is a round, *simulation* is the deterministic forward pass
-on the eval set. Three choices carry this module. Only a cycle's OWN rounds are nodes —
-a fork copies its parent's prefix forward, and counting those copies inflates every
-ancestor's visit count by its descendants' inherited prefixes, compounding with depth.
-The value is θ, not accuracy, because rounds score different sample subsets and a branch
-that drifted onto easier samples would out-rank an honest one. And Q is min-max
-normalized before the UCB1 bonus, because θ is unbounded logits where UCB1 assumes
-[0, 1] — that is what keeps ``UCB_EXPLORATION_C`` meaningful rather than arbitrary.
-"""
+"""MCTS backprop + UCB over the lineage. Only a cycle's OWN rounds are nodes — a fork's copied prefix inflates every
+ancestor's visits. The value is θ (subsets differ), and Q is min-max normalized since UCB1 assumes [0, 1]."""
 
 from __future__ import annotations
 
@@ -24,13 +15,8 @@ NodeKey = tuple[str, int]
 
 @dataclass(frozen=True)
 class NodeStats:
-    """One lineage node's backpropagated statistics — MCTS's N, W, Q.
-
-    ``visits`` is the size of the subtree rooted here (this round plus every round
-    descended from it, across every fork). ``value_sum`` is that subtree's summed θ.
-    A node with a high ``q`` but few ``visits`` is exactly what the exploration term
-    exists to surface: promising, and under-explored.
-    """
+    """One lineage node's backpropagated N, W, Q. ``visits`` is the size of the subtree rooted here, across every fork —
+    a high ``q`` with few ``visits`` is exactly what the exploration term exists to surface."""
 
     cycle_id: str
     round: int
@@ -67,13 +53,8 @@ def _parent_of(cycle: MaskCycle, rnd: MaskRound, first_round: int) -> NodeKey | 
 
 
 def accumulate_node_stats(record: MaskRecord) -> dict[NodeKey, NodeStats]:
-    """Backpropagate every round's θ up to its ancestors — the fold.
-
-    Each round is one simulation. A node's ``visits`` / ``value_sum`` accumulate its
-    own outcome plus every outcome below it, so an ancestor's statistics answer "what
-    did re-expanding from here actually yield, everywhere it was tried?" — the question
-    a rewind is asking, and the one no per-cycle counter can answer.
-    """
+    """Backpropagate every round's θ up to its ancestors; each round is one simulation. An ancestor's statistics answer
+    "what did re-expanding from here yield, everywhere it was tried?" — which no per-cycle counter can."""
     parents: dict[NodeKey, NodeKey | None] = {}
     own: dict[NodeKey, float] = {}
     for cycle in record.cycles:
@@ -131,16 +112,8 @@ def select_rewind_round(
     cycle_id: str,
     current_round: int,
 ) -> int | None:
-    """The UCB1 pick: which ancestor round to re-expand from. ``None`` ⇒ no rewind.
-
-    Returns an ABSOLUTE round number valid in the current cycle's coordinates. That is
-    sound without a cross-cycle address because a fork carries its parent's rounds
-    forward under their original numbers — so an ancestor living in a parent cycle is
-    addressable as that same round here, and ``RebaseRequest`` needs no cycle field.
-
-    ``None`` when there is nothing above the current node (a root's round 0) — the
-    caller must not fork, since a rewind to nowhere would mint a duplicate cycle.
-    """
+    """The UCB1 pick: which ancestor round to re-expand from. The ABSOLUTE round number is valid in the current cycle's coordinates,
+    since a fork carries the parent's rounds under their original numbers. ``None`` ⇒ the caller must not fork."""
     stats = accumulate_node_stats(record)
     node: NodeKey = (cycle_id, current_round)
     candidates = [a for a in _ancestors(stats, record, node) if a[1] < current_round]

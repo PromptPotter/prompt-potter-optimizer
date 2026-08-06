@@ -1,12 +1,5 @@
-"""``RoundBuffer`` — the per-round candidate buffer behind
-``dashboard.json::current_round.nodes.l1_score``.
-
-Owned by :class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView`;
-its ``_handle_snapshot`` fan-out (``candidate_started`` / ``sample_scored`` /
-``candidate_scored`` / ``p_best_update``) routes each snapshot kind to one of
-this dataclass's mutators. The render functions in ``render.py`` read these
-fields verbatim to build the dashboard output shape.
-"""
+"""The per-round candidate buffer behind ``current_round.nodes.l1_score``. The view's snapshot fan-out routes each kind to
+one mutator here, and the render functions read these fields verbatim."""
 
 from __future__ import annotations
 
@@ -29,13 +22,8 @@ class RoundBuffer:
         self.p_best_top = []
 
     def slot(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init a candidate slot. Sample / score / p_best callbacks may fire
-        before ``candidate_started`` seeds the slot, so all mutators funnel here.
-
-        ``changes_description`` holds the human-readable mutation text; the
-        canonical display ``label`` is composed in ``build_l1_score_block``
-        from the slot's round + idx via :func:`candidate_label`.
-        """
+        """Lazy-init a candidate slot: sample / score / p_best callbacks may fire BEFORE ``candidate_started`` seeds it, so all
+        mutators funnel here. The canonical display ``label`` is composed downstream, not stored here."""
         return self.candidates.setdefault(
             idx,
             {
@@ -56,15 +44,8 @@ class RoundBuffer:
         prompt_fields: dict[str, Any] | None,
         resolved_pipeline_params: dict[str, Any] | None,
     ) -> None:
-        """Seed a slot so CURRENT shows labelled pending rows before scoring lands.
-
-        ``prompt_fields`` + ``pp_override`` are the candidate's evolved
-        searchpoint (``OptSearchPoint.prompt_field_dict()`` + pipeline delta) —
-        the seed-able half the steer panel forks from. Surfacing them live makes
-        an in-flight candidate steerable without its (not-yet-written) round file.
-        ``resolved_pipeline_params`` is the config-only resolved config the
-        OBSERVE view reads live (the in-flight peer of the round-file field).
-        """
+        """Seed a slot so CURRENT shows labelled pending rows before scoring lands. ``prompt_fields`` + ``pp_override`` are the
+        seed-able half the steer panel forks from — surfacing them live makes an in-flight candidate steerable."""
         entry = self.slot(idx, total)
         entry["total"] = total
         entry["changes_description"] = changes_description or ""
@@ -129,15 +110,8 @@ class RoundBuffer:
         n_samples: int,
         p_best: float,
     ) -> None:
-        """Merge one candidate's P(best) into its slot, then rebuild the top-5 leaderboard.
-
-        Stores this candidate's ``p_best``, its signed delta vs the prior query and a capped
-        trajectory; then refreshes the round-wide top-5 consumed by ``build_pobb_block``
-        **by aggregating across the round's candidate slots**. Reading the leaderboard
-        straight off this one candidate's ``PoBBSnapshot`` dict instead lists the priors it
-        was measured against as if they were its rivals' standings, and each new snapshot
-        overwrites it — the last candidate to score decides the display.
-        """
+        """Merge one candidate's P(best), then rebuild the top-5 **by aggregating across the round's slots**. Reading it off this
+        one candidate's snapshot lists the priors it was measured against as rivals, and the last to score decides it."""
         cand = self.slot(idx, total)
         current = float(p_best)
         prev = float(cand.get("p_best", current))

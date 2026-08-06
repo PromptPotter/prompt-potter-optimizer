@@ -1,12 +1,5 @@
-"""Per-dataset starting-point prompt store + backend node overlay reader.
-
-Each dataset ships ``{dataset_dir}/prompts/`` with PromptTemplate YAML.
-Resolution: ``{node_name}.yaml`` → ``{variant}.yaml`` → ``FileNotFoundError``.
-
-``dataset_dir`` is the resolved config dir carried on ``Session.dataset_config_dir``
-(tenant-first via ``readable_dataset_dir``) — these loaders never recompute a
-repo-relative path from the bare dataset name, so tenant uploads and repo benchmarks
-load through the same code."""
+"""Per-dataset starting-point prompts. ``dataset_dir`` is the RESOLVED dir off the session (tenant-first), so these loaders never
+recompute a repo-relative path and a tenant upload loads through the same code as a repo benchmark."""
 
 from __future__ import annotations
 
@@ -20,9 +13,8 @@ from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    """Sparse ``{node_name: {key: value}}`` overlay from ``{dataset_dir}/pipeline.yaml``,
-    layered onto the wire payload at init. Backend ``GET /pipeline`` is SoT for runtime
-    defaults; this overlay encodes per-dataset operator preferences (e.g. AIME via OpenRouter/Mistral)."""
+    """Sparse per-node overlay from the dataset's ``pipeline.yaml``, layered onto the wire payload at init. The backend's
+    ``GET /pipeline`` stays SoT for runtime defaults; this encodes per-dataset operator preferences."""
     raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     if not raw:
         return {}
@@ -48,7 +40,6 @@ def load_node_prompt(
     node_name: str,
     variant: str = "default",
 ) -> PromptTemplate:
-    """Load canonical ``PromptTemplate``: ``{node_name}.yaml`` → ``{variant}.yaml`` → ``FileNotFoundError``."""
     d = dataset_prompt_dir(dataset_dir)
     node_path = d / f"{node_name}.yaml"
     data = read_yaml_optional(node_path)
@@ -69,7 +60,6 @@ def load_node_prompt(
 
 @functools.lru_cache(maxsize=64)
 def load_dataset_prompt(dataset_dir: Path, name: str = "default") -> PromptTemplate:
-    """Load dataset-wide ``{name}.yaml`` (thin wrapper over ``load_node_prompt`` for single-node + display)."""
     path = dataset_prompt_dir(dataset_dir) / f"{name}.yaml"
     if not path.exists():
         raise FileNotFoundError(
@@ -80,7 +70,6 @@ def load_dataset_prompt(dataset_dir: Path, name: str = "default") -> PromptTempl
 
 
 def list_dataset_prompts(dataset_dir: Path) -> list[str]:
-    """Return sorted template names available under *dataset_dir* (empty if none)."""
     d = dataset_prompt_dir(dataset_dir)
     if not d.is_dir():
         return []

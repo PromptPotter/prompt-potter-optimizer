@@ -1,20 +1,3 @@
-"""L1-generate input/output validation + variant invariant detection.
-
-Three concerns, all validation-shaped:
-
-- **Schema construction**: ``build_l1_response_schema`` grafts per-node
-  ``param_allowed_values`` into the static l1_generate envelope and
-  constrains the prompt-field + task-context slots so the LLM is
-  constrained at output-time across all three override slots.
-- **Schema compliance**: ``validate_overrides`` + ``L1_SCHEMA_COMPLIANCE``
-  catch ``pipeline_params_override`` values that violate the schema
-  after the fact (LLMs sometimes ignore parts of the schema). The
-  ``ValidatorOutcome`` lands on L1's own ``l1_wounds`` — L1 re-proposes.
-- **Variant invariants**: ``detect_invariants`` flags ``no_op_variant``
-  (no mutation vs parent) and ``duplicate_variant`` (sig-equal across
-  population). Returns ``L1YieldStats`` for the round.
-"""
-
 from __future__ import annotations
 
 import copy
@@ -80,16 +63,8 @@ DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
 
 
 def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
-    """Resolve ``$ref`` references in a Pydantic-emitted JSON Schema in place.
-
-    Pydantic's ``model_json_schema()`` factors nested models into a top-level
-    ``$defs`` table referenced via ``$ref``. Provider response_format wants a
-    self-contained schema (no $ref forward declarations on subtrees); we
-    inline so callers can mutate properties directly, and so the wire
-    payload validates server-side without resolution. ``title`` metadata is
-    stripped along the way — Pydantic auto-emits them, they bloat the
-    schema for no LLM-side benefit.
-    """
+    """Provider ``response_format`` wants a self-contained schema, so Pydantic's ``$defs`` table is
+    inlined in place; ``title`` metadata is stripped with it (auto-emitted, no LLM-side benefit)."""
     if isinstance(node, dict):
         if "$ref" in node:
             key = node["$ref"].split("/")[-1]
@@ -101,22 +76,8 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
 
 
 def effective_l1_field_names() -> dict[str, str]:
-    """The `{field: wire_name}` rename in force for this call — the ONE source both the emitted
-    JSON Schema and the response model derive from. Two surfaces, one function: a schema that
-    renames a field the response model does not alias fails every parse, every round.
-
-    **Unconditional, and it must be.** `schema_field_rename` governs whether an OUTER campaign's
-    L1 may *propose* a rename — it gates the graft, below. The INNER cycle honours whatever
-    mutation it is handed, exactly as it does for prose, `layout`, and
-    `output_schema_descriptions`. Gating this on the inner cycle's own config would open a silent
-    no-op channel: an inner campaign loads its config from the inner dataset's `campaign.json`
-    (`runner/inner/cycle.py`), never from the outer's, so the outer would emit a rename that
-    nothing applied — and score it as a legitimate mutation.
-
-    Empty on every normal, non-L4 cycle (no override bound). A proposed rename is dropped when
-    its target collides with a field that is not itself being renamed away
-    (`{changes_description: prompt_fields_override}` would make the response ambiguous).
-    """
+    """The ONE source the emitted schema and the response model both derive from. Unconditional —
+    gating on the INNER cycle's own config would emit a rename nothing applied, then score it."""
     proposed = resolve_node_override("l1_generate").schema_field_names
     if not proposed:
         return {}
@@ -125,7 +86,6 @@ def effective_l1_field_names() -> dict[str, str]:
 
 
 def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
-    """Rewrite `properties` keys and the `required` list in place; order is preserved."""
     props = variant["properties"]
     variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
     required = variant.get("required")
@@ -158,22 +118,8 @@ _SCHEMA_RENAME_INSTRUCTION = (
 
 
 def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | None:
-    """The emitted sub-schema for a NESTED (`object`-declared) optimizer param.
-
-    Three levers, each keyed by a CLOSED set so the optimizer can edit but never invent:
-
-    - `output_schema_descriptions` — the always-on `description` lever
-      (`docs/concepts/structured-output.md`). Keyed by **this node's own output-schema
-      fields** — synthesized onto every `output_schema`-bearing node, target or optimizer,
-      at parse time. This is the core case: `l1_generate` describing `llm_only`'s
-      `{reasoning, answer}` is the same code path as describing the inner optimizer's own
-      variant fields. `None` when the node ships no schema.
-    - `layout` (L4's information-flow lever): per-slot lists of injection names; value space
-      is the node's own `NODE_LAYOUTS` vocabulary. `None` when the node is not one of this
-      optimizer's own (no layout spec).
-    - `output_schema_field_names` (L4 rename, gated): the strongest lever, keyed by the inner
-      `l1_generate`'s own variant fields; offered only where a node declares it.
-    """
+    """Each lever is keyed by a CLOSED set, so the optimizer can edit but never invent; ``None``
+    where the node declares none."""
     if param == SCHEMA_DESCRIPTIONS_PARAM:
         out_schema = node.output_schema
         if out_schema is None or not out_schema.fields:
@@ -219,53 +165,8 @@ def build_l1_response_schema(
     citable_fields: Sequence[str],
     schema_field_rename: bool = False,
 ) -> dict[str, Any]:
-    """l1_generate response_schema — three constrained slots per variant.
-
-    ``citable_fields`` is this round's ``evidence_grounding.field`` enum — the evidence
-    panels the live layout renders (``registry.citable_fields``). Grafted here rather than
-    frozen on the model: what L1 may cite is what L1 was shown, and a layout edit changes it.
-
-    The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
-    for l1_generate's response); we then constrain each of the three
-    override slots so the LLM cannot conflate them:
-
-    - ``pipeline_params_override``: per backend node we enrich with the
-      node's allowed-value enums so the LLM is constrained at
-      output-time:
-
-      * if ``param_allowed_values`` carries an enum → ``{"type": "string", "enum": [...]}``
-      * else if ``param_types`` declares a type → ``{"type": <json-type>}``
-      * else → ``{}`` (unconstrained — dataset overlay gap)
-
-      The type emission is load-bearing: without it, the L1 LLM is free
-      to emit ``"0.2"`` for ``temperature`` (string instead of number),
-      which propagates through the wire payload to the upstream provider
-      and triggers a 4xx that PromptPotter has to skip.
-
-    - ``prompt_fields_override``: properties enumerated as the six
-      :data:`PROMPT_STRING_FIELDS`, each ``{"type": "string"}``;
-      ``additionalProperties: false``.
-
-    - ``task_context_override``: properties enumerated as
-      :data:`TASK_CONTEXT_OVERRIDES`, each ``{"type": "string"}``;
-      ``additionalProperties: false``.
-
-    **The last two are DROPPED where no node bears the target prompt.** Both write the
-    evolved ``OptSearchPoint`` — ``prompt_fields_override`` its six fields,
-    ``task_context_override`` the two strings spliced around ``problem_description`` —
-    and ``to_job_search_point`` puts that render on the wire only through
-    ``prompt_node_names()[0]``. With no such node (L4: the mutation surface is the inner
-    optimizer prompts, carried as ``pipeline_params``) the render lands nowhere, so a variant
-    spending itself on either slot mutates nothing. Same lock as model/provider — the LLM
-    cannot emit a key the schema never declares — which is why the optimizer prompt no longer
-    has to ASK for them to be left empty.
-
-    Returns the BARE JSON Schema. ``chat()``'s ``response_schema`` *is* the wire
-    schema (``llm/base.py``); the client owns the ``{name, schema, strict}`` provider
-    envelope. Returning an envelope here nests the real schema one level down, where
-    the provider reads a top-level object with no ``type`` and no ``properties`` —
-    every constraint below inert.
-    """
+    """Returns the BARE JSON Schema — ``chat()``'s ``response_schema`` IS the wire schema, and an
+    envelope here nests it where the provider reads no ``type`` and every constraint goes inert."""
     raw_schema = L1GenerateOutput.model_json_schema()
     defs = raw_schema.pop("$defs", {})
     inlined = _inline_refs(raw_schema, defs)
@@ -373,7 +274,6 @@ _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
 
 
 def _matches_declared_type(value: Any, declared: str) -> bool:
-    """JSON-Schema-flavoured isinstance: booleans are not numbers."""
     py_types = _JSON_TYPE_TO_PY.get(declared)
     if py_types is None:
         return True  # type we don't model → unconstrained here (schema gates structure)
@@ -388,34 +288,8 @@ def validate_overrides(
     pipeline_params_override: dict[str, dict[str, Any]],
     pipeline_schema: PipelineSchema,
 ) -> list[ValidationFailure]:
-    """Validate overrides vs available_models + param_allowed_values + param_types; failures drive synthetic-0.
-
-    Any touch of ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``) is rejected
-    outright, independent of whether the proposed value would be in
-    ``available_models`` — these axes are operator-owned (dataset overlay or a
-    cap-gated fork edit) and never on L1's surface at all.
-
-    Type mismatch (``"0.2"`` proposed for a ``number``-declared param) is
-    rejected with ``reason="type_mismatch"``. This catches the case the
-    JSON-schema ``type`` constraint in :func:`build_l1_response_schema` is
-    meant to prevent — both layers run because not every provider/SDK
-    enforces structured-output schemas with full fidelity.
-
-    ``SCHEMA_OWNED_FIELDS`` (``output_schema`` + schema registry identity) are
-    rejected UNCONDITIONALLY (no ablation unlock): the output schema is the
-    pipeline's structural wire contract, and a mutated one breaks the backend.
-    ``node_param_keys`` already strips them from the emittable surface, so this is
-    the deterministic backstop for a provider that leaks the key past its schema —
-    the structural twin of the model/provider lock.
-
-    A param the node never advertised is rejected as ``reason="unknown_param"``. The
-    emitted schema declares exactly ``node_param_keys``; anything else arrived past a
-    weakly-conformant provider's ``additionalProperties: false`` and would merge into
-    ``pipeline_params`` unchecked — unlike a hallucinated NODE, which
-    ``merge_pipeline_params`` drops downstream. This is the node-name check's per-param
-    twin, and it is what makes ``node_param_keys`` the single emittable surface its own
-    docstring claims: the catalogue and the schema derived from it; the validator did not.
-    """
+    """The deterministic twin of the emitted schema's constraints: both layers run because not
+    every provider enforces structured output with full fidelity."""
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
     emittable = pipeline_schema.node_param_keys()
@@ -510,7 +384,6 @@ def _check_l1_schema_compliance(
     pipeline_schema: PipelineSchema,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Wrap validate_overrides → ValidatorOutcome (L1 retunes its own override)."""
     if not source_output or not pipeline_schema:
         return None
     failures = validate_overrides(source_output, pipeline_schema)
@@ -534,18 +407,8 @@ def _check_l1_prompt_blocks_in_library(
     prompt_block_catalogue: str = "guidance",
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Under ``restrict``, a prompt-field value L1 PROPOSES must come from the block library.
-
-    Reads the round's ``prompt_fields_override`` — the delta, not the resulting OSP. The
-    parent's fields are the dataset's authored origin and are not in the library by
-    construction; checking the merged result would reject every candidate on round 1 for a
-    field nobody touched. Only ``guidance`` (the default) and ``off`` render nothing here —
-    they leave the value space open, so there is nothing to violate.
-
-    A field with no library entries (``problem_description`` — task-specific by nature) is
-    unrestricted: ``restrict`` narrows a declared value space, it does not close an
-    undeclared one.
-    """
+    """Reads the round's ``prompt_fields_override`` — the DELTA, not the resulting OSP: the parent's
+    fields are the dataset's authored origin, so checking the merge rejects every round-1 candidate."""
     if prompt_block_catalogue != "restrict" or not source_output:
         return None
     library = prompt_blocks()
@@ -581,15 +444,8 @@ def _check_l1_config_in_runtime_failures(
     opt_sp: OptSearchPoint | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reject candidates that re-propose a config already proven to fail.
-
-    Pure wire-level check — no LLM evidence judgment, just "we already proved this fails."
-
-    Sibling-fork inheritance (``Cycle.start`` → ``gather_sibling_runtime_failures``)
-    populates ``runtime_failures`` from prior cycles' terminal wounds, so
-    this check fires even on round 1 of a fresh fork when sibling evidence
-    exists.
-    """
+    """Sibling-fork inheritance populates ``runtime_failures`` from prior cycles' terminal wounds,
+    so this fires even on round 1 of a fresh fork."""
     if not source_output or opt_sp is None:
         return None
     failures_list = list(opt_sp.memory.wounds.runtime_failures)
@@ -627,20 +483,8 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 
 
 def _optimizer_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
-    """INLINE injection ports dropped from an inner optimizer prompt's prose (the L4 surface).
-
-    A ``{{token}}`` embedded mid-sentence in an optimizer prompt field (``{{n_variants}}`` in
-    ``l1_generate.task_intent``/``instruction``, ``{{citable_fields}}`` in
-    ``l1_generate.answer_format``) is a channel port, not prose — an L4 rewrite that deletes
-    it severs the channel while the schema keeps accepting proposals, and no measurement can
-    see what went missing. This guard is PERMANENT, not transitional: these ports are inline
-    format variables inside the sentence that uses them, so they can never move to the layout
-    channel (whose mandatory guard is ``validate_l1_layout`` — the capability directives ride
-    there, appended blocks with no inline position to hold). Do not delete this on a "layout
-    covers it" argument; layout covers only block-shaped signals. Checks the MERGED params,
-    not the round's delta: a child of a broken incumbent inherits the token-less prose without
-    re-proposing it, and the program it would run is just as severed.
-    """
+    """PERMANENT, not transitional: these ports sit mid-sentence, so they can never move to the
+    layout channel. Checks the MERGED params — a child inherits token-less prose without re-proposing it."""
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):
         if node_name not in NODE_LAYOUTS:
@@ -675,22 +519,8 @@ def _check_l1_prompt_placeholders_intact(
     pipeline_schema: PipelineSchema | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reject a candidate whose program drops a mandatory injection placeholder.
-
-    Two surfaces, one rule — a mutation may degrade what flows through a channel (measurable;
-    the proxy goes negative), never delete the channel itself (unmeasurable):
-
-    - **Target prompt**: the evolved prompt lands on exactly ONE node —
-      ``prompt_node_names()[0]``, the node ``OptSearchPoint.to_job_search_point`` injects
-      ``opt_sp.render()`` into; the other prompt-bearing nodes keep their fixed starting prompt.
-      If a mutation drops a declared ``{{var}}`` (e.g. ``{{combined_text}}`` carrying
-      web_search evidence into entity_profiling), the backend injects nothing there and the
-      evidence-free program would otherwise score as a valid winner. Mint guards this at setup
-      (``configure_and_apply_pipeline``); this is its in-loop twin, same ``missing_template_vars``.
-    - **Inner optimizer prompts** (L4): ``source_output`` is the candidate's MERGED
-      ``pipeline_params``; :func:`_optimizer_template_failures` guards the prose-embedded ports the
-      same way. Same reason, same fatal synthetic-0 path, same patience-0 L2 fire.
-    """
+    """A mutation may DEGRADE what flows through a channel (measurable — the proxy goes negative),
+    never delete the channel itself (unmeasurable). Mint's ``missing_template_vars`` in-loop twin."""
     if opt_sp is None or pipeline_schema is None:
         return None
     failures: list[ValidationFailure] = []
@@ -727,11 +557,7 @@ L1_PROMPT_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
 
 @dataclass(frozen=True)
 class L1YieldStats:
-    """Round-level L1 generation quality.
-
-    Field names mirror ``RoundDiagnostics.l1_yield``/``l1_n_no_op``/``l1_n_duplicate``
-    so callers can spread via ``dataclasses.asdict`` rather than translate.
-    """
+    """Field names mirror ``RoundDiagnostics.l1_yield`` so callers spread via ``dataclasses.asdict``."""
 
     l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
     l1_n_no_op: int
@@ -754,30 +580,8 @@ class L1YieldStats:
 
 
 def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
-    """``(round, idea fingerprint)`` for every prior candidate that was MEASURED and LOST.
-
-    The evidence base for ``repeat_variant``. Three filters, and each is load-bearing:
-
-    * **Measured** (``total > 0``). A candidate that scored no samples carries
-      ``accuracy == 0.0`` only because the field is a non-optional float — it is the absence
-      of evidence, not a defeat. Rejecting a live proposal because an unmeasured one "already
-      failed" would be the loop punishing an idea nobody ever ran. (Probe rounds manufactured
-      exactly these wholesale before the lever was removed.)
-    * **Trustworthy** (``is_leader_eligible``). The shapes whose measurement cannot be read at
-      all — escalation-aborted outside PoBB, degradation-cut — say nothing either way.
-    * **Lost.** An idea that BEAT its origin is not a dead end; refining a winner is the search
-      working. How that is known depends on how the candidate ended, and the two ways are
-      recorded facts, not a guess. A candidate that covered the origin's panel is compared to
-      its matched origin. A candidate PoBB **ε-eliminated** has no matched origin and needs
-      none: elimination IS the measurement — its P(best) fell below ε against the round's
-      leader. A **lock-in** stop is the opposite fact (it stopped because it was winning) and
-      is never evidence of a loss; ``elimination_context.leader_locked`` tells them apart, the
-      same bit ``mask/load.py::_abort_contributor`` reads.
-
-    That last split is why this cannot go back to reading a cut candidate's accuracy against a
-    prefix origin rate: the prefix is the incumbent's own miss list, so the comparison exempted
-    two ideas from the gate as winners whose θ sat well BELOW origin.
-    """
+    """Measured losses only: ``accuracy == 0.0`` on an unmeasured candidate is the absence of
+    evidence, not a defeat, and an ε-elimination IS the measurement while a lock-in is its opposite."""
     out: list[tuple[int, frozenset[str]]] = []
     for i, rr in enumerate(prior_rounds):
         parent = rr.prompt_fields
@@ -805,32 +609,8 @@ def detect_invariants(
     parent_pipeline_params: dict[str, Any] | None,
     prior_rounds: Sequence[Any] = (),
 ) -> L1YieldStats:
-    """Attach no_op_variant / duplicate_variant / repeat_variant failures; return yield stats.
-
-    Failures route through score_population's synthetic-0 path (Path 1) so
-    invariant variants don't burn LLM calls. Idempotent — pre-existing
-    invariant failures are dropped first so resume-from-disk doesn't dup.
-
-    **``repeat_variant`` is the cross-ROUND arm** (the other two are round-local). A candidate
-    is rejected when it re-proposes an idea a prior round already measured and lost — matched
-    on the content words it ADDED to its parent (:func:`candidate_idea`), so it still fires when
-    the idea has been rewritten into a different field — the only form a re-proposal actually
-    takes — without convicting a candidate for re-emitting the field body its edit had to carry.
-
-    Rejecting is destructive — the variant simply never exists, and a wrong rejection leaves no
-    trace — so four things bound it. (1) The evidence is filtered to measured losses only
-    (:func:`lost_ideas`). (2) The threshold is :data:`IDEA_MATCH_REJECT`, stricter than the
-    panel's marking threshold. (3) **A repeat is never allowed to empty the round**: if
-    rejecting them would leave no live proposal, they are all restored — a round that retries a
-    known-dead idea is a wasted round, but a round with zero candidates is a wasted round that
-    also loses the loop's turn. (4) Every rejection names the round it repeats, so it surfaces
-    on the wound channel and in ``review.md`` rather than vanishing into a yield number.
-
-    All three components of the signature are DELTAS against the parent — *parent_pipeline_params*
-    is the parent's resolved, folded config (``JobSearchPoint.pipeline_params``). ``None`` is the
-    honest "parent declared no node config" case (:attr:`JobSearchPoint.pipeline_params`), where
-    every override is by definition a real delta.
-    """
+    """Rejecting is destructive and leaves no trace, so a repeat is never allowed to EMPTY the
+    round — if rejection would leave no live proposal, they are all restored."""
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:
         cp.opt_sp.memory.wounds.validation_failures = [

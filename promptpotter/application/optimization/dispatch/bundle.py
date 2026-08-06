@@ -1,12 +1,5 @@
-"""Bundle types — per-call state container + signal classification.
-
-Every renderer reads an ``InjectionBundle`` (built once per transition by
-``facade.build_bundle``, consumed by ``DispatchHub``). ``InjectionKind``
-splits by origin: MEASUREMENT / DERIVED / TRACE / DIRECTIVE.
-
-This module stays ``Cycle``-free by contract so renderer tests can
-construct bundles directly; the ``Cycle``-snapshot path lives in
-``facade.py`` alongside ``DispatchHub``."""
+"""Bundle types — the per-call state every renderer reads. Stays ``Cycle``-free by contract so renderer tests can construct one
+directly; the ``Cycle``-snapshot path lives in ``facade.py``."""
 
 from __future__ import annotations
 
@@ -106,19 +99,8 @@ class InjectionKind(enum.StrEnum):
 
 @dataclass(frozen=True)
 class _Injection:
-    """One INJECTIONS entry — kind + renderer + per-injection ``char_cap`` + ``citable``.
-
-    ``char_cap`` has no default (omitting it = TypeError; coding mistakes fail loud,
-    not silently uncapped). Bounds LLM-authored text; ``None`` for
-    *_RENDER_CAP-bounded derived/measurement renderers.
-
-    ``citable`` — may an ``l1_generate`` variant name this panel in
-    ``evidence_grounding``? True for panels REPORTING something (what was measured,
-    what failed, what the layers steered); False for the value-space menus and the
-    prompt under edit — citing those grounds a mutation in its own subject. Also no
-    default: a new signal must decide. Citability for a given round is this flag
-    intersected with the node's live layout (``registry.citable_fields``), so a panel
-    that was never rendered can never be cited."""
+    """One INJECTIONS entry. Neither ``char_cap`` nor ``citable`` has a default — a new signal must decide both.
+    ``citable`` is False for the value-space menus and the prompt under edit: citing those grounds a mutation in itself."""
 
     name: str
     kind: InjectionKind
@@ -150,9 +132,8 @@ class CycleSlice:
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """Post-scoring readouts: ``diagnostics`` (deterministic) + ``critique`` (L1_CRITIQUE LLM dict)
-    + ``node_failure_rates`` (per-node round-level failure rate, the evidence-starvation signal).
-    Failure renderers (validation/runtime/l2/l3 breaches) read ``bundle.opt_sp`` instead — failures accumulate across rounds."""
+    """Post-scoring readouts for one round. The FAILURE renderers read ``bundle.opt_sp`` instead, because failures
+    accumulate across rounds while these do not."""
 
     diagnostics: RoundDiagnostics | None
     critique: CritiqueReadout | None
@@ -164,9 +145,8 @@ class RoundDigest:
 
 @dataclass(frozen=True)
 class InjectionBundle:
-    """State container per optimizer LLM call — every signal renderer reads off this.
-    ``origin_per_sample`` (frozen round-0 snapshot) drives ``origin_strengths`` (preserve hit-scaffolding);
-    ``trajectory_results`` (live cumulative per-sample results) drives the failure panels."""
+    """Per-call state container — every signal renderer reads off this. ``origin_per_sample`` is the frozen round-0
+    snapshot behind ``origin_strengths``; the live cumulative results drive the failure panels."""
 
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None
@@ -220,13 +200,8 @@ def signal(
     char_cap: int | None,
     citable: bool,
 ) -> Callable[[Renderer], Renderer]:
-    """Register a renderer into the injection registry at its definition site.
-
-    Co-locates the slot key with its renderer body: ``grep "<name>"`` lands on the
-    ``@signal("<name>", …)`` line directly above the ``def``, one hop to the call edge.
-    The decorated function is returned unchanged — still directly callable and
-    unit-testable. A duplicate key raises at import time (loud, not last-wins).
-    """
+    """Register a renderer into the injection registry at its definition site, so the slot key and its body are one grep
+    apart. The function is returned unchanged; a duplicate key raises at IMPORT, loud rather than last-wins."""
 
     def deco(fn: Renderer) -> Renderer:
         if name in _REGISTRY:
@@ -238,10 +213,8 @@ def signal(
 
 
 def injection_registry() -> dict[str, _Injection]:
-    """Snapshot of every ``@signal``-registered injection. Call only after importing all
-    renderer modules (registry.py does this) — a renderer whose module wasn't imported is
-    absent here and fails LOUD at import, where ``registry.py`` diffs this snapshot against
-    ``INJECTIONS`` and raises on any orphan — six lines from here, not in a test."""
+    """Snapshot of every ``@signal``-registered injection. Call only after every renderer module is imported — the
+    registry diffs this against ``INJECTIONS`` six lines away and raises on an orphan, at import rather than in a test."""
     return dict(_REGISTRY)
 
 

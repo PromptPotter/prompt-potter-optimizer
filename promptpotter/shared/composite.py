@@ -1,11 +1,5 @@
-"""Composite-score utilities — the short-code vocabulary + render primitives.
-
-``SHORT_NAMES`` (+ ``AGGREGATES``) is the single source for the evaluator short
-codes; the code regex and the short↔full inversion are derived from it, so adding
-or renaming an evaluator is one edit here and never a hand-synced literal
-elsewhere. In ``shared/`` because all three caller layers render these and
-infrastructure must not import the application-layer evaluator registry.
-"""
+"""``SHORT_NAMES`` (+ ``AGGREGATES``) is the single source for evaluator short codes — the regex and
+the short↔full inversion derive from it. In ``shared/`` so infrastructure need not import the registry."""
 
 from __future__ import annotations
 
@@ -46,11 +40,8 @@ SHORT_NAMES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class _ShortAggregate:
-    """A synthesized short code (``H``/``R``) that rolls several evaluators into
-    one displayed term. Its membership is declared once here — never re-listed in
-    a renderer. ``H`` and ``R`` are *display* aggregates over the evaluator dict,
-    not registry evaluators (adding them to ``_REGISTRY`` would materialize and
-    serve them, changing behavior)."""
+    """A synthesized code (``H``/``R``) rolling several evaluators into one displayed term, declared once
+    here. A DISPLAY aggregate — putting it in ``_REGISTRY`` would materialize and serve it as a term."""
 
     short_code: str
     members: tuple[str, ...]
@@ -76,15 +67,12 @@ _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
 def to_short_formula(formula: str) -> str:
-    """Translate a full-name formula (``0.7*accuracy + 0.3*latency_norm``) into its
-    short form (``0.7*acc + 0.3*lat``) via ``SHORT_NAMES``. Names without a short
-    code render unchanged. This is how ``default_per_round_formula_short`` derives —
-    no hand-synced literal."""
+    """Translate a full-name formula into its short form via ``SHORT_NAMES``; a name with no short code
+    renders unchanged. This is how ``default_per_round_formula_short`` derives, with no synced literal."""
     return _NAME_RE.sub(lambda m: SHORT_NAMES.get(m.group(0), m.group(0)), formula)
 
 
 def _aggregate_value(agg: _ShortAggregate, evaluators: dict[str, float]) -> float | None:
-    """Reduce an aggregate over whichever of its members are present; None if none."""
     vals: list[float] = []
     for member in agg.members:
         v = evaluators.get(member)
@@ -97,22 +85,8 @@ def inline_short_formula_values(
     formula_short: str | None,
     evaluators: dict[str, float] | None,
 ) -> str | None:
-    """Inline resolved values into the short formula string.
-
-    Transforms ``0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc`` into
-    ``0.65*acc|0.667 + 0.15*H|0.972 + 0.10*lat|0.965 + ...`` so an operator tailing
-    dashboard.json sees the formula and its resolved inputs in a single line — no
-    separate legend, no separate ``evaluators`` lookup.
-
-    Direct codes resolve from the evaluators dict via ``SHORT_NAMES``; the ``H`` /
-    ``R`` aggregates reduce their member evaluators (see ``AGGREGATES``). A code
-    present in the formula but unresolved (its evaluator absent this round) renders
-    unchanged.
-
-    Returns *formula_short* unchanged when *evaluators* is empty (e.g. before the
-    first candidate has scored). Returns ``None`` when *formula_short* is None
-    (custom formula authored by the operator — no template structure to inline into).
-    """
+    """Inline resolved values into the short formula, so a tail of ``dashboard.json`` shows the formula
+    and its inputs on one line. ``None`` for an operator-authored formula — no template to inline into."""
     if formula_short is None:
         return None
     if not evaluators:
@@ -167,11 +141,6 @@ _FORMULA_BUILTINS = {
 
 
 def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
-    """Return evaluator names present in *formula*, in first-appearance order.
-
-    Only names that also appear in *available* are returned. Builtins,
-    bare numbers, and `if/else` keywords are filtered out.
-    """
     seen: set[str] = set()
     out: list[str] = []
     for match in _NAME_RE.finditer(formula):
@@ -184,12 +153,8 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
 
 
 def render_composite_fitness_oneliner(composite_fitness: float, origin: float | None = None) -> str:
-    """Per-candidate / per-row 1-line composite_fitness render.
-
-    Anchors against the campaign origin so the operator sees how far
-    the run has come from origin even at round 50. ``origin=None``
-    (e.g. before init has fired) collapses to ``composite_fitness=0.6042``.
-    """
+    """Per-row composite_fitness render, anchored against the campaign origin so the operator still sees
+    distance travelled at round 50. ``origin=None`` collapses to the bare value."""
     if origin is None:
         return f"composite_fitness={composite_fitness:.4f}"
     delta = composite_fitness - origin
@@ -202,7 +167,6 @@ def _pairs_line(
     *,
     use_short_names: bool,
 ) -> str:
-    """Format the values line: ``name1=val  name2=val  ...`` with chosen labels."""
     if use_short_names:
         return "  ".join(f"{SHORT_NAMES.get(n, n)}={evaluators[n]:.3f}" for n in names)
     return "  ".join(f"{n}={evaluators[n]:.3f}" for n in names)
@@ -216,18 +180,6 @@ def render_composite_fitness_block(
     origin: float | None = None,
     use_short_names: bool = False,
 ) -> list[str]:
-    """3-line round-level composite_fitness block.
-
-    Layout:
-        line 1: ``composite_fitness = X.XXXX   origin=Y.YYYY  Δ+0.103``
-        line 2: ``formula:  <formula>``
-        line 3: ``name1=val  name2=val  ...``  (named evaluators present in
-                 the formula, full names by default; short codes when
-                 ``use_short_names`` is set)
-
-    Falls back to a single line ``composite_fitness=0.6042 (formula unavailable)``
-    when *formula* is None / empty.
-    """
     # Line 1: composite_fitness + trajectory anchor
     line1 = f"composite_fitness = {composite_fitness:.4f}"
     if origin is not None:

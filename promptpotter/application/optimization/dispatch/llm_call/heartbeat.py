@@ -1,17 +1,5 @@
-"""The one in-flight heartbeat loop — shared by the optimizer call and L4.
-
-Appends :class:`LLMCallProgressRecord` while a slow awaitable is open, so a call that
-takes 30-200s reads as working rather than frozen. Every slow await in the package rides
-this ONE loop; a second heartbeat is a bug.
-
-**The rule: an await that outlasts ``RUN_FRESH_S`` and writes nothing of its own MUST
-heartbeat.** Silence is how this package says "the producer died", so a live wait that
-stays silent is claiming to be dead — and every liveness reader downstream believes it.
-
-Because this is the one loop ticking beside every slow await, it is also the one place
-that can notice the MACHINE went to sleep underneath one — hence ``on_suspend``. A
-second watchdog task would be the second heartbeat this module forbids.
-"""
+"""The ONE in-flight heartbeat loop; a second is a bug. **An await that outlasts ``RUN_FRESH_S`` and writes nothing
+of its own MUST heartbeat** — silence is how this package says the producer died."""
 
 from __future__ import annotations
 
@@ -48,26 +36,8 @@ async def heartbeat(
     detail_fn: Callable[[], str | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
-    """Periodically append :class:`LLMCallProgressRecord` while a call is open.
-
-    Cancelled by the ``finally`` block in the caller when the awaited work
-    returns (success, last 429 retry, or raise). The
-    :class:`asyncio.CancelledError` is swallowed at the cancel site so
-    cancellation looks like a clean exit.
-
-    ``detail_fn`` (when supplied) is evaluated each tick and its result rides
-    the record's ``detail`` — the L4 inner-progress line. ``None`` keeps the
-    ordinary optimizer heartbeat's behavior (no detail).
-
-    ``on_suspend`` (when supplied) is called with the overshoot in seconds each
-    time a tick's sleep runs long enough to mean the MACHINE was suspended — the
-    hook a wall-clock deadline uses to give back time it never got to spend.
-
-    ``ledger`` may be ``None``: the tick still runs, it just appends nothing. That
-    is what lets a caller whose ledger is optional create this task
-    unconditionally, so a guard on the ledger can never silently disarm an
-    ``on_suspend`` that has nothing to do with telemetry.
-    """
+    """Append progress records while a call is open. ``ledger=None`` still ticks — that is what lets a caller
+    create the task unconditionally, so a ledger guard cannot silently disarm ``on_suspend``."""
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         if on_suspend is not None and overshoot > SUSPEND_GRACE_S:

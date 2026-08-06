@@ -1,16 +1,5 @@
-"""Per-user quota + abuse-limit gates fired from the launcher.
-
-Reads ``User.spend_budget_usd_daily`` / ``max_concurrent_cycles`` /
-``max_campaigns_per_day`` from :class:`UserStore`; cross-references
-:class:`JobRegistry` for live counts. Token-bucket rate limiter at module
-scope (process-wide; refilled on each ``check``) keeps ``mint-campaign``
-slow enough that one bad actor can't drain the budget in a single burst.
-
-Spend-cap composition: at mint time, the per-cycle ``spend_budget_usd``
-collapses to ``min(requested, daily_cap - daily_spent_today)`` so the user's
-daily cap can't be exceeded by stacking N small per-cycle caps. Per-cycle
-enforcement still rides the runner's ``BudgetGate`` (``runner/termination.py``).
-"""
+"""Per-user quota + abuse-limit gates fired from the launcher. At mint the per-cycle cap collapses to
+``min(requested, daily_cap − spent_today)``, so stacking N small caps cannot outrun the daily one."""
 
 from __future__ import annotations
 
@@ -28,13 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
-    """Raised when a user-scoped abuse limit blocks a launch (429).
-
-    ``code`` rides the HTTP layer (the abuse-limit kind, e.g. ``quota_exceeded``)
-    — distinct from :class:`~promptpotter.application.jobs.LaunchError` which is a
-    422 (malformed request / dataset not found / not owned). Maps to one HTTP
-    response via the :class:`~promptpotter.shared.errors.PotterError` seam.
-    """
+    """A user-scoped abuse limit blocked a launch — 429, as against ``LaunchError``'s 422 for a malformed
+    or unowned request. Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 429
 
@@ -53,7 +37,6 @@ _rate_lock = threading.Lock()
 
 
 def _consume_rate_token(user_id: str) -> bool:
-    """Token-bucket admit — return True iff a token was available."""
     now = time.monotonic()
     with _rate_lock:
         tokens, last = _rate_buckets.get(user_id, (float(_RATE_CAPACITY), now))
@@ -71,20 +54,8 @@ def check_launch_quotas(
     job_registry: JobRegistry,
     rate_limited: bool = True,
 ) -> None:
-    """Enforce per-user abuse limits before a launch.
-
-    The *global* run-admission gate (one campaign at a time across all users —
-    409 ``machine_busy``) rides :meth:`JobRegistry.reserve` at the launcher, not
-    here; this function owns only the per-user limits:
-
-    - rate-limit miss (``mint-campaign`` only; ``rate_limited=False`` skips it
-      for ``start-run`` against an existing cycle, which is a retry path)
-    - concurrent-cycles ceiling (the caller's *own* second launch)
-    - campaigns-per-day ceiling
-
-    Runs *before* ``reserve`` so it counts the caller's prior runs, not the
-    reservation it is about to make.
-    """
+    """Per-USER limits only: rate, concurrent cycles, campaigns per day. The global one-campaign-at-a-time
+    admission rides ``JobRegistry.reserve``; this runs BEFORE it, so it counts prior runs, not this one."""
     if rate_limited and not _consume_rate_token(user.user_id):
         raise QuotaExceededError(
             code="rate_limited",
@@ -121,17 +92,8 @@ def effective_spend_cap_usd(
     user: User,
     stores: Stores,
 ) -> float | None:
-    """Compose the per-cycle spend cap with the user's daily cap and any
-    delegated ceiling.
-
-    Sums today's ``TokenUsageRecord`` cost from the canonical ledger
-    (:func:`~promptpotter.application.jobs.spend.sum_user_spend`) to get
-    ``daily_spent``, then returns the ``min`` of the requested cap, the daily
-    remainder, and a delegated sub-principal's ``spend_ceiling_usd`` (ADR-0005,
-    carried in the identity's claims). A negative daily remainder collapses to
-    ``0.0`` so the runner halts at the first round boundary; ``None`` means no
-    cap applies from any source.
-    """
+    """Compose the per-cycle cap with the user's daily cap and any delegated ceiling, taking the ``min``.
+    A negative remainder collapses to ``0.0`` so the runner halts at the first round boundary."""
     caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
     if user.spend_budget_usd_daily is not None:
         spent = sum_user_spend(stores=stores, since=start_of_utc_day(), until=time.time())
@@ -140,7 +102,6 @@ def effective_spend_cap_usd(
 
 
 def _delegated_spend_ceiling(stores: Stores) -> float | None:
-    """A sub-principal's grant ceiling from the identity claims, else ``None``."""
     ceiling = stores.identity.claims.get("spend_ceiling_usd")
     return float(ceiling) if isinstance(ceiling, int | float) else None
 

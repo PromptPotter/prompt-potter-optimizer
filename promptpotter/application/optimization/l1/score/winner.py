@@ -1,7 +1,5 @@
-"""Round-winner selection. `l1_score` scores via `score_population`, adds the matched-origin
-floor, elects by `round_winner_key`, produces `RoundResult`. Composite + evaluators are
-opt_sp-aware from the scoring gateway (no recompute here).
-"""
+"""Round-winner selection. Composite and evaluators are searchpoint-aware from the scoring gateway — nothing is
+recomputed here."""
 
 from __future__ import annotations
 

@@ -1,9 +1,4 @@
-"""Compute :class:`RoundDiagnostics` from a freshly-completed round.
-
-Pure function over already-computed scoring data — rank analysis,
-pipeline-health distributions, failure categorization, cycle evolution,
-trajectory classification, cross-candidate diff, per-sample diagnostics.
-"""
+"""Compute ``RoundDiagnostics`` from a freshly-completed round — a pure function over already-computed scoring data."""
 
 from __future__ import annotations
 
@@ -44,12 +39,8 @@ def compute_round_diagnostics(
     rounds_history: list[RoundResult],
     pipeline_schema: PipelineSchema | None,
 ) -> RoundDiagnostics:
-    """Compute typed deterministics over a completed round.
-
-    *rounds_history* MUST contain *round_result* as its last element —
-    callers fold the round into ``cycle.rounds`` before computing
-    diagnostics.
-    """
+    """Compute typed deterministics over a completed round. *rounds_history* MUST contain *round_result* as its LAST
+    element — callers fold the round into ``cycle.rounds`` before computing diagnostics."""
     ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
     results = round_result.results
 
@@ -86,7 +77,6 @@ def compute_round_diagnostics(
 def _rank_analysis(
     results: list[dict[str, Any]], ranked_item_keys: list[str] | None
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
-    """Where did ground truth land in each sample's ranked-item list?"""
     keys = ranked_item_keys or None
     rank_map: dict[int, int | None] = {
         i: find_rank(get_ranked_items(r, keys), r.get("ground_truth", ""))
@@ -126,7 +116,6 @@ def _rank_analysis(
 
 
 def _pipeline_health(results: list[dict[str, Any]]) -> tuple[dict[str, int], float, float]:
-    """Termination distribution + error/warning rates."""
     total = len(results)
     if not total:
         return {}, 0.0, 0.0
@@ -145,23 +134,15 @@ def _pipeline_health(results: list[dict[str, Any]]) -> tuple[dict[str, int], flo
 
 
 def _warning_str(w: object) -> str:
-    """Normalize a pipeline warning entry to ``step:code``.
-
-    Pipelines emit warnings as either dicts (``{"step", "code", ...}``) or
-    bare strings; keep both shapes flowing to the same downstream surface.
-    Mirrors ``rendering._collect_advisories``.
-    """
+    """Normalize a pipeline warning to ``step:code``. Pipelines emit either dicts or bare strings; both shapes must reach
+    the same downstream surface."""
     if isinstance(w, dict):
         return f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"
     return str(w)
 
 
 def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]]:
-    """Per-round evolution rows + plateau detection.
-
-    Plateau anomaly fires when ≥ ``_PLATEAU_FLAG_THRESHOLD`` consecutive
-    deltas fall under :data:`_PLATEAU_DELTA`.
-    """
+    """Per-round evolution rows + plateau detection, which fires when enough consecutive deltas fall under the threshold."""
     if not rounds:
         return [], []
     rows: list[EvolutionRow] = []
@@ -193,10 +174,8 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
 
 
 def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:
-    """Classify cycle trajectory (stall / oscillation / ceiling / healthy) from the accuracy
-    series — the sole owner of that decision. Returns the typed :data:`TrajectoryClass` plus a
-    one-line description suitable for direct prompt inclusion.
-    """
+    """Classify the cycle's trajectory from the accuracy series — the SOLE owner of that decision. Returns the typed class
+    plus a one-line description suitable for direct prompt inclusion."""
     if len(rounds) < 2:
         return "healthy", "Too few rounds to classify"
     accuracies = [r.accuracy for r in rounds]
@@ -244,10 +223,8 @@ def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:
 
 
 def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
-    """Surface queries other candidates hit but the winner missed.
-
-    Empty when fewer than two candidates ran or the winner solved everything.
-    """
+    """Queries other candidates hit but the winner missed. Empty when fewer than two candidates ran, or the winner solved
+    everything."""
     winner_results = round_result.results
     all_results = round_result.all_candidate_results
     candidate_scores = round_result.candidate_scores

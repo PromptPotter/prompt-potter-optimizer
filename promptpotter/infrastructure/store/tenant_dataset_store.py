@@ -1,27 +1,5 @@
-"""Per-tenant user-uploaded dataset store — the M13 chat-first ingest target.
-
-User-uploaded Origins live at ``{tenant_root}/datasets/{slug}/``. Commit writes
-``{slug}/`` fresh (:meth:`write_committed_dataset`) from the materialized samples
-+ the Origin files (`cache.json`, `pipeline.yaml`, `task_description.md`,
-`prompts/default.yaml`, `task_context.yaml`) and the sibling `campaign.yaml`. The
-pre-commit working state (the parsed sample bank + the draft) lives under the
-owning check-in campaign (``campaigns/{id}/checkin/``, :class:`CheckinDraftStore`),
-not here — this store only owns committed datasets.
-
-A built-in benchmark's DEFINITION is install content and stays out of this tree
-(`config/paths.py::benchmark_datasets_root`, read-only). What is DERIVED from that
-definition on the operator's machine is not, and lands here in a flat keyed file
-per kind:
-
-* ``benchmark-rows/{name}.json`` — the fetched rows (regenerable, 6.8 MB); see
-  :meth:`benchmark_rows_path`.
-* ``task-context/{name}.yaml`` — the first-sight LLM decomposition of
-  ``task_description.md``; see :meth:`task_context_path`.
-
-Writing either back into the definition dir is the only thing that would make that tier
-need to be writable. This store only touches the tenant tree, and it is the only place
-either artifact is written.
-"""
+"""Per-tenant user-uploaded dataset store — committed Origins at ``{tenant_root}/datasets/{slug}/``.
+The pre-commit working state lives under the check-in campaign, never here."""
 
 from __future__ import annotations
 
@@ -51,27 +29,19 @@ class TenantDatasetStore:
     # -- Path helpers ---------------------------------------------------------
 
     def committed_datasets_root(self) -> Path:
-        """This tenant's OWN dataset tree — read-write, theirs outright.
-
-        Named apart from ``Stores.benchmarks_root`` on purpose: that one is the
-        install-global DEFINITIONS dir and is read-only. Both were spelled
-        ``datasets_root``, so the one identifier named two directories with
-        opposite write semantics."""
+        """This tenant's OWN dataset tree — read-write, theirs outright. Named apart from
+        ``Stores.benchmarks_root``, since one identifier named two opposite write semantics."""
         return self._base_dir / "datasets"
 
     def dataset_dir(self, slug: str) -> Path:
-        """Resolve ``{tenant_root}/datasets/{slug}``. Raises ``ValueError`` on bad slug."""
         validate_dataset_name(slug)
         return self.committed_datasets_root() / slug
 
     # -- Slug registry --------------------------------------------------------
 
     def list_slugs(self) -> list[str]:
-        """Sorted committed slugs (excludes dotted sidetrees).
-
-        Keyed on the same file :func:`~promptpotter.infrastructure.store.dataset_access.is_dataset_dir`
-        asks for, so this listing and the resolver cannot disagree about what a dataset is.
-        """
+        """Sorted committed slugs (excludes dotted sidetrees), keyed on the same file
+        :func:`is_dataset_dir` asks for — so listing and resolver cannot disagree."""
         root = self.committed_datasets_root()
         if not root.is_dir():
             return []
@@ -106,12 +76,8 @@ class TenantDatasetStore:
             n += 1
 
     def suggest_free_version(self, slug: str) -> str:
-        """Return the smallest free ``{slug}-v{n}`` (``n>=1``) — the archival name the
-        old data moves to on Replace. Distinct namespace from
-        :meth:`suggest_free_slug` (``-N``, a sibling copy): ``-vN`` reads as
-        "an earlier version of this name", which is exactly what a version-and-
-        repoint Replace produces.
-        """
+        """The smallest free ``{slug}-v{n}``, the archival name old data moves to on Replace.
+        A distinct namespace from :meth:`suggest_free_slug`, whose ``-N`` is a sibling copy."""
         n = 1
         while True:
             candidate = f"{slug}-v{n}"
@@ -134,13 +100,6 @@ class TenantDatasetStore:
     # -- Benchmark rows -------------------------------------------------------
 
     def benchmark_rows_path(self, name: str) -> Path:
-        """Where an install-tier benchmark's fetched rows live for this tenant.
-
-        Deliberately NOT ``datasets/{name}/cache.json``: a tenant dir carrying only
-        rows would satisfy the resolver's tenant-first rule and shadow the install
-        definition it was fetched for, leaving the overlay and prompts unreadable.
-        A flat keyed file cannot be mistaken for a dataset dir.
-        """
         validate_dataset_name(name)
         return self._base_dir / "benchmark-rows" / f"{name}.json"
 
@@ -168,15 +127,6 @@ class TenantDatasetStore:
     # -- Derived task context -------------------------------------------------
 
     def task_context_path(self, name: str) -> Path:
-        """Where a dataset's DERIVED task framing lives for this tenant.
-
-        Sibling of :meth:`benchmark_rows_path`, for the same reason: a decomposition
-        is computed from ``task_description.md`` by an LLM the operator paid for, so
-        it is theirs, and it cannot land beside a definition that is read-only under
-        a wheel. An ingested dataset writes its own ``{slug}/task_context.yaml`` at
-        commit and never reaches here — this is the first-sight decomposition of a
-        dataset that shipped without one.
-        """
         validate_dataset_name(name)
         return self._base_dir / "task-context" / f"{name}.yaml"
 
@@ -199,19 +149,8 @@ class TenantDatasetStore:
     # -- Commit ---------------------------------------------------------------
 
     def version_dataset(self, slug: str, versioned: str) -> Path:
-        """Atomic-rename a committed dataset ``{slug}/`` → ``{versioned}/`` and fix its
-        self-referential ``campaign.json::campaign_config.dataset_name``.
-
-        Step 1 of version-and-repoint Replace
-        (``application/datasets/dataset_replace.py``): preserves the bytes,
-        frees the canonical ``{slug}`` name for the newly-dropped data. Atomic
-        on the shared tenant filesystem. **Idempotent for crash recovery** — if
-        a prior run already moved the dir (``{slug}`` gone, ``{versioned}``
-        present) this returns the destination instead of raising, so the
-        repoint steps can re-run. Raises ``FileNotFoundError`` when neither
-        exists and ``FileExistsError`` when both do (a genuinely ambiguous
-        state the migration must not paper over).
-        """
+        """Atomic-rename ``{slug}/`` → ``{versioned}/`` and fix its self-referential dataset name.
+        Idempotent for crash recovery; raises when neither or both exist, never papering over it."""
         src = self.dataset_dir(slug)
         dst = self.dataset_dir(versioned)
         if not src.is_dir():
@@ -249,21 +188,8 @@ class TenantDatasetStore:
         prompt_default: dict[str, Any],
         task_context: dict[str, Any],
     ) -> Path:
-        """Create ``datasets/{slug}/`` fresh and write the Origin files.
-
-        The one commit mechanism for both entry points — the CLI ``new <file>``
-        commit and the durable check-in Start. The bank is delivered as
-        already-materialized ``Sample`` rows (the column mapping is confirmed by
-        now), so the pre-commit working dir (the campaign's ``checkin/`` dir) is the
-        caller's to clean up or keep as an audit breadcrumb — this writer never moves
-        it. ``task_context.yaml`` is the
-        run-start framing the check-in already decomposed (read at run-start instead
-        of a second LLM decomposition). The candidate library is NOT written here:
-        it rides the one origin-write seam (:meth:`write_candidate_library`).
-
-        On slug collision raises ``FileExistsError`` (caller maps to 409 with a
-        :meth:`suggest_free_slug` suggestion).
-        """
+        """Create ``datasets/{slug}/`` fresh and write the Origin files — the one commit mechanism
+        for both entry points. The candidate library rides :meth:`write_candidate_library`."""
         from promptpotter.domain.sample import Sample
 
         dst = self.dataset_dir(slug)
@@ -290,13 +216,8 @@ class TenantDatasetStore:
         return dst
 
     def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
-        """Write/replace a committed dataset's ``candidate_library.txt`` (one entry
-        per line) — the per-pipeline origin's target list, part of the origin spec,
-        sourced from a drop or a build-from-dataset. The run unions it into the
-        session term index. This is the SOLE origin-write seam for the library: the
-        launcher calls it on every mint route (fresh-upload commit + reused-dataset
-        mint), so a dropped/built library persists identically however the origin
-        was minted."""
+        """The SOLE origin-write seam for ``candidate_library.txt``, called on every mint route, so
+        a dropped or built library persists identically however the origin was minted."""
         path = self.dataset_dir(slug) / CANDIDATE_LIBRARY_FILE
         write_text(path, "\n".join(library))
         return path

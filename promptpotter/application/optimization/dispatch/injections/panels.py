@@ -1,10 +1,3 @@
-"""Diagnostic + cross-cycle memory injection renderers.
-
-Per-round readout (`_r_diagnostics`: STATUS + RoundDiagnostics body) and archive memory derived
-via `AxisIndex` (rankings, top runs, rare hits, intractable clusters). Uniform
-`(InjectionBundle) -> str` signature.
-"""
-
 from __future__ import annotations
 
 import re
@@ -57,9 +50,6 @@ from promptpotter.shared.errors import is_error_result
     citable=True,
 )
 def _r_escalation_panel(b: InjectionBundle) -> str:
-    """The exploration-budget signal l1_generate's supplemental rules cite. Widens
-    TIGHT→NORMAL→WIDE with L1 stall depth; WIDE is what legitimizes a stall_exploration
-    citation and mutating a PEAKED axis without a critique-names-the-axis rebut."""
     cs = b.cycle_slice
     budget = cs.exploration_budget
     guidance = {
@@ -78,13 +68,8 @@ def _r_escalation_panel(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_evidence_health(b: InjectionBundle) -> str:
-    """Surface the round-level node-failure rates (``compute_node_failure_rates``) so the
-    critique reads which node is failing and how badly. A node failing on ≥
-    ``EVIDENCE_STARVED_RATE`` of samples is *evidence-starved* — an upstream/backend fault
-    (e.g. search quota exhausted) the optimizer cannot fix by mutating a param. The critique
-    names the dead node rather than chasing an unrelated axis, and the degradation grade
-    (which reads the SAME helper) lifts the round to ``critical`` so the intelligent tiers
-    can stop. Empty when no node failed this round (the common, healthy case)."""
+    """A node failing on ≥ ``EVIDENCE_STARVED_RATE`` of samples is an upstream fault no param
+    mutation can fix; the degradation grade reads the SAME helper. Empty on a healthy round."""
     rates = b.digest.node_failure_rates
     if not rates:
         return ""
@@ -115,16 +100,8 @@ def _r_evidence_health(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_diagnostics(b: InjectionBundle) -> str:
-    """Round readout: plain STATUS (cycle counters, renders even pre-R1) + fenced RoundDiagnostics
-    body (wrapped because it echoes raw queries/GTs/warnings).
-
-    Section order is **actionability-first**: the per-sample failure detail (SAMPLE DIAGNOSTICS,
-    NEAR MISSES, MISSED OPPORTUNITIES) — the only content that names *which* queries failed and how
-    — renders before the aggregate distributions, and the historical TRAJECTORY/EVOLUTION narrative
-    renders last. The render façade truncates **section-aware** at `char_cap` (drops whole trailing
-    ``\n\n``-separated sections + a marker, head kept), so ordering least-actionable-last means the
-    least-actionable section is the first dropped when a round runs over budget — no mid-section slice.
-    """
+    """Section order is actionability-first BECAUSE the façade truncates section-aware at
+    ``char_cap`` — least-actionable last is the first dropped, and no section is ever half-rendered."""
     sections: list[str] = []
     cs = b.cycle_slice
     status: list[str] = [
@@ -259,9 +236,6 @@ def _critique_is_all_prompt_field(critique: CritiqueReadout | None) -> bool:
 
 
 def _filter_axis_rankings_to_prompt(value: str) -> str:
-    """Keep only `axis_rankings` entries whose last dotted component is `prompt` — drops
-    scalar-param entries (max_tokens, temperature, reasoning_effort, …). Returns "" on no survivors.
-    """
     if not value:
         return value
     kept: list[str] = []
@@ -280,12 +254,8 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
     citable=True,
 )
 def _r_axis_memory(b: InjectionBundle) -> str:
-    """Cross-cycle axis/sample memory from the MeasurementArchive via `AxisIndex.digest`.
-
-    Critique-aware filter: when L1_CRITIQUE flagged only semantic failures, strip `axis_rankings`
-    to prompt axes + suppress `top_values` (param rankings are noise the critique already vetoed).
-    Sample-side rows stay visible — they don't suggest axis mutations.
-    """
+    """Critique-aware: when L1_CRITIQUE flagged only semantic failures, param rankings are noise it
+    already vetoed. Sample-side rows stay — they suggest no axis mutation."""
     if b.axes is None:
         return ""
     digest = b.axes.digest()
@@ -321,10 +291,8 @@ def _query_stem(row: dict[str, Any], n: int = 70) -> str:
 
 
 def _head_at_line(text: str, cap: int) -> str:
-    """Head-keep *text* to ``cap`` chars, cutting at the last line boundary so a
-    premise is never sliced mid-sentence; a single over-cap line hard-slices.
-    Blank lines collapse to single newlines — the render façade truncates on
-    ``\\n\\n`` section boundaries, and quoted content must never mint one."""
+    """Cuts at a line boundary so a premise is never sliced mid-sentence, and collapses blank lines —
+    the façade truncates on blank-line boundaries, so quoted content must never mint one."""
     text = re.sub(r"\n\s*\n+", "\n", text.strip())
     if len(text) <= cap:
         return text
@@ -336,10 +304,8 @@ def _head_at_line(text: str, cap: int) -> str:
 
 
 def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
-    """Head+tail-keep *text* to ~``cap`` chars at line boundaries. For a reasoning
-    trace the decisive wrong step is usually the CONCLUSION — a pure head-keep
-    drops it first, which starved the critique of exactly the step it must quote.
-    Same blank-line collapse contract as :func:`_head_at_line`."""
+    """Head+tail: for a reasoning trace the decisive wrong step is usually the CONCLUSION, which a
+    pure head-keep drops first — starving the critique of the step it must quote."""
     text = re.sub(r"\n\s*\n+", "\n", text.strip())
     if len(text) <= cap:
         return text
@@ -364,23 +330,8 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     citable=True,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> str:
-    """The distiller's raw source: up to ``TRANSCRIPT_RENDER_CAP`` current misses shown
-    COMPLETE — full query text, the model's reasoning trace (when the backend captured
-    one), and predicted vs ground truth. Everything downstream reads the critique's
-    compression of this, so this is the one place the full failure must be visible.
-
-    Each transcript is its own fenced ``\\n\\n`` section, so the façade's section-aware
-    truncation drops a whole trailing transcript — never mid-premise, never a severed fence.
-
-    **Silent on the recursion** — the mirror of ``inner_narratives``, which is silent off it.
-    A miss is what selects these rows, and one level up a miss is a scoring artifact of running
-    inner cycles against a placeholder label: the outer critique is told three times to ignore
-    HIT/MISS, then handed its richest panel chosen by exactly that. It picked three inner runs
-    arbitrarily with respect to lift and prescribed a steer the inner loops had already measured
-    and lost. ``inner_narratives`` carries the same traces ordered by lift and paired against the
-    origin's own delta on that seed, so this panel has nothing left to add there — only a second,
-    worse-ordered copy of the bytes it is already reading.
-    """
+    """Silent on the recursion — the mirror of ``inner_narratives``, which is silent off it. A MISS
+    selects these rows, and one level up a miss is a scoring artifact of the placeholder label."""
     if _inner_narrated(b):
         return ""
     rows = _misses(b)
@@ -411,24 +362,15 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
 
 
 def _proxy_lift(r: dict[str, Any]) -> float | None:
-    """One inner cell's outer-lift proxy, or ``None`` off the recursion.
-
-    The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
-    zero-lift seed (a flat inner run — the ones an optimizer prompt edit most needs to see)
-    can round-trip as an int 0, so accept any real number, exclude bool.
-    """
+    """The L4 discriminator: only the ``promptpotter`` connector stamps it. A zero-lift seed — the
+    one an edit most needs to see — arrives as int 0, so accept any real number but not bool."""
     d = (r.get("pipeline_data") or {}).get("mean_round_delta")
     return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
 
 
 def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
-    """The rows that ARE inner campaigns telling their own story — lift beside narrative.
-
-    The one place the recursion split is spelled, because two panels divide on it in opposite
-    directions: ``inner_narratives`` renders exactly these rows, ``sample_transcripts`` renders
-    only when there are none. Non-empty is the fact "this bundle describes inner runs, and their
-    stories are readable" — both halves, so the pair can never leave a node with neither panel.
-    """
+    """The one place the recursion split is spelled: ``inner_narratives`` renders exactly these rows,
+    ``sample_transcripts`` renders only when there are none — so neither node is left with no panel."""
     return [
         (lift, r)
         for r in b.trajectory_results
@@ -446,37 +388,8 @@ def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
     citable=True,
 )
 def _r_inner_narratives(b: InjectionBundle) -> str:
-    """The L4 generator's one window into what the inner loop actually DID. Each outer sample
-    is a whole inner campaign; ``_inner_narrative`` (``runner/inner/cycle.py``) authors a
-    <=1150c story of its trajectory, carried on the sample row as ``reasoning_trace``. Without
-    this panel the outer generator sees only the critique's <=3x320c compression of that story
-    plus one scalar per-seed delta — so it re-proposes mutations the inner loop already measured
-    and lost, the exact "doesn't use the information" failure.
-
-    Fires ONLY on the recursion, on ``mean_round_delta``. NOT on ``reasoning_trace``: an ordinary
-    backend returns one of those on most samples (it is what ``sample_transcripts`` renders),
-    so gating on the trace alone flooded every non-L4 generator with its own task transcripts.
-
-    **Each cell's delta is shown BESIDE the origin's own delta on that same seed**, because
-    alone it is mostly the seed. The same seed measured 0.013 and 0.458 across one run's draws,
-    and the panel presented whichever it drew as that cell's character — so the generator read a
-    seed that had simply drawn low as an optimizer prompt failure and anchored four of six candidates
-    on it. The origin ran every seed too (``origin_per_sample``, the frozen round-0 snapshot),
-    and that pair is the comparison the outer verdict is itself computed on: printing both makes
-    "this seed is hard" and "your edits did nothing here" different sentences instead of one
-    number. They are equal exactly when the incumbent on that seed IS the origin, which is the
-    single most useful thing this panel can say to a round whose candidates all lost.
-
-    The ORDER stays the raw delta (ascending), not the pair: a cell where the inner loop found
-    little to climb is the one an optimizer prompt edit has to reach, whether or not this round's
-    candidates moved it.
-
-    **Only the weakest cells carry their whole story.** Measured on a live round the panel was
-    7,090 chars — 61% of every panel byte the generator saw — and 86% byte-identical between
-    consecutive rounds, because the strong cells' stories say the same thing every time. The
-    weak ones are what an optimizer prompt edit has to fix; the rest are a line each, which is enough
-    to see that they are fine.
-    """
+    """Each cell's delta is shown BESIDE the origin's own delta on that seed — alone it is mostly
+    the seed. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
     origin_lift = {
         sid: lift
         for r in b.origin_per_sample
@@ -510,31 +423,22 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
 
 
 def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
-    """The current misses out of the live frontier — the one place that filter is spelled.
-
-    An errored sample is NOT a miss: the measurement never happened (``is_error_result`` — the
-    typed owner of that fact, which every other consumer of these rows already asks), so the
-    pipeline answered nothing wrongly and no mutation can win it back. Rendered as a miss it
-    reads as a winnable failure carrying a difficulty, and the generator invents a task-level
-    deficiency to attack it with — measured: an infra-dead round put 4 of 6 outer candidates
-    onto an output-format edit the optimizer prompt explicitly forbids and prices at -2.2%."""
+    """An errored sample is NOT a miss — the measurement never happened (``is_error_result``), so no
+    mutation can win it back, and rendered as one it invents a task deficiency to attack."""
     return [
         r for r in b.trajectory_results if not is_hit(r.get("fitness")) and not is_error_result(r)
     ]
 
 
 def _errored(b: InjectionBundle) -> list[dict[str, Any]]:
-    """The rows ``_misses`` drops — samples that never produced a measurement."""
     return [r for r in b.trajectory_results if is_error_result(r)]
 
 
 def _label_counts(rows: list[dict[str, Any]], key: str) -> Counter[str]:
-    """Count non-empty ``key`` values across *rows*, as strings."""
     return Counter(str(v) for r in rows if (v := r.get(key)) not in (None, ""))
 
 
 def _tally(counts: Counter[str], total: int) -> str:
-    """``LABEL n (p%)`` rows, commonest first."""
     return " | ".join(f"{lbl} {n} ({100 * n / total:.0f}%)" for lbl, n in counts.most_common())
 
 
@@ -545,18 +449,8 @@ def _tally(counts: Counter[str], total: int) -> str:
     citable=True,
 )
 def _r_answer_distribution(b: InjectionBundle) -> str:
-    """The collapse detector, and the cheapest panel here by a wide margin.
-
-    Accuracy alone cannot distinguish a pipeline that reasons from one that has given up and
-    emits the same label every time — on a skewed label set the constant answer *is* a
-    respectable-looking score. Nothing else in the prompt carries that fact, so a generator
-    reading only accuracy and a prose critique will keep rewriting the instruction it is
-    already being denied, more emphatically each round, and never learn that the model is
-    not listening.
-
-    Only meaningful where the answer space is small and enumerable (``ANSWER_SPACE_CAP``);
-    on free-text outputs every prediction is its own bucket and the panel renders empty.
-    """
+    """The collapse detector: accuracy alone cannot tell a pipeline that reasons from one emitting the
+    same label every time, and nothing else in the prompt carries that fact. Empty on free text."""
     rows = [r for r in b.trajectory_results if r.get("ground_truth") not in (None, "")]
     # `None` = no repeated label to be constant about (free-text, or identity-keyed answers such
     # as an L4 outer round's per-seed tokens). Same rule the scorer's collapse gate reads.
@@ -606,17 +500,8 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
     citable=True,
 )
 def _r_failing_samples(b: InjectionBundle) -> str:
-    """The dense peer of ``sample_transcripts``: not three failures in full, but all of them
-    in one line each — so the generator can see the SHAPE of what it is failing (the same
-    wrong label recurring, the easy ones going down) instead of inferring it from a prose
-    compression it cannot check.
-
-    Ordered easiest-first because that ordering is the only thing here L1 cannot compute
-    for itself: a miss on a low-δ sample is a winnable one, and a miss on the hardest sample
-    in the set is where effort goes to die. δ comes from ``Cycle.delta_scale``, the ruler the
-    cycle locks on its first warm fit — a cold ruler simply renders the misses unordered
-    rather than quoting a difficulty that would move next round.
-    """
+    """Ordered easiest-first — the one thing here L1 cannot compute for itself. A cold ruler renders
+    the misses unordered rather than quoting a difficulty that would move next round."""
     rows = _misses(b)
     errored = _errored(b)
     if not rows:
@@ -670,21 +555,8 @@ def _r_failing_samples(b: InjectionBundle) -> str:
 def _candidate_mutation(
     cand: ScoredCandidate, parent: dict[str, Any], parent_pp: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
-    """What this candidate actually changed, as ``(field, full new value)`` pairs.
-
-    Derived from the payload, never from ``changes_description``: a candidate's
-    ``prompt_fields`` is its evolved prompt in full, and the round's own ``prompt_fields``
-    is the parent every candidate in that round was mutated from. The delta rule is the
-    shared :func:`candidate_delta` — the same definition dedup hashes, so the panel
-    cannot render a re-proposal (an override restating the parent's value, or the
-    parent's own schema prose echoed back) as a new mutation.
-
-    Returns the values UNCLIPPED and unformatted: the render clips to
-    ``MEMORY_VALUE_CAP`` for the eye. Clipping here would starve any reader that needs the
-    whole value (it did once: a fingerprint taken over 60-char stems was mostly field-name
-    tokens). The row's idea comes from :func:`candidate_idea`, which reads the candidate
-    against its parent rather than off this display list.
-    """
+    """Values are returned UNCLIPPED — the render clips for the eye, and clipping here starves any
+    reader needing the whole value. The delta rule is the shared ``candidate_delta`` dedup hashes."""
     pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp)
     pp_nested: dict[str, Any] = {}
     for (node, param), value in pp.items():
@@ -695,16 +567,8 @@ def _candidate_mutation(
 
 
 def _candidate_fate(cand: ScoredCandidate) -> str:
-    """How this candidate ended — the recorded outcome, not the prose.
-
-    A candidate PoBB cut early has no ``matched_origin_accuracy``: it ran a prefix of an order
-    stratified on the incumbent's own grades, so both halves of that comparison are set by
-    where it stopped rather than by what it did — precisely the reading that told the outer
-    optimizer a cut candidate had crushed the origin. So a stop reports WHERE it stopped and
-    that it stopped, never a standing; its subset-invariant standing is the θ beside it.
-    Not keyed on ``partial_reason``: its documented ``"pobb"`` arm is dead — nothing writes
-    it — so every eliminated candidate on disk carries the empty string.
-    """
+    """Not keyed on ``partial_reason``: its ``pobb`` arm is dead, so every eliminated candidate on
+    disk carries the empty string."""
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
     if cand.total == 0:
@@ -727,29 +591,8 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     citable=True,
 )
 def _r_mutation_memory(b: InjectionBundle) -> str:
-    """L1's own record of itself. Without it the generator re-proposes a mutation that has
-    already been measured and lost — it has never been shown one of its prior attempts.
-
-    ONE compact line per prior candidate — ``r{N} {outcome} · {field}:"{stem}"[; …]`` — so
-    every retained round fits and the record stays COMPLETE. The record's job is
-    recognition, not reproduction, so a short stem per field is enough.
-
-    An accuracy is only quoted against ``matched_origin_accuracy``, which exists only where the
-    candidate covered the origin's whole panel. A candidate PoBB cut early has none — its prefix
-    is the incumbent's own miss list, so a rate read off it says how far the candidate got, not
-    how well it did — so its row reports where it was cut instead of inventing a comparison.
-
-    Rows whose mutation carries an idea ALREADY tried in an earlier retained round are marked
-    ``↺ same idea as r{N} (Mx)`` — matched on idea vocabulary, never field+stem, because the
-    generator rewrites an idea into a different field each round (see :func:`candidate_idea`).
-    The marker is the panel's whole point made legible in one clause: the record does not just
-    LIST prior attempts, it says which of them are the same attempt.
-
-    A candidate that changed NOTHING is not an attempt and gets no row — C0 (round 0 mutated
-    nothing by definition) and the occasional no-op variant. Rows are built before the
-    retained window is taken, so such a round costs no slot and an empty panel renders
-    silent rather than as a header over nothing.
-    """
+    """ONE compact line per prior candidate, so every retained round fits and the record stays
+    COMPLETE — recognition, not reproduction. A candidate that changed nothing is not an attempt."""
     prior = list(b.prior_rounds)
     # Attempts per round, oldest first. Built for EVERY prior round before the retained
     # window is taken, because a round's row count is not knowable from the round: C0 and
@@ -815,15 +658,8 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_origin_strengths(b: InjectionBundle) -> str:
-    """One line on what the origin already earns — actionable signal ("don't strip
-    scaffolding"). Enumerating samples added bytes without adding input: L1 preserves the
-    parent's strengths wholesale, it doesn't pick.
-
-    Reports the origin's mean fitness rather than a count of maxed-out samples. The count
-    made the panel SILENT on every graded scorer (no row ever reaches 1.0, so the
-    early-return fired), which is the one outcome a "don't strip this" warning must never
-    have — the generator lost the signal exactly where scaffolding is most elaborate.
-    """
+    """Reports the origin's MEAN fitness, never a count of maxed-out samples: the count silenced the
+    panel on every graded scorer, which is the one thing a don't-strip-this warning must never do."""
     rows = b.origin_per_sample
     if not rows:
         return ""
@@ -843,9 +679,6 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_archive_top_runs(b: InjectionBundle) -> str:
-    """Top historical runs — anchor "beat run X (acc=Y%, comp=Z)" instead of re-discovering a
-    peak already on disk. Empty until `AxisIndex.refresh` has folded at least one run.
-    """
     if b.axes is None:
         return ""
     runs = b.axes.top_runs(3)
@@ -867,9 +700,6 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_rare_hit_samples(b: InjectionBundle) -> str:
-    """Samples cracked by ≤3 of ≥10 attempts — unlock-pattern pointers. Zero-hit samples surface
-    as `capacity-bound` (stop engineering for them).
-    """
     if b.axes is None:
         return ""
     rare = b.axes.sample_index.rare_hit_samples(max_hits=3, min_observations=10)

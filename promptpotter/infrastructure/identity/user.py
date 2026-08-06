@@ -1,9 +1,5 @@
-"""`UserId` derivation from OIDC issuer + subject.
-
-Stable across sign-ins of the same provider account; collision-resistant
-across providers (different `iss`). 16 hex chars from SHA-256 — fits
-`safe_name` (length ≤64, charset `[a-zA-Z0-9_-]+`).
-"""
+"""``UserId`` from OIDC issuer + subject — stable across sign-ins of one provider account, collision-resistant across
+providers. 16 hex of SHA-256, which fits ``safe_name``."""
 
 from __future__ import annotations
 

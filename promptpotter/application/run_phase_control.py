@@ -1,14 +1,5 @@
-"""Declare a run-phase control transition onto the canonical ledger.
-
-The runner is the *sole declarer* of control state (``running`` / ``paused``);
-:class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView`
-projects the declaration into ``dashboard.json::run_phase`` (the ``terminal``
-phase is set by ``mark_stopped`` at finalize, never declared here). A paused run
-*declares* ``paused`` once, so every surface reads the truth even after
-``dashboard.json`` goes stale.
-
-Vocabulary: :class:`~promptpotter.domain.phases.RunPhase`.
-"""
+"""Declare a run-phase control transition onto the ledger. The runner is the SOLE declarer of ``running`` / ``paused``, so a
+paused run declares once and every surface reads the truth even after ``dashboard.json`` goes stale."""
 
 from __future__ import annotations
 
@@ -30,11 +21,8 @@ def declare_run_phase(
     session: Session,
     phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE],
 ) -> None:
-    """Append a control ``PhaseRecord`` so the dashboard projection flips
-    ``run_phase``. No-op before the ledger is bound. Idempotent at the
-    projection: re-declaring the current phase neither overwrites ``terminal``
-    nor re-flushes, so emitting ``paused`` from several checkpoints is cheap.
-    """
+    """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound. Idempotent
+    at the projection, so emitting ``paused`` from several checkpoints is cheap."""
     ledger = session.state.ledger
     if ledger is None:
         return
@@ -42,16 +30,6 @@ def declare_run_phase(
 
 
 def pause_requested(session: Session) -> bool:
-    """True iff the operator set the pause flag (``.runtime/pause.flag``).
-
-    The single in-loop pause predicate. When it fires the caller declares
-    ``RunPhase.PAUSED`` and exits its loop cleanly: the worker process ends and
-    the cycle stays resumable (``_finalize_run`` skips terminal marking on
-    ``StopReason.PAUSED``). There is no in-process hold — a pause is a clean
-    exit, and the play action relaunches via ``start-run``/``resume``.
-
-    Place the checkpoint only at a seam where any work already done is on disk
-    (e.g. after ``persist_fresh`` in the per-sample loop), so a pause never loses
-    an accumulated datapoint.
-    """
+    """The single in-loop pause predicate; a pause is a CLEAN EXIT, never an in-process hold. Place the checkpoint only where
+    work already done is on disk, so pausing cannot lose an accumulated datapoint."""
     return session.pause_check is not None and session.pause_check()

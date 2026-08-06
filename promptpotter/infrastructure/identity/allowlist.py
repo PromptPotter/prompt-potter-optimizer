@@ -1,18 +1,5 @@
-"""Email allowlist gate — `.promptpotter/identity/allowlist.json`.
-
-Schema:
-
-```json
-{"emails": ["alice@example.com", "bob@example.com"]}
-```
-
-Missing file → allow-all (Stage-1 escape hatch for local dev). An empty
-`emails` list explicitly denies everyone — useful for "lock the surface
-while I'm setting up." Per the Phase G spec, an unmatched email returns
-403 at the callback, not 404 — existence-leak applies to campaigns, not
-to the OIDC seam itself (the operator wants a visible "you're not on
-the list" signal).
-"""
+"""Email allowlist. Missing file → allow-all (local-dev escape hatch); an EMPTY list denies everyone. An unmatched
+email is 403 at the callback, not 404 — existence-hiding covers campaigns, not the OIDC seam itself."""
 
 from __future__ import annotations
 
@@ -34,9 +21,8 @@ class AllowlistDecision:
 
 
 def _norm_email(email: str) -> str:
-    """Canonical email form: stripped + lowercased. The ONE normalizer, so the
-    membership test and the stored form can never drift apart. Non-raising;
-    ``_normalize`` wraps it for the mutators that require non-empty."""
+    """Canonical email form: stripped + lowercased. The ONE normalizer, so the membership test and the stored form cannot
+    drift apart."""
     return email.strip().lower()
 
 
@@ -76,11 +62,8 @@ def check_allowlist(path: Path, email: str | None) -> AllowlistDecision:
 
 
 def _load_emails(path: Path) -> list[str]:
-    """Current allowlist as a normalized (lowercased, stripped) sorted list.
-
-    Tolerant: missing / empty / malformed file → ``[]``. Editing always starts
-    from a clean view; a corrupt file is overwritten by the next write.
-    """
+    """The allowlist as a normalized sorted list. Tolerant — missing, empty or malformed all yield ``[]`` — so editing
+    always starts from a clean view and a corrupt file is overwritten by the next write."""
     if not path.is_file():
         return []
     raw = path.read_text(encoding="utf-8").strip()
@@ -126,12 +109,10 @@ def _normalize(email: str) -> str:
 
 
 def list_emails(path: Path) -> list[str]:
-    """Current allowlist as a sorted list (``[]`` if absent)."""
     return _load_emails(path)
 
 
 def add_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
-    """Add *email* to the allowlist; return the new sorted list. No-op if present."""
     normalized = _normalize(email)
     current = _load_emails(path)
     before = len(current)
@@ -145,7 +126,6 @@ def add_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[s
 
 
 def remove_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
-    """Remove *email* from the allowlist; return the new sorted list. No-op if absent."""
     normalized = _normalize(email)
     current = _load_emails(path)
     before = len(current)

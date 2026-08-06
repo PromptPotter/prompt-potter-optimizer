@@ -1,11 +1,5 @@
-"""Sweep-batch orchestration — one fork per ``OperatorSweepFile``.
-
-Each operator JSON file under ``datasets/{name}/sweep/`` parses into an
-:class:`~promptpotter.domain.run_records.OperatorSweepFile`; the orchestrator widens it
-to a ``ForkSpec(trigger=OPERATOR_SWEEP, ...)`` before calling the unified ``_mint_fork``
-primitive. Reached from CLI ``new --sweep-batch`` — the ``sweep`` VERB that was the
-second, hand-rolled harness for the same job is gone, and this is what survived it.
-"""
+"""Sweep-batch orchestration — one fork per ``OperatorSweepFile``, widened to a ``ForkSpec`` before the unified
+``_mint_fork``. Reached from ``new --sweep-batch``; the second hand-rolled harness for this job is gone."""
 
 from __future__ import annotations
 
@@ -42,11 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_sweep_dir(dataset_dir: Path | None) -> Path | None:
-    """Path to ``{dataset_dir}/sweep/`` if it exists, else None.
-
-    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
-    tenant-first), so a tenant dataset's ``sweep/`` is honored alongside repo
-    benchmarks'."""
+    """``{dataset_dir}/sweep/`` if it exists. *dataset_dir* is the RESOLVED config dir (tenant-first), so a tenant dataset's
+    sweep is honored alongside a repo benchmark's."""
     if dataset_dir is None:
         return None
     sweep_dir = dataset_dir / "sweep"
@@ -62,10 +53,8 @@ def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]
 def existing_fork_source_files(
     stores: Stores, campaign_id: str, parent_cycle_id: str
 ) -> dict[str, str]:
-    """``{source_file: fork_cycle_id}`` for prior FORK_CUTs under this parent.
-
-    Dropped fork dirs are ignored so a deleted-fork operator isn't blocked from re-running.
-    """
+    """Prior FORK_CUT source files under this parent. A dropped fork dir is ignored, so a deleted-fork operator is not
+    blocked from re-running it."""
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -101,17 +90,8 @@ async def run_sweep_batch(
     observer_factory: Callable[..., Any],
     verbose: bool,
 ) -> SweepBatchResult:
-    """Mint one fork per ``OperatorSweepFile`` off ``root_ctx.cycle_id``; restore active pointer on exit.
-
-    ``reload_ctx`` re-reads the active pointer AFTER ``_mint_fork`` retargets it, so each fork
-    binds its own session. It is injected rather than called directly because the only
-    implementation lives in ``presentation/cli`` — an application-layer function importing that
-    at runtime (and taking an ``argparse.Namespace``) inverted the layer direction. The debt
-    entry proposed passing one pre-resolved ``Session`` instead; that cannot work, since the
-    pointer moves once per payload and a single resolved session would bind every fork to the
-    first. A callable is the shape that survives the loop — the same injection
-    ``observer_factory`` beside it already uses.
-    """
+    """Mint one fork per payload; restore the active pointer on exit. ``reload_ctx`` is INJECTED, not called: the pointer moves
+    once per payload, so a single pre-resolved session would bind every fork to the first."""
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.runner.entry import RunMode
@@ -154,9 +134,8 @@ async def run_sweep_batch(
     interrupted = False
 
     def _finalize_batch() -> SweepBatchResult:
-        """Restore the pointer, close the batch index, write the summary. Runs from a
-        ``finally`` so an interrupt in any fork still leaves a readable batch — otherwise every
-        payload stays ``pending`` with an empty ``cycle_id`` and no ``summary.md`` is written."""
+        """Restore the pointer, close the batch index, write the summary — from a ``finally``, so an interrupt in any fork still
+        leaves a readable batch instead of every payload stuck ``pending``."""
         completed_at = utcnow_iso()
         save_active_pointer(
             store.base_dir,

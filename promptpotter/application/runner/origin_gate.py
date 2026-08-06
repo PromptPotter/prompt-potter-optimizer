@@ -1,13 +1,5 @@
-"""Origin gate — the round-0 HITL checkpoint.
-
-When round 0's verdict is too unhealthy to optimize against, the loop blocks here at
-``run_phase: gate`` rather than entering L1 against a broken floor — the usual case while
-a developer brings up a connector whose backend is still buggy. ``rescore`` re-scores
-force-fresh so a code fix is actually reflected, which is what makes fix-rescore-watch an
-iterate loop with no re-mint. One decision channel for every surface,
-``.runtime/gate_decision.json``, polled here; a pause always wins and leaves the gate
-resumable. The wait is unbounded, so it heartbeats — see ``dispatch/llm_call/heartbeat``.
-"""
+"""The round-0 HITL checkpoint: block at ``run_phase: gate`` rather than enter L1 against a broken
+floor. ``rescore`` re-scores force-fresh, which is what makes fix-rescore-watch a loop with no re-mint."""
 
 from __future__ import annotations
 
@@ -58,15 +50,8 @@ async def run_origin_gate(
     cb: RunCallbacks,
     mode: OriginGateMode,
 ) -> StopReason | None:
-    """Block at the round-0 origin gate until the operator decides.
-
-    Returns ``None`` to proceed into L1 (operator chose ``proceed``, or a
-    ``rescore`` produced a now-healthy origin) or a ``StopReason`` to halt
-    (``ORIGIN_GATE`` on ``abort``, ``PAUSED`` if a pause was requested while
-    waiting). Re-entrant: a ``rescore`` re-scores the origin force-fresh, re-emits
-    round 0, and loops — a still-unhealthy verdict waits again, a healthy one
-    proceeds. The caller invokes this only after ``origin_gate_tripped`` already
-    returned a stop for the freshly-emitted round 0."""
+    """Block until the operator decides: ``None`` to proceed into L1, else a ``StopReason``. Re-entrant —
+    a ``rescore`` re-emits round 0 and loops, so a still-unhealthy verdict simply waits again."""
     stdin_q = _spawn_stdin_reader()
     while True:
         grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
@@ -125,25 +110,8 @@ async def run_origin_gate(
 async def _await_gate_decision(
     session: Session, stdin_q: queue.Queue[GateDecision] | None
 ) -> _GateOutcome:
-    """Block until a decision lands on the flag file or stdin. A pause always
-    wins. A stale decision from a prior gate entry is cleared first.
-
-    **Heartbeated, and it is the whole reason this wait is safe.** This is the
-    longest await in the package — unbounded, since it ends only when a human
-    decides — and it writes nothing of its own. Without a heartbeat the cycle went
-    silent the moment it declared ``gate``, and three things followed, none of them
-    raising: after ``RUN_FRESH_S`` (30 s) ``derive_run_phase`` read DETACHED, so the
-    cycle **dropped out of the operator's dock** while waiting on that same
-    operator; after ``DEAD_AFTER_S`` (15 min) the liveness reaper stamped it
-    TERMINAL (``producer_vanished``) though the process was alive and still
-    polling; and a decision arriving afterwards resumed a run into a cycle already
-    marked finished.
-
-    So the gate rides the ONE shared heartbeat (``dispatch/llm_call/heartbeat.py``)
-    as its fourth caller, never a second loop of its own. The record is a pure
-    freshness tick — ``LiveDashboardView._handle_llm_call_progress`` mutates no
-    state, it only re-persists — so a held gate looks alive because it *is*.
-    """
+    """Block until a decision lands on the flag file or stdin; a pause always wins. Rides the ONE shared
+    heartbeat — writing nothing of its own, the cycle went DETACHED, then reaped, while alive and polling."""
     decision_path = _decision_path(session)
     decision_path.unlink(missing_ok=True)
     ledger = session.state.ledger
@@ -188,10 +156,8 @@ async def _rescore_and_reemit(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Re-score the origin force-fresh over the same-sized sample set the origin
-    used, then re-emit round 0 through the standard ``close_round`` seam so the
-    fresh verdict and every round-0 surface (``round_0000.json``,
-    ``dashboard.json::rounds[0]``) update in one shape."""
+    """Re-score the origin force-fresh, then re-emit round 0 through the standard ``close_round`` seam so
+    every round-0 surface updates in one shape."""
     from promptpotter.application.datasets.loaders import sample_dataset
     from promptpotter.application.origin import rescore_parent
 
@@ -209,20 +175,14 @@ def _decision_path(session: Session):  # type: ignore[no-untyped-def]
 
 
 def _read_decision_file(path) -> GateDecision | None:  # type: ignore[no-untyped-def]
-    """Read a decision from the flag file; ``None`` if absent or malformed."""
     data = read_json_tolerant(path)
     decision = data.get("decision") if isinstance(data, dict) else None
     return decision if decision in _DECISIONS else None
 
 
 def _spawn_stdin_reader() -> queue.Queue[GateDecision] | None:
-    """Start a daemon thread reading the gate decision from an attached TTY.
-
-    Returns a queue the poll loop drains non-blockingly, or ``None`` when stdin
-    is not a TTY (webapp-launched background run, notebook, redirected input) —
-    those surfaces drive the gate through the command channel instead. The thread
-    is a daemon so a still-blocked ``input()`` never hangs process exit when the
-    decision arrived from another surface."""
+    """Read the gate decision off an attached TTY on a daemon thread, or ``None`` when stdin is not one —
+    those surfaces drive the gate through the command channel, and a blocked ``input()`` never hangs exit."""
     if not (sys.stdin is not None and sys.stdin.isatty()):
         return None
     q: queue.Queue[GateDecision] = queue.Queue()

@@ -1,11 +1,5 @@
-"""OIDC provider configuration — Google + GitHub.
-
-Loaded from `.promptpotter/identity/oidc.json`, whose shape is
-:class:`ProviderConfigBundle` / :class:`OIDCProviderConfig` below. ``redirect_uri`` must
-match what was registered on the provider's OAuth app page — the provider checks that,
-we only verify the inbound ``state``. Omitting a provider is supported; the login page
-hides buttons for the ones that are absent.
-"""
+"""OIDC provider configuration from ``oidc.json``. ``redirect_uri`` must match what was registered on the provider's app
+page — the provider checks that, we only verify the inbound ``state``. Omitting a provider hides its button."""
 
 from __future__ import annotations
 
@@ -21,13 +15,8 @@ _SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 @dataclass(frozen=True)
 class OIDCProviderConfig:
-    """Per-provider OAuth/OIDC client config.
-
-    The discovery overrides (``issuer`` / ``authorize_url`` / ``token_url`` /
-    ``jwks_url``) are read by :class:`GoogleProviderClient` to point at any
-    OIDC-conformant IdP. ``None`` on all four → production Google URLs (the
-    common case). GitHub is OAuth-2.0 and ignores these fields.
-    """
+    """Per-provider OAuth/OIDC client config. The four discovery overrides point at any OIDC-conformant IdP; ``None`` on all
+    four means production Google. GitHub is OAuth 2.0 and ignores them."""
 
     client_id: str
     client_secret: str
@@ -56,7 +45,7 @@ class ProviderConfigBundle:
 
 
 class OIDCConfigError(ValueError):
-    """Raised when `oidc.json` is missing or malformed."""
+    pass
 
 
 def load_provider_config(path: Path) -> ProviderConfigBundle:

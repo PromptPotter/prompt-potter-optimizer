@@ -1,8 +1,5 @@
-"""Provider registry — name → factory.
-
-Provider must be supplied explicitly (the optimizer node's ``config.provider`` in
-``promptpotter/assets/optimizer/pipeline.yaml``, read by ``llm_call``); no auto-detection
-or env-var fallback."""
+"""Provider registry — name → factory. The provider must be supplied EXPLICITLY from the optimizer node's config; there
+is no auto-detection and no env-var fallback."""
 
 from __future__ import annotations
 
@@ -19,8 +16,6 @@ from promptpotter.infrastructure.llm.rate_limit import build_rate_limiter
 
 @dataclass(frozen=True)
 class ProviderSpec:
-    """Wiring for one OpenAI-compatible provider."""
-
     display_name: str  # e.g. "Groq" — used in error messages + logs
     api_key_attr: str  # settings field holding the API key
     base_url: str | None = None  # None ⇒ SDK default (OpenAI)
@@ -30,15 +25,8 @@ class ProviderSpec:
 
 @dataclass(frozen=True)
 class ModelProfile:
-    """Static, code-owned facts about one model's serving behaviour — the model-keyed
-    sibling of :class:`ProviderSpec`.
-
-    A **reasoning** model spends output-token budget on hidden reasoning tokens BEFORE it
-    emits any content, so a ``max_tokens`` pinned below ``min_max_tokens`` can be consumed
-    entirely by reasoning and return zero content (``finish_reason=length``,
-    ``content_chars=0`` — the ``reasoning_budget_exhausted`` class the runtime already
-    stamps post-hoc). ``min_max_tokens`` is the floor that turns that silent, paid-for
-    failure into a preflight block. Non-reasoning models leave the floor at 0."""
+    """Static facts about one model's serving behaviour. A REASONING model spends output budget on hidden tokens before emitting content, so
+    ``max_tokens`` below ``min_max_tokens`` returns nothing — the floor turns that paid-for silence into a preflight block."""
 
     is_reasoning: bool
     min_max_tokens: int = 0
@@ -75,9 +63,8 @@ _MODEL_PROFILES: dict[str, ModelProfile] = {
 
 
 def model_profile(model: str) -> ModelProfile | None:
-    """Profile for a model string, normalizing the ``org/model`` id (a routing suffix like
-    ``:nitro`` is stripped). ``None`` when the model is unprofiled — an unknown model is not
-    assumed to be a reasoning model, so it never blocks a run."""
+    """Profile for a model string, normalizing the id and stripping a routing suffix. ``None`` when unprofiled — an unknown
+    model is never ASSUMED to be a reasoning model, so it cannot block a run."""
     base = model.split(":", 1)[0].strip().lower()
     return _MODEL_PROFILES.get(base)
 
@@ -109,7 +96,6 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
 
 
 def _rate_caps(provider: str) -> tuple[int | None, int | None]:
-    """The (rpm, tpm) caps for *provider* from ``settings.RATE_LIMITS`` (both None if unset)."""
     caps = settings.RATE_LIMITS.get(provider) or []
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
 
@@ -152,11 +138,8 @@ _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
 
 @functools.cache
 def get_llm_client(provider: str) -> LLMClientBase:
-    """The LLM client for ``provider`` — one instance per provider per process.
-
-    Resolved on every optimizer call now (``llm_call`` reads the per-node
-    ``provider``), so it's cached: the rate-limiter state is per-provider-account
-    and rightly shared across cycles, and the lazy SDK/httpx pool is built once."""
+    """The LLM client for ``provider``, one instance per provider per process. Cached because rate-limiter state is
+    per-provider-account and rightly shared across cycles, and the lazy SDK pool should be built once."""
     factory = _PROVIDER_FACTORIES.get(provider)
     if factory is None:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))

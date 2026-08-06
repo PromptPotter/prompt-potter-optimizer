@@ -1,17 +1,5 @@
-"""Measurement provenance grade — how deliberate and comparable a run is.
-
-Every archived run already carries the two signals that separate a
-deliberately-explored datapoint from an incidental one: ``source`` (who
-produced the run) and, per sample, ``pipeline_data.terminated_at`` (which node
-the pipeline ended at).
-
-This module turns those existing signals into one ordinal grade
-(``A`` > ``B`` > ``C``) stamped on each run at the single write path
-(``build_dataset_run_data``) and carried on the index summary. Consumers read
-the grade instead of being fooled by row count: the digest drops grade ``C``,
-reuse can filter to deliberate runs, and a future optimizer-in-an-optimizer (L4)
-ingests only graded-clean records. One concept, three consumers.
-"""
+"""Provenance grade (``A`` > ``B`` > ``C``) from ``source`` + per-sample ``terminated_at``, stamped once at
+``build_dataset_run_data``. Consumers read the grade instead of being fooled by row count."""
 
 from __future__ import annotations
 
@@ -41,8 +29,6 @@ _GRADE_RANK = {grade: rank for rank, grade in enumerate(reversed(MEASUREMENT_GRA
 
 @dataclass(frozen=True, slots=True)
 class RunProvenance:
-    """The provenance verdict for one archived run."""
-
     grade: str
     deliberate_source: bool
     llm_path_fraction: float
@@ -69,13 +55,8 @@ def llm_terminal_nodes(schema: PipelineSchema | None) -> frozenset[str]:
 
 
 def _ran_llm_path(measurement: Mapping[str, Any], llm_nodes: frozenset[str]) -> bool:
-    """Whether one sample reached the deliberate LLM evaluation.
-
-    An empty ``terminated_at`` means the pipeline ran to completion (its terminal
-    node is the LLM step, per ``rendering._terminal_node``); a set value naming a
-    non-LLM node means the sample short-circuited in a connector/cache/retrieval
-    step before any LLM call.
-    """
+    """Whether one sample reached the deliberate LLM evaluation. An EMPTY ``terminated_at`` means the pipeline ran to
+    completion; a set value naming a non-LLM node means it short-circuited before any LLM call."""
     pd = measurement.get("pipeline_data") or {}
     terminated_at = pd.get("terminated_at") or ""
     if not terminated_at:
@@ -102,18 +83,8 @@ def grade_run(
     *,
     human_intervened: bool = False,
 ) -> RunProvenance:
-    """Grade a run from its source + per-sample termination.
-
-    ``A`` — deliberate source *and* the batch ran the LLM path (a clean explored
-    datapoint). ``B`` — one of the two but not both (a deliberate batch that
-    mostly short-circuited, or a full LLM batch from an incidental source). ``C``
-    — neither: an incidental connector-retrieval replay, the bias source.
-
-    A ``human_intervened`` run (a direct operator edit of an engine-owned/locked
-    value — the babysit path, ADR-0005) is forced to ``C`` regardless of source or
-    path: it is deliberate but no longer a clean autonomous datapoint, so it must
-    be excluded from the digest / reuse / L4 exactly like an incidental row.
-    """
+    """``A`` deliberate source AND LLM path, ``B`` one of the two, ``C`` neither. A ``human_intervened`` run is forced to
+    ``C`` regardless: deliberate, but no longer a clean autonomous datapoint."""
     deliberate = is_deliberate_source(source)
     frac = llm_path_fraction(measurements, llm_terminal_nodes(schema))
     full_path = frac >= LLM_PATH_FLOOR

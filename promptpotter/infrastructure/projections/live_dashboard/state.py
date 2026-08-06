@@ -1,16 +1,5 @@
-"""Pydantic schema for ``dashboard.json`` — the live operator dashboard.
-
-This file is the single source of truth for the dashboard payload shape.
-``LiveDashboardView`` accumulates state in a plain ``dict[str, Any]`` for
-in-memory mutation efficiency, but at every ``_persist()`` boundary the
-dict is validated through this model — drift between the writer and the
-schema raises at write time, not silently in production.
-
-The model is also the input to ``scripts/build_ts_types.py``, which emits
-``webapp/lib/api/types.generated.ts`` so the webapp's TypeScript consumers
-see the same shape the writer ships. Adding or renaming a field here
-without regenerating the TS types fails the CI guard.
-"""
+"""Pydantic schema for ``dashboard.json``. The writer mutates a plain dict for speed and validates
+through this model at every ``_persist()``, so writer/schema drift raises at write time."""
 
 from __future__ import annotations
 
@@ -39,11 +28,7 @@ __all__ = [
 
 class BackfillLogEntry(StrictModel):
     """One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``.
-
-    Names the round/candidate the backfill fired during, the sample the
-    priors were caught up on, and which priors gained a measurement. The
-    list is capped at 256 entries in the writer.
-    """
+    The writer caps the list at 256 entries."""
 
     round: int
     candidate_idx: int
@@ -68,10 +53,7 @@ class BackendWarning(StrictModel):
 
 class LoopWarning(StrictModel):
     """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
-    self-healing rails recovered from (zero-candidate round, L2 framing
-    soft-reject, injection budget truncation). Projected from the canonical
-    :class:`~promptpotter.domain.run_records.RoundWarningRecord`; visible on the
-    dashboard / file-tree alongside ``recent_backend_warnings``."""
+    self-healing rails recovered from: zero-candidate round, L2 framing soft-reject, truncation."""
 
     ts: str
     kind: str
@@ -83,11 +65,7 @@ class LoopWarning(StrictModel):
 
 class DashboardError(StrictModel):
     """``dashboard.json::error`` — structured crash summary written by
-    :meth:`LiveDashboardView._handle_error` from the canonical ``ErrorRecord``
-    when the runner exits via ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
-    ``message`` is the operator-actionable text; ``kind`` is the exception
-    class name; ``stop_reason`` echoes the ledger ``StopReason``. Absent on
-    normal stops (paused / completed)."""
+    ``_handle_error`` on a CRASHED / RENDER_ERROR / DIVERGED exit; absent on a normal stop."""
 
     kind: str
     message: str
@@ -96,11 +74,7 @@ class DashboardError(StrictModel):
 
 class InFlightCall(StrictModel):
     """``state.in_flight`` — the optimizer LLM call currently in progress.
-
-    Set on :class:`LLMCallStartRecord`; cleared on the paired
-    :class:`LLMCallRecord` by ``call_id``. ``None`` between calls — the
-    explicit None lets the webapp distinguish "no call" from "stale slot".
-    """
+    Set on ``LLMCallStartRecord``, cleared on the paired ``LLMCallRecord``; ``None`` between calls."""
 
     call_id: str
     node: str
@@ -112,11 +86,7 @@ class InFlightCall(StrictModel):
 
 class RunLimits(StrictModel):
     """``state.run_limits`` — the cycle's declared run-limit ceilings, written
-    once at ``INIT:exit`` from the ``OptimizationConfig``. Static (unlike the
-    live ``patience`` "N/max" string): the operator-facing source the fork
-    reconcile dialog defaults against ("3 of 6 rounds left"). A steered fork
-    re-emits its own reconciled limits here at its INIT.
-    """
+    once at ``INIT:exit``. Static, so a fork's reconcile dialog can default against it."""
 
     max_rounds: int | None = None
     l1_patience: int
@@ -134,19 +104,7 @@ class RunLimits(StrictModel):
 
 class LiveDashboardState(StrictModel):
     """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
-
-    See :class:`promptpotter.infrastructure.projections.live_dashboard.LiveDashboardView`
-    for the writer. The two surfaces inside this file:
-
-    * ``rounds[]`` — completed-round summaries (one entry per closed
-      round). Sole source for the FitnessChart, TrendChart, TopStrip
-      sparkline, LineageTree.
-    * ``current_round`` — the in-flight round's deep node block (L1
-      generate / critique / score in progress, plus PoBB telemetry).
-      Wiped at ``L1_GENERATE:enter`` so a fresh round starts with an
-      empty in-flight buffer. Past rounds' deep audit lives in
-      ``round_NNNN.json``, lazy-fetched by the webapp.
-    """
+    ``current_round`` wipes at ``L1_GENERATE:enter``; past deep audit lives in ``round_NNNN.json``."""
 
     model_config = ConfigDict(validate_assignment=False)
 
@@ -265,21 +223,8 @@ class LiveDashboardState(StrictModel):
         langfuse_trace_url: str | None,
         headline_metric: HeadlineMetric,
     ) -> LiveDashboardState:
-        """The state a starting run writes — ``prior`` (a resume/fork seed) carried
-        forward wholesale, with only this process's own facts stamped over it.
-
-        The cycle's ACCUMULATED trajectory all carries: rounds, best, current_acc,
-        spend, the four counters, both warning lists, run_limits, headline_metric,
-        hearts, the backfill log. *All* of it, because this model IS the on-disk shape,
-        so a hand-picked subset silently resets whatever it forgets to name — nine
-        fields did exactly that, and the constructor's first flush persisted the zeros.
-
-        What does not carry is everything describing the process that just ended: this
-        run's identity + trace, and the liveness markers that are lies the moment the
-        previous writer died. ``run_phase`` and ``stop_reason`` reset together — a
-        resumed run is RUNNING, and a carried stop reason would contradict the phase
-        printed beside it.
-        """
+        """The state a starting run writes — ``prior`` carried forward WHOLESALE, this process's own facts
+        stamped over it. This model IS the on-disk shape, so a hand-picked subset resets what it omits."""
         mine: dict[str, Any] = {
             "campaign_id": hop.campaign_id,
             "cycle_id": hop.cycle_id,

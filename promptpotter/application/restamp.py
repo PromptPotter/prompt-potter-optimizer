@@ -1,56 +1,5 @@
-"""Re-stamp every on-disk ``StrictModel`` record onto the current model.
-
-Every model here is ``extra="forbid"``. A file written before a field was renamed or dropped
-still carries that field, so the read raises ``extra_forbidden`` and the record can no longer be
-loaded — silently, until someone tries to use it. Re-stamping is the sanctioned remedy. Never
-``extra="allow"``, never an alias, never a migration shim.
-
-**The forbid default obliges EVERY on-disk model, and :data:`_SURFACES` is where that
-obligation is discharged.** ``5a69ca67`` dropped ``BackendConnection.last_synced_at`` and the
-stored ``backend.json`` records still carried it, so ``BackendStore`` raised at
-``init_services`` and every ``new``/``resume`` died at load — a surface this verb did not
-cover, on a box whose deploy runs it. Fixing that by hand-adding a third glob beside two
-others just moved the next omission one model along; the table is the fix, because a model
-that reaches disk becomes a ROW rather than a code change, and a kind missing from the tuple
-is visibly missing rather than merely un-thought-of.
-
-Two treatments, and which one a row takes is a statement about what the file IS:
-
-- **Delta** — the minted snapshot's config. Machine-written, and the engine already persists
-  it as the delta from today's defaults (``freeze_campaign_config``), so that is the shape it
-  is rewritten in.
-- **Prune** — every other record. Stale keys go and *nothing else changes*. Human-authored
-  YAML gets this and not the delta: an operator who wrote a default value out in full meant to
-  see it there, and a delta would silently reformat their file. The rewrite goes back through
-  the package emitter, so block scalars survive; YAML comments do not, which is the one thing
-  this script destroys and cannot help.
-
-**What is deliberately absent is the other half of the contract**, since a table read as
-partial teaches nothing:
-
-- **Measurements** (``rounds/round_*.json``, ``RoundResult``) — the one on-disk model that is
-  ``extra="ignore"``, and that is the migration story: a stale key must never make a *paid*
-  measurement unreadable, so the read tolerates it and no re-stamp is owed. A row here would
-  report every ``@computed_field`` as a stale key and rewrite nothing.
-- **The optimizer-call cache** (``archive/optimizer_calls/*.json``, ``LLMResponse``) — a
-  content-addressed cache is EVICTABLE, not migratable. A record that no longer validates is
-  one the next call re-fetches, so re-stamping it would pay to preserve something whose whole
-  contract is that losing it costs one call.
-
-Every dropped key is reported with the value it held, never silently. Whether that value *was*
-the default of the day is unknowable — a deleted field leaves no default behind — so this
-reports rather than classifies, and never maps an old key onto a new one. Guessing a mapping
-is a migration shim wearing a script.
-
-Skips are counted and printed; a scan that swallows ``OSError`` reports a vacuous zero.
-
-Reached by the ``restamp`` CLI verb. It lived under ``scripts/`` until it did not add up:
-``scripts/`` ships in no wheel (``pyproject.toml`` includes ``promptpotter*`` only), yet
-five surfaces named the file as THE remedy — including an HTTP 500 body an installed
-tenant reads. Its roots were bare CWD-relative strings for the same reason, so even a
-copied-out script addressed the wrong workspace from anywhere but the repo root. As a verb
-it resolves both roots through ``config/paths.py`` and exists wherever it is named.
-"""
+"""Re-stamp every on-disk ``StrictModel`` record onto the current model. ``extra="forbid"`` obliges
+EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged — as a ROW."""
 
 from __future__ import annotations
 
@@ -92,13 +41,8 @@ def _as_pruned(pruned: dict[str, Any]) -> dict[str, Any]:
 
 
 class _Surface(NamedTuple):
-    """One on-disk model kind: where it lives, what validates it, what happens to it.
-
-    ``key_path`` addresses the record inside the document; empty means the whole document IS
-    the record, which is what a leaf store writes. ``benchmark_globs`` is the second root from
-    ``config/paths.py`` — the install's own dataset definitions, which only the template
-    surface has.
-    """
+    """One on-disk model kind: where it lives, what validates it, what happens to it. ``key_path``
+    addresses the record inside the document; empty means the whole document IS the record."""
 
     title: str
     verb: str
@@ -112,6 +56,8 @@ class _Surface(NamedTuple):
 # THE coverage contract. A model that reaches disk belongs here the day it is written; adding
 # one is a row, not a code change. Ordered so a document addressed twice (the campaign manifest
 # and the config nested inside it) has its inner record settled first.
+# Measurements (`RoundResult`, extra="ignore") and the optimizer-call cache (evictable) are
+# deliberately absent: a stale key must never make a paid measurement unreadable.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
         title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
@@ -166,12 +112,8 @@ _SURFACES: tuple[_Surface, ...] = (
 
 
 def _nested_model(ann: Any) -> type[BaseModel] | None:
-    """The nested ``BaseModel`` an annotation carries, unwrapping ``X | None`` / ``Optional[X]``.
-
-    A sub-model reached through an *optional* field (``DatasetSplit | None``) must still have its
-    stale keys pruned — otherwise a dropped sub-field survives and the re-stamp still raises
-    ``extra_forbidden`` on load, which is exactly the failure this script exists to remove.
-    """
+    """The nested ``BaseModel`` an annotation carries, unwrapping ``X | None``. A sub-model reached
+    through an OPTIONAL field must still be pruned, or the re-stamp still raises on load."""
     if isinstance(ann, type) and issubclass(ann, BaseModel):
         return ann
     if get_origin(ann) in (Union, types.UnionType):
@@ -184,12 +126,8 @@ def _nested_model(ann: Any) -> type[BaseModel] | None:
 def _prune_to_schema(
     raw: dict[str, Any], model_cls: type[BaseModel], prefix: tuple[str, ...] = ()
 ) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
-    """Drop keys ``model_cls`` no longer declares. Returns ``(pruned, [(dotted_path, value)])``.
-
-    Recurses into nested *models* (including optional ones); a ``dict[str, X]`` field
-    (``pipeline_overrides``, ``optimizer_narrowing``) is free-form operator data and is passed
-    through untouched.
-    """
+    """Drop keys ``model_cls`` no longer declares, recursing into nested models. A ``dict[str, X]``
+    field is free-form operator data and passes through untouched."""
     pruned: dict[str, Any] = {}
     dropped: list[tuple[str, Any]] = []
     for key, value in raw.items():
@@ -223,10 +161,8 @@ class _Tally:
 
 
 def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tally) -> None:
-    """Prune, validate and (per the row's treatment) rewrite the record *surface* addresses.
-
-    Format follows the tree: ``.yaml`` templates in and out, ``.json`` records in and out.
-    """
+    """Prune, validate and rewrite the record *surface* addresses. Format follows the tree —
+    ``.yaml`` templates in and out, ``.json`` records in and out."""
     is_yaml = path.suffix == ".yaml"
     try:
         text = path.read_text(encoding="utf-8")
@@ -277,12 +213,8 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
 
 
 def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
-    """Scan every surface in :data:`_SURFACES`; report, and rewrite the rows that rewrite.
-
-    Roots come from ``config/paths.py`` — the tenant workspace and the install's benchmark
-    definitions — so the verb addresses the same trees the engine reads, from any CWD and
-    under a wheel. Returns the tallies; the printed detail is the operator's report.
-    """
+    """Scan every surface; report, and rewrite the rows that rewrite. Roots come from
+    ``config/paths.py``, so the verb addresses the trees the engine reads from any CWD."""
     root = DEFAULT_PROJECTS_ROOT
     if not root.is_dir():
         # Nothing to re-stamp is not a failure and not an unreadable file — a fresh

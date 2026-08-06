@@ -1,5 +1,3 @@
-"""Per-population scoring loop. Owns the candidate loop, accumulators, the shared round order, and ESCALATED break."""
-
 from __future__ import annotations
 
 from functools import partial
@@ -48,7 +46,6 @@ async def score_population(
     list[ScoredCandidate],
     EscalationSignal | None,
 ]:
-    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -60,14 +57,8 @@ async def score_population(
     async def _pobb_backfill(
         sp: JobSearchPoint, samples: list[Sample], prior_id: str
     ) -> list[QueryMeasurement]:
-        """Score *sp* on *samples* for PoBB paired-comparison fill-in. *sp* is a
-        PRIOR searchpoint, not a foreground candidate — so this fires **no**
-        per-sample display callbacks (``on_sample_scored=None``). The backfill's
-        own surface is the dedicated ``on_pobb_backfill`` event the candidate
-        loop emits (`candidate.py`); its spend rides the token ledger. Wiring the
-        foreground candidate callbacks here would mint a bogus ``C{round}.0`` row.
-        ``degradation_checks=None`` blocks recursive PoBB on backfill.
-        """
+        """Score a PRIOR searchpoint for paired fill-in — so it fires NO per-sample display callbacks, which would mint a
+        bogus ``C{round}.0`` row. ``degradation_checks=None`` blocks recursive PoBB on the backfill."""
         best_full_results, _best_full_scores, _signal = await score_search_point(
             sp,
             samples,

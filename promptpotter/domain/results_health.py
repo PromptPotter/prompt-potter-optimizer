@@ -1,12 +1,3 @@
-"""Round degradation-health verdict engine — pure functions, no I/O.
-
-Lifted out of ``results.py`` (which keeps the frozen data models) so the file a
-reader opens for "what shape is a round record" isn't interleaved with the
-~385-line grading ladder. One-way dependency: this module imports the models
-(``DegradationHealth``, ``WarningDict``, ``RoundResult``) from ``results``;
-``results`` never imports back.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -82,21 +73,8 @@ def classify_sample_failure(
     step_statuses: Mapping[str, str],
     warnings: Sequence[WarningDict],
 ) -> tuple[str | None, str | None]:
-    """Classify ONE sample's pipeline outcome AND attribute the causing node.
-
-    Returns ``(kind, causing_node)`` — ``kind ∈ {"structural","transient",None}``.
-    Reads the **source-stamped** ``WarningDict.kind`` (no PromptPotter-side code
-    taxonomy); an absent/unrecognized kind is SKIPPED, never defaulted to structural
-    (that was the shadow-taxonomy bug — it false-alarmed ``critical`` on ordinary
-    transient noise the backend's frozenset hadn't enumerated).
-
-    Attribution follows the **warning-bearing** node (the explained failure), not raw
-    ``step_statuses``: a node merely stamped ``failed`` with no warning is silent
-    collateral (e.g. an upstream node marked failed because the real break was
-    downstream), and must NOT outvote the node that actually broke. A node that DID
-    warn — even with an unclassifiable kind — counts as *explained*, so the bare-
-    ``failed`` fallback won't re-grade it. Only a genuinely silent ``failed`` (no
-    warning at all) drives the verdict structural. ``causing_node`` is ``None`` when clean."""
+    """Attribution follows the WARNING-BEARING node, never raw ``step_statuses``: a node merely
+    stamped failed with no warning is silent collateral and must not outvote what actually broke."""
     structural_node: str | None = None
     transient_node: str | None = None
     warned_nodes: set[str] = set()
@@ -130,12 +108,8 @@ def classify_sample_failure(
 
 
 def evidence_starved_node(rates: dict[str, float]) -> str | None:
-    """The single node at/above :data:`EVIDENCE_STARVED_RATE` (worst first), or ``None``.
-
-    The ONE definition of "evidence-starved" — read by both the degradation grade
-    (:func:`compute_degradation_health`) and the L2 router (the ``l1_evidence_starved``
-    escalation rule, via ``runner/round.py::post_round``), so the verdict the operator
-    sees and the routing the loop takes can never disagree."""
+    """The ONE definition of evidence-starved, read by both the degradation grade and the L2
+    router — so the verdict the operator sees and the routing the loop takes cannot disagree."""
     return max(
         (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
         key=lambda n: rates[n],
@@ -159,55 +133,8 @@ def compute_degradation_health(
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
 ) -> DegradationHealth | None:
-    """Grade a round's degradation health from its winner's per-sample outcomes
-    plus the cycle's track record. One denominator: every failure RATE is over
-    ``attempted`` (all rows the round ran — health grades the round's WORK, and an
-    errored row is exactly the evidence health exists to count).
-
-    ``answer_modal_share`` rides the verdict but is NOT graded and must not become a
-    precedence arm: a model hedging every row to one label is the failure the optimizer is
-    for, so halting on it would block the fix. It is carried because health is the one
-    per-round verdict every surface renders, and its round-over-round series is what says
-    whether the hedging is being optimized away. (The bool at 1.0 IS acted on — but by
-    ``PoBBCheck`` and the election, per candidate, never by this grade.)
-
-    **Health does not grade PRECISION — never add a clause that does.** Grading an
-    untested round ``degraded`` on a Wilson interval wider than ``DEGRADED_RATE_FLAG``
-    reuses a "fraction of samples that failed" threshold as an interval width: two
-    unrelated quantities sharing one number. Across the shipped sample budgets that
-    fires for any round whose accuracy is not pinned near 0 or 1 below n≈100 — a round
-    scoring 50% of 20 samples is ``degraded`` for existing. Since ``prior_clean_rounds``
-    counts only HEALTHY priors, such a cycle never clears ``untested``, which permanently
-    arms the ``structural_untested`` clause above: the first transient blip at any later
-    round grades ``critical`` and can trip ``origin_gate_tripped``. "The interval is wide"
-    is a fact about n, and its honest home is the CI already drawn beside every candidate
-    (``composite_ci_lo``/``_hi``), not a verdict that the pipeline is unwell.
-
-    Returns ``None`` when nothing was
-    attempted — genuinely no verdict, not a fabricated clean one — EXCEPT
-    the origin: a round-0 result only exists once scoring was attempted (the
-    ``has_program`` gate), so an ``attempted == 0`` origin measured *nothing* where
-    it was expected to, which is a broken floor (``critical`` / ``origin_unmeasured``),
-    not an abstention — candidates would otherwise be elected against no origin measurement.
-
-    Precedence (first match wins), thresholds = the module constants:
-      * **critical** — the backend was unreachable for ≥
-        :data:`BACKEND_UNREACHABLE_RATE` of samples (down, not a pipeline fault),
-        OR structural failures dominate (``structural`` rate ≥
-        :data:`STRUCTURAL_FLAG_RATE`), OR a single node was *evidence-starved*
-        (failure rate ≥ :data:`EVIDENCE_STARVED_RATE` — a flood of one enricher's
-        failures, systemic at the round level even when each sample's failure is a
-        recoverable ``transient``), OR *any* structural failure at an untested
-        config (no clean round precedes this one), OR ≥
-        :data:`CONSECUTIVE_DEGRADED_CRITICAL` consecutive degraded rounds.
-      * **degraded** — degraded fraction ≥ :data:`DEGRADED_RATE_FLAG` (transient /
-        noise on a proven pipeline).
-      * **healthy** — otherwise.
-
-    ``evidence_starved`` grades the round and names the starved node; it *routes* to
-    L2 (via the ``l1_evidence_starved`` escalation rule) but NEVER stops the loop
-    (R-48). L2 reads this verdict, then self-heals or emits ``terminate_proposal`` —
-    the stop authority stays with the intelligent tier, never this deterministic grade."""
+    """Never add a PRECISION clause. A Wilson width is not a failure RATE, and reusing the rate flag for one grades every
+    round under n≈100 as degraded — which, since only healthy rounds count as priors, arms the untested arm forever."""
     if attempted <= 0:
         if is_origin:
             return DegradationHealth(
@@ -275,10 +202,8 @@ def compute_degradation_health(
     nw = node_warnings or {}
 
     def _reported_by(node: str | None) -> str:
-        """The verbatim upstream reason(s) the node raised — the actual evidence
-        behind the verdict, so a generic 'enricher starved' is grounded in the
-        connector's real message ('Brave Search HTTP 429: …') and works the same
-        for any node a third party wires in. Empty when the node was silent."""
+        """The verbatim upstream reason(s) the node raised, so a generic verdict stays grounded in
+        the connector's real message. Empty when the node was silent."""
         msgs = nw.get(node or "", [])
         if not msgs:
             return ""
@@ -356,28 +281,14 @@ def assemble_prior_healths(
     rounds: Sequence[RoundResult],
     round_num: int,
 ) -> list[DegradationHealth | None]:
-    """The track record for the round being closed: every OTHER round's verdict,
-    starting at the origin's (round 0 — the floor every L1 round improves on). The
-    round being closed is already in ``rounds``, so it is dropped by number. Ordering
-    is oldest→newest so ``compute_round_health``'s reversed consecutive-degraded walk
+    """Oldest→newest, because ``compute_round_health``'s reversed consecutive-degraded walk
     reads most-recent-first."""
     return [r.health for r in rounds if r.round != round_num]
 
 
 def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float]:
-    """Per-NODE round-level failure rate: the fraction of a round's ATTEMPTED samples
-    in which each node failed (hard ``failed`` status OR a failure warning of either
-    kind); the denominator is derived here (``len(results)``) so no caller can pass a
-    diverging one.
-
-    Distinct from :func:`classify_sample_failure`, which attributes ONE node per sample:
-    a node failing *transiently* across many samples (e.g. an enricher whose search
-    quota is exhausted) surfaces here as a high rate even though each sample's failure
-    is individually recoverable. That round-level rate is the ``evidence_starved`` signal
-    (R-48) — both :func:`compute_degradation_health` (the grade) and the L1-critique panel
-    read THIS helper, so the verdict and the surface never diverge. Backend-down samples
-    carry no diagnostics, so they contribute nothing to the numerators.
-    Counts each failed node at most once per sample, so the value is a fraction-of-samples."""
+    """Round-LEVEL rate: a node failing transiently across many samples surfaces here even though
+    each sample is individually recoverable. The grade and the L1-critique panel share this helper."""
     total = len(results or [])
     if total <= 0:
         return {}
@@ -398,14 +309,8 @@ def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float
 
 
 def _collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Distinct upstream warning reasons per node, harvested from each sample's
-    ``pipeline_data.diagnostics.warnings`` — the verbatim ``[code] message`` the
-    connector's :class:`StepWarning` carried (e.g. a backend web-search node
-    forwarding ``Brave Search HTTP 429: …``). Deduped by ``(step, code)`` so a
-    flood of identical failures collapses to one line. This is the evidence behind
-    the degradation verdict and is connector-agnostic — whatever message a node
-    raises shows up, so someone wiring a brand-new node/API sees its real error,
-    not a hardcoded guess. ``message`` clipped to keep the banner readable."""
+    """Connector-agnostic — whatever message a node raises shows up, so a brand-new node's real
+    error surfaces rather than a hardcoded guess. Deduped by ``(step, code)``."""
     seen: dict[str, dict[str, str]] = {}
     for r in results or []:
         warnings = ((r.get("pipeline_data") or {}).get("diagnostics") or {}).get("warnings") or []
@@ -429,13 +334,8 @@ def compute_round_health(
     prior_healths: Sequence[DegradationHealth | None],
     is_origin: bool = False,
 ) -> DegradationHealth | None:
-    """Stamp a closed round's degradation verdict — the SINGLE computation site
-    (the app-layer round close). Every surface reads ``RoundResult.health``; none
-    recomputes (R-36). Counts structural/transient over the winner's per-sample
-    rows (``results``) via the backend's ``step_statuses``, derives the track
-    record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
-    then grades via :func:`compute_degradation_health` — failure rates over the
-    ATTEMPTED rows (``len(results)``)."""
+    """The SINGLE computation site: every surface reads ``RoundResult.health`` and none
+    recomputes it."""
     from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
     structural = transient = unreachable = no_result = holes = 0

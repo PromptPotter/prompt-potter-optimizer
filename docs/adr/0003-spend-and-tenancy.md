@@ -163,7 +163,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 #### 5. Rate cache is install-scoped, not tenant-scoped
 
-`~/.promptpotter/rates.json` is shared across tenants (one rate table per install — model pricing is global, not per-tenant). Confirmed: no per-tenant scoping. Documented in `shared/spend.py` module docstring.
+`~/.promptpotter/rates.json` is shared across tenants (one rate table per install — model pricing is global, not per-tenant). Confirmed: no per-tenant scoping.
 
 #### 6. Migration — existing `projects/{tenant}/` directory
 

@@ -1,11 +1,5 @@
-"""Escalation FSM — L1/L2/L3 stall counters, observation methods, fold-over-ledger reducer.
-
-Counters are private; only the observation methods + post-fire bookkeepers mutate. Read access is
-property-only — there's no field to assign a `round >= N` literal to, so the "signals from
-measurement, not calendar" rule is structural.
-
-Out of scope: post-round routing (`.decide`), LLM calls (`.firing`), OSP mutations.
-"""
+"""Escalation FSM — L1/L2/L3 stall counters, observations, and the fold-over-ledger reducer. Read
+access is property-only, so "signals from measurement, not calendar" is structural, not a rule."""
 
 from __future__ import annotations
 
@@ -49,8 +43,6 @@ class EscalationEvent:
 
 
 class EscalationFSM:
-    """Cause-driven L1/L2/L3 counters; mutation surface = observations + post-fire bookkeepers."""
-
     __slots__ = (
         "_l1_stall_count",
         "_l2_best_composite_fitness_at_entry",
@@ -88,42 +80,22 @@ class EscalationFSM:
 
     @property
     def lives(self) -> int | None:
-        """Current banked lives ('hearts'), or ``None`` when lives mode is off."""
         return self._lives
 
     @staticmethod
     def _bank_life(
         current: int | None, improved: bool, lives: LivesConfig, *, compared: bool = True
     ) -> int:
-        """Bank the round's ``improved`` verdict: +1 if improved, -1 if not, seeded
-        from ``start`` on the first round, clamped to ``[0, cap]``.
-
-        ``compared=False`` — no candidate reached the election, so the round measured nothing
-        against the incumbent — banks NOTHING. The bank is a budget of rounds that failed to
-        find an improvement, and a round with no comparison in it is not evidence about the
-        search; it is evidence about l1_generate, which the escalation rules route to L2 on
-        their own signals (``l1_zero_candidates``, ``l1_mandatory_breach``). Charging it here
-        too meant the faster of the two mechanisms killed the cycle before the slower one's
-        heal could be measured. On the 2026-07-27 `justlogic-d234` inner campaigns this was
-        roughly half the total drain — one campaign spent its last two lives on consecutive
-        rounds where every proposal was rejected as a repeat before it was ever scored, and
-        died at round 3 with its accuracy still climbing. ``max_rounds`` remains the backstop
-        for a generator that never recovers.
-        """
+        """Bank the round's ``improved`` verdict, clamped to ``[0, cap]``. ``compared=False`` banks NOTHING:
+        no candidate reached the election, so it is evidence about l1_generate, not about the search."""
         base = lives.start if current is None else current
         if not compared:
             return max(0, min(lives.cap, base))
         return max(0, min(lives.cap, base + (1 if improved else -1)))
 
     def _bank_round(self, improved: bool, lives: LivesConfig | None, *, compared: bool) -> None:
-        """Advance the L1 accumulators from one round's outcome — the stall counter and (when
-        enabled) the life bank. The live ``observe_round`` and the resume ``fold`` both land
-        here, so a run and its replay cannot bank the round differently.
-
-        The two accumulators read the same ``improved`` bit but diverge on ``compared``: an
-        uncompared round still advances the STALL counter (the loop is not progressing, and
-        that is precisely what should escalate to L2) while costing no life.
-        """
+        """Advance the L1 accumulators — live ``observe_round`` and resume ``fold`` both land here. They
+        diverge on ``compared``: an uncompared round still advances the STALL counter, at no life cost."""
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
         if lives is not None:
             self._lives = self._bank_life(self._lives, improved, lives, compared=compared)
@@ -131,11 +103,7 @@ class EscalationFSM:
     def would_exhaust_lives(
         self, improved: bool, lives: LivesConfig | None, *, compared: bool = True
     ) -> bool:
-        """Would banking this round's verdict empty the bank (i.e. stop the loop)?
-
-        Pure lookahead — banks nothing. Lets a caller know THIS round is the last one
-        before it spends an LLM call on output only the NEXT round could read. Reads
-        through ``_bank_life`` rather than re-deriving the arithmetic, so the answer can
+        """Would banking this round empty the bank? Pure lookahead — reads THROUGH ``_bank_life`` so it can
         never disagree with what ``observe_round`` is about to do."""
         if lives is None:
             return False
@@ -182,11 +150,8 @@ class EscalationFSM:
         current_theta: float | None,
         entry_theta: float | None,
     ) -> bool:
-        """Did the cycle's best advance since a layer fired? Prefers difficulty-adjusted
-        ability θ when the per-cycle ruler is live (both θ present), else composite. θ
-        stays cross-round comparable once per-round subsets drift, where composite (a raw
-        rate over whichever samples ran) does not. The ruler is fixed per cycle, so the
-        choice never flips mid-cycle — θ is present every round or none (R: slice 2)."""
+        """Did the cycle's best advance since a layer fired? Difficulty-adjusted θ when the per-cycle ruler
+        is live, else composite. The ruler is fixed per cycle, so the choice never flips mid-cycle."""
         if current_theta is not None and entry_theta is not None:
             return current_theta > entry_theta
         return current_comp > entry_comp
@@ -206,11 +171,8 @@ class EscalationFSM:
         l1_zero_candidates: bool = False,
         evidence_starved: bool = False,
     ) -> EscalationEvent:
-        """L1 round outcome — bumps stall (+ banks lives when enabled), delegates routing
-        to `decide_escalation`. When the lives bank hits zero it stops the loop — but only
-        if `decide_escalation` did not already stop on its own (a natural PERFECT / L3
-        convergence keeps its more-specific reason); an exhausted bank overrides a would-be
-        CONTINUE or escalation, skipping the doomed final layer fire."""
+        """L1 round outcome; routing delegates to `decide_escalation`. An emptied life bank overrides a
+        CONTINUE or an escalation, but never a more-specific stop (a natural PERFECT / L3 convergence)."""
         from promptpotter.application.optimization.escalation.decide import (
             EscalationInputs,
             decide_escalation,
@@ -240,9 +202,8 @@ class EscalationFSM:
         l2_patience: int | None,
         l3_patience: int | None,
     ) -> EscalationEvent:
-        """L2 escalation requested. First-invocation grace: stall only advances after a layer has
-        fired at least once (the entry θ/composite is the comparator).
-        """
+        """L2 escalation requested. First-invocation grace: stall only advances after a layer has fired at
+        least once, and the entry θ/composite is the comparator."""
         if self._l2_round > 0:
             l2_improved = self._improved(
                 current_composite_fitness,
@@ -277,7 +238,6 @@ class EscalationFSM:
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
-        """L2 LLM completed. Bumps L2 round, captures entry origin; resets L1 stall."""
         self._l1_stall_count = 0
         self._l2_round += 1
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
@@ -289,7 +249,7 @@ class EscalationFSM:
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
-        """L3 fired. Bump L3, reset L1 stall + the L2 counter (new plan invalidates L2's progress)."""
+        """L3 fired. Bump L3, reset L1 stall + the L2 counter — a new plan invalidates L2's progress."""
         self._l1_stall_count = 0
         self._l3_round += 1
         self._l3_best_composite_fitness_at_entry = best_composite_fitness
@@ -303,10 +263,8 @@ class EscalationFSM:
     # Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
 
     def fold(self, record: CycleRecord, *, lives: LivesConfig | None = None) -> None:
-        """Advance state from one ledger record. No-op for unrelated records. ``lives``
-        (when set) reconstructs the banked-lives accumulator from the same ``improved``
-        sequence that drives the stall counter — so resume rebuilds it exactly, no new
-        persisted field."""
+        """Advance state from one ledger record. ``lives`` reconstructs from the same ``improved`` sequence
+        that drives the stall counter, so resume rebuilds the bank exactly with no persisted field."""
         if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
@@ -346,12 +304,8 @@ class EscalationFSM:
     def from_ledger(
         cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None
     ) -> EscalationFSM:
-        """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state.
-
-        ``lives`` is required (pass the campaign's config, or ``None`` when the campaign
-        runs without a life bank): defaulting it silently rebuilt the accumulator empty,
-        handing a cycle one stall from ``LIVES_EXHAUSTED`` its whole bank back.
-        """
+        """Rebuild by folding every record; ``None`` ⇒ fresh state. ``lives`` is REQUIRED — defaulting it
+        rebuilt the accumulator empty, handing a cycle one stall from ``LIVES_EXHAUSTED`` its bank back."""
         s = cls()
         if ledger is None:
             return s

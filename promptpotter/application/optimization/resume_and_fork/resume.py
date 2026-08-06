@@ -1,14 +1,5 @@
 """Resume entry point — repair holed rounds, rescore, replay decisions, halt-or-fork.
-
-:func:`resume_with_divergence_check` is the runner's one entry point: rescore prior rounds,
-repair any that recorded a cell without a measurement, walk ``replay_decisions`` for the first
-divergence, then halt or mint a sibling via :func:`_mint_fork`.
-
-Incompleteness and divergence are different questions, so the repair runs regardless of
-``DiffScope`` and, when it lands, forces the walk. **A correction cuts FIRST and is graded
-SECOND**; it is priced by what it REACHED, not by having happened. That behaviour, and the
-three blind spots each check answers for: `docs/operations/persistence-and-state.md`.
-"""
+Incompleteness and divergence are different questions, so the repair runs regardless of scope."""
 
 from __future__ import annotations
 
@@ -121,9 +112,8 @@ def _rebank_on_branch(
     branch_cycle_id: str,
     retirements: list[tuple[RoundResult, int]],
 ) -> int:
-    """Put the corrected candidates on the BRANCH's own ledger — a measurement enters through
-    the ingress, and a round file with none behind it leaves the branch unable to name a
-    candidate of its own. Identity is copied; only the MEASUREMENT is re-emitted."""
+    """Put the corrected candidates on the BRANCH's own ledger — a measurement enters through the
+    ingress, and identity is copied while only the MEASUREMENT is re-emitted."""
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
     parent_ledger = CycleLayout(campaign_store.cycle_dir(parent)).ledger
     minted_at = {(c.round, c.idx): c for c in scan_ledger_candidates(parent_ledger)}
@@ -148,9 +138,8 @@ def _rebank_on_branch(
 
 
 def _resync_round_headline(t: RoundResult) -> bool:
-    """Re-project the round's headline off the winner's OWN row — a stored copy (the
-    duplication ``RoundResult`` defends), so a repair that misses it leaves the trajectory
-    quoting the holed panel. A projection, never a second election."""
+    """Re-project the round's headline off the winner's OWN row. A projection, never a second
+    election — miss it and the trajectory keeps quoting the holed panel."""
     from promptpotter.application.scoring.metrics import count_degraded_samples
 
     if not _headline_disagrees(t):
@@ -188,15 +177,8 @@ async def repair_incomplete_rounds(
     cycle: Cycle,
     dataset: list[Any],
 ) -> list[int]:
-    """Make an already-CLOSED round re-derive from its own rows again — IN MEMORY.
-
-    **Nothing here writes**: where the corrected rounds belong is unknowable until the caller
-    has measured whether the correction propagated. Each hole is plugged with a REAL
-    measurement, never an archive row, which may be a PoBB ``BACKFILL`` measured out of the
-    round's shared order. The panel gate does not cover this — it stops the round it fires
-    in, and rounds banked before it existed keep their holes. Re-election is NOT done here;
-    ``ROUND_WINNER`` is ``REPLAYED``, so the divergence walk owns it.
-    """
+    """Make an already-CLOSED round re-derive from its own rows again — IN MEMORY, **nothing here
+    writes**: where the corrected rounds belong is unknowable until the caller has measured it."""
     from promptpotter.application.optimization.l1.population import build_score_report
     from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -325,9 +307,8 @@ def _stale_generation(
     prior: list[RoundResult],
     resumed_from_round: int,
 ) -> ReplayMismatch | None:
-    """Is the round about to run holding candidates its own predecessor no longer matches?
-    Both sides are persisted, so unlike the package differential this survives a restart. No
-    recorded digest ⇒ UNVOUCHED ⇒ a divergence, not a shrug."""
+    """Is the round about to run holding candidates its own predecessor no longer matches? Both
+    sides are persisted, so this survives a restart. No recorded digest ⇒ a divergence, not a shrug."""
     from promptpotter.domain.results import round_document_digest
 
     cached = campaign_store.load_round_candidates(hop, resumed_from_round)
@@ -355,8 +336,7 @@ def _stale_generation(
 
 
 def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]:
-    """Rounds produced by a DIFFERENT optimizer than the one loaded now. Template, layout and
-    node config re-derive in any process, unlike a rendered panel. Asked PER ROUND so an edit
+    """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
     forks from where it bites; an unstamped round is REPORTED, never guessed."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         compute_optimizer_prompt_hashes,
@@ -393,13 +373,8 @@ def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]
 
 
 def _round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-    """``{round: {node: package fingerprint}}``, each rebuilt at ITS OWN point in the run.
-
-    **Replayed to the rounds BEFORE k, with k arriving only as ``latest_round``** — how
-    ``run_l1_critique`` receives it. Per round, not once fully: a bundle carries the
-    cumulative trajectory, so otherwise a repair in round k moved round 0's bundle too. The
-    generator of k+1 reads a different bundle and is :func:`_stale_generation`'s job.
-    """
+    """``{round: {node: package fingerprint}}``, each rebuilt at ITS OWN point in the run — a bundle
+    carries the cumulative trajectory, so one full rebuild would move round 0's bundle too."""
     from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
 
     out: dict[int, dict[str, str]] = {}
@@ -423,10 +398,8 @@ async def _rederive_critiques(
     cycle: Cycle,
     drifted: list[RoundResult],
 ) -> None:
-    """Re-distil the critique of each round whose package drifted — in place, on disk. It is
-    the one artifact a round file carries that an optimizer node PRODUCED, and the next
-    round's generator reads it. Measurements and winner untouched, so this is a repair, not a
-    rewind. Round 0 is not a target: its critique comes from the ORIGIN path."""
+    """Re-distil the critique of each round whose package drifted, in place on disk. Measurements and
+    winner untouched, so this is a repair, not a rewind; round 0's comes from the ORIGIN path."""
     from promptpotter.application.optimization.l1.critique import run_l1_critique
     from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 
@@ -464,9 +437,8 @@ def _package_drift(
     campaign_store: CampaignStore,
     hop: CycleHop,
 ) -> tuple[dict[int, ReplayMismatch], list[RoundResult]]:
-    """What the correction REACHED: ``({round that consumed a moved package: mismatch},
-    [rounds whose own package moved])``. Raised at the CONSUMER (``rn + 1``), never the
-    producer, and only where it owns something — a cached candidate set counts."""
+    """What the correction REACHED. Raised at the CONSUMER (``rn + 1``), never the producer, and only
+    where it owns something — a cached candidate set counts."""
     mismatches: dict[int, ReplayMismatch] = {}
     drifted: list[RoundResult] = []
     for rn, now in sorted(after.items()):
@@ -503,13 +475,8 @@ async def _apply_correction(
     cycle: Cycle,
     dataset: list[Any],
 ) -> ForkResult | None:
-    """Cut, correct, grade. ``None`` ⇒ nothing needed correcting; the caller carries on.
-
-    **The cut comes first** — read off the round documents and NOT again, since the repair
-    plugs the very holes it is read from — then GRADED by what the correction reached.
-    A cut with nothing repairable behind it leaves an empty branch for
-    ``cleanup_stub_fork_if_empty`` and returns ``None``.
-    """
+    """Cut, correct, grade — **the cut comes first**, read off the round documents and not again,
+    since the repair plugs the very holes it is read from. ``None`` ⇒ nothing needed correcting."""
     cut = repair_cut(prior)
     repair_target = hop.cycle_id
     repair_spec: ForkSpec | None = None
@@ -614,11 +581,8 @@ async def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    """Rescore prior rounds under the active scorer; halt or fork on divergence.
-
-    Short-circuits on a :attr:`DiffScope.NONE` / :attr:`DiffScope.POLICY_ONLY` config diff —
-    the parent's data trace is fully valid and the active policy governs unevaluated rounds.
-    """
+    """Rescore prior rounds under the active scorer; halt or fork on divergence. Short-circuits on a
+    ``NONE`` / ``POLICY_ONLY`` config diff — the parent's data trace is fully valid."""
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
@@ -682,12 +646,8 @@ async def resume_with_divergence_check(
         def _branch_or_halt(
             div: ReplayMismatch, survivors: list[RoundResult], *, self_inflicted: bool
         ) -> ForkResult:
-            """The ONE exit every divergence takes: branch at ``div.round_num``, or halt. A
-            ``SCORING_DIVERGENCE`` supersedes, and nothing here deletes — what the old package
-            produced above the cut stays with it.
-
-            Branches this resume CAUSED take themselves; a change from OUTSIDE is the
-            operator's call, which ``--fork-on-divergence`` decides."""
+            """The ONE exit every divergence takes: branch at ``div.round_num``, or halt. Branches this resume
+            CAUSED take themselves; a change from OUTSIDE is the operator's call."""
             if not fork_on_divergence and not self_inflicted:
                 raise ResumeDivergenceError(
                     round_num=div.round_num,

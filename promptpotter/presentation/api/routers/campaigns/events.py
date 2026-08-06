@@ -1,10 +1,5 @@
-"""Profile A — Server-Sent Events highway for a per-cycle ledger stream.
-
-The HTTP shell over :class:`projections.event_stream.CycleLedgerTail`; ``sse-starlette``
-owns the framing, heartbeat and teardown. The certified contract — colon-suffix URL,
-snapshot-then-tail, sequence gaps, the ``ProjectionEnvelope`` frame — is
-``docs/developer/event-stream.md``.
-"""
+"""Profile A — the SSE highway over ``CycleLedgerTail``; ``sse-starlette`` owns framing, heartbeat and teardown. The
+certified contract is ``docs/developer/event-stream.md``."""
 
 from __future__ import annotations
 
@@ -37,13 +32,8 @@ _SSE_POLL_INTERVAL_S = 0.5
 
 
 async def _stream(tail: CycleLedgerTail) -> AsyncIterator[str]:
-    """Snapshot envelope, then poll the ledger file for live tail.
-
-    Yields each ``ProjectionEnvelope`` as a JSON string; ``EventSourceResponse``
-    adds the ``data:`` frame and handles heartbeat + disconnect/shutdown
-    teardown, so this is purely the snapshot-then-tail loop. File reads run via
-    ``asyncio.to_thread`` so the event loop never blocks on disk I/O.
-    """
+    """Snapshot envelope, then poll the ledger for the live tail, yielding each frame as a JSON string. File reads run via
+    ``asyncio.to_thread`` so the event loop never blocks on disk I/O."""
     yield (await asyncio.to_thread(tail.snapshot_frame)).model_dump_json()
     while True:
         for envelope in await asyncio.to_thread(tail.read_new):

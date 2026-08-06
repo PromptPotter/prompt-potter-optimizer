@@ -35,12 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
-    """``(prompt_tokens, completion_tokens, reasoning_tokens)`` for ONE round-trip.
-
-    Per-attempt on purpose. ``reasoning_tokens`` is the tell: a reasoning model can spend
-    its whole ``max_tokens`` budget thinking and emit zero content tokens, which is a
-    prompt-size problem, not a flaky provider — but only if you read it off the attempt
-    that actually failed."""
+    """Usage for ONE round-trip, per-attempt on purpose. ``reasoning_tokens`` is the tell — a reasoning model can spend its
+    whole budget thinking and emit nothing — but only if read off the attempt that actually failed."""
     usage = getattr(response, "usage", None)
     details = getattr(usage, "completion_tokens_details", None)
     return (
@@ -57,13 +53,8 @@ def _finish_reason(response: ChatCompletion) -> str | None:
 def _failure_diagnostics(
     response: ChatCompletion, first_prompt: int, first_completion: int
 ) -> dict[str, Any]:
-    """The SECOND attempt's account + the billed totals, for ``OptimizerPromptParseError``.
-
-    ``prompt_tokens`` / ``completion_tokens`` are deliberately sums across both
-    round-trips: they are the billing contract (``dispatch/llm_call/call.py`` meters spend
-    off them, and a failed call is billed the same as a good one). Everything else here
-    describes the retry only — the failing attempt's own account is passed separately by
-    the caller, which still has it in scope."""
+    """The SECOND attempt's account plus the BILLED totals. The token counts are deliberately sums across both round-trips —
+    that is the billing contract, and a failed call is billed the same as a good one."""
     _, completion, reasoning_tokens = _attempt_usage(response)
     usage = getattr(response, "usage", None)
     message = response.choices[0].message if getattr(response, "choices", None) else None
@@ -78,8 +69,6 @@ def _failure_diagnostics(
 
 
 class OpenAICompatibleClient(LLMClientBase):
-    """Client for any OpenAI-compatible API (OpenAI, Groq, etc.)."""
-
     def __init__(
         self,
         api_key: str,
@@ -347,18 +336,8 @@ class OpenAICompatibleClient(LLMClientBase):
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
     ) -> LLMResponse | tuple[Any, str, ValidationError | None, Any]:
-        """One provider round-trip + parse.
-
-        Returns either an :class:`LLMResponse` (Groq ``json_validate_failed``
-        salvage — already validated) or ``(response, content, validation_err,
-        parsed)`` — caller decides retry vs raise on non-None ``validation_err``
-        and consumes ``parsed`` directly on success (parsed once here, never
-        re-validated by the caller).
-
-        SDK ``max_retries`` covers 408/409/429/5xx + Retry-After; this layer
-        only intercepts request-too-large, 404 model-not-found, and Groq's 400
-        quirk. ``with_raw_response`` exposes ``x-ratelimit-limit-*`` for the limiter.
-        """
+        """One provider round-trip + parse; ``parsed`` is consumed directly and never re-validated by the caller. SDK retries cover
+        408/409/429/5xx — this layer intercepts only request-too-large, 404 model-not-found, and Groq's 400 quirk."""
         try:
             raw = await client.chat.completions.with_raw_response.create(**request_params)
             response = raw.parse()

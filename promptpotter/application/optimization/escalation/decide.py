@@ -1,8 +1,5 @@
-"""Post-round escalation router. `decide_escalation` is priority-sort, first-match over
-`DEFAULT_ESCALATION_RULES`. Pure: no LLM, no side effects. Returns the EscalationEvent the
-round loop dispatches (`FIRE_L2` → `.firing.escalate_l2`, `STOP_*` → StopLoop, `CONTINUE` → next round).
-State mutation (stall counter bump) lives in `EscalationFSM.observe_round`; this is post-fold.
-"""
+"""Post-round escalation router — priority-sort, first-match, pure. State mutation lives in ``observe_round``; this is
+post-fold."""
 
 from __future__ import annotations
 
@@ -44,7 +41,6 @@ class EscalationInputs:
 
 
 def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
-    """Sort by priority (desc), return the first matching rule's event."""
     from promptpotter.application.optimization.escalation.rules import (
         DEFAULT_ESCALATION_RULES,
     )

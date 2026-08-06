@@ -1,5 +1,3 @@
-"""PhaseRecord enums, stop reasons, phase events — pure control-flow types."""
-
 from __future__ import annotations
 
 import enum
@@ -25,8 +23,6 @@ __all__ = [
 
 
 class CampaignPhase(enum.StrEnum):
-    """Feedback cycle phase names."""
-
     INIT = "init"
     ORIGIN = "origin"
     L1_GENERATE = "l1_generate"
@@ -37,28 +33,8 @@ class CampaignPhase(enum.StrEnum):
 
 
 class StopReason(enum.StrEnum):
-    """Feedback cycle termination reasons.
-
-    Operator-recoverable halts (no traceback, plain ``resume`` fixes):
-    - ``PAUSED`` — operator paused (the pause button or Ctrl+C /
-      asyncio.CancelledError). The worker exits cleanly but the cycle is
-      **non-terminal and resumable**: ``_finalize_run`` skips every terminal
-      write, so ``resume`` continues from the last completed round. The one
-      operator-interrupt reason — there is no separate "stop".
-    - ``DIVERGED`` — resume detected recorded-vs-current decision mismatch
-      under changed policy; one-flag rerun.
-    - ``RENDER_ERROR`` — an injection renderer raised (usually code drift on
-      a renamed field). Failing injection + traceback in ``index.json::final``.
-      Fix the renderer and ``resume``.
-    - ``OPTIMIZER_TIMEOUT`` — optimizer LLM blew its wall-clock twice (provider
-      stalled mid-stream, see ``llm_call._chat_under_deadline``); plain ``resume``.
-    - ``BACKEND_UNREACHABLE`` — a round was ≥ ``BACKEND_UNREACHABLE_RATE``
-      backend-down samples (CONNECTION / consecutive-error skips). The loop halts
-      instead of grinding zero-accuracy rounds against a dead backend; restart the
-      backend and ``resume``.
-
-    ``CRASHED`` is the catch-all for unhandled exceptions in the round loop.
-    """
+    """``BACKEND_UNREACHABLE`` halts on a round that was ≥ ``BACKEND_UNREACHABLE_RATE``
+    backend-down samples, rather than grinding zero-accuracy rounds against a dead backend."""
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
@@ -132,23 +108,8 @@ class RunPhase(enum.StrEnum):
 
 
 class DashboardState(enum.StrEnum):
-    """The fine-grained ACTIVITY vocabulary — ``dashboard.json::state``.
-
-    Orthogonal to :class:`RunPhase`, which is the coarse lifecycle+control axis. This one
-    answers "what is it doing right now", and every surface that narrates a live run reads
-    it: the pause affordance ("Finishing {…} — will pause"), the terminal readout, the
-    activity line.
-
-    It lives here rather than in the projection that writes it because it is a vocabulary
-    two sides must agree on, and it spent its whole life undeclared — bare string literals
-    at four ``_set_state`` call sites plus the values of ``_PHASE_TO_STATE``, mirrored by
-    hand in the webapp against no source. ``INIT`` and ``STOPPED`` were emitted the whole
-    time and had no label there; nothing errored, the affordance just rendered blank.
-
-    ``INIT`` / ``STOPPED`` bracket the run; the rest are one-to-one with the
-    :class:`CampaignPhase` the runner declares, except the two scoring states, which the
-    per-sample loop drives (``L1_SCORE`` has no phase mapping for exactly that reason).
-    """
+    """The fine-grained ACTIVITY vocabulary (``dashboard.json::state``), orthogonal to
+    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on."""
 
     INIT = "init"
     ORIGIN = "origin"
@@ -163,22 +124,8 @@ class DashboardState(enum.StrEnum):
 
 
 class StopOutcome(enum.StrEnum):
-    """How a cycle ended — the one classification of :class:`StopReason`.
-
-    Every terminal surface (index status display, ``JobStatus``, the webapp
-    label) derives from this single table instead of re-encoding the reason
-    into its own vocabulary.
-
-    - ``SUCCESS`` — ran to a natural conclusion (perfect score, target hit,
-      round cap, sweep/diag complete, converged).
-    - ``HALTED`` — a budget / policy halt the operator must act on to continue
-      (spend cap, escalation abort, origin gate, backend unreachable).
-    - ``FAILED`` — abnormal termination needing operator action (crash, render
-      error, resume divergence, optimizer timeout).
-    - ``PAUSED`` — operator paused; the **only non-terminal** outcome. The
-      worker exited but the cycle keeps no ``finished_at`` and resumes from the
-      last completed round.
-    """
+    """``PAUSED`` is the **only non-terminal** outcome — the worker exited but the cycle keeps no
+    ``finished_at``. Every terminal surface derives its label from this one table."""
 
     SUCCESS = "success"
     HALTED = "halted"
@@ -187,19 +134,8 @@ class StopOutcome(enum.StrEnum):
 
 
 class StopReasonInfo(NamedTuple):
-    """One row of the canonical :class:`StopReason` classification table.
-
-    ``halts_mid_round`` — the cycle stopped PARTWAY through a round, so the round
-    left on disk is **partial**: fewer samples scored than the dataset holds. Every
-    reader of a round file (the resume replayer, the mask, the L4 proxy trajectory)
-    needs this, because a partial round that reads as complete carries a fitness
-    computed over a handful of samples as if it were the whole bank.
-
-    ``has_traceback`` — the stop stashed a formatted traceback to surface.
-
-    **No defaults, on purpose.** A new ``StopReason`` must state both facts, and the
-    exhaustiveness raise below is what forces it.
-    """
+    """``halts_mid_round`` means the round left on disk is PARTIAL — read as complete, its fitness
+    is a handful of samples passing for the whole bank. No defaults: a new reason states both."""
 
     label: str
     outcome: StopOutcome
@@ -271,7 +207,6 @@ if _missing_stop_info:
 
 
 def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
-    """Outcome class for a terminal reason — the one classification."""
     return STOP_REASON_INFO[StopReason(reason)].outcome
 
 
@@ -284,8 +219,6 @@ class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
 
 
 class PhaseEvent(StrictModel):
-    """Emitted at phase boundaries during the feedback cycle."""
-
     model_config = ConfigDict(frozen=True)
 
     phase: str
@@ -303,7 +236,6 @@ def emit_phase(
     round: int | None = None,
     **data: Any,
 ) -> None:
-    """Build a PhaseEvent and dispatch it; no-op if ``on_phase`` is None."""
     if on_phase is None:
         return
     on_phase(PhaseEvent(phase=phase, event=event, round=round, data=data))

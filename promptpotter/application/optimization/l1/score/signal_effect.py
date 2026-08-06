@@ -1,10 +1,5 @@
-"""Escalation-signal decoding for one candidate's eval state.
-
-:func:`decode_signal_effect` folds the four overlapping reads of
-``signal.check_result`` (RuntimeFailure construction, elimination context,
-ELIMINATION_CUT decision payload, LEADER_LOCK_IN decision payload) into a
-single pass returning one :class:`SignalEffect`.
-"""
+"""Escalation-signal decoding for one candidate's eval state — folds the four overlapping reads of ``check_result``
+into a single pass returning one ``SignalEffect``."""
 
 from __future__ import annotations
 
@@ -31,24 +26,16 @@ _CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCatego
 
 
 def is_transient_scoring_abort(signal: EscalationSignal | None) -> bool:
-    """True when a scoring signal is a scoring-error abort dominated by transient transport
-    (CONNECTION/SERVER — a provider blip) rather than a config-deterministic break. The
-    origin path reads this to refuse banking a floor a transient hiccup corrupted."""
+    """True when a scoring abort is dominated by transient TRANSPORT rather than a config-deterministic break. The origin
+    path reads this to refuse banking a floor a hiccup corrupted."""
     if signal is None or signal.check_name != "scoring_error_abort":
         return False
     return not _abort_is_config_break(signal.check_result)
 
 
 def _abort_is_config_break(cr: dict[str, Any]) -> bool:
-    """True when a scoring-error abort is an operator-fixable config break.
-
-    Reads the abort's warning histogram: dominant CLIENT/PIPELINE ⇒ the
-    candidate's config is broken for all queries (operator-terminal). A
-    transport-dominated abort (CONNECTION/SERVER — the endpoint blipped) is
-    transient infrastructure, not a program fault — treating it as terminal
-    would blame a blip on the config and can escalate a hiccup to the HITL
-    terminate path. Empty histogram ⇒ transient (never halt on ambiguity).
-    """
+    """True when a scoring-error abort is operator-fixable. A transport-dominated abort is a blip, not a program fault:
+    treating it as terminal escalates a hiccup to the HITL path. Empty histogram ⇒ transient, never halt on ambiguity."""
     wt = cr.get("warning_types") or {}
     if not wt:
         return False
@@ -57,13 +44,8 @@ def _abort_is_config_break(cr: dict[str, Any]) -> bool:
 
 
 class CandidateOutcome(StrEnum):
-    """How ``score_one_candidate`` exited. Caller fires the report unconditionally
-    and uses the tag to decide whether to break the loop or continue.
-
-    SCORED is the default exit. SKIPPED_VALIDATION is an early return from
-    path 1; it still produces a report. LEADER_LOCKED tags a candidate whose
-    posterior cleared ``lock_in`` (per-candidate stop — the outer loop
-    continues). ESCALATED signals the caller to break."""
+    """How ``score_one_candidate`` exited. The caller fires the report UNCONDITIONALLY and uses the tag only to decide
+    whether to break — ``SKIPPED_VALIDATION`` is an early return that still produces one."""
 
     SKIPPED_VALIDATION = "skipped_validation"
     SCORED = "scored"
@@ -73,17 +55,8 @@ class CandidateOutcome(StrEnum):
 
 @dataclass(frozen=True)
 class SignalEffect:
-    """One pure decode of an ``EscalationSignal`` over a candidate's eval state.
-
-    Folds four overlapping reads of ``signal.check_result`` (RuntimeFailure
-    construction, elimination context, ELIMINATION_CUT decision payload,
-    LEADER_LOCK_IN decision payload) into a single pass. The caller still
-    owns leader-label decoration (needs prior-rank lookup over already-scored
-    candidates) and decision emission gating. Decision payloads are kept as
-    ``(inputs_ref, data)`` tuples — the ``ResumeCheckpointKind`` literal stays at
-    the ``record_decision`` callsite, where ``record_decision``'s own signature types
-    it, so a bare string is a mypy error rather than something a test has to find.
-    """
+    """One pure decode of an ``EscalationSignal``, folding four overlapping reads of ``check_result`` into one pass. Decision
+    payloads stay ``(inputs_ref, data)`` tuples so the kind literal is typed at the ``record_decision`` call site."""
 
     aborted: bool
     elimination_stopped: bool

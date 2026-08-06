@@ -1,8 +1,5 @@
-"""Per-sample formula compiler + scoring-spec block parser.
-
-AST-restricted ``eval`` over a namespace from the result's ``pipeline_data`` +
-scoring-function registry. Restricted-eval alone is bypassable; the AST
-allowlist (no attribute access / comprehensions / lambdas / walrus / subscript) is the boundary."""
+"""Per-sample formula compiler. Restricted ``eval`` alone is bypassable — the AST allowlist (no attribute access,
+comprehensions, lambdas, walrus or subscript) is the actual boundary."""
 
 from __future__ import annotations
 
@@ -18,25 +15,13 @@ from promptpotter.domain.scoring import DEFAULT_SCORER_ID, ScoringSpec
 
 
 class ScoringFormulaError(Exception):
-    """A scoring formula raised or returned a non-numeric value while scoring a sample.
-
-    Deterministic: the same formula runs on every sample, so this fires identically
-    across the round — it is a formula↔trace contract bug (a name the trace doesn't
-    carry, a matcher rejecting an input shape, a non-numeric result), never one odd
-    sample. It MUST halt loud: the prior behaviour swallowed it to ``0.0``, which is
-    indistinguishable from a genuinely wrong answer and silently zeroed an entire
-    campaign's fitness (the exact trap ``compile_scorer`` already guards at compile)."""
+    """A formula raised or returned a non-numeric while scoring. Deterministic — a formula↔trace contract bug, never one
+    odd sample — so it MUST halt loud: swallowing it to ``0.0`` silently zeroed an entire campaign's fitness."""
 
 
 class ScoringTermMissingError(ScoringFormulaError):
-    """The formula names a term the measurement does not carry.
-
-    Distinct from its parent because the two readers want opposite things. The live scorer
-    materializes its namespace fresh, so an absent term means a broken formula and must halt.
-    The read-side mask (``metrics.value_with_mask_applied``) scores stored records under
-    criteria they may predate — a schema-bound evaluator that never applied to that record —
-    and reports *unscorable*, never a fabricated number. Both need to tell "this term was
-    never measured" apart from "this formula divided by zero"."""
+    """The formula names a term the measurement does not carry. Distinct from its parent because the readers want opposites:
+    the live scorer must HALT, the read-side mask reports *unscorable* and never a fabricated number."""
 
 
 _SAFE_BUILTINS = {
@@ -95,7 +80,6 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
 
 
 def validate_ast(tree: ast.AST, *, source: str) -> None:
-    """Walk *tree*; raise ``ValueError`` on anything outside ``_ALLOWED_AST_NODES``."""
     for node in ast.walk(tree):
         kind = type(node)
         if kind in _ALLOWED_AST_NODES:
@@ -108,12 +92,8 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
 
 
 def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
-    """The ONE gate every scoring formula's result passes through, per-sample and per-round.
-
-    NaN/inf must never reach the clamp: ``min(1.0, nan)`` short-circuits to its FIRST
-    argument, so ``max(0.0, min(1.0, nan))`` is ``1.0`` — a ``0/0`` anywhere in a formula
-    would score a PERFECT sample, silently. A non-finite result is missing data, not a
-    verdict. *subject* names what was being scored (a query, a round)."""
+    """The ONE gate every formula result passes, per-sample and per-round. NaN must never reach the clamp: ``min(1.0, nan)``
+    short-circuits to its first argument, so a ``0/0`` anywhere would silently score a PERFECT sample."""
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:
@@ -216,7 +196,6 @@ def auto_scorer_id(per_sample: str | None) -> str:
 def split_scoring_block(
     block: str | dict[str, str] | None,
 ) -> ScoringSpec:
-    """Normalize the campaign ``scoring`` field to ``(per_sample, per_round, scorer_id)``."""
     if isinstance(block, dict):
         per_sample = block.get("per_sample")
         per_round = block.get("per_round")

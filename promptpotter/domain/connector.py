@@ -1,13 +1,5 @@
-"""Connector protocols — the "talk to a backend over the wire" boundary.
-
-- **WireAdapter** — outbound payload shaping; ``(query, pipeline_params)`` → HTTP body.
-  TermNorm default lives in ``promptpotter.connectors.termnorm``.
-- **SessionProtocol** — session-lifecycle handshake for stateful backends; no-op
-  for backends without a session concept.
-
-``PipelineSchema`` owns "pipeline shape"; connectors only **transmit** it. Keep
-these protocols small — anything beyond wire+session belongs in the schema.
-"""
+"""The wire boundary: ``WireAdapter`` shapes the outbound payload, ``SessionProtocol`` the handshake. ``PipelineSchema`` owns pipeline
+SHAPE and connectors only TRANSMIT it, so anything beyond wire+session belongs in the schema."""
 
 from __future__ import annotations
 
@@ -20,10 +12,7 @@ __all__ = ["SessionProtocol", "WireAdapter"]
 
 
 class WireAdapter(Protocol):
-    """Pure ``(query, pipeline_params) → request_body`` for ``BackendClient.run_query``.
-
-    TermNorm default projects to ``{"query", "steps", "node_config"}``.
-    """
+    """Pure ``(query, pipeline_params) → request_body`` for ``BackendClient.run_query``."""
 
     def __call__(
         self,
@@ -33,11 +22,8 @@ class WireAdapter(Protocol):
 
 
 class SessionProtocol(Protocol):
-    """Session lifecycle for stateful backends — keeps ``BackendClient`` session-agnostic.
-
-    Implementations own idempotency + recovery. Backends without sessions pass
-    a no-op instance.
-    """
+    """Session lifecycle for stateful backends, keeping ``BackendClient`` session-agnostic. Implementations own idempotency
+    and recovery; a backend without sessions passes a no-op."""
 
     async def set_terms(
         self,

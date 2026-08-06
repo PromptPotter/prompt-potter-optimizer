@@ -1,5 +1,3 @@
-"""Cross-cycle wound inheritance — surface sibling runtime_failures to a fresh fork."""
-
 from __future__ import annotations
 
 import logging
@@ -17,11 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _ran_to_completion(raw_stop_reason: Any) -> bool:
-    """Sibling reached a natural conclusion, so its terminal opt_sp carries trustworthy
-    runtime_failures.
-
-    Classified through the canonical ``StopReason`` table, never a hand-written name allowlist.
-    """
+    """The sibling reached a natural conclusion, so its terminal searchpoint carries trustworthy failures. Classified
+    through the canonical ``StopReason`` table, never a hand-written name allowlist."""
     if not isinstance(raw_stop_reason, str):
         return False
     try:
@@ -42,7 +37,6 @@ def gather_sibling_runtime_failures(
     backend_id: str,
     exclude_cycle_id: str | None = None,
 ) -> list[RuntimeFailure]:
-    """Aggregate deduped runtime_failures from finished sibling cycles of ``root_cycle_id``."""
     from promptpotter.infrastructure.store.layout import root_cycle_id as _root_of
 
     out: list[RuntimeFailure] = []

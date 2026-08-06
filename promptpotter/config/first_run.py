@@ -1,9 +1,5 @@
-"""First-run helper: prompt for a provider API key when none is set.
-
-Lives in `config/` so the write target (`.env` in CWD) is owned by the
-config layer rather than the CLI entry point — the entry-point invariant
-test forbids `write_text` from `campaign_runner.py`.
-"""
+"""First-run helper: prompt for a provider API key when none is set. It lives in ``config/`` so the write target
+(``.env`` in CWD) is owned by the config layer — the entry-point invariant test forbids a write from the CLI shell."""
 
 from __future__ import annotations
 
@@ -17,14 +13,8 @@ _PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENRO
 
 
 def ensure_api_key() -> None:
-    """Prompt for an OpenRouter key if no provider key is set anywhere.
-
-    Returns immediately if any of the four supported provider env vars is
-    set or if `.env` exists in CWD. Otherwise reads one line from stdin
-    and writes `.env` in CWD; cancellation (EOF/Ctrl-C/empty input) is
-    graceful — the caller proceeds and the provider call will error
-    later with the provider's own message.
-    """
+    """Prompt for an OpenRouter key when no provider key is set anywhere. Cancellation is GRACEFUL — the caller proceeds and
+    the provider call errors later with the provider's own message."""
     if any(os.environ.get(k) for k in _PROVIDER_KEYS):
         return
 

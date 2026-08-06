@@ -1,12 +1,5 @@
-"""`IdentityBundle` — singleton assembled at FastAPI startup.
-
-Holds provider config, session store, JWKS cache, the per-provider
-clients, and the short-lived OAuth-state map (state token → pending
-auth) used to bind the authorize→callback round-trip.
-
-Stashed on `app.state.identity_bundle`; the middleware + auth router
-both read from there.
-"""
+"""``IdentityBundle`` — the startup singleton holding provider config, session store, JWKS cache, clients, and the
+short-lived OAuth-state map. Stashed on ``app.state``; the middleware and auth router both read it from there."""
 
 from __future__ import annotations
 
@@ -33,8 +26,6 @@ _MAX_PENDING_STATES = 1024
 
 @dataclass(frozen=True)
 class PendingAuth:
-    """Short-lived state binding the authorize → callback round-trip."""
-
     provider: str
     nonce: str
     created_at: float
@@ -80,7 +71,6 @@ class IdentityBundle:
 
 
 def build_identity_bundle(paths: IdentityPaths) -> IdentityBundle:
-    """Assemble the bundle from on-disk config; missing providers stay None."""
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.sessions_dir.mkdir(parents=True, exist_ok=True)
     config = load_provider_config(paths.provider_config)

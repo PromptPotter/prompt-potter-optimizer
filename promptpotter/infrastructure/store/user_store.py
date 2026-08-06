@@ -1,10 +1,5 @@
-"""``UserStore`` — per-user quota knobs persisted at ``projects/{tenant}/user.json``.
-
-One file per tenant directory (tenant=user for Stage-1 single-tenant-per-user
-beta). The ``User`` record carries abuse-limit knobs that the launcher gates
-against: per-user daily spend cap, concurrent-cycles ceiling,
-campaigns-per-day ceiling. Missing file ⇒ defaults via :meth:`get_or_create`.
-"""
+"""Per-user quota knobs at ``projects/{tenant}/user.json`` — the abuse-limit ceilings the launcher gates against. A
+missing file yields defaults via :meth:`get_or_create`."""
 
 from __future__ import annotations
 
@@ -21,15 +16,8 @@ from promptpotter.shared.clock import utcnow_iso
 
 
 class ConsentRecord(StrictModel):
-    """Provable record that a user accepted a specific Terms version.
-
-    ``version`` is the accepted ``settings.TERMS_VERSION``; ``accepted_at`` is
-    server-stamped (never client-supplied — the record's legal weight depends on
-    a trustworthy clock). The consent gate re-prompts when ``version`` no longer
-    matches the live ``TERMS_VERSION``. This is the artifact the Terms'
-    indemnity / prohibition / security clauses lean on: which user accepted which
-    version, when.
-    """
+    """Provable record that a user accepted a specific Terms version. ``accepted_at`` is SERVER-stamped, never client-supplied —
+    the record's legal weight depends on a trustworthy clock."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -38,11 +26,8 @@ class ConsentRecord(StrictModel):
 
 
 class User(StrictModel):
-    """Per-user quota record. Persisted as ``user.json`` under the tenant root.
-
-    All limits are nullable / overridable per-install via the on-disk file —
-    operator hand-edits raise/lower for trusted users without redeploys.
-    """
+    """Per-user quota record at ``user.json`` under the tenant root. Every limit is nullable and overridable on disk, so an
+    operator can raise one for a trusted user without a redeploy."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -1,12 +1,5 @@
-"""AuditTrailView — per-cycle round recorder, flushes to `.runtime/cache/rounds/round_NNNN.json`.
-
-Per-cycle scope: a fork's recorder MUST point at the fork's own rounds dir. `__init__` rejects
-paths not ending in `.runtime/cache/rounds` to catch ad-hoc constructions; use `from_cycle_dir`.
-
-Pure ledger projection: boundaries from `PhaseRecord("round", "enter"|"complete")`, per-node I/O
-from `LLMCallRecord` (single-writer via `run_optimizer_node`). `set_l1_score` is the one direct
-in-process method — the live dashboard composes scoring data this projection wouldn't otherwise see.
-"""
+"""Per-cycle round recorder — a fork's MUST point at the fork's own rounds dir, so ``__init__`` rejects a path that does
+not end in ``.runtime/cache/rounds``. Pure ledger projection but for ``set_l1_score``, which the dashboard composes."""
 
 from __future__ import annotations
 
@@ -47,14 +40,8 @@ def load_round_audits(cycle_dir: Path, round_nums: list[int]) -> list[dict[str, 
 
 
 def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
-    """Project an :class:`LLMCallRecord` into the canonical ``nodes[*]`` block shape.
-
-    ``synthesized`` payloads carry input/output directly (used by L1 generate to record
-    its parser output without a live LLM call); other payloads route through
-    :func:`_action_to_node_block` for the per-field projection. Used by both
-    :class:`AuditTrailView` (flushes to ``round_NNNN.json``) and the live dashboard
-    projection (mirrors into ``current_round.nodes``).
-    """
+    """Project an ``LLMCallRecord`` into the canonical ``nodes[*]`` shape. ``synthesized`` payloads carry I/O directly (L1
+    generate records its parser output with no live call); everything else routes through the per-field projection."""
     if record.payload_kind == "synthesized":
         return {
             "input": dict(record.payload.get("input") or {}),
@@ -65,12 +52,8 @@ def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
 
 
 def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
-    """Read the latest ``round_NNNN.json``'s ``nodes`` block — used by the live dashboard
-    on resume to seed its sticky LLM-call mirror without re-issuing the calls.
-
-    Each returned block carries a ``round`` tag so a reader can tell which round
-    produced it. ``l1_score`` is skipped — the dashboard composes it live.
-    """
+    """The latest round file's ``nodes`` block — the live dashboard seeds its sticky LLM-call mirror from this on resume
+    without re-issuing the calls. ``l1_score`` is skipped, since the dashboard composes it live."""
     if not rounds_dir.is_dir():
         return {}
     round_re = re.compile(r"^round_(\d+)\.json$")
@@ -137,10 +120,8 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
 
 
 class AuditTrailView(DerivedView):
-    """Accumulates node I/O within a round, writes `round_NNNN.json` on flush. Construct via
-    `from_cycle_dir`; direct `__init__` is supported for tests. Both assert `.runtime/cache/rounds`
-    so a fork can never point at the parent tree.
-    """
+    """Accumulates node I/O within a round and writes the round file on flush. Both constructors assert the audit path, so
+    a fork can never point at the parent tree."""
 
     def __init__(self, rounds_dir: Path) -> None:
         if rounds_dir.parts[-len(_ROUNDS_SUBPATH) :] != _ROUNDS_SUBPATH:
@@ -196,10 +177,8 @@ class AuditTrailView(DerivedView):
                 self.flush()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Sole ingress for `nodes.l1_generate/l1_critique/l2_context/l3_plan`.
-        Projects via :func:`build_node_block`; the live dashboard subscribes the same
-        record kind and mirrors into ``current_round.nodes`` independently.
-        """
+        """Sole ingress for the optimizer node blocks. The live dashboard subscribes the same record kind and mirrors into
+        ``current_round.nodes`` independently."""
         self._nodes[record.node] = build_node_block(record)
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:

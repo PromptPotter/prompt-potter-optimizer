@@ -1,7 +1,5 @@
-"""``log.md`` render target — ``LogMdView`` → markdown digest.
-
-Per-cycle digest written to ``campaigns/<cycle_id>/log.md`` after each round:
-per-round block, P(best) sparklines, hard-sample heatmap, fork siblings, final-winner dump."""
+"""``log.md`` render target — the per-cycle digest rewritten after each round: per-round block, sparklines, heatmap,
+fork siblings, final winner."""
 
 from __future__ import annotations
 
@@ -39,7 +37,6 @@ _SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 
 
 def _spark(values: list[float]) -> str:
-    """ASCII sparkline for a [0, 1] series using Unicode block elements."""
     if not values:
         return ""
     out: list[str] = []

@@ -1,5 +1,3 @@
-"""L1-critique LLM call. Template references signals directly via the dispatch hub."""
-
 from __future__ import annotations
 
 import logging
@@ -33,12 +31,8 @@ async def run_l1_critique(
     round_num: int,
     ledger: CycleEventLog | None = None,
 ) -> CritiqueReadout:
-    """Build critique from pipeline stats + LLM analysis; returns dict for storage.
-
-    Template embeds ``{{plan|task_context|diagnostics|validation_failures|runtime_failures}}``
-    placeholders resolved by the dispatch hub. ``L1CritiqueOutput`` materialized to
-    dict so persistence doesn't drag Pydantic into the domain serialization path.
-    """
+    """Build the critique from pipeline stats + LLM analysis. The output is materialized to a dict so persistence does not
+    drag Pydantic into the domain serialization path."""
     bundle = build_bundle(cycle, latest_round=round_result)
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         load_optimizer_prompt,

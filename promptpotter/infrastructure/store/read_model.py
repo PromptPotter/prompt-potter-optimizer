@@ -1,13 +1,5 @@
-"""Append-only JSONL read model — the stdlib primitives that retire the
-read-whole / O(n)-scan / rewrite-whole persistence pattern.
-
-A save is one `O_APPEND` write and a read is one last-wins fold, so neither side
-hand-rolls upsert semantics over a whole-file scan. These are the ONLY primitives for
-derived-index persistence; a second mechanism doing the same job is a bug. The tailing
-reader keys its memo off the file's `(mtime_ns, size)` rather than its own writes — two
-`MeasurementArchive` instances share one file when an L4 inner cycle runs in-process, so
-a memo trusting only itself goes blind to the sibling's appends.
-"""
+"""Append-only JSONL read model — a save is one ``O_APPEND`` write, a read one last-wins fold. These
+are the ONLY primitives for derived-index persistence; a second mechanism doing this job is a bug."""
 
 from __future__ import annotations
 
@@ -22,20 +14,8 @@ from promptpotter.infrastructure.store.io import append_jsonl, ensure_parent_dir
 
 
 def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
-    """Every JSON object in *path*, in file order; missing file → ``[]``.
-
-    Blank and corrupt lines and non-object rows are skipped — a half-written
-    trailing line (crash mid-append) degrades to "not there", never an error.
-
-    *record_types* skips a line that cannot carry one of them **without parsing it**. A
-    cycle's ledger is the sole ingress for every event it ever emits — token usage, each
-    sample scored, every LLM call — so a scan looking for two record types was JSON-decoding
-    the whole file to keep a handful: one lineage tree cost 12k parses across 21 ledgers, and
-    that was the entire cost of serving it. The test is a substring probe for the quoted
-    value, so it cannot miss a row it should keep (a record_type is a plain identifier — JSON
-    escaping never rewrites those bytes) and a false positive is simply parsed and filtered
-    as before. Same rows out; the caller still checks ``record_type`` itself.
-    """
+    """Every JSON object in *path*, in file order; a blank, corrupt or half-written trailing line degrades
+    to "not there". *record_types* screens a line WITHOUT parsing it — a substring probe never misses."""
     probes = tuple(f'"{t}"' for t in record_types) if record_types else ()
     rows: list[dict[str, Any]] = []
     try:
@@ -65,9 +45,7 @@ def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> lis
 
 
 def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
-    """Fold *path* into ``{row[key]: row}``, last line wins. First-seen order is
-    preserved; a later line updates the value in place. Rows lacking a string
-    *key* are skipped."""
+    """Fold *path* into ``{row[key]: row}``, last line wins, first-seen order preserved."""
     out: dict[str, dict[str, Any]] = {}
     for row in iter_jsonl(path):
         k = row.get(key)
@@ -77,17 +55,8 @@ def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
 
 
 def fold_jsonl_from(path: Path, key: str, offset: int) -> tuple[dict[str, dict[str, Any]], int]:
-    """Fold only the bytes of *path* from *offset* on: ``({row[key]: row}, new_offset)``.
-
-    The caller merges the returned rows onto its memo (last-wins, same semantics as
-    :func:`fold_jsonl`) and keeps *new_offset* for the next tail. Reading stops at the
-    last complete line, so *new_offset* never lands mid-record and a crash-truncated
-    trailing line is simply re-read next tick rather than silently dropped — the same
-    tolerance :func:`iter_jsonl` gives a whole-file fold.
-
-    A newline cannot occur inside a multi-byte UTF-8 sequence, so cutting the byte
-    buffer at the last ``\\n`` is always a safe decode boundary.
-    """
+    """Fold only the bytes from *offset* on, returning the next offset. Reading stops at the last COMPLETE
+    line, so the offset never lands mid-record and a crash-truncated tail is re-read, never dropped."""
     out: dict[str, dict[str, Any]] = {}
     try:
         with open(path, "rb") as fh:
@@ -120,18 +89,15 @@ def _lock_for(path: Path) -> FileLock:
 
 
 def append_row(path: Path, row: dict[str, Any]) -> None:
-    """Append one upsert *row* (last-wins by the reader's key). One `O_APPEND`
-    write — no read, no rewrite. Held under the log's lock only to serialise
-    against a concurrent :func:`compact` (which truncates-and-replaces)."""
+    """Append one upsert row — one ``O_APPEND`` write, no read, no rewrite. Held under the log's lock only
+    to serialise against a concurrent :func:`compact`, which truncates and replaces."""
     with _lock_for(path):
         append_jsonl(path, row)
 
 
 def compact(path: Path, key: str, *, factor: int = 2) -> bool:
-    """Rewrite *path* keeping only the live (last-wins) row per *key*, in
-    first-seen order, when it has grown past *factor*× the live set. Returns
-    whether it rewrote. No-op when the file is absent or already tight. Held
-    under the log's lock so a concurrent :func:`append_row` can't be lost."""
+    """Rewrite *path* keeping only the live row per *key*, once it has grown past *factor*× the live set;
+    no-op when absent or already tight. Under the lock, so a concurrent append cannot be lost."""
     with _lock_for(path):
         rows = iter_jsonl(path)
         live: dict[str, dict[str, Any]] = {}

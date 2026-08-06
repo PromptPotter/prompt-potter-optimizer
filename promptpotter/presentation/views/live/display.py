@@ -73,13 +73,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _open_readout() -> TextIO | None:
-    """Truncate and hold open the run-readout mirror; ``None`` if the filesystem rejects it —
-    capture is best-effort observability and must never abort a costly campaign run.
-
-    Held open for the run rather than reopened per line: the open/append/close cycle measured
-    313 us against 6 us on a live handle, and a round mirrors hundreds of lines. Line-buffered,
-    so a hard-killed process still leaves every completed line on disk.
-    """
+    """Truncate and hold open the run-readout mirror; ``None`` if the filesystem refuses — capture is best-effort and must
+    never abort a costly run. Held open rather than reopened per line, and line-buffered so a hard kill still leaves them."""
     try:
         _READOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         return _READOUT_PATH.open("w", encoding="utf-8", buffering=1)
@@ -129,12 +124,8 @@ class LiveDisplay(DerivedView):
         return self._core.origin_acc
 
     def set_origin(self, fresh: float) -> None:
-        """Post-origin rewire — the headline scalars only.
-
-        It does NOT seed a row: round 0 arrives through ``on_round_complete`` like every
-        round. Inserting a synthetic ``origin`` row here put the origin in the table
-        twice (once as itself, once as C0) and, because the row numbers were positional,
-        pushed every later round's number one ahead of the round it reported."""
+        """Post-origin rewire — the headline scalars ONLY. It does not seed a row: round 0 arrives through ``on_round_complete``
+        like every round, and a synthetic one put the origin in the table twice and shifted every later round number."""
         self._core.origin_acc = fresh
         self._core.best_acc = max(self._core.best_acc, fresh)
 
@@ -164,7 +155,6 @@ class LiveDisplay(DerivedView):
         )
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        """In-flight optimizer LLM call as a one-line marker; oversized prompts flip to yellow ⚠."""
         self._pending_calls[record.call_id] = record.started_at_ms
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
@@ -181,26 +171,16 @@ class LiveDisplay(DerivedView):
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        """Surface a self-healed round degradation as a one-line CLI/notebook marker.
-
-        Parity with the dashboard's ``recent_loop_warnings`` + the round file's
-        ``warnings`` block — the same fact on every channel. ``message`` is
-        composed operator-readable at the emit site, so this just prints it.
-        """
+        """Surface a self-healed round degradation as a one-line marker — parity with the dashboard's warning list and the round
+        file's block, the same fact on every channel. ``message`` is composed at the emit site, so this just prints it."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         glyph = "✗" if record.severity == "error" else "⚠"
         prefix = f"{glyph} {round_tag} ".rstrip() if round_tag else f"{glyph} "
         self._write(f"  {YELLOW}{prefix}{record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Heartbeat tick (``HEARTBEAT_INTERVAL_S``); cached replays skip this path.
-
-        Same split the webapp draws (``derivations/time-ray.ts::isHeartbeat``): a BARE
-        tick proves only that the process is alive, one carrying ``detail`` reports
-        progress. ``detail`` is composed operator-readable at the emit site, so print it
-        verbatim — dropping it is what let a healthy inner campaign, which was reporting
-        ``inner r6/8 · Δ+18%`` into the ledger every 15s, read as a frozen call.
-        """
+        """Heartbeat tick; cached replays skip it. A BARE tick proves only that the process is alive, one carrying ``detail`` reports
+        progress — print ``detail`` VERBATIM: dropping it let a healthy inner campaign read as a frozen call."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         line = f"  · {node_label} still waiting · {record.elapsed_s:.0f}s"
@@ -209,7 +189,6 @@ class LiveDisplay(DerivedView):
         self._write(f"  {DIM}{line}{RESET}")
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Paired LLM-completion marker; reports duration + tokens; tags cached."""
         payload = record.payload
         cached = bool(payload.get("cached"))
         started = self._pending_calls.pop(record.call_id, None) if record.call_id else None
@@ -354,7 +333,6 @@ class LiveDisplay(DerivedView):
         p_best: float,
         paired_breakdown: dict[str, dict[str, float]],
     ) -> None:
-        """Stash PoBB snapshot; print one-line summary on first fire per candidate at q≥8."""
         apply_p_best_update(self._core, current_id, n_samples, p_best)
         POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
         if (
@@ -383,7 +361,6 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, sample_order: list[int], n_priors: int) -> None:
-        """The round's shared deterministic order — win-opportunity samples first."""
         if not sample_order:
             return
         prior_s = "" if n_priors == 1 else "s"
@@ -395,21 +372,14 @@ class LiveDisplay(DerivedView):
         )
 
     def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
-        """Priors backfilled on this sample. Cache-covered priors filtered upstream."""
         if not prior_ids:
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
         self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) across the round's candidates, ▲/▼ vs each one's own previous
-        reading; ``None`` when no PoBB this round.
-
-        The ranking is over ``round_p_best`` — one entry per candidate. Ranking the latest
-        single ``PoBBSnapshot`` dict instead ranks that candidate's odds against each prior,
-        and arrowing against the PREVIOUS ROUND's snapshot never matches at all: those ids
-        are round-scoped.
-        """
+        """Top-5 P(best) across the round's CANDIDATES, with each arrow against that candidate's own previous reading. Ranking one
+        snapshot's dict instead ranks its odds against each prior, and last round's ids never match — they are round-scoped."""
         if not self._core.round_p_best:
             return None
         last = self._core.round_p_best_prev
@@ -471,11 +441,8 @@ class LiveDisplay(DerivedView):
     def _fmt_round_leader(
         self, label: str, acc: float, origin_acc: float, composite: float | None
     ) -> str:
-        """Scoreboard one-liner; leader ordered by the shared ``round_winner_key``
-        (composite-first) so the live ★ can't contradict the display ranking under an
-        active formula. Point-estimate only — the true election (θ-LCB,
-        ``elect_round_winner``) prints at round close. ``★ leader`` only when
-        round-best strictly beats origin."""
+        """Scoreboard one-liner, ordered by the shared ``round_winner_key`` so the live ★ cannot contradict the display ranking.
+        Point-estimate only — the true θ-LCB election prints at round close."""
         delta_origin = acc - origin_acc
         key = round_winner_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key

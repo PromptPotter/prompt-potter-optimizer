@@ -1,10 +1,5 @@
-"""Workspace-scope diagnostic-run records — sole data feed for the Verify tab.
-
-Reads the sidecars written by ``cmd_verify`` (one
-:class:`DiagnosticRunRecord` per re-evaluation pass) and serves them under
-``/diagnostic-runs``. Cross-cycle, cross-campaign — the records live on the
-tenant archive root, not on any single campaign.
-"""
+"""Workspace-scope diagnostic-run records — the sole feed for the Verify tab. Cross-cycle and cross-campaign: the records
+live on the tenant archive root, not on any single campaign."""
 
 from __future__ import annotations
 

@@ -1,7 +1,5 @@
-"""Langfuse cloud sink — owns the trace/observation id maps and persists
-them to ``campaigns/{cycle_id}/langfuse/state.json`` so CLI-interrupted
-resumes produce one continuous trace.
-"""
+"""Langfuse cloud sink — owns the trace/observation id maps and persists them, so a CLI-interrupted resume still
+produces one continuous trace."""
 
 from __future__ import annotations
 

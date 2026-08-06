@@ -1,9 +1,5 @@
-"""Repo-local paths for OIDC config + sessions + claim ledger.
-
-The whole identity surface (provider config, allowlist, session store,
-default-claim marker) lives at `.promptpotter/identity/` next to the
-existing `.promptpotter/projects/` tree. Single git-ignored data dir.
-"""
+"""Repo-local paths for OIDC config, sessions and the claim ledger. The whole identity surface lives under one
+git-ignored ``.promptpotter/identity/`` dir."""
 
 from __future__ import annotations
 

@@ -1,12 +1,5 @@
-"""Validators on L3-parsed outputs (soft signals; layout HARD validators live in :mod:`domain.l1_layout`).
-
-* :data:`L3_PLAN_LENGTH_FLOOR` — plan is too short to carry signal.
-* :data:`L3_PLAN_VERBATIM_REPEAT` — same plan as the prior plan.
-
-Outcomes append to ``opt_sp.l3_guard_breaches`` and surface to L3's next
-fire as self-healing evidence via the ``l3_guard_breaches`` dispatch-hub
-signal.
-"""
+"""Soft signals on L3-parsed output; the HARD layout validators live in ``domain.l1_layout``. Outcomes append to
+``opt_sp.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
 
 from __future__ import annotations
 

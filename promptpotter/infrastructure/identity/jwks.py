@@ -1,8 +1,4 @@
-"""JWKS cache with key-rotation refresh.
-
-In-process cache keyed by JWKS URL → `{kid: rsa-key}`. Refreshed on
-unknown kid (covers Google rotating keys without a fixed schedule).
-"""
+"""JWKS cache keyed by URL, refreshed on an unknown ``kid`` — which covers Google rotating keys with no fixed schedule."""
 
 from __future__ import annotations
 

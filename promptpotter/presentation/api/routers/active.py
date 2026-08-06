@@ -1,18 +1,5 @@
-"""Active-session pointer + read-only cycle list + optimizer/registry reads.
-
-Carries the tenant-global read-only surface: the active session
-(``GET /sessions/active``), the global cycle list (``GET /cycles``), and the
-optimizer-pipeline read (``GET /optimizer-pipeline``). The evaluator registry is
-NOT served here — it is import-time constant, so it reaches the webapp through
-``scripts/build_ts_types.py`` (CI-gated) rather than a route.
-Live telemetry is NOT served here — a cycle's ``dashboard.json`` is served by
-the per-cycle dashboard route, which the operator reaches by resolving the
-active pointer above. Routes are tagged per-resource for OpenAPI grouping since
-this router spans several resources. Cycle mutations ride the closed-set command
-highway at ``POST /api/v1/commands/{kind}`` (``docs/specs/m12-api-openapi.yaml``
-for the wire contract; ``presentation/api/routers/commands.py`` for the dispatch
-shell).
-"""
+"""The tenant-global read-only surface. The evaluator registry is NOT served here (import-time constant, it reaches
+the webapp through the generated TS) and neither is live telemetry — that is the per-cycle dashboard route."""
 
 from __future__ import annotations
 

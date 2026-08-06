@@ -1,14 +1,5 @@
-"""``Sample`` — canonical per-sample domain object + ``Measurement`` archive row.
-
-``Sample`` is data-side peer to SearchPoint: cross-campaign ``id``, inputs, and
-accumulating metadata (``escalation_count``, ``run_ids``). Per-sample aggregate
-stats live in ``SampleIndex``, measurements in ``measurements/`` —
-read via ``SampleIndex`` / ``MeasurementArchive`` directly, never duplicated on
-the model. Mutable because ``run_ids`` accumulates over the campaign lifecycle.
-
-``Measurement`` is the denormalized read-only archive row returned by both
-``measurements_for_sample`` / ``measurements_for_config`` views.
-"""
+"""``Sample`` is the data-side peer to SearchPoint; aggregates live in ``SampleIndex`` and measurements in ``measurements/``,
+never duplicated on the model. Mutable because ``run_ids`` accumulates over the campaign."""
 
 from __future__ import annotations
 
@@ -21,8 +12,6 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class Sample(StrictModel):
-    """Canonical per-sample handle + metadata + trace coordinates."""
-
     # `extra="ignore"`: a dataset row carries whatever columns the operator's file had
     # (`task`, `source_sheet`, …); this model owns only the ones it names.
     model_config = ConfigDict(extra="ignore")

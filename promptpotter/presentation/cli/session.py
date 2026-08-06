@@ -1,5 +1,3 @@
-"""CLI session-state plumbing — ``SessionCtx`` wraps the raw state dict with typed accessors."""
-
 from __future__ import annotations
 
 import argparse
@@ -25,12 +23,8 @@ class SessionCtx:
 
     @property
     def hop(self) -> CycleHop:
-        """This context's cycle as the pair that addresses it.
-
-        Derived, never stored: ``cycle_id`` is reassigned in place when a verb forks
-        (``_maybe_fork_diag_sibling``), so a stored copy would name the pre-fork cycle
-        from the moment it stopped being the one running.
-        """
+        """This context's cycle as the pair that addresses it. Derived, never stored: ``cycle_id`` is reassigned IN PLACE when a
+        verb forks, so a stored copy names the pre-fork cycle from the moment it stopped being the one running."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
     @property
@@ -45,17 +39,8 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        """The dataset's live ``campaign.json`` (edits picked up + drift-detected) with the
-        per-campaign overlay (origin-floor values + param locks) re-applied from the frozen
-        ``campaign.json::config`` — that overlay lives only on the snapshot, so a live-file
-        rebuild would drop it. Session-state copy never consulted (may carry stale schema fields).
-
-        Resolution is **tenant-first**, via the same ``readable_dataset_dir`` the runner
-        uses: a tenant upload at ``projects/{tenant}/datasets/{slug}/`` before install
-        content at ``datasets/{name}/``. Reading only the repo root meant every *ingested*
-        dataset — the only kind a distributed install has — found no live file and resumed
-        off the frozen snapshot instead, making it the config of record for exactly the
-        campaigns whose snapshot is least likely to still validate."""
+        """The dataset's LIVE ``campaign.json`` with the frozen snapshot's overlay re-applied — that overlay exists only on
+        the snapshot. Resolution is tenant-FIRST: repo-root-only made every ingested dataset resume off the snapshot."""
         from promptpotter.application.config import (
             apply_inherited_overlay,
         )
@@ -95,7 +80,6 @@ class SessionCtx:
 
 
 def no_dataset_hint() -> str:
-    """Formatted list of discovered datasets + exact fresh-init commands."""
     root = benchmark_datasets_root()
     datasets = sorted(p.parent.name for p in root.glob("*/campaign.yaml"))
     lines = [f"  python -m promptpotter new {name}" for name in datasets]
@@ -104,7 +88,6 @@ def no_dataset_hint() -> str:
 
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
-    """Load active session from disk."""
     from promptpotter.infrastructure.store.session_pointer import (
         active_pointer_exists,
         read_active_pointer,

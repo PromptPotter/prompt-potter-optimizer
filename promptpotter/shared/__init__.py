@@ -1,5 +1,3 @@
-"""Shared leaf-level utilities — no service or model dependencies."""
-
 from __future__ import annotations
 
 import math
@@ -74,14 +72,8 @@ def extract_gsm8k_number(text: str) -> float | None:
 
 
 def extract_boxed_number(text: str) -> float | None:
-    """Extract an AIME answer: the last NUMERIC ``\\boxed{N}`` first, else the last
-    number in the text (commas tolerated). Mirrors :func:`extract_gsm8k_number`.
-
-    The ONE definition of the AIME answer value — read identically by the scorer
-    (``_aime_match``) and the display side (``_extract_boxed_display``), so the
-    shown answer never diverges from the scored one. A non-numeric ``\\boxed{…}``
-    (e.g. an algebraic expression) is skipped for the last bare number, exactly as
-    the scorer falls back."""
+    """The ONE definition of the AIME answer value, read identically by the scorer and the display side, so the shown answer never
+    diverges from the scored one. A non-numeric boxed expression falls back to the last bare number."""
     boxed = BOXED_RE.findall(text)
     if boxed:
         try:

@@ -1,6 +1,5 @@
-"""Evaluator registry + materializers; per-round/per-sample compute fns return a float in [0, 1],
-or ``None`` when the round/sample carried nothing to measure — the materializers then omit the
-key rather than fabricate a value. A zero is a verdict; an absence is not."""
+"""Evaluator registry + materializers. A compute fn returns a float in [0, 1], or ``None`` when the
+round/sample carried nothing to measure — a zero is a verdict, an absence is not."""
 
 from __future__ import annotations
 
@@ -52,19 +51,8 @@ __all__ = [
 
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Mean fitness over SCOREABLE samples. Three row classes, three treatments:
-
-    - **scoreable** (not deprecated, not errored) — carries a verdict; averaged.
-    - **deprecated** (fatal-classified) — a verdict-of-0-class failure, already penalized
-      via ``runtime_failure_rate``; excluded from the mean.
-    - **error** (``is_error_result`` — the measurement never happened) — the ABSENCE of a
-      verdict, not a zero; excluded from the mean and surfaced via ``compute_error_rate``.
-
-    ``None`` when the round scored no samples at all. No-scoreable-rows returns 0.0 — for
-    all-deprecated that is the honest verdict (every sample measured and fatally failed);
-    for all-errored the honest value is ``None``, but that Optional must propagate through
-    ``materialize_round_values`` → ``compute_composite_fitness`` without
-    ``ScoringTermMissingError`` first (see ``docs/specs/code-debt-cleanup.md``)."""
+    """Mean fitness over SCOREABLE rows. A DEPRECATED row is already penalized via
+    ``runtime_failure_rate``; an ERRORED one never happened and surfaces via ``compute_error_rate``."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.classification import is_deprecated
 
@@ -120,9 +108,6 @@ SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
 
 
 def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
-    """Build the per-channel self-heal Evaluator: ``min(len(events)/n_samples, 1.0)``,
-    ``direction='low'``. ``events`` is the matching list on ``opt_sp.memory.wounds``."""
-
     def compute(
         *, results: list[QueryMeasurement], opt_sp: OptSearchPoint | None = None, **_: Any
     ) -> float | None:
@@ -146,7 +131,6 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
 
 
 def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """``None`` when no sample carried a timing — an untimed round is not an instant one."""
     latencies: list[float] = []
     for r in results:
         pd = r.get("pipeline_data") or {}
@@ -170,9 +154,6 @@ def _compute_recall(
     candidate_key: str,
     **_: Any,
 ) -> float | None:
-    """Fraction of non-error queries (where *node* ran) with GT in *candidate_key*'s list.
-    ``None`` when the node ran on no query — recall over nothing is not zero recall."""
-
     def _step_ran(r: QueryMeasurement) -> bool:
         pd = r.get("pipeline_data") or {}
         if pd.get("terminated_at") == node.name:
@@ -196,7 +177,6 @@ def _compute_recall(
 def compute_cache_hit_rate(
     *, results: list[QueryMeasurement], node: PipelineNode, **_: Any
 ) -> float | None:
-    """``None`` when every query errored — a rate over no completed query is unmeasured."""
     cache_hits = non_error = 0
     for r in results:
         if is_error_result(r):
@@ -233,7 +213,6 @@ def has_limit_node(schema: PipelineSchema) -> bool:
 def _retrieval_shortfall_for_result(
     result: QueryMeasurement, schema: PipelineSchema
 ) -> float | None:
-    """Mean of min(observed/target, 1.0) over limit-bearing nodes; None when none apply."""
     pd = result.get("pipeline_data") or {}
     ratios: list[float] = []
     for node, _key, target in _limit_nodes(schema):
@@ -250,8 +229,6 @@ def _retrieval_shortfall_for_result(
 def compute_retrieval_shortfall_per_sample(
     *, result: QueryMeasurement, schema: PipelineSchema | None = None, **_: Any
 ) -> float | None:
-    """``None`` when no limit-bearing node produced a list for this sample — a retrieval that
-    never ran did not meet its target."""
     if schema is None:
         return None
     return _retrieval_shortfall_for_result(result, schema)
@@ -279,8 +256,6 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
 
 
 def compute_prompt_compactness(*, opt_sp: OptSearchPoint | None = None, **_: Any) -> float | None:
-    """``1 - len(render)/budget``; ``None`` when there is no prompt to measure — an absent
-    prompt is not a maximally compact one."""
     if opt_sp is None:
         return None
     rendered = opt_sp.render() or ""
@@ -290,13 +265,8 @@ def compute_prompt_compactness(*, opt_sp: OptSearchPoint | None = None, **_: Any
 
 
 def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """``1 - mean(output_tokens)/budget`` — the generation-cost twin of
-    ``prompt_compactness`` (output side). Sums each step's completion tokens from
-    ``pipeline_data.step_tokens[*].output``; ``None`` when no sample reported token
-    counts — a round whose cost we failed to record is not a maximally cheap one, and
-    scoring it 1.0 paid a fitness bonus for missing telemetry. This is the
-    accuracy-vs-cost axis the optimizer can trade against — a terse candidate scores
-    higher here than a verbose one."""
+    """``1 - mean(output_tokens)/budget`` — the generation-cost twin of ``prompt_compactness``, and the
+    accuracy-vs-cost axis the optimizer trades against: a terse candidate scores above a verbose one."""
     totals: list[float] = []
     for r in results:
         st = (r.get("pipeline_data") or {}).get("step_tokens") or {}
@@ -447,12 +417,11 @@ _REGISTRY: list[Evaluator] = [
 
 
 def all_evaluators() -> list[Evaluator]:
-    """Return the full registry (copy)."""
     return list(_REGISTRY)
 
 
 def evaluators_meta() -> list[dict[str, Any]]:
-    """JSON-serializable registry projection for the webapp What-If panel — drops `compute`/`applies`."""
+    """JSON-serializable registry projection for the webapp What-If panel — drops ``compute``/``applies``."""
     return [
         {
             "name": ev.name,
@@ -468,7 +437,6 @@ def evaluators_meta() -> list[dict[str, Any]]:
 def _concrete_round_entries(
     schema: PipelineSchema,
 ) -> list[tuple[str, Evaluator, PipelineNode | None]]:
-    """Applicable per-round evaluators; node-type-bound names get namespaced when >1 matching node."""
     out: list[tuple[str, Evaluator, PipelineNode | None]] = []
     for ev in _REGISTRY:
         if ev.scope != "per_round":
@@ -492,8 +460,6 @@ def materialize_round_values(
     *,
     opt_sp: OptSearchPoint | None = None,
 ) -> dict[str, float]:
-    """Run every per-round evaluator that applies; return ``{name: value}``, omitting the
-    evaluators that had nothing to measure (``None``)."""
     values: dict[str, float] = {}
     for display_name, ev, node in _concrete_round_entries(schema):
         kwargs: dict[str, Any] = {"results": results, "schema": schema, "opt_sp": opt_sp}
@@ -506,13 +472,8 @@ def materialize_round_values(
 
 
 def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, float]:
-    """Materialize the per-round evaluators that are pure functions of the persisted
-    per-sample rows (``Evaluator.from_rows``) — ``accuracy``, ``output_compactness``,
-    ``latency_norm``, ``error_rate``, ``degraded_rate``. No schema, no ``opt_sp``: the
-    read-side mask recomputes exactly these from ``all_candidate_results`` so they are
-    present on every record (and re-scored over a sample subset when masked), while the
-    schema/opt_sp-bound evaluators come from the stored snapshot. An evaluator with nothing
-    to measure on this row subset is omitted, not defaulted."""
+    """The per-round evaluators that are pure functions of the persisted rows (``Evaluator.from_rows``).
+    The read-side mask recomputes exactly these, so they survive a re-score over a sample subset."""
     out: dict[str, float] = {}
     for ev in _REGISTRY:
         if ev.scope != "per_round" or not ev.from_rows:
@@ -527,7 +488,6 @@ def materialize_sample_values(
     schema: PipelineSchema,
     result: QueryMeasurement,
 ) -> dict[str, float]:
-    """Run every per-sample evaluator that applies on a single result; omit the unmeasured."""
     values: dict[str, float] = {}
     for ev in _REGISTRY:
         if ev.scope != "per_sample":
@@ -541,16 +501,13 @@ def materialize_sample_values(
 
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """``accuracy`` — composite_fitness defaults to plain accuracy so the decision metric
-    and the headline number agree (no latency/recall/self-heal blend inflating it above
-    the real score). Degradation is gated separately by the round ``health`` block, not
-    folded into fitness. Re-weight in other terms via campaign.json::scoring."""
+    """``accuracy`` — the default composite is plain accuracy so the decision metric and the headline
+    agree. Degradation is gated by the round ``health`` block, never folded into fitness."""
     return "accuracy"
 
 
 def default_per_round_formula_short(schema: PipelineSchema) -> str:
-    """Short form of the default formula — derived from the full formula via the
-    shared short-code table (no hand-synced literal); fits the 70-char frame."""
+    """Short form of the default, derived through the shared short-code table; fits the 70-char frame."""
     return to_short_formula(default_per_round_formula(schema))
 
 
@@ -558,16 +515,8 @@ def resolve_round_formula(
     explicit: str | None,
     schema: PipelineSchema | None,
 ) -> tuple[str | None, str | None]:
-    """``(full, short)`` composite-fitness formula for a cycle — campaign override first,
-    else the schema default, else nothing to report.
-
-    The ONE resolution. Three surfaces answer "what formula is this cycle scored under" —
-    the live dashboard at INIT.enter, the same at INIT.exit, and the finished cycle's
-    `index.json::final`, which `log.md` reads. The third had no writer at all, so every
-    `log.md` ever rendered said `(formula unavailable)` about a cycle whose formula the
-    other two were already displaying. A short form exists only for the default: an
-    operator-authored formula is shown verbatim or not at all.
-    """
+    """``(full, short)`` for a cycle — campaign override, else the schema default, else nothing. THE one
+    resolution for all three surfaces; a short form exists only for the default, never for an override."""
     if explicit:
         return explicit, None
     if schema is None:

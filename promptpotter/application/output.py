@@ -1,18 +1,5 @@
-"""Operator-facing markdown writers — log.md / review.md / hard_samples.json.
-
-Called from runner milestones (not RunCallbacks — those stay display-only).
-Two log.md tiers: per-cycle (``cycles/{cycle_id}/log.md``) + campaign
-digest (``campaigns/{campaign_id}/log.md``).
-
-Owns disk-side view reconstruction (``from_disk_log``): a persisted ``index.json``
-→ the same ``LogMdView`` shape the live ingress emits, so ``to_markdown`` has one
-schema. (The round twin, ``from_disk_round``, had no callers and is deleted.)
-
-This is an **orchestrator** (computes artifacts + writes disk), so it lives in
-``application/`` next to the runner that calls it — not in ``presentation/``,
-whose entry-point shells must stay read-only over orchestration. It renders
-through the presentation view layer (``to_markdown`` + the typed view models),
-which is the pure data → text surface shared with the live ingress."""
+"""Operator-facing markdown writers — ``log.md`` / ``review.md`` / ``hard_samples.json``, called
+from runner milestones and NOT from RunCallbacks, which stay display-only."""
 
 from __future__ import annotations
 
@@ -184,25 +171,8 @@ def _compute_behavior_per_round(
 
 
 def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, str] | None:
-    """The cycle's terminal health story, or ``None`` when it ended cleanly.
-
-    Reads the cycle ``stop_reason`` + the round ``health`` (both already on disk).
-    An evidence-starvation abort — L2 reading the starved-node verdict and emitting
-    ``terminate_proposal`` → ``StopReason.ABORT`` (``escalation_abort``) — is otherwise
-    INVISIBLE in this surface: the conformance verdict reads "healthy" and ``l2_fires``
-    reads 0 (a terminate produces no l2-sourced round). Surface it so a starvation halt
-    can't be mistaken for a healthy short run.
-
-    Gated on the cycle's TERMINAL state, not any critical round in history: a
-    ``critical`` round that L2 then self-healed away (the cycle recovers and ends
-    healthy) must NOT show a halt banner. So fire only when the cycle aborted
-    (``escalation_abort``) OR the LAST graded round is itself ``critical`` (it halted
-    there — backend-unreachable, origin-gate, or natural end on a critical round).
-
-    Returns ``{tag, node, action, terminated}`` — ``tag`` the starvation/critical reason,
-    ``node`` the dead node (``dominant_node``), ``action`` the operator-facing
-    ``suggested_action``, ``terminated`` ``"yes"`` when L2 emitted ``terminate_proposal``
-    (``stop_reason == escalation_abort``), else ``""``."""
+    """The cycle's terminal health story, or ``None`` when it ended cleanly. Gated on the cycle's
+    TERMINAL state, never on a critical round in history that L2 then self-healed away."""
     stop_reason = (index.get("stop_reason") or "").strip()
     terminated = "yes" if stop_reason == StopReason.ABORT else ""
     last_health: DegradationHealth | None = None
@@ -388,15 +358,8 @@ def _render_variants_table(
     *,
     scored: bool,
 ) -> list[str]:
-    """Per-variant row. The audit dict carries what L1 PROPOSED; ``round_data`` carries what
-    each proposal MEASURED, joined on :func:`candidate_label` — the sole writer of both sides'
-    key. Join on anything else and every score column prints ``—`` while ``candidate_scores``
-    sits populated on the first parameter: `review.md` records an unscored round.
-
-    There is no Δ_parent column: the round file holds each candidate's MATCHED origin, which
-    is the comparison the loop itself elects on, and no parent composite. A column with no
-    source is what the em-dashes were.
-    """
+    """Per-variant row: the audit dict carries what L1 PROPOSED, ``round_data`` what it MEASURED,
+    joined on :func:`candidate_label`. Join on anything else and every score column prints ``—``."""
     variants = extract_l1_variants(audit)
     if not variants:
         return []
@@ -425,13 +388,8 @@ def _render_variants_table(
 
 
 def _score_cells(c: ScoredCandidate | None) -> str:
-    """``composite_fitness | acc | Δ_origin | beat`` for one variant.
-
-    ``—`` only where there genuinely is no number: a variant L1 proposed but the round never
-    scored (parse-rejected, deduped), or a candidate with no MATCHED origin — eliminated
-    before the coverage floor, where ``matched_origin_composite`` is deliberately ``None``
-    rather than 0.0 (a 0.0 there reads as "beat the origin by its whole score").
-    """
+    """``—`` only where there genuinely is no number — a variant the round never scored, or one
+    with no MATCHED origin, where ``None`` is deliberate: a 0.0 there reads as beating it whole."""
     if c is None:
         return "— | — | — | —"
     mo = c.matched_origin_composite
@@ -442,7 +400,6 @@ def _score_cells(c: ScoredCandidate | None) -> str:
 
 
 def _fmt_evidence_cell(raw: object) -> str:
-    """Render evidence_grounding for the variants table — one cell, terse."""
     if not isinstance(raw, dict):
         return "—"
     field_name = str(raw.get("field") or "").strip()
@@ -507,24 +464,8 @@ def _filter_artifact_to_live_candidates(
 
 
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, Any] | None:
-    """Build + persist the hard-sample heatmap artifacts at each data scope.
-
-    Two files, named by data scope:
-
-    - ``cycles/{cycle_id}/hard_samples.json`` — **cycle** scope: fit over
-      ``cycle.rounds`` only.
-    - ``campaigns/{campaign_id}/hard_samples.json`` — **campaign** scope:
-      the cycle's rounds folded with the campaign's archive observations.
-
-    There is no dataset-scope file. Dataset scope is CROSS-campaign, so no single
-    campaign owns it; the one consumer (``GET /datasets/{name}/heatmap``) folds it
-    from the archive per request, which is also the only way it can be correct while
-    a run is in flight.
-
-    Returns the artifact selected for inline log.md rendering: the
-    campaign-scope one when ``optimization.seed_heatmap_from_archive`` is on,
-    otherwise the cycle-scope one. ``None`` when no observations exist yet.
-    """
+    """Build + persist the heatmap artifacts at cycle and campaign scope. There is no DATASET-scope
+    file: that scope is cross-campaign, so no campaign owns it and the route folds it per request."""
     if not session.state.cycle_id or session.store is None:
         return None
 
@@ -567,14 +508,8 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """``{candidate_id: [P(best) per query]}`` + each one's last query index.
-
-    One stream line is one candidate's reading (``current_id`` says whose), so the
-    trajectory is keyed by that. Fanning every key of a cid→prob map into its own
-    trajectory instead lists each prior as a candidate: the non-current keys are the
-    CURRENT candidate's odds against that prior, so log.md's sparkline files the round's
-    actual winner under its own defeat.
-    """
+    """``{candidate_id: [P(best) per query]}``. One stream line is one candidate's reading, so fanning
+    every key of its cid→prob map into a trajectory files the winner under its own defeat."""
     if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
@@ -608,10 +543,8 @@ def from_disk_log(
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """``fork_indices`` is the list of sibling-cycle ``index.json`` blobs;
-    rendered as the ``## Cycles`` section on the campaign digest. The
-    per-cycle log.md passes ``None``.
-    """
+    """``fork_indices`` is the sibling-cycle ``index.json`` blobs, rendered as ``## Cycles`` on the
+    campaign digest; the per-cycle log.md passes ``None``."""
     final = index.get("final") or {}
     status = DigestStatusView(
         campaign_id=str(index.get("cycle_id") or ""),
@@ -726,7 +659,6 @@ def _render_cycle_log_md(
     hop: CycleHop,
     hard_samples_artifact: dict[str, Any] | None,
 ) -> None:
-    """Per-cycle ``cycles/{cycle_id}/log.md`` — this cycle's rounds only."""
     index = store.load(hop)
     if not index:
         return
@@ -746,11 +678,8 @@ def _render_cycle_log_md(
 
 
 def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
-    """Campaign digest ``campaigns/{campaign_id}/log.md`` — the folder-UI headline.
-
-    Anchored on the root cycle, with every other cycle of the lineage
-    folded into the ``## Cycles`` section.
-    """
+    """Campaign digest ``campaigns/{campaign_id}/log.md`` — the folder-UI headline, anchored on the
+    root cycle with every other cycle of the lineage folded into ``## Cycles``."""
     campaign = store.load_campaign(campaign_id)
     if campaign is None:
         return
@@ -776,7 +705,6 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
 def _load_sibling_indices(
     store: CampaignStore, campaign_id: str, *, exclude: str
 ) -> list[dict[str, Any]] | None:
-    """Every cycle ``index.json`` in the campaign except ``exclude``. ``None`` when empty."""
     cycles_dir = campaign_cycles_dir(store.campaign_root_dir(campaign_id))
     if not cycles_dir.is_dir():
         return None

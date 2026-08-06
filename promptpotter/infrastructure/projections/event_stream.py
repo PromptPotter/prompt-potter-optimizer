@@ -1,11 +1,5 @@
-"""Cross-process tail of a cycle's on-disk ledger → ``ProjectionEnvelope`` frames.
-
-Tailing the file rather than subscribing in-process is what makes the stream work no
-matter which process runs the campaign (API server, CLI, spawned runner). Reads are
-incremental — a byte cursor seeks past what was already streamed — and ``sequence`` is
-stamped with the writer's own 0-based line index, the same thing ``offset`` means
-everywhere else here. Certified Profile-A contract: ``docs/developer/event-stream.md``.
-"""
+"""Cross-process TAIL of a cycle's on-disk ledger into SSE frames — tailing rather than subscribing is what makes the
+stream work whichever process runs the campaign. ``sequence`` is the writer's own 0-based line index."""
 
 from __future__ import annotations
 
@@ -26,12 +20,8 @@ _VALID_KINDS: frozenset[str] = frozenset(get_args(ProjectionKind))
 
 
 class CycleLedgerTail:
-    """Incremental reader over one cycle's ``.runtime/ledger.jsonl``.
-
-    Tracks a byte position (for efficient seeks) alongside the line index it
-    stamps as ``ProjectionEnvelope.sequence``. The reads are synchronous file
-    I/O — callers on an event loop run them via ``asyncio.to_thread``.
-    """
+    """Incremental reader over one cycle's ledger, tracking a byte position alongside the line index it stamps as
+    ``sequence``. The reads are synchronous file I/O — callers on an event loop use ``asyncio.to_thread``."""
 
     def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
         self._layout = CycleLayout(cycle_dir)
@@ -41,10 +31,8 @@ class CycleLedgerTail:
         self._line_index = 0
 
     def snapshot_frame(self) -> ProjectionEnvelope:
-        """Leading frame: the cycle's ``dashboard.json`` (or a warming-up shape)
-        plus ``snapshot_at_offset``. Also positions the tail cursor at the current
-        end-of-file so the live tail begins exactly where the snapshot left off —
-        no gap, no duplicate."""
+        """The leading frame: the cycle's dashboard (or a warming shape) plus its offset. It also POSITIONS the tail cursor at
+        end-of-file, so the live tail begins exactly where the snapshot left off — no gap, no duplicate."""
         offset = self._seek_to_eof()
         body = self._read_dashboard()
         body["snapshot_at_offset"] = offset
@@ -56,9 +44,8 @@ class CycleLedgerTail:
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
-        """Every complete line appended since the last read → one envelope each
-        (``kind`` = the record's ``record_type``, ``sequence`` = line index). A
-        trailing partial line (a write still in flight) is left for the next call."""
+        """Every complete line appended since the last read, one envelope each. A trailing PARTIAL line — a write still in
+        flight — is left for the next call."""
         if not self._ledger_path.exists():
             return []
         with self._ledger_path.open("rb") as fh:

@@ -1,9 +1,5 @@
-"""Wound-channel renderers — self-healing evidence into optimizer prompts.
-
-Wound 1 (L1 parse-time validation), Wound 2 (DegradationCheck runtime), Wound 4 (L2/L3
-post-parse guard breaches). Uniform `(InjectionBundle) -> str`. Fenced where untrusted content
-(LLM-proposed values, pipeline warnings) is echoed.
-"""
+"""Wound-channel renderers — self-healing evidence into optimizer prompts, uniform ``(InjectionBundle) -> str``.
+Fenced wherever untrusted content (LLM-proposed values, pipeline warnings) is echoed."""
 
 from __future__ import annotations
 
@@ -25,10 +21,8 @@ from promptpotter.domain.validators import ValidatorOutcome
 def _rf_matches_current_config(
     rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
 ) -> bool:
-    """Filter ACCUMULATED failures by current backend config — a failure observed under a
-    superseded overlay (e.g. yesterday's provider/model) becomes stale evidence that mis-steers
-    L2's framing. Compares on PARAM_FORBIDDEN_KEYS (provider, model).
-    """
+    """Filter ACCUMULATED failures by current backend config: one observed under a superseded provider/model is stale
+    evidence that mis-steers L2's framing."""
     node = rf.dominant_warning.split(":", 1)[0]
     if not node:
         return True
@@ -55,10 +49,8 @@ def _validation_block(b: InjectionBundle) -> str:
 
 
 def _runtime_block(b: InjectionBundle) -> str:
-    """Mid-eval runtime failures, owner-tagged (owner=l1 → retune; owner=operator → flagged).
-    ACCUMULATED entries filter through `_rf_matches_current_config`; NEW (first-seen this round)
-    always pass — they describe the failure being heard right now.
-    """
+    """Mid-eval runtime failures, owner-tagged. ACCUMULATED entries filter through the config match; NEW ones always pass —
+    they describe the failure being heard right now."""
     runtime_failures = b.opt_sp.memory.wounds.runtime_failures
     if not runtime_failures:
         return ""
@@ -98,7 +90,6 @@ def _runtime_block(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_l1_wounds(b: InjectionBundle) -> str:
-    """The two L1-owned wound streams in one block — validation + runtime. Fenced."""
     blocks = [blk for blk in (_validation_block(b), _runtime_block(b)) if blk]
     return fence_untrusted("\n\n".join(blocks)) if blocks else ""
 
@@ -121,9 +112,8 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     citable=True,
 )
 def _r_guard_breaches(b: InjectionBundle) -> str:
-    """L2 + L3 post-parse guard outcomes in one block — both route to L3 (`PLAN`): L3 replans,
-    and reads its own past breaches to avoid repeating them. A non-empty L2 block is what
-    `escalate_l2` force-triggers L3 on (it reads the stream directly, not this render)."""
+    """L2 + L3 post-parse guard outcomes in one block; both route to L3, which reads its own past breaches to avoid
+    repeating them. ``escalate_l2`` force-triggers off the stream directly, not this render."""
     wounds = b.opt_sp.memory.wounds
     blocks = [
         blk
@@ -137,7 +127,6 @@ def _r_guard_breaches(b: InjectionBundle) -> str:
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
-    """Two-line render of one RuntimeFailure — for single-entry groups (multi-entry compresses)."""
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in rf.observed_config.items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
@@ -152,10 +141,8 @@ def _format_runtime_failure_lines(rf: Any) -> list[str]:
 
 
 def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
-    """Cluster by (warning, provider, model). N failures with same backend on varying param-axis
-    is ONE discovery, not N — collapse to a single line with the varying params enumerated.
-    Single-entry groups passthrough.
-    """
+    """Cluster by (warning, provider, model). N failures with the same backend on a varying param axis are ONE discovery,
+    not N — collapsed to a single line with the varying params enumerated."""
     clusters: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for rf in rfs:
         cfg = rf.observed_config

@@ -1,17 +1,5 @@
-"""The round's blocked-paired verdict on an optimizer prompt variant.
-
-An L4 outer round scores each optimizer prompt variant across the panel's cells (one inner cycle per
-(variant, cell)); each cell yields an :class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`.
-The round then pairs them: the **cached round-0 origin** is the within-panel control — no config
-is ever re-measured mid-run. :func:`compute_outer_verdict` computes, for the round's target
-variant, the paired ``(variant − origin)`` composite difference per cell, pooled across cells into
-an effect + CI, and a three-way decision. Cells are the blocks; the pooling treats them as
-exchangeable (per-cell n is 1, so inverse-variance weighting degenerates to a flat paired
-posterior; a random-effects refinement is the documented next step).
-
-Pure domain: no I/O. The projection (`round_summary`) reads the cached round-0 origin cells off
-disk and passes them in; this module never touches the filesystem.
-"""
+"""The round's blocked-paired verdict on an optimizer prompt variant — the paired
+``(variant − origin)`` composite diff per cell, pooled across cells into an effect + CI."""
 
 from __future__ import annotations
 
@@ -33,15 +21,8 @@ DECISION_INCONCLUSIVE = "inconclusive"
 
 
 class CandidateInfo(StrictModel):
-    """The minimal per-candidate facts the verdict needs (no RoundResult import).
-
-    Carries only arms the round could READ. Admission is the caller's to apply
-    (`domain/results.py::is_electable`) — it needs a `ScoredCandidate` and the arm's rows,
-    neither of which reaches here, and `results` imports this module so the law cannot ask
-    the predicate itself. Filtering there rather than stamping a flag here keeps the fact
-    derived at its one source instead of copied into a field a second construction site
-    could get wrong.
-    """
+    """The minimal per-candidate facts the verdict needs (no ``RoundResult`` import).
+    Carries only arms the round could READ; admission is the caller's, via ``is_electable``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -54,14 +35,7 @@ class CandidateInfo(StrictModel):
 
 class OuterCellEffect(StrictModel):
     """One cell's paired (variant − origin) composite difference.
-
-    ``variant_fitness`` / ``origin_fitness`` have **no reader today** — the panel renders
-    ``diff``. They stay, because this record is DURABLE (it rides ``dashboard.json::rounds``
-    + the round files) and ``diff`` is lossy: the two levels cannot be recovered from their
-    difference, so a verdict that kept only ``diff`` could never answer "lifted from WHAT
-    to what". Keep the measurement whole; a reader is cheap to add later, a discarded
-    measurement is not.
-    """
+    ``variant_fitness`` / ``origin_fitness`` have no reader yet — but ``diff`` is lossy, so they stay."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -73,20 +47,7 @@ class OuterCellEffect(StrictModel):
 
 class OuterVariance(StrictModel):
     """Where the panel's spread comes from — estimation noise, or real between-cell difference.
-
-    The verdict's ``se`` is computed from the spread of the per-cell diffs and nothing else, so
-    it cannot say WHICH of two very different problems it is looking at: cells that each measured
-    themselves poorly, or cells that genuinely disagree. Those take opposite levers — sharpen the
-    instrument (more inner samples, tighter cells) versus widen the panel or the candidates — and
-    with one number the choice is a guess. Splitting them is Finish-line item 7's "two series,
-    not one ratio", computed per round from evidence the panel has already paid for.
-
-    Reported in the MEASURAND's own units (θ logits), never the re-anchored fitness scale: the
-    per-cell SE is fitted in logits, and rescaling it would need the scoring formula's derivative
-    — a coupling from the law to a per-campaign config string. The verdict's own ``effect`` /
-    ``se`` / ``decision`` stay on the fitness scale and are untouched by anything here. This
-    record is a diagnostic; it does not participate in the decision.
-    """
+    A diagnostic in θ logits, never the fitness scale; it does not enter the decision."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -104,11 +65,7 @@ class OuterVariance(StrictModel):
 
 class OuterVerdict(StrictModel):
     """The pooled blocked-paired verdict for a round's target variant.
-
-    ``variant_id`` / ``variant_label`` likewise have no reader yet: they NAME the subject
-    this verdict is about. A durable measurement that cannot say which variant it measured
-    is not a measurement — do not strip them for lack of a consumer.
-    """
+    ``variant_id`` / ``variant_label`` NAME the subject — strip them and it measures nothing."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -138,26 +95,8 @@ class OuterVerdict(StrictModel):
 
 
 def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell_query: mean composite_fitness}`` — the one definition of what counts as a
-    MEASUREMENT of a cell, and the only projection of it: one point per cell however many
-    rows a cell has, so the blocked-paired diff carries one point either way.
-
-    A cell CAN hold more than one row — ``verify`` re-scores a candidate on more samples and
-    appends them — and averaging is the right collapse, because the cell is the unit the
-    paired verdict compares. There is deliberately no accessor for the un-averaged spread:
-    the readings behind one cell are not independent re-measurements of it.
-
-    Errored rows are dropped: an outer "sample" is a whole inner campaign and its fitness is a
-    transform of ``mean_round_delta``, so the floor asserts the optimizer prompt drove the
-    inner loop maximally DOWN — the strongest negative claim the scale carries. A cell that
-    timed out measured nothing. Asking the typed error channel also covers both row shapes,
-    since a freshly measured error row has no ``fitness`` key while a rescored one is stamped
-    at the floor. Same discipline as :func:`cell_measurand` below, for the same reason.
-
-    The one shared pure extraction: callers reading a fresh round (``compute_outer_verdict``)
-    and callers reading an archived round doc off disk
-    (``application/optimizer_prompt_ranking.py``) walk the same row shape.
-    """
+    """``{cell_query: mean composite_fitness}`` — one point per cell however many rows it holds, so
+    the paired diff carries one point either way. Errored rows drop — a timeout measured nothing."""
     acc: dict[str, list[float]] = {}
     for r in rows:
         if is_error_result(r):
@@ -170,14 +109,8 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
 
 
 def cell_measurand(rows: list[dict[str, Any]], key: str) -> dict[str, tuple[float, float]]:
-    """``{cell: (measurand, its within-cell SE)}`` on the measurand's OWN scale, from the rows'
-    ``pipeline_data``. Multiple rows for a cell average, matching :func:`cell_fitness`.
-
-    ``key`` is passed in rather than imported: ``domain.results`` imports this module and
-    ``proxies`` imports ``domain.results``, so reading the proxy's name here would close a cycle.
-    A cell missing either half is dropped — a measurand with no precision cannot enter a variance
-    split, and guessing one would put a number where a measurement is absent.
-    """
+    """``{cell: (measurand, its within-cell SE)}`` on the measurand's OWN scale. ``key`` is passed
+    in, not imported: ``domain.results`` imports this module, so reading it here closes a cycle."""
     acc: dict[str, list[tuple[float, float]]] = {}
     for r in rows:
         cell, pd = r.get("query"), r.get("pipeline_data")
@@ -197,7 +130,6 @@ def _variance_split(
     origin: dict[str, tuple[float, float]],
     shared: list[str],
 ) -> OuterVariance | None:
-    """Split the panel's paired spread into estimation noise and real between-cell difference."""
     cells = [c for c in shared if c in variant and c in origin]
     if len(cells) < 2:
         return None
@@ -218,20 +150,8 @@ def _variance_split(
 
 
 def _pick_variant(candidates: list[CandidateInfo]) -> tuple[CandidateInfo, bool] | None:
-    """The variant the verdict scores: the round's elected winner, else its best arm.
-
-    Returns ``(variant, is_winner)``, or ``None`` when the round left no readable arm. The
-    fallback exists because gating the whole verdict on a crowning discards the measurement in
-    exactly the case the operator most needs it: a round that crowns nothing is a round whose
-    answer is "inconclusive", and reporting nothing at all is indistinguishable from "never
-    measured".
-
-    *Best-scoring* is not *readable*, and this ``max`` reaches for exactly the arms that fake a
-    score — a degradation abort scoring a partial subset, a constant answerer scoring the drawn
-    subset's label mix. Both are already gone: *candidates* holds only what
-    ``domain/results.py::is_electable`` admitted, which is the same set the round's own election
-    drew its winner from. ``variant_is_winner`` distinguishes crowned from best; it cannot
-    rescue a subject the round refused to read."""
+    """The variant the verdict scores: the round's elected winner, else its best arm — a round that
+    crowns nothing is "inconclusive", which reporting nothing cannot distinguish from unmeasured."""
     if (winner := next((c for c in candidates if c.is_winner), None)) is not None:
         return (winner, True)
     if not candidates:
@@ -246,17 +166,8 @@ def compute_outer_verdict(
     *,
     measurand_key: str = "",
 ) -> OuterVerdict | None:
-    """The round's blocked-paired verdict against the **cached round-0 origin**
-    (*origin_rows*, supplied by the caller — round 0 is never re-measured), or ``None``
-    when there are no origin cells to pair against (a non-L4 round, or round 0 itself —
-    the origin is the control, not a verdict subject) or no arm the round left readable
-    (:func:`_pick_variant`).
-
-    The caller passes the origin's ROWS, not a pre-extracted fitness map: this function needs two
-    different readings of them (the fitness the decision pairs on, the measurand + precision the
-    variance split reads), and digesting them upstream meant either two disk reads or a caller
-    that had to know which projections the law wanted. ``measurand_key`` is the outer proxy's
-    name, empty to skip the split — see :func:`cell_measurand` for why it is not imported."""
+    """Pairs against the CACHED round-0 origin (round 0 is never re-measured); ``None`` when there
+    are no origin cells or no readable arm. Takes the origin ROWS: the law needs two readings."""
     origin_cells = cell_fitness(origin_rows)
     if not origin_cells:
         return None

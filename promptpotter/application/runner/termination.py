@@ -1,12 +1,5 @@
-"""The cycle's budget guardrail, in one legible place.
-
-Two ceilings, one gate, whichever trips first halting at the next clean round boundary.
-They are twins because neither is sufficient alone: a free backend reports $0, so the USD
-ceiling would see only optimizer cost, while tokens count the backend work it misses.
-Each ceiling is a PAIR of zero-arg probes (`spent`, `cap`) so the gate re-reads the cap
-every tick — `change-spend-budget` rewrites it mid-flight — and can never cache a stale
-ceiling. Probes of `None` disarm a ceiling; both disarmed never trips.
-"""
+"""Two budget ceilings, one gate, halting at the next clean round boundary — twins because a free
+backend reports $0 while tokens count the work it misses. Caps re-read every tick, never cached."""
 
 from __future__ import annotations
 
@@ -31,7 +24,6 @@ class BudgetGate:
     tokens_cap: Callable[[], int | None] | None = None
 
     def tripped(self) -> StopReason | None:
-        """The stop reason if a ceiling is met or exceeded, else `None`."""
         if self.usd_spent is not None and self.usd_cap is not None:
             cap = self.usd_cap()
             if cap is not None and self.usd_spent() >= cap:
@@ -46,18 +38,8 @@ class BudgetGate:
 def origin_gate_tripped(
     health: DegradationHealth | None, mode: OriginGateMode
 ) -> StopReason | None:
-    """``ORIGIN_GATE`` when the round-0 origin verdict warrants a halt, else ``None``.
-
-    The round-0 sibling of :meth:`BudgetGate.tripped`. A non-healthy origin means
-    candidates would be measured against a broken floor (the common case while a
-    developer brings up a new connector whose ``pipeline.yaml`` or backend code is
-    still buggy). ``strict`` halts on ``critical`` and on a ``degraded`` floor whose
-    degradation the rescore remedy can re-measure away (transient backend noise) —
-    but NOT on a purely ``untested`` degraded grade (a wide-CI low-sample round 0),
-    which is statistical uncertainty, not a broken measurement. ``critical_only``
-    halts only on a structurally-broken origin; ``off`` disarms the gate. A missing
-    verdict never trips.
-    """
+    """``ORIGIN_GATE`` when round 0's verdict warrants a halt — candidates would otherwise be measured
+    against a broken floor. ``strict`` spares a purely ``untested`` grade: that is uncertainty, not damage."""
     if mode == "off" or health is None:
         return None
     if health.grade == "critical":
@@ -80,14 +62,8 @@ def origin_gate_tripped(
 
 
 def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason | None:
-    """``BACKEND_UNREACHABLE`` when a closed round's verdict says the backend is down,
-    else ``None``. The mid-run sibling of :func:`origin_gate_tripped`.
-
-    Unconditional (no operator mode): a backend unreachable for most of a round is
-    never an optimization signal — there is nothing to decide, only a corpse to grind.
-    Halting at the round boundary turns six silent zero-accuracy rounds into one clear
-    "restart the backend and ``resume``". A missing verdict never trips.
-    """
+    """``BACKEND_UNREACHABLE`` on a closed round whose verdict says the backend is down. Unconditional:
+    there is nothing to decide, only a corpse to grind, and halting turns six silent rounds into one."""
     if health is None:
         return None
     if health.grade == "critical" and "backend_unreachable" in health.reasons:
@@ -96,29 +72,8 @@ def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason 
 
 
 def panel_gate_tripped(holed_candidate_ids: list[str], mode: PanelGateMode) -> StopReason | None:
-    """``PAUSED`` when an electable candidate's panel has holes, else ``None``.
-
-    The third sibling of :func:`origin_gate_tripped` / :func:`backend_unreachable_tripped`,
-    and the one that guards the COMPARISON rather than the floor or the backend. A hole is a
-    cell the loop spent on and got nothing back from (``domain/results.py::unscoreable_cells``),
-    so the round's candidates were ranked on different cell sets. Halting is resumable and
-    the round is not persisted, so the remedy is to refill the cells and re-decide — which is
-    why the stop reason is ``PAUSED`` and not a terminal one.
-
-    **Not a second under-probing guard.** ``coverage_floor`` (``scoring/metrics.py``) already
-    owns "did this candidate measure enough cells to be electable", counts the same
-    non-errored cells, and ``l1/score/winner.py`` explicitly bans a second sample-count gate
-    beside it. This asks a different question with a different authority: coverage decides
-    who MAY WIN and excludes; this decides whether the round may CLOSE at all and halts.
-    Excluding a holed candidate would still crown one of its rivals off an incomplete panel
-    and silently discard the holed candidate's real work. Both were live in the round that
-    motivated this: C1.1 held exactly ``coverage_floor`` (4) valid cells of 6 and won on
-    them, against a rival measured on 5.
-
-    ``strict`` (default) halts on any hole; ``off`` disarms. There is no middle mode — a
-    hole is not a matter of degree, and the operator who does not want the halt wants none
-    of it.
-    """
+    """``PAUSED`` when an electable candidate's panel has holes, so candidates were ranked on different
+    cell sets. **Not a second under-probing guard** — ``coverage_floor`` excludes; this halts, resumably."""
     if mode == "off" or not holed_candidate_ids:
         return None
     return StopReason.PAUSED

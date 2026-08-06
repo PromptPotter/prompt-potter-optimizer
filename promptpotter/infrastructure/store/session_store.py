@@ -1,5 +1,3 @@
-"""Per-session metadata under ``sessions/``."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,11 +14,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 
 class SessionStore:
-    """Tenant-scoped per-session artifacts at ``sessions/{session_id}/`` (no ``backend_id`` axis).
-
-    A CAMPAIGN RUN's session, not a browser login — that is
-    :class:`promptpotter.infrastructure.identity.OIDCSessionStore`.
-    """
+    """Tenant-scoped per-session artifacts. A CAMPAIGN RUN's session, not a browser login — that is ``OIDCSessionStore``."""
 
     def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
@@ -54,7 +48,6 @@ class SessionStore:
         return read_json_optional(self._state_path(session_id))
 
     def update(self, session_id: str, updates: dict[str, Any]) -> None:
-        """Merge *updates* into ``session.json``. Updates ``updated_at``."""
         path = self._state_path(session_id)
         data = read_json(path)
         data.update(updates)

@@ -1,17 +1,5 @@
-"""Load the realized **record** from disk — the read-time service the API calls.
-
-Reads each cycle's public round files (the full ``RoundResult`` dump:
-``candidate_scores`` with the materialized evaluator namespace + eligibility facts,
-``scoreboard`` for ``is_winner``, top-level ``evaluators``/``accuracy`` for the
-carried-forward winner) and builds a :class:`MaskRecord`. Never re-runs, never
-writes — pure read. The fold + verdict then operate on the returned record.
-
-The anchor (origin / carried-forward winner) of round ``N`` is round ``N-1``'s
-winner; for a fork's first round that ancestor lives in the *parent* cycle, so the
-loader reaches one file up to the branch-point winner. When an anchor is genuinely
-absent (interrupted prefix, missing file) the round simply carries no anchor and the
-verdict makes no claim — honest divergence, never fabricated.
-"""
+"""Load the realized record from disk — pure read, never re-runs. Round ``N``'s anchor is ``N-1``'s winner, so a
+fork's first round reaches into the PARENT; a genuinely absent anchor makes no claim rather than a fake one."""
 
 from __future__ import annotations
 
@@ -36,11 +24,8 @@ from promptpotter.infrastructure.store.stores import Stores
 
 
 def _mask_eligible(sc: ScoredCandidate) -> bool:
-    """Recorded election eligibility for mask re-selection: the realized
-    ``is_leader_eligible`` filter (escalation-abort / degradation) plus a guard
-    against structurally-invalid / validation-failed candidates whose realized
-    composite was force-zeroed *post-formula* — a formula re-score over their stored
-    evaluators cannot reproduce that zeroing, so they are not honest competitors."""
+    """Recorded election eligibility for mask re-selection, plus a guard against candidates whose composite was
+    force-zeroed POST-formula: a re-score over their stored evaluators cannot reproduce that zeroing."""
     return is_leader_eligible(sc) and not sc.invalid and not sc.validation_failures
 
 
@@ -116,21 +101,8 @@ def load_mask_record(
     *,
     with_replay: bool = False,
 ) -> MaskRecord:
-    """Read every cycle in *campaign_id* into a :class:`MaskRecord` (read-only).
-
-    *samples* (the **sample-set mask**) re-scores each candidate's accuracy over only
-    those sample ids — the carried-forward winner threads its subset accuracy too, so
-    the election re-runs on the subset and the fold finds where the subset-best
-    diverges from the recorded (full-set) winner. ``None`` ⇒ stored full-set values.
-
-    *with_replay* additionally carries each round's own ``RoundResult`` and the pool of
-    known per-sample outcomes as it stood before that round ran — what a replay verdict
-    re-derives from. Off by default because those are the raw rows: a scoring or abort
-    lens reads none of them, and the tree endpoint serves one of those on every request.
-    It also reads each round through the store's TYPED loader, which raises on a document
-    the current models cannot parse — a replay must re-derive from a document it can read,
-    where a lens is happy with the summary fields.
-    """
+    """Read every cycle into a ``MaskRecord``. *with_replay* also carries the raw rows and reads through the TYPED
+    loader, which raises on a document the current models cannot parse; a lens needs neither."""
     entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
     # Pass 1: read each cycle's round files (keyed by round number) + tree edges.

@@ -1,11 +1,5 @@
-"""``cmd_noise_floor`` — re-score a campaign's cached origin *k* times to read the
-backend's own run-to-run noise.
-
-A fenced debug diagnostic (idiomatic to ``verify``/``ab``), NOT a loop mechanism: no
-``OptimizationConfig`` field, no L1 injection — the loop never learns this verb exists.
-Not a cycle/fork/sweep: no ledger event; persistence is into the workspace ``archive/``
-tree only, same disk discipline as ``verify``.
-"""
+"""Re-score a cached origin *k* times to read the backend's run-to-run noise. A fenced debug diagnostic — no config field, no
+L1 injection, no ledger event; the loop never learns this verb exists."""
 
 from __future__ import annotations
 

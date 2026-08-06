@@ -1,12 +1,5 @@
-"""Durable check-in working-state under ``campaigns/{campaign_id}/checkin/``.
-
-An in-progress origin authoring lives under the campaign it belongs to, so a check-in
-survives a restart and resumes from disk like any other campaign. The ``checkin/`` subdir
-is invisible to the cycle scan, so it never pollutes campaign enumeration, and tenant
-scope is by path — a cross-tenant ``campaign_id`` simply isn't found. Stores dicts rather
-than ``DraftCampaign``: the conversion happens in the application caller, which is what
-keeps this leaf free of application/domain imports.
-"""
+"""Durable check-in working-state under the campaign it belongs to, so authoring survives a restart. The ``checkin/``
+subdir is invisible to the cycle scan; it stores DICTS, which keeps this leaf free of application/domain imports."""
 
 from __future__ import annotations
 
@@ -36,13 +29,11 @@ class CheckinDraftStore:
     # -- draft.json (lossless DraftCampaign dict) -----------------------------
 
     def write_draft(self, campaign_id: str, draft: dict[str, Any]) -> Path:
-        """Persist the lossless ``DraftCampaign.to_disk()`` dict."""
         path = self._checkin_dir(campaign_id) / "draft.json"
         write_json(path, draft)
         return path
 
     def read_draft(self, campaign_id: str) -> dict[str, Any] | None:
-        """Load the stored draft dict, or ``None`` when this campaign has no check-in."""
         return read_json_optional(self._checkin_dir(campaign_id) / "draft.json")
 
     # -- cache.json (pre-commit sample bank) ----------------------------------
@@ -55,15 +46,8 @@ class CheckinDraftStore:
         source_file: str = "",
         headers: Sequence[str] = (),
     ) -> Path:
-        """Persist the parsed sample bank to ``checkin/cache.json``.
-
-        On ingest ``items`` are the raw header-keyed rows (the column mapping
-        isn't confirmed yet); ``headers`` records the column order. A prior
-        ``resolution`` block (provenance + gaps) is preserved across a rewrite.
-        On Start the launcher rewrites this with materialized ``Sample`` rows and
-        hands them to ``write_committed_dataset``, which writes ``datasets/{slug}/``
-        fresh — this dir stays put as the check-in's audit breadcrumb.
-        """
+        """Persist the parsed sample bank. On ingest ``items`` are RAW header-keyed rows (the mapping isn't confirmed yet); a prior
+        ``resolution`` block survives a rewrite. Start rewrites this with materialized rows and leaves it as the breadcrumb."""
         from promptpotter.domain.sample import Sample
 
         path = self._checkin_dir(campaign_id) / "cache.json"
@@ -83,7 +67,6 @@ class CheckinDraftStore:
         return path
 
     def load_bank(self, campaign_id: str) -> dict[str, Any] | None:
-        """Read the parsed bank, or ``None`` when this campaign has no check-in."""
         return read_json_optional(self._checkin_dir(campaign_id) / "cache.json")
 
     def write_resolution(self, campaign_id: str, resolution: dict[str, Any]) -> None:

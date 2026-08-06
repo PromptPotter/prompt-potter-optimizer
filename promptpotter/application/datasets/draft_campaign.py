@@ -1,12 +1,5 @@
-"""Server-held ``DraftCampaign`` — the mutable working state of a check-in-lifecycle campaign.
-
-Wire shape: ``docs/specs/m12-api-openapi.yaml::DraftCampaign``; prose:
-``docs/specs/roadmap.md § Draft-campaign object``. The ``draft_id`` IS the owning
-``campaign_id``, and ``CheckinDraftStore`` persists the draft under that campaign's
-``checkin/`` dir — so a multi-step ingest survives a restart and resumes like any other
-campaign. There is no in-memory registry; adding one would put the operator's
-half-authored origin somewhere a restart can silently lose it.
-"""
+"""Server-held working state of a check-in-lifecycle campaign, persisted under the owning
+campaign's ``checkin/`` — no in-memory registry, which a restart would silently lose."""
 
 from __future__ import annotations
 
@@ -42,13 +35,8 @@ PREVIEW_ROWS = 10
 
 
 class OptimizationOverrides(StrictModel):
-    """The campaign-config knobs a new-campaign draft carries, as one validated
-    object — collapses what were hand-threaded fields (``max_rounds`` /
-    ``mechanisms``) so a new knob is one field here, not six plumbing sites
-    (draft → wire → edit-patch → webapp → OpenAPI). Operator-facing (UI) vocabulary.
-    The ``max_rounds`` bound gates the operator EDIT path; the trusted internal
-    ``draft_from_dataset`` path builds the dict directly (a reused dataset's config
-    may carry a higher ceiling)."""
+    """The ``max_rounds`` bound gates the operator EDIT path only; the trusted internal
+    ``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it."""
 
     max_rounds: int = Field(
         DEFAULT_MAX_ROUNDS,
@@ -71,39 +59,19 @@ class OptimizationOverrides(StrictModel):
 
 
 def _default_optimization_overrides() -> dict[str, Any]:
-    """Stock campaign-config knobs (all defaults), as the JSON-shaped dict the
-    draft stores and the wire emits."""
     return OptimizationOverrides().model_dump(mode="json")
 
 
 def closed_answer_format(labels: tuple[str, ...]) -> str:
-    """The canonical enumeration appended to a closed-answer-space prompt: every
-    label, pipe-joined behind a pick-one directive, so the model can emit any one
-    and the answer-space gate passes deterministically. The label set is a
-    deterministic fact (the target column's distinct values), not the LLM's to
-    transcribe — it reliably drops labels from a many-way set. Single source for
-    this string (``committed_prompt_fields`` appends it)."""
+    """The label set is a deterministic fact (the target column's distinct values), not the
+    LLM's to transcribe — it reliably drops labels from a many-way set."""
     return "Choose exactly one of these labels: " + " | ".join(labels)
 
 
 @dataclass(frozen=True, slots=True)
 class DraftCampaign:
-    """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`.
-
-    **It fuses two things on purpose.** The *dataset* half (``slug``,
-    ``raw_task_description``, ``pipeline_overlay``, ``origin_prompt_fields``, the
-    column mapping) materializes into the four dataset files; the *campaign-config*
-    half (``connector``, ``scoring_composite``, ``optimization_overrides``)
-    materializes into the sibling ``campaign.json``. The fusion is correct for the
-    one-form ingest UX — the operator fills both in one pass.
-
-    **The ``slug`` freezes at commit.** Before commit it's a mutable, operator-
-    editable name; the moment :func:`~promptpotter.application.jobs.launcher.materialize_and_write_origin`
-    (at check-in Start) writes ``datasets/{slug}/``, the slug becomes the dataset's
-    filesystem identity *and* the pin every campaign resolves through. The only
-    sanctioned post-commit identity change is the ``-vN`` suffix a *Replace* applies
-    (``application/datasets/dataset_replace.py``).
-    """
+    """Frozen — mutate via :meth:`patch`. The ``slug`` freezes at commit: from the moment
+    ``datasets/{slug}/`` is written, only a *Replace*'s ``-vN`` suffix may change it."""
 
     draft_id: str
     tenant_id: TenantId
@@ -187,12 +155,8 @@ class DraftCampaign:
     reused_origin_id: str = ""
 
     def to_wire(self) -> dict[str, Any]:
-        """Wire shape matching the OpenAPI ``DraftCampaign`` schema.
-
-        ``tenant_id`` is intentionally omitted — clients learn it from
-        the session cookie (ADR-0002 no-drift gate #3: no per-record
-        ``tenant_id`` on the wire).
-        """
+        """``tenant_id`` is omitted on purpose — clients learn it from the session cookie
+        (ADR-0002 no-drift gate #3: no per-record ``tenant_id`` on the wire)."""
         return {
             "draft_id": self.draft_id,
             "slug": self.slug,
@@ -232,14 +196,8 @@ class DraftCampaign:
         }
 
     def to_disk(self) -> dict[str, Any]:
-        """Lossless serialization for the durable check-in store (``checkin/draft.json``).
-
-        Unlike :meth:`to_wire` (the lossy client projection), this carries EVERY
-        field the readiness gate runs over — provenance enums (→ str), the column
-        label sets, ``candidate_library``, ``decomposed_task_context`` — so
-        :meth:`from_disk` reconstructs the exact draft. ``draft_id`` / ``tenant_id``
-        are omitted: the campaign dir the check-in lives under IS the identity, so
-        they're re-injected from campaign context on load."""
+        """Lossless, unlike :meth:`to_wire`: every field the readiness gate runs over survives.
+        ``draft_id`` / ``tenant_id`` are omitted — the campaign dir the check-in lives under IS them."""
         return {
             "slug": self.slug,
             "n_samples": self.n_samples,
@@ -269,10 +227,6 @@ class DraftCampaign:
     def from_disk(
         cls, data: dict[str, Any], *, draft_id: str, tenant_id: TenantId
     ) -> DraftCampaign:
-        """Reconstruct a draft from :meth:`to_disk` output + the campaign-context identity.
-
-        ``draft_id`` (= the owning ``campaign_id``) and ``tenant_id`` come from the
-        campaign dir the check-in lives under, not the JSON — the dir IS the identity."""
         return cls(
             draft_id=draft_id,
             tenant_id=tenant_id,
@@ -303,38 +257,15 @@ class DraftCampaign:
         )
 
     def answer_space(self) -> tuple[str, ...] | None:
-        """The target column's closed label set, or ``None`` when the target is
-        unresolved or open-ended.
-
-        Keyed off the resolved/proposed ``column_ground_truth`` into
-        :attr:`column_label_sets` (computed over the full upload at ingest). This
-        is the campaign's enumerable answer space — the gate requires it land in
-        the prompt, the proposer is handed it to enumerate.
-        """
+        """The campaign's enumerable answer space, computed over the full upload at ingest — the
+        gate requires it land in the prompt, and the proposer is handed it to enumerate."""
         if not self.column_ground_truth:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
     def committed_prompt_fields(self) -> dict[str, Any]:
-        """The prompt fields this draft commits at mint — the one encoding of
-        "the prompt this draft commits," shared by the prompt writer
-        (``launcher.materialize_and_write_origin``) and the answer-space gate
-        (``origin_readiness._check_answer_space``) so they can't drift.
-
-        The authored Layer-1 fields (``origin_prompt_fields``) win once present;
-        otherwise we floor on ``instruction`` from the task description (a real
-        ``PromptTemplate`` field — the prior ``task_description``/``instructions``
-        keys were not, so the committed prompt loaded empty).
-
-        A closed answer space is enumerated here deterministically: the label set is
-        a fact (the target column's distinct values), not the LLM's to transcribe —
-        the resolver reliably drops labels from a many-way set, which left every
-        non-enumerated row unscoreable and the gate stuck. Code GUARANTEES the full
-        enumeration rides the committed ``answer_format``, so ``_check_answer_space``
-        is the safety that passes, not a tripwire. APPEND (never overwrite) so the
-        resolver's extraction instruction — the bold/box the scorer reads — survives;
-        skip when ``answer_format`` is still empty so the ``_check_commit_format``
-        nudge to author it isn't masked."""
+        """The one encoding of "the prompt this draft commits", shared with the answer-space gate so
+        they cannot drift. APPEND, never overwrite: the resolver's extraction instruction survives."""
         fields = (
             dict(self.origin_prompt_fields)
             if self.origin_prompt_fields
@@ -349,18 +280,13 @@ class DraftCampaign:
         return fields
 
     def patch(self, **changes: Any) -> DraftCampaign:
-        """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
         return replace(self, updated_at=utcnow_iso(), **changes)
 
     def confirm_columns(
         self, *, query_col: str | None = None, ground_truth_col: str | None = None
     ) -> DraftCampaign:
-        """Set + CONFIRM the input/target column mapping (operator-stated).
-
-        Membership of each header in :attr:`headers` is the caller's
-        wire-validation concern (422); this only records the confirmed value.
-        The only caller is the ``edit-draft-campaign`` operator path.
-        """
+        """Membership of each header in :attr:`headers` is the caller's wire-validation concern
+        (422); this only records the confirmed value."""
         provenance = dict(self.field_provenance)
         changes: dict[str, Any] = {}
         if query_col is not None:
@@ -377,12 +303,8 @@ class DraftCampaign:
         values: dict[str, Any] | None = None,
         provenance: dict[str, Provenance] | None = None,
     ) -> DraftCampaign:
-        """Apply resolver/operator field changes + their per-field provenance.
-
-        ``values`` are draft-attribute kwargs (``raw_task_description=...``);
-        ``provenance`` merges checklist field-id → tag onto :attr:`field_provenance`.
-        The single mutation route the origin-resolution loop drives.
-        """
+        """The single mutation route the origin-resolution loop drives. ``values`` are draft
+        attribute kwargs; ``provenance`` merges field-id → tag onto :attr:`field_provenance`."""
         merged = dict(self.field_provenance)
         if provenance:
             merged.update(provenance)
@@ -390,18 +312,8 @@ class DraftCampaign:
 
 
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """The draft's effective ``pipeline.yaml::nodes`` block: connector node-config
-    seed (e.g. TermNorm's reasoning clamp + owned model) underneath, operator draft
-    edits on top.
-
-    The one place the draft's resolved node config is computed — shared by the
-    committed pipeline.yaml builder (``draft_build``), the wire-side optimizer-locks
-    block, and the origin readiness model gate — so the three never drift. Pure; the
-    ``connector`` is passed in (this module stays connector-registry-free, like
-    :meth:`DraftCampaign.to_wire`).
-
-    The layering itself is :func:`merge_node_blocks`, shared with the dataset overlay
-    in ``initialization/wiring.py``."""
+    """The one place the draft's resolved node config is computed — shared by the committed
+    ``pipeline.yaml`` builder, the wire optimizer-locks block and the origin model gate."""
     return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
 
 
@@ -415,22 +327,8 @@ def new_draft(
     source_file: str = "",
     column_label_sets: dict[str, tuple[str, ...]] | None = None,
 ) -> DraftCampaign:
-    """Build a fresh draft — the working state a check-in campaign is minted from.
-
-    The first ingest action calls this, then
-    :func:`~promptpotter.application.jobs.launcher.create_checkin_campaign` re-keys
-    the draft's ``draft_id`` to the new ``campaign_id`` and persists it. The
-    transient ``draft_id`` minted here is never stored (``to_disk`` omits it).
-
-    The input/target column mapping is **not** silently assumed: it auto-confirms
-    only when a header is literally named ``query`` / ``ground_truth`` (the
-    unambiguous, deterministic case), and otherwise lands ``UNSET`` for the operator
-    to confirm. The config knobs seed from our template defaults and auto-confirm
-    (one sane default each, so the operator overrides rather than fills them);
-    ``raw_task_description`` is the one knob with no default framing, so it lands
-    ``UNSET`` — the operator (or the resolver, high-confidence) must state what the
-    prompt does.
-    """
+    """``create_checkin_campaign`` re-keys ``draft_id`` to the new ``campaign_id``; the transient
+    one minted here is never stored. ``raw_task_description`` has no default, so it lands UNSET."""
     now = utcnow_iso()
     column_query, column_ground_truth, provenance = _seed_provenance(headers)
     return DraftCampaign(
@@ -457,11 +355,6 @@ def new_draft(
 def _seed_provenance(
     headers: list[str],
 ) -> tuple[str, str, dict[str, Provenance]]:
-    """Seed the gated-field provenance at mint: columns auto-detected (literal
-    ``query`` / ``ground_truth`` headers confirm; else UNSET), ``task_description``
-    UNSET (no default framing). Config is not gated — it carries a default the
-    operator edits, so it gets no provenance entry.
-    """
     query_col, ground_truth_col, provenance = _auto_detect_columns(headers)
     provenance["task_description"] = Provenance.UNSET
     return query_col, ground_truth_col, provenance
@@ -470,13 +363,8 @@ def _seed_provenance(
 def _auto_detect_columns(
     headers: list[str],
 ) -> tuple[str, str, dict[str, Provenance]]:
-    """Deterministic column auto-confirm — literal `query` / `ground_truth` only.
-
-    The unambiguous case the spec's auto-confirm describes, resolved without
-    an LLM: a header literally named ``query`` (resp. ``ground_truth``)
-    confirms that column. Anything else stays ``UNSET`` for the operator to
-    pick — no fuzzy guessing in the deterministic gate.
-    """
+    """Deterministic auto-confirm: a header literally named ``query`` / ``ground_truth`` confirms
+    that column, anything else stays UNSET for the operator — no fuzzy guessing in the gate."""
     header_set = set(headers)
     query_col = "query" if "query" in header_set else ""
     ground_truth_col = "ground_truth" if "ground_truth" in header_set else ""
@@ -488,7 +376,6 @@ def _auto_detect_columns(
 
 
 def _mint_draft_id() -> str:
-    """Stable, short, URL-safe draft id. ``d_`` prefix mirrors ``s_`` for sessions."""
     return f"d_{uuid.uuid4().hex[:16]}"
 
 
@@ -502,12 +389,7 @@ _DERIVED_PREFIX = "dataset:"
 
 
 def dataset_source_of(source_file: str) -> str | None:
-    """Source dataset slug iff the draft was derived from an existing dataset.
-
-    Returns the slug after the ``dataset:`` prefix (the value
-    ``mint_campaign_command(dataset_name=...)`` resolves), or ``None`` for a
-    fresh CSV upload. Single source of truth for the prefix parse.
-    """
+    """Single source of truth for the ``dataset:`` prefix parse; ``None`` for a fresh CSV upload."""
     if source_file.startswith(_DERIVED_PREFIX):
         return source_file[len(_DERIVED_PREFIX) :] or None
     return None

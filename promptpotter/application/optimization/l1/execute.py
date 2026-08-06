@@ -1,5 +1,3 @@
-"""L1 round driver — top-level entry called by the runner."""
-
 from __future__ import annotations
 
 import logging
@@ -56,16 +54,8 @@ async def execute_round(
     skip_critique: bool = False,
     is_final_round: bool = False,
 ) -> RoundResult:
-    """Execute one L1 round: generate → score+select → critique. Returns a
-    ``RoundResult`` (`.critique` set when L1_CRITIQUE fired); runner folds it
-    into Cycle state via ``absorb_round`` — l1.py never mutates Cycle directly.
-
-    ``skip_critique=True`` (sweep mode) drops the round-end critique so the
-    cheap-fork stays one LLM call; round 1 is identical across all forks.
-
-    ``is_final_round=True`` (the loop's calendar cap is about to bite) likewise drops
-    it — see the critique site for why a critique nobody will read is pure latency.
-    """
+    """One L1 round: generate → score+select → critique. The runner folds the result in via ``absorb_round`` — this never mutates
+    ``Cycle``. Sweep mode and the final round both drop the critique, which nobody would read."""
     session = cycle.session
     config = cycle.config
     opt = config.optimization

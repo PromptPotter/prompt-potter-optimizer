@@ -1,5 +1,3 @@
-"""OptSearchPoint — optimizer working state; mutable, serialized via ``model_dump()``."""
-
 from __future__ import annotations
 
 import copy
@@ -42,10 +40,8 @@ class FewShotExample(StrictModel):
 
 
 class PromptTemplate(SearchPoint):
-    """The prompt scheme shared by job + optimizer prompts: the six ``render()``
-    decomposition fields (``PROMPT_STRING_FIELDS``) plus ``few_shot_examples`` and
-    ``plan`` (handled separately — few-shot appended by ``render()``, ``plan``
-    injected via its own signal)."""
+    """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
+    (``PROMPT_STRING_FIELDS``), plus ``few_shot_examples`` and ``plan``, which render separately."""
 
     persona: str = ""
     task_intent: str = ""
@@ -64,7 +60,6 @@ class PromptTemplate(SearchPoint):
     )
 
     def render(self) -> str:
-        """Assemble non-empty decomposition fields, double-newline-joined."""
         parts = [v for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
         block = self._render_few_shot_block()
         if block:
@@ -87,17 +82,8 @@ class PromptTemplate(SearchPoint):
         return "\n".join(lines)
 
     def compile_prompt(self, **kwargs: str | int) -> str:
-        """Render and substitute the supplied ``{{variable}}`` placeholders.
-
-        Any ``{{…}}`` left after substitution is kept as literal text — prompt-field
-        content legitimately carries braces that are NOT optimizer slots. The chief
-        case: an evolved node prompt echoed into an optimizer template (the
-        ``rendered_prompt`` injection) embeds the backend's own ``{{query}}`` /
-        ``{{combined_text}}`` injection placeholders, which the target backend fills,
-        not PromptPotter. Authored-template slot typos are caught at load time by
-        ``dispatch.validate_template`` (which knows the INJECTIONS vocabulary); this
-        method only fills what it is handed.
-        """
+        """Any ``{{…}}`` left after substitution stays LITERAL: an evolved node prompt echoed into an
+        optimizer template carries the backend's own placeholders, which the backend fills, not us."""
         text = self.render()
         for key, value in kwargs.items():
             text = text.replace("{{" + key + "}}", str(value))
@@ -108,11 +94,8 @@ class PromptTemplate(SearchPoint):
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
 
     def prompt_field_dict(self) -> dict[str, Any]:
-        """``prompt_fields()`` plus ``few_shot_examples`` + ``plan`` — the L1-roundtrip
-        shape. ``plan`` rides here (and restores via ``from_prompt_fields``) so a seed /
-        campaign-from-origin fork inherits the L3 strategic frame instead of starting at
-        ``plan=""``. ``plan`` is NOT in ``render()`` (it's injected via its own signal),
-        so carrying it leaves the render-identity gate + content hash untouched."""
+        """``plan`` rides here — and restores through ``from_prompt_fields`` — so a seed or fork inherits
+        the L3 frame. It is not in ``render()``, so carrying it leaves render identity untouched."""
         d: dict[str, Any] = dict(self.prompt_fields())
         if self.few_shot_examples:
             d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
@@ -247,14 +230,8 @@ class OptSearchPoint(PromptTemplate):
         *,
         schema: PipelineSchema,
     ) -> JobSearchPoint:
-        """Render → inject into pipeline_params → frozen JobSearchPoint. Pipeline
-        composition reads *schema*, never inferred from ``base_pipeline_params``.
-
-        *schema* is REQUIRED. Without one this silently produced a structurally valid
-        point carrying NEITHER the rendered prompt (no schema ⇒ no prompt node to inject
-        it into) NOR ``steps`` — and that point is then scored, content-hashed, and
-        written to the archive like any other. Nothing raised; the run just measured a
-        prompt nobody wrote."""
+        """*schema* is REQUIRED: without one this produced a valid-looking point carrying neither the
+        rendered prompt nor ``steps``, and that point is scored and archived like any other."""
         from promptpotter.domain.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
@@ -285,9 +262,8 @@ class OptSearchPoint(PromptTemplate):
         )
 
     def mutate(self, **changes: Any) -> OptSearchPoint:
-        """Child OSP: prompt fields + ``task_context`` + ``l1_overrides`` inherit
-        from parent; ``wounds``/``l1_layout`` reset to defaults. The reset two flow
-        on L2/L3 adopt via ``copy_memory_to`` instead."""
+        """Prompt fields, ``task_context`` and ``l1_overrides`` inherit; ``wounds`` / ``l1_layout`` reset.
+        Those two flow on L2/L3 adopt through ``copy_memory_to`` instead."""
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(self, f))
@@ -325,9 +301,8 @@ at each site."""
 
 
 def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield ``(node_name, config)`` for each node-config block in *pp*, skipping
-    the reserved wire keys (``steps``) and any non-dict value. The canonical walk
-    over the tunable surface of a ``pipeline_params`` dict."""
+    """The canonical walk over a ``pipeline_params`` dict's tunable surface — skips the reserved
+    wire keys and any non-dict value."""
     for k, v in (pp or {}).items():
         if k in RESERVED_PIPELINE_PARAM_KEYS or not isinstance(v, dict):
             continue
@@ -335,11 +310,8 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
 
 
 def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
-    """True iff *overlay* edits at least one node AND every key it sets is a
-    locked axis (``model``/``provider``). A pure model/provider steer — the origin
-    is unchanged in every other respect, so a param-only fork **inherits** the done
-    origin's C0 rather than re-scoring it (a non-locked param edit genuinely changes
-    the origin measurement → re-score). Gates the inherit path, not the taint."""
+    """A pure model/provider steer leaves the origin unchanged in every other respect, so the fork
+    INHERITS the done C0 instead of re-scoring it. Gates the inherit path, not the taint."""
     keys = [k for _node, cfg in node_config_items(overlay) for k in cfg]
     return bool(keys) and all(k in PARAM_FORBIDDEN_KEYS for k in keys)
 
@@ -347,15 +319,7 @@ def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
 def overlay_sets_model_outside_allowed(
     overlay: dict[str, Any] | None, allowed_models: list[str] | None
 ) -> bool:
-    """True iff a seed ``pipeline_overlay`` steers the inner-optimizer model/provider
-    to a value the origin has NOT sanctioned — the ADR-0005 babysit trigger.
-
-    ``allowed_models`` is the origin's declared allow-list (``CampaignConfig``).
-    A steer to a model IN the set is a clean human choice (no taint); a steer to a
-    model OUTSIDE it — or ANY model steer when the set is empty (nothing sanctioned,
-    the restrictive default) — taints the branch. A ``provider`` edit has no allow-list
-    to sanction it, so it always counts. The optimizer never searches these axes at all
-    (``PARAM_FORBIDDEN_KEYS`` invariant); this governs only the direct human steer."""
+    """A ``provider`` edit has no allow-list that could sanction it, so it always counts."""
     allowed = set(allowed_models or [])
     for _node, cfg in node_config_items(overlay):
         if "provider" in cfg:
@@ -367,36 +331,8 @@ def overlay_sets_model_outside_allowed(
 
 
 def fold_schema_descriptions(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:
-    """Fold each node's virtual ``output_schema_descriptions`` into its wire
-    ``output_schema`` prose, in place, then remove the virtual key.
-
-    This is the apply site for the core structured-output `description` lever
-    (`docs/concepts/structured-output.md`): the optimizer accumulates
-    ``output_schema_descriptions`` as a normal ``object`` param (so
-    ``apply_node_overlay`` merges it one level across generations), and here — at the
-    render→wire seam — its entries are written onto the node's REAL
-    ``output_schema.properties[field].description`` before the connector sends it.
-    Assignment onto EXISTING properties only: a field the optimizer invented is dropped
-    rather than reaching the wire (names are the locked contract). The virtual key is then
-    deleted, so the backend receives a valid schema and no pseudo-param, and identity still
-    separates two description sets because the folded ``output_schema`` differs.
-
-    A node may declare its schema INLINE (``config.output_schema``) or by REGISTRY
-    IDENTITY (``config.schema_family`` — TermNorm's ``entity_profiling`` / ``llm_ranking``).
-    In the registry case the config carries no schema to write on, so *schema* — required,
-    because omitting it silently reinstates the drop described below — supplies the
-    resolved one (``PipelineNode.output_schema.json_schema``, parsed from the same
-    ``GET /pipeline`` payload) and the fold materializes it inline. Without this the
-    descriptions were popped and dropped: two opposite steers produced a byte-identical wire
-    payload, so the searchpoint hashes collided and the optimizer scored one measurement
-    twice — a lever it could propose but never pull.
-
-    Materialization happens ONLY for a node that actually carries descriptions, so a normal
-    cycle's payload is byte-identical to the pre-lever one and C0 identity is unchanged.
-
-    Idempotent + safe on any pp: a node without the virtual key, or with no schema from
-    either source, is untouched. Mutates in place — callers pass a deep copy.
-    """
+    """*schema* is REQUIRED — a node declaring its schema by registry identity carries none to write
+    on, and without it two opposite steers produced a byte-identical payload whose hashes collided."""
     for node, cfg in node_config_items(pp):
         descriptions = cfg.pop(SCHEMA_DESCRIPTIONS_PARAM, None)
         if not isinstance(descriptions, dict) or not descriptions:
@@ -429,14 +365,8 @@ def fold_schema_descriptions(pp: dict[str, Any] | None, schema: PipelineSchema) 
 
 
 def parent_param_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
-    """The parent's CURRENT value for *param*, shaped like the override that proposes it.
-
-    Every param but one reads straight off the parent's node config. ``output_schema_descriptions``
-    is virtual: the prose it edits lives folded inside ``output_schema.properties[f].description``
-    (:func:`fold_schema_descriptions`), so the parent never carries the key and a naive lookup
-    returns ``None`` — making an exact re-proposal of the existing prose read as a mutation. It is
-    reconstructed here, keyed by the fields the override actually names.
-    """
+    """``output_schema_descriptions`` is virtual — its prose lives folded inside the schema, so the
+    parent never carries the key and a naive lookup makes re-proposing existing prose read as a mutation."""
     if param == SCHEMA_DESCRIPTIONS_PARAM and isinstance(proposed, dict):
         props = (parent_cfg.get("output_schema") or {}).get("properties") or {}
         return {f: (props.get(f) or {}).get("description", "") for f in proposed}
@@ -449,16 +379,8 @@ def candidate_delta(
     pp_override: dict[str, Any] | None,
     parent_pp: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[tuple[str, str], Any]]:
-    """What a candidate ACTUALLY changed vs its parent — the ONE delta definition.
-
-    Prompt-field component: the ``PROMPT_STRING_FIELDS`` whose child value differs.
-    Param component: per-``(node, param)`` overrides that MOVE the parent's resolved
-    value — restating what the parent already holds is not a mutation, and the
-    virtual ``output_schema_descriptions`` compares against the folded schema prose
-    (:func:`parent_param_value`). Dedup (``detect_invariants``) hashes this and the
-    ALREADY TRIED panel renders it, so a delta rule honored in one cannot desert
-    the other (the panel would show a re-proposal as new).
-    """
+    """The ONE delta definition: dedup hashes it and the ALREADY TRIED panel renders it, so a rule
+    honoured in one cannot desert the other. Restating the parent's value is not a mutation."""
     pf = {
         f: child_fields.get(f)
         for f in PROMPT_STRING_FIELDS
@@ -475,16 +397,8 @@ def candidate_delta(
 
 
 def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
-    """The ``PromptTemplate``-field text one L1 variant wrote, from BOTH carriers.
-
-    A prose mutation rides ``prompt_fields_override`` where the campaign evolves a target
-    prompt and ``pipeline_params_override[node][field]`` where it evolves a node's own
-    template (L4's whole surface, and any backend advertising a decomposition field in
-    ``param_keys``). Same edit, different carrier — so a check that reads one carrier
-    answers "was this a prose mutation" correctly on one kind of campaign and inverted on
-    the other. Keyed ``field`` / ``node.field``; the pair with :func:`candidate_delta`,
-    which answers the same question against a parent.
-    """
+    """A prose mutation rides two different carriers depending on whether the campaign evolves a
+    target prompt or a node's own template — reading one answers inverted on the other kind."""
     written: dict[str, str] = {}
     for f, v in (variant.get("prompt_fields_override") or {}).items():
         if f in PROMPT_STRING_FIELDS:
@@ -606,33 +520,14 @@ IDEA_MATCH_REJECT = 0.70
 
 
 def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
-    """Content-word set of the VALUES a candidate wrote — its WORDING, independent of field.
-
-    **It catches a re-proposal that reuses vocabulary. It cannot catch one that does not, and a
-    zero repeat count is therefore not evidence the generator is exploring.** Measured on the ten
-    inner edits that all asked the target model to reason further before answering — one
-    hypothesis, ten wordings, every one scoring +0.000: this catches **0 of their 15 pairs**, at
-    overlaps of 0.09-0.44 against :data:`IDEA_MATCH_REJECT`. Nor is the threshold the problem —
-    convicting a 0.11 pair means a threshold near 0.10, which convicts every candidate of
-    duplicating every other. Lexical comparison has no operating point that separates "same idea,
-    new words" from "different idea".
-
-    Left lexical deliberately. The alternatives are an embedding dependency (this project spends
-    dependencies reluctantly) or an LLM call per candidate (spend, on the loop's hot path), and
-    both buy little: the repeat gate only DROPS a candidate, never improves one, and by contract
-    a round where everything repeats rejects nothing. The generator producing a mechanism edit
-    instead is worth more than any detector — which is why that instruction lives in
-    ``assets/optimizer/sets/self_optimizing.yaml`` rather than here.
-    """
+    """It catches a re-proposal that REUSES vocabulary, and nothing else — a zero repeat count is not
+    evidence the generator is exploring. Left lexical: the alternatives buy little for their cost."""
     words = re.findall(r"[a-z]+", " ".join(values).lower())
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 
 
 def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool:
-    """Overlap coefficient of two fingerprints against *threshold*.
-
-    *threshold* is explicit at every call site on purpose — see :data:`IDEA_MATCH_REJECT`.
-    """
+    """*threshold* is explicit at every call site on purpose — see :data:`IDEA_MATCH_REJECT`."""
     if len(a) < IDEA_MIN_TOKENS or len(b) < IDEA_MIN_TOKENS:
         return False
     return len(a & b) / min(len(a), len(b)) >= threshold
@@ -644,28 +539,8 @@ def candidate_idea(
     pp_override: dict[str, Any] | None,
     parent_pp: dict[str, Any] | None,
 ) -> frozenset[str]:
-    """The content words a candidate ADDED to its parent — the ONE idea definition.
-
-    Fingerprinting a changed field's WHOLE value measures which field was rewritten, not
-    which idea was proposed: an edit re-emits the field's unchanged body, so two unrelated
-    rewrites of one long field share that body and overlap far above
-    :data:`IDEA_MATCH_REJECT`. Measured on ``justlogic-d234__f8dd54`` — two candidates whose
-    words were ~50% new scored 0.800 and 0.867 against a prior loser and were rejected as
-    re-proposals. Both were REMOVAL edits, the only kind that can stop a prompt growing every
-    round; with them gone the rendered prompt grew 44% across 7 rounds until a third of
-    ``l1_generate`` calls overran ``max_tokens`` and paid a repair round-trip.
-
-    Subtracting the parent also sharpens the case this exists FOR — an idea rewritten into a
-    different field keeps its own words, so it still matches, while the boilerplate that never
-    carried the idea stops voting.
-
-    The parent is subtracted WHOLE — every prompt field, not just the ones this candidate
-    changed. A wholesale field rewrite re-types the task's own vocabulary, and that vocabulary
-    lives across the parent's other fields too: subtracting only the changed field left
-    ``provably``/``uncertain``/``json``/``schema`` in both fingerprints and still convicted two
-    unrelated ``instruction`` rewrites at 0.714 and 0.743. A word already somewhere in the
-    parent's prompt cannot be what this candidate contributed.
-    """
+    """The parent is subtracted WHOLE, every prompt field: the task's own vocabulary lives across the
+    fields this candidate did not change, and left in it convicts unrelated rewrites of repeating."""
     pf, pp = candidate_delta(child_fields, parent_fields, pp_override, parent_pp)
     parent = parent_pp or {}
     written = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
@@ -687,17 +562,8 @@ def _fmt_pp_val(v: object) -> str:
 
 
 def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
-    """``{node: {param: value}}`` → ``{node.param: value}`` display dict.
-
-    A nested param flattens ONE level further, to ``node.param.key`` — the depth its
-    declaration lets the merge accumulate at, so the searchpoint diff names the single
-    ``output_schema_descriptions`` entry a candidate rewrote instead of printing two
-    dict reprs and asking the operator to spot the difference. ``group_diff_keys``
-    splits on the first dot, so the extra segment still groups under its node.
-
-    Sniffing the value is right *here* and wrong in the merge: this is display depth,
-    not semantics, and a dict never reads better flattened than as its own repr.
-    """
+    """A nested param flattens ONE level further, to ``node.param.key`` — the depth its declaration
+    lets the merge accumulate at. ``group_diff_keys`` splits on the first dot, so it still groups."""
     flat: dict[str, str] = {}
     for k, v in node_config_items(pp):
         for sub_k, sub_v in v.items():

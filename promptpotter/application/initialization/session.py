@@ -1,5 +1,3 @@
-"""Session/Cycle identity + active-session-pointer claim. Owns ``Session`` + per-cycle bundles."""
-
 from __future__ import annotations
 
 import logging
@@ -99,23 +97,13 @@ class Session:
 
     @property
     def hop(self) -> CycleHop:
-        """This session's cycle as the pair that names it — campaign plus cycle.
-
-        Derived, never stored: ``campaign_id`` is the session's and ``cycle_id`` flips with
-        ``state`` on a fork, so a stored copy would be a second answer that goes stale at the
-        one moment it matters. The pair is the unit because a cycle_id repeats across sibling
-        ``.inner`` sandboxes — reading either half alone is what let one campaign's fan-out
-        serve another's.
-        """
+        """This session's cycle as the PAIR that names it. Derived, never stored — ``cycle_id`` flips on a fork, and it
+        repeats across sibling ``.inner`` sandboxes, so reading either half alone crosses one fan-out into another."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.state.cycle_id)
 
     def llm_node_name(self) -> str:
-        """The dataset's prompt-bearing LLM node — the override target for a per-cell
-        seed / model pin.
-
-        Derived from the pipeline schema, never a literal. Raises rather than
-        guessing — a dataset declaring no prompt node cannot carry an override.
-        """
+        """The dataset's prompt-bearing LLM node — the override target for a per-cell seed or model pin. Derived from the
+        schema, never a literal, and RAISES rather than guessing: a dataset with no prompt node cannot carry an override."""
         names = self.pipeline_schema.prompt_node_names()
         if not names:
             raise ValueError(
@@ -191,12 +179,8 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:
-    """Mint fresh campaign + session + root cycle under *campaign_id*; claim the active pointer.
-
-    ``campaign_id`` is chosen by the caller (``jobs/mint.py::prepare_fresh_cycle``) rather
-    than minted here, so an L4 inner spawn can hand in an id derived from the cell it
-    measures and land back on the campaign a previous attempt left rounds in.
-    """
+    """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
+    L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
     from promptpotter.application.config import freeze_campaign_config, resolved_dataset_name
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
@@ -278,20 +262,8 @@ def auto_mint_session(
 
 
 def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
-    """Mint a real disk-backed campaign in the ``checkin`` lifecycle — transition (a).
-
-    The first ingest action lands here: write a provisional ``campaign.json``
-    (``lifecycle_status="checkin"``, empty ``root_content_hash`` / ``config`` — the
-    origin isn't authored yet), a skeleton cycle ``index.json``, a placeholder
-    session, and drop ``.runtime/checkin.flag`` so ``derive_run_phase`` reads the
-    cycle as ``CHECKIN``. No Session, no backend, no quota, no machine slot — a
-    check-in is resumable progress, not a run. **It does NOT claim the active
-    pointer**: the pointer is "the cycle the dashboard follows", and a not-yet-run
-    check-in following it would snap a following workspace off the chat mid-drop
-    (bouncing the operator out of the authoring flow). ``finalize_checkin_to_active``
-    claims the pointer when it flips this to ``active`` at Start. The draft
-    working-state + sample bank are written separately by the caller through
-    :class:`CheckinDraftStore`. Returns ``(session_id, campaign_id, cycle_id)``."""
+    """Mint a disk-backed campaign in the ``checkin`` lifecycle. It does NOT claim the active pointer — a
+    not-yet-run check-in following it snaps a watching workspace out of the authoring flow."""
     from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.campaign import Campaign
@@ -352,12 +324,8 @@ def finalize_checkin_to_active(
     cycle_plan: CyclePlan,
     dataset_size: int,
 ) -> None:
-    """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — transition (b).
-
-    The deferred half of the mint: the origin is now resolved (``cycle_plan``). The
-    cycle id stays the provisional ``cycle_chk_*`` (option 2b — drift reads
-    ``root_content_hash``, not the parsed id). Unlike ``auto_mint_session`` this
-    mints nothing new; the caller binds the session + detaches the run."""
+    """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — the cycle id stays the provisional
+    ``cycle_chk_*``, since drift reads ``root_content_hash`` and not the parsed id. This mints nothing new."""
     from promptpotter.application.config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,

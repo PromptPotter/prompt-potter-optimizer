@@ -1,17 +1,5 @@
-"""Campaign / cycle directory builders + cycle-id parsing + the per-cycle
-on-disk layout. Pure — no I/O, no parent walk.
-
-On-disk shape: ``campaigns/{campaign_id}/`` holds ``campaign.json`` + ``log.md`` +
-``cycles/{cycle_id}/`` (every cycle flat under one ``cycles/``). New campaigns
-mint ``campaign_id = {dataset}__{rand6_hex}`` per ``new``; root cycle is
-``cycle_{target_hash[:12]}``. Sibling kind + sweep batch id live in
-``cycles/{cycle_id}/index.json``, not the path.
-
-:class:`CycleLayout` is the single owner of everything *inside* a cycle dir —
-the ``.runtime/`` durability tree, the public round files, the manifest, the
-rendered prompts, the langfuse mirror. Every reader/writer derives its paths
-from a ``CycleLayout``; to move a file on disk, change it here and nowhere else.
-"""
+"""Campaign / cycle directory builders + cycle-id parsing. Pure — no I/O, no parent walk.
+Every cycle is flat under one ``cycles/``; sibling kind and sweep batch ride ``index.json``."""
 
 from __future__ import annotations
 
@@ -39,22 +27,8 @@ _DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def validate_dataset_name(name: str) -> str:
-    """**The** dataset-name rule — every entry point asks here, wire included.
-
-    Stricter than :func:`validate_path_component` (no dots) and lowercase-only,
-    because a dataset name IS a directory name and the two filesystems this ships
-    on are case-insensitive: ``Foo`` and ``foo`` would be one directory while
-    :meth:`~...TenantDatasetStore.slug_exists` reported two. Ingest already
-    lowercases, so nothing legal is lost.
-
-    A leading digit is allowed on purpose — ``2024-sales.csv`` is an ordinary upload, and
-    a wire rule that rejects it rejects the slug its own ingest just minted, so a dataset
-    can be created and never minted against. That is what a second rule for this field
-    buys (it was ``_DATASET_NAME_PATTERN`` in the commands router); there is one rule
-    because two can disagree.
-
-    Raises ``ValueError`` on invalid; returns *name* unchanged otherwise.
-    """
+    """Lowercase-only because a dataset name IS a directory name and both shipped filesystems are
+    case-insensitive. A leading digit is legal — ingest mints ``2024-sales`` slugs of its own."""
     if not name or not _DATASET_NAME_RE.match(name):
         raise ValueError(
             f"Invalid dataset name: {name!r}. Lowercase alphanumerics, hyphens and "
@@ -64,10 +38,8 @@ def validate_dataset_name(name: str) -> str:
 
 
 def root_cycle_id(cycle_id: str) -> str:
-    """Family-root cycle id — prefix before the FIRST sibling separator (``_fork_``/``_diag_``/``_sweep_``).
-
-    ``cycle_X_fork_Y_sweep_b1_abc`` roots at ``cycle_X``.
-    """
+    """Prefix before the FIRST sibling separator: ``cycle_X_fork_Y_sweep_b1_abc`` roots at
+    ``cycle_X``."""
     m = _SIBLING_SEP_RE.search(cycle_id)
     return cycle_id[: m.start()] if m else cycle_id
 
@@ -81,18 +53,8 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
 
 
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
-    """``projects_root/{tenant_id}`` — the tenant's workspace root, and the ONE
-    place that relation is written down.
-
-    Every ``tenant_root`` argument below is one of these. It is a
-    :data:`~promptpotter.domain.cycle_paths.WorkspaceDir` rather than a bare ``Path``
-    so the type system can tell it apart from the ``projects_root`` one level up:
-    the two are both ``Path``, differ by exactly one segment, and every function that
-    took the wrong one still compiled. That was not hypothetical — the active-session
-    pointer accepted an optional root and defaulted to the process-global workspace, so
-    an L4 inner cycle retargeted the OPERATOR's pointer at a campaign living under
-    ``.inner/`` and blanked their dashboard mid-run.
-    """
+    """The ONE place ``projects_root/{tenant_id}`` is written down. It returns a ``WorkspaceDir`` so
+    the type system separates it from ``projects_root``, one segment up and also a ``Path``."""
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 
 
@@ -102,10 +64,8 @@ def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
 
 
 def archive_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
-    """Recycle-bin home for an archived campaign — ``archive/{campaign_id}/``. The
-    ``archive`` verb MOVES the campaign tree here; ``unarchive`` moves it back to
-    ``campaigns/``. Recoverability is its only feature; it sits beside the
-    measurement store (``measurements/``, the DB core), which is NOT trash."""
+    """Recycle bin for an archived campaign — ``archive`` MOVES the tree here, ``unarchive`` moves
+    it back. It sits beside ``measurements/``, the DB core, which is NOT trash."""
     return tenant_root / "archive" / validate_path_component(campaign_id)
 
 
@@ -116,9 +76,8 @@ def campaign_cycles_dir(campaign_root: Path) -> Path:
 
 
 def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
-    """Per-cycle dir under an ALREADY-RESOLVED campaign root — the sole owner of the
-    ``cycles/{cycle_id}`` layout. ``CampaignStore`` passes an archive-aware root here;
-    :func:`cycle_dir_for` passes the ``campaigns/``-only one."""
+    """Sole owner of the ``cycles/{cycle_id}`` layout. ``CampaignStore`` passes an archive-aware
+    root here; :func:`cycle_dir_for` passes the ``campaigns/``-only one."""
     return campaign_cycles_dir(campaign_root) / validate_path_component(cycle_id)
 
 
@@ -149,34 +108,14 @@ def session_dir_for(tenant_root: WorkspaceDir, session_id: str) -> Path:
 
 
 def inner_sandboxes_dir(workspace_projects_root: Path) -> Path:
-    """The workspace's sandbox home, ``.inner/`` — a sibling of ``projects/``.
-
-    Pass the REAL workspace projects root (``Stores.shared_root``), which is invariant
-    across recursion depth. A sandboxed store's own ``projects_root`` already IS
-    ``.inner/<key>``, so anchoring on it would nest ``.inner/.inner/…`` at L5 — the exact
-    path-length trap the flat layout exists to avoid. The two coincide at depth 0.
-    """
+    """Pass the REAL workspace projects root, invariant across recursion depth: a sandboxed store's
+    own ``projects_root`` already IS ``.inner/<key>``, so anchoring there nests it again at L5."""
     return workspace_projects_root.parent / ".inner"
 
 
 def inner_sandbox_key(tenant_id: str, hop: CycleHop) -> str:
-    """Directory name of one cycle's inner sandbox: ``inner_<16 hex>``.
-
-    Keyed on the FULL owner identity, because no part of it identifies the owner alone.
-    ``cycle_id`` is a content hash of the origin and is therefore SHARED by every campaign
-    minted from that origin — deliberately, since resume and cache reuse depend on it — and
-    ``campaign_id`` is unique only within a tenant. Keyed on the cycle alone, as it was, two
-    campaigns on one origin shared a single sandbox: a fresh ``new`` swept away the other's
-    live inner tree, ``delete_campaign`` cascaded into it, ``reclaim_orphan_sandboxes``
-    resolved its owner through a cross-tenant glob, and ``?descend=`` served one campaign's
-    inner fan-out under the other's id. Observed, not hypothetical — a second
-    ``new promptpotter-self`` destroyed 39 banked inner campaigns belonging to the only outer
-    run that had ever finished.
-
-    The three names are not lost to the hash: the sandbox records them in ``owner.json``
-    (:func:`sandbox_owner_path`), which is also what lets a reader resolve ownership exactly
-    instead of guessing at it from a path.
-    """
+    """Keyed on the FULL owner triple. ``cycle_id`` is content-addressed on the origin and so is
+    shared by every campaign minted from it; keyed on the cycle alone, two campaigns share a sandbox."""
     for part in (tenant_id, hop.campaign_id, hop.cycle_id):
         validate_path_component(part)
     # The three names go in as they always did — this hash IS the sandbox directory name,
@@ -192,11 +131,8 @@ def inner_sandbox_dir(workspace_projects_root: Path, tenant_id: str, hop: CycleH
 
 
 def sandbox_owner_path(sandbox_dir: Path) -> Path:
-    """``owner.json`` — which ``(tenant, campaign, cycle)`` this sandbox belongs to.
-
-    A material fact, so it lands on disk in human-readable form rather than only in the
-    directory name. It is what makes the orphan reaper's ownership test exact.
-    """
+    """A material fact, so it lands on disk in readable form rather than only in the directory
+    name. It is what makes the orphan reaper's ownership test exact."""
     return sandbox_dir / "owner.json"
 
 
@@ -208,13 +144,8 @@ def round_basename(round_num: int) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CycleLayout:
-    """Every path *inside* one cycle dir, named once — the sole owner of the
-    on-disk shape below ``campaigns/{c}/cycles/{cy}/``.
-
-    ``.runtime/ledger.jsonl``, the ``round_{n:04d}`` file naming, and the flag
-    names (``pause.flag`` / ``skip.flag`` / …) all derive from here, so a move
-    on disk (e.g. a ``.runtime/`` durability-class split) is a one-line change.
-    """
+    """Sole owner of the on-disk shape below ``campaigns/{c}/cycles/{cy}/`` — the ledger path, the
+    ``round_{n:04d}`` naming and the flag names all derive here, so a move on disk is one line."""
 
     cycle_dir: Path
 
@@ -306,15 +237,8 @@ _REPORT_NAMES = frozenset(
 
 
 class FileKind(Enum):
-    """The logical role of one file in a campaign tree — the single taxonomy behind
-    BOTH the storage rollup's size leaf (:attr:`leaf`) and ``delete --keep-results``'
-    keepsake decision (:attr:`keepsake`).
-
-    :attr:`leaf` names the MECE size bucket (a human-facing figure — the sidebar cake).
-    :attr:`keepsake` is whether ``delete --keep-results`` spares the file. ``trace`` is
-    the one leaf that straddles keepsake, so it carries two kinds — the langfuse loop
-    trace survives, loop telemetry does not — which is why a bare 6-way leaf enum can't
-    also answer keepsake."""
+    """``leaf`` names the MECE size bucket; ``keepsake`` is whether ``delete --keep-results`` spares
+    the file. ``trace`` straddles, which is why a bare 6-way leaf enum cannot answer both."""
 
     leaf: str
     keepsake: bool
@@ -339,14 +263,8 @@ class FileKind(Enum):
 
 
 def classify(rel: Path) -> FileKind:
-    """Classify one file (path relative to the campaign root) into its :class:`FileKind`.
-    First match wins; the final branch makes the partition exhaustive.
-
-    ``ROUND_PUBLIC`` (``rounds/round_*.json``) is the lone file whose bytes straddle two
-    leaves — the backend's per-sample arrays roll into ``connector``, the searchpoint
-    remainder into ``state`` — so the rollup splits it rather than reading ``.leaf``. The
-    ``.runtime/cache`` audit copy carries ``.runtime`` and is caught above as
-    ``CONNECTOR_CACHE``, so it never reaches the round branch."""
+    """First match wins; the final branch makes the partition exhaustive. ``ROUND_PUBLIC`` is the
+    lone file whose bytes straddle two leaves, so the rollup splits it rather than reading ``.leaf``."""
     parts = rel.parts
     if "langfuse" in parts:
         i = parts.index("langfuse")

@@ -1,9 +1,4 @@
-"""Live display primitives — pure formatting, zero business logic.
-
-ANSI colors + box-drawing + scoreboard + interrupt banner + display-tag
-state + small numeric helpers. Higher-level renderers consume these in
-``views/render.py`` and the ``views/live/`` package.
-"""
+"""Live display primitives — pure formatting, zero business logic."""
 
 from __future__ import annotations
 
@@ -24,18 +19,14 @@ _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
 def fmt_ci(lower: float | None, upper: float | None) -> str:
-    """Format a 95% CI bracket: ``[X.X%-Y.Y%]``, or ``—`` where no interval exists.
-
-    The composite CI is absent for a candidate with no scored cell, and an absent
-    interval must read as absent rather than as ``[0.0%-0.0%]`` — a fabricated
-    bracket claiming certainty about a measurement that never happened."""
+    """Format a 95% CI bracket, or ``—`` where no interval exists. An absent interval must READ as absent:
+    ``[0.0%-0.0%]`` is a fabricated bracket claiming certainty about a measurement that never happened."""
     if lower is None or upper is None:
         return "—"
     return f"[{lower:.1%}-{upper:.1%}]"
 
 
 def fmt_pvalue(p: float) -> str:
-    """Format a p-value with significance tier (***, **, *, ns)."""
     if p < 0.001:
         return "p<0.001 ***"
     if p < 0.01:
@@ -46,13 +37,10 @@ def fmt_pvalue(p: float) -> str:
 
 
 def _visible_len(text: str) -> int:
-    """Length of text after stripping ANSI escape codes."""
     return len(_ANSI_RE.sub("", text))
 
 
 def _truncate_visible(text: str, max_visible: int) -> str:
-    """Truncate ``text`` to at most ``max_visible`` visible chars, preserving
-    ANSI escape sequences and appending RESET if any sequence was emitted."""
     if max_visible <= 0:
         return ""
     out: list[str] = []
@@ -101,7 +89,6 @@ def _h_rule_labeled(
     width: int = _W,
     fill: str = "─",
 ) -> str:
-    """Horizontal rule with embedded labels: ``LC─ label ──── label_right ─RC``."""
     inner = width - 4
     left = f" {label} " if label else ""
     right = f" {label_right} " if label_right else ""
@@ -110,16 +97,10 @@ def _h_rule_labeled(
 
 
 def _h_rule(lc: str, rc: str, *, width: int = _W, fill: str = "─") -> str:
-    """Plain horizontal rule: ``LC───...───RC``."""
     return f"{lc}{fill * (width - 2)}{rc}"
 
 
 def _h_text(lw: str, rw: str, text: str, *, width: int = _W) -> str:
-    """Content line walled with ``LW`` / ``RW``: ``LW  text ...  RW``.
-
-    Truncates with ``…`` when ``text`` exceeds inner width so the closing
-    wall always lands at column ``width - 1``.
-    """
     inner = width - 4
     vis = _visible_len(text)
     if vis > inner:
@@ -146,7 +127,6 @@ def _box_line(text: str, width: int = _W) -> str:
 
 
 def _fmt_delta(val: float) -> str:
-    """Format accuracy delta with color: green positive, red negative, yellow zero."""
     if abs(val) < 0.001:
         return f"{YELLOW}+0.0%{RESET}"
     color = GREEN if val > 0 else RED
@@ -166,15 +146,12 @@ def _node_line(text: str) -> str:
 
 
 def _node_lines(text: str) -> list[str]:
-    """``_node_line`` for a possibly-multi-line value: prefix EACH physical line so an embedded
-    ``\\n`` (e.g. a multi-line prompt-field value in the SP-diff legend) doesn't escape the box —
-    only the first line was prefixed before, the rest broke the frame in the terminal + latest.log.
-    """
+    """``_node_line`` for a possibly-multi-line value — prefix EACH physical line, or an embedded newline
+    escapes the box and breaks the frame in both the terminal and ``latest.log``."""
     return [_node_line(line) for line in text.split("\n")]
 
 
 def _node_block(label: str, *lines: str, label_right: str = "") -> str:
-    """Render a node block: ``├─ LABEL ─┤`` + content lines + ``├──┤``."""
     parts = [_node_top(label, label_right)]
     parts.extend(_node_line(line) for line in lines)
     parts.append(_node_bottom())
@@ -182,8 +159,6 @@ def _node_block(label: str, *lines: str, label_right: str = "") -> str:
 
 
 def _dbox_block(title: str, *lines: str) -> str:
-    """Render a double-box block with title header and content lines."""
-
     def line(text: str) -> str:
         return _h_text("║", "║", text, width=_W)
 
@@ -195,10 +170,6 @@ def _dbox_block(title: str, *lines: str) -> str:
 
 
 def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
-    """Heavy round separator with labels.
-
-    Returns a 3-line string: heavy rule, label line, heavy rule.
-    """
     rule = "━" * width
     inner = f"  {label}"
     if label_right:
@@ -211,14 +182,8 @@ def _scoreboard(
     candidate_scores: Sequence[ScoreEntry],
     winner_label: str,
 ) -> str:
-    """Format ranked candidate scoreboard as a box with 95% CI.
-
-    Reads the frozen ``ScoreEntry`` rows directly. The Δ column compares each row against
-    ``matched_origin_accuracy`` — origin on the samples that row actually ran — and is blank
-    where the row has none. The round's full-set origin is NOT a fallback for those rows: it
-    is a different sample basis, so there is no parameter for it rather than one left unread.
-    Returns multi-line string ready to print.
-    """
+    """Ranked candidate scoreboard with 95% CI. Δ compares each row against origin ON THE SAMPLES THAT
+    ROW RAN, blank where it has none: the round's full-set origin is a different basis, not a fallback."""
     # Filter synthetic-zeroed variants (no_op / duplicate) — they did not burn an LLM call
     # and ranking them as 0.0% delta distorts the verdict. The set is imported, never
     # re-spelled: it belongs to the validator that EMITS these reasons.
@@ -283,10 +248,6 @@ _WIRE_TYPE_TAGS: dict[str, str] = {
 
 
 def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
-    """Compute ``{node_name: tag}`` with auto-enumeration for duplicates.
-
-    Resolution: ``_WIRE_TYPE_TAGS[node.wire_type]`` → ``node.name[:4]``.
-    """
     from collections import Counter
 
     base_tags: list[tuple[str, str]] = [
@@ -305,11 +266,8 @@ def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
 
 
 def set_display_tags(schema: PipelineSchema | None) -> None:
-    """Set display tags from a PipelineSchema. Call once at pipeline init.
-
-    Mutates ``DISPLAY_TAGS`` in place so other modules importing it keep
-    a live reference.
-    """
+    """Set display tags from a ``PipelineSchema``, once at pipeline init. Mutates ``DISPLAY_TAGS`` in
+    place so every module that imported it keeps a live reference."""
     DISPLAY_TAGS.clear()
     if schema:
         DISPLAY_TAGS.update(_build_display_tags(schema))
@@ -339,13 +297,8 @@ def render_pipeline_overrides(
     pipeline_params: dict[str, Any] | None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overrides`` block.
-
-    Nested format ``{"node_name": {"param": value}}``.  When ``pipeline_schema``
-    is given, only keys listed in each node's ``param_keys`` are shown; nodes
-    without a schema entry fall back to all key/value pairs.  Returns an empty
-    string when there is nothing to render.
-    """
+    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overrides`` block. With a schema, only
+    each node's ``param_keys`` are shown; a node absent from the schema falls back to every pair."""
     if not pipeline_params:
         return ""
 

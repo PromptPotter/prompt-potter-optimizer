@@ -1,15 +1,5 @@
-"""Live ``PhaseEvent → typed View`` ingress.
-
-``from_phase_event`` (called by ``RunCallbacks.on_phase``) builds a typed view
-and applies ctx side effects (round-num tracking, origin rolling, prompt-flat
-memo) in one pass. The typed view rides ``PhaseRecord.payload['view']`` on the
-in-memory ledger fan-out — subscribers consume it directly (``to_text`` /
-attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
-no hand-rolled reconstruction is needed.
-
-The ``score_entry_from_dict`` helper is also consumed by
-``application/output.py`` for disk-derived ``log.md`` rendering.
-"""
+"""Live ``PhaseEvent → typed View`` ingress. The view rides ``PhaseRecord.payload['view']`` and Pydantic serialises it on
+persist + SSE, so nothing downstream hand-rebuilds it."""
 
 from __future__ import annotations
 
@@ -320,7 +310,6 @@ _BUILDERS: dict[str, Any] = {
 
 
 def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
-    """Build a typed view from a ``PhaseEvent``; ``None`` for unregistered phases."""
     if event.round is not None:
         ctx.round_num = event.round
     builder = _BUILDERS.get(f"{event.phase}:{event.event}")
@@ -331,12 +320,8 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
-    """``ScoredCandidate`` dict (``model_dump``) → narrow ``ScoreEntry`` renderer row.
-
-    The interval is ``composite_ci_lo``/``_hi`` — it brackets the composite the row
-    reports, where the old Wilson pair bracketed a binary hit-rate nothing displayed.
-    The scoreboard's ``invalid_reason`` is derived from the first validation failure.
-    """
+    """``ScoredCandidate`` dict → the narrow renderer row. The interval is the COMPOSITE CI, which brackets the number the
+    row reports — the old Wilson pair bracketed a binary hit rate nothing displayed."""
     sc = ScoredCandidate.model_validate(s)
     invalid_reason: str | None = None
     if sc.invalid and sc.validation_failures:

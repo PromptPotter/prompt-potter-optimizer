@@ -1,5 +1,3 @@
-"""PipelineSchema — backend-agnostic LLM-pipeline description."""
-
 import enum
 import hashlib
 import json
@@ -65,14 +63,11 @@ SCHEMA_DESCRIPTIONS_PARAM = "output_schema_descriptions"
 
 
 def stable_hash(value: Any) -> str:
-    """Deterministic 16-char hex digest of an arbitrary JSON-able value."""
     blob = json.dumps(value, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
 class NodeType(enum.StrEnum):
-    """Pipeline node type classification (empty string = untyped)."""
-
     NONE = ""
     CANDIDATE_SOURCE = "candidate_source"
     RANKER = "ranker"
@@ -91,17 +86,8 @@ CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
 
 
 class PipelineDependency(StrictModel):
-    """A categorical input a pipeline requires beyond (pipeline + dataset + origin),
-    derived from its **node types** — not hardcoded per backend.
-
-    A ``candidate_source`` node needs a target library to rank against; a future
-    enricher might need a knowledge base. The requirement is read off the node
-    taxonomy (``NodeType``), so a new connector declares one node type and gets
-    detection for free. Surfaced in the check-in / ingest UI so the operator sees
-    *which* input is missing and drops it in place — never a hidden fabricated
-    default. ``node`` names the node(s) it serves (comma-joined when one input feeds
-    several); ``hint`` says how to fulfil it.
-    """
+    """Read off the node taxonomy, so a new connector declares one node type and gets detection
+    for free. Surfaced to the operator as a missing input — never a hidden fabricated default."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -114,16 +100,8 @@ class PipelineDependency(StrictModel):
 def dependencies_from_node_types(
     node_type_by_name: Mapping[str, NodeType],
 ) -> tuple[PipelineDependency, ...]:
-    """Derive a pipeline's required inputs from its node-type map (categorical).
-
-    The single derivation both ingest (connector-declared ``node_types`` for the
-    active steps) and a live :class:`PipelineSchema` share, so the two never drift.
-    Today one arm: a pipeline with any ``CANDIDATE_SOURCE`` node raises ONE
-    ``candidate_library`` dependency — every candidate_source node ranks against the
-    same shared term index, so the library is one input, not one-per-node (hence the
-    dependency is collapsed, ``node`` listing the nodes it serves). New
-    node-type→input rules add an arm here, nowhere else.
-    """
+    """The single derivation both ingest and a live :class:`PipelineSchema` share, so the two never
+    drift. New node-type→input rules add an arm here, nowhere else."""
     deps: list[PipelineDependency] = []
     candidate_sources = sorted(
         name
@@ -148,8 +126,6 @@ def dependencies_from_node_types(
 
 
 class ObservationMapping(StrictModel):
-    """Maps one trace observation field to a pipeline_data key."""
-
     model_config = ConfigDict(frozen=True)
 
     pipeline_key: str
@@ -175,9 +151,8 @@ class NodeOutputSchema(StrictModel):
 
 
 class NodePromptInfo(StrictModel):
-    """Describes the prompt a node accepts — its presence marks the node as
-    prompt-bearing (the injection point for the candidate prompt) and names the
-    template variables. The input-side companion to :class:`NodeOutputSchema`."""
+    """Its PRESENCE marks the node prompt-bearing — the injection point for the candidate prompt.
+    The input-side companion to :class:`NodeOutputSchema`."""
 
     # `extra="ignore"`: the backend owns this sub-object's vocabulary and describes itself
     # to humans there (`family`, `description`); PP reads only `template_variables`.
@@ -187,8 +162,6 @@ class NodePromptInfo(StrictModel):
 
 
 class PipelineViewNode(StrictModel):
-    """Webapp pipeline-graph node."""
-
     model_config = ConfigDict(frozen=True)
 
     id: str
@@ -197,8 +170,6 @@ class PipelineViewNode(StrictModel):
 
 
 class PipelineViewEdge(StrictModel):
-    """Webapp pipeline-graph edge."""
-
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     from_: str = Field(alias="from")
@@ -217,8 +188,6 @@ class PipelineView(StrictModel):
 
 
 class PipelineNode(StrictModel):
-    """One node in a pipeline (target or optimizer)."""
-
     model_config = ConfigDict(frozen=True)
 
     name: str
@@ -239,28 +208,18 @@ class PipelineNode(StrictModel):
 
     @property
     def output_keys(self) -> list[str]:
-        """Pipeline_data keys this node writes (derived from observation_mappings)."""
         return [m.pipeline_key for m in self.observation_mappings]
 
     @property
     def is_llm(self) -> bool:
-        """Whether this node makes an LLM call PER ITS OBSERVATION MAPPINGS. Narrow
-        on purpose: this is the "the dataset must declare a per-node ``model``" signal
-        (`config.py::_require_owned_models`). An in-process optimizer prompt node (L4) runs
-        an LLM but carries no owned model — its model is the install-global optimizer
-        config — so it is deliberately NOT ``is_llm`` and stays exempt from that check."""
+        """Narrow on purpose: this is the "the dataset must declare a per-node ``model``" signal. An
+        in-process optimizer prompt node runs an LLM but owns no model, so it stays exempt."""
         return any(m.is_llm for m in self.observation_mappings)
 
     @property
     def runs_llm(self) -> bool:
-        """Whether this node runs an LLM call at all — the BROAD signal, the union of
-        the ``is_llm`` mapping, a ``generation`` wire/langfuse type (the backend's
-        explicit LLM marker), and the ``llm_only`` sentinel. This is the "could this
-        node carry the model axis" predicate: pp-self's ``optimizer_prompt`` nodes are
-        ``generation`` LLM calls with no per-node model, so ``is_llm`` is False for
-        them but ``runs_llm`` is True. Model-axis carrier selection reads THIS, not the
-        narrower ``is_llm`` — otherwise a self-optimization pipeline resolves no carrier
-        and the model axis silently never engages."""
+        """The BROAD signal — mapping, ``generation`` wire type, or the ``llm_only`` sentinel. Model-axis
+        carrier selection reads THIS: on ``is_llm`` a self-optimization pipeline resolves no carrier."""
         return (
             self.name == "llm_only"
             or self.is_llm
@@ -298,17 +257,8 @@ class NodeConfigParam(StrictModel):
 
 
 class NodeSearchNarrowing(StrictModel):
-    """A campaign's per-node narrowing of the dataset-declared optimizer search
-    space — the per-campaign search-space lever beside ``exclude_nodes`` (whole
-    node); model/provider are always locked. The dataset's
-    ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only
-    SUBSET it, frozen into the ``Campaign`` snapshot at mint and applied by
-    :meth:`PipelineSchema.narrow`.
-
-    ``param_keys`` is the tunable config subset the optimizer may move (``None`` =
-    inherit the node's full declared set; prompt-decomposition fields stay tunable
-    regardless — the prompt is always evolved). ``param_allowed_values`` narrows a
-    param's enum to a subset of the dataset's allowed set."""
+    """The dataset's ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only
+    SUBSET it. Prompt-decomposition fields stay tunable regardless — the prompt is always evolved."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -342,66 +292,32 @@ class PipelineSchema(StrictModel):
 
     @property
     def active_steps(self) -> tuple[str, ...]:
-        """Node names in pipeline order."""
         return tuple(n.name for n in self.nodes)
 
     def active_steps_excluding(self, exclude: Iterable[str]) -> list[str]:
-        """Node names surviving the campaign's ``exclude_nodes``, in pipeline order.
-
-        The complement `filter_to_steps` consumes: callers hold a drop-list but the
-        canonical projection takes a keep-list, so this owns the one inversion."""
+        """Callers hold a drop-list but the canonical projection takes a keep-list, so this owns the
+        one inversion."""
         dropped = set(exclude)
         return [n for n in self.active_steps if n not in dropped]
 
     @property
     def is_single_node(self) -> bool:
-        """A bare one-node scoring pipeline (TermNorm ``llm_only``) — the model
-        answers each query directly, with no retrieval / web search / ranking
-        stage. The first-class predicate that replaces scattered
-        ``len(active_steps) <= 1`` arithmetic and literal ``"llm_only"`` checks:
-        the acute case for the lock invariant (locking the only node leaves the
-        optimizer nothing to tune) and the redundant-node-row UI guard."""
+        """The first-class predicate replacing scattered ``len(active_steps) <= 1`` arithmetic and
+        literal ``llm_only`` checks — the acute case for the lock invariant and the node-row UI guard."""
         return len(self.nodes) == 1
 
     @property
     def observation_keys(self) -> frozenset[str]:
-        """``pipeline_data`` keys written by all nodes' observation mappings."""
         return self._observation_keys
 
     def to_pipeline_params(self) -> dict[str, Any]:
-        """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults.
-
-        This is the WIRE base only. The origin cycle id does not derive from it:
-        ``build_origin_cycle_id`` hashes the overlay-merged ``session.pipeline_params``
-        (connector config included), so the cycle id and the measurement key agree."""
+        """The WIRE base only. The origin cycle id does NOT derive from it — ``build_origin_cycle_id``
+        hashes the overlay-merged params, so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}
 
     def node_config_schema(self) -> dict[str, list[NodeConfigParam]]:
-        """Every param each node carries — the UNION of ``param_keys`` and the node's
-        actual ``current_config``, keyed by node.
-
-        COMPLETE by contract, so a reader can answer "may the optimizer move anything
-        here?" by summing ``optimizer_tunable``. Each param's ``kind`` names the surface
-        that owns it (see :class:`NodeConfigParam`); the config editor renders the five
-        widget kinds and skips ``prompt``/``nested``, which is where the filtering
-        belongs — a param this method drops is invisible to every caller, and dropping
-        the prose fields is what made pp-self's four optimizer prompt nodes — whose entire
-        search space IS prose — report themselves optimizer-locked.
-
-        The lone exclusion is :data:`SCHEMA_OWNED_FIELDS` (``output_schema`` /
-        ``schema_family`` / ``schema_version``): the ``NodeOutputSchemaView`` tree owns
-        those AND the optimizer is locked out of them, so they belong to neither
-        question. Config-only keys (``provider: groq``) bundle in, so the operator sees
-        the WHOLE node as one unit; model/provider are always ``optimizer_locked`` yet
-        still listed — the operator isn't the optimizer, and a cap-holding one may edit
-        them on a fork, which taints the branch babysat (ADR-0005 §4).
-
-        When NO node declares ``model`` natively (an install-global-model pipeline —
-        pp-self's optimizer prompt nodes run the shared optimizer model, own none) the model
-        row is SYNTHESIZED onto the carrier from ``available_models`` so the operator's
-        fork-model-steer has somewhere to land (without it the steer panel showed
-        "no configurable params").
-        """
+        """COMPLETE by contract, so a reader answers "may the optimizer move anything here?" by summing
+        ``optimizer_tunable``. A param dropped here is invisible to every caller — filter downstream."""
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
         model_declared = any("model" in (n.param_keys | set(n.current_config)) for n in self.nodes)
@@ -465,19 +381,13 @@ class PipelineSchema(StrictModel):
         return out
 
     def _model_carrier(self) -> str | None:
-        """The single node the model axis rides — the first LLM-running node in
-        declaration order (:attr:`PipelineNode.runs_llm`). One carrier, not per-node, so
-        an outer L4 search evolves ONE inner-optimizer model fanned across every node
-        (`resolve_node_override` does the fan). Read by both :meth:`node_param_keys`
-        (optimizer-tunable axis) and :meth:`node_config_schema` (operator-editable row),
-        so the two never target different nodes."""
+        """ONE carrier, not per-node, so an outer L4 search evolves ONE inner-optimizer model fanned
+        across every node. Both the tunable-axis and operator-row readers share it."""
         return next((s.name for s in self.nodes if s.runs_llm), None)
 
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
-        """Per-node structured-output contract (``fields`` / ``field_descriptions`` /
-        ``json_schema``) keyed by node name — the read-only companion to
-        :meth:`node_config_schema` so the steer panel can show the WHOLE node:
-        model + params + prompt + the structured output it produces."""
+        """The read-only companion to :meth:`node_config_schema`, so the steer panel can show the WHOLE
+        node: model + params + prompt + the structured output it produces."""
         return {n.name: n.output_schema for n in self.nodes}
 
     def get_node(self, name: str) -> PipelineNode | None:
@@ -491,15 +401,8 @@ class PipelineSchema(StrictModel):
         )
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
-        """Return a copy with each node's optimizer search space narrowed to the
-        campaign's per-node subset (the search-space lever beside
-        ``exclude_nodes``; model/provider are always locked).
-
-        A node's ``param_keys`` intersect the campaign subset (``None`` = inherit
-        the full set); prompt-decomposition fields are always kept tunable (the
-        prompt is owned by the prompt editor, not the lock editor, and is always
-        evolved). ``param_allowed_values`` intersect the narrowed enum. Empty
-        narrowing is a no-op; a node absent from the mapping is unchanged."""
+        """Intersects, never widens; prompt-decomposition fields are always kept tunable. Empty
+        narrowing is a no-op and a node absent from the mapping is unchanged."""
         if not narrowing:
             return self
         new_nodes: list[PipelineNode] = []
@@ -539,18 +442,8 @@ class PipelineSchema(StrictModel):
         return stable_hash(configs) if configs else ""
 
     def node_param_keys(self) -> dict[str, set[str]]:
-        """Optimizer-tunable param keys per node — the SINGLE surface the param
-        catalogue, the L1 output schema, and `validate_overrides` all derive from.
-
-        `PARAM_FORBIDDEN_KEYS` (`model`/`provider`) and `SCHEMA_OWNED_FIELDS`
-        (`output_schema` + schema registry identity) are stripped UNCONDITIONALLY.
-        Model/provider are operator-owned — set via the dataset overlay or a
-        cap-gated fork edit — never an optimizer axis; a file's stale `param_keys`
-        listing of them is inert. The schema is the pipeline's structural wire
-        contract, not a tunable; an L1 variant that mutated it would break the
-        backend. Stripping here keeps `build_l1_response_schema` from declaring
-        them, so the LLM can't emit a key the schema omits.
-        """
+        """The SINGLE surface the param catalogue, the L1 output schema and ``validate_overrides`` all
+        derive from — so a key stripped here is one the LLM's schema never declares."""
         out: dict[str, set[str]] = {}
         for step in self.nodes:
             keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
@@ -559,7 +452,6 @@ class PipelineSchema(StrictModel):
         return out
 
     def prompt_node_names(self) -> list[str]:
-        """Node names whose output is affected by the prompt — ``prompt_info`` set."""
         return [node.name for node in self.nodes if node.prompt_info is not None]
 
 

@@ -1,24 +1,5 @@
-"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` — the dispatcher-shell verbs.
-
-All four are thin shells over ``CommandDispatcher``, which is why they share a module:
-the verb is the only thing that differs. ``pause`` is cycle-scoped run control rather
-than campaign lifecycle, but routing it anywhere else would mean a second way to reach
-the same seam.
-
-``archive`` MOVES the campaign tree into the ``archive/`` recycle bin (hidden from
-the default sidebar, restorable by ``unarchive``); ``delete`` is destructive — it
-removes the tree outright, or with ``--keep-results`` strips to the keepsake tier
-(manifest + reports + the shallow langfuse loop trace). The cross-campaign
-measurement cache (``measurements/``) is never touched, so siblings still
-cache-hit. A LIVE cycle is refused; the campaign you are merely looking at is the
-ordinary case, and its active pointer is released rather than defended.
-Operator-facing shape:
-``docs/operations/persistence-and-state.md`` § Beta hosting state.
-
-The three are a thin shell over ``CommandDispatcher.dispatch_lifecycle`` — the
-seam ``POST /commands/{kind}`` uses. ``CommandDispatcher`` is the sole writer of
-``CommandRecord`` (``docs/architecture.md`` §0) — from the terminal as from the web.
-"""
+"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` — thin shells over ``CommandDispatcher``, the sole
+writer of ``CommandRecord``. ``measurements/`` is never touched, so siblings still cache-hit."""
 
 from __future__ import annotations
 
@@ -42,9 +23,8 @@ __all__ = ["cmd_archive", "cmd_delete", "cmd_pause", "cmd_unarchive"]
 
 
 async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandResult | None:
-    """Run *kind* through the dispatcher. ``None`` on success; a ``CommandResult`` when
-    the campaign is absent / not the caller's (existence-leak gate: not_found, never
-    403) or the target is the active campaign (conflict)."""
+    """Run *kind* through the dispatcher. ``None`` on success; a result when the campaign is absent or not the caller's
+    (existence-leak gate: not_found, never 403), or when the target is the active campaign."""
     campaign_id: str = args.campaign_id
     dispatcher = CommandDispatcher(
         build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
@@ -75,7 +55,6 @@ def _reason_suffix(args: argparse.Namespace) -> str:
 
 
 async def cmd_archive(args: argparse.Namespace) -> CommandResult:
-    """Move a campaign into the ``archive/`` recycle bin — hidden from the default sidebar."""
     refusal = await _dispatch(args, "archive-campaign")
     if refusal is not None:
         return refusal
@@ -88,7 +67,6 @@ async def cmd_archive(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
-    """Restore a campaign from the ``archive/`` recycle bin back to ``active``."""
     refusal = await _dispatch(args, "unarchive-campaign")
     if refusal is not None:
         return refusal
@@ -101,16 +79,8 @@ async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_pause(args: argparse.Namespace) -> CommandResult:
-    """Ask a running cycle to stop at its next checkpoint. Resumable by ``resume``.
-
-    The terminal's half of the webapp's pause control — the SAME ``pause-cycle``
-    command, through the same dispatcher, so the interrupt lands on the cycle's ledger
-    as a ``CommandRecord`` naming who asked. Writing ``.runtime/pause.flag`` by hand
-    has the same effect on the loop and leaves no such record, which is the difference
-    between a pause you can audit and one that merely happened.
-
-    Targets the active cycle unless ``--campaign`` / ``--cycle`` name another.
-    """
+    """Ask a running cycle to stop at its next checkpoint. The SAME ``pause-cycle`` command the webapp fires, so the interrupt
+    lands on the ledger naming who asked — writing ``.runtime/pause.flag`` by hand leaves no such record."""
     identity = identity_from_args(args)
     store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id: str = getattr(args, "campaign", None) or ""

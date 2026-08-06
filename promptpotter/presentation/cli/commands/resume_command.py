@@ -1,11 +1,5 @@
-"""``cmd_resume`` — continue the active campaign.
-
-Flags: ``--from N`` (rewind), ``--fork-on-divergence`` (sibling on replay
-disagree), ``--no-check`` (silent), ``--diag`` (diag-sibling BFS).
-
-Drift detection compares the stored ``campaign.json::root_content_hash``
-to a freshly computed hash; ``classify_config_diff`` flags the diff as
-policy-only (safe to resume) or data-affecting (recommends fork or fresh ``new``)."""
+"""``cmd_resume`` — continue the active campaign. Drift is the stored ``root_content_hash`` against a
+fresh one; ``classify_config_diff`` calls it policy-only (resume) or data-affecting (fork or new)."""
 
 from __future__ import annotations
 
@@ -57,25 +51,8 @@ def _prepare_cycle_for_resume(
     pivot_prompt: bool = True,
     steer_fork: bool = False,
 ) -> dict[Any, Any]:
-    """Apply pipeline to session + verify the campaign config still matches.
-
-    Drift = recomputed hash vs stored ``campaign.json::root_content_hash``:
-    empty stored ⇒ unstarted check-in, refuse; match ⇒ resume; differ ⇒ classify
-    POLICY_ONLY (safe) vs DATA_AFFECTING (recommend fork or fresh ``new``;
-    TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
-
-    ``steer_fork`` (``--steer-model``) downgrades the drift halt to a note: a
-    steer-fork mints a fresh sibling under the current config + prompts — the very
-    "config changed → fork" resolution the halt recommends — so it must not be
-    blocked by it, matching the web ``fork-cycle`` path (which runs no drift check).
-
-    OPTIMIZER drift is not asked here — it is asked per round, from the application seam
-    every entry point reaches (``resume_and_fork/resume.py::_optimizer_divergences``). A
-    campaign-level hash equality halting with "mint a new campaign" is the wrong shape
-    twice over: on the CLI a resume from the webapp bypasses it entirely, and comparing
-    against the MINT-time value cannot name which rounds ran under which optimizer or
-    offer the fork every other divergence offers.
-    """
+    """Apply pipeline + verify the config still matches. OPTIMIZER drift is NOT asked here — it is asked
+    per round from the application seam every entry point reaches, since a webapp resume bypasses this."""
     from promptpotter.application.knobs import DiffScope, classify_config_diff
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
@@ -200,9 +177,8 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
 def _maybe_fork_operator_rewind(
     args: argparse.Namespace, ctx: SessionCtx, session: Session
 ) -> None:
-    """``--rewind N``: mint an OPERATOR_REWIND sibling cycle at round N, preserve
-    the parent intact, retarget the active pointer. Parent's rounds 0..N-1 are
-    copied to the fork; optimization continues on the fork from round N."""
+    """``--rewind N``: mint an OPERATOR_REWIND sibling at round N with the parent intact. Rounds 0..N-1
+    are copied to the fork, which then continues from N."""
     rewind_to = getattr(args, "rewind_to_round", None)
     if rewind_to is None:
         return
@@ -247,10 +223,8 @@ def _maybe_fork_operator_rewind(
 
 
 def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> str:
-    """The branch-point candidate id in *cycle_id*'s round *from_round* — what the
-    fork inherits its C0 from. A param-only origin's round 0 holds exactly the origin
-    candidate; return the single (or first) recorded candidate. Empty string when the
-    round file is missing or holds no candidate (the inherit path then re-scores)."""
+    """The branch-point candidate the fork inherits its C0 from. Empty string when the round file is
+    missing or holds no candidate — the inherit path then re-scores."""
     round_file = session.store.campaigns.load_round_file(
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id), from_round
     )
@@ -259,18 +233,8 @@ def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> st
 
 
 def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
-    """``--steer-model NODE=MODEL``: mint an operator-steered fork whose seed overlay
-    steers a node's inner-optimizer model — the CLI twin of the web steer-fork
-    (``POST /commands/fork-cycle``). The done origin's C0 is **inherited**, never
-    re-scored (the overlay is model-only; ``try_inherit_fork_origin`` reads the
-    branch-point candidate via ``from_candidate_id``), so only the candidate is
-    measured under the steered model.
-
-    Steering to a model OUTSIDE the origin's ``allowed_models`` (empty = nothing
-    sanctioned) is a babysit act: it requires ``campaign.babysit`` (the fork-cycle
-    applier's gate) and the runner stamps the branch grade C (``runner/entry.py``,
-    the seam both paths share). A steer to a SANCTIONED model is a clean fork — no
-    cap, no taint. Retargets the active pointer; the resume loop then runs the fork."""
+    """``--steer-model NODE=MODEL``: the CLI twin of the web steer-fork; C0 is INHERITED, so only the
+    candidate is measured. Outside ``allowed_models`` needs ``campaign.babysit`` and grades the branch C."""
     specs = getattr(args, "steer_model", None)
     if not specs:
         return
@@ -382,7 +346,6 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    """Drive the loop. ``ResumeDivergenceError`` → prompt operator (TTY) to fork; yes ⇒ re-run with ``fork_on_divergence=True``."""
     from promptpotter.shared.errors import ResumeDivergenceError
 
     fork_on_divergence = bool(getattr(args, "fork_on_divergence", False))
@@ -448,7 +411,6 @@ async def _run_loop(
 
 
 async def cmd_resume(args: argparse.Namespace) -> CommandResult:
-    """Resume the active campaign. Flags drive rewind / divergence / diag modes."""
     from promptpotter.shared.spend import refresh_rates_in_background
 
     refresh_rates_in_background()

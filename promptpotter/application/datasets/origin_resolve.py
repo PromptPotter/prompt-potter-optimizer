@@ -1,12 +1,5 @@
-"""Origin-resolution loop — one resolver turn against a ``DraftCampaign``.
-
-The proposer half of the proposer/gate split: it runs the origin-aware ``checkin`` node —
-the same node CLI ``new`` uses, never a parallel one — and applies its evidence-cited
-findings, but :func:`origin_readiness` and not the resolver decides completeness. The
-turn's token spend rides the check-in cycle's OWN ledger, so an origin's authoring cost
-belongs to the campaign that incurred it. One turn per call: the operator drives the
-next, which is what bounds the loop instead of an internal auto-spin.
-"""
+"""One resolver turn against a ``DraftCampaign`` — the proposer half of the proposer/gate split,
+running the same ``checkin`` node CLI ``new`` does. ``origin_readiness`` decides completeness."""
 
 from __future__ import annotations
 
@@ -57,13 +50,8 @@ _PREVIEW_ROWS = 10
 
 @dataclass(frozen=True, slots=True)
 class RaisedCommand:
-    """One proposal, already shaped as the command that would apply it.
-
-    The operator clicks it; the assistant never fires it. ``confidence`` decides
-    whether the operator-invoked resolver turn applies it inline (``high``) or
-    leaves it PROPOSED for a click (``low``) — a policy of the caller, not of the
-    model, which only ever emits a field and a value.
-    """
+    """One proposal, already shaped as the command that would apply it. The operator clicks it; the
+    assistant never fires it. ``confidence`` is the CALLER's apply-inline policy, not the model's."""
 
     field: str
     patch_key: str
@@ -84,24 +72,13 @@ class RaisedCommand:
 
 @dataclass(frozen=True, slots=True)
 class OriginResolutionResult:
-    """One turn's outcome: the resolver output (wire dict) + the post-apply draft."""
-
     resolution: dict[str, Any]
     draft: DraftCampaign
 
 
 def build_origin_consultation(draft: DraftCampaign, message: str | None = None) -> tuple[str, str]:
-    """Deterministic origin-context message + the origin-mode instruction.
-
-    Returns ``(user_content, consultation_instruction)``. Pure formatting — no
-    LLM call, no summarisation; the resolver reads the raw facts and proposes.
-
-    ``message`` is the operator's turn, kept separate from the draft's
-    ``raw_task_description`` (the task-framing field the resolver proposes and the
-    operator confirms). Folding a correction into the framing was the only way to
-    be heard before, which meant "the target is the `answer` column" had to be
-    written as a task description.
-    """
+    """Deterministic origin-context message + the origin-mode instruction; no LLM call. ``message`` is
+    the operator's turn, kept apart from the ``raw_task_description`` the resolver proposes."""
     readiness = origin_readiness(draft)
     values = field_values(draft)
     provenance = {key: prov.value for key, prov in draft.field_provenance.items()}
@@ -163,12 +140,8 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
 
 
 def _checkin_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
-    """The resolver turn's audit home — the check-in campaign's own cycle ledger.
-
-    ``draft_id`` IS the ``campaign_id`` (re-keyed at ``create_checkin_campaign``),
-    and the campaign's ``root_cycle_id`` is the ``cycle_chk_*`` minted alongside it.
-    Both check-in modes bill through the one :func:`checkin_call_context`.
-    """
+    """The turn's audit home — the check-in campaign's own cycle ledger. ``draft_id`` IS the
+    ``campaign_id`` (re-keyed at ``create_checkin_campaign``); both modes bill through the one call."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
@@ -181,8 +154,7 @@ async def resolve_origin_turn(
     draft: DraftCampaign,
     message: str | None = None,
 ) -> OriginResolutionResult:
-    """Persists the mutated draft + resolution block to the check-in store under the
-    draft's ``draft_id`` (which IS the owning ``campaign_id``)."""
+    """Persists the mutated draft + resolution block under the draft's ``draft_id``."""
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
     # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
@@ -254,21 +226,8 @@ async def resolve_origin_turn(
 def _grade_resolution(
     *, output: CheckinOutput, applied: bool, repair_attempts: int
 ) -> dict[str, Any] | None:
-    """Grade one resolver turn for degradation. ``None`` when healthy, else
-    ``{grade, reasons}`` with ``grade ∈ {"degraded", "critical"}``.
-
-    Mirrors the ``healthy|degraded|critical`` vocabulary of
-    :class:`~promptpotter.domain.results_health.DegradationHealth` (which is
-    sample-results-shaped, so not reusable on a ``CheckinOutput``).
-
-    * **critical** — the turn produced nothing usable: no field applied, no
-      operator question asked, and an empty recap. This is the empty/truncated
-      provider response the apply loop silently dropped.
-    * **degraded** — the turn carried something but a full schema-repair retry was
-      paid (``repair_attempts > 0``): the provider's first response was
-      empty/truncated, so the cost doubled and the recovered output may be thin.
-      Surfaced even when the retry recovered, so the operator sees the ~2x hit.
-    """
+    """Grade one turn: ``critical`` when it produced nothing usable, ``degraded`` when a schema-repair
+    retry was paid. Same vocabulary as ``DegradationHealth``, which is sample-shaped and not reusable."""
     asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
     if not applied and not asking and not output.recap.strip():
         reasons = ["the check-in produced no usable setup, recap, or question"]
@@ -289,13 +248,8 @@ def _grade_resolution(
 
 
 def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[RaisedCommand]:
-    """The turn's proposals, as commands the operator could click.
-
-    The single admission gate: a finding must map to a patchable field, cite
-    evidence, coerce to the attribute's type, and not downgrade a settled field.
-    Both the button surface and the inline apply read this one list, so what the
-    operator sees offered is exactly what a click would do.
-    """
+    """The turn's proposals as clickable commands, and the single admission gate: patchable field, cited
+    evidence, coercible type, no downgrade. Button surface and inline apply read this one list."""
     raised: list[RaisedCommand] = []
     for finding in output.findings:
         patch_key = FINDING_PATCH_KEYS.get(finding.field)
@@ -325,8 +279,6 @@ def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[RaisedC
 def _apply_findings(
     draft: DraftCampaign, output: CheckinOutput, raised: list[RaisedCommand]
 ) -> DraftCampaign:
-    """Apply the turn's proposals to the draft. High-confidence → CONFIRMED, low →
-    PROPOSED (the value lands, the click confirms it)."""
     values: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
     for proposal in raised:
@@ -365,8 +317,6 @@ def _apply_findings(
 
 
 def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
-    """Coerce a string ``proposed_value`` to the draft attribute's type; return
-    ``None`` to drop a finding that can't be applied safely."""
     proposed = proposed.strip()
     if not proposed:
         return None
@@ -376,12 +326,8 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
 
 
 def _resolution_wire(output: CheckinOutput) -> dict[str, Any]:
-    """The resolver turn's output, persisted to ``cache.json`` for the panel + AI.
-
-    Carries what a reader consumes, not everything the turn produced: the findings ride
-    ``block["raised"]`` as clickable proposals (``raised_commands``), so mirroring them
-    here too would serve the same fact twice.
-    """
+    """The turn's output for ``cache.json``. Findings ride ``block["raised"]`` as clickable proposals,
+    so mirroring them here would serve the same fact twice."""
     return {
         "assessment": output.assessment,
         "next_action": {

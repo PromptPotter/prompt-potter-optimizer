@@ -1,22 +1,5 @@
-"""Task-description check-in: raw context → Layer-1 prompt fields + task_context.
-
-One LLM decomposition, cached on disk as ``task_context.yaml``. The web ingest path
-writes that file at commit (from the check-in it already ran);
-:func:`load_or_build_task_context` is the single run-start seam that reads it — or
-decomposes a benchmark's ``task_description.md`` once on first sight. No second
-check-in call recomputes what ingest already produced.
-
-**Read and write do not share a tier.** The framing resolves tenant-then-install
-(``store/dataset_access.py::readable_task_context``), but a first-sight decomposition
-is persisted to the TENANT tree, never beside the definition it was derived from —
-that dir is inside ``site-packages`` under a wheel.
-
-The call bills the campaign it seeds. :func:`checkin_call_context` names that cycle,
-and *context* is required at both seams precisely so no caller can reach the LLM
-without one: this decomposition ran unbilled and untraced — the ledger binds
-``_CYCLE_LEDGER`` (token/cost, via ``emit_token_usage``) *and* rides ``context``
-(the audit ``LLMCallRecord``), which are two channels, not one.
-"""
+"""Task check-in: raw context → L1 prompt fields + task_context, cached as ``task_context.yaml``. Read and
+write do NOT share a tier — read resolves tenant-then-install, a decomposition always lands in tenant."""
 
 from __future__ import annotations
 
@@ -48,10 +31,8 @@ __all__ = [
 
 
 def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
-    """The check-in call's audit home — the seeded campaign's own cycle ledger.
-
-    The cache is what makes an unchanged decomposition free on replay; omitting it
-    silently re-spends (see :class:`LLMCallContext`)."""
+    """The check-in call's audit home — the seeded campaign's own cycle ledger. The cache is what makes an unchanged
+    decomposition free on replay; omitting it silently re-spends."""
     return LLMCallContext(
         ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))),
         round_num=0,
@@ -62,10 +43,8 @@ def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
 async def decompose_prompt_fields(
     context_input: Any, *, campaign_id: str, context: LLMCallContext
 ) -> dict[str, Any]:
-    """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict.
-
-    Provider + model come from the ``checkin`` optimizer node config
-    (``promptpotter/assets/optimizer/pipeline.yaml``), resolved inside :func:`llm_call`."""
+    """LLM check-in: raw context → Layer 1 prompt fields + task_context. Provider and model come from the ``checkin``
+    optimizer node config, resolved inside :func:`llm_call`."""
     if isinstance(context_input, dict):
         user_content = (
             "The user has provided partial Layer 1 fields for a prompt. "
@@ -118,24 +97,8 @@ async def load_or_build_task_context(
     campaign_id: str,
     context: LLMCallContext,
 ) -> TaskDecomposition:
-    """Run-start task framing — resolve the dataset's ``task_context.yaml``, or
-    decompose ``task_description.md`` once on first sight and persist it.
-
-    The single seam both the web mint path and CLI ``new`` funnel through: an
-    ingested dataset already carries ``task_context.yaml`` (written at commit from
-    the check-in's decomposition), so the run reads it with no LLM call. A benchmark
-    that shipped without one has only ``task_description.md`` — decompose it once and
-    every later run is a free read. Empty framing when neither exists.
-
-    Takes the store and the NAME, not a resolved dir, because the read and the write
-    do not share a tier. The framing resolves through
-    :func:`~promptpotter.infrastructure.store.dataset_access.readable_task_context`
-    (tenant, then install) while the write always lands in the tenant tree: the
-    decomposition is derived from install content but is not install content, and
-    under a wheel that dir is inside ``site-packages``. Handed a dir, this function
-    wrote back into whichever tier it was handed — which is exactly what it must not
-    do for the four benchmarks that ship no ``task_context.yaml``.
-    """
+    """Resolve the dataset's ``task_context.yaml``, else decompose once on first sight. Takes the store and the
+    NAME, never a dir: handed a dir it wrote back into whichever tier it was handed."""
     if dataset_name is None:
         return TaskDecomposition()
     existing = readable_task_context(stores, dataset_name)

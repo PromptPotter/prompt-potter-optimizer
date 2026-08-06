@@ -1,11 +1,5 @@
-"""Backend storage router — GET-only reads over registered backends.
-
-Mutations (``register-backend``) ride the command highway:
-``POST /commands/{kind}`` per ``docs/specs/m12-api-openapi.yaml``. The dispatcher
-writes a ``CommandRecord`` to the workspace ledger
-(``projects/{tenant}/.workspace/events.jsonl``) and inline-applies through
-``CommandDispatcher._apply_register_backend``.
-"""
+"""GET-only reads over registered backends. Mutations ride the command highway at ``POST /commands/{kind}``, which writes a
+``CommandRecord`` to the workspace ledger."""
 
 from __future__ import annotations
 

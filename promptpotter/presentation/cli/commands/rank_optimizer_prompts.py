@@ -1,14 +1,5 @@
-"""``cmd_rank_optimizer_prompts`` — rank every optimizer prompt state on disk by paired candidate-minus-origin effect.
-
-Read-only and **zero spend**: :func:`rank_optimizer_prompts` re-derives the ranking from round files
-already written, so it pools every cell every past L4 run paid for and answers "which edit
-actually held up" retroactively. A verb as well as ``GET /optimizer-prompt-ranking`` because a
-CLI-only operator has no route to HTTP.
-
-It NAMES a winner and writes nothing. Graduating one into
-``promptpotter/assets/optimizer/pipeline.yaml`` stays a deliberate hand-edit — that manifest is
-operator-owned, and no verb here writes it.
-"""
+"""Rank every optimizer prompt state on disk by paired candidate-minus-origin effect — read-only, ZERO spend. It NAMES a
+winner and writes nothing: graduating one into the operator-owned manifest stays a deliberate hand-edit."""
 
 from __future__ import annotations
 
@@ -28,14 +19,8 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 def _spread_lines(spread: OuterSpread) -> list[str]:
-    """What the order above is, and what it is not.
-
-    A ranking prints a leader whatever the corpus holds, and reading that leader as a finding
-    is the error this block exists to stop. The interval beside each arm is the evidence; this
-    says how far apart the arms are at all, and names the instrument that settles a specific
-    one — because "run the same cell again" cannot: the inner backend is content-addressed, so
-    it replays. Depth comes from more samples on one candidate, which is `verify`.
-    """
+    """What the order above is, and what it is NOT. A ranking prints a leader whatever the corpus holds; the interval beside each
+    arm is the evidence. Re-running a cell cannot settle one — the inner backend replays — so depth is ``verify``'s job."""
     if spread.arm_effect_sd is None:
         return [
             "",
@@ -52,7 +37,6 @@ def _spread_lines(spread: OuterSpread) -> list[str]:
 
 
 async def cmd_rank_optimizer_prompts(args: argparse.Namespace) -> CommandResult:
-    """Rank the optimizer prompt corpus; print the top ``--top`` states with their CIs."""
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")

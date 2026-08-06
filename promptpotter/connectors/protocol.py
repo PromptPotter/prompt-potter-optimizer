@@ -1,10 +1,5 @@
-"""Connector protocol — bundles backend-specific hooks under one shape.
-
-Adding a connector is intentionally local to ``connectors/<name>.py`` — no edits to
-``application/config.py`` or ``infrastructure/backend.py``, and the loop dispatches on a
-connector's *declared* capability rather than on its name. Each hook's contract is on its
-type alias below.
-"""
+"""Connector protocol — adding one is intentionally LOCAL to ``connectors/<name>.py``, and the loop dispatches on a
+connector's DECLARED capability rather than on its name."""
 
 from __future__ import annotations
 
@@ -54,14 +49,8 @@ AuthTokenFn = Callable[[], str | None]
 
 
 class BackendUnreachableError(PotterError):
-    """Raised by ``Connector.preflight`` when the configured backend isn't
-    responding (503).
-
-    Carries the backend type + URL on ``details`` so the central
-    :class:`~promptpotter.shared.errors.PotterError` mapping seam composes the
-    ``details.backend_type`` + ``details.backend_url`` envelope without
-    re-parsing the message.
-    """
+    """The configured backend isn't responding (503). Carries backend type + URL on ``details`` so the ``PotterError`` seam
+    composes the envelope without re-parsing the message."""
 
     http_status = 503
     code = "backend_unreachable"

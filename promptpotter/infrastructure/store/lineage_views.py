@@ -1,9 +1,5 @@
-"""The lineage tree — the served genealogy, read at any depth.
-
-A fork is not a node; its candidates mount onto the parent's ONE timeline, unless the cut
-superseded. The law, its three bounds and the read-model rule: `infrastructure/CLAUDE.md`
-§ The lineage tree. Nothing here decides anything.
-"""
+"""The lineage tree — the served genealogy, read at any depth. A fork is not a node; its
+candidates mount onto the parent's ONE timeline. The law: `infrastructure/CLAUDE.md`."""
 
 from __future__ import annotations
 
@@ -213,9 +209,8 @@ class LineageNode(StrictModel):
 
 
 class FamilyCourse(NamedTuple):
-    """A course in the family and how to reach it — the recursion's unit of work. Public
-    because ``store/family_ray_views.py`` walks the same family; a second walk would be a
-    second answer to "who hangs off whom"."""
+    """A course in the family and how to reach it — the recursion's unit of work. Public because
+    ``family_ray_views.py`` walks the same family, and a second walk is a second answer."""
 
     store: Stores
     path: CyclePath
@@ -234,9 +229,8 @@ class FamilyCourse(NamedTuple):
 
 
 class _Reads:
-    """Every store this tree touches, read ONCE (``enumerate_cycles`` answers a WHOLE store,
-    so asking it per course is the tree's O(n²)). Per-build and thrown away after: the file
-    tree IS the dashboard, so a memo outliving the request serves a round that has closed."""
+    """Every store this tree touches, read ONCE (``enumerate_cycles`` answers a WHOLE store).
+    Per-build and thrown away: a memo outliving the request serves a round that has closed."""
 
     def __init__(self) -> None:
         self._cycles: dict[Path, list[dict[str, object]]] = {}
@@ -277,9 +271,8 @@ def _str_or_none(value: object) -> str | None:
 
 
 def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
-    """``(candidate_id, candidate_label)`` this course hangs off — the ONE resolver. The label
-    is a full-strength fallback: inner runs on disk stamp only it. Both null = a campaign root
-    or a rebase fork, which the caller attaches to the origin."""
+    """``(candidate_id, candidate_label)`` this course hangs off — the ONE resolver. The label is a
+    full-strength fallback; both null = a campaign root or a rebase fork, attached to the origin."""
     fork = _block(index, "fork")
     if cid := _str_or_none(fork.get("from_candidate_id")):
         return cid, None
@@ -292,9 +285,8 @@ def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
 
 
 def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
-    """A cut's direction: the MEASURED one it recorded (a correction outranks its default),
-    else the one its trigger implies. An unrecognised trigger returns ``None`` rather than
-    guessing — drawing a supersession as an offshoot is the lie this exists to stop."""
+    """A cut's direction: the MEASURED one it recorded, else the one its trigger implies. An
+    unrecognised trigger returns ``None`` — drawing a supersession as an offshoot is the lie."""
     measured = fork.get("direction")
     if isinstance(measured, str):
         try:
@@ -311,9 +303,8 @@ def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
 
 
 class _CloseFacts(NamedTuple):
-    """What only a round CLOSE knows — the joint fit: the election, the ability it ranked on,
-    the θ-implied band overriding the candidate's own whisker, the frontier it advanced.
-    Nothing a candidate knows alone belongs here. No entry ⇒ no crown nobody awarded."""
+    """What only a round CLOSE knows — the election, the ability it ranked on, the θ-implied band,
+    the frontier it advanced. No entry ⇒ no crown nobody awarded."""
 
     is_winner: bool
     theta: float | None
@@ -324,14 +315,8 @@ class _CloseFacts(NamedTuple):
 
 
 def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _CloseFacts]:
-    """``candidate_id -> _CloseFacts``, folded from the cycle's OWN ledger, one scan after
-    ``scan_ledger_candidates``.
-
-    **The join stays on ``label``, the positional identity.** One file does not make
-    ``candidate_id`` safe: it is a fresh uuid per construction and a resume re-scores the
-    origin, so the ledger holds a NEW mint for `(0, 0)` beside a close written under the OLD
-    id. A round with no close record gets no entry, so no crown and no θ.
-    """
+    """``candidate_id -> _CloseFacts``, folded from the cycle's OWN ledger. **The join stays on
+    ``label``**: ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it."""
     closes = scan_ledger_round_closes(ledger_path)
     out: dict[str, _CloseFacts] = {}
     for cand in candidates:
@@ -399,10 +384,8 @@ def _course_scalars(
 
 
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
-    """Every course hanging off *path* — forks AND inner runs, one list, so callers never
-    branch on which. Only sandbox ROOTS (an inner run's own forks are ITS children), and both
-    matches on the full ``(campaign_id, cycle_id)``: a bare cycle_id reaches into another
-    campaign minted on the same declaration."""
+    """Every course hanging off *path* — forks AND inner runs in one list, so callers never branch.
+    Sandbox ROOTS only, matched on the full ``(campaign_id, cycle_id)``: a bare id reaches out."""
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
@@ -445,9 +428,8 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
 
 
 def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
-    """The whole family rooted at *path* — the FLAT view of what :func:`_build` walks
-    recursively, same helpers, so membership has one answer. Order is stable so the
-    time-ray's ETag holds across identical requests."""
+    """The whole family rooted at *path* — the FLAT view of what :func:`_build` walks recursively,
+    same helpers. Order is stable so the time-ray's ETag holds across identical requests."""
     reads = _Reads()
     root_store, _ = resolve_cycle_path(stores, path)
     root = FamilyCourse(
@@ -473,9 +455,8 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
 
 
 def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]) -> str:
-    """The candidate this course descends from: id, then label, then the origin. The label
-    join is scoped to THIS course's candidates, so it is a minted key in one namespace, not a
-    guess. Falling back to C0 beats floating loose — the bug this tree exists to end."""
+    """The candidate this course descends from: id, then label, then the origin. The label join is
+    scoped to THIS course's candidates, so it is a minted key rather than a guess."""
     by_label = {c.label: c.candidate_id for c in candidates}
     known = {c.candidate_id for c in candidates}
     origin = candidates[0].candidate_id if candidates else ""
@@ -486,7 +467,6 @@ def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]
 def _bucket_by_parent(
     courses: list[FamilyCourse], candidates: list[LedgerCandidate]
 ) -> dict[str, list[FamilyCourse]]:
-    """``candidate_id -> the inner runs filed under it``."""
     out: dict[str, list[FamilyCourse]] = {}
     for course in courses:
         if target := _parent_candidate_of(course, candidates):
@@ -498,11 +478,7 @@ def _retired_by(
     fork: FamilyCourse, candidates: list[LedgerCandidate], reach: int | None
 ) -> dict[str, str]:
     """``candidate_id -> the branch that replaced it``, for the tail a SUPERSEDE cut retired.
-
-    Bounded by BOTH the cut (a candidate where one was recorded, else the round) and *reach*
-    — retirement is a replacement, not a position. A cut recording neither retires nothing
-    rather than placing it by inference.
-    """
+    Bounded by BOTH the cut and *reach* — retirement is a replacement, not a position."""
     spec = _block(fork.manifest, "fork")
     if _fork_direction(spec) is not ForkDirection.SUPERSEDE or reach is None:
         return {}
@@ -518,9 +494,8 @@ def _retired_by(
 
 
 def _is_replay(node: LineageNode) -> bool:
-    """A ``C0`` that descends from a candidate IS that candidate, re-run — so it merges into
-    what it replays rather than joining the timeline as an attempt. Structural, not a
-    convention: only a fork's origin has a parent, because a fork borrows one."""
+    """A ``C0`` that descends from a candidate IS that candidate re-run, so it merges into what it
+    replays. Structural, not a convention: only a fork's origin has a parent, because it borrows."""
     return node.label == "C0" and node.parent_id is not None
 
 
@@ -553,13 +528,8 @@ class _Contribution(NamedTuple):
 def _contributions(
     fork: FamilyCourse, *, cut_from: str, cut_round: int, depth: int, reads: _Reads
 ) -> _Contribution:
-    """A fork, resolved onto the timeline of the course it was cut in.
-
-    Labels are assigned by :func:`_build`, the only place that can: the index depends on every
-    sibling. ``depth`` passes straight through rather than decrementing — a fork is not a
-    course node, so its candidates are *this* course's timeline and their runs sit at this
-    course's depth. A fork of a fork resolves transitively.
-    """
+    """A fork, resolved onto the timeline of the course it was cut in. ``depth`` passes straight
+    through — a fork is not a course node, so its candidates sit at this course's depth."""
     course = _build(fork.store, fork.path, depth=depth, reads=reads)
     replays = [c for c in course.children if _is_replay(c)]
     replay_ids = {c.id for c in replays}
@@ -599,11 +569,8 @@ def _contributions(
 def _fold_contributions(
     kids: list[LineageNode], contributions: list[_Contribution]
 ) -> list[LineageNode]:
-    """Mount every fork's attempts onto this course's ONE timeline — the law in code, three
-    cases in the order asked: same id + nothing retired ⇒ replace in place; same id +
-    retired ⇒ both stay (address is ``(path, id)``); new id ⇒ keep the label it replaced, or
-    queue. ``course_label`` survives untouched — it is the fork's private position.
-    """
+    """Mount every fork's attempts onto this course's ONE timeline, three cases in the order asked.
+    ``course_label`` survives untouched — it is the fork's private position."""
     by_round: dict[int, int] = {}
     for k in kids:
         by_round[k.round or 0] = by_round.get(k.round or 0, 0) + 1
@@ -780,9 +747,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
 
 
 def build_lineage_tree(stores: Stores, path: CyclePath) -> LineageNode:
-    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`.
-
-    Each level costs one ledger scan plus two small JSON reads per course.
-    """
+    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`. Each level
+    costs one ledger scan plus two small JSON reads per course."""
     store_at, _ = resolve_cycle_path(stores, path)
     return _build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads())

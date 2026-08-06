@@ -1,13 +1,5 @@
-"""Sealed sub-principal grant store — `.promptpotter/identity/grants.json`.
-
-Sealed means the tenant's own API surface cannot write this file, so a delegate can never
-edit its own grant to self-escalate (ADR-0005). Keyed by the canonical ``user_id``, never
-email: the identity that owns campaigns is issuer+subject-derived and cannot be changed.
-Resolution is fail-secure — a malformed file or an unnamed delegator yields a principal
-alone in its own empty tenant, never a fall-through to owner — and attenuation is enforced
-at READ time (:func:`resolve_effective_capabilities`), so even a hand-edited over-grant
-cannot exceed the delegator's own authority.
-"""
+"""Sealed sub-principal grant store (ADR-0005) — sealed meaning the tenant's own API cannot write it,
+so a delegate can never self-escalate. Attenuation is enforced at READ time, not on the file."""
 
 from __future__ import annotations
 
@@ -24,11 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PrincipalGrant:
-    """One sub-principal's delegation record, as resolved from the store.
-
-    ``delegated_by`` empty marks a DENIED grant (malformed / no delegator): the
-    caller must treat it as "own tenant, no command caps", never as an owner.
-    """
+    """One sub-principal's delegation record. An empty ``delegated_by`` marks a DENIED grant: the caller
+    must read it as "own tenant, no command caps", never as an owner."""
 
     sub_principal: str
     delegated_by: str
@@ -53,12 +42,8 @@ def _denied(sub_principal: str) -> PrincipalGrant:
 
 
 def _load_grants_raw(path: Path) -> dict[str, object] | None:
-    """The ``{"grants": {...}}`` map, or ``None`` when the store is absent.
-
-    A malformed store is distinct from an absent one: absent → nobody is a
-    sub-principal (every user is a full owner); malformed → deny-all (return an
-    empty map so every lookup fails secure rather than silently promoting).
-    """
+    """The grants map, or ``None`` when absent. Malformed is DISTINCT from absent — absent means nobody is
+    a sub-principal, malformed means deny-all, so every lookup fails secure instead of promoting."""
     if not path.is_file():
         return None
     raw = path.read_text(encoding="utf-8").strip()
@@ -74,13 +59,8 @@ def _load_grants_raw(path: Path) -> dict[str, object] | None:
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
-    """Resolve *sub_principal_user_id*'s grant, or ``None`` if they are not a delegate.
-
-    ``None`` means "not a sub-principal" — a normal full-owner user. A returned
-    :class:`PrincipalGrant` with :attr:`~PrincipalGrant.is_denied` is a store
-    entry that could not be honored (fail-secure); the caller drops the principal
-    to its own tenant with no capabilities.
-    """
+    """Resolve a grant, or ``None`` if they are not a delegate — a normal full owner. A returned grant
+    that ``is_denied`` could not be honored: drop the principal to its own tenant with no capabilities."""
     grants = _load_grants_raw(path)
     if not grants or sub_principal_user_id not in grants:
         return None
@@ -110,12 +90,8 @@ def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
 def resolve_effective_capabilities(
     grant: PrincipalGrant, delegator_capabilities: frozenset[str]
 ) -> frozenset[str]:
-    """The sub-principal's enforceable caps: its grant INTERSECTED with the
-    delegator's own set — attenuation as a hard ceiling, checked at use.
-
-    Intersecting (not trusting the file) is the defense-in-depth: a grant edited
-    to claim a capability the delegator never held is silently clamped away.
-    """
+    """The enforceable caps: the grant INTERSECTED with the delegator's own set. Intersecting rather than
+    trusting the file is the defense in depth — a hand-edited over-grant is silently clamped away."""
     return grant.capabilities & delegator_capabilities
 
 
@@ -138,8 +114,6 @@ def _load_grants_for_edit(path: Path) -> dict[str, dict[str, object]]:
 
 
 def list_grants(path: Path) -> dict[str, dict[str, object]]:
-    """Every delegation as ``{sub_principal_user_id: entry}`` (``{}`` if absent) —
-    the administration read facet, for the operator-admin channel."""
     return _load_grants_for_edit(path)
 
 
@@ -169,17 +143,8 @@ def grant_principal(
     actor: str,
     audit_path: Path,
 ) -> None:
-    """Provision (or replace) *sub_principal*'s grant. Overwrites any prior entry.
-
-    Does NOT itself validate ``capabilities ⊆ delegator`` — attenuation is enforced
-    at resolve time regardless of what is written, so a stale over-grant is inert.
-    The caller (admin channel) may still pre-validate for a clean error.
-
-    Rejects a *delegator* that is itself a sub-principal: delegation is one-level,
-    so the attenuation ceiling at read time (the delegator's full owner set) is
-    only sound when every delegator is a real tenant owner. Enforcing it here — at
-    the sealed store's sole writer — makes that invariant hold for every reader.
-    """
+    """Provision (or replace) a grant; attenuation is not validated here, since resolve time enforces it
+    anyway. Rejects a sub-principal AS delegator — the read-time ceiling needs one level only."""
     if read_grant(path, delegated_by_user_id) is not None:
         raise ValueError(
             f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
@@ -205,8 +170,6 @@ def grant_principal(
 def revoke_principal(
     path: Path, *, sub_principal_user_id: str, actor: str, audit_path: Path
 ) -> bool:
-    """Remove *sub_principal*'s grant → they revert to a normal own-tenant user.
-    Returns True iff an entry was removed."""
     grants = _load_grants_for_edit(path)
     removed = grants.pop(sub_principal_user_id, None) is not None
     if removed:

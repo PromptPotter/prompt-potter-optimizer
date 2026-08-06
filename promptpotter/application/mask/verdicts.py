@@ -1,18 +1,5 @@
-"""Verdict strategies — each lives where its math already is, selected at the API
-edge. The fold (:func:`find_divergences`) folds one of these over the record.
-
-**scoring** (M1) is here because its math is scoring math: it re-scores candidates
-under an alternative formula through the single re-evaluation seam
-(``value_with_mask_applied`` — a formula over the stored evaluator namespace, no
-schema, no re-run) and re-runs the *exact* realized election to ask "would this
-round have elected someone else?". The abort verdict (a log-read over
-``elimination_context``, no value face) lands here too when it migrates.
-
-The third verdict lives elsewhere for the same reason these two live here: **replay**
-asks whether a changed ENGINE re-derives the recorded decisions, and that math is the
-replayers', so ``resume_and_fork/ab_replay.py`` builds it. The fold is what is shared;
-a verdict belongs beside the math it asks.
-"""
+"""Verdict strategies — each lives beside the math it asks, selected at the API edge. The FOLD is what is
+shared, which is why ``replay`` lives in ``resume_and_fork/ab_replay.py`` with the replayers."""
 
 from __future__ import annotations
 
@@ -26,18 +13,8 @@ from promptpotter.domain.scoring import RoundScorer
 
 
 def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
-    """Build the **scoring** verdict for a swapped ``criterion`` (a formula string
-    like ``"accuracy"``, a compiled ``RoundScorer``, or ``None`` for accuracy-only).
-
-    Per round it re-runs the realized election under the swap: ``argmax
-    round_winner_key`` over ``{origin-anchor} ∪ eligible candidates``, each re-scored
-    from its *own* stored evaluator namespace via ``value_with_mask_applied``. The
-    eligible filter and the election key are the realized ones verbatim — only the
-    formula changes — so feeding the *realizing* criterion reproduces ``is_winner``
-    exactly (the self-consistency gate). A flip from the recorded winner is a
-    divergence; the flipped-to candidate is the one-step alternative (it was measured
-    = nameable).
-    """
+    """The scoring verdict for a swapped criterion. The eligible filter and the election key are the realized ones verbatim
+    — only the formula changes — so feeding the REALIZING criterion reproduces ``is_winner`` exactly."""
 
     def _key(evaluators: Mapping[str, float], accuracy: float) -> tuple[float, float] | None:
         # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
@@ -83,21 +60,8 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
 
 
 def make_abort_verdict(suppress: frozenset[str]) -> Verdict:
-    """Build the **abort** verdict — the second consumer, a *different* verdict on the
-    *same* fold (a log-read over ``elimination_context``, no value face).
-
-    ``suppress`` names the PoBB abort contributor(s) to switch off — a subset of
-    ``{"epsilon", "lock_in"}``. The abort only changes *what gets measured from the
-    point it first fires*, so up to that round every variant took identical
-    measurements (invariant, zero re-runs); the first round a *suppressed*
-    contributor actually fired is the divergence — past it the realized continuation
-    is counterfactual. No one-step alternative is nameable (the continuation was
-    never measured). ``suppress`` empty ⇒ the realized config ⇒ no divergence (the
-    self-consistency case). Suppressing a contributor that *did* fire is fully
-    record-computable; *adding* a contributor the realized run lacked is not (it
-    needs the per-step ``p_best`` stream) and lives on the real-run sibling-cycle
-    path, not this read-side mask.
-    """
+    """The abort verdict. Suppressing a contributor that DID fire is record-computable; ADDING one the run lacked
+    is not — that needs the per-step ``p_best`` stream, and belongs on the real-run sibling-cycle path."""
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         if rnd.round == 0:

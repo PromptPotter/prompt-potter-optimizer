@@ -1,11 +1,5 @@
-"""Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
-
-Every trigger mints through here; the rebase family shares one on-disk shape and differs only
-as an audit discriminator, so none may grow its own mint path. A fork is a new *cycle* in the
-**same campaign**, flat under ``cycles/``, never nested under its parent. A cut that
-**supersedes** also retires the parent (``mark_superseded``) — the line moved, and a state
-nobody writes is one every reader has to guess.
-"""
+"""The unified fork-mint primitive; every trigger mints here and none may grow its own path. A fork is
+a new CYCLE in the SAME campaign, flat under ``cycles/``, never nested under its parent."""
 
 from __future__ import annotations
 
@@ -48,8 +42,6 @@ __all__ = ["ForkResult", "_mint_fork", "cleanup_stub_fork_if_empty", "mint_opera
 
 
 class ForkResult(NamedTuple):
-    """Resume detected divergence and forked into a sibling cycle."""
-
     new_cycle_id: str
     new_resumed_from_round: int
 
@@ -65,7 +57,6 @@ def _fork_sibling_setup(
     sweep_batch_id: str | None = None,
     source_file: str | None = None,
 ) -> str:
-    """Common plumbing: dir create, FORK_CUT append, pointer + log. Returns ``now_iso``."""
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
     if new_dir.exists():
@@ -161,14 +152,8 @@ def _mint_fork(
     sweep_batch_id: str | None = None,
     sweep_source_file: str | None = None,
 ) -> str:
-    """Single entry point for fork creation, dispatching on ``payload.trigger``. The pointer
-    retargets in ``campaign_store``'s OWN workspace, never a process-global one.
-
-    ``fork_from_round`` is MECHANICAL (how many of the parent's rounds this fork lifts; ``0``
-    = a clean offshoot); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came
-    from). Equal for a rebase, so the seam back-fills the spec only when its author left it
-    unset — a steered fork lifts nothing yet is cut from a real round's candidate.
-    """
+    """Single entry point, dispatching on ``payload.trigger``. ``fork_from_round`` is MECHANICAL (how many
+    parent rounds this lifts); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came from)."""
     if payload.from_round is None:
         payload = payload.model_copy(update={"from_round": fork_from_round})
     if payload.trigger in _ZERO_ROUND_TRIGGERS and fork_from_round != 0:
@@ -300,24 +285,8 @@ def cleanup_stub_fork_if_empty(
     hop: CycleHop,
     parent_cycle_id: str,
 ) -> tuple[bool, str]:
-    """Delete a freshly-minted fork's dir if it never advanced past round 0;
-    retarget the active pointer back to *parent_cycle_id* when the fork was
-    active. Returns ``(deleted, reason)``. THE stub-deletion path — the runner's
-    own post-run cleanup and the control plane's ``delete-cycle`` both come here,
-    so the pointer discipline has one home.
-
-    ``CampaignStore.try_delete_stub_cycle`` enforces the file-system guards
-    (n_rounds=0, no descendants, not root); this helper layers
-    active-pointer policy on top.
-
-    The session id comes off the POINTER, not from the caller. A retarget only
-    changes which cycle the pointer names, so the id it needs is the one already
-    written there — and it is readable exactly when it is needed, since the branch
-    only runs if the pointer names this cycle. Taking it as an argument meant a
-    caller that had none (a sibling index carries ``parent_session_id: ""`` whenever
-    its parent did) passed the empty string into ``validate_path_component`` and
-    the cleanup raised instead of cleaning up.
-    """
+    """THE stub-deletion path — the runner's cleanup and ``delete-cycle`` both come here, so pointer
+    discipline has one home. The session id comes off the POINTER, never the caller, who may have none."""
     workspace = campaign_store.workspace
     session_id, _, active_cid = read_active_pointer(workspace)
     was_active = active_cid == hop.cycle_id
@@ -351,17 +320,8 @@ def mint_operator_fork(
     seed: CycleSeed,
     steered_by: str,
 ) -> str:
-    """The operator-initiated fork entry — the control-plane seam
-    (``CommandDispatcher``, fork-cycle) calls this. Builds the typed
-    :class:`ForkSpec` and delegates to :func:`_mint_fork`; there is no parallel
-    fork-creation path.
-
-    Every operator fork is ``operator_steered``: a clean offshoot (fresh ledger,
-    numbering restarts at round 1) carrying *seed* (the chosen searchpoint's
-    evolved prompt + config + reconciled run limits — recorded, not forbidden:
-    operators may act, we record it), appended to the fork's ledger as a
-    ``CycleSeedRecord`` and re-scored as the fork's origin at init.
-    """
+    """The operator-initiated fork entry; no parallel creation path exists. Every operator fork is a clean
+    offshoot carrying *seed* — recorded, not forbidden: operators may act, and we record that they did."""
     parent_index = stores.campaigns.load(hop) or {}
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_STEERED,

@@ -1,5 +1,3 @@
-"""Per-sample HIT/MISS line formatter (``LiveDisplay.on_sample_scored``). Pure."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -22,7 +20,6 @@ def _ellide(s: str, n: int) -> str:
 
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
-    """Append an annotation line under the query; indent mirrors the query's leading whitespace."""
     return line + f"\n{indent}{color}{emoji} {text}{RESET}"
 
 
@@ -33,11 +30,8 @@ def fmt_query_result(
     prefix: str = "",
     scoring_formula: str | None = None,
 ) -> str:
-    """Format a single query result as a HIT/MISS line with timing.
-
-    *scoring_formula* (from ``campaign_config["scoring"]``) routes ``predicted``
-    through ``extract_display_answer`` so ``**bold**`` / ``\\boxed{…}`` collapse to one token.
-    """
+    """Format one query result as a HIT/MISS line. *scoring_formula* routes ``predicted`` through ``extract_display_answer``
+    so a bold or boxed answer collapses to one token."""
     raw_pred = r.get("predicted") or ""
     pred = _ellide(extract_display_answer(raw_pred, scoring_formula), 30)
     gt_full = r.get("ground_truth", "") or ""

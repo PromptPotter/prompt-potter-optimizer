@@ -1,7 +1,5 @@
-"""The time-ray route — a shell like the ``tree`` route beside it: resolve, walk the
-family once, decide the conditional GET, build the window. The merge rules live in
-``store/family_ray_views.py``; the family walk is ``lineage_views.iter_family_courses``,
-shared with the tree so "who belongs to this campaign" has exactly one answer."""
+"""The time-ray route — resolve, walk the family once, decide the conditional GET, build the window. The family walk is
+shared with the tree route, so "who belongs to this campaign" has exactly one answer."""
 
 from __future__ import annotations
 

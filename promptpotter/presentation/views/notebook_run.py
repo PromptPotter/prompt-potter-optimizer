@@ -55,7 +55,6 @@ __all__ = [
 
 
 def render_completion_html(result: CycleResult) -> str:
-    """HTML render of the final-winner summary; ``""`` when no winner."""
     if not result.winner_prompt_fields:
         return ""
     prompt_json = html.escape(
@@ -77,7 +76,6 @@ def render_completion_html(result: CycleResult) -> str:
 
 
 def _try_display_html(html_body: str) -> bool:
-    """Render ``html_body`` inline inside IPython; ``False`` outside."""
     if not html_body:
         return False
     try:
@@ -99,7 +97,6 @@ def render_completion(
     dataset_name: str | None = None,
     campaign_id: str | None = None,
 ) -> str:
-    """Render the closing summary box (paused vs complete) + pipeline overrides."""
     paused = result.stop_reason == StopReason.PAUSED
     title = (
         f"{YELLOW}{BOLD}PAUSED{RESET} — resumable (re-run resume to continue)"
@@ -139,7 +136,6 @@ async def init_notebook_session(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
 ) -> Session:
-    """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
     session = await _init_services(
         dataset_name=dataset_name,
@@ -159,11 +155,8 @@ async def prepare_origin_notebook(
     *,
     pipeline_params: dict[str, Any] | None = None,
 ) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
-    """Mint the campaign, build observers, score the origin — one notebook cell.
-
-    Mints through ``prepare_fresh_cycle``, the same prologue ``new`` and the web mint run
-    — never a second path in ``build_run_observers`` for this caller alone, which is how a
-    mint skips the pipeline overlay and the cycle seed."""
+    """Mint the campaign, build observers and score the origin in one notebook cell — through ``prepare_fresh_cycle``, the
+    same prologue ``new`` and the web mint run, never a second path for this caller alone."""
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     display = LiveDisplay(
         origin_acc=0.0,
@@ -212,7 +205,6 @@ async def run_optimization_notebook(
     langfuse_session_id: str | None = None,
     task_context: TaskDecomposition | dict[str, Any] | None = None,
 ) -> CycleResult | None:
-    """Run optimization with the observers built in the prior cell."""
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 

@@ -1,12 +1,5 @@
-"""The knob layer — what each ``CampaignConfig`` knob shapes, and which knobs collide.
-
-``KNOBS`` is **walked** off each field's own ``Knob`` metadata, never re-listed, because
-metadata on a field cannot go stale against that field. Couplings exist because knobs do
-not act independently: several co-determine one ``Estimand``, so flipping one in isolation
-can quietly make another ill-defined — each coupling is a predicate saying whether the
-resolved combination is currently violated. Consumers and the one-way ``knobs`` →
-``config`` import: ``application/CLAUDE.md``.
-"""
+"""The knob layer. ``KNOBS`` is WALKED off each field's own ``Knob`` metadata, never re-listed, so it
+cannot go stale. Couplings + the one-way ``knobs`` → ``config`` import: ``application/CLAUDE.md``."""
 
 from __future__ import annotations
 
@@ -46,8 +39,6 @@ __all__ = [
 
 @dataclass(frozen=True)
 class KnobDecl:
-    """One knob as declared on its field: where it lives, what it moves, its default."""
-
     path: tuple[str, ...]
     knob: Knob
     default: Any
@@ -59,7 +50,6 @@ class KnobDecl:
 
 
 def _unwrap_optional(annotation: object) -> object:
-    """Strip ``X | None`` down to ``X``; pass anything else through."""
     origin = typing.get_origin(annotation)
     if origin is typing.Union or origin is types.UnionType:
         non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
@@ -69,7 +59,6 @@ def _unwrap_optional(annotation: object) -> object:
 
 
 def _default_of(field: FieldInfo) -> Any:
-    """The field's default; a ``default_factory`` resolves to its produced value (``[]`` / ``{}``)."""
     if field.is_required():
         return None
     if field.default_factory is not None:
@@ -78,13 +67,8 @@ def _default_of(field: FieldInfo) -> Any:
 
 
 def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[KnobDecl]:
-    """Every knob under *model_cls*, in declaration order.
-
-    A field carrying a ``Knob`` is a leaf whatever its shape. A field without one is
-    descended into if it is a nested model — and is otherwise an undeclared knob, which
-    fails here rather than shipping invisible to the config map and DATA_AFFECTING on
-    every resume.
-    """
+    """Every knob under *model_cls*, in declaration order. A field with no ``Knob`` that is not a nested
+    model is an UNDECLARED knob and fails here — else it ships invisible and DATA_AFFECTING forever."""
     out: list[KnobDecl] = []
     for name, field in model_cls.model_fields.items():
         path = (*prefix, name)
@@ -119,15 +103,8 @@ KNOBS: dict[tuple[str, ...], KnobDecl] = {d.path: d for d in _walk(CampaignConfi
 
 
 class DiffScope(StrEnum):
-    """Resume-time diff classification — the union of the diffed leaves' scopes.
-
-    - ``NONE``: identical configs.
-    - ``POLICY_ONLY``: only ``Scope.POLICY`` knobs differ. Past measurements + candidates
-      stay valid; the new policy governs unevaluated rounds.
-    - ``DATA_AFFECTING``: at least one ``Scope.DATA`` knob differs (or an unclassified
-      path — a stale snapshot). Cached measurements may not apply — resume runs
-      divergence detection.
-    """
+    """Resume-time diff classification, the union of the diffed leaves' scopes. ``POLICY_ONLY`` keeps
+    past measurements valid; ``DATA_AFFECTING`` (or any unclassified path) sends resume to divergence."""
 
     NONE = "none"
     POLICY_ONLY = "policy_only"
@@ -139,7 +116,6 @@ def _diff_paths(
     frozen: Any,
     prefix: tuple[str, ...] = (),
 ) -> list[tuple[str, ...]]:
-    """Diff paths between *active* and *frozen*; a declared knob is compared as a unit."""
     if prefix in KNOBS:
         return [prefix] if active != frozen else []
     if isinstance(active, dict) or isinstance(frozen, dict):
@@ -155,20 +131,8 @@ def _diff_paths(
 def classify_config_diff(
     config: CampaignConfig, frozen: dict[str, Any]
 ) -> tuple[DiffScope, list[str]]:
-    """Classify *config* vs the frozen snapshot; returns `(scope, dotted_paths)`.
-
-    Both sides are **deltas from the code defaults** (`freeze_campaign_config`), so this
-    answers the question resume actually asks — *did the operator edit the dataset's authored
-    `campaign.json` since this campaign was minted?* — without ever validating the snapshot.
-    That matters: the snapshot is the one config on disk that a schema change can invalidate,
-    and the resume that must report the drift is exactly the one that must not die on it. A
-    stale path survives the walk and lands in the unclassified branch below, which names it and
-    classifies DATA_AFFECTING — a divergence replay, zero spend, loud.
-
-    ⚠ The trade-off of comparing deltas: a change to a *code* default does not surface as a
-    config diff — deliberately: pinning a stale default while the surrounding code moved is a
-    false reproducibility, and `ab`/`verify` re-derive under the current engine by design.
-    """
+    """Classify *config* vs the frozen snapshot. Both sides are deltas from the code DEFAULTS, so the
+    snapshot is never validated — the resume that must report drift is the one that must not die on it."""
     if not frozen:
         # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has
         # no snapshot yet. That is "nothing to diff against", not "every leaf changed".
@@ -207,19 +171,8 @@ def _elim(c: CampaignConfig) -> Any:
 
 @dataclass(frozen=True)
 class Coupling:
-    """A declared relationship between knobs that share an estimand.
-
-    ``predicate`` returns True when the *current* config is in the violating
-    combination. ``severity``:
-
-    - ``collision`` — the combination makes a statistical quantity ill-defined
-      (soundness bug); the preflight gate warns loudly.
-    - ``inert`` — a tuned numeric knob no-ops because its enabling toggle is off
-      (silent waste, not a soundness bug).
-    - ``info`` — a permanent relationship worth seeing in the map; usually never
-      "violated" (predicate stays False), it's shown so the operator knows the
-      knobs co-move.
-    """
+    """A declared relationship between knobs sharing an estimand; ``predicate`` is True in the violating
+    combination. ``collision`` = ill-defined statistic, ``inert`` = silent waste, ``info`` = co-moves."""
 
     name: str
     knobs: tuple[str, ...]
@@ -384,8 +337,6 @@ COUPLINGS: tuple[Coupling, ...] = (
 
 @dataclass(frozen=True)
 class KnobState:
-    """One knob's resolved provenance + estimand tags — a row of the config map."""
-
     path: str
     value: Any
     source: str  # default | campaign | required | constant
@@ -403,7 +354,6 @@ _MISSING = object()
 
 
 def _at(data: Any, path: tuple[str, ...]) -> Any:
-    """Value at *path* in a dumped config, or ``_MISSING`` when the path isn't there."""
     cur: Any = data
     for part in path:
         if not isinstance(cur, dict) or part not in cur:
@@ -413,13 +363,8 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
 
 
 def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
-    """Every knob's effective value + source layer + estimands — the provenance map.
-
-    ``source`` is ``required`` (no default, operator must set), ``campaign`` (the operator
-    set it — it survives ``exclude_defaults``), ``default`` (the Pydantic default rode
-    through), or ``constant`` (a hardcoded statistical floor). ``value`` is ``None`` where
-    an opt-in submodel is off, so ``lives.start`` reads as not-in-effect rather than set.
-    """
+    """Every knob's effective value + source layer + estimands. ``source`` is required / campaign /
+    default / constant; ``value`` is ``None`` where an opt-in submodel is off, not merely unset."""
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
     states: list[KnobState] = []
@@ -439,7 +384,6 @@ def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
 
 
 def check_couplings(config: CampaignConfig) -> list[Coupling]:
-    """The declared couplings currently in their violating combination."""
     return [c for c in COUPLINGS if c.predicate(config)]
 
 

@@ -1,12 +1,5 @@
-"""Measurement archive — DB core. Append-only, content-addressed, cross-cycle/session/tenant.
-
-Sole source of truth: the derived views (AxisIndex, SampleIndex) refresh from `list_all`,
-never a parallel stream. Both files are append-only logs folded last-wins, and the rule
-that keeps them cheap is **nothing whole, in either direction** — a save appends only what
-is new (the scoring walk re-saves per sample, so rewriting is quadratic), and a read tails
-only the bytes added since the last one. `_live_rows` stats the file every read rather
-than trusting our own writes; that is what makes the in-memory fold safe.
-"""
+"""Measurement archive — DB core. **Nothing whole, in either direction**: a save appends only what
+is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one."""
 
 from __future__ import annotations
 
@@ -37,12 +30,8 @@ _DETAIL_SUFFIX = ".jsonl"
 
 
 def _measurement_key(item: dict[str, Any]) -> str:
-    """Fold key of one measurement row — its ``sample_id``, the cell's one identity.
-
-    A row without one is a writer bug (every writer stamps it), but the archive is paid LLM
-    spend: keying it by its own content keeps it in the log rather than dropping it, and it
-    cannot collide with a real sample's key.
-    """
+    """A row without a ``sample_id`` is a writer bug, but the archive is paid LLM spend — keying it by
+    its own content keeps it in the log instead of dropping it, and cannot collide with a real key."""
     sid = item.get("sample_id")
     if isinstance(sid, int):
         return f"m:{sid}"
@@ -54,9 +43,8 @@ def _measurement_key(item: dict[str, Any]) -> str:
 
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
-    """Project a full run-detail dict onto the index summary line (the fields readers
-    need without opening the detail file). Shared by :meth:`MeasurementArchive.save`
-    and :meth:`MeasurementArchive.reindex` so the two can never drift."""
+    """Shared by :meth:`MeasurementArchive.save` and :meth:`MeasurementArchive.reindex`, so the
+    summary the two write can never drift."""
     return {
         "run_id": data["run_id"],
         "name": data.get("name", data["run_id"]),
@@ -105,35 +93,14 @@ def _entry_dataset(entry: dict[str, Any]) -> str | None:
 
 
 def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> bool:
-    """`None` ⇒ everything (forensic/admin). A concrete name ⇒ that dataset's entries.
-
-    An entry carrying no ``dataset_name`` belongs to no dataset, so it matches no concrete name.
-    """
+    """``None`` ⇒ everything (forensic/admin). An entry carrying no ``dataset_name`` belongs to no
+    dataset, so it matches no concrete name."""
     return dataset_name is None or _entry_dataset(entry) == dataset_name
 
 
 class MeasurementArchive:
-    """File I/O for the measurement store — the DB core, NOT the recycle bin.
-
-    Tenant-global, self-contained under `measurements/`: the append-only index
-    `measurements/index.jsonl` beside a `measurements/runs/` dir holding one
-    `{run_id}.jsonl` detail log each. It sits beside `campaigns/` and `archive/` (the
-    recycle bin), never inside `archive/` — it is a cross-campaign cache, not trash. Run
-    logs are reached by explicit `run_id` (`load_by_id`) or via the index (`list_all`); only
-    `reindex` globs the dir, so the index shares it safely.
-
-    **`runs/` holds nothing but detail logs** — that keeps their membership test one
-    suffix check, so no other file kind may land there.
-
-    **Identity does not include the execution path.** A measurement is keyed by
-    `content_hash(prompt, dataset, pipeline_params)` and reused by
-    `PipelineSchema.node_configs()`, neither of which carries `backend_type`. So
-    the archive is not backend-scoped at all — no read or write takes a
-    `backend_id`, and repointing a dataset at a different connector (wire TermNorm
-    → an in-process one, say) does NOT invalidate rows measured under the old
-    one — it silently serves them. Change the connector and you must change the
-    config the hash sees, or re-mint the campaign.
-    """
+    """**Identity does not include the execution path.** A measurement is keyed by content, and no
+    read or write takes a ``backend_id`` — repointing a dataset at another connector serves the old rows."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
@@ -145,9 +112,8 @@ class MeasurementArchive:
 
     @property
     def base_dir(self) -> Path:
-        """The archive's root — its identity. A memo over archive-derived data keys on
-        this: run_ids are content-addressed, but an L4 inner cycle runs in-process over a
-        SANDBOXED archive, so run_id alone is not a unique key across live instances."""
+        """The archive's root — its identity. run_ids are content-addressed, but an L4 inner cycle runs
+        in-process over a SANDBOXED archive, so run_id alone is not unique across live instances."""
         return self._base_dir
 
     def _store_dir(self) -> Path:
@@ -165,23 +131,13 @@ class MeasurementArchive:
     # -- index read model -----------------------------------------------------
 
     def _invalidate(self) -> None:
-        """Drop the memo — for the two ops that rewrite the index wholesale."""
         self._rows = None
         self._stat = None
         self._offset = 0
 
     def _live_rows(self) -> dict[str, dict[str, Any]]:
-        """The folded index (last-wins by ``content_hash``), tailed rather than re-folded.
-
-        Every read stats the file first. Unchanged ``(mtime_ns, size)`` serves the memo;
-        a file that GREW is tailed from the last offset and merged (last-wins, so an
-        appended row supersedes in place); anything else — shrunk, or same size with a
-        new mtime, i.e. a `compact`/`reindex`/`write_jsonl` rewrote it — re-folds whole.
-
-        The stat is what makes this safe across instances: an L4 inner cycle runs
-        in-process with its own ``Stores`` over the same ``measurements/`` dir, so a memo
-        trusting only its own writes would go blind to the sibling's appends.
-        """
+        """Tailed rather than re-folded, and every read STATS the file first — an L4 inner cycle runs
+        in-process over the same dir, so a memo trusting only its own writes goes blind to its appends."""
         path = self._index_path()
         try:
             st = path.stat()
@@ -210,25 +166,8 @@ class MeasurementArchive:
         data: dict[str, Any],
         new_measurements: Iterable[dict[str, Any]],
     ) -> Path:
-        """Append *new_measurements* + a fresh header row to the run's detail log, and one
-        index summary. *data* is the full run dict (`build_dataset_run_data`); its
-        ``measurements`` key is the merged view, used for the header's derived fields
-        (scores, provenance, item_count) and dropped from the row itself.
-
-        The caller passes ONLY the rows it has not appended yet. The measurement rows
-        already on disk are not rewritten — that is the whole point: the scoring walk calls
-        this once per sample, and rewriting the accumulated detail each time would cost
-        O(samples²) bytes.
-
-        Measurements land before the header, so the header is the commit marker: a crash
-        mid-save leaves rows the old header does not yet count, never a header promising
-        rows that are not there.
-
-        A re-measure of the same `content_hash` under a *different* `run_id` orphans the old
-        log (the index row is superseded, so no read ever reaches it); `reindex` GCs those.
-        The common case — same `run_id` (same label) — appends into the same log, where
-        last-wins by ``sample_id`` supersedes in place.
-        """
+        """The caller passes ONLY the rows it has not appended yet; rewriting the accumulated detail per
+        sample is O(samples²). Measurements land before the header, so the header is the commit marker."""
         detail_path = self._detail_path(run_id)
         for item in new_measurements:
             append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **item})
@@ -240,34 +179,18 @@ class MeasurementArchive:
         return detail_path
 
     def compact_run(self, run_id: str) -> bool:
-        """Drop the run's superseded rows (dead headers, re-measured samples).
-
-        ``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header
-        rows against ONE live one, so the default ``factor=2`` guard (rewrite only past 2× the
-        live set) would never fire on a log whose live set is ``1 + S``.
-        """
+        """``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header rows
+        against ONE live one, so the default 2× guard would never fire."""
         return compact(self._detail_path(run_id), _FOLD_KEY, factor=1)
 
     def reset_run(self, run_id: str) -> None:
-        """Discard the run's log entirely — the ``force_fresh`` truncation.
-
-        Append-only does not overwrite, so a re-measure that means to REPLACE the stale rows
-        (a connector fix the content hash cannot see) has to say so. Without this, an
-        interrupted force-fresh pass leaves a franken-run: post-fix rows for the samples it
-        reached, pre-fix rows for the rest, under one header, and nothing errors.
-        """
+        """Append-only does not overwrite, so a re-measure meaning to REPLACE has to say so — an
+        interrupted force-fresh otherwise leaves post-fix and pre-fix rows under one header."""
         self._detail_path(run_id).unlink(missing_ok=True)
 
     def maintain_index(self) -> bool:
-        """Drop superseded rows from the index when they've grown past the live set.
-
-        `save` appends one summary row per call, and the scoring walk saves after every
-        sample — so a run of S samples leaves S rows for one live entry. On the live
-        archive that is 7909 rows for 688 runs: 91% dead weight, re-read by every cold
-        fold. Compaction is the append-only log's own answer to that (`read_model`), it
-        just had no caller on the loop path. Self-limiting: `compact` no-ops on a tight
-        log, so calling this every run costs one fold and usually rewrites nothing.
-        """
+        """Self-limiting — ``compact`` no-ops on a tight log, so calling this every run costs one fold
+        and usually rewrites nothing."""
         if compact(self._index_path(), "content_hash"):
             self._invalidate()
             return True
@@ -279,15 +202,8 @@ class MeasurementArchive:
         return _fold_detail(self._detail_path(run_id))
 
     def detail_signatures(self) -> dict[str, tuple[int, int]]:
-        """``{run_id: (mtime_ns, size)}`` for every run detail, in ONE directory scan.
-
-        Lets a caller memoize a DERIVATION of the details (cheap to hold) instead of the
-        details themselves (90 MB across 676 runs — caching those is what starves memory).
-        A run_id is NOT immutable content: the scoring walk appends to the same log after
-        every sample, so it grows under a reader, and anything cached off it must be
-        revalidated. `scandir` carries the stat data from the directory read, so asking
-        once for all of them beats a `stat` per run by an order of magnitude.
-        """
+        """Lets a caller memoize a DERIVATION of the details rather than the details themselves. A run_id
+        is NOT immutable content — the scoring walk appends to the same log, so it grows under a reader."""
         out: dict[str, tuple[int, int]] = {}
         try:
             with os.scandir(self._runs_dir()) as it:
@@ -301,17 +217,8 @@ class MeasurementArchive:
         return out
 
     def restamp_dataset(self, old_name: str, new_name: str) -> int:
-        """Rewrite every archive entry stamped *old_name* → *new_name* (index summary
-        + the matching detail log's ``dataset_name``). Returns the count restamped.
-
-        The measurement half of the dataset version-and-repoint migration
-        (``application/datasets/dataset_replace.py``): when a dataset's data is
-        archived under a ``-vN`` name, its prior campaigns' measurements move with
-        it so dataset-scoped reuse + filtering stay truthful. Idempotent — only
-        entries still stamped *old_name* are touched, so a re-run after a crash is
-        a no-op. Each rename is one appended index row + one appended header row
-        (last-wins on both logs) — no measurement is rewritten.
-        """
+        """Idempotent: only entries still stamped *old_name* are touched, so a re-run after a crash is a
+        no-op. Each rename is one appended row per log — no measurement is rewritten."""
         index_path = self._index_path()
         count = 0
         for entry in list(fold_jsonl(index_path, "content_hash").values()):
@@ -343,18 +250,8 @@ class MeasurementArchive:
         return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
 
     def reindex(self) -> dict[str, int]:
-        """Rebuild ``index.jsonl`` from the detail logs and GC orphans — the append-only
-        log's on-demand repair. Folds every ``runs/{run_id}.jsonl``, keeps the latest by
-        ``created_at`` per ``content_hash``, rewrites a compacted index, then deletes the
-        *superseded* logs (a re-measure under a new ``run_id`` orphans the old one).
-        Returns ``{indexed, orphans_removed, details_scanned}``. Losing the index loses
-        nothing — this reproduces it.
-
-        GC is positive-identification-only: a log is deleted only if it folded to a
-        measurement detail (carried a ``content_hash``) and lost to a newer run for that
-        hash. A path it cannot read as a detail is left untouched — reindex never removes a
-        path it can't explain.
-        """
+        """GC is positive-identification-only: a log is deleted only if it folded to a detail carrying a
+        ``content_hash`` and lost to a newer run. Losing the index loses nothing — this reproduces it."""
         parsed: list[tuple[Path, dict[str, Any]]] = []
         for path in self._runs_dir().glob(f"*{_DETAIL_SUFFIX}"):
             data = _fold_detail(path)
@@ -443,10 +340,8 @@ class MeasurementArchive:
         run_ids: list[str] | None = None,
         dataset_name: str | None = None,
     ) -> list[Measurement]:
-        """Every measurement of one sample, across all configs. *run_ids* hint (from `Sample.run_ids`)
-        skips the index scan; without it, walks every batch. Caller-supplied ids must already be
-        dataset-scoped (true when sourced from `Sample.run_ids`).
-        """
+        """Caller-supplied *run_ids* must already be dataset-scoped (true when sourced from
+        ``Sample.run_ids``); without the hint this walks every batch."""
         if run_ids is not None:
             sources: Iterator[tuple[str, dict[str, Any]]] = (
                 (rid, detail) for rid in run_ids if (detail := self.load_by_id(rid)) is not None
@@ -511,27 +406,8 @@ class MeasurementArchive:
         dataset_name: str,
         min_grade: str | None = None,
     ) -> dict[int, dict[str, Any]]:
-        """Per-sample cache from prior runs sharing *node_configs*, keyed by ``sample_id``.
-        Exact match → reuse all non-error; partial → prefix-trusted nodes only. `is_fatal`
-        prevents a deprecated archive row shadowing a saved valid retry. *min_grade*
-        (`A`/`B`/`C`) drops runs whose provenance grade is below the floor — a clean-substrate
-        read (e.g. the loop-improvement experiment) passes `A` to reuse only deliberately-
-        explored measurements; the default `None` keeps every run, so ordinary scoring caching
-        is unchanged.
-
-        *dataset_name* is REQUIRED. ``sample_id`` identifies a sample WITHIN a dataset, so a
-        pooled slice (the ``None`` the index treats as forensic/admin) would serve one dataset's
-        measurement under another's sample — the bleed ``test_integrity`` guards. The writer
-        stamps ``sample_id`` on every measurement (``sample_measurement.py``), so it is the
-        cell's one identity.
-
-        Operating consequence (the answer to "will changing a connector tunable re-score?"):
-        `node_configs` carries each node's effective config INCLUDING `model`, so a change at
-        node N breaks the prefix match at N — every sample whose pipeline ran PAST N is
-        re-measured; only samples that short-circuited upstream (`terminated_at` in a trusted
-        prefix node, e.g. cache/fuzzy) replay. So editing a node's model and minting a fresh
-        campaign genuinely re-scores the LLM-path samples.
-        """
+        """*dataset_name* is REQUIRED — ``sample_id`` identifies a sample WITHIN a dataset, so a pooled
+        slice serves one dataset's measurement under another's. A config change at node N re-measures past N."""
         if not dataset_name:
             raise ValueError("load_reusable_results requires a dataset_name — see the docstring")
         if not node_configs:
@@ -573,13 +449,8 @@ class MeasurementArchive:
 
 
 def _fold_detail(path: Path) -> dict[str, Any] | None:
-    """Fold one detail log back into the run dict its writer built.
-
-    Last-wins per ``k``: the newest header row, and the newest row per ``sample_id`` in
-    first-seen order. ``None`` when the log is absent or has no header yet — a headerless
-    log is a walk that appended measurements and died before its first commit, and it must
-    not read as a run (it has no scores).
-    """
+    """Last-wins per key. ``None`` when the log has no header yet — a headerless log is a walk that
+    appended measurements and died before its first commit, and it must not read as a run."""
     rows = fold_jsonl(path, _FOLD_KEY)
     header = rows.pop(_HEADER_KEY, None)
     if header is None:

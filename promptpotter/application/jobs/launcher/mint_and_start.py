@@ -1,16 +1,5 @@
-"""Background-task launcher — mints + spawns a campaign run from one command.
-
-The ``mint-campaign`` apply path runs the one shared mint prologue
-(``jobs/mint.py::prepare_fresh_cycle`` — the same seam CLI ``new``
-runs inline): build session → load campaign config → ``prepare_fresh_cycle``
-→ build observers → ``asyncio.create_task`` for ``run_optimization``.
-The 202 returns the moment the campaign exists on disk; the run
-proceeds in background tracked by :class:`JobRegistry`.
-
-``_CYCLE_LEDGER`` ContextVar isolation (set by ``build_run_observers``,
-cleared by ``drain_all``) lets multiple concurrent campaigns coexist
-without leaking ledger state across asyncio tasks.
-"""
+"""Background-task launcher — mints + spawns a campaign run; the 202 returns the moment the
+campaign exists on disk. The ``_CYCLE_LEDGER`` ContextVar keeps concurrent campaigns apart."""
 
 from __future__ import annotations
 
@@ -76,9 +65,8 @@ logger = logging.getLogger(__name__)
 
 
 def launch_interrupted(exc: BaseException) -> bool:
-    """True when the launch stopped because someone asked — the pause flag's synthetic
-    ``KeyboardInterrupt``, a terminal Ctrl+C's ``CancelledError``, or the host cancelling the
-    task. None is a defect in the campaign, and none is visible to ``except Exception``."""
+    """True when the launch stopped because someone ASKED — the pause flag's synthetic
+    ``KeyboardInterrupt``, a Ctrl+C's ``CancelledError``, a host cancel. None is visible to ``except Exception``."""
     return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
 
 
@@ -89,9 +77,8 @@ def _record_launch_stop(
     session_id: str,
     exc: BaseException,
 ) -> None:
-    """Stamp a launch that ended before its projection pipeline bound onto the cycle's on-disk
-    truth. :func:`launch_interrupted` picks the shape: a crash gets ``finished_at``, an
-    interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
+    """Stamp a launch that ended before its projection pipeline bound. A crash gets ``finished_at``,
+    an interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
     from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
     interrupted = launch_interrupted(exc)
@@ -129,21 +116,13 @@ _JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
 
 
 class LaunchError(PayloadInvalidError):
-    """Raised on mint-time failures (missing dataset, malformed config, …) — 422.
-
-    A :class:`~promptpotter.shared.errors.PayloadInvalidError`, so it maps to one
-    HTTP response via the central seam; routes that add context (a suggested free
-    slug) still catch it explicitly.
-    """
+    """Mint-time failure (missing dataset, malformed config) — a ``PayloadInvalidError``, so the
+    central seam maps it to 422 and only routes ADDING context catch it explicitly."""
 
 
 class OriginIncompleteError(PayloadInvalidError):
-    """Raised when the origin-readiness checklist still has gaps at mint time (422).
-
-    Carries the blocking :class:`FieldGap`s on ``details.gaps`` so the API can
-    surface every unresolved field (``origin_incomplete``). The draft is left
-    intact — the operator resolves the gaps and retries.
-    """
+    """The origin-readiness checklist still has gaps at mint time (422). Carries the blocking
+    :class:`FieldGap`s on ``details.gaps``; the draft is left intact for the operator to resolve."""
 
     code = "origin_incomplete"
 
@@ -157,25 +136,16 @@ class OriginIncompleteError(PayloadInvalidError):
 
 
 def _assert_origin_ready(draft: DraftCampaign) -> None:
-    """Run the deterministic origin gate; raise 422 with the open gaps if incomplete.
-
-    The one gate both mint paths run BEFORE anything irreversible — the checklist,
-    not the operator, decides a false-ready never reaches mint.
-    """
+    """The one gate both mint paths run BEFORE anything irreversible — the checklist, not the
+    operator, decides, so a false-ready never reaches mint."""
     readiness = origin_readiness(draft)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
 
 
 async def _run_preflight(backend_type: str, backend_url: str) -> None:
-    """Resolve the connector and run its reachability probe.
-
-    Connectors opt out of preflight by leaving ``Connector.preflight = None``
-    (the ``promptpotter`` in-process connector does this — nothing to probe).
-    Probe raises :class:`~promptpotter.connectors.BackendUnreachableError`
-    on failure; the dispatcher's central catch in ``_record_and_apply`` maps
-    it to HTTP 503 with ``details.backend_type`` + ``details.backend_url``.
-    """
+    """Resolve the connector and run its reachability probe. A connector opts out by leaving
+    ``Connector.preflight = None``; a raised ``BackendUnreachableError`` becomes a 503."""
     connector = connectors.get(backend_type)
     if connector.preflight is None:
         return
@@ -183,12 +153,8 @@ async def _run_preflight(backend_type: str, backend_url: str) -> None:
 
 
 def _admit(reservation: ReserveResult) -> Job:
-    """Unwrap an admission, or raise 409 ``machine_busy`` from the slot holder.
-
-    The single map from :class:`ReserveResult` to the launch surface — both
-    launchers gate through it, so the busy 409 reads identically whichever
-    command was attempted.
-    """
+    """Unwrap an admission, or raise 409 ``machine_busy`` from the slot holder. Both launchers gate
+    through it, so the busy 409 reads identically whichever command was attempted."""
     if reservation.job is not None:
         return reservation.job
     holder = reservation.holder
@@ -207,18 +173,8 @@ def build_cycle_config(
     *,
     pipeline_overlay: dict[str, Any] | None = None,
 ) -> CampaignConfig:
-    """Load the campaign config for a launch, folding a reused-dataset overlay onto a
-    per-campaign snapshot — the shared prologue of every path that resolves a cycle.
-
-    Read the dataset's committed ``campaign.json`` + connector profile into a
-    ``CampaignConfig``; when the draft carried operator setup edits
-    (``pipeline_overlay``), split them (``split_overlay``) into ``pipeline_overrides``
-    (narrow the search space) + ``optimizer_narrowing`` (origin-floor values) on the
-    snapshot, leaving the shared dataset immutable. A fresh upload commits its edits
-    into its own ``pipeline.yaml``, so it passes no overlay. The ONE definition shared
-    by ``mint_campaign_command``, ``start_run_command``, and check-in
-    ``prepare_checkin_run`` — so the committed config can't drift between launch paths.
-    """
+    """Load the campaign config for a launch, folding a reused-dataset overlay onto a per-campaign
+    SNAPSHOT — one definition for all three launch paths, leaving the shared dataset immutable."""
     file_config = read_campaign_config_file(dataset_campaign_path(dataset_root))
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
@@ -244,22 +200,8 @@ async def mint_campaign_command(
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> tuple[str, str, Job]:
-    """Mint a fresh campaign + cycle, then spawn the runner in the background.
-
-    Returns ``(campaign_id, cycle_id, job)``. The asyncio task is detached;
-    the caller's 202 response goes out the moment this returns. Background
-    progress shows up via the canonical ledger + `dashboard.json` stream.
-
-    ``origin_override`` (campaign-from-origin) seeds C0 from a chosen prior
-    origin's prompt fields instead of the dataset's authored origin.
-
-    ``pipeline_overlay`` carries a reused-dataset draft's operator setup edits
-    (lock/allow + origin-floor values). It is split (``split_overlay``) onto the
-    per-campaign config snapshot — narrowing the dataset's declared search space
-    + overriding origin-floor values for THIS campaign only, leaving the shared
-    dataset immutable. A fresh upload commits its edits into its own
-    ``pipeline.yaml`` instead, so this stays ``None`` for that path.
-    """
+    """Mint a fresh campaign + cycle, then spawn the runner detached; the caller's 202 goes out the
+    moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own."""
     # Heal any dataset Replace interrupted mid-migration before resolving a pin —
     # a crashed version-and-repoint can leave a campaign pointing at a name whose
     # data has already moved to `-vN`. Cheap no-op when nothing's pending.
@@ -403,14 +345,8 @@ async def mint_campaign_command(
 def materialize_and_write_origin(
     stores: Stores, draft: DraftCampaign, *, bank_items: list[dict[str, Any]]
 ) -> None:
-    """Materialize raw bank rows → Samples and write the committed dataset Origin
-    files + candidate library — the one commit body run at check-in Start (shared by
-    the CLI ``new <file>`` inline path and the web detach path via
-    :func:`prepare_checkin_run`).
-
-    The pre-commit bank rows come from ``checkin/cache.json``; this turns them into
-    ``datasets/{slug}/``. The four origin projections come from the pure
-    :mod:`draft_build` helpers, so the committed shape can't drift between callers."""
+    """Materialize raw bank rows → Samples and write the committed dataset Origin files — the one
+    commit body at check-in Start, shared by the CLI inline path and the web detach path."""
     table = Table(headers=draft.headers, rows=tuple(bank_items))
     samples = materialize_samples(
         table, query_col=draft.column_query, ground_truth_col=draft.column_ground_truth
@@ -430,16 +366,8 @@ def materialize_and_write_origin(
 
 
 def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftCampaign) -> None:
-    """Write the draft's candidate library into the dataset origin — the ONE
-    origin-write seam for the library, called on every mint route.
-
-    The library is part of the origin spec, so it persists whenever a draft
-    establishes/re-establishes an origin: a fresh-upload commit and a
-    reused-dataset mint (which skips ``commit_draft``) both land here. Scoped to
-    tenant datasets — a reopened repo benchmark isn't ours to mutate, and on
-    reopen the committed library already round-tripped through the draft, so
-    re-writing it would be a no-op anyway. A draft with no library is a no-op
-    (nothing was dropped)."""
+    """Scoped to tenant datasets: a reopened repo benchmark is not ours to mutate, and its committed
+    library already round-tripped through the draft. A draft with no library is a no-op."""
     if draft.candidate_library and stores.tenant_datasets.slug_exists(slug):
         stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
 
@@ -455,12 +383,8 @@ async def start_run_command(
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
-    """Spawn a runner against an existing cycle. ``kind`` ∈ ``{"new", "resume"}``.
-    ``stop_after_rounds`` bounds the run to that many rounds in place (``step-round``).
-
-    Mirrors CLI ``resume`` for ``kind="resume"`` and CLI ``new`` re-mint for
-    ``kind="new"`` (used after pause or to retry an interrupted launch).
-    """
+    """Spawn a runner against an existing cycle; ``kind`` ∈ ``{"new", "resume"}`` mirrors the two CLI
+    verbs. ``stop_after_rounds`` bounds the run in place (``step-round``)."""
     if kind not in ("new", "resume"):
         raise LaunchError(f"start-run kind must be 'new' or 'resume', got {kind!r}")
 
@@ -685,11 +609,8 @@ async def _run_in_background(
 
 
 def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:
-    """Resolve ``backend_type`` from ``{dataset_root}/pipeline.yaml`` for the preflight.
-
-    Raises :class:`LaunchError` when the field is missing — the launch can't
-    proceed without it, and the dispatcher catches LaunchError into a 422.
-    """
+    """Resolve ``backend_type`` from the dataset's ``pipeline.yaml`` for the preflight. Raises
+    :class:`LaunchError` when absent — the launch cannot proceed without it."""
     raw_path = dataset_pipeline_path(dataset_root)
     try:
         raw = read_yaml_optional(raw_path)

@@ -1,9 +1,5 @@
-"""Per-candidate three-path lifecycle — :func:`score_one_candidate`.
-
-Path 1 — validation-skip: synthetic-0 score (no eval). Path 2 —
-cache-replay: full-run cache hit (no backend calls). Path 3 — scored:
-full eval, classified into SCORED / LEADER_LOCKED / ESCALATED.
-"""
+"""Per-candidate three-path lifecycle: validation-skip (synthetic 0, no eval), cache-replay (no backend calls), and
+full eval classified into SCORED / LEADER_LOCKED / ESCALATED."""
 
 from __future__ import annotations
 
@@ -42,9 +38,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CandidateRunResult:
-    """One candidate's full lifecycle output. ``runtime_failure`` is the
-    caller's signal to append to ``opt_sp_c.memory.wounds.runtime_failures``; the function
-    cannot mutate it directly because the OSP is shared with other paths."""
+    """One candidate's full lifecycle output. ``runtime_failure`` is the CALLER's signal to append to the wounds: this
+    function cannot mutate them, because the searchpoint is shared with other paths."""
 
     outcome: CandidateOutcome
     report: ScoredCandidate
@@ -72,15 +67,8 @@ async def score_one_candidate(
     l1_diversity: float,
     force_fresh: bool = False,
 ) -> CandidateRunResult:
-    """Run one candidate through the three-exit-path lifecycle (module docstring).
-
-    ``candidate_scores`` is read for prior_label resolution (already-scored
-    candidates only — caller appends the current report after this returns).
-
-    ``candidate_sp`` is built once by the caller (``score_population``) and shared
-    with the in-flight dashboard seed, so the origin⊕delta merge happens at a
-    single site; ``config_params`` strips the rendered prompt for the served
-    resolved config."""
+    """One candidate through the three-exit-path lifecycle. ``candidate_sp`` is built ONCE by the caller and shared with the in-flight
+    dashboard seed, so the origin⊕delta merge happens at a single site."""
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
 

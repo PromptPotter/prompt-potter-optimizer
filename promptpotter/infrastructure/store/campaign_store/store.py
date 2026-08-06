@@ -1,12 +1,3 @@
-"""Campaign + cycle file I/O under ``campaigns/{campaign_id}/`` — one cohesive store.
-
-One store owns the whole tree, so no sibling writer can disagree about its shape. The
-cycle seed rides the ledger as a read-once ``CycleSeedRecord``, never a ``.overrides/``
-sidecar, which is what makes a resume or fork recover it by construction; the pure,
-no-subscriber ledger scans it needs live in ``ledger_scan.py``. Fork projections and
-the ``.runtime/`` flags it must not be confused with: ``infrastructure/CLAUDE.md``.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -59,10 +50,6 @@ logger = logging.getLogger(__name__)
 
 
 def _round_summary(rr: RoundResult) -> dict[str, Any]:
-    """Projection of a round into the ``index.json::rounds`` shape.
-
-    Private: it shapes a WRITE, and this module owns ``index.json``.
-    """
     return {
         "round_id": rr.round_id,
         "round": rr.round,
@@ -75,38 +62,15 @@ def _round_summary(rr: RoundResult) -> dict[str, Any]:
 
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
-    """The origin's round-0 score, derived from ``rounds[]`` — there is no stored copy.
-
-    Round 0 IS the origin, and every path that (re)scores it — init, a diag
-    fork's re-measure, the interactive origin-gate rescore — re-emits round 0
-    through ``save_round_file``, so the round row is always fresh. ``None`` until
-    round 0 lands (fresh mint / pre-origin fork)."""
+    """Round 0 IS the origin and there is no stored copy — every path that (re)scores it
+    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``."""
     rounds = index.get("rounds") or []
     return next((float(r["accuracy"]) for r in rounds if r.get("round") == 0), None)
 
 
 def _apply_best(data: dict[str, Any]) -> None:
-    """Set the index's ``best_accuracy`` / ``best_round`` from ``data["rounds"]`` via the
-    shared ``best_round_by_measured_accuracy`` (which resume/fork rebuild also rides, so
-    ``index.json`` and ``dashboard.json::best`` agree by construction).
-
-    Best = the highest ``accuracy`` any round actually MEASURED — the elected winner on the
-    samples that round drew, or on a held round the retained incumbent's re-score. It is
-    therefore always a number some individual scored, over a stated ``total``.
-
-    **Never argmax ``cumulative_accuracy`` here.** No rescore backs that series: it is a
-    sample-keyed union of rows measured by DIFFERENT configurations, so the headline
-    routinely exceeds anything the cycle measured — it published ``57%→78%`` on a run whose
-    best candidate reached 0.679. Calling it "the incumbent rescored over every sample probed
-    so far" is what kept that invisible; do not reintroduce a pooled mean here.
-
-    Deliberately a DIFFERENT basis from the winner export: ``cycle.py::absorb_round`` /
-    ``replay_priors`` argmax ``best_sp``/``best_round`` on ``composite_fitness`` — the
-    optimizer's objective, also the L2/L3 stall comparator (``escalation/firing.py``). This
-    headline argmaxes plain ``accuracy`` — the formula-independent number operators
-    recognize. Under a non-accuracy formula the two ``best_round``s can legitimately
-    disagree; flipping either to match would break the objective (winner side) or the
-    display contract (this side). See ``architecture.md`` §0.5."""
+    """Never argmax ``cumulative_accuracy``: no rescore backs that series, so the headline
+    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5."""
     data["best_accuracy"], data["best_round"] = best_round_by_measured_accuracy(data["rounds"])
 
 
@@ -117,12 +81,6 @@ def _fresh_sibling_index_blob(
     forked_at: str,
     **extras: Any,
 ) -> dict[str, Any]:
-    """Clean-slate sibling index inheriting type + identity ``header`` from the parent.
-
-    ``sibling_kind ∈ {fork, diag, sweep}``. ``backend_id`` / ``dataset_name`` ride the
-    inherited ``header`` block (the single identity home built by
-    ``_build_index_header``) — no top-level copy.
-    """
     return {
         "type": parent_index.get("type", "optimization_loop"),
         "header": parent_index.get("header", {}),
@@ -142,8 +100,6 @@ def _fresh_sibling_index_blob(
 
 
 def _prune_empty_dirs(root: Path) -> None:
-    """``rmdir`` every now-empty directory under *root*, deepest first (a dir holding a
-    keepsake file keeps its ancestors alive)."""
     for d in sorted(
         (p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
     ):
@@ -152,16 +108,6 @@ def _prune_empty_dirs(root: Path) -> None:
 
 
 def _strip_to_keepsake(campaign_dir: Path) -> None:
-    """Drop every non-keepsake file in each cycle tree in place, sparing what
-    ``delete --keep-results`` preserves — the manifest, the per-cycle reports
-    (``index.json`` / ``dashboard.json`` / ``log.md`` / ``review.md`` /
-    ``hard_samples.json``), and the shallow ``langfuse/{traces,observations,scores}``
-    loop trace. Keepsake is the single ``FileKind.keepsake`` predicate
-    (``store/layout.py``) — the same taxonomy the storage rollup rolls into leaves —
-    so the heavy tiers (resume state, audit cache, ledger, streams, prompts, the
-    langfuse dataset mirror) drop without a hand-maintained subdir list; emptied dirs
-    are pruned after. ``sweeps/`` is a batch-diagnostic tree with no keepsake and no
-    cycle, so it drops wholesale."""
     cycles_dir = campaign_cycles_dir(campaign_dir)
     if cycles_dir.is_dir():
         for cdir in cycles_dir.iterdir():
@@ -180,7 +126,6 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
 
 
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
-    """Sidebar unit kind ∈ {``session``, ``divergent_resume``, ``user_fork``, ``auto_rebase``}."""
     if sibling_kind == "root":
         return "session"
     if fork_trigger == "scoring_divergence":
@@ -191,24 +136,13 @@ def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
 
 
 class CampaignStore:
-    """Campaign + cycle artifacts under ``campaigns/{campaign_id}/``.
-
-    One class over the whole tree: manifest CRUD, per-cycle ``index.json``
-    CRUD + rewind + enumeration, fork-sibling writers, round/candidate detail
-    files, and the cycle-seed ledger I/O (``CycleSeedRecord``).
-    """
-
     def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
 
     @property
     def workspace(self) -> WorkspaceDir:
-        """The tenant root this store is rooted at.
-
-        Exposed so a caller holding a ``CampaignStore`` asks it rather than being handed
-        the same fact twice more: a mint taking ``(campaign_store, tenant_id,
-        projects_root=None)`` and defaulting the third retargets a pointer that can belong
-        to a different workspace than the cycle it just minted."""
+        """The tenant root this store is rooted at — ask the store rather than passing a second
+        ``projects_root``, which lets a mint target a workspace other than its own cycle's."""
         return self._base_dir
 
     # ------------------------------------------------------------------
@@ -216,14 +150,8 @@ class CampaignStore:
     # ------------------------------------------------------------------
 
     def _campaign_dir(self, campaign_id: str) -> Path:
-        """Resolve a campaign tree wherever it actually lives. Active campaigns sit
-        under ``campaigns/``; the ``archive`` verb MOVES the tree into the
-        ``archive/`` recycle bin. The active location wins if both somehow exist; a
-        fresh write defaults to ``campaigns/``. The free path builders
-        (``cycle_dir_for`` etc.) used by the live API/projection routes stay
-        ``campaigns/``-only — so an archived campaign is listable + manageable
-        through this store but inert to browse until ``unarchive``d, which is the
-        recycle-bin semantic."""
+        """Archive-aware: ``campaigns/`` wins, then the ``archive/`` recycle bin. The free path
+        builders (``cycle_dir_for``) stay ``campaigns/``-only — archived is inert to browse."""
         active = campaign_root_dir_for(self._base_dir, campaign_id)
         if active.exists():
             return active
@@ -242,7 +170,6 @@ class CampaignStore:
         return self.campaign_root_dir(campaign_id) / "campaign.json"
 
     def _layout(self, hop: CycleHop) -> CycleLayout:
-        """The per-cycle path owner (archive-aware root — ``self.cycle_dir``)."""
         return CycleLayout(self.cycle_dir(hop))
 
     def _index_path(self, hop: CycleHop) -> Path:
@@ -261,22 +188,14 @@ class CampaignStore:
         return Campaign.model_validate(data)
 
     def load_owned(self, campaign_id: str, owner_user_id: str) -> Campaign | None:
-        """Load *campaign_id* iff it exists AND is owned by *owner_user_id*, else ``None``.
-
-        The single definition of owner-scoped campaign access: a missing campaign and a
-        cross-owner one collapse to ``None`` so every caller 404s both the same way
-        (existence-hiding). Callers keep their own ``NotFoundError`` message/code — only
-        the ownership rule lives here, not copied at each read/command site.
-        """
+        """Missing and cross-owner both collapse to ``None`` so every caller 404s them alike
+        (existence-hiding). The single definition — never re-checked at a call site."""
         campaign = self.load_campaign(campaign_id)
         if campaign is None or campaign.owner_user_id != owner_user_id:
             return None
         return campaign
 
     def _campaign_parents(self) -> list[Path]:
-        """The two dirs a campaign tree can live under: ``campaigns/`` (active) and
-        the ``archive/`` recycle bin. The ``*/cycles/*`` + ``*/campaign.json`` filters
-        below skip ``archive/``'s non-campaign cache neighbours (optimizer_calls/, …)."""
         return [self._base_dir / "campaigns", self._base_dir / "archive"]
 
     def _index_files(self) -> list[Path]:
@@ -287,10 +206,8 @@ class CampaignStore:
         return sorted(out)
 
     def iter_campaign_dirs(self) -> list[Path]:
-        """Every campaign dir (has a ``campaign.json``) under ``campaigns/`` AND
-        ``archive/``. The one campaign-tree enumeration — anything summing or
-        reducing over "all campaigns" walks this, so an archived campaign's
-        spend and measurements stay visible."""
+        """The one campaign-tree enumeration, ``archive/`` included — anything reducing over
+        all campaigns walks this, so an archived campaign's spend stays visible."""
         out: list[Path] = []
         for parent in self._campaign_parents():
             if parent.exists():
@@ -298,9 +215,7 @@ class CampaignStore:
         return sorted(out)
 
     def iter_cycle_ledgers(self) -> list[Path]:
-        """Every per-cycle ledger (``cycles/*/.runtime/ledger.jsonl``) across the
-        campaign tree, archived included — archiving a campaign mid-day must not
-        free daily spend-cap budget."""
+        """Every cycle ledger, archived included — archiving must not free daily spend-cap budget."""
         return [
             ledger
             for campaign_dir in self.iter_campaign_dirs()
@@ -309,7 +224,6 @@ class CampaignStore:
 
     @staticmethod
     def _ids_from_index_path(index_path: Path) -> tuple[str, str]:
-        """``(campaign_id, cycle_id)`` for a ``campaigns/{c}/cycles/{cy}/index.json`` path."""
         cycle_id = index_path.parent.name
         campaign_id = index_path.parent.parent.parent.name
         return campaign_id, cycle_id
@@ -331,12 +245,8 @@ class CampaignStore:
         write_json(path, data)
 
     def set_allowed_models(self, campaign_id: str, allowed_models: list[str]) -> None:
-        """Rewrite the frozen config snapshot's ``allowed_models`` — the SINGLE source of
-        truth for a campaign's model allow-list (read by both the fork-cycle cap-gate off
-        ``campaign.config`` and, via ``apply_inherited_overlay``, the runner's grade-C
-        stamp). Empty clears the key (delta-snapshot convention: absent = restrictive
-        default). Identity-neutral — ``allowed_models`` is not in ``root_content_hash``,
-        so no re-stamp and no re-measure. The ``set-allowed-models`` command's writer."""
+        """The SINGLE source of truth for the allow-list, read by the fork cap-gate and the
+        runner's overlay. Identity-neutral: not in ``root_content_hash``, so no re-measure."""
         path = self._manifest_path(campaign_id)
         data = read_json(path)
         config = data.get("config")
@@ -350,17 +260,8 @@ class CampaignStore:
         write_json(path, data)
 
     def repoint_dataset(self, old_name: str, new_name: str) -> int:
-        """Move every campaign pinned to *old_name* onto *new_name*. Returns the count.
-
-        The campaign half of the dataset version-and-repoint migration
-        (``application/datasets/dataset_replace.py``): rewrites the manifest pin
-        (``campaign.json::dataset_name``) — the ONE owner; every cycle-level
-        reader derives from it. After this, a prior campaign resolves the exact
-        bytes it always ran on, now living under *new_name*. Any lifecycle
-        (active / archived / deleted) — an archived campaign's data must stay
-        truthful too. Idempotent: a campaign already on *new_name* doesn't match
-        and is skipped.
-        """
+        """Rewrites the manifest pin ``campaign.json::dataset_name`` — the ONE owner, which
+        every cycle-level reader derives from — across every lifecycle, archived included."""
         count = 0
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
@@ -371,8 +272,6 @@ class CampaignStore:
         return count
 
     def list_campaign_ids(self) -> list[str]:
-        """Every campaign id on disk (dir with ``campaign.json``), sorted — active
-        under ``campaigns/`` plus archived under the ``archive/`` recycle bin."""
         ids: set[str] = set()
         for parent in self._campaign_parents():
             if not parent.is_dir():
@@ -389,17 +288,7 @@ class CampaignStore:
         lifecycle: str = "active",
         owner_user_id: str | None = None,
     ) -> list[Campaign]:
-        """Campaigns matching the filter.
-
-        *lifecycle* — one of ``"active"`` / ``"archived"`` / ``"deleted"`` /
-        ``"all"``; defaults to ``"active"`` so archived + deleted campaigns
-        drop out of the default sidebar. The store is the sole filter
-        gateway; API + CLI pass through.
-
-        *owner_user_id* — when set, only campaigns owned by this user are
-        returned. Unset means no owner filter (the in-process tenant scope
-        is still enforced by ``Stores.identity``).
-        """
+        """The sole lifecycle/owner filter gateway — API and CLI pass through, never re-filtering."""
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
@@ -415,16 +304,8 @@ class CampaignStore:
         return out
 
     def _live_cycle_ids(self, campaign_id: str) -> list[str]:
-        """Cycles of *campaign_id* with a producer attached RIGHT NOW.
-
-        ``RUNNING`` is the whole answer, and it is the only phase that means a process
-        is writing here: a cycle held at the origin ``GATE`` is still heartbeating, so
-        it derives ``RUNNING`` too. Each of the others is explicitly NOT a reason to
-        refuse a verb the operator asked for — ``PAUSED`` and ``CHECKIN`` are resumable
-        but unattended, ``DETACHED`` is a dead producer (the reaper's business), and
-        ``TERMINAL`` is finished. Derived through the one liveness function every other
-        reader uses, never a second "is it running?" of our own.
-        """
+        """``RUNNING`` is the whole answer — a gated cycle heartbeats, so it derives ``RUNNING``
+        too, and none of the rest is a reason to refuse a verb the operator asked for."""
         cycles_dir = campaign_cycles_dir(self._campaign_dir(campaign_id))
         if not cycles_dir.is_dir():
             return []
@@ -441,22 +322,11 @@ class CampaignStore:
         return live
 
     def live_cycle_ids(self, campaign_id: str) -> list[str]:
-        """Cycles of *campaign_id* whose producer is alive right now.
-
-        Public because two verbs need it and there must not be two answers: campaign
-        archive/delete asks below, and the control plane asks before deleting a stub
-        cycle. Both route to the one ``derive_run_phase``.
-        """
         return self._live_cycle_ids(campaign_id)
 
     def _guard_and_release(self, campaign_id: str, verb: str) -> None:
-        """Refuse *verb* while a producer is attached; otherwise release the pointer.
-
-        The only hazard is a LIVE cycle's open ``.runtime/`` handles; a stranded
-        pointer is a UI state to fix, not a reason to refuse. So the live check
-        refuses, and the pointer is simply released — deleting what you are looking
-        at is the ordinary case, not the dangerous one.
-        """
+        """Only a LIVE producer's open handles are a hazard; a stranded pointer is a UI state
+        to fix, not a reason to refuse, so it is simply released."""
         if live := self._live_cycle_ids(campaign_id):
             raise ConflictError(
                 f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
@@ -474,12 +344,8 @@ class CampaignStore:
         }
 
     def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        """Flag the manifest ``archived`` then MOVE the tree into the ``archive/``
-        recycle bin. Returns ``False`` if the campaign isn't found; raises
-        ``ConflictError`` if any of its cycles has a LIVE producer (see
-        ``_guard_and_release``, which also releases the active pointer when it names
-        this campaign). ``unarchive_campaign`` reverses it. Measurements
-        (``measurements/``) are untouched."""
+        """Flags ``archived`` then MOVES the tree into the ``archive/`` recycle bin;
+        ``measurements/`` is untouched and ``unarchive_campaign`` reverses it."""
         if self.load_campaign(campaign_id) is None:
             return False
         self._guard_and_release(campaign_id, "archive")
@@ -492,8 +358,6 @@ class CampaignStore:
         return True
 
     def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        """MOVE the tree back from the ``archive/`` recycle bin to ``campaigns/`` and
-        flag the manifest ``active``. Returns ``False`` if not found."""
         src = archive_root_dir_for(self._base_dir, campaign_id)
         dst = campaign_root_dir_for(self._base_dir, campaign_id)
         if src.exists() and not dst.exists():
@@ -513,29 +377,8 @@ class CampaignStore:
         reason: str = "",
         inner_sandbox_root: Path | None = None,
     ) -> bool:
-        """Destructive — no recovery. ``keep_results=False`` removes the whole tree;
-        ``True`` strips the heavy tiers (Resume + Audit + Mirror) in place and flags
-        the manifest ``deleted``, sparing only the keepsake (manifest + reports + the
-        shallow langfuse loop trace). The cross-campaign measurement cache
-        (``measurements/``) is NEVER touched — it belongs to no single campaign, so a
-        re-run on the same ``(dataset × config)`` reproduces the identical key.
-
-        ``inner_sandbox_root`` (the workspace ``.inner/``, i.e.
-        ``inner_sandboxes_dir(Stores.shared_root)``) — when given, the off-registry L4
-        inner-proxy sandboxes this campaign's cycles spawned (siblings of ``projects/``
-        and so missed by the campaign-tree rmtree above) are removed for every cycle_id.
-        Without this a deleted L4 campaign orphans dozens of inner campaign trees on disk
-        forever. Each is resolved through ``inner_sandbox_key`` on THIS campaign's identity,
-        so the cascade cannot reach a sibling campaign minted from the same origin — keyed
-        on the cycle alone, as it was, deleting one such campaign took the other's inner
-        history with it.
-        Passed only on delete — NOT on archive, which is recoverable and must keep the
-        sandboxes for a later unarchive + the self-potter-hop.
-
-        Returns ``False`` if the campaign isn't found; raises ``ConflictError`` if any
-        of its cycles has a LIVE producer (``_guard_and_release``, which also releases
-        the active pointer when it names this campaign — deleting the campaign you are
-        looking at is the ordinary case)."""
+        """Destructive. The cross-campaign ``measurements/`` cache is NEVER touched, and
+        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes (delete only)."""
         campaign_dir = self._campaign_dir(campaign_id)
         if not (campaign_dir / "campaign.json").is_file():
             return False
@@ -569,7 +412,6 @@ class CampaignStore:
     # ------------------------------------------------------------------
 
     def load(self, hop: CycleHop) -> dict[str, Any] | None:
-        """Load a cycle's ``index.json``; ``cycle_id`` injected from dir name."""
         data: dict[str, Any] | None = read_json_optional(self._index_path(hop))
         if data is None:
             return None
@@ -581,7 +423,7 @@ class CampaignStore:
         hop: CycleHop,
         metadata: dict[str, Any],
     ) -> Path:
-        """Create/augment cycle ``index.json``; replay merges keys without clobbering rounds/best."""
+        """Create/augment ``index.json``; a replay merges keys without clobbering rounds/best."""
         path = self._index_path(hop)
         existing = read_json_optional(path) or {}
         now = utcnow_iso()
@@ -615,7 +457,6 @@ class CampaignStore:
         *,
         remove: Sequence[str] = (),
     ) -> None:
-        """Merge updates into ``index.json`` and write back (+ timestamp)."""
         path = self._index_path(hop)
         data = read_json(path)
         for key in remove:
@@ -631,19 +472,8 @@ class CampaignStore:
         kind: str,
         at: str,
     ) -> None:
-        """Mark the cycle babysat and append one entry to its intervention log.
-
-        Written the moment the operator intervenes (e.g. skip-searchpoint), not at
-        teardown — a still-running babysat cycle must already be distinguishable
-        from a pure/reproducible one. Idempotent on the boolean; the log grows by
-        one per gesture.
-
-        No ``round`` / ``candidate``: both were declared, both defaulted to ``None``, and the
-        sole caller could not have filled them if it tried — ``_apply_skip_searchpoint`` writes
-        a one-shot ``skip.flag`` that the RUNNER consumes at some later per-sample checkpoint,
-        so at write time nobody knows which round or candidate will pick it up. Every entry
-        therefore carried ``"round": None, "candidate": None``. A signature asking its caller
-        for information the caller structurally cannot have is not an unwired feature."""
+        """Written the moment the operator intervenes, not at teardown — a still-running
+        babysat cycle must already be distinguishable from a pure, reproducible one."""
         path = self._index_path(hop)
         data = read_json(path)
         data["human_intervened"] = True
@@ -659,7 +489,6 @@ class CampaignStore:
         hop: CycleHop,
         after_round: int,
     ) -> None:
-        """Delete round + candidate files for rounds > ``after_round``; rebuild the round index. Ledger-admissibility-gated."""
         layout = self._layout(hop)
         rounds_dir = layout.rounds
         candidates_dir = layout.candidates_cache
@@ -747,13 +576,6 @@ class CampaignStore:
         crash_traceback: str | None = None,
         final: dict[str, Any] | None = None,
     ) -> None:
-        """Write the terminal facts this seam uniquely owns: lifecycle status +
-        the ``final`` winner block.
-
-        ``best_accuracy`` / ``best_round`` / ``n_rounds`` are NOT written here — they
-        are owned by the ``rounds[]``-writer (``save_round_file`` → ``_apply_best``) on
-        the origin-inclusive measured-``accuracy`` basis. ``final`` is written
-        unconditionally (a crash finalize records a valid crash verdict)."""
         from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {
@@ -780,20 +602,8 @@ class CampaignStore:
             self.update(hop, updates, remove=remove_keys)
 
     def reopen_for_continuation(self, hop: CycleHop) -> None:
-        """Clear the terminal latch so a continued cycle stops claiming it finished.
-
-        The exact inverse of :meth:`mark_finished`, and the ONLY writer that removes
-        ``finished_at``. That field is a latch, not a note: :func:`derive_run_phase`
-        returns ``TERMINAL`` on it before it consults anything else, so the cycle list,
-        the picker and the reaper's staleness sweep all read it. Continuing a cycle
-        without clearing it leaves a live producer on a cycle every reader calls
-        finished — and ``TERMINAL`` is precisely the phase the reaper's guards do not
-        refuse, so the next sweep would re-stamp it underneath the run.
-
-        ``final`` is removed with it because it names a winner for a trajectory that is
-        about to grow; a verdict that outlives the round justifying it is worse than
-        none. ``interrupted_round`` / ``crash_traceback`` describe the stop being undone.
-        """
+        """The ONLY writer that removes ``finished_at``, which is a latch: ``derive_run_phase``
+        returns ``TERMINAL`` on it, and TERMINAL is the one phase the reaper will re-stamp."""
         self.update(
             hop,
             {"status": "active"},
@@ -807,18 +617,11 @@ class CampaignStore:
         )
 
     def mark_superseded(self, hop: CycleHop) -> bool:
-        """The line moved to a branch: stamp this cycle ``TERMINAL`` (``REBASED``).
-
-        The retirement half of what :meth:`mark_producer_vanished` answers — both record that
-        a cycle stopped writing, and the difference is WHY. Unstamped, a parent that stops
-        **by design** presents exactly as a crashed one. Idempotent (an L2/L3 rebase already
-        finalizes its own parent), and :meth:`reopen_for_continuation` still clears the latch.
-        """
+        """The line moved to a branch. Unstamped, a parent that stops BY DESIGN presents
+        exactly as a crashed one; ``reopen_for_continuation`` still clears the latch."""
         return self._stamp_terminal(hop, StopReason.REBASED)
 
     def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
-        """Stamp a cycle terminal with no verdict, ONCE — ``False`` if it already carries one.
-        The shared tail of the two ways a cycle stops without finishing."""
         data = read_json_optional(self._index_path(hop))
         if not isinstance(data, dict) or data.get("finished_at"):
             return False
@@ -831,42 +634,8 @@ class CampaignStore:
         return True
 
     def mark_producer_vanished(self, hop: CycleHop) -> bool:
-        """Reap a dead cycle: stamp it ``TERMINAL`` (``producer_vanished``) so the
-        one liveness owner and the on-disk truth agree.
-
-        Idempotent — a no-op (returns ``False``) if the cycle already carries a
-        ``finished_at`` (never clobber a real ``final`` / crash verdict). Unlike
-        a normal :meth:`mark_finished` call there is no verdict — the producer
-        simply vanished (crash / kill / sleep left no terminal record, or the
-        cycle predates ``finished_at``) — but the write itself IS
-        :meth:`mark_finished` (``final=None``): one terminal-stamp seam for every
-        stop reason, reaped or not. The caller decides the cycle is dead; this
-        method only records it, and inherits ``mark_finished``'s ``graceful()``
-        swallow — a truthy return means the write was *attempted* after the
-        guards below passed, not that it durably landed. Resumability is
-        unaffected (admissibility is ledger-gated, `scan_ledger_max_round_complete`).
-
-        Never terminates a **paused**, **check-in**, or **origin-gated** cycle —
-        pause is an intentional, resumable suspend; check-in is pre-loop origin
-        authoring (no ``dashboard.json``, no producer to go silent); and a gated
-        cycle is a live process holding for an operator decision. None is a dead
-        producer, and both reaper paths defer to these invariants here (not just
-        the sweep's staleness gate).
-
-        Pause is checked through BOTH its writers — the operator's flag and the
-        runner's declaration — because they are not the same event. A Ctrl+C out
-        of a long phase declares ``paused`` and exits without ever writing a flag
-        (``runner/entry.py``'s prep guard), so a flag-only check reaped exactly the
-        runs the operator had stopped by hand: the ledger said ``control/paused``,
-        and fifteen minutes later the index said ``producer_vanished``.
-
-        The gate invariant is the newest and was bought with a real bug: the gate's
-        unbounded wait wrote nothing, so the cycle went stale in 30 s and was reaped
-        TERMINAL 15 minutes later while alive and still polling — and a decision
-        arriving after that resumed a run into a cycle marked finished. The wait now
-        heartbeats (``runner/origin_gate.py``), which is the fix; this check is the
-        second line, because a heartbeat can still lose a race a machine sleep
-        creates, and being reaped is not recoverable by asking again."""
+        """Never reaps a paused, check-in or origin-gated cycle — none is a dead producer, and
+        pause is checked through BOTH its writers (the flag, and the runner's declaration)."""
         cycle_dir = self.cycle_dir(hop)
         layout = CycleLayout(cycle_dir)
         if layout.pause_flag.is_file() or is_checkin(cycle_dir):
@@ -924,23 +693,11 @@ class CampaignStore:
         }
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
-        """Every cycle on disk in the webapp-picker shape; unreadable → ``status='unreadable'`` stubs."""
         return [self._entry_from_index(p) for p in self._index_files()]
 
     def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
-        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: banked nothing of its
-        OWN, not a family root, no children.
-
-        "Nothing of its own" is measured against what the cut INHERITED, not against zero.
-        A rebase fork copies rounds ``0..from_round-1`` at mint, so one that never ran a
-        round still carries ``n_rounds == from_round`` — and against a flat ``n_rounds == 0``
-        every rebase fork read as "ran real work". The docstring named that family and the
-        guard could not reach it, so the one cleanup path in the codebase was unusable for
-        the one family that mints stubs on failure.
-
-        A ``from_round`` we cannot read counts as 0, which is the strict reading: when it is
-        unknown what the fork inherited, refuse rather than delete.
-        """
+        """Banked-nothing is measured against what the cut INHERITED, never against zero: a
+        rebase fork mints carrying ``n_rounds == from_round`` without having run a round."""
         cycle_dir = self.cycle_dir(hop)
         index_path = self._index_path(hop)
         # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
@@ -985,9 +742,8 @@ class CampaignStore:
         forked_at: str,
         **blob_kwargs: Any,
     ) -> Path:
-        """The single writer for the diag / operator-steered / sweep fork triggers
-        (``kind`` ∈ ``{"diag", "fork", "sweep"}``; numbering restarts at round 1, no
-        parent-round inheritance — that's ``save_rebase_fork``'s job)."""
+        """The single writer for the diag / steered / sweep triggers — numbering restarts at
+        round 1; parent-round inheritance is ``save_rebase_fork``'s job."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
@@ -1008,16 +764,8 @@ class CampaignStore:
         forked_from_round: int,
         surviving_rounds: list[RoundResult],
     ) -> Path:
-        """Mid-cycle fork inheriting parent state up to ``forked_from_round``.
-
-        Single writer for all 4 rebase-shaped triggers
-        (``SCORING_DIVERGENCE``, ``L2_REBASE``, ``L3_REBASE``,
-        ``OPERATOR_REWIND``). The issuer is recorded on the FORK_CUT
-        ledger record via ``ForkSpec.trigger``.
-
-        ``rounds[]`` is the index SUMMARY shape, projected here — never whole round
-        documents, which would bury every per-sample row in ``index.json``.
-        """
+        """Single writer for all four rebase triggers; the issuer rides ``ForkSpec.trigger`` on
+        the FORK_CUT record. ``rounds[]`` is the index SUMMARY shape, never whole documents."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
         index = {
@@ -1044,7 +792,6 @@ class CampaignStore:
         *,
         before_round: int,
     ) -> int:
-        """Copy parent's round + candidate files for rounds < ``before_round``."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
@@ -1075,11 +822,6 @@ class CampaignStore:
         hop: CycleHop,
         rr: RoundResult,
     ) -> Path:
-        """Persist a round detail file and update the cycle index.
-
-        ``rr.model_dump()`` IS the file — there is no payload dict between the round
-        and the disk, so a field cannot be computed and then dropped on the way out.
-        """
         validate_path_component(rr.round_id)
 
         detail_path = self._layout(hop).round_file(rr.round)
@@ -1102,8 +844,6 @@ class CampaignStore:
         hop: CycleHop,
         round_num: int,
     ) -> RoundResult | None:
-        """The sole typed read of a round document. A round file that fails validation is
-        corrupt — it raises rather than degrading into a dict of defaults."""
         raw = read_json_optional(self._layout(hop).round_file(round_num))
         return None if raw is None else RoundResult.model_validate(raw)
 
@@ -1113,7 +853,6 @@ class CampaignStore:
         start: int,
         end: int,
     ) -> list[RoundResult]:
-        """Load rounds ``start..end`` inclusive. Missing rounds skipped."""
         out: list[RoundResult] = []
         for r in range(start, end + 1):
             rr = self.load_round_file(hop, r)
@@ -1129,14 +868,8 @@ class CampaignStore:
         *,
         consumed: str,
     ) -> None:
-        """Persist generated candidates before scoring, WITH what they were generated from.
-
-        ``consumed`` is ``round_document_digest`` of the round this generation read
-        (``round_num - 1``). Without it a replayed cache is unfalsifiable: the candidates
-        say what they are and nothing says whether the round they came out of still reads
-        the same way, so a repaired or re-distilled predecessor is carried straight past
-        the replay branch. Both halves ride ONE file so they cannot drift apart.
-        """
+        """``consumed`` is the ``round_document_digest`` of the round this generation read;
+        without it a replayed cache is unfalsifiable, so both halves ride ONE file."""
         path = self._layout(hop).candidate_file(round_num)
         write_json(path, {"consumed": consumed, "candidates": candidates})
         logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
@@ -1146,13 +879,8 @@ class CampaignStore:
         hop: CycleHop,
         round_num: int,
     ) -> tuple[list[dict[str, Any]], str | None] | None:
-        """``(candidates, consumed)`` or ``None`` when no cache exists.
-
-        ONE read for both facts, because every caller that trusts the candidates needs to
-        know what they were generated from. ``consumed`` is ``None`` for a cache written
-        before it was recorded — unvouched, which is a state to act on rather than a
-        detail to shrug at.
-        """
+        """``consumed`` is ``None`` for a cache written before the digest was recorded —
+        unvouched, which is a state to act on rather than a detail to shrug at."""
         raw = read_json_optional(self._layout(hop).candidate_file(round_num))
         if raw is None:
             return None
@@ -1168,7 +896,6 @@ class CampaignStore:
         hop: CycleHop,
         round_num: int,
     ) -> None:
-        """Delete cached candidates (forces fresh generation)."""
         path = self._layout(hop).candidate_file(round_num)
         if path.exists():
             unlink_robust(path)
@@ -1181,15 +908,10 @@ class CampaignStore:
     # ------------------------------------------------------------------
 
     def write_cycle_seed(self, hop: CycleHop, seed: CycleSeed) -> None:
-        """Append the cycle seed as the read-once ``CycleSeedRecord`` on the ledger
-        (was ``.overrides/seed.json``). A steered fork appends its own after inheriting
-        the parent's virtually, so on disk it is this cycle's own first seed record."""
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
-        """The cycle's own seed from its ledger, or ``None`` when it wasn't seeded. Pure
-        scan — no ``CycleEventLog``, no subscribers fire (mirrors the admissibility scan)."""
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
 

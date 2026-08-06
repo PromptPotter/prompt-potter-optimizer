@@ -1,14 +1,5 @@
-"""CLI entry-point facade — COMMANDS dispatch + ``main()``. Per-command bodies in ``commands/``.
-
-Two write verbs: ``new [DATASET|FILE]`` mints a fresh campaign — from an authored
-``datasets/<name>/`` *or* from a raw file (which it ingests → resolves the origin
-check-in → commits as a tenant dataset → runs, the headless twin of the web
-onboarding); ``resume`` continues the active session. Reads = open the on-disk
-artifact tree (``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``).
-Ctrl+C is a resumable pause that exits 130, not a stop; ``pause`` asks a running cycle
-to stop at its next checkpoint, through the same dispatcher the webapp's pause control
-fires.
-"""
+"""CLI entry-point facade — COMMANDS dispatch + ``main()``; bodies in ``commands/``. Ctrl+C is a resumable pause that exits
+130, not a stop; ``pause`` asks a RUNNING cycle to stop through the dispatcher the webapp's control also fires."""
 
 from __future__ import annotations
 

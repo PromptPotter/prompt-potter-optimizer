@@ -1,5 +1,3 @@
-"""Rasch IRT primitives + per-round scoring-subset selection via the adaptive queue mechanism."""
-
 from __future__ import annotations
 
 import hashlib
@@ -55,13 +53,8 @@ __all__ = [
 
 
 class Observation(NamedTuple):
-    """One ``(candidate, sample, response)`` triple. ``response`` is the sample's
-    **graded** per-sample fitness ∈ [0,1] — the same continuous score accuracy
-    (mean fitness) and ``paired_fitness`` read, NOT a binarized ``hit``. The
-    logistic MAP maximizes cross-entropy ``Σ y·log p + (1−y)·log(1−p)`` (valid for
-    any y ∈ [0,1]), so a binary dataset (y ∈ {0,1}) is bit-identical to a binarized
-    ``hit`` while a continuous-fitness backend (reciprocal-rank matching, the
-    L4 outer proxy) keeps its gradient instead of collapsing to all-miss θ."""
+    """``response`` is the sample's GRADED per-sample fitness ∈ [0,1], never a binarized ``hit`` — the
+    cross-entropy MAP is valid for any y ∈ [0,1], so a graded backend keeps its gradient."""
 
     candidate_id: str
     sample_id: int
@@ -69,9 +62,7 @@ class Observation(NamedTuple):
 
 
 def graded_response(result: Mapping[str, Any]) -> float:
-    """The per-sample graded response for a result dict — its ``fitness`` clamped to
-    [0,1] (the logistic likelihood needs y ∈ [0,1]). One reader so every θ/δ fit
-    sees the same graded signal the composite does."""
+    """One reader, so every θ/δ fit sees the same graded signal the composite does."""
     return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
 
 
@@ -83,13 +74,8 @@ def ruler_entry(value: RulerEntry) -> tuple[float, float]:
 
 
 def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> float | None:
-    """Expected score of ability ``theta`` over the fixed difficulty ruler — the
-    θ-implied accuracy on the ruler's one reference sample set. Subset-invariant
-    (always the whole ruler, never a round's drifting probe subset), so it is the
-    honest peer of a round's raw accuracy under ``per_round_resubset``: a lucky
-    thin subset can inflate raw accuracy, but ability re-projected onto the fixed
-    ruler cannot. ``None`` when the ability or ruler is absent (cold start) →
-    callers fall back to raw accuracy."""
+    """Ability re-projected onto the FIXED ruler — the subset-invariant peer of a round's raw accuracy.
+    ``None`` at cold start (no ability or ruler), where callers fall back to raw accuracy."""
     if theta is None or not delta_scale:
         return None
     etas = np.array([a * (theta - d) for d, a in (ruler_entry(v) for v in delta_scale.values())])
@@ -103,18 +89,8 @@ def theta_accuracy_ci(
     *,
     alpha: float = 0.05,
 ) -> tuple[float, float] | None:
-    """The candidate's ability θ re-projected to accuracy on the fixed ruler, as a CI band.
-
-    The decision-relevant whisker: ``ruler_expected_accuracy`` at ``θ ± z·θ_se``, the SAME
-    difficulty-adjusted, subset-invariant scale the round-winner election ranks on. Because it
-    borrows strength through the ruler's per-sample difficulty, it is tighter than the raw
-    mean-CLT band on the same evidence — the "throw away less info" the loop already computes
-    for its own decisions but never showed. ``ruler_expected_accuracy`` is monotone in θ, so the
-    lower θ maps to the lower accuracy; no sort needed.
-
-    ``None`` when θ / SE / ruler is absent (a COLD ruler, e.g. a fresh dataset or an inner
-    instrument) — the caller then keeps the raw composite CI, so a difficulty-blind round is
-    never dressed up as a difficulty-adjusted one."""
+    """``ruler_expected_accuracy`` at ``θ ± z·θ_se``, monotone in θ so no sort is needed. ``None`` on a
+    COLD ruler — the caller keeps the raw composite CI rather than dressing it as difficulty-adjusted."""
     if theta is None or theta_se is None or not delta_scale:
         return None
     from scipy.stats import norm
@@ -132,51 +108,8 @@ def adopted_level_trajectory(
     incumbents: Sequence[tuple[float, float] | None],
     delta_scale: Ruler | None,
 ) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
-    """Origin ability + the per-round ability of the **incumbent the search adopted** — the
-    single-scale signal an outer L4 cycle grades inner search quality by. Every level is a θ in
-    LOGITS on the cycle's locked δ ruler, the one estimator that is subset-invariant.
-
-    A level is the ``(θ, θ_se)`` pair ``fit_theta_given_delta`` returns, carried whole. The SE is
-    the level's own precision — how sharply THIS cell measured the incumbent — and it is what
-    lets the outer panel tell estimation noise from between-cell heterogeneity instead of
-    estimating both from the spread of six scalars. It rides here rather than in a parallel
-    series because the carry-forward below must be the same decision for both halves: a round
-    that could not be fit did not move the incumbent, so it did not sharpen the reading either.
-
-    **Why the incumbent, and not the round's proposals.** A round's value to the search is what
-    it *crowns*; the arms it discards are the price of finding that. Averaging proposals prices
-    exploration as damage — for any mutation operator with mass below the parent (all of them,
-    which is why selection exists) ``E[mean θ] < θ_parent``, so the mean is negative for an
-    exploring generator and ≈0 for an inert one, exactly backwards. Measured on
-    ``promptpotter-self__d8b5be``: an inner round that adopted a 28-sample winner at θ +0.27 and
-    let PoBB kill a dud at 6 samples (θ −1.84) recorded a level of −0.79 — a 0.88-logit
-    *regression* stamped on a round the loop itself marked ``improved: True``.
-
-    It is not the max-order-statistic the mean was chosen to avoid — but it is not free of
-    selection either, and the earlier claim here that "the winner's-curse discount is applied
-    there" was false: ``elect_round_winner`` ranks on the POINT estimate with no SE margin
-    (``scoring/metrics.py``, which says so), and ``_cumulative_theta`` applies no discount. What
-    actually bounds it is dilution — the frontier re-fit pools the winner's electing rows with
-    carried rows it did not select, and the L4 law then averages the whole series rather than
-    reading its endpoint. The residual is what ``theta_se`` above is for: measured, not assumed.
-
-    **Why logits, and not expected accuracy.** θ and the ruler's δ share one *interval* scale —
-    that is the point of fitting a Rasch model at all: equal Δθ is equal difficulty of gain
-    wherever the origin sits. Projecting each θ back through :func:`ruler_expected_accuracy`
-    *before* differencing throws that property away, because the sigmoid is flat near the ruler's
-    ceiling: the same ability gain then reads smaller for a strong origin than for a weak one, and
-    the outer loop would rank optimizer prompts partly by which seed drew an easy origin.
-
-    A round whose frontier could not be fit (every row errored) carries the PRIOR level — the
-    incumbent persists; nothing says it moved — falling back to the origin at round 1. Levels are
-    **not** floored at the origin, so a genuinely regressing optimizer prompt still reads negative,
-    which is the gradient the outer optimizer needs to avoid bad mutations.
-
-    ``delta_scale`` is read only as the WARM-RULER GATE, not by the arithmetic — where the ruler
-    is cold ``fit_theta_given_delta`` places every sample at δ=0, so θ collapses to that round's
-    logit-accuracy and stops being subset-invariant, and differencing across rounds would compare
-    two different scales. ``(None, [])`` there and when the origin was never fit; the caller
-    excludes the cycle (``no_evidence_reason``)."""
+    """Origin ability plus the per-round ability of the incumbent the search ADOPTED, in logits on
+    the locked ruler. Why the incumbent: ``concepts/optimizer-of-the-optimizer.md``."""
     if origin is None or not delta_scale:
         return None, []
     prev = origin
@@ -226,9 +159,8 @@ class RaschPosterior:
     discrimination_se: dict[int, float] = field(default_factory=dict)
 
     def ruler(self) -> dict[int, RulerEntry]:
-        """The fixed difficulty ruler this fit defines, as the one mapping the θ
-        seam reads: ``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination
-        was estimated (2PL). Folds δ + a back into a single per-sample value."""
+        """``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination was estimated — δ and a folded
+        into one per-sample value, the shape the θ seam reads."""
         return {
             sid: ((d, self.discrimination[sid]) if sid in self.discrimination else d)
             for sid, d in self.delta.items()
@@ -247,7 +179,6 @@ def _map_fit(
     max_iter: int,
     tol: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, bool]:
-    """Alternating-Newton MAP at fixed hyperparameters. Priors ``θ ~ N(0, σ_θ²)``, ``δ ~ N(μ_δ, σ_δ²)``."""
     theta = np.zeros(n_c)
     delta = np.full(n_s, mu_delta)
 
@@ -392,44 +323,8 @@ def fit_theta_given_delta(
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> dict[str, tuple[float, float]]:
-    """Estimate each candidate's ability θ at a **fixed** difficulty ruler ``delta``.
-
-    The cross-round comparability primitive. ``fit_rasch`` re-estimates δ *and*
-    re-anchors ``mean(θ) == 0`` on every call, so its θ scale drifts between fits —
-    round-N θ and round-0 θ sit on different rulers, which is why the round-winner
-    election / c0_ok / the stall ladder couldn't compare θ across rounds on it. Holding
-    δ fixed at the calibrated ruler pins the scale: every θ this returns lands on the
-    one shared scale, so cross-round θ comparison is valid.
-
-    With δ fixed the candidates **decouple** — each θ_c is an independent 1-D logistic
-    MAP (prior ``N(0, σ_θ²)``, σ_θ = the ruler's population spread) over that
-    candidate's observations: ``p = σ(aₛ·(θ − δₛ))``. A ruler entry is either a bare δ
-    (1PL, ``aₛ ≡ 1``) or a ``(δ, a)`` pair (2PL — the high-signal sample weights its
-    residual harder, the noisy one is discounted). A sample absent from the ruler is
-    placed at **δ=0, a=1** — a FLAT ruler where it is cold, so θ degenerates to
-    logit-accuracy there rather than the observation being dropped. This is the
-    "one ruler, θ always, flat where cold" contract (fitness-comparability slices 2–3):
-    an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy. Returns
-    ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation is omitted.
-
-    **``theta_se`` carries a quasi-likelihood dispersion correction, and it is load-bearing
-    for every graded backend.** The Bernoulli information ``Σ a²·p(1−p)`` is the variance of a
-    COIN FLIP, but ``Observation.response`` is a graded fitness ∈ [0,1]: a ranked-table answer
-    at position 5 of 20 is neither a hit nor a miss, and the L4 outer proxy is a composite
-    score. A graded response varies far less than a coin flip about the same mean, so assuming
-    Bernoulli variance OVERSTATES the uncertainty — measured at n=28 against the true sampling
-    spread of θ̂: ×1.02 on binary hit/miss, ×1.51 on reciprocal-rank-of-20, **×4.66** on the
-    low-dispersion L4 outer composite. That inflation is what left the outer election unable to
-    crown and PoBB unable to eliminate (p_best pinned at a tie): the loop was discarding ~4.7×
-    the precision it had actually paid for.
-
-    So the SE is scaled by ``√φ``, with ``φ`` the Pearson dispersion ``Σ (y−p)²/(p(1−p)) / (n−1)``
-    (Wedderburn 1974). This is an ESTIMATE off the same residuals, not a knob — φ ≈ 1 on genuinely
-    binary data, so a dichotomous dataset is unchanged; φ < 1 hands a graded backend its real
-    precision back; and φ > 1 on an OVERDISPERSED backend widens the SE instead, so it fails safe
-    in both directions. Floored at ``_MIN_DISPERSION``: a response with no residual variance at
-    all (a constant, or a single observation) carries no evidence about its own dispersion, and
-    an unfloored φ→0 would report infinite confidence from it."""
+    """Fixed δ decouples the candidates; a sample absent from the ruler sits at δ=0, a=1 — FLAT where
+    cold, so θ degenerates to logit-accuracy. ``theta_se`` carries the √φ dispersion correction."""
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
         d, a = ruler_entry(delta.get(o.sample_id, 0.0))
@@ -475,18 +370,8 @@ def fit_rasch_2pl(
     max_iter: int = 100,
     tol: float = 1e-4,
 ) -> RaschPosterior:
-    """Hierarchical **2PL** fit — like ``fit_rasch`` but with a per-sample discrimination
-    ``aₛ`` (``p = σ(aₛ·(θ_c − δₛ))``). 1PL says only *how hard* a sample is; 2PL also says
-    *how much it tells you* — ``aₛ`` is the sample's signal-to-noise, so selection and the
-    gate can weight high-discrimination samples harder and discount noisy ones.
-
-    Warm-started from the 1PL fit (θ, δ, and its EB hyperparameters) with ``log aₛ = 0``,
-    then alternating-Newton MAP over θ, δ, and ``log aₛ`` (the log keeps a > 0). Priors:
-    ``θ ~ N(0, σ_θ²)``, ``δ ~ N(μ_δ, σ_δ²)`` (both from the 1PL EB fit, held fixed here),
-    ``log a ~ N(0, σ_a²)`` (``_SIGMA_LOG_A``) — the log-a prior shrinks toward a=1 and pins
-    the a-vs-θ scale degeneracy. ``mean(θ)==0`` anchored each step. Not gated on its own:
-    ``graduate_ruler_model`` decides per-dataset whether this model is adopted.
-    """
+    """Warm-started from the 1PL fit; ``log aₛ`` keeps a > 0 and its prior pins the a-vs-θ degeneracy.
+    Not gated on its own — ``graduate_ruler_model`` decides per-dataset whether it is adopted."""
     if not observations:
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
 
@@ -591,16 +476,12 @@ def fit_rasch_2pl(
 
 
 def _logp(y: float, theta: float, delta: float, a: float) -> float:
-    """Cross-entropy log-likelihood of one held-out graded response ``y ∈ [0,1]``
-    under ``p = σ(a·(θ−δ))``: ``y·log p + (1−y)·log(1−p)`` (reduces to the binary
-    branch when ``y ∈ {0,1}``)."""
     p = 1.0 / (1.0 + np.exp(-float(np.clip(a * (theta - delta), -50, 50))))
     p = min(max(p, 1e-9), 1.0 - 1e-9)
     return float(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
 
 
 def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float:
-    """In-sample log-likelihood of a fit over all its observations (for the BIC pre-check)."""
     return sum(
         _logp(
             o.response,
@@ -613,29 +494,15 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
 
 
 def _fold_of(o: Observation, n_folds: int) -> int:
-    """Which CV fold an observation belongs to — a stable hash of its OWN identity.
-
-    Never its position in the list. Stride folds (``observations[i::n_folds]``) made the
-    graduation verdict a function of the order the archive happened to be walked in, so a
-    ``reindex`` could flip 1PL↔2PL, hence δ, hence which candidates PoBB kills. Worse, they
-    collapse outright on a sorted stream: with the observations grouped by candidate and
-    sorted by sample, a stride index becomes a bijection onto the sample, so fold *k* holds
-    a fixed sample partition whose samples are never in training and EVERY held-out response
-    is dropped (``n_eval == 0`` ⇒ 1PL forced) — for any dataset size divisible by ``n_folds``.
-    """
+    """A stable hash of the observation's OWN identity, never its position: stride folds make the
+    verdict a function of walk order, and collapse outright on a stream sorted by candidate."""
     digest = hashlib.blake2b(f"{o.candidate_id}\x00{o.sample_id}".encode(), digest_size=8).digest()
     return int.from_bytes(digest, "big") % n_folds
 
 
 def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, float] | None:
-    """Cross-validated held-out total log-likelihood ``(ll_1pl, ll_2pl)``.
-
-    Deterministic hash folds (no RNG, no positional dependence — see :func:`_fold_of`).
-    For each held-out fold both models are refit on the rest and scored on the fold — but
-    only on responses whose candidate *and* sample were seen in training (an unseen one has
-    no estimate). ``None`` when too sparse to evaluate either model. This is the primary
-    graduation test: held-out fit can't reward 2PL for overfitting in-sample.
-    """
+    """Scored only on responses whose candidate AND sample were seen in training. The primary
+    graduation test — held-out fit cannot reward 2PL for overfitting in-sample."""
     n = len(observations)
     if n < n_folds * 4:
         return None
@@ -673,22 +540,8 @@ def graduate_ruler_model(
     margin: float = 0.01,
     n_folds: int = 5,
 ) -> tuple[CalibrationModel, RaschPosterior]:
-    """Decide per-dataset whether the difficulty bank uses 1PL or 2PL, and return
-    ``(model_name, posterior)`` — the chosen fit, whose ``ruler()`` the cycle reads.
-
-    1PL fixes sample-set drift now with the data we have; **2PL adds power once enough
-    data is collected**, adopted only where it provably wins. Two gates (spec slice 3):
-
-    1. **Cheap BIC pre-check** on the full fit — 2PL spends ``n_s`` extra discrimination
-       parameters, so it must clear ``2·Δloglik > n_s·ln(N)`` before the costlier CV runs.
-    2. **Cross-validated held-out log-likelihood** (the primary test) — 2PL must beat 1PL
-       on out-of-sample (sample, hit) pairs by a per-response ``margin`` (hysteresis: the
-       margin + re-evaluation only at calibration refresh stop round-to-round flip-flop;
-       and held-out scoring means 2PL can never *regress* a dataset).
-
-    ``enable=False`` (or too-sparse data) ⇒ always 1PL. The discrimination SE is carried
-    on the returned posterior so selection/teaching can read how well ``aₛ`` is pinned.
-    """
+    """Two gates: a cheap BIC pre-check on the full fit, then cross-validated held-out log-likelihood
+    by a per-response ``margin`` (hysteresis). ``enable=False`` or too-sparse data ⇒ always 1PL."""
     base = fit_rasch(observations)
     if not enable or len(base.delta) < 2:
         return "1PL", base
@@ -711,7 +564,6 @@ def graduate_ruler_model(
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
-    """Flatten ``cycle.rounds`` into ``(candidate, sample, response)`` triples; skip errors."""
     obs: list[Observation] = []
     for rr in rounds:
         for cid, results in rr.all_candidate_results.items():
@@ -726,14 +578,8 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
-    """Collapse ``groups`` onto one observation per ``(candidate, sample)`` cell, LAST wins.
-
-    A cell measured twice is not two pieces of evidence — the second is almost always a cache
-    replay of the first (a re-scored origin under a new round subset), and letting it through
-    weights that sample in δ by how often it happened to be replayed. Newest-wins is the same
-    rule ``load_reusable_results`` resolves the identical collision with, so pass groups
-    oldest-first.
-    """
+    """A cell measured twice is one piece of evidence, not two — the second is almost always a cache
+    replay, so LAST wins and callers pass groups oldest-first."""
     cells: dict[tuple[str, int], Observation] = {}
     for group in groups:
         for o in group:
@@ -746,16 +592,8 @@ def candidate_abilities(
     origin_results: list[QueryMeasurement],
     delta_scale: Ruler,
 ) -> RaschPosterior:
-    """Each arm's ability θ on the **fixed** difficulty ruler ``delta_scale`` (the cycle's
-    δ bank), via ``fit_theta_given_delta``.
-
-    The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so it shares
-    the arms' scale. Holding δ fixed at the bank — rather than a per-call joint ``fit_rasch``
-    that re-anchors ``mean(θ)==0`` every call — is what makes θ **cross-round/cross-subset
-    comparable**: the election, the c0_ok floor, the stall ladder and PoBB all read the one
-    ruler. Samples absent from the ruler are flat (δ=0); raw subset accuracy is
-    difficulty-blind and drifts across subsets, θ does not.
-    """
+    """The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so it shares the arms'
+    scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable."""
     obs: list[Observation] = []
     pools: list[tuple[str, list[QueryMeasurement]]] = [
         (cid, list(results)) for cid, results in results_by_id.items()
@@ -781,21 +619,8 @@ def candidate_abilities(
 
 
 def theta_lift_over_origin(abilities: RaschPosterior, candidate_id: str) -> float | None:
-    """``θ_candidate − θ_origin`` on the fixed ruler, or ``None`` when either arm was never fit.
-
-    The one reader of the matched origin's ability. ``fit_theta_given_delta`` **omits an arm
-    with no observation**, and ``candidate_abilities`` drops every errored row — so an origin
-    whose samples all failed carries no ``ORIGIN_ABILITY_ID`` entry at all. Defaulting it to
-    ``0.0`` invents a logit-0 origin: an arm as able as a coin, on a floor nobody measured.
-    Both the winner election and the promotion gate read the lift, so both would rank against
-    that phantom.
-
-    ``paired_fitness`` does not catch this. It counts an errored row as a 0.0 cell (its
-    declared policy — "the score it earned"), so the origin-overlap guard passes on exactly the
-    rows the θ fit threw away.
-
-    There is no lift over a floor that was never measured. Absent is not a number.
-    """
+    """``None`` when either arm was never fit — an origin whose samples all errored has no entry, and
+    defaulting it to 0.0 invents a logit-0 floor nobody measured. Absent is not a number."""
     theta_c = abilities.theta.get(candidate_id)
     theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID)
     if theta_c is None or theta_origin is None:
@@ -808,22 +633,8 @@ def select_round_subset(
     observations: list[Observation],
     budget: int,
 ) -> list[Sample]:
-    """Pick ``budget`` most-informative samples via the adaptive queue mechanism.
-
-    Prior ``N(θ_leader, σ_θ²)``; peaks on the contested band (δ ≈ leader θ).
-    Cold start → bank-order prefix.
-
-    **A δ fit needs at least two arms, or selecting on it is a difficulty ratchet.** With a
-    single arm the Rasch likelihood cannot separate ability from difficulty: θ is pinned by the
-    identifiability anchor and δ collapses to that one arm's hit pattern, shrunk — two values,
-    "it passed" and "it failed". Selecting the contested band off that ruler then means "give me
-    everything the incumbent got wrong", which is not the most-informative subset, it is the
-    incumbent's own worst 28. Measured on all four ``justlogic-d234`` inner campaigns of
-    2026-07-27: round 1 dropped 12 samples versus round 0 and **all 12 were C0 responses, zero were
-    misses**, in every campaign — C0's own rate on the round-1 panel fell 0.525 → 0.321. Every
-    one of those campaigns then read round 1 as a regression. So one arm falls back to the
-    bank prefix, alongside the no-observation cold start it is a special case of.
-    """
+    """A δ fit needs at least TWO arms or selecting on it is a difficulty ratchet — with one arm δ
+    collapses to its hit pattern, so the contested band is just the incumbent's own misses."""
     if budget <= 0 or not bank:
         return []
     if budget >= len(bank):

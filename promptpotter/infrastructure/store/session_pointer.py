@@ -1,20 +1,5 @@
-"""The per-tenant active-session pointer — which campaign + cycle the operator is on.
-
-Every verb here is keyed on a :data:`~promptpotter.domain.cycle_paths.WorkspaceDir` —
-the tenant's own root, ``Stores.base_dir`` — so there is no global pointer and by
-construction no tenant can read or clobber another's. **The key is the whole contract —
-never give it a default.** ``(tenant_id, projects_root=None)`` falling back to the
-process-global ``DEFAULT_PROJECTS_ROOT`` makes omitting the root compile and be silently
-wrong, and nearly every caller omits it. One is the L4 auto-rebase: an inner cycle
-retargets the OPERATOR's pointer at a campaign under ``.inner/``, every per-cycle route
-404s, and the dashboard goes blank mid-run. A resolved root is the only way to ask, and
-the newtype stops the ``projects_root`` one level up from being passed by mistake.
-
-Distinct from :class:`store.session_store.SessionStore`: this answers *which* session
-is live, that stores *what* a session holds. Depends only on the pure leaves
-``store.io`` + ``store.layout``, so it stays importable from anywhere without dragging
-a store in.
-"""
+"""The per-tenant active-session pointer, keyed on a ``WorkspaceDir``. **Never give that key a default** — a
+process-global fallback lets an inner cycle retarget the OPERATOR's pointer and blank the dashboard."""
 
 from __future__ import annotations
 
@@ -40,11 +25,7 @@ def mint_session_id() -> str:
 
 
 def save_active_pointer(workspace: WorkspaceDir, session_id: str, hop: CycleHop) -> None:
-    """Persist *workspace*'s active pointer — session + campaign + cycle.
-
-    The workspace root selects the file; the JSON payload carries only the
-    session / campaign / cycle ids.
-    """
+    """Persist the workspace's active pointer. The workspace ROOT selects the file; the payload carries only the three ids."""
     validate_path_component(session_id)
     validate_path_component(hop.campaign_id)
     validate_path_component(hop.cycle_id)
@@ -59,7 +40,6 @@ def save_active_pointer(workspace: WorkspaceDir, session_id: str, hop: CycleHop)
 
 
 def clear_active_pointer(workspace: WorkspaceDir) -> None:
-    """Delete *workspace*'s active-session pointer file, if present. Idempotent."""
     _active_pointer_path(workspace).unlink(missing_ok=True)
 
 

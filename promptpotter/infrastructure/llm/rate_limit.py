@@ -1,8 +1,5 @@
-"""Rolling-window RPM/TPM throttle + 429 `Retry-After` handling (RFC 7231 §7.1.3).
-
-Blocks before sending when caps would be exceeded. Token estimate is `chars//4`; `record_actual()`
-reconciles from server-reported usage.
-"""
+"""Rolling-window RPM/TPM throttle + 429 ``Retry-After`` handling (RFC 7231 §7.1.3). Blocks before
+sending when a cap would be exceeded; the ``chars//4`` estimate reconciles via ``record_actual()``."""
 
 from __future__ import annotations
 
@@ -42,24 +39,14 @@ _UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "dai
 
 
 def set_abort_check(predicate: Callable[[], bool] | None) -> None:
-    """Bind the cooperative-abort predicate :func:`wait_with_countdown` polls.
-
-    Set at the runner seam to ``session.pause_check``. Because the operator's
-    pause button writes ``.runtime/pause.flag`` cross-process, this is what lets a
-    multi-minute rate-limit wait be broken even when an OS Ctrl+C never reaches
-    the loop (a hosting uvicorn swallows SIGINT into its own graceful shutdown).
-    """
+    """Bind the cooperative-abort predicate :func:`wait_with_countdown` polls. The pause button writes
+    ``.runtime/pause.flag`` CROSS-PROCESS, so a wait breaks even when a hosting uvicorn eats SIGINT."""
     _ABORT_CHECK.set(predicate)
 
 
 def get_abort_check() -> Callable[[], bool] | None:
-    """The abort predicate bound in THIS task's context, or ``None``.
-
-    Exists so a nested run can compose the predicate it inherits instead of
-    overwriting it. An L4 inner cycle is spawned as a child asyncio task, so it
-    receives a copy of the outer's context — reading it here is how the inner
-    campaign learns that its owner was told to stop.
-    """
+    """The abort predicate bound in THIS task's context, so a nested run composes rather than overwrites.
+    An L4 inner cycle is a child task, so reading it is how the inner learns its owner was stopped."""
     return _ABORT_CHECK.get()
 
 
@@ -165,14 +152,8 @@ def decide_429_wait(
     *,
     max_attempts: int = MAX_429_ATTEMPTS,
 ) -> RateLimitWait | None:
-    """Decide the pause for one 429 retry, or ``None`` to give up.
-
-    ``None`` ⇒ no usable ``Retry-After``, a non-positive wait, or attempts
-    exhausted — the caller surfaces the original failure unchanged. Otherwise
-    returns the cushioned wait plus the diagnosed window scope. The single
-    429 decision shared by the backend wire (`BackendClient.run_query`) and
-    the optimizer LLM call (`dispatch.llm_call`).
-    """
+    """The pause for one 429 retry, or ``None`` (no usable ``Retry-After``, non-positive, or exhausted) —
+    on which the caller surfaces the original failure. Shared by the backend wire and the optimizer."""
     wait = parse_retry_after(headers)
     if wait is None or wait <= 0 or attempt >= max_attempts - 1:
         return None
@@ -186,14 +167,8 @@ def decide_429_wait(
 
 
 async def wait_with_countdown(total_sec: float, label: str) -> None:
-    """Sleep `total_sec` while emitting a yellow single-line countdown to stderr.
-
-    Cooperatively abortable: each 1 s tick polls the per-task abort predicate
-    (:func:`set_abort_check`); a requested pause raises ``asyncio.CancelledError``
-    so the surrounding loop unwinds through its existing interrupt path instead
-    of blocking out the full wait. This is why the operator's pause button — not
-    only an OS Ctrl+C — breaks the wait.
-    """
+    """Sleep while emitting a countdown to stderr. Cooperatively abortable: a requested pause raises
+    ``asyncio.CancelledError`` so the loop unwinds through its existing interrupt path."""
     abort = _ABORT_CHECK.get()
     end = time.monotonic() + total_sec
     while True:
@@ -224,7 +199,6 @@ def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> i
 
 
 def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:
-    """Extract ``(limit, requested)`` from a Groq-style ``"Limit X, Requested Y"`` body."""
     m = re.search(r"Limit\s+(\d+),\s*Requested\s+(\d+)", err_str)
     if not m:
         return None
@@ -244,7 +218,6 @@ def _parse_int_header(headers: Mapping[str, Any] | Any, key: str) -> int | None:
 
 
 def raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
-    """Translate a terminal 413/429 "Requested > Limit" into ``RequestTooLargeError``."""
     status = getattr(exc, "status_code", None)
     if status not in (413, 429):
         return
@@ -282,7 +255,6 @@ def apply_discovered_caps(
     rpm_header: str,
     tpm_header: str,
 ) -> None:
-    """Self-tune the limiter from the provider's rate-limit response headers (no-op without limiter)."""
     if rate_limiter is None:
         return
     rpm = _parse_int_header(headers, rpm_header)
@@ -307,7 +279,6 @@ class RateLimiter:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
-        """Populate unpinned caps from server-reported headers; tier changes mid-run take effect."""
         if rpm is not None and not self.rpm_pinned:
             self.rpm = rpm
         if tpm is not None and not self.tpm_pinned:
@@ -327,7 +298,6 @@ class RateLimiter:
                 await asyncio.sleep(wait)
 
     def record_actual(self, estimated: int, actual: int) -> None:
-        """Correct the most recent reservation with the response's actual tokens."""
         if self._tokens and self._tokens[-1][1] == estimated:
             ts, _ = self._tokens[-1]
             self._tokens[-1] = (ts, actual)
@@ -339,9 +309,7 @@ class RateLimiter:
         *,
         provider_name: str,
     ) -> RateLimitReservation:
-        """Estimate → fail-fast on over-cap → throttle → return reservation. Must `close()` with
-        the server's actual token count.
-        """
+        """Estimate → fail-fast on over-cap → throttle → reservation. Must ``close()`` with actual tokens."""
         estimated = estimate_tokens(messages, max_output)
         if self.tpm is not None and estimated > self.tpm:
             raise RequestTooLargeError(
@@ -360,13 +328,11 @@ class RateLimiter:
             self._tokens.popleft()
 
     def _rpm_wait(self, now: float) -> float:
-        """Seconds until the oldest request ages out, if the RPM cap is full."""
         if self.rpm is None or len(self._requests) < self.rpm:
             return 0.0
         return self._requests[0] + self.window_s - now
 
     def _tpm_wait(self, now: float, estimated_tokens: int) -> float:
-        """Seconds until enough token budget has aged out to fit the request."""
         if self.tpm is None:
             return 0.0
         current = sum(t for _, t in self._tokens)
@@ -392,13 +358,10 @@ class RateLimitReservation:
     limiter: RateLimiter
 
     def close(self, actual: int) -> None:
-        """Reconcile the reservation with the server's actual token usage."""
         self.limiter.record_actual(self.estimated, actual)
 
 
 def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
-    """Build a limiter. Configured caps pin; unconfigured slots self-tune from
-    ``x-ratelimit-limit-*`` response headers on the first successful call."""
     return RateLimiter(
         rpm=rpm,
         tpm=tpm,

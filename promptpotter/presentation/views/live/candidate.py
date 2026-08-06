@@ -1,5 +1,3 @@
-"""Per-candidate header + summary classification. Pure: no I/O, no mutation."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,16 +18,8 @@ from promptpotter.shared.composite import render_composite_fitness_oneliner
 
 
 def fmt_pp_override(pp: dict[str, Any] | None) -> str:
-    """Render a nested pipeline_params override as ``node.key: val  …``; ``""`` when empty.
-
-    One flattener, one float format: this is a JOIN over the canonical
-    ``flatten_sp_summary`` (`domain/opt_search_point.py`), not a second implementation of
-    it. The hand-rolled version this replaced also carried its own float formatter
-    (``_pp_val``), byte-identical to the domain one, and flattened only one level — so a
-    nested param printed as a dict repr here and as ``node.param.leaf`` on every other
-    surface. Routing through the domain helper also puts the "reserved key or non-dict"
-    question where ``node_config_items`` already owns it.
-    """
+    """Render a nested pipeline_params override. A JOIN over the canonical ``flatten_sp_summary``, never a second implementation — the
+    hand-rolled twin carried its own float formatter and flattened only one level."""
     return "  ".join(f"{k}: {v}" for k, v in flatten_sp_summary(pp).items())
 
 
@@ -39,7 +29,6 @@ def fmt_individual_header(
     changes_description: str,
     pp_override: dict[str, Any] | None,
 ) -> str:
-    """Pre-scoring header: ``ind k/N  <mutation>`` or ``ind k/N  parent re-eval``."""
     label = f"ind {idx + 1}/{total}"
     body = fmt_pp_override(pp_override)
     if not body and changes_description:
@@ -50,8 +39,6 @@ def fmt_individual_header(
 
 @dataclass(frozen=True)
 class IndividualSummary:
-    """Structured candidate render — ``tag`` + ``body_line`` + ordered ``detail_lines``."""
-
     status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
     body_line: str
@@ -64,10 +51,7 @@ def individual_summary_from_dict(
     *,
     origin_composite_fitness: float | None = None,
 ) -> IndividualSummary:
-    """Classify a candidate score report and pre-format all display pieces.
-
-    Precedence: invalid > aborted > eliminated > ok.
-    """
+    """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok."""
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 

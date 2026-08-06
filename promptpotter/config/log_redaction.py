@@ -1,13 +1,5 @@
-"""Secret-redaction filter for the root logging handler.
-
-Last-mile defense before stderr: scrubs configured API keys and well-known
-provider key prefixes out of every log record. The codebase already bans
-``print()`` (CLAUDE.md), so any user-visible string passes through here.
-
-The filter is defense-in-depth — no current code path stringifies an api_key
-into a log record. It exists so a future careless ``logger.info("auth=%s",
-key)`` cannot silently leak a credential.
-"""
+"""Secret-redaction filter on the root handler — the last-mile defense before stderr. Defense-in-depth: no current path stringifies a
+key, and it exists so a future careless ``logger.info("auth=%s", key)`` cannot leak one."""
 
 from __future__ import annotations
 
@@ -44,11 +36,8 @@ def _snapshot_secret_values() -> tuple[str, ...]:
 
 
 class SecretRedactionFilter(logging.Filter):
-    """Replaces configured api-key values + well-known prefixes with ``***REDACTED***``.
-
-    Snapshots settings values at filter construction. Re-instantiate the
-    filter if env keys are rotated mid-process.
-    """
+    """Replaces configured api-key values and well-known prefixes. It SNAPSHOTS settings at construction, so re-instantiate
+    the filter if env keys rotate mid-process."""
 
     def __init__(self) -> None:
         super().__init__()

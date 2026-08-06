@@ -1,17 +1,5 @@
-"""`INJECTIONS` registry — the one dict every prompt site resolves against.
-
-Each entry registers itself via the ``@signal("<name>", …)`` decorator at its renderer's
-definition site (``injections/panels.py``, ``layer_state.py``, ``catalogues.py``, ``wounds.py``).
-This module imports those modules to trigger registration, then snapshots the result. So
-``grep "<slot>"`` lands on the decorated renderer in one hop — key and body are co-located,
-and there is no separate dict literal to keep in sync.
-
-`char_cap` policy (set in each ``@signal``): truncate + warn on overrun. Set for LLM-authored
-text AND for the large derived/measurement panels that feed L2/L3 (diagnostics, axis_memory,
-the wound channels) — a backstop so a deep-stall round (when L3 fires and these panels are
-largest) can't balloon the optimizer prompt past its budget. Caps sit above the typical render
-size, so healthy rounds are untouched. ``None`` only for the small, internally-capped renderers
-(*_RENDER_CAP, top-K digests) and ``task_context`` (its per-field cap is finer).
+"""``char_cap`` (set per ``@signal``, ``None`` for the internally-capped renderers) truncates and
+warns: a backstop so a deep-stall round can't balloon the optimizer prompt past its budget.
 """
 
 from __future__ import annotations
@@ -49,21 +37,15 @@ STALL_EXPLORATION = "stall_exploration"
 
 @functools.cache
 def injection_source_digest() -> str:
-    """What these renderers EMIT, as a digest — the L4 measurement identity's engine half.
-
-    ``_identity_config`` hashes the prompt TEMPLATES and the layouts naming which panels fill
-    them, but the panels' text is code, so ~40% of every inner prompt sat outside measurement
-    identity. Normalized through the AST — comments and docstrings stripped, formatting
-    canonicalized — so documenting a renderer costs nothing while its prose or its render
-    CONDITION moves the number. Scope is this package: the declared measurement→prompt seam.
-    """
+    """The panels' text is code, so it sits outside ``_identity_config``'s prompt templates and
+    layouts. AST-normalized: documenting a renderer costs nothing, its prose or condition does not."""
     parts: list[str] = []
     for module in (catalogues, layer_state, panels, wounds):
         tree = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)) and (
-                body := getattr(node, "body", None)
-            ):
+            if isinstance(
+                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ) and (body := getattr(node, "body", None)):
                 head = body[0]
                 if (
                     isinstance(head, ast.Expr)
@@ -81,27 +63,8 @@ def citable_fields(
     exploration_budget: str | None = None,
     rendered: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
-    """What an ``l1_generate`` variant may cite THIS round: the evidence-bearing panels the
-    layout actually renders into its prompt, plus the stall escape hatch when licensed.
-
-    Derived, never declared. A citable panel must be renderable into L1's prompt or the
-    contract invites fabricated citations — so citability is the layout, filtered by
-    ``_Injection.citable``, and the same call feeds the prompt's menu, the wire schema's
-    enum, and the behaviour check. ``exploration_budget=None`` (the wiring layer couldn't
-    determine it) offers the hatch — fail open, as the check has always done.
-
-    *rendered* (``DispatchHub.fill``'s third return) narrows "in the layout" to "shown":
-    a panel with nothing to say renders empty and never reaches the slot, and offering its
-    name is the same phantom the layout derivation exists to prevent, one level down —
-    measured at 5 of 10 offered names blank on a live round. The behaviour check replaying
-    off a round file has no render to consult and omits it, which fails OPEN in the same
-    direction the rest of that path already does.
-
-    **The result is never empty.** It becomes the ``evidence_grounding.field`` enum, and an
-    empty enum is an unsatisfiable schema. The layout invariant below guarantees a citable
-    mandatory panel EXISTS; it cannot guarantee one SAID anything, and a first round has no
-    critique yet. When nothing rendered, "no panel points anywhere" is measured rather than
-    inferred from a stall count — which is the hatch's own definition, so it is offered."""
+    """Narrowed to what actually RENDERED — offering a panel that said nothing is the phantom
+    citation one level down. Never empty: an empty ``evidence_grounding.field`` enum is unsatisfiable."""
     names = [
         n
         for n in layout.all_placeholders()

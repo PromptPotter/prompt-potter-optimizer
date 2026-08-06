@@ -1,16 +1,3 @@
-"""Optimizer-pipeline manifest loading — schemas + optimizer prompt templates.
-
-Single source of truth for optimizer nodes and prompts is
-``promptpotter/assets/optimizer/pipeline.yaml``. It follows the same shape as a
-backend's ``GET /pipeline`` response: ``nodes`` reference
-``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
-prompt bodies live in its ``resolved_prompts`` registry, and the schema
-bodies in the generated sibling ``resolved_schemas.json``. The optimizer is
-itself a pipeline.
-Run-scoped prompt mutation rides the per-node override channel
-(:func:`set_optimizer_prompt_overrides`), never a second prompt source.
-"""
-
 from __future__ import annotations
 
 import contextvars
@@ -91,51 +78,19 @@ _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | 
 
 
 def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> None:
-    """Bind per-cycle optimizer-prompt-field overrides for this task's context.
-
-    Keyed by optimizer node; each value is a partial `PromptTemplate`-field map
-    merged onto the loaded prompt by :func:`load_optimizer_prompt`. Two callers,
-    both task-isolated: the runner seam binds the outer L4 cycle's optimizer prompt set
-    (:func:`load_optimizer_set_overrides`); the inner runner
-    (`runner/inner/cycle.py`) binds the outer's per-node mutations."""
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
 
 
 def get_optimizer_config_overrides() -> dict[str, Any] | None:
-    """The optimizer decoding clamp for this task, or ``None`` on every normal call.
-
-    A flat ``{param: value}`` map (``temperature`` + ``seed``) clamped onto EVERY optimizer
-    node call by :func:`..call.llm_call`, applied LAST so it beats both the node's file
-    config and any per-call override (``l1_generate``'s creativity temp, the dominant noise
-    source). Distinct from the prompt-field override above: that swaps optimizer prompt TEXT,
-    this pins the sampling knobs. Set only by declaring a cycle a measurement instrument
-    (:func:`~promptpotter.shared.instrument.enter_instrument_mode`), which is what makes an
-    inner campaign a near-deterministic function of its optimizer prompt — the outer optimizer's
-    own task binds no mode and keeps the file default."""
+    """The optimizer decoding clamp, applied LAST so it beats both the node's file config and any
+    per-call override. Only instrument mode sets it — that is what makes an inner cycle near-deterministic."""
     mode = instrument_mode()
     return mode.optimizer_clamp if mode is not None else None
 
 
 def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
-    """Load a named optimizer prompt-set's per-node field overrides.
-
-    The L4 outer cycle selects a specialized optimizer prompt set via
-    ``OptimizationConfig.optimizer_set`` (e.g. ``"self_optimizing"`` →
-    ``assets/optimizer/sets/self_optimizing.yaml``). The file is a flat
-    ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
-    the SAME per-node override channel as the inner-cycle mutations
-    (:func:`set_optimizer_prompt_overrides` → :func:`resolve_node_override`), so
-    every injection slot the set does not name (the ``pipeline_param_catalogue``
-    in ``problem_description``, the evidence panels, …) stays intact from the
-    default manifest. Empty ``opt_set`` or a missing file → ``{}``.
-
-    Non-dict top-level entries (e.g. a ``_doc`` note) are dropped — only real
-    per-node field maps are returned.
-
-    A named set whose file is missing RAISES. ``optimizer_set`` is an
-    ``Estimand.SEARCH`` axis, so falling back to the default set would run the inner
-    prompts while the campaign records that it ran the named one — a measurement
-    attributed to a prompt set it never used."""
+    """A named set whose file is MISSING raises: ``optimizer_set`` is an ``Estimand.SEARCH`` axis, so
+    falling back to the default would attribute a measurement to a prompt set it never ran."""
     if not opt_set:
         return {}
     path = optimizer_assets_root() / "sets" / f"{opt_set}.yaml"
@@ -147,22 +102,8 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
 
 @functools.lru_cache(maxsize=1)
 def optimizer_manifest() -> dict[str, Any]:
-    """The operator-authored optimizer manifest, parsed (cached).
-
-    Public because it is what callers should hash and render — the raw bytes are not
-    a meaningful identity now the file carries comments and block scalars, and a second
-    read of the same file is a second opinion nobody needs.
-
-    Says so once per process when the shipped manifest is NOT the one being read. An
-    override is deliberate and rare, and it decides the provider, model and temperature
-    of every optimizer node — so "why is the optimizer behaving unlike the docs" must be
-    answerable without knowing that file exists. A stale override already fails loudly at
-    the node that went missing; this is for the case where it merely behaves differently.
-    The warning lives here rather than beside the constant because module import happens
-    before ``setup_logging()`` on every entry point, and a record emitted then reaches
-    ``logging.lastResort``: raw stderr, no formatter, and outside the secret-redaction
-    filter. The cache is the once-guard; there is no second one.
-    """
+    """Public because this is what callers hash and render — the raw bytes stopped being a meaningful
+    identity once the file carried comments and block scalars. Warns once when it is not the shipped one."""
     if optimizer_assets_root() / "pipeline.yaml" != OPTIMIZER_PIPELINE_PATH:
         logger.warning(
             "optimizer manifest OVERRIDDEN: reading %s instead of the manifest shipped with "
@@ -187,16 +128,8 @@ def _resolved_key(family: str, version: Any) -> str:
 
 @functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
-    """Load the optimizer's own pipeline as a PipelineSchema (cached).
-
-    Follows the same pipeline-schema convention as a backend: each node's
-    structured output schema is referenced via ``config.schema_family`` /
-    ``config.schema_version`` and resolved against the ``resolved_schemas``
-    registry — same shape ``parse_pipeline_response`` uses for backend
-    pipelines, so the optimizer is itself a pipeline that can later be
-    optimized. The registry is a sibling file because it is generated, not
-    authored; joining them here is the only place the two halves meet.
-    """
+    """The schema registry is a sibling file because it is generated, not authored; this is the only
+    place the two halves meet."""
     from promptpotter.domain.pipeline_parsing import parse_resolved_schema
     from promptpotter.domain.pipeline_schema import PipelineNode
 
@@ -225,13 +158,8 @@ def get_optimizer_schema() -> PipelineSchema:
 
 
 def optimizer_node_config(node: str) -> dict[str, Any]:
-    """The resolved config dict for an optimizer node (``promptpotter/assets/optimizer/pipeline.yaml``).
-
-    The single read accessor for optimizer-node tunables — provider, model,
-    temperature, reasoning_effort — now that they live only in the optimizer
-    pipeline file. Display/default sites (the RoundEnd model line, the preflight
-    optimizer-vs-target check, the l1 creativity default) read through here
-    instead of a per-campaign config copy."""
+    """The single read accessor for optimizer-node tunables, which live only in the optimizer
+    pipeline file — never in a per-campaign config copy."""
     schema_node = get_optimizer_schema().get_node(node)
     if schema_node is None:
         raise KeyError(f"Unknown optimizer node: {node!r}")
@@ -239,17 +167,10 @@ def optimizer_node_config(node: str) -> dict[str, Any]:
 
 
 def optimizer_model(node: str = "l1_generate") -> str:
-    """The concrete optimizer model configured for ``node`` (default: the L1 generator)."""
     return str(optimizer_node_config(node)["model"])
 
 
 def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
-    """Look up a node's prompt body in ``resolved_prompts``.
-
-    Joins the node's ``config.prompt_family``/``prompt_version`` against
-    the manifest's ``resolved_prompts`` registry — same family/version
-    indirection backend pipelines use.
-    """
     data = optimizer_manifest()
     node_cfg = data.get("nodes", {}).get(name, {}).get("config", {})
     family = node_cfg.get("prompt_family")
@@ -262,9 +183,8 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
 
 @functools.lru_cache(maxsize=32)
 def base_optimizer_template(name: str) -> PromptTemplate:
-    """The manifest template for *name*, override-free — the base an L4 prose mutation
-    merges onto, and the declaration of the inline ``{{tokens}}`` (caller extras such as
-    ``{{n_variants}}`` / ``{{citable_fields}}``) such a mutation must preserve."""
+    """Override-free: the base an L4 prose mutation merges onto, and the declaration of the inline
+    ``{{tokens}}`` (``{{n_variants}}``, ``{{citable_fields}}``) that mutation must preserve."""
     body = _resolved_prompt_for_node(name)
     if body is None:
         raise KeyError(
@@ -278,18 +198,8 @@ def effective_optimizer_prompts(
     schema: PipelineSchema | None,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, dict[str, str]]:
-    """Every inner optimizer prompt field an outer cycle may rewrite, with its CURRENT text.
-
-    On the recursion the artifact under edit is not the ``OptSearchPoint`` — it is the
-    inner optimizer's own templates, carried per node as ``pipeline_params``. So the
-    current text is the manifest base for that node with whatever the incumbent already
-    adopted laid over it, exactly what the next override REPLACES.
-
-    Returns ``{}`` off the recursion: a node qualifies only if it names an optimizer
-    prompt we hold the base for AND advertises ``PromptTemplate`` fields in
-    ``param_keys``. A normal campaign's nodes do neither, so ``rendered_prompt`` stays
-    its target prompt alone with no second concept in the way.
-    """
+    """``{}`` off the recursion — a node qualifies only if it names an optimizer prompt we hold the
+    base for AND advertises ``PromptTemplate`` fields, which no normal campaign's nodes do."""
     if schema is None:
         return {}
     owned = set(list_optimizer_prompts())
@@ -312,13 +222,8 @@ def effective_optimizer_prompts(
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Load an optimizer prompt from the manifest registry.
-
-    Every load runs through :func:`~promptpotter.application.optimization.dispatch.facade.validate_template`,
-    so a template referencing a slot that is not in ``INJECTIONS``
-    (``dispatch/injections/registry.py``) and not in the per-template extras list
-    raises at load time rather than silently rendering empty.
-    """
+    """Every load runs ``validate_template``, so a template naming a slot outside ``INJECTIONS`` and
+    the per-template extras raises at load time rather than silently rendering empty."""
     from promptpotter.application.optimization.dispatch.facade import validate_template
 
     template = base_optimizer_template(name)
@@ -330,15 +235,8 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
 
 @dataclass(frozen=True)
 class ResolvedNodeOverride:
-    """The outer L4 cycle's per-node mutation, resolved from the specimen channel into one surface.
-
-    Every field is empty / ``None`` on a normal (non-L4) cycle, so reading it there is a total
-    no-op. ``prompt_fields`` are the ``PromptTemplate``-field edits (the model is ``extra``-strict,
-    so it is never one of them); ``schema_field_names`` is the cleaned ``{field: wire_name}`` rename
-    map. ``model`` / ``provider`` are the SINGLE inner-optimizer model the outer carrier node set
-    (``node_param_keys`` constrains the outer search to one carrier), returned for EVERY node so one
-    choice fans across the whole inner optimizer at apply time. ``resolve_node_layout`` is the peer
-    for the layout half, which has a non-optional floor and so keeps its own accessor."""
+    """``model`` / ``provider`` are the SINGLE inner-optimizer model the outer carrier node set,
+    returned for EVERY node so one choice fans across the whole inner optimizer at apply time."""
 
     prompt_fields: dict[str, Any]
     schema_field_names: dict[str, str]
@@ -347,7 +245,6 @@ class ResolvedNodeOverride:
 
 
 def _node_override(node: str) -> dict[str, Any]:
-    """The raw ``overrides[node]`` object bound for this task, or ``{}``."""
     raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
     return raw if isinstance(raw, dict) else {}
 
@@ -363,16 +260,8 @@ def _single_model_override() -> tuple[str | None, str | None]:
 
 
 def resolve_node_override(node: str) -> ResolvedNodeOverride:
-    """Resolve the outer L4 cycle's mutation of *node* into one typed surface — the single reader
-    of the specimen channel's per-node dict for its prose, schema-rename, and model levers.
-
-    Prose fields merge onto the template in :func:`load_optimizer_prompt`; renames feed
-    ``build_l1_response_schema`` via ``effective_l1_field_names``; the single fanned model is
-    consumed in :func:`..call.llm_call`'s config merge. A rename target is dropped when it is a
-    non-identifier, a no-op self-rename, or a duplicate (two fields claiming one wire name is an
-    unresolvable response); a collision with a field that is NOT being renamed is rejected at the
-    apply site, which knows the field set. A bad L4 mutation must score poorly, never break the run.
-    """
+    """A rename target is dropped when it is a non-identifier, a self-rename, or a duplicate; a
+    collision is rejected at the apply site. A bad L4 mutation must score poorly, never break the run."""
     raw = _node_override(node)
     prompt_fields = {k: v for k, v in raw.items() if k in PromptTemplate.model_fields}
     names: dict[str, str] = {}
@@ -394,20 +283,8 @@ def resolve_node_override(node: str) -> ResolvedNodeOverride:
 
 
 def resolve_node_layout(node: str) -> L1Layout:
-    """The effective per-node injection layout for *node* — its floor ± the outer
-    L4 cycle's per-node ``layout`` edit.
-
-    The layout edit rides the SAME per-node override channel as the prose edits
-    (:func:`set_optimizer_prompt_overrides` → ``overrides[node]["layout"] = {slot:
-    [name, ...]}``) — the outer L1 emits it alongside a prose edit; the inner runner
-    binds it inside the inner task. It is a PARTIAL per-slot replacement: a slot the
-    edit names replaces the floor's list, a slot it omits keeps the floor. The merged
-    layout is validated against the node's :data:`NODE_LAYOUTS` spec — a dropped-
-    mandatory / unknown-placeholder / dup edit is the GUARD RAIL: it rolls back to the
-    floor, so the inner cycle runs on the good default and the bad edit scores as
-    no-improvement rather than starving the node. No override bound (every normal,
-    non-L4 cycle) → the floor unchanged (:class:`ResolvedNodeOverride`'s peer for the
-    structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
+    """PARTIAL per-slot replacement: a named slot replaces the floor's list, an omitted one keeps it.
+    The GUARD RAIL rolls a bad edit back to the floor, so it scores no-improvement, not starvation."""
     spec = NODE_LAYOUTS[node]
     # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
     # layout is L2's in-campaign surface (`opt_sp.memory.l1_layout`) and nothing here applies
@@ -442,7 +319,6 @@ def resolve_node_layout(node: str) -> L1Layout:
 
 
 def list_optimizer_prompts() -> list[str]:
-    """Names of nodes that declare a ``prompt_family`` in the manifest."""
     data = optimizer_manifest()
     return sorted(
         name
@@ -452,27 +328,8 @@ def list_optimizer_prompts() -> list[str]:
 
 
 def compute_optimizer_prompt_hashes() -> dict[str, str]:
-    """SHA-256 (16-char prefix) per optimizer node of THE OPTIMIZER THAT RUNS IT.
-
-    Three parts, because all three decide what the node produces:
-
-    * the deterministic ``model_dump_json()`` of the loaded ``PromptTemplate`` — the
-      manifest base plus any bound per-node override, i.e. what was actually used;
-    * the node's resolved injection layout — a layout-only L4 edit changes which evidence
-      the node sees, so it must move the hash (a node with no ``NODE_LAYOUTS`` entry
-      contributes nothing here);
-    * the node's resolved config — model, provider, temperature, reasoning effort. It was
-      missing, and its absence was the hole: repointing ``l1_generate`` at a different model
-      in ``promptpotter/assets/optimizer/pipeline.yaml`` left this hash unmoved, so every
-      drift check downstream read "same optimizer" while a different model was generating
-      the candidates. Measurement identity already folds the whole parsed manifest
-      (``connectors/promptpotter.py::_identity_config``), so the ARCHIVE was never at risk —
-      only the trajectory, which is what this hash is for.
-
-    Recorded per round (``RoundResult.optimizer_prompt_hashes``) — the round is what a
-    resume can ask about — and on ``index.json::final.prompt_hashes`` so cross-cycle audits
-    can join cycles by ``l1_generate``'s hash.
-    """
+    """Three parts — the template, the resolved layout, the resolved config — because all three decide
+    what the node produces; without config, repointing a node's MODEL left this hash unmoved."""
     out: dict[str, str] = {}
     for name in list_optimizer_prompts():
         tpl = load_optimizer_prompt(name)
@@ -490,16 +347,8 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
 
 
 def combined_optimizer_prompt_hash() -> str:
-    """One 12-hex hash over the whole optimizer prompt set.
-
-    Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes` into a single
-    deterministic digest. Recorded on ``campaign.json`` as ``optimizer_prompt_hash`` and on
-    each inner campaign — an audit JOIN KEY ("which optimizer was this campaign minted
-    under"), not the drift gate. Drift is asked per ROUND, where the answer can name the
-    round and fork at it (``resume_and_fork/resume.py``); a campaign-level equality could
-    only say yes or no about the whole campaign. Not part of ``campaign_id`` — campaign ids
-    are random per ``new`` call.
-    """
+    """An audit JOIN KEY, not the drift gate: drift is asked per ROUND, where the answer can name the
+    round and fork at it. Not part of ``campaign_id``, which is random per ``new``."""
     per_prompt = compute_optimizer_prompt_hashes()
     blob = json.dumps(per_prompt, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]

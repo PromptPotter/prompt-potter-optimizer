@@ -1,21 +1,5 @@
-"""The two check-in transitions — drop/pick → CHECKIN skeleton, Start → active+run.
-
-Transition a establishes identity + persists working state (free, no slot);
-transition b irreversibly commits + runs (the gate + commit + loop). A check-in
-is a real disk-backed campaign in the ``checkin`` lifecycle, so it shows in the
-sidebar, follows the active pointer, and survives a restart — the working state
-lives under the campaign dir (``checkin/draft.json`` + ``checkin/cache.json``)
-and is rehydrated at Start.
-
-The irreversible Start body — commit the origin, build the session, resolve the
-cycle plan, flip ``checkin`` → ``active`` — is :func:`prepare_checkin_run`, shared
-by BOTH run tails: the web ``start_checkin_campaign`` (reserves a machine slot then
-detaches via :func:`_run_in_background`) and the CLI ``new <file>`` (runs the loop
-inline with ``LiveDisplay``). The ONLY legitimate difference between the surfaces is
-run-invocation; everything up to the run is one path. The commit + finalize steps
-reuse the launcher core (:func:`materialize_and_write_origin`,
-:func:`resolve_cycle_plan`, :func:`finalize_checkin_to_active`).
-"""
+"""The two check-in transitions: drop/pick mints a real disk-backed CHECKIN campaign (sidebar,
+active pointer, restart-survivable); Start commits it. The tails differ ONLY in run-invocation."""
 
 from __future__ import annotations
 
@@ -75,18 +59,8 @@ def create_checkin_campaign(
     source_file: str = "",
     headers: tuple[str, ...] = (),
 ) -> tuple[str, str, DraftCampaign]:
-    """Transition (a) — mint a CHECKIN campaign skeleton from the first ingest action.
-
-    Mints campaign + provisional cycle + session + active pointer (no slot, no run),
-    re-keys ``draft`` to the new ``campaign_id``, and persists the durable working
-    state (``checkin/draft.json``) + the sample bank (``checkin/cache.json``). The
-    campaign appears in the sidebar immediately and is resumable. Returns
-    ``(campaign_id, cycle_id, keyed_draft)`` — the keyed draft (``draft_id`` now the
-    ``campaign_id``) is the wire/return value the ingest handlers hand back.
-
-    The bank lands before the draft: :meth:`write_resolution` patches ``cache.json``
-    and no-ops when no bank exists, so minting through the seam in the other order
-    would leave a fresh check-in with no ``resolution`` breadcrumb on disk."""
+    """Transition (a) — mint the CHECKIN skeleton, re-key ``draft`` to the new ``campaign_id``, persist
+    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one."""
     _session_id, campaign_id, cycle_id = mint_checkin_skeleton(stores, slug=draft.slug)
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
@@ -95,10 +69,8 @@ def create_checkin_campaign(
 
 
 def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None:
-    """Rehydrate the durable check-in draft for ``campaign_id``, or ``None``.
-
-    The campaign dir is the identity, so ``draft_id`` / ``tenant_id`` are
-    re-injected from the store's tenant scope — a cross-tenant id isn't found."""
+    """Rehydrate the durable check-in draft, or ``None``. The campaign dir IS the identity, so
+    ``draft_id`` / ``tenant_id`` come from the store's tenant scope — a cross-tenant id isn't found."""
     data = stores.checkin.read_draft(campaign_id)
     if data is None:
         return None
@@ -108,14 +80,8 @@ def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None
 def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: dict[str, Any] | None = None
 ) -> DraftCampaign:
-    """Persist a mutated check-in draft back to disk (``draft_id`` IS the campaign id).
-
-    The single write-back seam every draft-mutating handler rides. It writes BOTH
-    ``draft.json`` and the ``cache.json::resolution`` breadcrumb, because the latter
-    is derived from the former: a caller that refreshed one and not the other left
-    the operator reading stale gaps out of the file tree. Pass ``resolution`` only to
-    enrich the default block (the resolver appends its raw output + degradation).
-    """
+    """The single write-back seam every draft-mutating handler rides. It writes BOTH ``draft.json`` and
+    the derived ``cache.json::resolution``, so no caller can refresh one and leave the other stale."""
     stores.checkin.write_draft(draft.draft_id, draft.to_disk())
     stores.checkin.write_resolution(draft.draft_id, resolution or resolution_block(draft))
     return draft
@@ -123,10 +89,6 @@ def save_checkin_draft(
 
 @dataclass(frozen=True, slots=True)
 class PreparedCheckinRun:
-    """The run bundle :func:`prepare_checkin_run` hands back — everything the loop
-    needs, after the check-in has been committed + flipped to ``active``. Both run
-    tails (web detach + CLI inline) drive the loop from this."""
-
     session: Session
     campaign_config: CampaignConfig
     train_data: list[Any]
@@ -136,10 +98,8 @@ class PreparedCheckinRun:
 
 
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[str, DraftCampaign]:
-    """Load + gate a check-in for Start — the shared front of both run tails.
-
-    An incomplete origin raises :class:`OriginIncompleteError` → 422 with the open
-    gaps, leaving the campaign in check-in. Returns ``(cycle_id, draft)``."""
+    """Load + gate a check-in for Start. An incomplete origin raises ``OriginIncompleteError`` → 422
+    with the open gaps, leaving the campaign in check-in."""
     recover_pending_replacements(stores=stores)
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
@@ -162,15 +122,8 @@ async def prepare_checkin_run(
     draft: DraftCampaign,
     make_session: Callable[[str], Awaitable[Session]],
 ) -> PreparedCheckinRun:
-    """Commit the origin + build the session + flip ``checkin`` → ``active``.
-
-    The single irreversible Start body shared by the web detach + CLI inline tails.
-    Fresh upload → materialize the dataset now; derived-from-existing → the dataset
-    already exists, persist only its candidate library through the one origin-write
-    seam. ``make_session`` is the surface's session factory (web ``init_services`` /
-    CLI ``init_services_cli``) taking the resolved ``dataset_name``. Preflight + the
-    machine slot (web) / status check (CLI) + the run itself are the caller's — this
-    seam is run-invocation-agnostic."""
+    """The single irreversible Start body: commit the origin, build the session, flip to ``active``.
+    Run-invocation-agnostic — preflight, the machine slot and the run itself are the caller's."""
     canonical = dataset_source_of(draft.source_file)
     if canonical is None:
         if stores.tenant_datasets.slug_exists(draft.slug):
@@ -244,11 +197,8 @@ async def start_checkin_campaign(
     spend_budget_usd: float | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Any:
-    """Transition (b), web tail — flip a CHECKIN campaign to ``active`` and DETACH.
-
-    Reserves the machine slot before the runner spawns as a detached task. The
-    webapp's "Start campaign" (``POST /commands/start-checkin``) calls this; the
-    CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs inline."""
+    """Transition (b), web tail — reserve the machine slot, then spawn the runner as a detached task.
+    The CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs the loop inline."""
     cycle_id, draft = load_checkin_for_start(stores, campaign_id)
 
     user = stores.users.get_or_create(

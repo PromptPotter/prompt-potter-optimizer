@@ -1,18 +1,5 @@
-"""``IdentityContext`` — the sole identity carrier past the resolver seam.
-
-Per `docs/adr/0002-identity-foundation.md` + the Stage-0 framing in
-`docs/adr/0003-spend-and-tenancy.md`. Five fields:
-
-* :attr:`IdentityContext.user_id` — :class:`~promptpotter.domain.identity.UserId`
-* :attr:`IdentityContext.tenant_id` — :class:`~promptpotter.domain.identity.TenantId`
-* :attr:`IdentityContext.issuer` — :class:`~promptpotter.domain.identity.Issuer` or ``None``
-* :attr:`IdentityContext.claims` — read-only ``Mapping[str, object]`` of OIDC/SCIM claims
-* :attr:`IdentityContext.capabilities` — RBAC permit set (SCIM-named at Stage 1+)
-
-Stage 0 ships :func:`default_identity` (auth-off single-operator) as the
-sole construction route. Stage 1 (M12) replaces only the resolver, never
-this type.
-"""
+"""``IdentityContext`` — the sole identity carrier past the resolver seam, per ADR-0002 and the
+Stage-0 framing in ADR-0003. Stage 1 replaces only the resolver, never this type."""
 
 from __future__ import annotations
 
@@ -72,12 +59,8 @@ OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
 
 
 def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
-    """Map short tier names to capabilities; unknown names raise ``ValueError``.
-
-    The admin channel uses this to turn an operator's ``step,create`` into the
-    grant's capability set — an unknown tier is a typo, rejected loudly, not a
-    silently-dropped (and thus under-)grant.
-    """
+    """Map short tier names to capabilities. An unknown name is a typo, rejected loudly — a silently
+    dropped tier is an UNDER-grant nobody notices."""
     caps: set[str] = set()
     for tier in tiers:
         name = tier.strip().lower()
@@ -96,8 +79,6 @@ PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
 @dataclass(frozen=True)
 class IdentityContext:
-    """Frozen identity carrier — see module docstring for field semantics."""
-
     user_id: UserId
     tenant_id: TenantId
     issuer: Issuer | None = None
@@ -106,36 +87,16 @@ class IdentityContext:
 
 
 def _admin_caps_from_env() -> frozenset[str]:
-    """WHO is host-admin, Stage 0 (auth-off CLI / local dev): the env flag.
-
-    Sound ONLY on the single-operator box, where "the box's operator" and "the
-    identity" are the same principal. The multi-user OIDC path MUST NOT use this —
-    a process-wide flag there would make every signup an admin. There, admin is
-    pinned to the registered-developer identity (`oidc.py`).
-
-    This and the Stage-1 pinned-marker predicate are *two deliberate predicates*
-    for the same question. **Never merge them.** WHAT admin grants lives once, in
-    :data:`ADMIN_CAPABILITIES`; WHO is admin is answered differently per stage
-    because the two stages have different threat models.
-    """
+    """WHO is host-admin at Stage 0 — an env flag, sound ONLY on a single-operator box. The OIDC path
+    pins admin to a registered identity: **never merge the two predicates**, the threat models differ."""
     if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
         return ADMIN_CAPABILITIES
     return frozenset()
 
 
 def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
-    """Stage-0 single-operator identity factory.
-
-    Auth-off CLI / local dev: ``--tenant`` overrides ``tenant_id``. A *registered*
-    operator (one who has signed in once, recorded in the default-claim marker)
-    passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
-    same single workspace the authenticated web reads (one tenant per operator).
-    The single local operator owns their tenant, so they hold the full
-    :data:`OWNER_COMMAND_CAPABILITIES` command set; ``PROMPTPOTTER_ADMIN=1``
-    additionally augments with :data:`ADMIN_CAPABILITIES` (Tier 1a).
-    Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
-    (`presentation/api/deps.py::resolve_identity`); no other call site changes.
-    """
+    """Stage-0 identity factory. A REGISTERED operator gets ``user_id == tenant_id``, so a terminal run
+    lands in the same single workspace the authenticated web reads — one tenant per operator."""
     return IdentityContext(
         user_id=UserId(safe_name(user_id)),
         tenant_id=TenantId(safe_name(tenant_id)),
@@ -146,18 +107,12 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
 
 
 def has_capability(identity: IdentityContext, capability: str) -> bool:
-    """The one predicate for "does this identity hold *capability*".
-
-    The command-verb gate (`command_dispatcher._require_capability_for`) reads
-    capabilities through here, so every capability decision has one shape.
-    Dataset *reads* are not a capability decision — see
-    `infrastructure.store.dataset_access`.
-    """
+    """The one predicate for "does this identity hold *capability*", so every capability decision has one
+    shape. Dataset READS are not a capability decision — see ``infrastructure.store.dataset_access``."""
     return capability in identity.capabilities
 
 
 def claim_email(identity: IdentityContext) -> str | None:
-    """Best-effort read of the OIDC ``email`` claim — ``None`` when absent/non-string."""
     raw = identity.claims.get("email")
     return raw if isinstance(raw, str) else None
 

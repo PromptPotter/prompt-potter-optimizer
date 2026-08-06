@@ -1,7 +1,3 @@
-"""
-PromptPotter Optimizer API — main FastAPI application entry point.
-"""
-
 import asyncio
 import contextlib
 import logging
@@ -107,14 +103,8 @@ def _error_response(
     details: dict[str, object] | None = None,
     exc_info: bool = False,
 ) -> JSONResponse:
-    """Mint the trace id, log it, and serialize the envelope — one seam, all errors.
-
-    ``error_id`` is what ties the string a user sees to the line logged here.
-    That argument was always true for the catch-all 500; it is just as true for
-    the 404 that sends an operator to restart a server that was never down. So
-    EVERY error carries one, and a bug report quotes it instead of a wall-clock
-    guess (frontend-surface-contract.md § I7_failure_traceable).
-    """
+    """Mint the trace id, log it, serialize the envelope — one seam, all errors. EVERY error carries an ``error_id``, so a bug
+    report quotes it instead of a wall-clock guess."""
     error_id = uuid.uuid4().hex[:12]
     logger.log(
         logging.ERROR if exc_info else logging.WARNING,
@@ -188,24 +178,8 @@ install_oidc_middleware(app)
 
 
 class SecurityHeadersMiddleware:
-    """Security + freshness response headers, in one pass (the single response-header
-    seam — don't add a second middleware beside this).
-
-    Pure ASGI, not ``BaseHTTPMiddleware``: the header set rides the ``http.response.start``
-    message via a wrapped ``send``, so a streaming ``EventSourceResponse`` passes through
-    untouched. ``BaseHTTPMiddleware`` buffers the body through an anyio memory stream and
-    breaks the SSE feed's disconnect/shutdown teardown (a lingering subscription then hangs
-    graceful shutdown and raises ``RuntimeError: No response returned``).
-
-    Security headers on **every** response: ``X-Content-Type-Options: nosniff``,
-    ``X-Frame-Options: DENY`` + CSP ``frame-ancestors 'none'`` (clickjacking), ``Referrer-Policy``,
-    and HSTS when the request arrived over https (behind the Cloudflare tunnel uvicorn sees the
-    forwarded proto via ``--proxy-headers`` on ``scope["scheme"]``; plain-http local dev gets no
-    HSTS, correctly). The CSP is **strict on JSON API paths** (``default-src 'none'`` — a JSON
-    body is never a document) and **frame-only on the webapp document** so its own same-origin
-    Next.js assets still load. Plus ``Cache-Control: no-store`` on ``/api/v1/*`` — the live
-    polling surface must never be cached (a freshness bug, not an optimization).
-    """
+    """The single response-header seam — never add a second middleware beside it. Pure ASGI, not
+    ``BaseHTTPMiddleware``, which buffers the body and breaks the SSE feed's disconnect/shutdown teardown."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

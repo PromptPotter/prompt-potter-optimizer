@@ -1,10 +1,5 @@
-"""The ``emit_*`` seam — per-call telemetry from deep async chains to the ledger.
-
-``emit_token_usage`` is the template: build the ``*Record`` and append it to the
-active cycle ledger read from a ContextVar. The runner installs the ledger via
-``set_cycle_ledger`` at cycle start and clears it on ``drain_all``; concurrent
-cycles (M12+) get task-local isolation for free. No process global, no wrapper
-dataclass — call site to ledger in one hop."""
+"""The ``emit_*`` seam — per-call telemetry from deep async chains straight to the active cycle
+ledger, read from a ContextVar. No process global, no wrapper: call site to ledger in one hop."""
 
 from __future__ import annotations
 
@@ -33,9 +28,7 @@ _CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=Non
 
 
 def set_cycle_ledger(ledger: CycleEventLog | None) -> Token[CycleEventLog | None]:
-    """Bind the cycle ledger ``emit_token_usage`` appends to.
-
-    Returns the reset ``Token``; ``drain_all`` pairs it with ``reset_cycle_ledger``."""
+    """Bind the ledger ``emit_token_usage`` appends to; returns the ``Token`` ``drain_all`` resets."""
     return _CYCLE_LEDGER.set(ledger)
 
 
@@ -44,7 +37,6 @@ def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
 
 
 def set_current_round(round_num: int | None) -> Token[int | None]:
-    """Bind the round number stamped onto each ``TokenUsageRecord``."""
     return _CURRENT_ROUND.set(round_num)
 
 
@@ -53,11 +45,8 @@ def reset_current_round(token: Token[int | None]) -> None:
 
 
 def _append_record(record: CycleRecord) -> int | None:
-    """Append *record* to the active cycle ledger; return its offset.
-
-    No-ops to ``None`` when no ledger is bound (pure/test call paths stay
-    side-effect-free) or when the append raises (logged, never propagated —
-    telemetry must not break the call site)."""
+    """Append *record* to the active cycle ledger, or ``None``. A missing ledger keeps pure/test paths
+    side-effect-free; a raising append is logged and swallowed — telemetry must not break its call site."""
     ledger = _CYCLE_LEDGER.get()
     if ledger is None:
         return None
@@ -81,17 +70,8 @@ def emit_token_usage(
     cached: bool = False,
     reasoning_tokens: int = 0,
 ) -> None:
-    """Build ``TokenUsageRecord`` and append it to the active cycle ledger.
-
-    Reads ledger + round from ContextVars (per-asyncio-task isolation —
-    concurrent cycles for M12+ just work). The overlong-prompt signal is the
-    per-node char gate at the pre-call site (``OPTIMIZER_PROMPT_BUDGET_CHARS``),
-    which fires before the call on the composed prompt — the duplicate
-    post-call token gate that could never fire first is gone.
-
-    ``cached`` marks a call served from a content-addressed cache: it consumed the
-    recorded tokens but spent no money. See ``TokenUsageRecord`` for why the ledger
-    carries both and the rollup keeps them apart."""
+    """Build ``TokenUsageRecord`` and append it. ``cached`` marks a call served from the content-addressed
+    cache: it consumed the recorded tokens but spent no money, and the rollup keeps the two apart."""
     _append_record(
         TokenUsageRecord(
             kind=kind,
@@ -117,13 +97,7 @@ def emit_command(
     idempotency_key: str,
     issued_by_user_id: str = "",
 ) -> int | None:
-    """Append a ``CommandRecord`` to the active cycle ledger.
-
-    Reads ledger from the per-task ``_CYCLE_LEDGER`` ContextVar; the
-    dispatcher binds the target cycle's ledger via ``set_cycle_ledger``
-    around its work. Returns the offset the record was appended at;
-    ``None`` when no ledger is bound (informational — callers above
-    the dispatcher already raised by then)."""
+    """Append a ``CommandRecord``; the dispatcher binds the target cycle's ledger around its work."""
     return _append_record(
         CommandRecord(
             command_id=command_id,
@@ -142,10 +116,6 @@ def emit_command_ack(
     detail: str = "",
     effect: dict[str, Any] | None = None,
 ) -> None:
-    """Append a ``CommandAckRecord`` to the active cycle ledger.
-
-    Same ContextVar surface as ``emit_command``; the actuator that applied
-    (or refused) the command emits this through the same binding."""
     _append_record(
         CommandAckRecord(command_id=command_id, status=status, detail=detail, effect=effect or {})
     )
@@ -158,14 +128,8 @@ def emit_error_record(
     stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"],
     traceback: str | None = None,
 ) -> ErrorRecord:
-    """Append an ``ErrorRecord`` to the active cycle ledger and return it.
-
-    Same ContextVar surface as ``emit_token_usage``. The runner's three
-    ``except`` sites call this from ``application/runner/{entry,loop}.py``
-    and carry the returned record straight onto ``CycleResult.error`` — one
-    build, no twin. ``LiveDashboardView`` is the sole subscriber writing
-    ``dashboard.json::error``. Errors emitted before the round loop entered
-    carry ``round=None``."""
+    """Append an ``ErrorRecord`` and RETURN it — the runner's ``except`` sites carry the same object onto
+    ``CycleResult.error``, so there is one build and no twin. Pre-loop errors carry ``round=None``."""
     record = ErrorRecord(
         kind=kind,
         message=message,
@@ -184,13 +148,8 @@ def emit_round_warning(
     severity: Literal["warning", "error"] = "warning",
     detail: dict[str, Any] | None = None,
 ) -> None:
-    """Append a ``RoundWarningRecord`` to the active cycle ledger.
-
-    Same ContextVar surface as :func:`emit_error_record` — reads the ledger +
-    round from ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND``. Makes a non-fatal,
-    self-healed degradation visible on every channel (dashboard, round file,
-    CLI) instead of only the server log. No-ops when no ledger is bound, so
-    pure/test call paths stay side-effect-free."""
+    """Append a ``RoundWarningRecord``, putting a non-fatal self-healed degradation on every channel
+    instead of only the server log."""
     _append_record(
         RoundWarningRecord(
             kind=kind,

@@ -1,11 +1,5 @@
-"""Token → USD resolution — bundled floor + runtime refresh, no third-party dep.
-
-Resolution order is wire cost (``override_usd``, currently OpenRouter only) → runtime
-cache → the checked-in floor; see :func:`compute_usd` and :func:`load_rates`. Only
-``urllib`` + ``json``, by choice — a cost-tracking package is a supply-chain surface for
-a table we can vendor from LiteLLM's public price backup (MIT, BerriAI). The fetched
-JSON stays data: keys become dict lookups, values floats, nothing is ever ``eval``-ed.
-"""
+"""Token → USD — wire cost (``override_usd``) → runtime cache → the checked-in floor. stdlib only,
+by choice: the table is vendored from LiteLLM's public price backup (MIT, BerriAI), never eval-ed."""
 
 from __future__ import annotations
 
@@ -52,7 +46,6 @@ _TTL_SECONDS = 24 * 60 * 60
 
 
 def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
-    """Keep only cost-bearing entries with the four fields we use."""
     out: dict[str, Any] = {}
     for name, body in raw.items():
         if not isinstance(body, dict):
@@ -68,7 +61,6 @@ def _wrap(models: dict[str, Any]) -> dict[str, Any]:
 
 
 def _cache_fresh() -> bool:
-    """True if ``CACHE_PATH`` exists and was fetched within the TTL window."""
     if not CACHE_PATH.exists():
         return False
     try:
@@ -90,14 +82,8 @@ def _cache_fresh() -> bool:
 
 
 def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> bool:
-    """Fetch upstream → strip → write ``CACHE_PATH``. Return True on success.
-
-    No-op (returns True) when the cache is younger than ``_TTL_SECONDS``
-    unless ``force=True``. Network failure logs a warning and leaves any
-    prior cache in place so a startup with no internet still resolves
-    rates from the last successful fetch — and if no cache exists yet,
-    ``load_rates`` falls through to the bundled floor.
-    """
+    """Fetch upstream → strip → write ``CACHE_PATH``; ``True`` on success. A network failure logs and
+    leaves the prior cache — with none, :func:`load_rates` falls through to the bundled floor."""
     if not force and _cache_fresh():
         return True
     try:
@@ -130,22 +116,12 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
 
 def refresh_rates_in_background() -> None:
-    """Start :func:`refresh_rates` on a daemon thread and return at once.
-
-    The fetch is a synchronous ``urlopen`` with a 30 s timeout, and both run verbs called it
-    as their first statement — so once a day, and on every flaky or proxied network, the
-    operator watched the campaign do nothing while a price table downloaded. Nothing on the
-    run path consumes the result: a failure already logs and leaves the prior cache or the
-    bundled floor in place, and every reader resolves through that same chain.
-
-    Abandoning the thread at process exit is safe in both directions — a half-written cache
-    fails ``json.loads`` in :func:`_cache_fresh`, which reports stale and refetches.
-    """
+    """Start :func:`refresh_rates` on a daemon thread and return at once — nothing on the run path
+    consumes it. A half-written cache fails ``json.loads``, reports stale, and refetches."""
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
 def _read_models(path: Path) -> dict[str, Any] | None:
-    """Return the ``models`` dict from a wrapped rates file, or None."""
     if not path.exists():
         return None
     try:
@@ -174,15 +150,8 @@ def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
 
 @functools.lru_cache(maxsize=1)
 def load_rates() -> dict[str, tuple[float, float]]:
-    """Load rates with cache → bundled-floor → empty fallback chain.
-
-    The cache (``CACHE_PATH``) wins when present so operators get fresh
-    pricing. ``BUNDLED_PATH`` is the floor — checked into the repo so a
-    fresh install with no internet still resolves rates. Returns ``{}``
-    only when both are missing/unreadable; callers leave
-    ``rate_known=False`` and the spend chip falls back to a token-count
-    display. ``refresh_rates`` clears this cache after a successful write.
-    """
+    """Rates from the cache, else the bundled floor, else ``{}`` — on which callers leave
+    ``rate_known=False`` and the spend chip shows a token count instead of a price."""
     models = _read_models(CACHE_PATH)
     if models is not None:
         return _models_to_rates(models)
@@ -199,30 +168,8 @@ def load_rates() -> dict[str, tuple[float, float]]:
 
 
 def lookup_rate(model: str | None, provider: str | None = None) -> tuple[float, float] | None:
-    """``(input_per_token, output_per_token)`` for *model* as billed by *provider*, or None.
-
-    **A price is a property of the (provider, model) PAIR, and the table is keyed that
-    way** — LiteLLM registers eight distinct ``*/deepseek-v4-flash`` entries spanning
-    $0.10/$0.20 to $0.25/$1.75. So the provider is the first half of the question, not a
-    hint: given one, only a key that agrees with it can answer, and a bare key is not a
-    fallback but a different vendor's price list.
-
-    This replaced a chain that matched across providers by suffix and then by bare
-    substring. It resolved an OpenRouter ``deepseek/deepseek-v4-flash`` call onto
-    DeepSeek's own first-party key at $0.14/$0.28 against OpenRouter's listed
-    $0.088/$0.176 — ~1.6x, on the route where the wire returns no cost at all, so the
-    estimate was the only number and nothing could contradict it. Which of the eight it
-    picked was decided by key length. A wrong number that cannot be told from a right one
-    is worse than ``None``, which at least arms the "USD cap inactive" warning.
-
-    Threading the provider also RETIRES the suffix hack rather than replacing it: Groq
-    answers ``response.model = "openai/gpt-oss-120b"`` while the table keys it
-    ``groq/openai/gpt-oss-120b``, and ``provider="groq"`` composes that exactly.
-
-    A routing suffix (``:nitro``, ``:floor``) stays deliberately unpriceable. It selects a
-    different upstream provider with its own rate — measured, ``xiaomi/mimo-v2.5:nitro``
-    billed ~6x its base listing — so the base-model price is not an approximation of it.
-    """
+    """``(input, output)`` per-token rate as billed by *provider*, or ``None``. **A price belongs to the
+    (provider, model) PAIR** — a bare key is another vendor's list; ``:nitro`` is unpriceable by design."""
     if not model:
         return None
     needle = model.lower().strip()
@@ -261,13 +208,8 @@ def compute_usd(
     override_usd: float | None = None,
     provider: str | None = None,
 ) -> float | None:
-    """USD cost for one call. ``override_usd`` short-circuits the rate lookup.
-
-    Returns None when no override is given and no rate is on file —
-    callers leave ``rate_known=False`` and fall back to a token-count
-    display for the spend chip. ``provider`` is who billed it; without it only an
-    exact key resolves, because a price belongs to the pair (see :func:`lookup_rate`).
-    """
+    """USD for one call; ``override_usd`` short-circuits the lookup. ``None`` when no rate is on file,
+    and *provider* is who billed it — without one only an exact key resolves."""
     if override_usd is not None:
         return float(override_usd)
     rate = lookup_rate(model, provider)

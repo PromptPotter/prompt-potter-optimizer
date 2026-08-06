@@ -18,21 +18,37 @@ collects everything else.
   contract, lean on it.
 - **Comments default to none.** Only non-obvious *why*. Never explain *what*
   the code does — the names already do that.
-- **Docstrings carry a budget: ≤3 lines, stating the one invariant,
-  constraint, or caller obligation the signature cannot.** One that restates
-  the name gets deleted, not shortened. **Past tense is a smell** — "used
-  to", "its predecessor", a date: a docstring describes what the code *is*;
-  how it got that way is git's job (commit message, `CHANGELOG.md`), and
-  architecture facts belong in the layer's CLAUDE.md or `docs/`.
-  `__init__.py` gets a one-line namespace marker plus a pointer, never a
-  package essay. Two named carve-outs are **product surfaces with their own
-  budget**, not documentation: the `EXPORTED_MODELS` docstring FIRST lines
-  (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`), and
-  FastAPI route docstrings (→ the OpenAPI descriptions the docs UI serves).
-  The optimizer response models in `dispatch/schemas.py` are **not** a third
-  one, and used to be: Pydantic hoisted each class docstring into the wire
-  JSON Schema, so our design notes rode every optimizer call.
-  `OptimizerResponseModel` drops them. What ships there is
+- **A docstring never restates the code as semantic text.** Two gates, both
+  must pass or it gets **deleted, not shortened**. (1) *Non-local* — cover the
+  docstring and read the name, signature, types, body, rest of file: is the
+  fact still missing, such that a reader would have to open **other files** to
+  learn it? Local dies, and that is the large majority — what it does,
+  `Args:`/`Returns:`, what it raises when the `raise` is right there. (2)
+  *Unowned* — a rule binding a **set** of symbols is layer documentation by
+  definition: route it to the layer's CLAUDE.md or `docs/` and delete the
+  docstring. What survives is the fact whose evidence lives in another
+  subsystem, compressed to **≤2 lines**, present tense. **An `__init__.py` gets
+  none at all** — the path already names the namespace, the module map is one
+  `ls`, and [`concept-map.md`](concept-map.md) is the single orientation index.
+  A `#` comment is for a non-obvious *why* **inside** the body, aimed at the
+  next editor — never a deleted docstring in a different costume.
+  **Past tense is a smell** — "used to", "its predecessor", a date, a
+  percentage, a run id: how the code got that way is git's job (commit body,
+  `CHANGELOG.md`). Enforced by the `docstring_lines` ledger row
+  (`promptpotter/diagnostics.py`), which counts the prose MASS, not the
+  violators — so a compliant docstring nobody needed costs exactly as much as
+  an essay growing back, and both cost a baseline edit and a written reason.
+- **Three carve-outs are product surfaces with their own budget**, not
+  documentation, because a generator reads them: `EXPORTED_MODELS` docstrings
+  (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`; only a
+  CLASS docstring's line 1 ships, so it must be a complete sentence, while a
+  `@computed_field` property ships WHOLE), FastAPI route docstrings, and the
+  Pydantic/enum **class**
+  docstrings that become component-schema descriptions — the last two both
+  landing in the OpenAPI the docs UI serves. The optimizer response models in
+  `dispatch/schemas.py` are **not** a fourth: Pydantic hoists a class
+  docstring into the wire JSON Schema, so `OptimizerResponseModel` strips it
+  and an import-time guard keeps it stripped. What ships there is
   `Field(description=)` — editing one IS a prompt change, so regenerate via
   `scripts/build_optimizer_schemas.py`.
 - **Pipeline components are nodes** — never "building blocks", never

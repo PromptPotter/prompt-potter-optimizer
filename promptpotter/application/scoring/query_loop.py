@@ -1,11 +1,5 @@
-"""Per-sample query loop — the inner loop ``score_search_point`` drives.
-
-:func:`run_query_loop` walks a dataset sample by sample (the round's one
-deterministic shared order, or insertion order), reusing prior-cache results where available,
-running the stale-data recovery protocol on degraded results, and
-classifying client/pipeline errors into an abort reason. It returns a
-:class:`QueryLoopResult` — the gateway turns that into the archived run.
-"""
+"""The per-sample inner loop ``score_search_point`` drives — prior-cache reuse, stale-data recovery, and error
+classification into an abort reason. The gateway turns its result into the archived run."""
 
 from __future__ import annotations
 
@@ -55,8 +49,6 @@ errors — a runaway backend shouldn't burn the round's compute budget."""
 
 @dataclass
 class QueryLoopResult:
-    """_run_query_loop return: results + completed/stop_reason + first escalation_signal."""
-
     results: list[QueryMeasurement]
     completed: bool = True
     # "graceful" | "force" (both unwind the cycle) | "skip" (operator early-abort:
@@ -69,9 +61,8 @@ _BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
 
 
 def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMeasurement:
-    """A shallow copy of the sample result carrying the candidate's running
-    fitness on ``_running`` — a transient projection hint for the live dashboard
-    (the persisted ``state.results`` keep the clean result, not this copy)."""
+    """A shallow copy carrying the candidate's running fitness — a transient projection hint for the live dashboard. The
+    persisted results keep the clean result, not this copy."""
     out = dict(result)
     out["_running"] = running
     return cast(QueryMeasurement, out)
@@ -111,13 +102,8 @@ def _materialize_cached(
 
 
 def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
-    """Meter a measurement-cache hit from the tokens the archived row already carries.
-
-    ``_materialize_cached`` copies ``pipeline_data`` through, so the original call's
-    per-node ``step_tokens`` (input/output/model, and the wire ``cost_usd`` when the
-    provider gave one) are sitting right there. Replaying them costs nothing, but the
-    search still made the call — see ``TokenUsageRecord`` for why the ledger has to say so.
-    """
+    """Meter a measurement-cache hit off the tokens the archived row already carries. Replaying them costs nothing, but the
+    search still made the call, so the ledger has to say so."""
     from promptpotter.application.scoring.sample_measurement import (
         StepTokenUsage,
         emit_step_token_usage,
@@ -320,12 +306,8 @@ async def run_query_loop(
     running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]],
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> QueryLoopResult:
-    """Score dataset samples in insertion order, reusing prior results where available.
-
-    The caller owns the order: ``score_population`` reorders the round's dataset
-    once (the shared deterministic round order), so walking it as-given IS the
-    round order. Elimination checks fire after every sample.
-    """
+    """Score samples in the order GIVEN — ``score_population`` reorders the round's dataset once, so walking it as-given IS
+    the round order. Elimination checks fire after every sample."""
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
     ctx = QueryLoopState(

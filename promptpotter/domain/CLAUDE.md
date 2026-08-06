@@ -30,7 +30,10 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
 
 - `l4/` — **the L4 law, and its only home.** `proxies.py`: what ONE finished inner cycle says
   about the optimizer prompt that ran it — the floor / exclude / measure trichotomy, plus
-  `OuterSampleProxies` (the type IS the law; nothing restates it). `verdict.py`: what a ROUND of
+  `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
+  and every term the panel retired, is argued in
+  [`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
+  `verdict.py`: what a ROUND of
   them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
   is what stops it growing a file read or a session dep, which is exactly how it drifted before.
   Import the submodule, never the package: `domain.results` imports `verdict` while `proxies`

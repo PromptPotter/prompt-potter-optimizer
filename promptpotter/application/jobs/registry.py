@@ -1,15 +1,5 @@
-"""``JobRegistry`` — per-job audit + in-memory asyncio task tracking.
-
-One JSON file per job at ``.promptpotter/jobs/{job_id}.json``. The
-in-memory ``_tasks`` map holds live ``asyncio.Task`` handles; persistence
-captures everything an audit reader needs without depending on the
-process being alive.
-
-At startup the registry walks `jobs/` and marks any ``pending`` /
-``running`` job as ``stopped`` with ``stop_reason="server_restart"`` —
-a torn task can't be recovered, and the stale "still running" status
-would mislead the next operator.
-"""
+"""``JobRegistry`` — per-job audit + in-memory asyncio task tracking. At startup it marks every
+``pending`` / ``running`` job ``stopped``: a torn task cannot be recovered, and would mislead."""
 
 from __future__ import annotations
 
@@ -54,22 +44,15 @@ class Job:
 
     @property
     def hop(self) -> CycleHop:
-        """The cycle this job runs, as the pair that addresses it.
-
-        Reads :data:`UNRESOLVED_HOP` between admission and mint — the slot is held
-        before the cycle it will name exists.
-        """
+        """The cycle this job runs, as the pair that addresses it. Reads :data:`UNRESOLVED_HOP`
+        between admission and mint — the slot is held before the cycle it will name exists."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
 
 @dataclass(frozen=True)
 class ReserveResult:
-    """Outcome of an admission attempt (:meth:`JobRegistry.reserve`).
-
-    Exactly one side is set: ``job`` is the reservation when a slot was free;
-    ``holder`` is the run that owns the slot when the machine is at capacity.
-    The launcher maps a ``holder`` to a 409 ``MachineBusyError``.
-    """
+    """Outcome of an admission attempt. Exactly one side is set — ``job`` when a slot was free,
+    ``holder`` when the machine is at capacity, which the launcher maps to a 409."""
 
     job: Job | None
     holder: Job | None
@@ -81,15 +64,8 @@ def default_jobs_dir() -> Path:
 
 
 class JobRegistry:
-    """Process-wide job tracker + run-admission gate.
-
-    Thread-safe; persists per-job state on every status change. ``capacity`` is
-    the number of runs admitted concurrently — the single sequential slot is
-    ``capacity = 1`` (the default). Admission rides :meth:`reserve`, an atomic
-    count-then-claim that closes the launch race; raising ``capacity`` is the
-    concurrent-serving lever (gated on per-user keys + per-tenant rate limits —
-    see ``docs/specs/roadmap.md § Run admission + concurrent serving``).
-    """
+    """Process-wide job tracker + run-admission gate, thread-safe. ``capacity`` is how many runs are
+    admitted concurrently; raising it is the concurrent-serving lever, gated per user and tenant."""
 
     def __init__(
         self,
@@ -150,17 +126,8 @@ class JobRegistry:
         dataset_name: str,
         hop: CycleHop = UNRESOLVED_HOP,
     ) -> ReserveResult:
-        """Atomically admit a run against ``capacity``, or report the holder.
-
-        The slot count read and the reservation write happen under one lock with
-        **no ``await`` between them** — that atomicity is what closes the launch
-        race (two near-simultaneous launches cannot both pass the gate
-        before either's record lands). At ``capacity = 1`` any in-flight run
-        blocks a new admit (strictly sequential). The reservation is a ``pending``
-        :class:`Job`; the mint path fills real ids later via :meth:`update_target`,
-        and the launcher releases it (``mark_finished``) if the launch fails
-        before the task starts — so a slot is never wedged.
-        """
+        """Atomically admit a run against ``capacity``, or report the holder: the count read and the
+        reservation write take one lock with **no ``await`` between them**, which closes the race."""
         with self._lock:
             running = self.list_running()
             if len(running) >= self._capacity:
@@ -174,7 +141,6 @@ class JobRegistry:
             return ReserveResult(job=job, holder=None)
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
-        """Fill the campaign/cycle ids on a reservation once the mint resolves them."""
         job = self.get(job_id)
         if job is None:
             return
@@ -233,17 +199,8 @@ class JobRegistry:
         return out
 
     def _reap_if_orphaned(self, job: Job) -> Job:
-        """Self-heal a ``running`` job whose in-process asyncio task is gone.
-
-        Jobs run inside THIS process (single construction in the server lifespan,
-        ``--workers 1``), so a running-status file with no live task in
-        ``self._tasks`` is a zombie — the producer died without reaching
-        ``mark_finished`` (e.g. a ``BaseException`` that skipped the teardown).
-        Without this, the dead job holds the machine slot (409s every launch)
-        until a server restart, while ``derive_run_phase`` already reads the same
-        cycle as DETACHED — two liveness owners disagreeing. ``pending`` is left
-        alone: the reserve→attach window legitimately has no task yet, and a
-        pre-launch failure releases it via the launcher's ``mark_finished``."""
+        """Self-heal a ``running`` job whose in-process asyncio task is gone — a zombie holding the
+        machine slot. ``pending`` is left alone: the reserve→attach window legitimately has no task."""
         if job.status != "running":
             return job
         with self._lock:
@@ -266,30 +223,16 @@ class JobRegistry:
         return out
 
     def machine_holder(self, *, exclude_user_id: str) -> Job | None:
-        """The oldest still-running job owned by a user other than *exclude_user_id*.
-
-        The single global "is the machine busy for this user, and by whom"
-        query. Both the launch gate (``check_launch_quotas``) and the
-        ``/machine-status`` read call it, so the 409 a blocked user gets and
-        the banner everyone sees can never disagree. Oldest-first so the holder
-        is the run that actually owns the slot, not a later contender. ``None``
-        when the machine is free for this user. Process-wide + ``--workers 1``
-        makes this authoritative across every tenant.
-        """
+        """The oldest still-running job owned by another user — the single "is the machine busy, and by
+        whom" query, so the 409 a blocked user gets and the banner everyone sees cannot disagree."""
         others = [j for j in self.list_running() if j.user_id != exclude_user_id]
         if not others:
             return None
         return min(others, key=lambda j: j.created_at)
 
     def list_created_today(self, *, user_id: str | None = None) -> list[Job]:
-        """Daily-campaigns quota probe — jobs created since UTC midnight.
-
-        The prefix is sliced off ``utcnow_iso`` rather than composed, because
-        ``created_at`` was MINTED by that function: any second spelling of "today" is a
-        chance for the key and the stamp to disagree. One did — ``date.today()`` is the
-        LOCAL date, so on a UTC+2 machine this quota rolled over two hours before the
-        daily-spend quota beside it (``spend.py::start_of_utc_day``) and matched no
-        ``created_at`` at all during the gap."""
+        """Daily-campaigns quota probe. The prefix is SLICED off ``utcnow_iso`` rather than composed,
+        because ``created_at`` was minted by it and a second spelling of "today" once disagreed."""
         today = utcnow_iso()[:10]
         return [j for j in self.list_all(user_id=user_id) if j.created_at.startswith(today)]
 

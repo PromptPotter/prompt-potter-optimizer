@@ -1,8 +1,5 @@
-"""``cmd_new`` — mint a fresh campaign + run the loop from round 0.
-
-``campaign_id = {dataset}__{rand6_hex}``, fresh per call. Declaration
-(target + optimizer-prompt hash) is recorded as properties on
-``campaign.json`` for resume-time drift detection, not used to derive the id."""
+"""``cmd_new`` — mint a fresh campaign + run the loop from round 0. The declaration (target +
+optimizer-prompt hash) rides ``campaign.json`` for resume-time drift, never derives the id."""
 
 from __future__ import annotations
 
@@ -74,10 +71,8 @@ def _settable() -> str:
 
 
 def _set_knob(draft: DraftCampaign, field: str, raw: str) -> DraftCampaign:
-    """Merge one ``--set`` knob onto the draft's overrides, validated by the model.
-
-    Pydantic coerces the raw CLI string to the leaf's type and enforces its bounds,
-    so there is no second range check to drift from the model's own."""
+    """Merge one ``--set`` knob onto the draft's overrides. Pydantic coerces the raw CLI string and
+    enforces the leaf's bounds, so there is no second range check to drift from the model's own."""
     merged = {**draft.optimization_overrides, field: raw}
     try:
         knobs = OptimizationOverrides.model_validate(merged)
@@ -88,7 +83,6 @@ def _set_knob(draft: DraftCampaign, field: str, raw: str) -> DraftCampaign:
 
 
 def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
-    """Apply operator ``field=value`` confirmations (CONFIRMED + STATED)."""
     for item in sets:
         if "=" not in item:
             raise SystemExit(f"ERROR: --set expects FIELD=VALUE, got {item!r}.")
@@ -123,10 +117,8 @@ def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
 
 
 def _raise_incomplete(gaps: Any, last: Any) -> NoReturn:
-    """Print the still-open gaps + the resolver's questions, then exit non-zero.
-
-    The deterministic gate refused mint — surface every blocking field and how to
-    close it (``--set field=value``) rather than minting a half-specified origin."""
+    """Print the still-open gaps + the resolver's questions and exit non-zero, rather than minting a
+    half-specified origin."""
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
     lines += [f"  - {g.field}: {g.hint}" for g in gaps]
     questions = (
@@ -147,13 +139,8 @@ def _raise_incomplete(gaps: Any, last: Any) -> NoReturn:
 
 
 async def _ingest_checkin(args: argparse.Namespace) -> str:
-    """Parse the file → apply ``--set`` → resolve the origin → return the durable
-    check-in campaign id (gated).
-
-    The check-in campaign is minted on the first action and persists: on a residual
-    gap, this prints the open fields + resolver questions and exits non-zero, but the
-    campaign survives so a later ``--set`` + ``resume`` can complete it — no silent
-    default reaches the run."""
+    """Parse → ``--set`` → resolve the origin → the gated check-in campaign id. On a residual gap this
+    exits non-zero but the campaign SURVIVES, so a later ``--set`` + ``resume`` completes it."""
     from promptpotter.application.datasets.csv_ingest import IngestError
     from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
     from promptpotter.application.datasets.origin_readiness import origin_readiness
@@ -209,16 +196,8 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 async def _ingest_and_prepare_checkin(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
-    """File → durable check-in → flip to ``active`` + build the run session, inline.
-
-    The CLI tail of the check-in Start: shares :func:`prepare_checkin_run` with the
-    web detach path (the ONLY difference is run-invocation). Returns the same
-    4-tuple as :func:`_mint_fresh_session`, so ``cmd_new``'s common tail (backend
-    status, task check-in, loop) runs unchanged for both file + dataset-name inputs.
-
-    Backend reachability isn't preflighted here: a check-in is durable, so if the
-    backend is down the campaign is minted + flipped + left ready, and the common
-    tail's status check reports it — ``resume`` runs it once the backend is up."""
+    """The CLI tail of check-in Start, sharing :func:`prepare_checkin_run` with the web detach path.
+    Backend reachability is not preflighted: a check-in is durable, so ``resume`` runs it later."""
     from promptpotter.application.jobs.launcher.checkin import (
         load_checkin_draft,
         prepare_checkin_run,
@@ -263,14 +242,8 @@ async def _checkin_task(
     task_file: str | None,
     task_text: str | None,
 ) -> None:
-    """Resolve the run's ``task_context`` and stash it on session state.
-
-    The dataset's ``task_context.yaml`` is the canonical framing — written at commit
-    from the check-in's decomposition, shipped with a benchmark, or decomposed once on
-    first sight (resolved tenant-then-install by ``readable_task_context``).
-    ``--task-file``/``--task-text`` decompose an ad-hoc override instead. Either way
-    the result rides session state so ``resume`` reads it back; no second check-in
-    call recomputes what ingest already decomposed."""
+    """Resolve the run's ``task_context`` and stash it on session state so ``resume`` reads it back —
+    no second check-in call recomputes what ingest already decomposed."""
     from promptpotter.application.optimization.task_context import (
         checkin_call_context,
         decompose_prompt_fields,
@@ -312,8 +285,7 @@ async def _checkin_task(
 async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
-    """Find-or-create campaign + mint session + root cycle. No scoring (origin runs as phase 0 of the loop).
-    Returns ``(session, campaign_config, dataset_name, session_id)``."""
+    """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
@@ -381,9 +353,8 @@ async def _run_sweep_batch(
     train_data: list[Sample],
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
-    """Thin shim → ``application.sweep.run_sweep_batch``; binds the observer factory AND the
-    active-pointer reload to CLI args, so the application layer needs neither `argparse` nor
-    `presentation.cli`."""
+    """Thin shim → ``application.sweep.run_sweep_batch``, binding the observer factory and the
+    active-pointer reload to CLI args so the application layer imports no ``argparse``."""
     from promptpotter.application.sweep import run_sweep_batch
     from promptpotter.presentation.cli.session import load_session
 
@@ -415,13 +386,8 @@ async def _maybe_dispatch_sweep_batch(
     train_data: list[Sample],
     dataset_config_dir: Path | None,
 ) -> CommandResult | None:
-    """Multi-fork sweep dispatch: with ``--sweep-batch``, mint one fork per OperatorSweepFile
-    under ``{dataset_dir}/sweep/``. ``None`` (no flag) falls through to the normal path.
-
-    Missing or empty payloads are a loud setup error, never a fall-through: the operator asked
-    for a paired batch, and silently running ONE unpaired cycle instead answers a different
-    question than the one they posed — the same reason a missing node model halts
-    ``configure_and_apply_pipeline`` rather than inheriting a hidden backend default."""
+    """``--sweep-batch`` mints one fork per ``OperatorSweepFile``. A missing or empty payload is a LOUD
+    setup error: running one unpaired cycle instead answers a different question than the one posed."""
     if not getattr(args, "sweep", False):
         return None
     from promptpotter.application.sweep import load_sweep_payloads, resolve_sweep_dir
@@ -466,16 +432,8 @@ async def _run_loop(
 
 
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
-    """Mint a fresh campaign and run the loop from round 0.
-
-    The positional is a dataset name *or* a raw file (CSV). A file folds onto the
-    durable check-in path (``_ingest_and_prepare_checkin``): ingest → resolve origin
-    → flip the check-in campaign to ``active`` + build the session, all sharing
-    :func:`prepare_checkin_run` with the web. A dataset name mints fresh
-    (``_mint_fresh_session``). Both produce the same session bundle, so the tail
-    below (backend → dataset → pipeline → task → origin → loop) is one path.
-    Live state: ``cycles/{cycle_id}/dashboard.json``; digest: ``campaigns/{campaign_id}/log.md``;
-    final: ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C."""
+    """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
+    produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
     from promptpotter.shared.spend import refresh_rates_in_background
 
     refresh_rates_in_background()

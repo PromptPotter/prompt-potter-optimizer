@@ -1,18 +1,5 @@
-"""``ingest_draft`` — parse an uploaded blob into a durable check-in campaign.
-
-The single orchestration seam both ingest surfaces call: the web
-``POST /datasets/ingest`` handler and the CLI ``new <file>`` branch. Keeping the
-parse → slug-validate → draft-build → mint-check-in sequence here (not inline in
-the API handler) is what makes CLI/web parity real — neither surface owns the
-logic, both call this. The first ingest action mints a real disk-backed campaign
-in the ``checkin`` lifecycle (:func:`create_checkin_campaign`), so the returned
-draft's ``draft_id`` IS its ``campaign_id`` and the in-progress authoring survives
-a restart. The handler/CLI translate the raised errors to their own shape (HTTP
-status vs. stderr); the orchestration is identical.
-
-Spec: ``docs/specs/roadmap.md`` +
-``docs/specs/roadmap.md § Ingest``.
-"""
+"""``ingest_draft`` — the single orchestration seam both ingest surfaces call, which is what makes
+CLI/web parity real. The first action mints a durable check-in, so ``draft_id`` IS its ``campaign_id``."""
 
 from __future__ import annotations
 
@@ -56,10 +43,8 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 def _column_label_sets(
     headers: list[str], rows: list[dict[str, str]]
 ) -> dict[str, tuple[str, ...]]:
-    """Per-column closed label set over the FULL upload (not the truncated
-    preview): the answer space the origin gate + check-in proposer need. Only
-    columns that read as a fixed taxonomy carry an entry; an open-ended column
-    (query text, numeric answers) is absent."""
+    """Per-column closed label set over the FULL upload, not the truncated preview — the answer space the
+    origin gate needs. Only a column reading as a fixed taxonomy carries an entry."""
     n = len(rows)
     return {
         header: labels
@@ -69,11 +54,6 @@ def _column_label_sets(
 
 
 class SlugTakenError(Exception):
-    """The derived slug already exists in this tenant's collection.
-
-    Carries a free ``suggested`` slug so the caller can offer it (409 on the
-    wire, a one-line hint on the CLI)."""
-
     def __init__(self, slug: str, suggested: str) -> None:
         self.slug = slug
         self.suggested = suggested
@@ -87,14 +67,8 @@ def ingest_draft(
     filename: str,
     slug: str | None = None,
 ) -> DraftCampaign:
-    """The format is detected from ``filename`` (CSV/TSV/JSON/JSONL/XLSX). Raises
-    :class:`~promptpotter.application.datasets.csv_ingest.IngestError`
-    (bad/empty/oversized/unsupported upload, or hardened-mode-blocked Excel),
-    :class:`ValueError` (bad slug), or :class:`SlugTakenError` (slug collision —
-    raised BEFORE the check-in campaign is minted, so a collision leaves no
-    orphan). Byte-size capping is the wire boundary's concern — not enforced here.
-    Returns the keyed draft (``draft_id`` == the new ``campaign_id``).
-    """
+    """Format is detected from ``filename``. ``SlugTakenError`` is raised BEFORE the check-in campaign is
+    minted, so a collision leaves no orphan. Byte-size capping belongs to the wire boundary, not here."""
     from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
@@ -134,21 +108,8 @@ def draft_from_dataset(
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
 ) -> DraftCampaign:
-    """Build a fully-confirmed :class:`DraftCampaign` straight from an authored
-    dataset's on-disk files, then mint a check-in campaign from it.
-
-    ``overrides`` are draft fields the *campaign* supplies rather than the dataset
-    (campaign-from-origin passes ``reused_origin_id`` + the seed's prompt). They are
-    applied before the mint, so creation persists the final state in one write.
-
-    This is the direct path behind "open an existing dataset (demo / benchmark /
-    owned tenant dataset) in the ingest panel": no browser-side CSV reconstruction,
-    no ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
-    node config rides through as ``pipeline_overlay``, so starting the campaign
-    **preserves the backend model/provider** (a fresh CSV upload would instead
-    fall back to connector defaults). The same check-in → Start sequence runs from
-    here on, so both surfaces share one path. Returns the keyed draft.
-    """
+    """Build a fully-confirmed draft straight from an authored dataset's files, then mint a check-in. The
+    node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider."""
     from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 
     items = resolve_dataset_items(stores, dataset_name)

@@ -1,20 +1,5 @@
-"""``/auth/*`` — OIDC sign-in + per-user identity surface.
-
-* ``GET /auth/login/{provider}`` — issue a state token, redirect to the provider's consent screen.
-* ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/``.
-* ``POST /auth/logout`` — delete the session + clear the cookie.
-* ``GET /auth/me`` — current identity envelope + consent state (401 when no session).
-* ``GET|PATCH /auth/user-settings`` — read / write per-user preferences (Account → Preferences).
-* ``POST /auth/accept-terms`` — record the user's acceptance of the current Terms (the provable consent record).
-* ``GET /auth/quota-status`` — Security pane: live quota knobs + today's usage.
-* ``GET /auth/activity`` — Activity pane: time-bucketed spend / requests / tokens.
-
-The auth router is the Identity I/O kind (ADR-0002), not the ``/commands``
-highway — its per-user mutations (``user-settings``, ``accept-terms``) ride it
-directly. It intentionally does NOT use ``IdentityDep`` for the login / callback
-/ logout routes — those run pre-auth. The identity-gated routes use the dep, and
-401 is the expected pre-sign-in answer.
-"""
+"""``/auth/*`` — the Identity I/O kind (ADR-0002), NOT the ``/commands`` highway, so its per-user mutations ride
+it directly. Login / callback / logout run pre-auth and deliberately take no ``IdentityDep``."""
 
 from __future__ import annotations
 
@@ -192,13 +177,8 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
 
 
 def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResponse:
-    """Bounce a failed callback to the sign-in surface with a query-param error.
-
-    Google's consent screen browser-navigates straight to /auth/callback/...;
-    raising HTTPException there dumps raw JSON to the tab. Industry-standard
-    fix: 303 to the app root (`/`) with `?auth_error=<code>` so the
-    React modal can render a friendly inline banner.
-    """
+    """Bounce a failed callback to the sign-in surface with a query-param error. The consent screen browser-navigates here,
+    so raising would dump raw JSON into the tab — a 303 lets the React modal render an inline banner."""
     qs = f"auth_error={code}"
     if email:
         qs += f"&email={quote_plus(email)}"
@@ -569,12 +549,8 @@ def activity(
 
 
 def _provider_from_model(model: str) -> str:
-    """Derive the API-key axis from a model string.
-
-    Convention: most rate-keyed model strings here are ``"<provider>/<model>"``
-    (e.g. ``openai/gpt-oss-120b``, ``anthropic/claude-3-5-sonnet``). A
-    string with no slash falls back to ``"unknown"``.
-    """
+    """Derive the API-key axis from a model string, by the ``<provider>/<model>`` convention. A string with no slash falls
+    back to ``unknown``."""
     if "/" in model:
         return model.split("/", 1)[0]
     if ":" in model:  # e.g. "groq:openai/gpt-oss-120b"

@@ -1,11 +1,5 @@
-"""GitHub OAuth 2.0 provider client.
-
-GitHub is OAuth 2.0, not OIDC — no ID token, no JWS verification. Identity
-comes from the user-profile API call under TLS, scoped by the access
-token's `read:user`/`user:email` permissions. The synthetic issuer is
-`https://github.com` so downstream `(iss, sub)` hashing stays
-provider-distinct from Google.
-"""
+"""GitHub is OAuth 2.0, NOT OIDC — no ID token, no JWS verification; identity comes from the profile API under TLS. The
+synthetic issuer ``https://github.com`` keeps ``(iss, sub)`` hashing provider-distinct from Google."""
 
 from __future__ import annotations
 
@@ -27,7 +21,7 @@ GITHUB_EMAIL_URL = "https://api.github.com/user/emails"
 
 
 class GitHubTokenExchangeError(RuntimeError):
-    """Raised when the token exchange or profile fetch fails."""
+    pass
 
 
 class GitHubProviderClient:

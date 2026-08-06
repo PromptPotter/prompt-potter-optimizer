@@ -19,9 +19,10 @@ itself a refactor. `git log -p tests/test_complexity_ledger.py` is the history o
 move; this file is only where the surface stands now, and it is not a target to reach.
 
 The comments below record why a baseline sits where it does — the precedent
-``<surface-ledger>`` rule 1 points at. What a dimension COUNTS, and which of its members
-are a deliberate FLOOR rather than debt, is on the matching ``_count_*`` in
-``promptpotter/diagnostics.py``; do not restate it here.
+``<surface-ledger>`` rule 1 points at — **and which of its members are a deliberate FLOOR
+rather than debt**, because that is a fact about this number, not about the code that
+computes it. The matching ``_count_*`` in ``promptpotter/diagnostics.py`` states only what
+is counted, and only where the name cannot; do not restate either half in the other.
 """
 
 from promptpotter.diagnostics import compute_ledger
@@ -38,6 +39,11 @@ LEDGER_BASELINE = {
     # the panel's composition unreproducible.
     "modules": 300,
     "init_files": 47,
+    # A FLOOR: none of the 5 is a shim, and emptying any of them breaks the app. `connectors`
+    # and `presentation/api/routers/campaigns` ARE registries — the submodule imports run the
+    # `@campaigns_router` decorators, so emptying the latter mounts ZERO routes. `shared`,
+    # `application/scoring/formula` and `application/views/render` hold real code in the body,
+    # which a text test cannot see.
     "reexport_shims": 5,
     # ``len(KNOBS)`` — the registry in ``application/knobs.py`` IS the taxonomy, so the
     # ledger does not carry a second opinion about what counts as one leaf.
@@ -83,6 +89,11 @@ LEDGER_BASELINE = {
     # layer — a relocation, not a new surface. The pool is folded by the live loop, by resume,
     # and by the mask record rebuilt from disk; leaving it beside the loop obliged a READ path
     # to import the whole loop to re-fold what it had already read.
+    #
+    # A high FLOOR. Honest: the pipeline overlay (`opt_search_point`, `pipeline_parsing`,
+    # `pipeline_schema`, `search_point`, `connector`), a node's output (`rendering`,
+    # `validators`), a dataset row (`sample`). Retirable: `results`, `results_health`,
+    # `l4.verdict`, `measurement_provenance` — rows of PP's OWN on-disk shapes, taken as bags.
     "domain_any_maps": 76,
     # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
@@ -145,8 +156,45 @@ LEDGER_BASELINE = {
     # runs, and growing with the archive forever. This is the read-model shape
     # `infrastructure/store/read_model.py` declares for derived-index persistence, not a
     # sidecar; the surface it costs buys a start cost that stops scaling.
-    "param_decls": 4073,
+    #
+    # Marches to a FLOOR: most of this is functions taking their real arguments, and the width
+    # `conventions.md` § Code shape REQUIRES — a parameter that changes what a number MEANS
+    # taking no default — is the rule working. What a pass can retire is the rest: transport.
+    # 4073 -> 4074 (2026-08-06): `_count_docstrings(py_files)`, the one parameter the new
+    # `docstrings` dimension below costs. It takes the same file list its ten neighbours do.
+    "param_decls": 4074,
     "models_lax": 4,
+    # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
+    # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
+    # budget all along and 61% overran it. That drift happened under a WRITTEN rule with no
+    # counter behind it, which is the whole argument for the dimension: a prose rule got
+    # ignored for the same reason `<surface-ledger>` exists. Length is a quality tax on every
+    # read, human or agent (`<simplify-the-problem>`), and nothing else here can see it — a
+    # docstring adds no module, no field and no param, so the other fifteen rows read flat
+    # while the package carried a third of a codebase in prose.
+    #
+    # It counts the LINES, and it did not start there. The first pass counted every docstring;
+    # over a batch that deleted 791 lines the population moved 13, so it was narrowed to the
+    # ones over the ≤2-line budget. Both are blind, in opposite directions: a population count
+    # cannot see a 52-line essay, and an over-budget count cannot see what a compression sweep
+    # actually accumulates, which is COMPLIANT docstrings. A third of the way in, that blind
+    # spot already held 577 one-liners and 462 sitting exactly at the budget — a thousand
+    # survivors the row could not price, all of them still prose a reader pays for. Lines see
+    # every move: one deleted, one compressed, and an essay growing back at its own length.
+    #
+    # 1033 over-budget -> 9774 lines (2026-08-06): a counter-DEFINITION change. The two are not
+    # comparable and neither is a TOTAL across them; the sweep's own history is in `git log -p`.
+    #
+    # A debt counter DESCENDING to a floor, unlike its neighbours which already sit at one, and
+    # the floor is FAR below where this stands. It is the set a generator reads, which makes it
+    # product rather than documentation — the `EXPORTED_MODELS` docstring FIRST lines
+    # (`scripts/build_ts_types.py` reads `splitlines()[0]` into
+    # `webapp/lib/api/types.generated.ts`), the FastAPI route bodies, and the 32 Pydantic/enum
+    # component descriptions the docs UI serves out of `docs/specs/openapi.generated.json` —
+    # plus the survivor of the two gates, rare by construction because anything binding a SET
+    # of symbols belongs to a layer `CLAUDE.md`. That set is pinned when the sweep reaches it;
+    # until then every drop here is ordinary prose deleted, and the number only falls.
+    "docstring_lines": 3386,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

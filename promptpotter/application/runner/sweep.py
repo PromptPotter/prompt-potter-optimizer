@@ -1,8 +1,5 @@
-"""Generation-only round — L1 variants without scoring.
-
-Shared by the two generate-only run modes — ``new --sweep-batch`` (round-1 scored +
-round-2 generate-only) and ``--diag``; round_data JSON: ``status='generation_only'``,
-no scoreboard, no accuracy."""
+"""Generation-only round — L1 variants without scoring. Shared by ``new --sweep-batch`` and ``--diag``; the round
+document carries ``status='generation_only'``, no scoreboard and no accuracy."""
 
 from __future__ import annotations
 

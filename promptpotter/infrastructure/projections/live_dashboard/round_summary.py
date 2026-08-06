@@ -1,11 +1,5 @@
-"""Per-round display summary for ``dashboard.json::rounds[]``.
-
-Pure projection over a :class:`RoundResult` — emits the strict subset of
-``ScoredCandidate`` fields the webapp's chart, lineage tree, and trend
-sparkline consume. Deep audit (per-sample rows, full evaluator output,
-prompt content) stays in ``.runtime/cache/rounds/round_NNNN.json`` and
-is fetched on demand by the deep-inspection consumers.
-"""
+"""Per-round display summary for ``dashboard.json::rounds[]`` — the strict subset the chart, tree and sparkline consume.
+Deep audit stays in ``round_NNNN.json``, fetched on demand."""
 
 from __future__ import annotations
 
@@ -32,15 +26,8 @@ _CANDIDATE_INFO_INCLUDE = set(CandidateInfo.model_fields) - {"is_winner"}
 
 
 def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
-    """The round-0 (origin) per-cell ROWS off the cached ``rounds/round_0000.json`` — the
-    un-edited-optimizer prompt control every later round's outer verdict pairs against. The sole
-    reader of this file for this purpose; ``application/optimizer_prompt_ranking.py`` reuses it
-    instead of keeping its own copy.
-
-    Rows, not a pre-extracted fitness map: the verdict takes two different readings of them (the
-    fitness it pairs on, the measurand + precision its variance split reads), and pre-digesting
-    here would have meant a second disk read or a projection that knew which projections the
-    domain law wanted next."""
+    """The round-0 per-cell ROWS — the control every later outer verdict pairs against, and the sole reader of that file for it. Rows, not a
+    pre-extracted fitness map: the verdict takes two different readings of them."""
     doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
     if not isinstance(doc, dict):
         return []
@@ -76,20 +63,8 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
 
 
 def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
-    """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
-
-    Winner detection rides the shared ``is_round_winner`` rule (also used by
-    ``RoundResult.scoreboard``): the candidate whose ``changes_description``
-    matches the round's elected label is the winner. This builder is the sole
-    writer of the persisted ``is_winner`` flag on the summary row.
-
-    ``health`` is copied straight from ``rr.health`` (stamped once at round close
-    by ``compute_round_health``) — the projection renders the served verdict, it
-    does not recompute it (R-36).
-
-    *origin_rows* is the cached round-0 origin's per-cell rows (``[]`` off an L4 round, or
-    when summarizing round 0 itself — the origin is the control, never a verdict subject).
-    """
+    """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_winner`` flag. ``health`` is
+    COPIED from ``rr.health``: the projection renders the served verdict and never recomputes it."""
     # Both display models are strict name-subsets of ``ScoredCandidate`` plus the derived flags
     # below — so each is a ``model_dump(include=…)`` projection, not a hand-copy. The include-set
     # is the target model's OWN field list minus those: a field added to the target can't be

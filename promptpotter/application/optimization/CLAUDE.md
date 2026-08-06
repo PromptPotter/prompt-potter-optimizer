@@ -134,6 +134,10 @@ Beyond steering L1's attention / rewriting `plan`, L2 and L3 have **exactly two*
 
 `dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` puts this package's source in `_identity_config`, AST-normalized: a comment, docstring or reflow costs nothing; a panel's prose, its `char_cap` or its render condition voids the banked origins. Expect the re-measure; the bug is the reverse.
 
+## A validator either REJECTS or SCORES — never both
+
+`validators/` carries two postures and the split is the point: `*_strict` / `*_output` reject, so a failure routes back up as a `ValidationFailure` and the layer heals; `*_behavior` only scores conformance into `review.md` and the round file, and never blocks a candidate. Model/provider locking belongs to neither — it is structural, because those param keys are never emitted for the LLM to set in the first place.
+
 ## Signals come from measurement, not from the calendar
 
 Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives from stall depth + mutation history, not `round ≥ 3`. `exploration_budget` widens with `stall_rounds`, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.

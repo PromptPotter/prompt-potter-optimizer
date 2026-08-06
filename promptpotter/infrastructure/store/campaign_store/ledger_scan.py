@@ -1,14 +1,5 @@
-"""Physical-file ledger scans — the highest closed round, the cycle seed, the candidates.
-
-Both read through ``iter_jsonl``, the declared read-model primitive: corruption-
-tolerant (a torn trailing line degrades to "not there") but NOT failure-tolerant.
-Never swallow an ``OSError`` here — "unreadable" would return what "nothing on the
-ledger" returns, and a seeded cycle would silently become an unseeded one.
-
-These scan the PHYSICAL file, deliberately. ``CycleEventLog.iter`` replays a fork's
-inherited parent prefix first; a fork's own seed and its own closed rounds are the
-appends in its own file.
-"""
+"""Physical-file ledger scans, deliberately physical: ``CycleEventLog.iter`` would replay a fork's
+inherited prefix. Never swallow an ``OSError`` — "unreadable" would answer as "nothing on it"."""
 
 from __future__ import annotations
 
@@ -39,12 +30,8 @@ _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
 
 
 def scan_ledger_max_round_complete(ledger_path: Path) -> int:
-    """Highest round with a closing PhaseRecord in ``ledger_path``; ``-1`` if none closed.
-
-    One closing event: ``(phase="round", event="complete", round=N)``. Round 0 closes through
-    it too — ``emit_origin_round`` sends the origin down the same ``close_round`` seam every L1
-    round uses.
-    """
+    """Highest round with a closing ``PhaseRecord``; ``-1`` if none closed. Round 0 closes through it
+    too — ``emit_origin_round`` sends the origin down the same ``close_round`` seam."""
     max_complete = -1
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
         if rec.get("record_type") != "phase":
@@ -57,11 +44,8 @@ def scan_ledger_max_round_complete(ledger_path: Path) -> int:
 
 
 def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
-    """The cycle's own seed — the last ``CycleSeedRecord``'s ``seed`` in ``ledger_path``,
-    or ``None`` when the cycle carries none (sweep / diag).
-
-    The seed is written once at mint, but we take the last match so a re-seed wins.
-    """
+    """The cycle's own seed, or ``None`` when it carries none (sweep / diag). Written once at mint, but
+    the LAST match wins so a re-seed supersedes."""
     found: CycleSeed | None = None
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"cycle_seed"})):
         if rec.get("record_type") != "cycle_seed":
@@ -76,25 +60,8 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
 
 
 def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
-    """The cycle's candidate tier, folded out of ``ledger_path`` in ``(round, idx)`` order.
-
-    Independent of round CLOSE, which is the whole point: a cycle whose producer died
-    mid-round still names the candidates it minted, and at L4 the inner campaigns they
-    spawned still have a parent to hang off.
-
-    A fold over TWO events, because identity and measurement are two facts arriving at two
-    times: ``CandidateMintedRecord`` names the candidate, ``candidate_scored`` gives it a
-    number. Either alone yields a candidate — a minted one not yet scored is `minted`, and
-    a cycle that pre-dates the mint record is still named by its score. Re-runs of the same
-    ``(round, idx)`` overwrite, so a rewind's re-mint wins, as in ``scan_ledger_cycle_seed``.
-
-    **Election and θ are deliberately absent, because the ledger does not have them.** The
-    ``ROUND_WINNER`` decision goes to a plain list that lands in the round file, not to the
-    ledger (``record_decision``'s sink is polymorphic — only some call sites pass the
-    ``CycleEventLog``), and θ is stamped onto the candidate at election time, *after* this
-    snapshot was emitted. Both are round-CLOSE facts and reach a reader through
-    ``dashboard.json::rounds[]``. Do not fold them here from a lookalike record.
-    """
+    """The candidate tier, folded from mint + score records — independent of round CLOSE, so a cycle whose
+    producer died mid-round still names what it minted. Election and θ are round-close facts, not here."""
     found: dict[tuple[int, int], dict[str, object]] = {}
 
     def _merge(key: tuple[int, int], **fields: object) -> None:
@@ -149,21 +116,8 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
 
 
 def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
-    """``round -> LedgerRoundClose`` for every round that CLOSED in ``ledger_path``.
-
-    ONE record carries the whole close — the ``(phase="round", event="complete")``
-    ``PhaseRecord`` ``persist_round`` writes, filled from the ``RoundResult`` it is
-    persisting. Last write per round wins, so a rewind's re-close supersedes, and so does the
-    round-0 re-persist a warming δ ruler triggers. The ``ROUND_WINNER`` decision rides the
-    ledger too, but as the audit of the ELECTION; it is deliberately not this fold's source,
-    because round 0 adopts a C0 without electing anything and reading the crown off a
-    decision would leave the origin uncrownable.
-
-    **A round with no entry never closed, and that is the honest answer** — its candidates
-    get no crown, no θ, and nothing invents one. Recovering these facts from
-    ``dashboard.json`` instead is a projection reading another projection's output, which is
-    what a close that never reaches the ingress forces.
-    """
+    """``round -> LedgerRoundClose`` for every round that CLOSED; last write per round wins, so a rewind
+    supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one."""
     out: dict[int, LedgerRoundClose] = {}
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
         if rec.get("phase") != "round" or rec.get("event") != "complete":

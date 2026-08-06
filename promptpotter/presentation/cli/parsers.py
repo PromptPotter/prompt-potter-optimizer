@@ -1,18 +1,5 @@
-"""Argparse schema for ``new`` / ``resume`` / ``reset`` / ``verify``.
-
-Imported by ``campaign_runner.main()``. Help text is verbose by design — this
-is the operator-facing surface.
-
-Two write verbs:
-
-* ``new [DATASET|FILE]`` mints a fresh campaign — from an authored dataset
-  name, or from a raw file (CSV) it ingests → origin-resolves → commits as a
-  tenant dataset → runs. ``campaign_id`` is ``{dataset}__{YYYYMMDD-HHMMSS}``,
-  collision-free by construction, so every invocation lands in its own
-  ``campaigns/{campaign_id}/`` directory with its own dashboard.
-* ``resume`` continues the active campaign (rewinds with ``--from``, forks
-  on divergence with ``--fork-on-divergence``, etc.).
-"""
+"""Argparse schema for the write + diagnostic verbs, imported by ``campaign_runner.main()``. Help
+text is verbose by design — this is the operator-facing surface."""
 
 from __future__ import annotations
 
@@ -26,7 +13,6 @@ from promptpotter.config.settings import (
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    """Tenant + session + verbosity flags shared across every command."""
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
         "--tenant",
@@ -52,11 +38,8 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """Shared --halt-at / --spend-budget flags (new + resume).
-
-    ``--spend-budget`` overrides ``campaign.yaml::optimization.spend_budget_usd``
-    when supplied; either source halts the cycle at the next round boundary
-    once cumulative spend (optimizer + backend) crosses the threshold."""
+    """Shared ``--halt-at`` / ``--spend-budget``. Either source halts at the next round boundary once
+    cumulative spend (optimizer + backend) crosses the threshold."""
     p.add_argument(
         "--halt-at",
         dest="halt_at_accuracy",
@@ -76,18 +59,8 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
 
 
 def _add_new_args(p_new: argparse.ArgumentParser) -> None:
-    """Fresh-init flags for ``new``.
-
-    The positional accepts a dataset **name** *or* a **raw file** (CSV):
-    ``new aime`` reads ``datasets/aime/{pipeline,campaign}.json`` and starts the
-    loop; ``new data.csv`` ingests the file, resolves its origin via the AI
-    check-in, commits a tenant dataset, then runs — the headless twin of the web
-    onboarding (parses → draft → auto-drives the resolver → deterministic gate →
-    mint). Residual gaps are answered with repeatable ``--set field=value``
-    (operator-stated, applied before the resolver so they seed it), or printed so
-    you can re-run — no silent default ever reaches mint. Explicit ``--config``
-    overrides ``datasets/<name>/campaign.yaml``.
-    """
+    """Fresh-init flags. The positional takes a dataset NAME or a raw FILE, the headless twin of the web
+    onboarding; a residual gap is answered with ``--set`` or printed — no silent default reaches mint."""
     p_new.add_argument(
         "dataset",
         nargs="?",
@@ -157,11 +130,6 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
 
 
 def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
-    """Resume / divergence / mode flags for ``resume``.
-
-    All operate on the active session pointed to by ``active_session.json``.
-    No fresh-init flags here — those moved to ``new``.
-    """
     p_resume.add_argument(
         "--from",
         dest="resume_from_round",
@@ -234,7 +202,6 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
 
 
 def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
-    """Campaign + candidate selectors + sample budget for ``verify``."""
     p_verify.add_argument(
         "campaign",
         help="Campaign id, 6-hex suffix, or unambiguous prefix "
@@ -271,7 +238,6 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
 
 
 def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
-    """Dataset + the candidate seeds to measure, for ``seed-screen``."""
     p.add_argument(
         "dataset",
         help="Inner benchmark whose bank draws are being screened (e.g. 'justlogic-d234').",
@@ -306,7 +272,6 @@ def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
 
 
 def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
-    """Campaign selector + replicate count for ``noise-floor``."""
     p_noise_floor.add_argument(
         "campaign",
         help="Campaign id, 6-hex suffix, or unambiguous prefix "
@@ -331,12 +296,8 @@ def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
 
 
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
-    """Tenant scope + safety flags for ``reset``.
-
-    Drops ``campaigns/`` + ``sessions/`` + ``active_session.json`` under the
-    selected tenant; ``measurements/`` (the DB core) + ``archive/`` (recycle bin +
-    optimizer_calls + sweeps) are preserved. ``--dry-run`` is the recommended first step.
-    """
+    """Tenant scope + safety flags for ``reset``. Drops campaigns + sessions + the active pointer;
+    ``measurements/`` (the DB core) and ``archive/`` are PRESERVED. ``--dry-run`` first."""
     scope = p_reset.add_mutually_exclusive_group()
     scope.add_argument(
         "--all-tenants",
@@ -359,11 +320,7 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``new`` / ``resume`` / ``reset`` / ``verify``.
-
-    Bare ``python -m promptpotter`` (no subcommand) defaults to ``resume`` —
-    the most common operator action gets the shortest invocation.
-    """
+    """Bare ``python -m promptpotter`` defaults to ``resume`` — the commonest action, shortest invocation."""
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
         description=f"{settings.BRAND_SHORT_NAME} optimization CLI. Bare invocation runs "
@@ -522,13 +479,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parser_verbs(parser: argparse.ArgumentParser) -> frozenset[str]:
-    """The subcommand names registered on ``parser`` — the argparse half of the verb set.
-
-    Exists so ``campaign_runner`` can assert its ``COMMANDS`` table against the parser at
-    import without reaching into argparse itself. The two halves are authored in different
-    files and drift silently in one direction: a verb in ``COMMANDS`` with no parser row is
-    simply unreachable, and argparse reports an unknown verb rather than a missing one.
-    """
+    """The subcommand names registered on ``parser``, so ``campaign_runner`` can assert ``COMMANDS``
+    against it at import. They drift one way: a verb with no parser row is silently unreachable."""
     return frozenset(
         name
         for action in parser._actions

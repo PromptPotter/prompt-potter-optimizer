@@ -1,9 +1,5 @@
-"""Stores + LLMClient + connector resolution → ``Session``.
-
-``init_services`` opens stores under the tenant root, applies the tenant-pointer
-guard, resolves the connector, fetches the pipeline schema, registers the backend,
-and loads the dataset. Identity + scoring lifecycle live in ``session`` +
-``loop_start``."""
+"""Stores + LLMClient + connector resolution → ``Session`` — step 1 of run init. Identity and
+the scoring lifecycle live in ``session`` + ``loop_start``."""
 
 from __future__ import annotations
 
@@ -57,10 +53,8 @@ async def _verify_connector_revision(
     client: BackendClient,
     connector: connectors.Connector,
 ) -> None:
-    """Compare ``connector.expected_revision`` to the live backend's reported
-    revision; WARN on drift. No-op when either field is ``None`` — opt-in
-    per connector. Network errors are swallowed (the WARN says
-    "could not verify", not "mismatch")."""
+    """WARN on drift between ``connector.expected_revision`` and the live backend's. Opt-in per
+    connector; a network error says "could not verify", never "mismatch"."""
     expected = connector.expected_revision
     check = connector.version_check
     if not expected or check is None:
@@ -94,10 +88,8 @@ async def _verify_connector_revision(
 
 
 def _warn_if_no_terminal_ranker(schema: PipelineSchema, status: Callable[[str], None]) -> None:
-    """A pipeline yields a prediction only if some ranker/candidate_source node emits a
-    ranked list — ``terminal_ranking`` reads the terminal one's head as ``predicted``.
-    Without such a node every sample silently scores NO_RESULT (the lca-bom-termnorm trap).
-    Surface it loudly at setup, on the operator-visible status line, not at score time."""
+    """Without a ranker/candidate_source node emitting a ranked list, every sample silently scores
+    NO_RESULT — so it is surfaced loudly at setup, on the status line, not at score time."""
     if not schema.nodes:
         return
     if any(n.node_type in ("ranker", "candidate_source") and n.output_keys for n in schema.nodes):
@@ -117,24 +109,8 @@ async def _resolve_pipeline_schema(
     *,
     in_process: bool = False,
 ) -> PipelineSchema:
-    """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
-    ``{dataset_config_dir}/pipeline.yaml`` is the operator overlay. Merged
-    here before parsing — backend underneath, dataset on top. Backend
-    unreachable → local file alone (offline mode).
-
-    An ``in_process`` connector (``promptpotter``) has NO remote backend, so the
-    local ``pipeline.yaml`` IS the whole schema — skip the fetch entirely
-    (otherwise it would hit ``backend_url`` and merge an unrelated backend's
-    nodes, e.g. TermNorm's, under the dataset overlay).
-
-    **Raises rather than returning ``None``.** Neither branch is optional in practice:
-    ``_read_backend_type`` has already read this same file and raised unless it parses
-    and declares a ``backend_type``, so the only way to arrive with nothing is a
-    pipeline.yaml that fails to parse — a setup error, not a mode. Returning ``None``
-    for it would make the schema optional on ``Session`` and therefore optional at the ~40
-    readers downstream, where a missing schema does not fail: it drops the rendered
-    prompt from the searchpoint, picks the other ``sp_hash`` algorithm, and stamps a
-    different origin cycle id. The run completes and the numbers are wrong."""
+    """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the local file IS
+    the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run completes with wrong numbers."""
     backend_resp: dict[str, Any] | None = None
     if in_process:
         pass  # no remote backend — local pipeline.yaml is authoritative
@@ -181,13 +157,8 @@ async def _resolve_pipeline_schema(
 
 
 def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None) -> str:
-    """Resolve backend_type from ``{dataset_config_dir}/pipeline.yaml``. Required field.
-
-    Typed for the same reason its sibling :func:`_resolve_pipeline_schema` is: both fail
-    on an unusable ``pipeline.yaml``, both fire on the web Start path, and a bare
-    ``ValueError`` reaches the API's catch-all as a 500 — which the webapp classifies
-    ``transient`` and retries forever against a config only the operator can fix.
-    """
+    """Resolve backend_type from the dataset's ``pipeline.yaml``. Typed for the same reason its
+    sibling is: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
     if not dataset_name or dataset_config_dir is None:
         raise PayloadInvalidError(
             "dataset_name required to resolve backend_type for connector lookup",
@@ -205,18 +176,8 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
 
 
 def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
-    """Connector kind of *dataset_name*, or ``""`` when it cannot be resolved.
-
-    THE predicate for "which connector does this dataset use?" for every read-side caller —
-    the sidebar's self-optimization test and the L4 prompt ranking's corpus filter both
-    ask it, so neither hand-maintains a list of dataset NAMES (a name allowlist silently skips
-    an arm, a fork, or a renamed dataset instead of loudly rejecting it).
-
-    Tolerant, unlike the strict twin ``_read_backend_type`` above: a campaign outlives its
-    dataset dir, and a reader that raises because one old dataset was deleted is worse than one
-    that treats that campaign as a plain (non-L4) campaign. Init still raises, because
-    there a missing kind means the run cannot pick a connector at all.
-    """
+    """THE predicate for "which connector does this dataset use?", so no reader hand-maintains a list
+    of dataset NAMES. Tolerant, unlike its strict init twin: a campaign outlives its dataset dir."""
     try:
         raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
     except (OSError, ValueError, DatasetAccessError):
@@ -232,18 +193,8 @@ def _load_dataset_into_session(
     *,
     connector: connectors.Connector | None = None,
 ) -> None:
-    """Populate session.samples + index_terms.
-
-    Precedence: tenant Origin (``projects/{tenant}/datasets/{slug}/``) →
-    repo benchmark (``datasets/{name}/``) → the ``dataset_loader`` resolver's
-    one-shot download into the benchmark tree. Tenant uploads never
-    cross-contaminate the install-global benchmark slot.
-
-    A connector that declares an :attr:`~Connector.experiment_file` (the
-    in-process ``promptpotter`` L4 dataset, whose outer "samples" ARE the inner
-    tasks in ``inner_tasks.yaml``) loads through ``extract_experiment`` when no
-    CSV/loader samples exist — so the same ``new <dataset>`` path serves it.
-    """
+    """Populate session.samples + index_terms — tenant Origin, then repo benchmark, then the
+    loader's one-shot download. A connector declaring an ``experiment_file`` loads through that."""
     items = resolve_dataset_items(session.store, dataset_name, status=status)
     if not items and connector is not None and connector.experiment_file:
         _load_experiment_file_into_session(session, connector, status)
@@ -280,9 +231,8 @@ def _load_experiment_file_into_session(
     connector: connectors.Connector,
     status: Callable[[str], None],
 ) -> None:
-    """Load samples from the connector's on-disk experiment doc (L4: the inner
-    tasks in ``inner_tasks.yaml``) via ``extract_experiment`` — the same seam the
-    experiment-sync path uses, but reading the dataset dir instead of a backend."""
+    """Load samples from the connector's on-disk experiment doc — the same ``extract_experiment``
+    seam the sync path uses, reading the dataset dir instead of a backend."""
     config_dir = session.dataset_config_dir
     exp_path = (config_dir / connector.experiment_file) if config_dir else None
     data = read_yaml_optional(exp_path) if exp_path else None
@@ -307,24 +257,8 @@ async def init_services(
     stores: Stores | None = None,
     enable_tracing: bool = True,
 ) -> Session:
-    """Init store, client, pipeline schema, scoring data — step 1 of run init.
-
-    Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.yaml``
-    declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
-    ``dataset_name`` is REQUIRED — the dataset resolves the config dir, which resolves
-    the connector, so there is no session without one.
-    ``identity`` defaults to the Stage-0 single-operator :func:`default_identity`.
-    Active-session pointers are per-tenant on disk, so two operators on the
-    same machine cannot collide.
-
-    ``store`` injects a pre-built :class:`Stores` instead of letting
-    :func:`build_stores` resolve the user-data root: the L4 inner-cycle runner passes a
-    sandboxed store rooted at the flat ``<workspace>/.inner/<key>/`` registry, keyed on
-    the owning (tenant, campaign, cycle)
-    — named by the spawning cycle, never nested under it — so an inner campaign's state
-    never touches the outer's active pointer. It is the ONE way to relocate the tree;
-    a ``project_root`` parameter sat beside it doing a weaker version of the same job,
-    lost its last caller when the roots moved into ``config/paths.py``, and is gone."""
+    """``store`` injects a pre-built :class:`Stores` rather than resolving the user-data root: it is
+    the ONE way to relocate the tree, and the L4 inner runner passes a sandboxed one."""
 
     def status(msg: str) -> None:
         if on_status:

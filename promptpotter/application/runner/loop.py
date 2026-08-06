@@ -1,15 +1,5 @@
-"""Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
-``halt_at_accuracy`` + ``budget_gate`` are optional halts checked every clean round —
-reachable from ``new`` / ``resume``, the launcher, and the command dispatcher alike.
-
-Pause cooperation: at each iteration top the loop polls ``session.pause_check``
-(``.runtime/pause.flag`` per cycle dir, written by the ``pause-cycle`` command
-applier). When set it declares ``PAUSED`` and exits cleanly via
-``StopReason.PAUSED`` — the worker ends and the cycle stays resumable.
-
-Budget cooperation: ``budget_gate`` (see ``runner/termination.py``) re-reads its
-USD + token caps every clean round, so the ``change-spend-budget`` command can
-raise / lower a ceiling mid-flight without restarting the loop."""
+"""Round loop — generate → score → escalate → stop. Pause and budget are polled EVERY clean round, so ``pause-cycle``
+exits resumably and ``change-spend-budget`` moves a ceiling mid-flight without a restart."""
 
 from __future__ import annotations
 
@@ -67,16 +57,8 @@ async def run_round_loop(
     stop_after_rounds: int | None = None,
     budget_gate: BudgetGate | None = None,
 ) -> tuple[StopReason, ErrorRecord | None]:
-    """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
-    ``budget_gate.tripped()`` → SPEND_BUDGET / TOKEN_BUDGET (omit ⇒ no budget halt).
-
-    The gate re-reads its caps every clean round so the ``change-spend-budget``
-    command (``.runtime/spend_cap.json``) can mutate a ceiling mid-flight.
-
-    Returns ``(stop_reason, error)`` — ``error`` is set on ``RENDER_ERROR`` /
-    ``CRASHED`` so the caller can populate ``CycleResult.error`` without
-    re-reading the ledger. The ``ErrorRecord`` is appended to the canonical
-    ledger via ``emit_error_record`` at the same time."""
+    """The round loop. The budget gate re-reads its caps every clean round, so ``change-spend-budget`` mutates a ceiling
+    mid-flight. Returns ``(stop_reason, error)`` — ``error`` is set so the caller need not re-read the ledger."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round

@@ -1,9 +1,5 @@
 """Dataset scoring gateway — ``score_search_point``: cache resolution, archival, observability.
-
-The sole scoring ingress (§0.5). Resolves the prior-cache split, runs the
-per-sample loop (:func:`run_query_loop` in ``query_loop.py``), persists each
-fresh measurement to the archive, and emits the ``DatasetRun`` trace.
-"""
+The sole scoring ingress (§0.5)."""
 
 from __future__ import annotations
 
@@ -45,14 +41,8 @@ def rescored_prior_tail(
     scorer_id: str,
     scorer_formula: str | None,
 ) -> dict[int, QueryMeasurement]:
-    """The cache priors this run may archive without re-measuring, rescored ONCE.
-
-    In-dataset and not evicted (a deprecated prior must re-measure, not re-archive). The
-    active scorer is fixed for the duration of one ``score_search_point``, so rescoring here
-    — before the walk — is exactly equivalent to rescoring inside
-    :func:`merge_with_unprocessed_priors`, which did it for every prior on every sample:
-    O(samples²) rescores for one run's worth of answers.
-    """
+    """The cache priors this run may archive without re-measuring, rescored ONCE. The active scorer
+    is fixed for one call, so rescoring per prior per sample was O(samples²) for the same answers."""
     tail: dict[int, QueryMeasurement] = {}
     for sid, prior in cached_sample_results.items():
         if sid not in dataset_sample_ids or sid in deprecated_samples:
@@ -68,13 +58,8 @@ def merge_with_unprocessed_priors(
     results: list[QueryMeasurement],
     prior_tail: dict[int, QueryMeasurement],
 ) -> list[QueryMeasurement]:
-    """Union results with the priors for samples the walk has not reached.
-
-    Without this, partial runs (cache hits + Ctrl+C) shrink the archive's record of this
-    run. The archive log is append-only and last-wins by ``sample_id``, so a prior already
-    on disk is superseded the moment its sample is walked — but the run's *derived* fields
-    (scores, provenance, item_count) are computed off this merged view, so it stays.
-    """
+    """Union results with the priors for samples the walk has not reached, or a partial run (cache
+    hits + Ctrl+C) shrinks the archive's record. The run's derived fields read this merged view."""
     if not prior_tail:
         return results
     processed = {r["sample_id"] for r in results}
@@ -88,7 +73,6 @@ def _build_scoring_error_signal(
     candidate_idx: int,
     n_total_candidates: int,
 ) -> EscalationSignal:
-    """Build ELIMINATE_CANDIDATE signal carrying error histogram for RuntimeFailure mint."""
     # Skip rows whose error is the abort-reason padding — those are synthetic
     # markers inserted after the cascade to bring results up to dataset length,
     # not the real backend failure that triggered it.
@@ -137,12 +121,8 @@ def _resolve_prior_cache(
     force_fresh: bool,
     label: str,
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
-    """Load-side cache resolution: the reusable-archive lookup, the deprecated-row
-    split, and the cache-vs-fresh preamble log. Returns
-    ``(kept_cache, deprecated_rows, dataset_sample_ids)``, all keyed by ``sample_id``.
-    ``force_fresh`` skips reuse; so does a session with no dataset, since ``sample_id``
-    only identifies a sample within one.
-    """
+    """Load-side cache resolution — reusable-archive lookup, deprecated-row split, preamble log.
+    ``force_fresh`` skips reuse, and so does a session with no dataset: ``sample_id`` needs one."""
     store = session.store
     backend_id = session.backend_id
     dataset_name = session.dataset_name
@@ -200,11 +180,8 @@ def _resolve_partial_escalation(
     candidate_idx: int,
     n_total_candidates: int,
 ) -> EscalationSignal | None:
-    """Resolve the escalation signal for a non-completed, non-escalated batch.
-
-    Raises ``KeyboardInterrupt`` to unwind a graceful/force stop (the raise must
-    still propagate uncaught out of the gateway). Branch order is load-bearing.
-    """
+    """Resolve the escalation signal for a non-completed, non-escalated batch. Raises
+    ``KeyboardInterrupt`` to unwind a stop — it must propagate uncaught. Branch order is load-bearing."""
     if not batch.completed and not escalation_signal:
         if batch.stop_reason == "skip":
             # Operator early-abort of THIS searchpoint. The partial is already on
@@ -283,52 +260,8 @@ async def score_search_point(
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
-    """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
-
-    ``force_fresh`` skips the measurement-archive reuse and measures every sample
-    live. The content hash keys the cache on *PromptPotter-visible* config, so a
-    backend-code fix (a connector bug, a schema bound) is invisible to it — a
-    re-run would silently replay the broken measurement. ``force_fresh`` is the
-    escape hatch for exactly that: re-score an origin after fixing the connector
-    and see the new result. Its run's detail log is TRUNCATED first, because an
-    append-only log does not overwrite: without that, an interrupted force-fresh pass
-    would leave a franken-run — post-fix rows for the samples it reached, pre-fix rows
-    for the rest, under one header, and nothing would error.
-
-    ``opt_sp`` is the candidate's ``OptSearchPoint``, and it is a **required keyword
-    without a default** for the same reason the callbacks below are: it decides what the
-    numbers MEAN, so every call site must say which it wants. Threading it makes the
-    composite this gateway computes (and archives) opt_sp-aware, matching the round-file
-    one for any formula weighting an opt_sp-aware evaluator (``prompt_compactness`` off the
-    rendered prompt, ``runtime_failure_rate`` off the wounds). ``None`` keeps those on their
-    vacuous fallback, which is right whenever the pass measures something other than one
-    individual's own report — a paired floor, a prior's backfill, a diagnostic replay: there
-    both sides must sit on the same fallback or the delta reads prompt length as behaviour.
-
-    It carried a ``= None`` default until an agent reading ``score_origin`` could not tell
-    that the origin's evaluator namespace was a deliberate choice rather than an oversight —
-    the fact lived in an ABSENT argument, a distant default and a docstring clause, three
-    hops from the call it governs. Five of seven call sites were relying on it silently.
-
-    Per-sample callbacks ``on_sample_scored`` and ``on_sample_starting`` are
-    **required keywords without a default** for the same reason — every call site must
-    declare its visibility choice (wire a callback, or pass ``None`` with documented
-    intent). The class of bug being guarded: a backend running
-    ``measure_sample`` for tens of seconds while the CLI stays silent,
-    burning LLM credits with the operator unable to tell the front-end
-    apart from a frozen process. The required-keyword signature **is** the
-    enforcement — a caller that omits the choice fails to compile/typecheck;
-    there is no standing test.
-
-    ``measured`` is required for that same reason, and it is the reason this binding lives
-    HERE rather than in ``score_one_candidate``. Bound one layer up, it was set once per
-    candidate and then INHERITED by the two askers that re-enter this gateway mid-round
-    (``_pobb_backfill``, ``rescore_parent``), so their measurements were stamped with
-    whichever candidate was bound last — C1.1's backfills were recorded as C1.2's, and
-    nothing errored. Every pass now declares who it measures for and why
-    (:class:`MeasurementRole`); ``None`` means no individual is in scope (an origin pass),
-    which is an answer, not an omission.
-    """
+    """``opt_sp``, ``measured`` and the two per-sample callbacks are required keywords with NO
+    default — each decides what the numbers MEAN, and the signature is the only enforcement."""
     set_measured_candidate(measured)
     store = session.store
     backend_id = session.backend_id
@@ -412,13 +345,8 @@ async def score_search_point(
         )
 
     def _persist_fresh(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """Persist the walk's new rows; return the candidate's running fitness.
-
-        The archived score is the MERGED one (results + not-yet-walked priors), the running
-        one is over ``results`` alone — the candidate's own fitness, which is what the
-        gateway returns and PoBB reads. When there are no priors the two are the same fold,
-        so it is computed once and reused (the common case: 512 of 752 archived runs are
-        all-fresh)."""
+        """Persist the walk's new rows; return the candidate's running fitness. The ARCHIVED score is
+        the merged fold, the running one is over ``results`` alone — the candidate's own, what PoBB reads."""
         running = _composite(results)
         if not (store and backend_id):
             return running
@@ -427,11 +355,8 @@ async def score_search_point(
         return running
 
     def _running_scores(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """The in-flight candidate's fitness over results-so-far — the SAME shape
-        and inputs as the final ``scores`` below, recomputed per sample. It rides
-        out on the sample snapshot so ``dashboard.json`` carries a live composite
-        that converges to the final one: a file-tree reader (no browser) sees the
-        candidate's fitness move in real time, not sit at 0 until it completes."""
+        """The in-flight candidate's fitness over results-so-far, same shape and inputs as the final
+        fold. It rides the sample snapshot, so a file-tree reader watches the composite converge."""
         return _composite(results)
 
     batch = await run_query_loop(

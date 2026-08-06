@@ -1,18 +1,5 @@
-"""Pydantic response models for every optimizer LLM node.
-
-**``Field(description=)`` is the only model-facing text here; a class docstring is
-NOT.** :class:`OptimizerResponseModel` drops class-level descriptions from the emitted
-JSON Schema, so a docstring is documentation for us and reaches no model — write one
-under the ordinary budget (``docs/developer/conventions.md``). A field description IS
-prompt text: editing one is a prompt edit, so regenerate with
-``scripts/build_optimizer_schemas.py``.
-
-Pydantic is the SoT; ``promptpotter/assets/optimizer/resolved_schemas.json`` is a
-regenerated export for non-Python consumers. ``extra="forbid"`` is load-bearing — it is
-what emits ``additionalProperties: false``, without which the SDK silently falls back to
-lenient parsing. :class:`L1Variant`'s three override slots are separate so the LLM cannot
-conflate the buckets, which is what makes the shape statically validatable.
-"""
+"""**``Field(description=)`` is the only model-facing text here; a class docstring is NOT** — the emitted schema
+drops those. A field edit IS a prompt edit: regenerate via ``scripts/build_optimizer_schemas.py``."""
 
 from __future__ import annotations
 
@@ -26,14 +13,8 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
-    """Silent head-keeping truncation for LLM outputs that overshoot a Field cap — for both
-    string length and list count.
-
-    Pydantic's max_length raises ValidationError on overflow, which would discard the *entire*
-    critique on a single overrun field AND force a full (paid) schema-repair round-trip. The
-    schema cap stays (it tells the LLM the budget via JSON Schema export); this BeforeValidator
-    drops the tail and keeps the head so a 5th axis or 4th highlight clips instead of hard-failing.
-    """
+    """Silent head-keeping truncation for an over-cap LLM field. Pydantic's ``max_length`` would discard the ENTIRE
+    critique on one overrun and force a paid repair round-trip; the schema cap stays, to state the budget."""
 
     def _v(value: Any) -> Any:
         if isinstance(value, (str, list)) and len(value) > max_len:
@@ -50,8 +31,6 @@ L1_OVERRIDE_KEYS: frozenset[str] = frozenset({"creativity", "n_variants"})
 
 
 def _keep_known_keys(allowed: frozenset[str]) -> Callable[[Any], Any]:
-    """Drop map keys outside *allowed* — the closed-vocabulary peer of :func:`_truncate`."""
-
     def _v(value: Any) -> Any:
         if isinstance(value, dict):
             return {k: v for k, v in value.items() if k in allowed}
@@ -61,11 +40,8 @@ def _keep_known_keys(allowed: frozenset[str]) -> Callable[[Any], Any]:
 
 
 def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
-    """Word-boundary truncation with a visible ``…`` marker — for the fields whose
-    tail is load-bearing prose (a quoted failure pattern), where ``_truncate``'s
-    silent mid-quote cut reads as a complete-but-wrong steer downstream (run
-    b786e9: a candidate faithfully implemented a priority_fix cut mid-sentence).
-    """
+    """Word-boundary truncation with a VISIBLE marker — for fields whose tail is load-bearing prose, where a silent
+    mid-quote cut reads downstream as a complete-but-wrong steer."""
 
     def _v(value: Any) -> Any:
         if isinstance(value, str) and len(value) > max_len:
@@ -96,11 +72,8 @@ def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> 
 
 
 class OptimizerResponseModel(StrictModel):
-    """Base for every model whose JSON Schema goes on the wire: class descriptions dropped.
-
-    Config is inherited and MERGED, so nested models are covered without restating
-    ``extra="forbid"``, and it fires at all three sites a schema is built.
-    """
+    """Base for every model whose JSON Schema goes on the wire; class descriptions are dropped. Config is inherited and
+    MERGED, so nested models are covered without restating ``extra="forbid"``."""
 
     model_config = ConfigDict(json_schema_extra=_drop_class_description)
 
@@ -111,25 +84,16 @@ class OptimizerResponseModel(StrictModel):
 
 
 class VariantEvidenceGrounding(OptimizerResponseModel):
-    """One row of evidence justifying a variant's chosen mutation.
-
-    ``field``'s per-round ``enum`` is grafted onto the wire schema by
-    :func:`l1_strict.build_l1_response_schema`; the parse boundary stays permissive because
-    not every provider honours it, and ``evidence_grounding_present`` is the enforcement.
-    """
+    """One row of evidence justifying a variant's mutation. ``field``'s per-round ``enum`` is grafted onto the wire schema,
+    but the parse boundary stays PERMISSIVE because not every provider honours it — the validator is the enforcement."""
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str
 
 
 class L1Variant(OptimizerResponseModel):
-    """One candidate variant proposed by ``l1_generate``.
-
-    Each override slot's INNER shape is grafted at runtime from the active
-    ``PipelineSchema``; the keys stay loose here so a backend-specific node name never
-    fails the parse. At least one slot must be non-empty (:meth:`_reject_empty_mutation`),
-    so an all-empty variant re-asks the provider instead of costing a candidate slot.
-    """
+    """One candidate variant. Each override slot's INNER shape is grafted at runtime from the active schema; the keys stay
+    loose so a backend-specific node name never fails the parse. An all-empty variant re-asks instead of costing a slot."""
 
     # FIELD ORDER IS GENERATION ORDER — evidence precedes the decision it justifies, and the
     # decision is the MUTATION, not the prose about it. `changes_description` trails the three
@@ -181,19 +145,12 @@ class L1Variant(OptimizerResponseModel):
 
 
 class L1GenerateOutput(OptimizerResponseModel):
-    """Top-level shape returned by the ``l1_generate`` optimizer prompt."""
-
     variants: list[L1Variant]
 
 
 def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
-    """``L1GenerateOutput`` whose variant fields validate through renamed wire keys.
-
-    ``populate_by_name`` is left off deliberately: a model that ignores the rename and emits
-    the original key fails validation → zero candidates → ``problem_rate = 1.0``, so a rename
-    the model cannot honour is self-penalising rather than silently half-applied. Empty map →
-    :class:`L1GenerateOutput` itself, so the non-renamed path allocates nothing.
-    """
+    """``L1GenerateOutput`` validating through renamed wire keys. ``populate_by_name`` is left OFF deliberately: a model
+    emitting the original key fails validation and self-penalises, rather than the rename silently half-applying."""
     if not field_names:
         return L1GenerateOutput
     return _build_l1_response_model(tuple(sorted(field_names.items())))
@@ -232,8 +189,6 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
 
 
 class L1CritiqueOutput(OptimizerResponseModel):
-    """Critique returned at round-end — three load-bearing fields, no prose ones."""
-
     # First field on purpose: generation order = schema order, so the tail truncates first.
     # failure_highlights carries the per-sample evidence quotes the NEXT round's L1 differentiates
     # on — losing them to a long-output clip is the costliest drop, so it generates before the
@@ -265,10 +220,7 @@ class L1CritiqueOutput(OptimizerResponseModel):
 
 
 class ForkProposal(OptimizerResponseModel):
-    """L2/L3-emitted proposal to rewind the search to an earlier round.
-
-    Carries no round offset — see ``optimization/CLAUDE.md`` § L2/L3 layer-control channel.
-    """
+    """L2/L3-emitted proposal to rewind the search. It carries no round offset — see ``optimization/CLAUDE.md``."""
 
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",
@@ -293,11 +245,7 @@ class ForkProposal(OptimizerResponseModel):
 
 
 class TerminateProposal(OptimizerResponseModel):
-    """L2/L3-emitted decision to terminate the cycle — the HITL stop.
-
-    Peer of :class:`ForkProposal` — see ``optimization/CLAUDE.md`` § L2/L3 layer-control
-    channel.
-    """
+    """L2/L3-emitted decision to terminate the cycle — the HITL stop, peer of :class:`ForkProposal`."""
 
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",
@@ -312,11 +260,8 @@ class TerminateProposal(OptimizerResponseModel):
 
 
 class L2ContextOutput(OptimizerResponseModel):
-    """L2 refinement — all fields optional, the LLM sets only what it changes.
-
-    Deliberately carries neither ``task_context`` (operator-authored, frozen for the run)
-    nor ``action`` — see ``optimization/CLAUDE.md`` §§ The L2-layer · Probe rounds.
-    """
+    """L2 refinement; all fields optional, the LLM sets only what it changes. It deliberately carries neither
+    ``task_context`` (operator-authored, frozen for the run) nor ``action``."""
 
     # Sized off 70 live fires (output 582 median / 2187 max; `rationale` peaked at 745,
     # `axis_targeted` at 14), so a normal call is untouched. `l1_layout` needs no char bound —
@@ -344,8 +289,6 @@ class L2ContextOutput(OptimizerResponseModel):
 
 
 class L3PlanOutput(OptimizerResponseModel):
-    """L3 strategic replan."""
-
     # `plan` rides EVERY downstream prompt until the next replan, so its length is a standing
     # tax — and it was the only unbounded output. Asking for the budget in `answer_format`
     # cannot work (a model cannot count the characters it emits), so it is judged here and
@@ -365,12 +308,8 @@ class L3PlanOutput(OptimizerResponseModel):
 
 
 class CheckinTaskContext(OptimizerResponseModel):
-    """Domain-context sub-object inside the checkin output.
-
-    Every field renders VERBATIM into the ``task_context`` panel of EVERY optimizer prompt and
-    is frozen for the run, so ``TaskDecomposition.check_budget`` REFUSES an over-budget one at
-    mint rather than letting a renderer clip it. Overflow belongs in ``task_description.md``.
-    """
+    """Domain context inside the checkin output. Every field renders VERBATIM into every optimizer prompt and is frozen for
+    the run, so an over-budget one is REFUSED at mint rather than clipped by a renderer. Overflow belongs elsewhere."""
 
     domain: str = Field(
         "", description="One noun phrase — the task family, e.g. 'competition mathematics'."
@@ -401,11 +340,8 @@ class CheckinTaskContext(OptimizerResponseModel):
 
 
 class OriginFinding(OptimizerResponseModel):
-    """One origin-readiness field the resolver proposes a value for.
-
-    An uncited finding is rejected by the apply loop, mirroring ``l1_generate``'s
-    ``evidence_grounding`` contract; only ``confidence == "high"`` auto-confirms.
-    """
+    """One origin-readiness field the resolver proposes a value for. An UNCITED finding is rejected by the apply loop, and
+    only ``confidence == "high"`` auto-confirms."""
 
     field: str = Field(
         default="", description="Checklist field id, e.g. 'task_description', 'column.query'."
@@ -421,11 +357,8 @@ class OriginFinding(OptimizerResponseModel):
 
 
 class OriginQuestion(OptimizerResponseModel):
-    """One operator-facing question on a ``kind='ask'`` turn.
-
-    ``field`` names the checklist field the answer resolves, so the panel applies it as a
-    confirmed patch rather than the operator hunting for the matching control.
-    """
+    """One operator-facing question on an ``ask`` turn. ``field`` names the checklist field the answer resolves, so the
+    panel applies it as a confirmed patch rather than the operator hunting for the control."""
 
     field: str = Field(
         default="", description="Checklist field id the answer resolves, e.g. 'column.query'."
@@ -452,10 +385,8 @@ class OriginNextAction(OptimizerResponseModel):
 
 
 class CheckinOutput(OptimizerResponseModel):
-    """Output of the checkin prompt. Two modes share one shape: task decomposition (CLI
-    ``new``) leaves the origin block empty; origin resolution (web ingest) fills it AND the
-    Layer-1 fields, which seed the campaign's starting prompt either way.
-    """
+    """Output of the checkin prompt. Two modes share one shape: task decomposition leaves the origin block empty, origin
+    resolution fills it AND the Layer-1 fields — which seed the campaign's starting prompt either way."""
 
     persona: str = ""
     task_intent: str = ""

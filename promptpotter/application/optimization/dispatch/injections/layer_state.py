@@ -70,15 +70,8 @@ _OPTIMIZER_PROMPT_HEADER = (
     citable=False,
 )
 def _r_rendered_prompt(b: InjectionBundle) -> str:
-    """The artifact under edit — a target prompt, inner optimizer prompts, or both.
-
-    Two halves, each empty where it is not the mutation surface, so there is no branch
-    and no second panel. A normal campaign evolves the ``OptSearchPoint`` and renders
-    its body; an L4 cycle's outer point is inert (its fields reach no node) while the
-    real levers ride ``pipeline_params`` — which is what left this MANDATORY panel
-    rendering nothing at all on the recursion, and the generator rewriting fields it
-    had never been shown.
-    """
+    """The artifact under edit — a target prompt, inner optimizer prompts, or both; each half empty where
+    it is not the mutation surface. An L4 outer point is INERT: its levers ride ``pipeline_params``."""
     sections: list[str] = []
     if body := b.opt_sp.render():
         sections.append(f"CURRENT PROMPT:\n---\n{body}\n---")
@@ -102,7 +95,6 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
     citable=False,
 )
 def _r_l1_overrides(b: InjectionBundle) -> str:
-    """Current L1 runtime knobs (creativity, n_variants, …) as JSON."""
     overrides = b.opt_sp.memory.l1_overrides
     return f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else ""
 
@@ -118,13 +110,8 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_task_context(b: InjectionBundle) -> str:
-    """The operator's framing, rendered VERBATIM — this panel never truncates.
-
-    A renderer cannot know which half of an authored sentence matters, so it never guesses:
-    the budget is enforced where the text is written (`TaskDecomposition.check_budget`, at
-    mint), where a human can actually fix it. Truncation stays legitimate for the DERIVED
-    panels, which rank their rows and say what they dropped.
-    """
+    """The operator's framing, rendered VERBATIM — this panel never truncates, because a renderer cannot
+    know which half of an authored sentence matters. The budget is enforced at mint, where a human is."""
     tc = b.opt_sp.memory.task_context
     if not tc:
         return ""
@@ -144,7 +131,6 @@ def _r_task_context(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_critique(b: InjectionBundle) -> str:
-    """Compact view of the most recent L1_CRITIQUE output dict."""
     return format_l1_critique_for_prompt(b.digest.critique, b.pipeline_schema)
 
 
@@ -180,25 +166,8 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
     citable=False,
 )
 def _r_rebase_capability(b: InjectionBundle) -> str:
-    """Render the fork_proposal escape-hatch instruction, gated by
-    ``OptimizationConfig.rebase_capability``. When the capability is off
-    this returns the empty string so the L2/L3 prompt body is bit-for-bit
-    identical to a no-rebase ablation run.
-
-    The rename-unlock clause rides this same directive rather than a signal of its
-    own: it is one more sentence about the same emitted object, and a second
-    injection would render an empty line into every prompt that lacks the lever.
-    It appears only when the unlock is both *reachable* — some node DECLARES the
-    rename param, which only an optimizer-of-the-optimizer dataset does — and *not
-    already open*. Reachability is read off the declaration, never off a node name:
-    teaching a lever the campaign cannot pull is the same defect as a citable panel
-    that never renders, and hardcoding ``"l1_generate"`` here would re-file the
-    knowledge of the target that ``node_param_keys`` exists to hold.
-
-    Gated on ``exploration_budget`` for the same reason, one level up: the block's own text
-    conditions the lever on stalled rounds with no lift, and that is already measured — the
-    SAME threshold ``citable_fields`` uses to license ``stall_exploration``. At ``tight`` the
-    round has no grounds to fork, so the block taught against its own evidence."""
+    """The ``fork_proposal`` escape hatch, empty when the capability is off so an ablation body is
+    bit-for-bit identical. Reachability is read off the DECLARED param, never off a node name."""
     if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
         return ""
     schema = b.pipeline_schema
@@ -236,14 +205,8 @@ _TERMINATE_STARVED_TEXT = (
     citable=False,
 )
 def _r_terminate_capability(b: InjectionBundle) -> str:
-    """Render the terminate_proposal instruction, gated by
-    ``OptimizationConfig.terminate_capability``. Off ⇒ empty string so the L2/L3
-    prompt body is bit-for-bit identical to a no-terminate ablation run (R-48).
-
-    The starvation coaching is gated a second time, on the round actually having a starved
-    node — it used to point at "the EVIDENCE STARVED panel above", which renders nothing on a
-    healthy round. The lever itself stays unconditional: starvation is its canonical first
-    user, not its only one."""
+    """The ``terminate_proposal`` instruction; off ⇒ empty string, so an ablation body is bit-for-bit
+    identical. Its starvation coaching is gated a second time on a round that HAS a starved node."""
     if not b.terminate_capability:
         return ""
     starved = evidence_starved_node(b.digest.node_failure_rates)

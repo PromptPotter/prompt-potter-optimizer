@@ -1,10 +1,5 @@
-"""
-Application settings and global constants.
-
-The ``Settings`` class holds env-driven configuration. Module-level constants
-below are static and serve as the single source of truth for prompt field
-lists, persistence versioning, and service-level defaults.
-"""
+"""Application settings + global constants. The module-level constants are the single source for prompt field lists,
+persistence versioning and service-level defaults."""
 
 import math
 import tomllib
@@ -16,14 +11,8 @@ from promptpotter.config.paths import env_file_path, source_checkout_root
 
 
 def _app_version() -> str:
-    """One version owner: ``pyproject.toml``. The dev tree reads the file directly
-    (editable-install dist metadata goes stale on a bump until reinstall); an
-    installed wheel has no pyproject.toml on disk and reads its own metadata.
-
-    "Is there a checkout beside the package?" is precisely what
-    :func:`~promptpotter.config.paths.source_checkout_root` answers, so this asks it
-    rather than walking to ``parents[2]`` itself — that walk was one of five
-    independent copies of the same question, each correct at its own depth only."""
+    """One version owner: ``pyproject.toml``. The dev tree reads the file (editable-install metadata goes stale on a bump);
+    an installed wheel reads its own. Whether a checkout sits beside the package is ``source_checkout_root``'s question."""
     checkout = source_checkout_root()
     if checkout is not None:
         with (checkout / "pyproject.toml").open("rb") as f:
@@ -165,8 +154,6 @@ UCB_EXPLORATION_C: float = math.sqrt(2)
 
 
 class Settings(BaseSettings):
-    """Application configuration settings."""
-
     # Environment
     ENVIRONMENT: str = "development"
 
@@ -189,7 +176,6 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> list[str]:
-        """Parse ALLOWED_ORIGINS as a comma-separated list, dropping blanks."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     # LLM provider keys. The optimizer's provider + model are install-global,

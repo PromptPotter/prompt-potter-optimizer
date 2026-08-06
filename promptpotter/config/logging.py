@@ -13,8 +13,6 @@ LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class _CliFormatter(logging.Formatter):
-    """Bare message at INFO; ``LEVEL: message`` above. Appends traceback when ``exc_info`` is set."""
-
     def format(self, record: logging.LogRecord) -> str:
         if record.levelno >= logging.WARNING:
             line = f"{record.levelname}: {record.getMessage()}"
@@ -26,15 +24,8 @@ class _CliFormatter(logging.Formatter):
 
 
 class _QuietPolls(logging.Filter):
-    """Drop successful high-frequency webapp polls from ``uvicorn.access``.
-
-    The dashboard polls ``/…/dashboard`` (2 s) and the workspace polls
-    ``/active`` + ``/cycles`` + ``/campaigns`` + per-backend ``/health``.
-    These are ~100+ identical 200/304s per minute and crowd out real signal
-    (errors, commands, startup). Only successful (200/304) GETs on those
-    routes are silenced — 4xx/5xx (incl. the unauthenticated-tab 401s),
-    POSTs, and one-shot reads still log.
-    """
+    """Drop successful high-frequency webapp polls from the access log — ~100+ identical 200/304s a minute crowd out real
+    signal. Only successful GETs on those routes are silenced; 4xx/5xx, POSTs and one-shot reads still log."""
 
     _LIST = re.compile(r"^/api/v1/(active|cycles|campaigns)(\?|$)")
     _SUFFIX = ("/dashboard", "/health")
@@ -57,12 +48,8 @@ def setup_logging(
     *,
     style: Literal["full", "cli"] = "full",
 ) -> None:
-    """Configure root logger with a stream handler to stderr.
-
-    ``style="full"`` — timestamped, module-tagged format (API server, notebook).
-    ``style="cli"`` — bare messages for interactive CLI; deep-layer INFO is
-    suppressed so the presentation layer owns the user-facing summary.
-    """
+    """Configure the root logger to stderr. ``full`` is timestamped and module-tagged; ``cli`` is bare, and suppresses
+    deep-layer INFO so the presentation layer owns the user-facing summary."""
     root = logging.getLogger()
     if root.handlers:
         return  # already configured (e.g. by pytest)
@@ -84,19 +71,8 @@ def setup_logging(
 
 
 def silence_proactor_disconnect_noise() -> None:
-    """Swallow the benign Windows ``ProactorEventLoop`` teardown error.
-
-    When a browser drops a kept-alive socket, ``_ProactorBasePipeTransport.
-    _call_connection_lost`` calls ``sock.shutdown(SHUT_RDWR)`` on an
-    already-reset socket and raises ``ConnectionResetError`` [WinError 10054],
-    which the loop dumps via its exception handler (Python bpo-39010). The
-    connection is already gone — nothing failed, it's pure log noise.
-
-    Install a loop exception handler that swallows *exactly* that case — a
-    ``ConnectionResetError`` raised inside ``_call_connection_lost`` — and
-    delegates everything else to the prior/default handler so real loop errors
-    still surface. Call once, from inside the running loop (lifespan startup).
-    """
+    """Swallow the benign Windows Proactor teardown ``ConnectionResetError`` (bpo-39010) and delegate everything else, so
+    real loop errors still surface. Call once, from inside the running loop."""
     loop = asyncio.get_running_loop()
     prior = loop.get_exception_handler()
 

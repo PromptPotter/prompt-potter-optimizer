@@ -1,14 +1,5 @@
-"""On-disk size — the figures the sidebar hover card, the Files-view cake, and the
-account storage panel show. Read-only.
-
-ONE taxonomy, MECE: every byte in a campaign tree lands in exactly one of six leaves
-that sum to the on-disk total, each defined by its ``Field(description=…)`` below;
-the axis is the operator's mental model, **Connector vs Loop vs Dataset**. The
-"keepsake" that ``delete --keep-results`` spares is a cross-cutting SUBSET, not a
-leaf — surface it as a UI note, never a summed figure, or the partition stops being
-MECE. The workspace rollup adds the shared cross-campaign caches plus an ``other``
-residual, so its grand total is the tenant's real footprint with nothing excluded.
-"""
+"""On-disk size, read-only. ONE taxonomy, MECE: every byte lands in exactly one of six leaves. The ``--keep-results`` keepsake
+is a cross-cutting SUBSET — surface it as a note, never a summed figure, or the partition stops being MECE."""
 
 from __future__ import annotations
 
@@ -33,7 +24,6 @@ _LEAVES = ("dataset", "connector", *_LOOP_LEAVES)
 
 
 def _round_connector_bytes(path: Path) -> int:
-    """Serialized size of the per-sample arrays the backend produced in one round file."""
     doc = read_json_tolerant(path)
     if not isinstance(doc, dict):
         return 0
@@ -41,12 +31,8 @@ def _round_connector_bytes(path: Path) -> int:
 
 
 def _campaign_split(root: Path) -> dict[str, int]:
-    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves.
-
-    Each file's leaf comes from the single :func:`classify` taxonomy; the six values
-    sum exactly to the tree's on-disk total. ``ROUND_PUBLIC`` is the lone straddler —
-    its backend arrays go to ``connector``, its searchpoint remainder to ``state``.
-    """
+    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
+    ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
     acc = dict.fromkeys(_LEAVES, 0)
     if not root.is_dir():
         return acc
@@ -68,7 +54,6 @@ def _campaign_split(root: Path) -> dict[str, int]:
 
 
 def _dir_size(root: Path) -> int:
-    """Recursive on-disk byte total of a directory (0 if absent)."""
     total = 0
     if not root.is_dir():
         return total
@@ -82,7 +67,6 @@ def _dir_size(root: Path) -> int:
 
 
 def _leaf_fields(acc: dict[str, int]) -> dict[str, int]:
-    """``{leaf: n}`` → ``{leaf_bytes: n}`` for the response models."""
     return {f"{k}_bytes": acc[k] for k in _LEAVES}
 
 

@@ -1,20 +1,3 @@
-"""``LiveDashboardView`` — session-family ``dashboard.json`` writer.
-
-This class is the **scalar-state mutation dispatcher**: phase / snapshot /
-LLM-call / token-usage records mutate ``self.state`` (the on-disk scalar
-shape) and the sticky LLM-call mirror, and the debounced ``_persist`` plumbing
-flushes them to disk. The two other concerns it orchestrates live in sibling
-modules:
-
-- **Round buffer** — :class:`.round_buffer.RoundBuffer` owns the per-round
-  candidate buffer feeding ``dashboard.json::current_round.nodes.l1_score``;
-  ``_handle_snapshot`` routes per-candidate / per-sample writes to it.
-- **Block builders** — :mod:`.render` (``build_l1_score_block`` /
-  ``build_pobb_block`` / ``fmt_sample_line``) projects scalar state + round
-  buffer to the dashboard.json output shape; called by ``_persist`` and the
-  round-complete flush in ``_handle_phase``.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -178,15 +161,8 @@ class LiveDashboardView(DerivedView):
         recorder: AuditTrailView | None = None,
         seed_from_cycle_id: str | None = None,
     ) -> LiveDashboardView | None:
-        """Build projection, or ``None`` if ids missing.
-
-        Writes ``cycles/{cycle_id}/dashboard.json`` — each cycle (root, fork,
-        sweep, diag) owns its own live file, stamped with its own ``cycle_id``.
-        ``seed_from_cycle_id`` (set for a fork) names the cycle to read the
-        prior dashboard from — the fork inherits the parent's trajectory up to
-        the cut while counting its own (copied) round files; ``None`` seeds from
-        the cycle's own dir (root / resume).
-        """
+        """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
+        the parent's trajectory up to the cut while counting its own copied round files."""
         if not (tenant_root and session_id and hop.campaign_id and hop.cycle_id):
             return None
 
@@ -233,16 +209,8 @@ class LiveDashboardView(DerivedView):
         exc: BaseException,
         interrupted: bool,
     ) -> None:
-        """Stamp a cycle's ``dashboard.json`` when a launch/run stopped BEFORE the
-        projection pipeline bound — so the file tree and the webapp show what happened
-        instead of a frozen ``init``. Reads any prior state and marks it in place; writes
-        a minimal one when none exists yet. Best-effort — it runs on an exit path and must
-        not raise. Sole-writer rule holds: this IS ``LiveDashboardView`` writing its own
-        file, atomically.
-
-        ``interrupted`` picks the outcome: a crash is TERMINAL and carries its message in
-        ``error``; an interrupt is PAUSED and carries none. Callers pair this with
-        ``mark_finished`` only for a crash — a ``finished_at`` makes the pause unresumable."""
+        """Stamps a cycle whose run stopped BEFORE the projection bound, so the tree shows what
+        happened. Pair with ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
         cycle_path = Path(cycle_dir)
         state = resolve_resume_state(cycle_path, cycle_path, None) or LiveDashboardState(
             campaign_id=hop.campaign_id,
@@ -269,17 +237,10 @@ class LiveDashboardView(DerivedView):
     # -- State transitions ----------------------------------------------------
 
     def _set_state(self, name: DashboardState) -> None:
-        """Liveness transition — keeps ``state`` and ``state_since`` in lockstep."""
         self.state.state = name
         self.state.state_since = utcnow_iso()
 
     def mark_stopped(self, reason: str) -> None:
-        """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json.
-
-        The operator-facing ``error`` block (``kind`` + ``message``) is owned
-        by :meth:`_handle_error` which subscribes to ``ErrorRecord`` on the
-        canonical ledger; ``mark_stopped`` only flips the liveness state.
-        """
         self.state.stop_reason = reason
         self.state.run_phase = RunPhase.TERMINAL
         self._set_state(DashboardState.STOPPED)
@@ -293,22 +254,12 @@ class LiveDashboardView(DerivedView):
     # land on disk instantly.
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
-        """Serialise every event under `_persist_lock` so the Timer-thread
-        flush can't observe mid-mutation `state` / `_buffer.candidates`."""
         with self._persist_lock:
             super().on_record(record, offset)
 
     def _schedule_persist(self) -> None:
-        """Mark dirty and ensure a 250 ms flush is armed. Caller must hold `_persist_lock`.
-
-        An already-armed timer is left to run rather than cancelled and replaced: it will pick
-        this mutation up when it fires, because the flush reads `_persist_dirty` and not the
-        event that armed it. Re-arming per event span a fresh OS thread for each of the four
-        events a sample emits — ~960 create/cancel pairs a round — and made the window
-        *trailing*, so a dense enough burst kept pushing the deadline out and `dashboard.json`
-        went stale exactly while the most was happening. A fixed window bounds staleness at
-        `_DASHBOARD_DEBOUNCE_S` from the first unwritten mutation instead of the last.
-        """
+        """An already-armed timer is left to run rather than replaced — the flush reads
+        ``_persist_dirty``, not the event, so staleness is bounded from the FIRST mutation."""
         self._persist_dirty = True
         if self._persist_timer is not None:
             return
@@ -318,9 +269,8 @@ class LiveDashboardView(DerivedView):
         timer.start()
 
     def _fire_debounced_persist(self) -> None:
-        """Timer callback — runs on a Timer thread. Swallows exceptions so a
-        torn-down cycle dir (test cleanup, mid-shutdown disk error) can't
-        propagate into the daemon-thread default handler."""
+        """Runs on a Timer thread; swallows exceptions so a torn-down cycle dir cannot reach the
+        daemon-thread default handler."""
         try:
             with self._persist_lock:
                 # Unconditionally, and before the dirty test: this slot is what `_schedule_persist`
@@ -335,8 +285,6 @@ class LiveDashboardView(DerivedView):
             logger.exception("debounced dashboard persist failed")
 
     def _flush_pending_persist(self) -> None:
-        """Cancel any pending debounce and write immediately. Called from
-        phase-boundary handlers, `mark_stopped`, and `drain`."""
         with self._persist_lock:
             if self._persist_timer is not None:
                 self._persist_timer.cancel()
@@ -345,8 +293,6 @@ class LiveDashboardView(DerivedView):
             self._persist()
 
     def drain(self) -> None:
-        """Teardown hook — flush any pending debounced write so the on-disk
-        snapshot mirrors the final ledger truth before the cycle closes."""
         self._flush_pending_persist()
 
     # -- Ledger subscription (sole ingress) -----------------------------------
@@ -586,19 +532,8 @@ class LiveDashboardView(DerivedView):
         )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        """Sole writer for ``state['spend']``: optimizer → ``loop``, backend → ``backend``.
-
-        Bucket-add + total recompute inline in one method. ``record.cost_usd``
-        (provider-reported wire cost, e.g. OpenRouter ``usage.cost``) short-
-        circuits the rate-table when present; absent ⇒ ``compute_usd`` rate-
-        tables the tokens. Per-record write keeps the projection self-contained:
-        no parallel writer, no helper chain.
-
-        EVERY call lands in ``incurred``. Only a call that reached the wire
-        (``record.cached`` false) lands in the bill — the tokens, the USD, and the
-        unpriced counter that arms the "USD cap inactive" warning. A cached call spent
-        no money, so billing it would make the budget gate halt a run that cost nothing.
-        """
+        """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
+        cached call spent nothing, so billing it would halt a run over money it never cost."""
         spend = self.state.spend
         bucket = spend.loop if record.kind == "optimizer" else spend.backend
         in_tok = int(record.input_tokens)
@@ -637,25 +572,15 @@ class LiveDashboardView(DerivedView):
 
     @property
     def spend_total_used_usd(self) -> float:
-        """Clean accessor for the spend halt probe.
-
-        Reads the live spend rollup the projection owns; the halt loop goes
-        through this property so the dashboard remains the single owner of
-        spend semantics (no probe reaching into ``self.state.spend``)."""
         return self.state.spend.total_used_usd
 
     @property
     def spend_total_tokens(self) -> int:
-        """Token twin of ``spend_total_used_usd`` — the token halt probe's
-        source. Same single-owner discipline: the gate reads this accessor, not
-        ``self.state.spend`` directly."""
         return self.state.spend.total_tokens_used
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        """Publish the in-flight optimizer LLM call to `dashboard.json::in_flight` —
-        kills the multi-minute blind spot during reasoning-heavy critique calls.
-        Cleared by the paired `LLMCallRecord` in `_handle_llm_call`.
-        """
+        """Publishes the in-flight optimizer call — the multi-minute blind spot during a
+        reasoning-heavy critique, where no other record fires."""
         self.state.in_flight = InFlightCall(
             call_id=record.call_id,
             node=record.node,
@@ -667,12 +592,8 @@ class LiveDashboardView(DerivedView):
         self._schedule_persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Mirror the call into the sticky LLM-node store + clear the in-flight slot.
-
-        The sticky store backs ``dashboard.json::current_round.nodes`` and survives
-        round transitions (most-recent fire per phase-keyed slot). In-flight match
-        is by ``call_id`` so out-of-order delivery can't clear the wrong call.
-        """
+        """The sticky store backs ``current_round.nodes`` and survives round transitions —
+        most-recent fire per phase-keyed slot."""
         self._sticky_llm_calls[record.node] = {
             **build_node_block(record),
             "round": self.state.round,
@@ -683,21 +604,14 @@ class LiveDashboardView(DerivedView):
         self._schedule_persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Heartbeat → re-persist so `wallclock_serialized_at` stays fresh during 30-90s
-        optimizer LLM phases that fire no other records. No state mutation, only the timestamp moves.
-        """
+        """Heartbeat → re-persist, so ``wallclock_serialized_at`` stays fresh through an optimizer
+        phase that fires no other record. No state mutation."""
         del record
         self._schedule_persist()
 
     def _handle_error(self, record: ErrorRecord) -> None:
-        """Sole writer of ``dashboard.json::error``.
-
-        Subscribed to the ledger ``ErrorRecord`` emitted by the runner's
-        three ``except`` sites in ``application/runner/{entry,loop}.py``;
-        nothing else writes this block. The webapp reads it to render the
-        operator-facing crash summary without parsing the traceback out
-        of ``index.json``.
-        """
+        """Sole writer of ``dashboard.json::error``, fed by the ``ErrorRecord`` the runner's three
+        ``except`` sites emit — so the webapp renders a crash without parsing ``index.json``."""
         self.state.error = DashboardError(
             kind=record.kind,
             message=record.message,
@@ -706,14 +620,8 @@ class LiveDashboardView(DerivedView):
         self._schedule_persist()
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        """Sole writer of ``dashboard.json::recent_loop_warnings``.
-
-        Mirrors ``recent_backend_warnings`` — a rolling, capped list of
-        optimizer-loop degradations.
-        Flushed immediately: a zero-candidate round is a material fact the
-        operator (or the file-tree reader) must see without waiting on the
-        debounce.
-        """
+        """Sole writer of ``recent_loop_warnings``, flushed immediately: a zero-candidate round is a
+        material fact the operator must see without waiting on the debounce."""
         warning = LoopWarning(
             ts=record.timestamp,
             kind=record.kind,
@@ -736,18 +644,8 @@ class LiveDashboardView(DerivedView):
     def _absorb_round_complete(
         self, round_accuracy: float, l1_stall_count: int, hearts: int | None = None
     ) -> None:
-        """Settle the headline ``current_acc``/``best`` to what the round actually MEASURED
-        (``RoundResult.accuracy`` — the elected winner on the samples this round drew, or on a
-        held round the retained incumbent's re-score). One configuration, over a stated
-        ``total``. During scoring ``current_acc`` still ticks the in-flight candidate via
-        ``_update_current_acc``; this is the round-boundary settle.
-
-        **Never settle to ``cumulative_accuracy``.** Nothing rescores: that series pools rows
-        measured by different configurations, so the headline can exceed everything the cycle
-        measured. The concern behind it is real — a hard-first subset score is not the full-set
-        rate — but the answer is the round's own ``total`` beside the number, and
-        ``cumulative_theta`` for the cross-round-comparable series, not a pooled mean.
-        """
+        """Never settle to ``cumulative_accuracy`` — nothing rescores it, so that pooled series can
+        exceed everything the cycle measured. The round's own ``total`` is the answer beside it."""
         s = self.state
         acc = round(round_accuracy, 4)
         s.current_acc = acc
@@ -771,16 +669,8 @@ class LiveDashboardView(DerivedView):
         sample_id: int,
         prior_ids: list[str],
     ) -> None:
-        """Append a per-sample paired-PoBB backfill event to ``state["backfill_log"]``.
-
-        Webapp + notebook readers see this under ``dashboard.json::backfill_log``.
-        Each entry names the round/candidate the backfill fired during, the
-        sample the priors were caught up on, and which priors gained a
-        measurement — absence of an entry for a given sample means every
-        prior was already cached for it. Capped at 256 entries (per-sample
-        events can accumulate quickly: ~N samples × M priors × K candidates
-        per round).
-        """
+        """Absence of an entry for a sample means every prior was already cached for it. Capped at
+        256 — per-sample events accumulate as samples × priors × candidates."""
         log = list(self.state.backfill_log)
         log.append(
             BackfillLogEntry(
@@ -796,9 +686,6 @@ class LiveDashboardView(DerivedView):
     # -- Block builders (delegated to render.py) ------------------------------
 
     def _l1_score_block(self, round_result: RoundResult | None = None) -> dict[str, Any]:
-        """Thread the view's live state into the pure
-        :func:`~promptpotter.infrastructure.projections.live_dashboard.render.build_l1_score_block`
-        projection — the only state coupling the builder needs."""
         return build_l1_score_block(
             self._buffer,
             self.state.composite_fitness_formula,

@@ -73,7 +73,7 @@ rather than less. It also cannot be computed without new spend: the origin is re
 on that round's panel, so it holds no measurement on late-round cells at all.
 
 **Honest absence, not a fallback.** A cold ruler makes θ collapse to that round's logit-accuracy
-(`adopted_level_trajectory` states this), so the accumulated number is **absent** there — never
+(`fit_theta_given_delta`'s flat-where-cold contract), so the accumulated number is **absent** there — never
 silently substituted with raw accuracy, which is the subset-relative quantity this whole spec
 exists to stop headlining.
 

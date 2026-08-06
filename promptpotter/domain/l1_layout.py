@@ -1,17 +1,5 @@
-"""Per-node prompt layout — the optimizer's information-flow axis. A layout is per-slot
-lists of placeholder names the dispatch hub resolves when filling a node's PromptTemplate.
-
-Every optimizer node owns a ``NodeLayoutSpec`` in ``NODE_LAYOUTS`` (editor / possible /
-mandatory / floor). ``l1_generate`` is edited by L2 in-campaign (its live layout rides
-``OptSearchPoint.memory.l1_layout``); the other optimizer prompt nodes are edited only by L4
-across the recursion (their floor is their layout until an outer loop mutates it). This
-is the single source for which signals reach each optimizer prompt — the dispatch hub fills
-every node from here (no second `{{token}}` source in the templates).
-
-Validation (`validate_l1_layout`, against a node's spec):
-* HARD (missing mandatory / unknown name / dups within slot) → rollback to floor + wound.
-* SOFT (unchanged from prior) → apply with warning.
-"""
+"""Per-node prompt layout — the optimizer's information-flow axis, and the SINGLE source for which
+signals reach each optimizer prompt. There is no second ``{{token}}`` source in the templates."""
 
 from __future__ import annotations
 
@@ -66,9 +54,7 @@ L1_LAYOUT_SLOTS: tuple[str, ...] = (
 
 class L1Layout(StrictModel):
     """Per-slot list of placeholder names that the dispatch hub resolves
-    when filling L1's PromptTemplate. Empty lists ⇒ slot uses only the
-    template's static text.
-    """
+    when filling L1's PromptTemplate. Empty lists ⇒ the slot's static text only."""
 
     persona: list[str] = Field(default_factory=list)
     task_intent: list[str] = Field(default_factory=list)
@@ -76,7 +62,6 @@ class L1Layout(StrictModel):
     thinking_style: list[str] = Field(default_factory=list)
 
     def all_placeholders(self) -> list[str]:
-        """Flatten every slot's placeholders in slot-iteration order."""
         return [
             *self.persona,
             *self.task_intent,
@@ -85,30 +70,14 @@ class L1Layout(StrictModel):
         ]
 
     def slot(self, name: str) -> list[str]:
-        """Return the placeholder list for *name*; raise on unknown slot."""
         if name not in L1_LAYOUT_SLOTS:
             raise KeyError(f"Unknown L1 layout slot: {name}")
         return cast("list[str]", getattr(self, name))
 
 
 class NodeLayoutSpec(StrictModel):
-    """Per-node information-flow spec — one optimizer node's searchable injection axis.
-
-    * ``editor`` — who may mutate this node's layout, and it is READ, not decoration:
-      ``resolve_node_layout`` refuses a node that is not ``l4``. ``l2`` is ``l1_generate``
-      alone, whose layout lives on ``opt_sp.memory.l1_layout`` and is L2's in-campaign
-      attention surface — **no code path applies an L4 layout override to it**, so an outer
-      edit aimed there would have been accepted and silently done nothing. It read ``l2_l4``
-      until 2026-08-02, which claimed a second editor that does not exist. ``l4`` is every
-      other optimizer node (nothing sits above them in a normal campaign), and those are the
-      three ``resolve_node_layout`` serves.
-    * ``possible`` — the full add/excise vocabulary (⊇ ``mandatory`` and ⊇ ``floor``).
-    * ``mandatory`` — the GUARD RAIL: placeholders an edit may never excise; the
-      validator rolls back an edit that drops one, so the search stays "creative
-      within guard rails."
-    * ``floor`` — the origin layout (a conservative floor, expanded on evidence),
-      used verbatim when no editor has mutated it.
-    """
+    """One optimizer node's searchable injection axis. ``editor`` is READ, not decoration — ``l2`` is
+    ``l1_generate`` alone, and NO path applies an L4 layout override to it. ``mandatory`` is the guard rail."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -333,9 +302,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
 
 
 def default_l1_layout() -> L1Layout:
-    """Origin layout for ``l1_generate`` = ``NODE_LAYOUTS['l1_generate'].floor`` (one
-    source). Returns a deep copy so the OSP's mutable per-slot lists never alias the
-    shared floor. Origin = conservative floor, expanded on evidence by L2."""
+    """Origin layout for ``l1_generate``, deep-copied so the OSP's mutable per-slot lists never alias the
+    shared floor."""
     return NODE_LAYOUTS["l1_generate"].floor.model_copy(deep=True)
 
 
@@ -360,10 +328,8 @@ del _node, _spec, _floor_ph
 
 
 def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Coerce `{slot: [name…]}` → L1Layout. `{}` is the sanctioned omit-sentinel ("keep current
-    layout") — driver treats None as "no layout proposed". Malformed non-empty input also returns
-    None so the validator (not this coercer) surfaces failures.
-    """
+    """Coerce to an ``L1Layout``. ``{}`` is the sanctioned omit-sentinel ("keep current"); malformed
+    non-empty input also returns ``None``, so the VALIDATOR and not this coercer surfaces the failure."""
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None
     sanitised: dict[str, list[str]] = {}
@@ -381,8 +347,7 @@ def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
 
 class LayoutValidationResult:
     """L1-layout validation result. `is_valid=False` ⇒ HARD failure → rollback to prior; outcomes
-    surface to L2's next fire either way as self-healing evidence.
-    """
+    surface to L2's next fire either way as self-healing evidence."""
 
     __slots__ = ("is_valid", "outcomes")
 
@@ -397,8 +362,7 @@ def validate_l1_layout(
     spec: NodeLayoutSpec,
     prior_layout: L1Layout | None = None,
 ) -> LayoutValidationResult:
-    """Run deterministic layout checks against a node's ``spec``. HARD failures flip
-    ``is_valid`` (→ rollback to the floor / prior — the guard rail)."""
+    """Deterministic layout checks against a node's ``spec``; a HARD failure rolls back to floor or prior."""
     outcomes: list[ValidatorOutcome] = []
     is_valid = True
 

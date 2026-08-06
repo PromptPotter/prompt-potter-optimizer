@@ -1,14 +1,5 @@
-"""Earned prompt-block library — the reusable field values that MEASURED lift, task-fit.
-
-Mined from run history — a short field value (`persona` / `task_intent` / `thinking_style` /
-`answer_format`) that a candidate *changed* AND that beat its matched origin by a
-**credible** margin (`composite_ci_lo` clears the origin, not a noise win), tagged by the
-run's **answer-space signature** so a block earned on one task shape never lands on another.
-
-Silent when nothing clears the bar: the dispatch renders only earned, fitting signal. The
-long task-specific fields (`instruction` / `problem_description`) are deliberately excluded —
-they carry per-task detail and are where prompt bloat accumulates, not reusable material.
-"""
+"""Field values that MEASURED credible lift, tagged by answer-space signature so a block earned on one task shape
+never lands on another. The long task-specific fields are excluded — that is where prompt bloat accumulates."""
 
 from __future__ import annotations
 
@@ -45,8 +36,6 @@ OPEN_ANSWER_SPACE = "OPEN"
 
 
 class EarnedBlock:
-    """One reusable field value that earned credible lift, aggregated across its occurrences."""
-
     __slots__ = ("field", "mean_lift", "n", "text")
 
     def __init__(self, field: str, text: str, mean_lift: float, n: int) -> None:
@@ -57,13 +46,8 @@ class EarnedBlock:
 
 
 def answer_space_signature(labels: Iterable[Any]) -> str:
-    """The task-fit key for a set of ground-truth labels: sorted distinct labels, or ``OPEN``.
-
-    Mirrors ``answer_distribution``'s notion of an enumerable answer space — above
-    ``ANSWER_SPACE_CAP`` distinct labels the space is open (free-text / ranking) and carries
-    no closed-label identity to match on. The one place a run's fit key is derived, so a block
-    earned under a signature and a live cycle looking up its own signature draw the same line.
-    """
+    """The task-fit key for a set of ground-truth labels: sorted distinct labels, or ``OPEN`` above the cap. The one place
+    a run's fit key is derived, so a block earned under a signature and a cycle looking one up draw the same line."""
     distinct = {label for label in labels if isinstance(label, str) and label}
     if not distinct or len(distinct) > ANSWER_SPACE_CAP:
         return OPEN_ANSWER_SPACE
@@ -71,7 +55,6 @@ def answer_space_signature(labels: Iterable[Any]) -> str:
 
 
 def _answer_space_signature(round_doc: dict[str, Any]) -> str:
-    """A stored round's fit key — :func:`answer_space_signature` over its observed truths."""
     return answer_space_signature(
         row.get("ground_truth")
         for rows in (round_doc.get("all_candidate_results") or {}).values()
@@ -80,12 +63,8 @@ def _answer_space_signature(round_doc: dict[str, Any]) -> str:
 
 
 def _credible_lift(cand: dict[str, Any]) -> float | None:
-    """A candidate's lift over its matched origin, kept only when credibly positive.
-
-    ``composite_ci_lo`` is the lower bound of the candidate's composite CI; when it clears
-    the matched origin's composite the gain is real signal, not a noise win. Returns the
-    point lift (``composite − matched_origin``) or ``None`` when uncredible / unpaired.
-    """
+    """A candidate's lift over its MATCHED origin, kept only when ``composite_ci_lo`` clears that origin — real signal,
+    not a noise win. ``None`` when uncredible or unpaired."""
     origin = cand.get("matched_origin_composite")
     comp = cand.get("composite_fitness")
     ci_lo = cand.get("composite_ci_lo")
@@ -122,22 +101,8 @@ def _accumulate(round_doc: dict[str, Any], acc: dict[tuple[str, str, str], list[
 
 
 def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
-    """Walk every campaign's rounds and return earned blocks keyed by answer-space fit.
-
-    ``{fit_signature: [EarnedBlock, ...]}`` — each fit's blocks ranked by mean credible lift,
-    highest first. A caller looks up its own run's fit signature (see
-    :func:`_answer_space_signature`) to get only blocks that fit its task shape.
-
-    **Empty under instrument mode.** This is cross-run MEMORY, the category
-    ``shared/instrument.py`` names as contamination for an instrument — but it reads the
-    CAMPAIGN TREE, not the archive, so the evidence epoch that hides memory from every
-    other such read (``store/archive_views.py``) never sees it. Applied here the epoch
-    would hide everything anyway: an inner sandbox's campaign tree holds nothing BUT the
-    sibling cells of the same outer run, so the empty library IS the filtered answer, not
-    a special case. Ungated, cell #1 rendered the static fallback while cell #39 rendered
-    blocks mined from 38 finished siblings — same cell, different prompt, ordered by how
-    often the instrument had been used.
-    """
+    """Earned blocks keyed by answer-space fit. **Empty under instrument mode** — it reads the campaign TREE, which
+    the archive's evidence epoch never sees, so ungated an inner cell #39 gets a richer prompt than cell #1."""
     if instrument_mode() is not None:
         return {}
 
@@ -166,11 +131,8 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
 def earned_library_for(
     stores: Stores, fit_signature: str, *, per_field_cap: int = 3
 ) -> dict[str, tuple[str, ...]]:
-    """The `guidance` library for one run: ``{field: (block, ...)}``, earned + fitting only.
-
-    Empty dict when no block earned credible lift on this answer-space shape — the injection
-    renders nothing, which is the correct silence for a task with no transferable history yet.
-    """
+    """The ``guidance`` library for one run — earned and FITTING only. Empty when nothing cleared the bar on this
+    answer-space shape, which is the correct silence for a task with no transferable history yet."""
     earned = mine_earned_blocks(stores).get(fit_signature, [])
     by_field: dict[str, list[str]] = defaultdict(list)
     for block in earned:

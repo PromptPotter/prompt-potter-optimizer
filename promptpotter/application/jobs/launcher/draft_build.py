@@ -1,20 +1,5 @@
-"""Draft → on-disk artifact builders for the launcher commit path.
-
-Pure projections from a :class:`DraftCampaign` to the files / wire shapes the
-commit + new-campaign UI need — no launch side effects, no JobRegistry, no
-asyncio. Split off :mod:`.core` so the launch / commit orchestration stays
-readable; the core module imports these.
-
-* ``_build_origin_pipeline_json`` / ``_build_default_campaign_json`` /
-  ``_build_task_context`` — the committed dataset's ``pipeline.yaml`` overlay,
-  ``campaign.json`` sibling, and ``task_context.yaml`` framing. The seed⊕overlay
-  node merge they build on is ``draft_campaign.merge_pipeline_overlay`` (its
-  conceptual owner — shared with the origin readiness model gate).
-* ``split_overlay`` — split a reused-dataset overlay into its two
-  campaign-config homes (``pipeline_overrides`` + ``optimizer_narrowing``).
-* ``derive_optimizer_locks`` / ``draft_pipeline_dependencies`` /
-  ``draft_wire_with_locks`` — the new-campaign permission + dependency surface.
-"""
+"""Pure projections from a :class:`DraftCampaign` to the files and wire shapes the commit +
+new-campaign UI need — no launch side effects, no JobRegistry, no asyncio."""
 
 from __future__ import annotations
 
@@ -38,21 +23,8 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposi
 
 
 def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    """Slice-1 pipeline overlay seeded from the connector's first-tenant default.
-
-    The committed file is the dataset's ``pipeline.yaml`` overlay; the
-    backend's live ``GET /pipeline`` response is the actual schema.
-    ``backend_type`` is mandatory for connector resolution
-    (``_read_backend_type`` reads it at init); ``pipelines.default``
-    overrides the backend's pipeline order per the merge contract in
-    ``application/initialization/wiring.py::_apply_dataset_overlay``.
-
-    The step list is the draft's chosen pipeline (``draft.pipeline_steps`` —
-    preserved when reusing an existing dataset) and falls back to
-    :attr:`Connector.default_pipeline` for a fresh upload. The launcher carries
-    no hard-coded ``["llm_only"]``; connectors that leave the field empty inherit
-    the backend's own default.
-    """
+    """The committed file is the dataset's ``pipeline.yaml`` OVERLAY; the backend's live
+    ``GET /pipeline`` is the actual schema. ``pipelines.default`` overrides the pipeline order."""
     pipeline: dict[str, Any] = {
         "name": draft.slug,
         "backend_type": draft.connector,
@@ -72,17 +44,8 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
 def split_overlay(
     pipeline_overlay: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, NodeSearchNarrowing]]:
-    """Split a draft ``pipeline_overlay`` into its two campaign-config homes.
-
-    The lock editor writes one transport shape — ``nodes.{n}.{config, optimizer}``.
-    Each node's ``config`` block is the origin-floor value override
-    (→ ``CampaignConfig.pipeline_overrides``); its ``optimizer`` block
-    (``param_keys`` subset + narrowed ``param_allowed_values``) is the
-    search-space narrowing (→ ``CampaignConfig.optimizer_narrowing``). A reused
-    dataset's mint applies this split onto the per-campaign snapshot so the
-    shared, immutable dataset is never mutated. Fresh uploads instead fold the
-    whole overlay into the committed ``pipeline.yaml`` (``merge_pipeline_overlay``)
-    — the dataset is theirs to author."""
+    """A reused dataset's mint applies this split onto the per-campaign snapshot, so the shared,
+    immutable dataset is never mutated; a fresh upload folds the whole overlay into its own file."""
     overrides: dict[str, Any] = {}
     narrowing: dict[str, NodeSearchNarrowing] = {}
     for node, block in pipeline_overlay.items():
@@ -101,17 +64,8 @@ def split_overlay(
 
 
 def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
-    """The backend-pipeline permission surface the new-campaign UI renders.
-
-    Makes the otherwise-hidden connector defaults visible *before* commit: the
-    default pipeline, the per-node config floor + the ``param_allowed_values``
-    the optimizer may permute, and the always-locked forbidden axes
-    (``model``/``provider`` — the optimizer never searches them). A draft's
-    ``pipeline_overlay`` is empty until commit, so without this the UI couldn't
-    show that the optimizer is *locked out* of escalating these — not merely
-    that ``low`` is a default. Mirrors the commit-time merge via
-    :func:`merge_pipeline_overlay`.
-    """
+    """Makes the connector defaults visible BEFORE commit — a draft's ``pipeline_overlay`` is empty
+    until then, so without this the UI cannot show the optimizer is LOCKED OUT of an axis."""
     connector = connectors.get(draft.connector)
     # The active pipeline is the permission surface — the optimizer can only move
     # nodes that actually run. Scope the per-node locks to it so the panel shows
@@ -138,14 +92,8 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
-    """The categorical inputs the draft's ACTIVE pipeline requires, read off the
-    connector's static ``node_types`` for the chosen steps.
-
-    Scoped to the active steps (operator override, else the connector default) so a
-    dependency surfaces only when a node that needs it actually runs — TermNorm's
-    ``llm_only`` default raises none; selecting the full pipeline (with
-    ``token_matching``) raises ``candidate_library``. Shares the live
-    :func:`dependencies_from_node_types` mapping."""
+    """Scoped to the ACTIVE steps, so a dependency surfaces only when a node needing it runs —
+    TermNorm's ``llm_only`` default raises none, the full pipeline raises ``candidate_library``."""
     connector = connectors.get(draft.connector)
     active = set(draft.pipeline_steps or connector.default_pipeline)
     node_types = {n: t for n, t in connector.node_types.items() if n in active}
@@ -159,17 +107,8 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 
 
 def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
-    """The draft's parsed pipeline ``view`` + per-node config/output schema — the
-    node-editor render surface, computed straight from the draft.
-
-    A check-in has no committed ``datasets/{slug}/`` yet, so its pipeline can't be
-    read from disk; it is fully determined by the draft (``_build_origin_pipeline_json``
-    yields the byte-identical ``pipeline.yaml`` that Start commits). Riding the draft
-    wire means the ingest node editor renders directly from the draft — no
-    fetch-by-slug, no 404, no second pipeline endpoint. Mirrors
-    ``datasets.get_dataset_pipeline`` for the committed-dataset case: one render path,
-    two sources (draft pre-commit / dataset post-commit).
-    """
+    """A check-in has no committed ``datasets/{slug}/``, so its pipeline is read off the draft, not
+    disk — the ingest node editor renders with no fetch-by-slug and no second endpoint."""
     schema = parse_pipeline_response(_build_origin_pipeline_json(draft))
     cfg = load_campaign_config(_build_default_campaign_json(draft)["campaign_config"])
     schema = schema.narrow(cfg.optimizer_narrowing)
@@ -181,22 +120,8 @@ def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
-    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``,
-    the parsed ``pipeline_view`` + node schemas, and the ``dependencies`` blocks.
-
-    The single wire shape every draft-returning endpoint emits — keeps
-    :meth:`DraftCampaign.to_wire` pure (no connector import) and adds the
-    connector-derived blocks once at the I/O boundary. The ``pipeline_view`` +
-    ``node_config_schema`` + ``node_output_schema`` block makes the draft fully
-    self-describing so the ingest node editor renders from it directly (no
-    fetch-by-slug for a dataset dir that doesn't exist pre-commit).
-    ``dependencies`` carries each required input + whether it's ``fulfilled``, so
-    the ingest UI shows the operator which input is missing and offers a drop in
-    place. ``readiness`` is the **server-authoritative** mint-gate verdict (the
-    full :func:`origin_readiness` checklist) recomputed on every draft response —
-    the UI gates Start on this, never on a partial client re-derivation that would
-    drift from the answer-space / answer-format / node-model checks.
-    """
+    """``readiness`` is the **server-authoritative** mint gate, recomputed on every draft response —
+    the UI gates Start on it, never on a client re-derivation that would drift."""
     readiness = origin_readiness(draft)
     return {
         **draft.to_wire(),
@@ -214,29 +139,8 @@ def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
-    """Default-campaign sibling — valid :class:`CampaignConfig` wrapped in the
-    on-disk ``campaign_config`` outer key per the repo convention
-    (see ``datasets/{benchmark}/campaign.json``).
-
-    ``exclude_nodes`` and the ``optimization`` knob overrides come from the
-    connector (:attr:`Connector.default_exclude_nodes` +
-    :attr:`Connector.default_optimization`); connectors that leave the fields
-    empty get the schema defaults.
-
-    Written as the **delta from defaults** (``freeze_campaign_config``), the same
-    shape the minted snapshot persists: a knob nobody chose never reaches disk, so
-    renaming or dropping it later cannot make this file unreadable. That matters
-    here because ``CampaignConfig`` is ``extra="forbid"`` and three endpoints read
-    this one file — ``/datasets/{name}/pipeline``, ``/preview``, and the draft
-    mint. ``draft.optimization_overrides`` is a *full* dump of every knob
-    (``OptimizationOverrides().model_dump()``) and must not pass through
-    verbatim — that would spell every mechanism toggle onto disk at its default
-    and hold every ingested dataset hostage to the next rename.
-
-    Validating before freezing also means a connector whose ``default_optimization``
-    omits a required knob fails at mint, where the cause is legible — not on the
-    first read of a file that was never loadable.
-    """
+    """Written as the DELTA from defaults, so a knob nobody chose never reaches disk and a later
+    rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras."""
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
@@ -256,12 +160,8 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:
-    """The run-start domain framing, written to ``task_context.yaml``.
-
-    The check-in already decomposed the task into the 7-field ``task_context``
-    (carried on :attr:`DraftCampaign.decomposed_task_context`); normalize it through
-    :class:`TaskDecomposition` with the verbatim ``raw_description`` so the run
-    reads it directly instead of re-decomposing via a second LLM call."""
+    """The check-in already decomposed the task, so the run reads ``task_context.yaml`` directly
+    instead of re-decomposing through a second LLM call."""
     return TaskDecomposition.from_dict(
         {**draft.decomposed_task_context, "raw_description": draft.raw_task_description}
     ).to_dict()

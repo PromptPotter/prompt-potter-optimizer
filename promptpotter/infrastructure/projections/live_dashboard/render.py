@@ -1,11 +1,5 @@
-"""Pure projections from scalar state + :class:`RoundBuffer` to the
-``dashboard.json`` output shape.
-
-These functions are side-effect free — they read the live state the
-:class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView`
-owns and return plain dicts. ``LiveDashboardView._persist`` and the
-round-complete flush in ``_handle_phase`` call them.
-"""
+"""Pure projections from scalar state + ``RoundBuffer`` to the ``dashboard.json`` shape — side-effect free, returning
+plain dicts."""
 
 from __future__ import annotations
 
@@ -39,19 +33,16 @@ def _trim(text: str, n: int) -> str:
 
 
 def _partial_mean_fitness(samples: list[dict[str, Any]]) -> float | None:
-    """Running mean fitness over scored-so-far samples, or None when none scored.
-    Bridges the gap before a candidate's final ``accuracy`` lands so the dashboard shows
-    in-flight progress — and ``accuracy`` IS mean fitness, so this converges on it."""
+    """Running mean fitness over samples scored so far, bridging the gap before a candidate's final ``accuracy`` lands. That
+    accuracy IS mean fitness, so this converges on it."""
     if not samples:
         return None
     return sum(float(s.get("fitness") or 0.0) for s in samples) / len(samples)
 
 
 def fmt_sample_line(s: dict[str, Any]) -> str:
-    """One compact line per query for the in-flight ``l1_score`` samples list.
-    Keeps the live dashboard scannable instead of bloating with full ~2 kB
-    query strings; round-complete flush emits the full dicts.
-    """
+    """One compact line per query for the in-flight samples list, keeping the dashboard scannable instead of bloating with
+    full query strings. The round-complete flush emits the full dicts."""
     qi = int(s.get("qi", 0))
     sid = s.get("sample_id")
     sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
@@ -85,18 +76,8 @@ def build_l1_score_block(
     short_formula_template: str | None,
     round_result: RoundResult | None = None,
 ) -> dict[str, Any]:
-    """Project current candidates to dashboard's l1_score shape.
-
-    ``label`` is canonical ``CN.M`` (``C0`` for origin), composed from
-    the slot's round + idx via :func:`candidate_label`. Display sites
-    read this field verbatim — no ``idx + 1`` arithmetic anywhere.
-
-    ``live`` (``round_result is None``) renders samples as compact
-    one-liners; ``not live`` emits the full sample dicts (round-complete
-    flush). Each candidate's composite_fitness number is paired with
-    the active formula and the value-inlined short formula derived from
-    ``short_formula_template``.
-    """
+    """Project current candidates to the dashboard's l1_score shape. ``label`` is canonical — display sites read it verbatim,
+    and no ``idx + 1`` arithmetic exists anywhere."""
     live = round_result is None
     candidates = buffer.candidates
     round_num = buffer.round_num
@@ -165,19 +146,8 @@ def build_l1_score_block(
 
 
 def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> dict[str, Any]:
-    """Round-wide PoBB telemetry: leader probability, posterior-width, top-5.
-
-    ``posterior_width = 1 - max(p_best)`` — distance the leader has
-    from certainty. Width near 0 = leader confirmed; width near 1 =
-    flat posterior, more samples needed before elimination is safe.
-    Operators read this to judge whether ``elimination_n_min`` is set
-    appropriately for the dataset's per-sample variance.
-
-    ``leader_prob`` is the best standing among the round's CANDIDATES (``p_best_top``) —
-    never a max over one candidate's ``PoBBSnapshot`` dict, whose other entries are that
-    same candidate's odds against each prior, so a candidate losing badly to one prior
-    would publish a high "leader probability" drawn from its own defeat.
-    """
+    """Round-wide PoBB telemetry. ``leader_prob`` is the best standing among CANDIDATES — never a max over one snapshot's
+    dict, whose other entries are that same candidate's odds against each prior."""
     if not core.current_p_best_id:
         return {
             "current_id": "",

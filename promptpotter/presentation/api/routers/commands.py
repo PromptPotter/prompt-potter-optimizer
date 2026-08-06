@@ -1,12 +1,5 @@
-"""``POST /commands/{kind}`` — closed inbound command surface.
-
-The HTTP-side shell: parse the envelope, enforce the trust-boundary headers
-(``Idempotency-Key`` always, ``Expected-Version`` when supplied on a cycle-scoped
-command), delegate to ``CommandDispatcher``. The closed set is declared in
-``docs/specs/m12-api-openapi.yaml`` — a kind is declared there *before* its handler
-lands here. A few kinds get typed routes because they answer a domain object rather
-than ``CommandAcceptedBody``; a response shape never buys its own write path.
-"""
+"""``POST /commands/{kind}`` — the closed inbound surface; parse, enforce the trust-boundary headers, delegate. A kind is
+declared in the OpenAPI spec BEFORE its handler lands, and a response shape never buys its own write path."""
 
 from __future__ import annotations
 
@@ -120,15 +113,8 @@ def _require_slug(payload: dict[str, Any], key: str, *, max_len: int) -> str:
 
 
 def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") -> str:
-    """A dataset name under whichever key the wire gives it — ``dataset_name`` or,
-    for ``replace-dataset``, ``slug``.
-
-    Extracting the field is this function's job; deciding what a dataset name IS
-    belongs to :func:`validate_dataset_name`, which every entry point asks. A pattern
-    of its own here is a second rule that can disagree: ``POST /datasets/ingest`` mints
-    a slug straight off the filename, so an upload named ``2024-sales.csv`` produces a
-    dataset a stricter local rule then refuses to mint a campaign against.
-    """
+    """Extract a dataset name under whichever key the wire gives it. Deciding what a name IS belongs to ``validate_dataset_name``:
+    a pattern of its own here is a second rule that can disagree with the slug ingest mints off a filename."""
     raw = _require_string(payload, key, max_len=64)
     try:
         return validate_dataset_name(raw)
@@ -139,11 +125,8 @@ def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") ->
 def _optional_bounded_float(
     payload: dict[str, Any], key: str, *, lo: float, hi: float | None = None
 ) -> float | None:
-    """``payload[key]`` as a float within ``[lo, hi]``, or ``None`` when absent.
-
-    Out of range is a 422, never a silent omission: dropping the key let a run start
-    with no spend cap and no halt threshold while the client got a 202.
-    """
+    """A bounded float, or ``None`` when absent. Out of range is a 422, never a silent omission: dropping the key let a run
+    start with no spend cap and no halt threshold while the client got a 202."""
     raw = payload.get(key)
     if raw is None:
         return None
@@ -168,10 +151,8 @@ def _run_limits(payload: dict[str, Any]) -> dict[str, float]:
 
 
 def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate + project the workspace payload per the YAML schema.
-
-    The returned dict lands on the workspace-ledger ``CommandRecord``;
-    keep keys minimal + lossless so the audit trail mirrors the request."""
+    """Validate + project the workspace payload. The result lands on the ledger record, so keep the keys minimal and
+    lossless — the audit trail mirrors the request."""
     if kind == "register-backend":
         name = _require_string(payload, "name", max_len=128)
         backend_type = _require_string(payload, "backend_type", max_len=64)
@@ -265,11 +246,8 @@ def _reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
 
 
 def _origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
-    """What the applier moved in the origin, diffed against its pre-apply projection.
-
-    Recorded on the ack because the ``CommandRecord.payload`` states only what was
-    *asked* for — a ``resolve-origin`` payload names the draft and nothing else.
-    """
+    """What the applier MOVED in the origin, diffed against its pre-apply projection. Recorded on the ack because the
+    command payload states only what was ASKED for."""
     return origin_delta(before, origin_projection(_reread_draft(stores, draft_id)))
 
 
@@ -280,14 +258,8 @@ async def dispatch_draft_patch(
     patch_raw: dict[str, Any],
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """Validate a sparse draft patch, apply it through `CommandDispatcher`, return
-    the post-mutation draft wire.
-
-    The single write path behind `edit-draft-campaign`. The candidate-library routes
-    (`routers/datasets.py`) derive their patch from a multipart upload or one of the
-    draft's own columns and then ride this — an origin edit is a `CommandRecord`
-    whatever the ingress looked like.
-    """
+    """The single write path behind ``edit-draft-campaign``. The candidate-library routes derive their patch and then ride this,
+    so an origin edit is a ``CommandRecord`` whatever the ingress looked like."""
     patch = _EditDraftPatch.model_validate(patch_raw)
 
     draft = load_checkin_draft(stores, draft_id)

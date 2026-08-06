@@ -1,13 +1,5 @@
-"""``version_and_repoint`` — the data-critical *Replace* path for dataset-name collisions.
-
-An in-place overwrite would falsify every prior result: a campaign reads its dataset
-**live** by name, and measurements are stamped with that name. So the old data moves to
-an archival ``{slug}-vN`` and its dependents move with it — data, campaign pins,
-measurement stamps, each through its owning store — freeing the canonical name last. A
-``datasets/.migrations/{id}.json`` marker is written *before* any move and every step is
-idempotent, so :func:`recover_pending_replacements` finishes a half-done migration; the
-version → repoint order makes the only reachable crash state recoverable, never *wrong*.
-"""
+"""The data-critical *Replace* path. An in-place overwrite would falsify every prior result — a campaign reads its dataset LIVE
+by name — so the old data moves to ``{slug}-vN`` with its dependents, freeing the canonical name LAST, marker written first."""
 
 from __future__ import annotations
 
@@ -35,11 +27,8 @@ class ReplaceResult:
 
 
 class NothingToReplaceError(Exception):
-    """Replace was asked for a slug with no committed tenant dataset behind it.
-
-    The collision card only offers Replace when the name is taken, so this is a
-    race / stale-client guard (the dataset was removed between the 409 and the
-    click), surfaced as a clean 409 rather than a half-run migration."""
+    """Replace was asked for a slug with no committed dataset behind it — a race / stale-client guard, surfaced as a
+    clean 409 rather than a half-run migration."""
 
     def __init__(self, slug: str) -> None:
         self.slug = slug
@@ -68,12 +57,8 @@ def version_and_repoint(*, stores: Stores, slug: str) -> ReplaceResult:
 
 
 def recover_pending_replacements(*, stores: Stores) -> None:
-    """Re-run any migration whose marker is still ``pending`` (a prior crash).
-
-    Idempotent — each step skips work already done, so a fully-completed-but-
-    unflipped marker re-applies as a no-op before being marked done. Cheap when
-    there's nothing pending (one scan of a usually-absent ``.migrations/`` dir).
-    """
+    """Re-run any migration whose marker is still ``pending``. Idempotent — each step skips work already done, so a
+    completed-but-unflipped marker re-applies as a no-op before being marked done."""
     mig_dir = stores.tenant_datasets.migrations_dir()
     if not mig_dir.is_dir():
         return
@@ -90,7 +75,6 @@ def recover_pending_replacements(*, stores: Stores) -> None:
 
 
 def _apply(stores: Stores, *, slug: str, versioned: str) -> ReplaceResult:
-    """The three idempotent moves — data, then pins, then measurements."""
     stores.tenant_datasets.version_dataset(slug, versioned)
     repointed = stores.campaigns.repoint_dataset(slug, versioned)
     restamped = stores.archive.restamp_dataset(slug, versioned)

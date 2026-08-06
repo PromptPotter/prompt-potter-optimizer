@@ -1,17 +1,5 @@
-"""Origins — the runnable starting points the operator reuses.
-
-An *origin* is a content identity (resolved origin prompt + pipeline config),
-distinct from a campaign (a run of an origin) and from a dataset (raw material).
-This list is what the webapp "Reuse an origin" picker shows. Today it derives
-**campaign-backed** origins: every distinct origin that ≥1 active campaign
-references, deduped by ``Campaign.root_content_hash``. Prepared origins (a ready
-dataset config with no campaign yet — potter-run / edited config) are unioned in
-by a later phase; the ``prepared`` flag marks them.
-
-Derived, not stored: an origin drops from the list when the last campaign using
-it is archived/deleted (the ``lifecycle="active"`` filter), so there is no
-separate origin to clean up.
-"""
+"""An *origin* is a content identity, distinct from a campaign (a run of one) and a dataset (raw material). Derived,
+not stored — an origin drops off the list when the last campaign using it is archived."""
 
 from __future__ import annotations
 
@@ -82,7 +70,6 @@ class OriginListResponse(StrictModel):
 
 
 def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
-    """Group the caller's active campaigns by origin identity → one entry each."""
     samples_by_dataset = {r.name: r.n_samples for r in list_readable_datasets(stores)}
     # Tenant-scoped (no owner_user_id filter), matching the dashboard's `/cycles`
     # surface: a CLI-minted campaign is owned by the registered-developer user_id,
@@ -123,14 +110,8 @@ def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
 
 
 def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
-    """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint
-    would stamp (``configure_and_apply_pipeline`` merge → ``build_origin_cycle_id``),
-    computed from disk without a Session. Returns the bare hash, or ``None`` if the dataset
-    can't be resolved. The node-config merge runs through the SHARED
-    ``resolve_pipeline_config_params`` — the exact definition the live setup path uses — so
-    this prospective id can never silently diverge from what a real run stamps. Steps get
-    overwritten by ``to_job_search_point`` with the schema's active_steps, so only the
-    per-node config (model included) drives the config-aware hash."""
+    """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint would stamp, computed from disk with no
+    Session. The merge runs through the SHARED resolver, so this prospective id cannot diverge from what a real run stamps."""
     try:
         raw = read_yaml(dataset_pipeline_path(dataset_dir))
         schema = parse_pipeline_response(raw)
@@ -155,12 +136,8 @@ def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> 
 
 
 def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntry]:
-    """Each ready tenant dataset as its CURRENT config-aware origin, shown as *prepared*
-    when that exact config has no campaign yet (its prospective origin id isn't
-    campaign-backed). So an edited-but-unrun config (a model swap, a potter-run prep)
-    surfaces as a distinct prepared origin beside the dataset's older campaign-origins, and
-    folds into campaign-backed once run. Only the operator's own (``tier="yours"``) datasets
-    — a benchmark stub is not a prepared origin to run."""
+    """Each ready tenant dataset as its CURRENT config-aware origin, marked *prepared* when that exact config has no campaign
+    yet — so an edited-but-unrun config surfaces beside the dataset's older origins and folds in once run."""
     out: list[OriginEntry] = []
     for ref in list_readable_datasets(stores):
         if ref.tier != "yours" or ref.n_samples <= 0:
@@ -211,12 +188,8 @@ def list_origins(stores: StoresDep) -> OriginListResponse:
 
 
 def _campaign_for_origin(stores: Stores, origin_id: str) -> Campaign | None:
-    """The canonical (earliest) active campaign whose origin identity is ``origin_id``.
-
-    Mirrors :func:`_campaign_backed_origins`' grouping key (``root_content_hash``, or
-    ``campaign_id`` for a blank-hash ``checkin`` manifest). ``None`` for a *prepared*
-    origin id (no campaign yet) — those reuse the dataset-draft path, not this one.
-    """
+    """The canonical (earliest) active campaign whose origin identity is ``origin_id``, mirroring the grouping key its
+    sibling uses. ``None`` for a *prepared* origin, which reuses the dataset-draft path instead."""
     matches = [
         c
         for c in stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)

@@ -1,16 +1,5 @@
-"""Campaign + cycle identity helpers — pure, no I/O.
-
-- ``content_hash_of`` — target content hash (rendered prompt + dataset +
-  target ``pipeline_params``); the 12-hex value on ``campaign.json::root_content_hash``,
-  the root cycle dir (``cycle_<hash>``), and the archive run key.
-- ``mint_campaign_id`` — fresh random 6-hex suffix glued to the dataset name;
-  each ``new`` run mints a distinct campaign. Declaration is recorded as
-  *properties* (``root_content_hash`` + ``optimizer_prompt_hash``) for drift
-  detection on resume, not to derive the id.
-
-Dataset-scoped ``measurements/`` pools evidence across campaigns on
-the same declaration, so two fresh ``new`` calls on an unchanged declaration
-share origin scores (every sample cache-hits) but have different ``campaign_id``s."""
+"""Campaign + cycle identity — pure. Dataset-scoped ``measurements/`` pools evidence across campaigns on one
+declaration, so two ``new`` calls on an unchanged declaration share origin scores under different ids."""
 
 from __future__ import annotations
 
@@ -42,14 +31,8 @@ def mint_campaign_id(dataset_name: str) -> str:
 
 
 def mint_checkin_cycle_id() -> str:
-    """Provisional root cycle id for a check-in campaign — ``cycle_chk_{rand12_hex}``.
-
-    The origin isn't authored at first action, so there's no content hash to
-    address the root cycle by (the normal ``cycle_<hash>`` scheme). This stays the
-    permanent root id; drift detection reads ``campaign.json::root_content_hash``
-    (set at Start), not the parsed cycle id. The ``cycle_chk_`` prefix carries no
-    sibling separator, so ``sibling_kind`` reads it as ``root`` and ``root_cycle_id``
-    returns it whole."""
+    """Provisional root cycle id for a check-in — the origin isn't authored yet, so there is no content hash to address
+    it by. This stays the PERMANENT root id; the ``cycle_chk_`` prefix carries no separator, so it reads as ``root``."""
     return f"cycle_chk_{secrets.token_hex(6)}"
 
 
@@ -59,19 +42,8 @@ def build_origin_cycle_id(
     dataset: list[Sample],
     base_pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """Cycle ID for an origin ``OptSearchPoint`` — the OSP → JSP projection ceremony.
-
-    Config-AWARE: callers pass the overlay-merged ``session.pipeline_params`` (which
-    carries the connector ``model``/config) as ``base_pipeline_params``, so the cycle id
-    reflects the connector config and AGREES with the measurement key (``content_hash``
-    over the same merged params). A connector-config edit (e.g. model 120B→20B) therefore
-    yields a DISTINCT origin. Falls back to the sparse ``to_pipeline_params()`` only when
-    no merged params are in scope.
-
-    The schema is REQUIRED — it had a third fallback rung (``{}``) below that one, and
-    this function's output is the ORIGIN CYCLE ID. Two callers reaching it with the
-    schema in different states stamped two different ids for a single origin, which is
-    the one value that must not depend on who is asking."""
+    """Origin cycle id — config-AWARE, so it agrees with the measurement key and a connector-config edit yields a
+    DISTINCT origin. The schema is REQUIRED: two callers holding it differently stamped two ids for one origin."""
     base_pp = (
         base_pipeline_params if base_pipeline_params is not None else schema.to_pipeline_params()
     )

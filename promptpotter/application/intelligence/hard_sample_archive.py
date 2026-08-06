@@ -53,7 +53,6 @@ def _run_cells(
     run_id: str,
     sig: tuple[int, int] | None,
 ) -> tuple[tuple[int, float], ...]:
-    """This run's ``(sample_id, response)`` pairs, re-derived only when its detail changed."""
     if sig is None:
         return ()
     key = (str(stores.archive.base_dir), run_id)
@@ -80,21 +79,8 @@ def build_archive_observations(
     dataset_name: str | None,
     origin_sp_hash: str | None = None,
 ) -> list[Observation]:
-    """Walk the measurement store → ``Observation(prompt_fields_id, sample_id, response)`` triples.
-
-    ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
-
-    **The candidate is the searchpoint, not the run.** ``prompt_fields_id`` (= ``sp_hash``) is
-    prompt-inclusive and dataset-independent; ``content_hash`` folds in the sample subset, so
-    keying on it would turn one prompt re-scored against N round subsets into N "candidates",
-    each weighting its samples again in δ.
-
-    ``origin_sp_hash`` renames that candidate to ``ORIGIN_ABILITY_ID`` so the archive's copy of
-    the origin and the caller's own ``origin_obs`` are one candidate with one θ, not two.
-
-    Grade A only, always — one substrate, by construction: the δ that decides which candidates
-    PoBB kills and the δ the operator reads off the heatmap are the same grade-A scale.
-    """
+    """Measurement store → ``Observation`` triples. **The candidate is the SEARCHPOINT, not the run** — keying on
+    ``content_hash`` turns one prompt re-scored on N subsets into N candidates. Grade A only, by construction."""
     obs: list[Observation] = []
     sigs = archive_views.run_signatures(stores)
     entries = archive_views.list_runs(stores, dataset_name=dataset_name)
@@ -121,7 +107,6 @@ def build_archive_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
 ) -> dict[str, Any]:
-    """Per-dataset hard-samples artifact fit on every archive measurement (``cycle_id=None``)."""
     return build_hard_samples_artifact_from_observations(
         build_archive_observations(
             stores,

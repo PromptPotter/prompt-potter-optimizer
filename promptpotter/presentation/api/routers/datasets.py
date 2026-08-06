@@ -1,5 +1,3 @@
-"""Dataset preview router — hard-sample leaderboard for the New-Job view."""
-
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
@@ -120,13 +118,8 @@ def _too_large(observed: int | str) -> ContentTooLargeError:
 
 
 async def _read_capped(request: Request, upload: UploadFile, cap: int) -> bytes:
-    """Read ``upload`` into memory, aborting with 413 the moment it exceeds ``cap``.
-
-    A buffer-then-check (``await upload.read()`` followed by a size test) would let
-    a multi-GB upload exhaust memory before the test fires. We fast-reject on the
-    declared ``Content-Length`` first, then stream in chunks as the real backstop
-    (the header can lie or be absent under chunked transfer-encoding).
-    """
+    """Read ``upload`` into memory, aborting with 413 the moment it exceeds ``cap``. Fast-reject on
+    the declared ``Content-Length``, then stream in chunks — the header can lie or be absent."""
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > cap:
         raise _too_large(declared)
@@ -296,16 +289,8 @@ def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
 def _load_dataset_rows(
     stores: Stores, name: str
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
-    """Resolve *name*'s rows; normalise sample-id keys to int.
-
-    Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
-    normalise at the read boundary. The name is already access-checked by
-    :func:`readable_dataset_dir`, so MISSING rows are not an unknown dataset — they are a
-    resolvable one with no materialised sample bank (a pipeline-only / L4 self-optimizing dataset
-    such as ``promptpotter-self``, which reports ``n_samples: 0`` in the list). Return an
-    empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
-    than a 404 that reads as "unknown slug" and spams the webapp console every load.
-    """
+    """Resolve *name*'s rows, normalising the sample-id key at the read boundary. Missing rows are
+    not an unknown dataset but a bank-less one, so this answers an honest empty 200, not a 404."""
     raw = readable_dataset_rows(stores, name)
     if raw is None:
         return {"name": name, "items": []}, {}
@@ -322,16 +307,8 @@ def _artifact_scope_store(
     cycle_id: str | None,
     descend: str | None,
 ) -> tuple[Any, str | None, str | None]:
-    """Store + ids the scope artifact lives in — the caller's own tree, or an L4 sandbox.
-
-    A plain per-cycle/campaign read stays in the caller's ``store``. When
-    ``?descend=`` is present the viewed leaf is an L4 inner cycle whose
-    hard-samples + measurement archive live in the off-registry
-    ``.inner/<outer cycle>`` sandbox, so walk there via :func:`resolve_cycle_path`
-    (the same seam the dashboard + event-stream readers ride) and read every scope
-    from the leaf store. Descend walks from the ROOT hop, so both root ids are
-    required alongside it.
-    """
+    """Store + ids the scope artifact lives in. With ``?descend=`` the viewed leaf is an L4 inner
+    cycle in an off-registry sandbox, so the walk starts at the ROOT hop and both ids are required."""
     if not descend:
         return stores, campaign_id, cycle_id
     if not campaign_id or not cycle_id:
@@ -617,12 +594,8 @@ class MeasurementSeriesResponse(StrictModel):
 
 
 def _sample_series(sample_id: int, dots: list[dict[str, Any]]) -> SampleSeries:
-    """One sample's dots plus the aggregates over exactly those dots.
-
-    Aggregating here rather than at the reader is what makes `n_hits` / `mean_fitness`
-    answer for the series they ship with: every scope builds its dots from a different
-    source, so a second pass anywhere else would be counting a different set.
-    """
+    """One sample's dots plus the aggregates over exactly those dots. Every scope builds its dots
+    from a different source, so a second pass anywhere else would be counting a different set."""
     fitness = [float(d["fitness"]) for d in dots]
     return SampleSeries(
         sample_id=sample_id,

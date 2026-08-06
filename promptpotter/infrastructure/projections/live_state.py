@@ -1,9 +1,5 @@
-"""LiveStateCore + spend bookkeeping — shared accumulators for live subscribers.
-
-``LiveDisplay`` and ``LiveDashboardView`` both subscribe to the same ledger;
-the overlap (round number, origin/best anchors, PoBB snapshot) lives here.
-Spend has one owner and it is not this module: ``LiveDashboardView`` prices
-each ``TokenUsageRecord`` as it lands, off that record's own model."""
+"""Shared accumulators for the two live subscribers. Spend has ONE owner and it is not this module — the dashboard
+prices each ``TokenUsageRecord`` as it lands, off that record's own model."""
 
 from __future__ import annotations
 
@@ -37,14 +33,8 @@ class LiveStateCore:
 
 
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> None:
-    """Update *core* from a ``PhaseEvent``. Origin set once on ``INIT:exit`` and
-    never re-anchored (immutable campaign origin). Leader (``best_acc``) advances
-    on improved ``L1_SCORE:exit``.
-
-    ``view`` is the typed view object the producer built — ``InitExitView`` on
-    ``INIT:exit``, ``RoundCompleteView`` on ``L1_SCORE:exit`` (``from_phase_event``
-    binds each phase to its view type). Read by attribute so this projection stays
-    agnostic to the view classes without importing them upward."""
+    """Update *core* from a ``PhaseEvent``. Origin is set once at ``INIT:exit`` and never re-anchored. ``view`` is read by
+    ATTRIBUTE, so this projection stays agnostic to the view classes without importing them upward."""
     if event.round is not None:
         core.round_num = event.round
     if view is None:
@@ -77,12 +67,8 @@ def apply_p_best_update(
 
 
 def roll_p_best_at_round_complete(core: LiveStateCore) -> None:
-    """Clear the round's readings at round-end so the next round starts blank.
-
-    Candidate ids are round-scoped, so carrying a previous round's map forward could only
-    ever compare a candidate against a stranger — which is what the ``last_p_best`` field
-    this replaces did, silently, since no id ever matched across the boundary.
-    """
+    """Clear the round's readings at round-end. Candidate ids are ROUND-SCOPED, so carrying the map forward could only ever
+    compare a candidate against a stranger — which is what the field this replaces did, silently."""
     core.round_p_best = {}
     core.round_p_best_prev = {}
     core.current_p_best_id = ""
@@ -90,11 +76,6 @@ def roll_p_best_at_round_complete(core: LiveStateCore) -> None:
 
 
 def top_n_p_best(standings: dict[str, float], n: int = 5) -> list[tuple[str, float]]:
-    """Top-*n* ``(candidate_id, p_best)`` descending, over a CANDIDATE→standing map.
-
-    Every key must be a candidate's own P(best) — never one candidate's ``PoBBSnapshot``
-    dict, whose non-current keys are *P(current beats that prior)*: the "leaderboard" would
-    rank one real candidate against numbers describing that same candidate, filed under its
-    opponents' ids.
-    """
+    """Top-*n* over a CANDIDATE→standing map. Every key must be a candidate's own P(best) — never one snapshot's dict, whose
+    non-current keys are *P(current beats that prior)*, filed under its opponents' ids."""
     return sorted(standings.items(), key=lambda kv: -kv[1])[:n]

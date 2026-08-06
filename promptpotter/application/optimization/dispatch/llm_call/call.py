@@ -1,11 +1,5 @@
-"""The optimizer LLM call itself — ``llm_call`` + ``run_optimizer_node``.
-
-``llm_call`` is the chokepoint: every optimizer prompt call goes through it for
-429-retry, the wall-clock deadline, the in-flight heartbeat, token-usage
-emit, the audit-trail ledger record, and the cross-cycle response cache.
-``run_optimizer_node`` is the template → compile → call → parse wrapper the
-L1/L2/L3 sites use.
-"""
+"""The optimizer LLM call itself. ``llm_call`` is the chokepoint every optimizer prompt call goes
+through for 429-retry, the wall-clock deadline, the heartbeat, token emit, the ledger, the cache."""
 
 from __future__ import annotations
 
@@ -62,16 +56,8 @@ __all__ = ["LLMCallContext", "llm_call", "run_optimizer_node"]
 
 @dataclass(frozen=True)
 class LLMCallContext:
-    """Audit + cache context for one optimizer LLM call.
-
-    Bundles the four kwargs that always travel together across
-    ``llm_call`` and ``run_optimizer_node``: the ledger that receives
-    start/progress/end records, the round/candidate identity those records
-    carry, and the cross-cycle response cache. Defaults to all-``None`` for
-    callers that need no audit trail; note ``llm_call`` consults and writes
-    ``cache`` only when it is not ``None``, so an omitted cache silently
-    re-spends on every call.
-    """
+    """Audit + cache context for one optimizer LLM call — the four kwargs that always travel
+    together. ``cache`` is consulted only when non-``None``, so omitting it silently re-spends."""
 
     ledger: CycleEventLog | None = None
     round_num: int | None = None
@@ -106,27 +92,8 @@ async def _chat_under_deadline(
     node_label: str,
     **chat_kwargs: Any,
 ) -> LLMResponse:
-    """Run one optimizer chat call under a total wall-clock deadline.
-
-    The provider SDK's ``timeout`` is a per-read-gap timeout, not a total
-    one: a reasoning model streaming a large output slowly never trips it
-    and the call can hang indefinitely (a live ``l1_generate`` sat 315s+
-    with no response). :func:`asyncio.timeout` is the hard wall-clock
-    bound the SDK's timeout is not.
-
-    A first timeout is treated as transient (provider hiccup) and the call
-    is retried once; a second raises :class:`TimeoutError` to the caller.
-    :func:`run_round_loop` turns that into ``StopReason.OPTIMIZER_TIMEOUT``
-    — a graceful, operator-recoverable halt.
-
-    **The retry lands on the ledger.** It doubles this call's wall budget, and
-    under L4 that time is spent against the OUTER per-sample wall — so a retry
-    only the server log knows about is a state nothing downstream can read.
-
-    The wall budget is the per-round-trip ceiling times the worst-case
-    round-trip count, because one ``chat()`` may include a schema-repair
-    retry (a second full call); see ``_MAX_ROUND_TRIPS_PER_CALL``.
-    """
+    """The provider SDK's ``timeout`` is a per-read-gap bound, so a slowly streaming reasoning model
+    never trips it; this is the wall clock. A first timeout retries, and that retry hits the ledger."""
     budget_s = OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL
     for attempt in range(2):
         try:
@@ -158,13 +125,8 @@ async def _chat_under_deadline(
 
 
 def _ledger_response_payload(response: LLMResponse) -> Any:
-    """Materialize ``response.parsed`` into a JSON-safe shape for the ledger.
-
-    Typed Pydantic instances dump cleanly; raw dicts pass through; ``None``
-    (text-mode call) falls back to the raw content string. The prior
-    ``json.loads(response.content)`` re-parse is unnecessary now that
-    ``chat()`` populates ``parsed`` itself.
-    """
+    """Materialize ``response.parsed`` into a JSON-safe shape for the ledger — typed instances dump,
+    raw dicts pass through, and a text-mode call falls back to the raw content string."""
     if response.parsed is None:
         return response.content
     if isinstance(response.parsed, BaseModel):
@@ -183,32 +145,8 @@ async def llm_call(
     context: LLMCallContext | None = None,
     **overrides: Any,
 ) -> LLMResponse:
-    """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
-
-    ``provider`` and ``model`` resolve from the optimizer node's config (sourced
-    from ``promptpotter/assets/optimizer/pipeline.yaml`` via ``node``) like every other
-    tunable — the client is built here from ``merged["provider"]``, not passed in.
-
-    *response_model* defaults to ``OPTIMIZER_RESPONSE_MODELS[node]`` when a
-    *node* is supplied — every optimizer node has a Pydantic model, so
-    callers get a typed ``response.parsed`` for free. Pass *response_schema*
-    to override the wire JSON Schema (used by ``l1_generate`` whose schema
-    is built dynamically per backend ``PipelineSchema``); the parsed
-    content is still validated against *response_model* for type-level
-    guarantee on the Python side.
-
-    *context* bundles the four call-audit kwargs (ledger, round, candidate,
-    cache). When ``context.cache`` is set, the resolved ``(messages, model,
-    temperature, response_model, response_schema, provider)`` tuple is
-    hashed and looked up before firing the LLM; a hit replays the stored
-    ``LLMResponse`` (and emits an ``LLMCallRecord`` with ``cached: true``)
-    instead of calling the provider. When ``context.ledger`` is set, an
-    :class:`LLMCallRecord` is appended after each successful call or cache
-    hit — the audit-trail projection picks it up via ``on_record`` and
-    shapes it into the round's ``nodes.<node>`` block. Callers MUST pass
-    the ledger via ``context``; the direct ``recorder.add_action`` write
-    path is gone.
-    """
+    """LLM call with config-driven defaults; precedence ``_LLM_DEFAULTS < config < overrides``, and
+    ``provider``/``model`` resolve from the node's config, so the client is built here, not passed."""
     if context is None:
         context = LLMCallContext()
     if config is None:
@@ -499,43 +437,8 @@ async def run_optimizer_node(
     context: LLMCallContext | None = None,
     template: PromptTemplate | None = None,
 ) -> tuple[Any, str, int]:
-    """Load prompt template, compile, call LLM → (parsed_result, prompt_text, repair_attempts).
-
-    Provider, model, and the default temperature come from the node's config in
-    ``promptpotter/assets/optimizer/pipeline.yaml`` (resolved inside :func:`llm_call`).
-    Pass *temperature* only to override that default — the L1 generator does, with
-    its escalation-driven creativity; every other node defers to the file.
-
-    The response model is looked up by ``template_name`` in
-    :data:`OPTIMIZER_RESPONSE_MODELS`; the typed Pydantic instance lands on
-    ``LLMResponse.parsed`` and is returned to the caller as the first
-    element of the tuple. Callers that need a dict shape (the
-    audit-trail) call ``.model_dump()`` themselves.
-
-    The third element is ``response.schema_repair_attempts`` — non-zero ⇒ the
-    provider's first response failed schema validation and a full repair
-    round-trip was paid (~2x cost + latency; see ``openai_compat.py``). The
-    loop sites record it via the ledger payload and discard the return value;
-    the non-ledger ``checkin`` resolver reads it live to surface a degraded
-    turn to the operator (``origin_resolve.py``).
-
-    When *template* is provided, it overrides the load-from-name path (used
-    by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt
-    body by writing ``template_override`` on its OSP). The trace metadata
-    still records ``template_name`` so observability stays continuous.
-
-    When *response_schema* is supplied, it overrides the wire JSON Schema
-    derived from the response model — used by ``l1_generate`` whose
-    schema is built dynamically per backend ``PipelineSchema``.
-
-    *response_model* overrides the ``OPTIMIZER_RESPONSE_MODELS`` lookup. ``l1_generate``
-    passes one when a field RENAME is in force: the wire schema advertises the new keys and
-    the model aliases them back (``build_l1_response_model``). Both derive from
-    ``effective_l1_field_names``, so the two can never disagree.
-
-    *context* bundles the audit/cache kwargs (ledger, round, candidate,
-    cache); forwarded verbatim to :func:`llm_call`.
-    """
+    """Load prompt template, compile, call → ``(parsed, prompt_text, repair_attempts)``. A non-zero
+    third element means a full schema-repair round-trip was paid — roughly twice the cost."""
     if template is None:
         template = load_optimizer_prompt(template_name)
     prompt = template.compile_prompt(**prompt_vars)

@@ -1,21 +1,5 @@
-"""Tabular blob → ``Table`` → ``list[Sample]`` for the chat-first ingest path.
-
-Two stages, deliberately split (per ``docs/specs/roadmap.md``):
-
-* :func:`read_tabular` decodes + parses an uploaded blob into a header-agnostic
-  :class:`Table` (headers + raw rows). It does **not** require any particular
-  column names — column identity is the origin-resolution job, gated at mint,
-  not at upload. Dispatches on ``fmt`` (derived from the filename by
-  :func:`format_from_filename`): CSV, TSV, JSON, JSONL, and XLSX (first sheet).
-* :func:`materialize_samples` turns a :class:`Table` into ``Sample`` rows once
-  the input/target column mapping is confirmed. Run only at commit time.
-
-The reason this isn't tucked into ``loaders.py``: the HuggingFace loaders own
-the install-global benchmark download path; this module owns the
-operator-uploaded blob path. Different trust boundary (untrusted file content
-vs. signed HF datasets), different failure shape (``IngestError`` returns a
-structured reason for the 422 wire response).
-"""
+"""Tabular blob → ``Table`` → ``list[Sample]`` for the operator-uploaded ingest path. The
+HuggingFace loaders own the signed-download path; this one owns untrusted file content."""
 
 from __future__ import annotations
 
@@ -43,19 +27,8 @@ _JSON_RECORD_KEYS = ("data", "rows", "items", "records", "examples")
 
 
 class IngestError(PayloadInvalidError):
-    """Structured parse / shape failure — 422 through the one wire seam.
-
-    ``reason`` is a stable code declared in
-    ``docs/specs/m12-api-openapi.yaml::ErrorEnvelope`` (``ingest_failed``
-    detail): ``bad_csv`` | ``bad_json`` | ``empty`` | ``too_large`` |
-    ``missing_column`` | ``unsupported_format`` | ``hardened_blocked``.
-
-    A :class:`PayloadInvalidError`, like ``LaunchError`` beside it, so the central
-    ``PotterError`` handler maps it with no per-route arm. It was a plain
-    ``Exception``, and the five routers that could raise it each rebuilt the same
-    ``code``/``details`` by hand — five copies of one mapping, free to drift.
-    A route that needs MORE context adds to ``details`` and re-raises.
-    """
+    """``reason`` is a stable code declared in ``m12-api-openapi.yaml::ErrorEnvelope``. A
+    :class:`PayloadInvalidError`, so the central ``PotterError`` handler maps it with no arm."""
 
     code = "ingest_failed"
 
@@ -66,12 +39,8 @@ class IngestError(PayloadInvalidError):
 
 @dataclass(frozen=True, slots=True)
 class Table:
-    """A parsed tabular upload, header-agnostic.
-
-    ``rows`` carry every column keyed by its header; no column has been
-    interpreted as input or target yet. Whitespace-only cells are kept as-is
-    (the column mapping decides which cells matter).
-    """
+    """Header-agnostic: no column has been read as input or target yet, and whitespace-only
+    cells are kept as-is."""
 
     headers: tuple[str, ...]
     rows: tuple[dict[str, str], ...]
@@ -83,12 +52,8 @@ SUPPORTED_FORMATS_HINT = "Drop a CSV, TSV, JSON, JSONL, or Excel (.xlsx) file."
 
 
 def format_from_filename(filename: str) -> str:
-    """Map an upload filename to a parse format. A recognised extension →
-    its format; ``.txt`` / blank / no extension → ``"csv"`` (best-effort text
-    parse so an extensionless CSV still reads); any other extension (``.png``,
-    ``.pdf``, …) → ``"unknown"`` so :func:`read_tabular` rejects it with a
-    friendly "unsupported file type" message rather than a UTF-8 decode error.
-    Recognised: ``csv`` | ``tsv`` | ``json`` | ``jsonl`` | ``xlsx``."""
+    """An unrecognised extension maps to ``"unknown"`` so :func:`read_tabular` refuses it with
+    a file-type message instead of a UTF-8 decode error."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext in ("csv", "txt", ""):
         return "csv"
@@ -104,16 +69,8 @@ def format_from_filename(filename: str) -> str:
 
 
 def read_tabular(blob: bytes, *, fmt: str = "csv") -> Table:
-    """Decode + parse an uploaded blob into a :class:`Table`; raise on shape failure.
-
-    Header-agnostic: any column names are accepted; the origin check-in reads the
-    columns + sample rows and proposes the input/target mapping. Dispatches on
-    ``fmt`` (see :func:`format_from_filename`). UTF-8 with BOM tolerated (Excel
-    CSV exports often ship one). Rows where every cell is blank are dropped.
-    Raises :class:`IngestError` on an unsupported type, undecodable bytes,
-    unparseable content, a missing header row, >:data:`MAX_SAMPLES` rows, or
-    zero data rows.
-    """
+    """Header-agnostic — column identity is the origin check-in's job, gated at mint, not here.
+    UTF-8 with BOM tolerated (Excel CSV exports ship one)."""
     if fmt == "xlsx":
         return _read_xlsx(blob)
     if fmt in ("csv", "tsv"):
@@ -129,11 +86,6 @@ def read_tabular(blob: bytes, *, fmt: str = "csv") -> Table:
 
 
 def _decode(blob: bytes) -> str:
-    """UTF-8 (BOM-tolerant) decode for text formats; structured error otherwise.
-
-    A decode failure means the bytes aren't UTF-8 text — almost always a binary
-    file given a text extension — so the message points back at supported types
-    rather than leaking the raw codec error."""
     try:
         return blob.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -175,10 +127,6 @@ def _read_delimited(text: str, delimiter: str) -> Table:
 
 
 def _read_json_records(text: str) -> Table:
-    """Parse a JSON document into a :class:`Table`, permissively. Accepts a
-    top-level list of objects, an object wrapping a list under a known key
-    (``data``/``rows``/``items``/``records``/``examples``), or an
-    object-of-columns (every value an equal-length list → transposed)."""
     try:
         doc: Any = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -210,7 +158,6 @@ def _records_from_json(doc: Any) -> list[dict[str, Any]]:
 
 
 def _read_jsonl(text: str) -> Table:
-    """Parse JSONL/NDJSON (one JSON object per non-blank line) into a :class:`Table`."""
     records: list[dict[str, Any]] = []
     for ordinal, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
@@ -228,9 +175,6 @@ def _read_jsonl(text: str) -> Table:
 
 
 def _records_to_table(records: list[dict[str, Any]]) -> Table:
-    """Flatten record dicts into a header-agnostic :class:`Table`. Headers are the
-    first-seen-ordered union of keys; cells are stringified (``json.dumps`` for
-    nested dict/list, ``""`` for ``None``). Blank rows dropped, cap enforced."""
     headers: list[str] = []
     seen: set[str] = set()
     rows: list[dict[str, str]] = []
@@ -260,8 +204,6 @@ def _records_to_table(records: list[dict[str, Any]]) -> Table:
 
 
 def _stringify_cell(value: Any) -> str:
-    """Coerce one JSON cell value to a string: nested dict/list → compact JSON,
-    ``None`` → ``""``, scalars → ``str``."""
     if value is None:
         return ""
     if isinstance(value, (dict, list)):
@@ -270,12 +212,8 @@ def _stringify_cell(value: Any) -> str:
 
 
 def _read_xlsx(blob: bytes) -> Table:
-    """Parse the first sheet of an ``.xlsx`` workbook into a :class:`Table`.
-
-    Gated by ``settings.HARDENED_MODE`` — Excel is a macro / zip-bomb / XXE
-    vector, so a hardened deployment rejects it rather than parses. ``openpyxl``
-    runs ``read_only`` (streams large sheets) + ``data_only`` (cached values,
-    not formulas) and never executes VBA."""
+    """Gated by ``settings.HARDENED_MODE`` — Excel is a macro / zip-bomb / XXE vector, so a
+    hardened deployment refuses rather than parses it."""
     from promptpotter.config.settings import settings
 
     if settings.HARDENED_MODE:
@@ -308,14 +246,8 @@ def _read_xlsx(blob: bytes) -> Table:
 
 
 def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) -> list[Sample]:
-    """Project a :class:`Table` into ``Sample`` rows using a confirmed column mapping.
-
-    Both ``query_col`` and ``ground_truth_col`` must be members of
-    ``table.headers`` (raises ``missing_column`` otherwise — the origin gate
-    should have caught this, so this is a belt-and-suspenders guard). Each row
-    contributes one ``Sample`` with a positional ``id``; a row missing either
-    mapped cell is a ``bad_csv`` failure naming its data-row ordinal.
-    """
+    """Belt-and-suspenders: the origin gate should already have rejected a column that is not a
+    member of ``table.headers``."""
     for label, col in (("query", query_col), ("ground_truth", ground_truth_col)):
         if col not in table.headers:
             raise IngestError(
@@ -341,9 +273,8 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
 
 
 def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
-    """Strip, drop blanks + the TermNorm ``--`` placeholder, dedup to first
-    occurrence (order-preserving). The shared shape of a candidate library however
-    it's sourced — a dropped file or a dataset column — so the two never diverge."""
+    """The shared shape of a candidate library however it is sourced — a dropped file or a
+    dataset column — so the two never diverge."""
     seen: dict[str, None] = {}
     for value in values:
         term = value.strip()
@@ -353,21 +284,8 @@ def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
 
 
 def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
-    """Parse a dropped candidate-library file into the flat target list.
-
-    Two shapes, split on extension (matching the dependency hint "one entry per
-    line, or a single-column CSV/Excel"): a ``.txt`` / extensionless file is read
-    line-by-line (no header assumption — every non-blank line is a target); any
-    tabular format reuses :func:`read_tabular` and takes the **first column**,
-    dropping its header. Blanks and the TermNorm ``--`` placeholder are skipped;
-    order is preserved and duplicates collapse to first occurrence (so the index
-    stays stable). Raises :class:`IngestError` on an unparseable tabular blob.
-
-    Entries that themselves contain commas (e.g. ``"Steel, low-alloyed, ... U"``)
-    are safe via ``.txt`` (one per line) or ``.xlsx`` (cells read verbatim), and via
-    CSV only when the source quotes them (valid CSV). An UNQUOTED-comma ``.csv``
-    splits mid-entry — so the operator-facing hint steers comma-laden lists to
-    per-line ``.txt`` / Excel, not raw CSV."""
+    """An UNQUOTED-comma ``.csv`` splits mid-entry, which is why the operator-facing hint steers
+    comma-laden lists to per-line ``.txt`` or Excel rather than raw CSV."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext in ("txt", ""):
         return _dedup_terms(_decode(blob).splitlines())
@@ -376,15 +294,8 @@ def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
 
 
 def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
-    """Read the candidate library committed alongside an origin (``candidate_library.txt``).
-
-    The single file-read seam for the per-pipeline origin's target list — the
-    runtime term-index union (``initialization/wiring.py``) and the reopen draft
-    (``ingest.draft_from_dataset`` via :class:`AuthoredDataset`) both read it
-    through here, so the parse (one entry per line) and normalization
-    (:func:`_dedup_terms`: strip, drop blanks + the ``--`` placeholder, dedup)
-    match however the library was sourced. Absent file → ``()`` (no dependency
-    was dropped; the pool is the answers alone — degenerate but runnable)."""
+    """The single file-read seam, so the runtime term-index union and the reopened draft parse
+    identically. Absent file → ``()``: the pool is the answers alone, degenerate but runnable."""
     path = dataset_config_dir / CANDIDATE_LIBRARY_FILE
     if not path.is_file():
         return ()
@@ -392,13 +303,8 @@ def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
 
 
 def candidate_library_from_rows(rows: Iterable[dict[str, Any]], column: str) -> tuple[str, ...]:
-    """Build a candidate library from the distinct values of ``column`` across a
-    dataset's own rows — the "build from dataset" source.
-
-    The unified alternative to a file drop: when the targets already live in the
-    data (the ground-truth/target column, the union of the dataset's category
-    sheets), the library is derived rather than re-uploaded. Same dedup shape as
-    :func:`parse_candidate_library`."""
+    """The alternative to a file drop when the targets already live in the data. Same dedup
+    shape as :func:`parse_candidate_library`."""
     return _dedup_terms(str(row.get(column, "")) for row in rows)
 
 
@@ -411,19 +317,8 @@ enumerating verbatim into the origin prompt."""
 def closed_label_set(
     values: Iterable[str], *, n_rows: int, max_enum: int = MAX_ENUMERATED_LABELS
 ) -> tuple[str, ...] | None:
-    """Distinct target-column values when the column reads as a CLOSED label set.
-
-    Returns the sorted distinct non-empty values when the column looks like a
-    fixed classification taxonomy (``2 <= distinct <= max_enum`` *and*
-    ``distinct <= n_rows // 2`` — so a free-text or numeric column, where
-    ``distinct ≈ n_rows``, reads as open-ended). Returns ``None`` for an
-    open-ended column: there's no small fixed answer space to enumerate.
-
-    The single cardinality gate is the closed-vs-open detector — a classifier's
-    gold column (e.g. ``{financial, actionable, informational, other}`` over 32
-    rows) returns its four labels; GSM8K's numeric answers (``distinct ≈ n``)
-    return ``None``. No scorer special-casing needed.
-    """
+    """``None`` for an open-ended column — there is no small fixed answer space to enumerate.
+    The single cardinality gate is the closed-vs-open detector; no scorer special-casing."""
     distinct = sorted({v.strip() for v in values if v and v.strip()})
     if not 2 <= len(distinct) <= max_enum:
         return None

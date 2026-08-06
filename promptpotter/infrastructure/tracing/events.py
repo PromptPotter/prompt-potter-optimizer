@@ -1,13 +1,5 @@
-"""Event schema for the observability bridge.
-
-Two families:
-- :class:`OptimizationEvent` — Topology A: one Langfuse trace per campaign,
-  rounds + nodes nest underneath. Emitted inline by the loop.
-- :class:`MeasurementEvent` — Topology B: one trace per query, linked to
-  dataset items. Emitted by the backfill replayer over ``measurements/``.
-
-Each event is self-contained; sinks own the id mappings.
-"""
+"""Two families: ``OptimizationEvent`` (one trace per campaign, emitted inline by the loop) and ``MeasurementEvent`` (one trace per query,
+emitted by the backfill replayer). Each event is self-contained; sinks own the id mappings."""
 
 from __future__ import annotations
 
@@ -25,21 +17,15 @@ def generate_observation_id() -> str:
 
 
 def dataset_item_id(dataset_name: str, query: str) -> str:
-    """Content-addressed Langfuse item id for a ``(dataset, query)`` pair.
-
-    The file sink and the cloud bridge both key items by this id; it MUST be
-    byte-identical across them or the two register mismatched ids for the same
-    pair — so it lives here, not duplicated at each sink.
-    """
+    """Content-addressed Langfuse item id for a ``(dataset, query)`` pair. It MUST be byte-identical across the file sink
+    and the cloud bridge, or the two register mismatched ids for one pair — hence it lives here, not at each sink."""
     return hashlib.sha256(f"{dataset_name}:{query}".encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetRegistered:
-    """Dataset items registered in file store and (optionally) Langfuse.
-
-    The cloud-side ``query → item_id`` mapping is shared between both topologies.
-    """
+    """Dataset items registered in the file store and, optionally, Langfuse. The cloud-side query → item id mapping is
+    shared between both topologies."""
 
     dataset_name: str
     items: tuple[tuple[str, str], ...]
@@ -65,10 +51,7 @@ class RoundStart:
 
 @dataclass(frozen=True, slots=True)
 class NodeStart:
-    """Open a node observation under the active round.
-
-    Producers pass identity; sinks resolve trace + parent observation by id.
-    """
+    """Open a node observation under the active round. Producers pass identity; sinks resolve trace + parent by id."""
 
     campaign_id: str
     round_num: int
@@ -96,8 +79,6 @@ class NodeEnd:
 
 @dataclass(frozen=True, slots=True)
 class CandidateCreated:
-    """An L1-proposed candidate was registered for this round."""
-
     campaign_id: str
     round_num: int
     candidate_idx: int
@@ -106,8 +87,6 @@ class CandidateCreated:
 
 @dataclass(frozen=True, slots=True)
 class CandidateScored:
-    """A candidate finished its full scoring loop (report built)."""
-
     campaign_id: str
     round_num: int
     candidate_idx: int
@@ -116,8 +95,6 @@ class CandidateScored:
 
 @dataclass(frozen=True, slots=True)
 class RoundWinnerChosen:
-    """Round winner picked from scored candidates."""
-
     campaign_id: str
     round_num: int
     winner_candidate_id: str
@@ -127,8 +104,6 @@ class RoundWinnerChosen:
 
 @dataclass(frozen=True, slots=True)
 class L1CritiqueWritten:
-    """L1 critique text produced after scoring (inline in ``_score_and_select``)."""
-
     campaign_id: str
     round_num: int
     l1_critique_text: str
@@ -136,8 +111,6 @@ class L1CritiqueWritten:
 
 @dataclass(frozen=True, slots=True)
 class LayerApplied:
-    """L2 (``refine_strategy``) or L3 (``modify_plan``) transition applied to the loop state."""
-
     layer: Literal["L2", "L3"]
     campaign_id: str
     round_num: int
@@ -146,8 +119,6 @@ class LayerApplied:
 
 @dataclass(frozen=True, slots=True)
 class PromptVersion:
-    """A new optimizer prompt was materialized for the active round."""
-
     campaign_id: str
     round_num: int
     prompt_fields_id: str
@@ -158,11 +129,8 @@ class PromptVersion:
 
 @dataclass(frozen=True, slots=True)
 class DatasetRun:
-    """Target-layer scoring report (one SearchPoint), nested under the optimizer round span.
-
-    Layer-boundary event: target data, optimizer-layer parent — Topology A
-    entangles them so the campaign trace shows which scoring run each round used.
-    """
+    """Target-layer scoring report, nested under the optimizer round span — a layer-boundary event with target data and an
+    optimizer-layer parent, so the campaign trace shows which scoring run each round used."""
 
     campaign_id: str
     round_num: int
@@ -221,10 +189,7 @@ OptimizationEvent = Union[
 
 @dataclass(frozen=True, slots=True)
 class QueryNodeSpan:
-    """One pipeline node's I/O during a measurement; child of a ``QueryScore*`` pair.
-
-    ``as_type`` is the pipeline schema's ``langfuse_type`` for the node.
-    """
+    """One pipeline node's I/O during a measurement. ``as_type`` is the pipeline schema's declared type for that node."""
 
     run_id: str
     query: str

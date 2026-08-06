@@ -1,16 +1,5 @@
-"""`DispatchHub` façade + ``build_bundle`` + load-time template validation.
-
-* `build_bundle` — snapshot live ``Cycle`` state into a frozen ``InjectionBundle``.
-* `fill` — fill a node's layout (`NODE_LAYOUTS[node]` floor, or L2-authored for `l1_generate`)
-  and resolve any injection tokens left in non-layout prose → `(filled_template, injection_vars)`.
-  One path for every optimizer node (was two: `fill_l1` for L1 + `fill_fixed` for the rest).
-
-`validate_template` raises at load time on typos so they don't silently render to empty.
-
-``bundle.py`` stays ``Cycle``-free (frozen types only — renderer tests
-construct bundles directly); the ``Cycle`` knot lives here in the
-``build_bundle`` snapshot path.
-"""
+"""`DispatchHub` façade + ``build_bundle`` + load-time template validation. ``bundle.py`` stays
+``Cycle``-free, so the ``Cycle`` knot lives here in the snapshot path."""
 
 from __future__ import annotations
 
@@ -51,11 +40,8 @@ _SECTION_SEP = "\n\n"
 
 
 def _truncate_to_cap(text: str, cap: int) -> tuple[str, int]:
-    """Section-aware truncation for an over-budget injection. Renderers join sections with
-    ``\\n\\n`` highest-priority first, so dropping whole sections from the TAIL keeps the head
-    and never slices mid-section; a ``[…N section(s) dropped]`` marker records what was cut.
-    A lone section still over cap is hard-sliced as the last resort. Returns
-    ``(truncated_text, sections_dropped)``."""
+    """Section-aware truncation for an over-budget injection: renderers join sections highest-priority
+    first, so whole sections drop from the TAIL and nothing is sliced mid-section."""
     sections = text.split(_SECTION_SEP)
     for keep in range(len(sections) - 1, 0, -1):
         dropped = len(sections) - keep
@@ -100,8 +86,6 @@ def validate_template(name: str, template: PromptTemplate) -> None:
 
 
 class DispatchHub:
-    """Static façade around INJECTIONS — pure, stateless."""
-
     @staticmethod
     def render(name: str, bundle: InjectionBundle) -> str:
         """Render one injection with ``char_cap`` enforcement. Overruns truncate + warn;
@@ -149,30 +133,8 @@ class DispatchHub:
         layout: L1Layout,
         bundle: InjectionBundle,
     ) -> tuple[PromptTemplate, dict[str, str], dict[str, str]]:
-        """Fill a node's layout + resolve any injection tokens left in non-layout slots.
-
-        Two rendering channels, one call — every optimizer node routes through here:
-
-        1. **Layout slots** (``L1_LAYOUT_SLOTS``): append the ``layout``-driven injection
-           content to each slot's static text (empty static ⇒ the joined content *is*
-           the slot). This is the searchable information-flow axis.
-        2. **Non-layout slots** (``instruction`` / ``answer_format``): scan the filled body
-           and render any remaining ``INJECTIONS`` token into a kwargs dict for
-           ``compile_prompt``. The base manifest embeds no such tokens anymore (the capability
-           directives ride layout); this is the safety net for an override SET whose prose
-           still embeds one — without it the token would render literally. Tokens not in
-           ``INJECTIONS`` (caller extras like ``n_variants``; a backend's own ``{{query}}``
-           echoed inside ``rendered_prompt``) are left for the caller / backend.
-
-        Returns ``(filled_template, injection_vars, rendered)``; the caller merges its own
-        extras onto ``injection_vars`` and passes both to ``run_optimizer_node``. ``rendered``
-        is each layout placeholder's text — **what the node was actually shown**, which is a
-        different set from what its layout NAMES: a panel with nothing to say renders empty
-        and is dropped from the slot. `l1_generate` derives its citation menu from this, so
-        it cannot offer a name whose panel is blank; rendering here rather than re-rendering
-        at the menu keeps one render per panel per round (a second pass would re-emit any
-        `injection_budget_overrun` wound).
-        """
+        """Fill a node's layout, then resolve any injection token left in non-layout prose — two
+        channels, one call. ``rendered`` is what the node was actually SHOWN, which is the smaller set."""
         rendered = {name: DispatchHub.render(name, bundle) for name in layout.all_placeholders()}
 
         update: dict[str, str] = {}
@@ -195,13 +157,8 @@ class DispatchHub:
 
 @contextlib.contextmanager
 def _no_round_warnings() -> Iterator[None]:
-    """Unbind the cycle ledger for the duration — a probe render must not emit.
-
-    ``DispatchHub.render`` raises an ``injection_budget_overrun`` warning onto the ledger
-    when a panel outgrows its cap. That is right when the render is the one the LLM sees
-    and wrong when it is a fingerprint probe: the operator would read a fresh warning about
-    a truncation that happened rounds ago, once per probed round per pass.
-    """
+    """Unbind the cycle ledger for the duration — a probe render must not emit. Otherwise the
+    operator reads a fresh overrun warning about a truncation that happened rounds ago."""
     token = set_cycle_ledger(None)
     try:
         yield
@@ -210,27 +167,8 @@ def _no_round_warnings() -> Iterator[None]:
 
 
 def node_packages(bundle: InjectionBundle) -> dict[str, str]:
-    """Fingerprint the information package EVERY optimizer node would be handed from *bundle*.
-
-    One hash per node over what :meth:`DispatchHub.fill` produces — the filled template body
-    plus the injections it resolved. That is the package: what the node reads to decide with,
-    minus the caller's own extras (``n_variants``, the citation menu), which are config rather
-    than evidence about the round.
-
-    **Node-agnostic by construction.** It walks :data:`NODE_LAYOUTS`, so a node is covered the
-    moment it is registered and nothing here names one. Which layout applies is asked of the
-    node's declared ``editor`` — L1's rides the L2-authored ``opt_sp.memory.l1_layout``, every
-    other node's resolves through the L4 override channel — the same split
-    :func:`resolve_node_layout` enforces. ``checkin`` runs around the loop rather than through
-    the injection path, so it is absent from the registry and from this walk.
-
-    **Compare two of these, never one against a stored value.** An absolute fingerprint cannot
-    be reproduced in a later process: the AxisIndex digest behind ``axis_memory`` and the
-    escalation fold behind ``escalation_panel`` are not reconstructible to a past round, so a
-    re-render always differs somewhere and every resume would read as drift. Build both from
-    ONE cycle with only the round content changed between them and all of that cancels exactly,
-    leaving the difference that was actually asked about.
-    """
+    """Fingerprint the information package every optimizer node would be handed. **Compare two of
+    these, never one against a stored value** — an absolute fingerprint cannot be reproduced later."""
     out: dict[str, str] = {}
     with _no_round_warnings():
         for node, spec in NODE_LAYOUTS.items():

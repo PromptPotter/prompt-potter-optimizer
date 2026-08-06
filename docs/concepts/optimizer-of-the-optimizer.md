@@ -27,7 +27,25 @@ Each outer "sample" runs an inner PromptPotter cycle on proxy benchmarks.
 **Still under exploration is the tuning of the measure (fitness) that quantifies the performance of the inner rounds.** A rudimentary measure could be improvements per searchpoint collected, or something derived from lift × quality × efficiency + the candidate-gradient law.
 
 We are currently working with `mean_round_delta`, because for the inner campaign we use seeds and do not evolve the inner optimization prompts in the current setting; once the setting no longer needs that hack for statistics, I want to retire it.
-- **`mean_round_delta`** — the MEAN, over the inner rounds, of the incumbent each round ADOPTED, minus the origin, in LOGITS on one ability ruler. Reading the round's *proposals* instead priced exploration as damage and inverted the whole metric — see `exploration.adopted_level_trajectory`. **Its definition, its bound and why it needs no denominator are the type's, not this doc's — read `domain/l4/proxies.py`.**
+- **`mean_round_delta`** — the MEAN, over the inner rounds, of the incumbent each round ADOPTED, minus the origin, in LOGITS on one ability ruler (`exploration.py::adopted_level_trajectory` builds the series). The field's `±4` rail is a plausibility bound, not a structural one, and says so at `domain/l4/proxies.py::OuterSampleProxies`.
+
+**Why the ADOPTED incumbent, and not the round's proposals.** A round's value to the search is
+what it *crowns*; the arms it discards are the price of finding that. Averaging proposals prices
+exploration as damage — for any mutation operator with mass below the parent (all of them, which
+is why selection exists) `E[mean θ] < θ_parent`, so the mean reads negative for an exploring
+generator and ≈0 for an inert one, exactly backwards. The adopted level is not free of selection
+either; what bounds it is dilution — the frontier re-fit pools the winner's electing rows with
+carried rows it did not select — and the residual is measured rather than assumed, because every
+level carries its own `θ_se`. That SE is what lets the outer panel separate estimation noise from
+between-cell heterogeneity instead of reading both off the spread of six scalars.
+
+**What carries a level forward, and what never floors it.** A round whose frontier could not be
+fit carries the PRIOR level — the incumbent persists; nothing says it moved — falling back to the
+origin at round 1. Levels are **not** floored at the origin, so a regressing optimizer prompt
+still reads negative, which is the gradient the outer optimizer needs. A COLD ruler is not a level
+at all: where the bank is cold every sample sits at δ=0, θ collapses to that round's
+logit-accuracy and stops being subset-invariant, so the cycle is EXCLUDED (`no_evidence_reason`)
+rather than measured on a scale that moved underneath it.
 
 **Why the mean and not the last step.** Measured on the 39 banked cells of
 `promptpotter-self__af6252`, refitting `fd[arm,seed] = μ + α + β + ε` under each read: the
@@ -61,6 +79,21 @@ incumbent, so a peak the inner search later walked away from scores as nothing �
 panel that is 17 of 39 cells, mean gap +0.052. It is a one-line derivation, and it is out because
 it changes the ESTIMAND: under a pure peak ruler the origin loses. That is a decision to take on
 measurement, not in passing.
+
+**Two denominators it deliberately does not have.** The mean is taken over the round BUDGET,
+holding the last adopted level forward across rounds the cycle never reached (`held_levels`).
+Dividing by the series length instead makes the denominator a per-cell quantity, so a cell
+stopped at round 2 and one that ran four are two different estimands — and because `lives` stops
+a *stalling* cycle, the short series is exactly the one that lifted early and then went quiet: it
+would be divided by its own brake. Separately, there is no DIFFICULTY denominator. Every level is
+an ability θ in logits on the cycle's own fixed δ ruler, so a difference of two levels already
+sits on one interval scale and is comparable across seeds of different origin strength; per-cell
+difficulty is modelled where it belongs, in the round-winner election and PoBB, which fit an
+explicit per-cell δ.
+
+**Deliberately not added: `rounds_to_N`, or a target.** Counting rounds-to-a-threshold asserts up
+front how much room the inner benchmark has. A task the inner model looks bad at is one it has
+not been tuned for yet, not one with no headroom.
 
 Acceptance is empirical: the composed fitness must hold `proxy_lift_corr ≥ 0.6` — a term that
 degrades it is cut, not kept for tidiness.

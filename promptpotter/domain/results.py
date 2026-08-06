@@ -1,5 +1,3 @@
-"""Round and run outcome models — pure pydantic types, no I/O."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -63,10 +61,8 @@ __all__ = [
 
 
 class EliminationContext(TypedDict, total=False):
-    """PoBB exit context on a ``ScoredCandidate`` — written by ``decode_signal_effect``
-    when the elimination check fires. Empty ``{}`` when the candidate wasn't cut.
-    ``leader_label`` is decorated post-construction (needs prior-rank lookup), so the
-    whole shape is ``total=False``. Disjoint from :class:`DegradationContext`."""
+    """Written by ``decode_signal_effect`` when the elimination check fires; empty when the
+    candidate was not cut. Disjoint from :class:`DegradationContext`."""
 
     p_best: float
     epsilon: float
@@ -79,9 +75,8 @@ class EliminationContext(TypedDict, total=False):
 
 
 class DegradationContext(TypedDict, total=False):
-    """DegradationCheck / scoring-error-abort exit context on a ``ScoredCandidate``.
-    Empty ``{}`` when the candidate wasn't degradation-cut. Disjoint from
-    :class:`EliminationContext` — the renderer branches on which is non-empty."""
+    """Empty when the candidate was not degradation-cut. Disjoint from
+    :class:`EliminationContext` — the renderer branches on which of the two is non-empty."""
 
     degraded_rate: float
     degraded_count: int
@@ -93,10 +88,8 @@ class DegradationContext(TypedDict, total=False):
 
 
 class CritiqueReadout(TypedDict, total=False):
-    """Serialized ``L1CritiqueOutput`` as it rides ``RoundResult.critique`` and the
-    dispatch ``RoundDigest``. Domain-local mirror of the three load-bearing fields so
-    a round file round-trips without the optimization layer's schema in scope; the
-    optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
+    """A domain-local mirror, so a round file round-trips without the optimization layer's
+    schema in scope; the optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
 
     priority_fix: str
     suggested_axes: list[str]
@@ -104,7 +97,7 @@ class CritiqueReadout(TypedDict, total=False):
 
 
 def candidate_label(round_num: int, idx: int) -> str:
-    """Canonical candidate label — `C0` for origin, `C{N}.{idx+1}` otherwise. Sole writer."""
+    """Sole writer of the label — every surface reads this rather than re-deriving the format."""
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
@@ -113,25 +106,8 @@ def candidate_label(round_num: int, idx: int) -> str:
 def best_round_by_measured_accuracy(
     rounds: list[dict[str, Any]],
 ) -> tuple[float, int | None]:
-    """Highest round ``accuracy`` across ``rounds`` → ``(accuracy, round)``.
-    Ties keep the earliest round (``max`` returns the first). Empty ⇒ ``(0.0, None)``.
-
-    Every round's ``accuracy`` is ONE configuration measured on the samples that round drew
-    — the elected winner's, or on a held round the retained incumbent's re-score
-    (``rescore_parent``). So the headline is always a number something actually scored, and
-    the round's ``total`` states what it was scored over.
-
-    This replaced an argmax over ``cumulative_accuracy``, a sample-keyed union of rows
-    measured by DIFFERENT configurations. That published ``57%→78%`` for a cycle whose best
-    candidate ever measured 0.679, and crowned a round whose two candidates scored 0.0 and
-    0.481. See :func:`merge_known_outcomes`.
-
-    Sole definition of the headline-best derivation — the cycle index (`_apply_best`) and
-    the resume/fork trajectory rebuild (`resolve_resume_state`) both call this so
-    ``index.json::best_accuracy`` and ``dashboard.json::best`` agree by construction rather
-    than by two hand-copied ``max`` folds. NOT the winner export (that argmaxes
-    ``composite_fitness`` — the optimizer's objective); this is the formula-independent
-    accuracy operators recognize. See ``architecture.md`` §0.5."""
+    """Sole definition of the headline-best derivation, so the cycle index and the resume rebuild
+    agree by construction. NOT the winner export, which argmaxes ``composite_fitness`` — §0.5."""
     # `or 0.0` would rank a round that never recorded an accuracy alongside one that
     # genuinely scored 0% — and could crown it. A round with no number doesn't back the headline.
     scored = [r for r in rounds if r.get("accuracy") is not None]
@@ -142,31 +118,14 @@ def best_round_by_measured_accuracy(
 
 
 def is_round_winner(candidate_id: str, winner_id: str) -> bool:
-    """The round winner is the candidate the election ELECTED — matched by identity.
-
-    Sole definition of the rule; the round-file scoreboard (`RoundResult.scoreboard`), the
-    dashboard round summary (`build_round_summary`) and the terminal readout all call this,
-    so the operator-visible winner flag can't diverge between surfaces.
-
-    Prose is not an identity: `changes_description` can be EMPTY (the label falls back to
-    `lineage.id[:12]`) and IDENTICAL across candidates (`detect_invariants` dedups on the
-    mutation SIGNATURE, not the prose).
-
-    The elected id is already on disk in two places — the `ROUND_WINNER` decision record and
-    `RoundResult.prompt_fields["lineage"]["id"]`. Ask it; don't re-derive it from prose."""
+    """Matched by IDENTITY, never prose: ``changes_description`` can be empty, and can repeat
+    across candidates. The elected id is already on disk twice — ask it, never re-derive it."""
     return bool(winner_id) and candidate_id == winner_id
 
 
 class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
-
-    ``model_dump()`` *is* the wire format; ``model_validate()`` reads it back.
-
-    There is no ``hits`` and no Wilson interval. ``accuracy`` IS mean fitness, so on a
-    binary scorer ``hits/total`` was exactly that number a second time, and on a graded
-    one it counted an unreachable ceiling. The interval that belongs beside a composite
-    is ``composite_ci_lo``/``_hi``, which brackets the quantity actually reported.
-    """
+    ``model_dump()`` IS the wire format; ``accuracy`` IS mean fitness, so there is no ``hits``."""
 
     # `extra="ignore"`: round files written before `hits`/`ci_lo`/`ci_hi` were dropped
     # still carry them, and a stale key must not make a paid measurement unreadable.
@@ -231,119 +190,36 @@ class ScoredCandidate(StrictModel):
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    """Eligibility for round-leader election — a **validity** predicate, never a ranking one.
-
-    Disqualifies exactly the two shapes whose measurement cannot be trusted: (a)
-    escalation-aborted-without-PoBB (mid-run failure outside measured comparison) and (b)
-    degradation/scoring_error_abort (partial subset accuracy can fake-inflate above origin).
-
-    **A stop is not a disqualification.** A PoBB stop — ε, futility, lock-in — is a BUDGET
-    decision: "more samples will not change the answer". It says nothing about whether the
-    candidate is the round's best, and the election is the thing that answers that, on θ over
-    the fixed ruler with ``coverage_floor`` guarding thin arms. Conflating the two cost a real
-    round: a candidate stopped at 19/28 carried a genuine +0.099 θ lift over origin and was the
-    best thing measured, but its stop wrote ``p_best: 0.0`` (a placeholder the gate never
-    computed) and this predicate read that as "PoBB says it lost". Every candidate in the round
-    stopped the same way, so the round crowned nobody — silently, with `improved=False` and no
-    reason recorded.
-
-    **Validity is not admissibility.** This asks only whether the measurement can be trusted;
-    whether the round can READ the arm is :func:`is_electable`, which adds the two clauses that
-    need the arm's rows. Reach for this one only where the rows are not in hand.
-
-    Lives beside the model it judges, not in the L1 scoring module: it is a pure predicate
-    over recorded facts, and every reader of a recorded round needs it — the live election,
-    the mask read-model, the lineage backprop. Filed under the loop, it dragged the whole
-    optimization package into any module that merely wanted to read a candidate's fate.
-    """
+    """A VALIDITY predicate, never a ranking one — a PoBB stop is a budget decision and
+    disqualifies nothing. Whether the round can READ the arm is :func:`is_electable`."""
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
     return not cs.degradation_context
 
 
 def is_electable(cs: ScoredCandidate, rows: Sequence[Mapping[str, object]]) -> bool:
-    """Whether this arm is one the round can READ — the election's own admission rule.
-
-    Three clauses, and every reader needs all three: the arm is leader-eligible (its
-    measurement is valid at all — :func:`is_leader_eligible`), it was measured in this round
-    (``rows``; an arm absent from ``all_candidate_results`` has nothing to read), and it did not
-    answer one label to everything (:func:`~promptpotter.domain.scoring.is_answer_collapsed` —
-    a constant answerer carries no measurement of ability, so its score is an artifact of the
-    drawn subset).
-
-    Named because the concept had two spellings that silently disagreed. The election filtered
-    on all three inline; the outer verdict filtered on ``is_leader_eligible`` alone, so a
-    collapsed arm whose artifact score topped the round was reachable by the verdict's ``max``
-    in a round whose ``electable_count`` excluded it — the verdict scored an arm the round had
-    refused to crown. `winner.py` already stated the rule this encodes: such an arm "stops being
-    a thing the election, the ruler, or the outer proxy can read". The outer proxy is the
-    verdict, so it reads it here.
-
-    A round's ``electable_count`` is the count of this predicate over its candidates.
-    """
+    """The election's admission rule, and the outer verdict must use it too: filtering on
+    :func:`is_leader_eligible` alone lets a collapsed arm top a round that refused to crown it."""
     return is_leader_eligible(cs) and bool(rows) and not is_answer_collapsed(rows)
 
 
 def round_document_digest(rr: RoundResult) -> str:
-    """12-hex digest of a round AS PERSISTED — what a later generation consumed from it.
-
-    The WHOLE document, never a chosen subset. Anything a round records can reach the next
-    round's package, and a digest that names fields is a list somebody forgets to extend the
-    day a field starts mattering. It answers one question — "is a generation that read this
-    round still vouched for?" — so over-firing costs one regeneration while under-firing
-    carries a stale generation forward in silence, and those are not comparable prices.
-    """
+    """The WHOLE document, never a chosen subset — anything a round records can reach the next
+    round's package. Over-firing costs a regeneration; under-firing goes stale in silence."""
     return stable_hash(rr.model_dump(mode="json"))[:12]
 
 
 def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
-    """Cells this candidate ATTEMPTED that came back carrying no measurement.
-
-    A **hole**, and the sibling of :func:`is_leader_eligible`: that one asks whether a
-    candidate's measurement can be trusted, this one asks whether the round measured what
-    it set out to. Detection rides the typed ``error_category`` channel
-    (:func:`is_error_result`) — the single owner of "this sample errored".
-
-    Two near-misses are deliberately NOT holes, and both were counted as one by the
-    obvious arithmetic (``scored_samples - total``), which is why that is not the rule:
-
-    * A **PoBB stop** is a budget decision — "more samples will not change the answer".
-      Those cells were never attempted, so there is nothing missing; the candidate is
-      fine and its short panel is the mechanism working.
-    * A **deprecated** row (``pobb/classification.py::is_deprecated``) is a sample the
-      classifier marked fatal — an empty completion, an infra truncation. It carries no
-      ``error_category``, the loop has a designed response to it, and it is already
-      excluded from ``total``. One such row exists on disk (an inner round whose cell hit
-      ``content_empty`` and retried), and the arithmetic form would have read that healthy
-      cycle as holed and halted it.
-
-    What remains is the real thing: the loop spent on a cell and got nothing back, so two
-    candidates in one round were compared on different cell sets.
-    """
+    """A hole is a cell ATTEMPTED that came back empty, read off the typed ``error_category`` —
+    never ``scored_samples - total``, which counts a PoBB stop and a deprecated row as holes."""
     return sum(1 for r in results if is_error_result(r))
 
 
 def merge_known_outcomes(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
-
-    **This pool is not a score, and must never be scored.** Its rows are measured by
-    DIFFERENT configurations — round N's winner on the samples it ran, whatever ran them
-    last everywhere else — so an accuracy over it belongs to no individual. It exists to
-    decide what to measure NEXT (PoBB seeding, resume's election floor, replay parity),
-    which is a question the pool's mixed provenance does not spoil.
-
-    Scoring it is what published ``57%→78%`` on a cycle whose best candidate ever measured
-    0.679: the round-7 number was 12 rows from round 6's config glued to 28 from round 7's,
-    and because the round subset is the CONTESTED one, the carried rows are the easy tail
-    the previous config scored 12/12 on. Every configuration inherits its predecessor's
-    perfect easy-tail score, so a mutation that regresses there is invisible.
-
-    Pure and here rather than beside the loop that folds it most, because the read side
-    folds it too: replay and the mask record both rebuild this pool from disk, and reaching
-    into ``optimization/cycle`` for it would pull the whole loop into a read path.
-    """
+    """This pool is NOT a score and must never be scored: its rows are measured by DIFFERENT
+    configurations, so an accuracy over it belongs to no individual. It decides what runs next."""
     by_sid: dict[Any, dict[str, Any]] = {
         r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
     }
@@ -396,12 +272,8 @@ class ScoreboardRow(StrictModel):
 
 
 class CandidateProposal(StrictModel):
-    """LLM-proposed candidate — OSP + the two override deltas, persisted across generate→score for resume replay.
-
-    Both deltas ride here, not just the merged result: the OSP carries the *resulting*
-    prompt fields (parent's, plus whatever L1 changed), which cannot answer "what did L1
-    actually propose this round" — the question `prompt_block_catalogue="restrict"` asks.
-    """
+    """Both deltas ride here, not just the merged result — the OSP carries the RESULTING prompt
+    fields, which cannot answer what L1 actually proposed this round."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -411,15 +283,8 @@ class CandidateProposal(StrictModel):
 
 
 class RoundParent(StrictModel):
-    """The individual this round's candidates were mutated from, scored over the samples they
-    touched so every paired diff is matched. It is the origin only at round 0; after that it is
-    the prior winner. On probe rounds it reflects the probe subset, not the full set.
-
-    Its measurement is a `ScoredCandidate` like any other individual's — same shape, same
-    single builder, straight from the scoring gateway. It carried loose `accuracy` /
-    `composite_fitness` / `evaluators` / `label` copies instead, which is what let a
-    re-score drop the evaluator namespace with nothing to notice.
-    """
+    """The origin only at round 0; the prior winner after it. Its measurement is a
+    ``ScoredCandidate`` from the scoring gateway, so a re-score cannot drop the evaluators."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -448,54 +313,7 @@ L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
 
 class RoundResult(StrictModel):
     """Per-round outcome — and the round document itself.
-
-    ``model_dump()`` IS ``rounds/round_NNNN.json``; ``model_validate()`` reads it back.
-    There is no second, hand-mirrored payload dict: a new field here reaches disk, the
-    `GET /rounds/{n}` route, and every reader by declaring it, not by being copied into
-    a builder that can forget it.
-
-    Three field groups: checkpoint-critical scalars (the resume/diff surface), the raw
-    payload (per-candidate detail for replay, audit, full rendering), and the fields
-    stamped as the round closes. `diagnostics`/`critique`/`health` are computed
-    post-scoring; read by dispatch's `diagnostics`/`critique` signals and rendered by
-    every health surface.
-
-    Three fields ARE derivable yet deliberately stored, each for a different reason:
-
-    * `candidates_scored` == the `candidate_scores` rows that were measured
-      (`candidate_id in all_candidate_results`) and stayed leader-eligible — exact at all
-      three construction sites. `model_config` here is `extra="ignore"`, so every caller
-      still passing `candidates_scored=` would keep working **silently** while the value
-      changed underneath: on a lax model, promoting a field to `@computed_field` is a
-      quiet semantic change, not a mechanical one. One int does not buy that.
-    * `degraded_samples` == `sum(has_pipeline_warnings(r) for r in self.results)`, and
-      `shared/` is importable from here, so the derivation is cheap. It is kept because
-      it would not be a pure refactor: round 0 never passes the field, so deriving it
-      would start reporting a nonzero origin degradation count where the document has
-      always carried 0. That is probably a FIX, and it belongs in a change that says so
-      and is measured — not bundled into a simplification pass.
-    * `deprecated` is derivable only via `is_deprecated`, which lives in
-      `application/optimization/pobb/` — domain cannot import it. Structurally blocked.
-
-    And one genuine duplication that MUST NOT be collapsed — the reason is worth keeping
-    because the change looks obviously correct until you follow it. `results` is the
-    winner's rows, which also ride `all_candidate_results[winner_id]`, so a winning round
-    stores that payload twice; the tempting fix is to derive `results` from
-    `all_candidate_results[winner_id]` and, for the no-winner case (where `results`
-    carries the retained *incumbent's* rows and the incumbent is not a candidate), write
-    the incumbent in under its own lineage id.
-
-    That would silently corrupt the difficulty ruler. `exploration.build_observations`
-    — the Rasch fit's input — flattens `all_candidate_results` across EVERY round into
-    `(candidate_id, sample_id, response)` triples with no round filter and no dedup at
-    that seam. A retained incumbent keeps its lineage id across consecutive no-winner
-    rounds, so a lineage retained for k rounds would contribute each of its observations
-    k+1 times to a fit whose entire purpose is subset-invariance. The rows in the
-    no-winner case were also measured in a DIFFERENT round, so the key would assert a
-    measurement that did not happen here. `results` stays: it is a round-local headline
-    payload, and `all_candidate_results` means "measured in this round", which is a
-    property several cross-round readers depend on without restating it.
-    """
+    ``model_dump()`` IS ``rounds/round_NNNN.json`` — declare a field here and it reaches disk."""
 
     # `extra="ignore"`: `round_id`/`scoreboard` are computed fields — `model_dump()` writes
     # them into the round file, `model_validate()` must not reject them coming back.
@@ -617,16 +435,8 @@ class RoundResult(StrictModel):
 
     @property
     def l1_collapsed(self) -> dict[str, int]:
-        """Candidates rejected before they could cost a backend call, keyed by reason.
-
-        DERIVED from ``candidate_scores``, never stored: a collapsed candidate is not
-        dropped, it rides ``candidate_scores`` with ``invalid=True`` and its
-        ``validation_failures``, which is where ``invalid_reason`` and the display filter
-        already read it from.
-
-        One reason per candidate — a variant that trips several invariants collapsed once and
-        must be counted once, or the parts would sum past the population.
-        """
+        """DERIVED from ``candidate_scores``: a collapsed candidate rides it with ``invalid=True``,
+        never dropped. One reason per candidate, or the parts would sum past the population."""
         counts: dict[str, int] = {}
         for cand in self.candidate_scores:
             if not cand.invalid:
@@ -683,31 +493,15 @@ class RoundResult(StrictModel):
 
     @property
     def winner_id(self) -> str:
-        """The elected winner's lineage id, read off the id `l1/score/winner.py` stamped
-        onto ``prompt_fields`` when it built this round (round 0 stamps the origin's own).
-        Empty only when no candidate was crowned — and then no row is a winner, which is
-        the honest answer rather than a prose match that happens to hit."""
+        """The elected winner's lineage id, read off the id ``l1/score/winner.py`` stamped onto
+        ``prompt_fields``. Empty only when no candidate was crowned — then no row is a winner."""
         lineage = self.prompt_fields.get("lineage")
         return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
 
 
 class SpendBucket(StrictModel):
     """One spend sub-bucket (backend or optimizer-loop). Mutated only by
-    :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
-    ``dashboard.json::spend`` after the canonical-ledger collapse.
-
-    Two costs, deliberately not one. ``used_usd`` is the BILL — money that left the
-    account, so cache hits contribute nothing. ``incurred_usd`` is what this search
-    would cost to run cold, cache hits priced from the tokens they recorded. The bill
-    is the headline and the budget gate; the incurred cost is what a *measurement* of a
-    candidate has to divide by, because it must not depend on what we already happen to
-    have in the cache. They coincide exactly on a cold cache — which is why this was
-    invisible until an L4 arm replayed a prior run and read as free.
-
-    Lives in ``domain`` rather than beside the dashboard schema it is served in because
-    ``CycleResult`` carries a rollup of these, and a second flat re-declaration of the
-    same six fields one layer down is what this replaced.
-    """
+    ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
 
     used_usd: float = 0.0
     input_tokens: int = 0
@@ -733,29 +527,7 @@ class SpendBucket(StrictModel):
 
 class SpendRollup(StrictModel):
     """A cycle's spend: the two buckets, and the totals every consumer reads off them.
-
-    Serves both ``dashboard.json::spend`` (live, mutated in place by the projection) and
-    ``CycleResult.spend`` (terminal, read from the in-memory state at finalize so a
-    consumer — notably the L4 outer loop rolling an inner campaign up onto its own
-    backend-cost channel — does not race the debounced projection file).
-
-    **One shape, and the totals are properties.** A flat six-field twin used to sit at the
-    far end of that chain, hand-mapped from these buckets. Every billed field here has an
-    incurred twin that must move with it, and a half somebody forgot to map reads as a
-    ZERO rather than an error — which is indistinguishable from the honest zero a replayed
-    cycle gives. Derived totals cannot be forgotten.
-
-    Carries spend only; the armed USD ceiling lives in ``run_limits.spend_budget_usd``
-    (the single authoritative budget source every surface reads). There is no
-    ``budget_usd`` here — it was an always-null duplicate that let the RemoteBar and
-    the chat job-bar disagree.
-
-    Two costs, and picking the wrong one is a live bug class. ``total_used_usd`` and the
-    token counts are the BILL — money that left the account, what rolls up onto an outer
-    campaign and what a budget caps. ``total_incurred_usd`` is what this cycle would cost
-    against a cold cache, and it is the only honest divisor for a *measurement of the
-    search*: the caches are tenant-global, so replaying a cycle we already ran bills $0
-    while the search did the same work. On a cold cache the two are equal."""
+    ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
@@ -764,20 +536,16 @@ class SpendRollup(StrictModel):
 
     @property
     def input_tokens(self) -> int:
-        """Billed prompt tokens across both buckets."""
         return self.backend.input_tokens + self.loop.input_tokens
 
     @property
     def output_tokens(self) -> int:
-        """Billed completion tokens across both buckets."""
         return self.backend.output_tokens + self.loop.output_tokens
 
     @property
     def total_tokens_used(self) -> int:
-        """Cumulative BILLED tokens across both buckets (input + output) — the token
-        halt probe's source, mirroring ``total_used_usd`` for the USD gate. Cache hits
-        are excluded for the same reason they are excluded from the bill: a cap exists
-        to bound what the run spends, not what it would have spent."""
+        """Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits
+        are excluded: a cap bounds what the run spends, not what it would have spent."""
         return self.input_tokens + self.output_tokens
 
     @property
@@ -788,16 +556,12 @@ class SpendRollup(StrictModel):
 
     @property
     def incurred_unpriced_tokens(self) -> int:
-        """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ ``total_incurred_usd``
-        understates what the search costs, so a consumer that divides by it (the L4
-        efficiency proxy) would read cheapness that never happened and score the run
-        fitter for it. Such a cell is refused, not scored."""
+        """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ the L4 efficiency proxy would divide by
+        an understated cost and read cheapness that never happened, so such a cell is refused."""
         return self.backend.incurred_unpriced_tokens + self.loop.incurred_unpriced_tokens
 
 
 class CycleResult(StrictModel):
-    """Final result of the feedback cycling process."""
-
     rounds: list[RoundResult]
     # Completed L1 rounds only — origin-EXCLUSIVE (the origin is round 0 but is
     # not an L1 round). The persisted index.json::n_rounds counts round 0; the
@@ -939,14 +703,8 @@ class RoundSummaryCandidate(StrictModel):
 
 
 class WarningDict(TypedDict):
-    """One backend diagnostics warning as it rides ``round_file::results[].pipeline_data.diagnostics.warnings``.
-
-    ``kind`` is **source-stamped by the backend** (TermNorm's ``WarningKind`` enum —
-    ``structural`` = config/schema fault the operator must fix, ``transient`` =
-    recoverable noise). PromptPotter reads it directly and keeps NO shadow code→kind
-    taxonomy: an absent or unrecognized ``kind`` is SKIPPED, never guessed. A backend
-    site that forgets to stamp under-counts (and surfaces in the live smoke), instead
-    of silently grading a transient blip as an abort-worthy ``structural`` break."""
+    """``kind`` is source-stamped by the BACKEND and PromptPotter keeps no shadow code→kind
+    taxonomy: an absent or unrecognized ``kind`` is SKIPPED, never guessed."""
 
     step: str
     code: str
@@ -966,16 +724,7 @@ HeadlineMetric = Literal["accuracy", "composite", "ability"]
 
 class DegradationHealth(StrictModel):
     """Context-aware degradation verdict for a round (origin included), computed
-    PP-side at round close (``domain/results_health.py``) from the backend's
-    per-sample warning stamps — the single graded signal every surface renders (R-36).
-
-    ``grade`` distinguishes a structurally-broken pipeline (``critical``,
-    abort-worthy) from transient backend noise (``degraded``, keep going) from a
-    sound round (``healthy``). The SAME degradation grades differently by track
-    record: structural failures at an untested config (``prior_clean_rounds == 0``)
-    are abort-suspect, while the same isolated failure deep in a proven campaign is
-    noise. The verdict NEVER stops the run — ``suggested_action`` (set only at
-    ``critical``) is an operator-facing recommendation, surfaced read-only."""
+    PP-side at round close from the backend's warning stamps. It never stops the run."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -1023,12 +772,7 @@ class DegradationHealth(StrictModel):
 
 class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
-
-    Top-level `accuracy`/`composite_fitness` are what the round MEASURED (the winner on
-    its subset, or a held round's incumbent re-score); `cumulative_theta` is the
-    subset-invariant cross-round series the trend/sparkline plot. In-flight round rides
-    `current_round`.
-    """
+    Top-level `accuracy` is what the round MEASURED; `cumulative_theta` is the invariant series."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -1071,8 +815,6 @@ class RoundSummary(StrictModel):
 
 
 class PayloadOutcome(StrictModel):
-    """Per-payload row inside a ``SweepBatchResult``."""
-
     source_file: str
     # A ``StopOutcome`` value for attempted forks (success | paused | halted |
     # failed — the one StopReason classification, never a sweep-private
@@ -1082,8 +824,6 @@ class PayloadOutcome(StrictModel):
 
 
 class SweepBatchResult(StrictModel):
-    """Final outcome of a sweep batch — all forks attempted, persistence finalized."""
-
     batch_id: str
     parent_cycle_id: str
     family_root: str

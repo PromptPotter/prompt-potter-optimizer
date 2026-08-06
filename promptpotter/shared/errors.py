@@ -1,8 +1,3 @@
-"""Error classification and shared exception types.
-
-Leaf module — no domain model or service dependencies.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class ErrorCategory(enum.StrEnum):
-    """Categorical tags for backend scoring errors."""
-
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
@@ -26,24 +19,8 @@ class ErrorCategory(enum.StrEnum):
 
 
 class PotterError(Exception):
-    """Base for every API error — maps to ONE flat wire envelope at ONE seam.
-
-    Carries the three things the wire needs: ``http_status`` (response code),
-    ``code`` (the stable machine string), and ``details`` (optional structured
-    context); ``message`` is ``str(self)``. The single FastAPI handler in
-    ``main.py`` serializes these to the flat ``ErrorEnvelope`` declared in
-    ``docs/specs/m12-api-openapi.yaml`` — ``{"error", "message", "details"?}`` —
-    and the command-dispatcher's central catch emits a rejected ack then re-raises
-    the same instance for that handler. There is no per-class handler and no
-    ``HTTPException`` in the API layer — a convention held by review, not a lock.
-    It claimed a lock for a long time, naming an enforcement test nobody had written.
-
-    A subclass fixes the HTTP *status family* (``NotFoundError`` → 404); the
-    ``code`` is the stable category, defaulted per subclass and overridable per
-    raise site (``NotFoundError(msg, code="command_target_not_found")``) for the
-    closed codes the OpenAPI enum names. Routes that need extra context still add
-    ``details`` at the raise site.
-    """
+    """Base for every API error — ONE flat wire envelope at ONE seam, the single FastAPI handler.
+    A subclass fixes the status FAMILY; ``code`` is the stable string, overridable per raise site."""
 
     http_status: int = 500
     code: str = "internal_error"
@@ -90,16 +67,8 @@ class ConflictError(PotterError):
 
 
 class MachineBusyError(PotterError):
-    """The single sequential run slot is taken — 409.
-
-    The server admits ``MACHINE_RUN_CAPACITY`` campaigns at once (1 today —
-    ``uvicorn --workers 1``, runs in sequence). A launch while the slot is full
-    is rejected with the holder's presence record on ``details`` — the reusable
-    "who's on the machine" ledger an admin presence view consumes later. At
-    capacity 1 the holder may be the caller's *own* in-flight run, so the
-    message stays neutral; the cross-user banner (``/machine-status``, which
-    excludes self) is what names the other operator.
-    """
+    """The single sequential run slot is taken — 409, carrying the holder's presence record. At
+    capacity 1 the holder may be the caller's OWN run, so the message stays neutral."""
 
     http_status = 409
     code = "machine_busy"
@@ -146,20 +115,8 @@ class ServiceUnavailableError(PotterError):
 
 
 class StoredConfigInvalidError(PotterError):
-    """A config file the server itself persisted no longer loads — 500.
-
-    Not 400/404/422: the request was well-formed, the file exists, and the caller
-    can't fix it. The usual cause is a knob dropped from ``CampaignConfig``
-    (``extra="forbid"``) while a file written earlier still names it — so the
-    remedy is ``promptpotter restamp --apply``, which ``deploy-linux/update.sh``
-    runs on every deploy. A VERB rather than a script because this message is read by
-    an installed tenant, and ``scripts/`` ships in no wheel.
-
-    Without this class such a failure reaches the catch-all as a bare
-    ``internal_error``, and the key that broke it lives only in a traceback in
-    journald. ``path`` and ``reason`` are required because a corrupt-file error
-    that names neither is the shrug this exists to replace.
-    """
+    """A config file the server itself persisted no longer loads — 500, because the request was fine
+    and the caller cannot fix it. ``path`` and ``reason`` are required; the remedy is ``restamp``."""
 
     http_status = 500
     code = "stored_config_invalid"
@@ -172,11 +129,8 @@ class StoredConfigInvalidError(PotterError):
 
 
 class RequestTooLargeError(RuntimeError):
-    """Raised when a single LLM request exceeds the provider's per-minute token cap.
-
-    Terminal — retrying will not help. Caller (CLI/notebook) should surface the
-    message to the user without a traceback.
-    """
+    """A single LLM request exceeds the provider's per-minute token cap. Terminal — retrying will
+    not help, so the caller surfaces the message without a traceback."""
 
     def __init__(
         self,
@@ -204,17 +158,8 @@ class RequestTooLargeError(RuntimeError):
 
 
 class ResumeDivergenceError(RuntimeError):
-    """Raised when a resumed campaign diverges from the recorded trajectory.
-
-    A decision recorded in a prior round_data (round winner, elimination cut,
-    escalation trigger, …) re-derives to a different outcome under the
-    currently active scorer. The only mechanism: every recorded decision is
-    a pure function of scored results, and rescoring changes the inputs.
-
-    Rerun ``resume --fork-on-divergence`` to branch a sibling cycle from
-    this point under the new policy, or revert ``campaign.json::scoring``
-    to continue the original trajectory.
-    """
+    """A recorded decision re-derives differently under the active scorer: every decision is a pure
+    function of scored results. Branch with ``resume --fork-on-divergence``, or revert the formula."""
 
     def __init__(
         self,
@@ -244,32 +189,21 @@ class ResumeDivergenceError(RuntimeError):
 
 
 def is_error_result(result: Mapping[str, Any]) -> bool:
-    """Return True if *result* represents a failed measurement.
-
-    Detection rides the typed ``error_category`` channel — the single owner of
-    "this sample errored". ``predicted == "ERROR"`` is a display token, not a
-    detection mechanism, and ``error`` is a plain human message.
-    """
+    """Detection rides the typed ``error_category`` channel — the single owner of "this sample
+    errored". ``predicted == "ERROR"`` is a display token, and ``error`` a human message."""
     return result.get("error_category") is not None
 
 
 def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
-    """A sample carries pipeline warnings iff ``pipeline_data.diagnostics.warnings`` is non-empty.
-
-    Sibling of :func:`is_error_result` (backend failed outright). Renamed
-    from ``is_degraded`` so the name describes what it actually checks —
-    "degraded" was confusable with the backend-error sentinel.
-    """
+    """A sample carries pipeline warnings iff ``pipeline_data.diagnostics.warnings`` is non-empty —
+    the sibling of :func:`is_error_result`, where the backend failed outright."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
-    """Suppress non-interrupt exceptions with a log message.
-
-    Re-raises ``KeyboardInterrupt`` and ``asyncio.CancelledError``
-    so that graceful-shutdown logic is never swallowed.
-    """
+    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt`` and
+    ``asyncio.CancelledError`` re-raise, so graceful shutdown is never swallowed."""
     try:
         yield
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -279,11 +213,8 @@ def graceful(msg: str) -> Iterator[None]:
 
 
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
-    """Read the typed error category off a measurement (``None`` when clean).
-
-    Tolerates the on-disk round-trip form: a persisted row read back from JSON
-    carries the bare ``StrEnum`` value (a plain ``str``), coerced back here.
-    """
+    """Read the typed error category off a measurement, ``None`` when clean. Tolerates the on-disk
+    round-trip form, where a persisted row carries the bare ``StrEnum`` value as a plain ``str``."""
     cat = result.get("error_category")
     if cat is None:
         return None

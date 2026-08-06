@@ -1,13 +1,5 @@
-"""Cycle state — round-loop mutable orchestration object.
-
-**Wrong-level guardrail:** new *optimizer* state flows through ``OptSearchPoint``
-(``domain/opt_search_point.py``), never a sidecar field here. `Cycle` holds
-round-loop orchestration — the escalation FSM, the axis index, this round's
-bookkeeping — and is rebuilt per cycle. State a layer must carry ACROSS
-generations (anything L1/L2/L3 reads or writes about the individual) belongs on
-the searchpoint, which is what lineage, hashing, and resume all key on. A field
-added here instead is invisible to `derive()` and silently lost on fork.
-"""
+"""**Wrong-level guardrail:** state a layer carries ACROSS generations belongs on
+``OptSearchPoint``, never a field here — one added here is invisible to ``derive()``."""
 
 from __future__ import annotations
 
@@ -59,17 +51,8 @@ def _origin_round(
     theta: tuple[float, float] | None,
     calibration_model: CalibrationModel | None,
 ) -> RoundResult:
-    """Round 0 as an ordinary ``RoundResult`` — one candidate, C0, no rivals.
-
-    C0's row IS the report the scoring gateway produced, with the two facts only a round
-    close can add stamped on: its ability θ on the cycle's δ ruler, and — because it faced
-    nobody — a matched origin that is itself. Nothing is re-derived here; a second
-    computation of an already-measured number is how the row and the ledger came to hold
-    different answers about the same candidate.
-
-    The origin changed nothing, so it describes no change — winner identity is
-    ``candidate_id``, which both this row and the round stamp from the same lineage.
-    """
+    """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
+    add: its θ on the cycle's δ ruler, and a matched origin that is itself. Nothing re-derived."""
     prompt_fields = {**opt_sp.prompt_field_dict(), "lineage": opt_sp.lineage.model_dump()}
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
     row = report.model_copy(
@@ -117,8 +100,7 @@ def _origin_round(
 def _build_initial_opt_sp(
     resolved_origin: OptSearchPoint, task_context: TaskDecomposition
 ) -> OptSearchPoint:
-    """Seed the optimizer state from a scored origin: nest task_context + a copied
-    l1_overrides dict under ``memory`` so L2/L3 mutations don't share references."""
+    """Copies ``l1_overrides`` so later L2/L3 mutations do not share references with the origin."""
     return resolved_origin.model_copy(
         update={
             "memory": resolved_origin.memory.model_copy(
@@ -134,9 +116,8 @@ def _build_initial_opt_sp(
 def _assert_overlay_preserved(
     sp: JobSearchPoint, session_pipeline_params: dict[str, Any] | None
 ) -> None:
-    """Dataset-overlay keys must survive into ``sp.pipeline_params`` so ``content_hash``
-    flips on overlay edits and the wire adapter forwards the overlay. ``Cycle.start``
-    must pass ``session.pipeline_params`` (the merged overlay), not a sparse schema view."""
+    """``Cycle.start`` must pass the MERGED overlay, not a sparse schema view — ``content_hash``
+    flips on an overlay edit only if those keys survive into ``sp.pipeline_params``."""
     sp_pp = sp.pipeline_params or {}
     for node, cfg in node_config_items(session_pipeline_params):
         missing = set(cfg) - set(sp_pp.get(node, {}))
@@ -154,35 +135,8 @@ def _calibrate_delta_ruler(
     enable_2pl: bool,
     archive_obs: list[Observation],
 ) -> tuple[dict[int, RulerEntry], tuple[float, float] | None, CalibrationModel | None]:
-    """Calibrate the per-cycle FIXED difficulty ruler + read the origin's ``(θ, θ_se)`` on it.
-
-    The cross-round comparability anchor (slice 2 of fitness-comparability). Every
-    later θ readout in this cycle (round winners for ``c0_ok``, the stall ladder) is
-    measured against this one fixed ruler via ``fit_theta_given_delta`` — so they compare
-    on a shared scale instead of each round's own re-anchored fit. Calibrated at cycle
-    start (and, on a cold start, re-attempted per round until it warms + LOCKS —
-    ``Cycle._maybe_warm_ruler``) from the **grade-A** archive (the operator's pick: cleanest reference, same
-    de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
-    (so the origin's samples are always on the ruler). The origin rides under
-    ``ORIGIN_ABILITY_ID``, which is how the fit sees it as one arm; **θ_C0 is then read back
-    off the finished ruler by the same conditional estimator every other level uses**, never
-    off the joint fit (see the comment at the return). Cold start —
-    fewer than ``n_min`` calibrated samples (a fresh dataset's first cycle) — returns a
-    **FLAT ruler** ``{}`` (δ≡0) and the origin's θ on it (logit-accuracy), so the gates
-    still compare in θ (one ruler, θ always) rather than a separate accuracy floor.
-    ``n_min`` is ``optimization.elimination_n_min`` — the single min-samples floor that
-    also gates when PoBB acts on a candidate's θ; difficulty and ability become trustworthy
-    at the same evidence threshold (no separate ruler-only constant).
-
-    The model is chosen by ``graduate_ruler_model`` (slice 3): the bank uses 1PL until a
-    data-rich, genuinely-discriminating dataset wins held-out cross-validation, then the
-    ruler carries per-sample discrimination ``(δ, a)``. Returned as the third element so
-    the operator reads the model actually fitted; a cold ruler is **neither** 1PL nor 2PL
-    (it is flat), so it returns ``None`` rather than the name the graduation would have
-    picked had the fit been adopted. Gated by ``enable_2pl``
-    (``optimization.enable_2pl_graduation``). The switch is invisible above the
-    seam — ``ruler()`` folds δ + a into the one mapping every θ consumer already reads.
-    """
+    """The per-cycle FIXED ruler every later θ readout is measured against — slice 2 of
+    ``docs/specs/fitness-comparability.md``. Cold start returns a FLAT ruler and a ``None`` model."""
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,
         Observation,
@@ -248,16 +202,8 @@ _FRONTIER_ABILITY_ID = "_frontier"
 def _cumulative_theta(
     results: list[dict[str, Any]], delta_scale: dict[int, RulerEntry] | None
 ) -> tuple[float, float] | None:
-    """Ability ``(θ, θ_se)`` of the cumulative frontier ``results`` on the fixed ``delta_scale``.
-
-    The θ-space peer of the cumulative composite — what the stall ladder compares
-    round-over-round. One virtual candidate (the frontier) fit against the fixed δ (flat
-    where the ruler is cold), so successive rounds land on one scale even once per-round
-    subsets drift. ``None`` only when no non-error result remains to fit.
-
-    The SE comes back with it because the fit already computed it (dispersion-corrected) and
-    dropping it left every downstream consumer — the stall ladder, the L4 panel — to re-derive
-    precision from the spread of point estimates it did not have enough of."""
+    """The θ-space peer of the cumulative composite: one virtual candidate (the frontier) fit
+    against the fixed δ, so rounds land on one scale once per-round subsets drift."""
     from promptpotter.application.intelligence.exploration import (
         Observation,
         fit_theta_given_delta,
@@ -377,13 +323,8 @@ class Cycle:
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        """Construct a fresh Cycle from a scored origin.
-
-        The origin arrives ALREADY measured — ``origin_report`` is what the scoring gateway
-        returned, so nothing here recomputes its accuracy, composite or evaluator namespace.
-        Doing so was a second code path onto the same rows with the same scorer, and it fed
-        round 0's row while the ledger got the gateway's answer.
-        """
+        """``origin_report`` arrives ALREADY measured — nothing here recomputes its accuracy,
+        composite or evaluator namespace."""
         origin_accuracy = origin_report.accuracy
         opt_sp = _build_initial_opt_sp(resolved_origin, task_context)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
@@ -458,16 +399,11 @@ class Cycle:
 
     @property
     def origin_round(self) -> RoundResult:
-        """Round 0 — the origin's measurement, located like any round. Its accuracy,
-        composite, evaluators, per-sample results, θ, verdict and critique are round
-        fields; none of them is a sidecar on this object."""
         return self.rounds[0]
 
     def restamp_origin_round(self, parent: RoundParent) -> None:
-        """Replace round 0 with a fresh measurement of the same origin — the origin
-        gate's rescore. A whole round in, a whole round out: re-measuring C0 cannot
-        leave one of its fields (evaluators, the CI whisker, the verdict) reading
-        from the run before the fix. θ is carried, not re-fit: the ruler is locked."""
+        """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
+        the run before the fix. θ is carried, not re-fit: the ruler is locked."""
         assert self.tracking.current_sp is not None
         prior = self.origin_round
         carried = (
@@ -485,25 +421,8 @@ class Cycle:
         )
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
-        """Reconstruct round-loop state from persisted prior rounds (in-place).
-
-        ``EscalationFSM`` is NOT touched — caller rebuilds via ``from_ledger``.
-
-        A persisted round supersedes the same-numbered one already in memory: round 0
-        is the only one ``start`` builds, and the file it was written to is the record
-        of what actually ran (its verdict, its critique, a gate rescore). A fork whose
-        priors begin at round 1 keeps the round 0 it inherited.
-
-        **RE-RUNNABLE, and that is load-bearing.** Rounds at or after *priors*' first
-        number are REPLACED, not merged in — so replaying a shorter list (a fork's
-        survivors) drops the tail rather than leaving it standing — and the high-water
-        scalars below are re-seeded from round 0 before the walk, so a second call
-        reconstructs rather than accumulating. Both mattered the moment resume began
-        replaying twice (the package-drift differential renders the same rounds before
-        and after a repair): a merge would have carried the discarded tail into the
-        fork, and a stale maximum would have reported a best the repaired rounds never
-        reached — and hidden the very drift the second pass exists to see.
-        """
+        """RE-RUNNABLE: rounds at or after *priors*' first number are REPLACED, and the high-water
+        scalars re-seed from round 0 — so a second replay reconstructs instead of accumulating."""
         if not priors:
             return
         schema = self.session.pipeline_schema
@@ -574,25 +493,8 @@ class Cycle:
         tr.current_composite_fitness = last_rr.composite_fitness
 
     def _maybe_warm_ruler(self) -> None:
-        """Warm the δ ruler from a cold start, then LOCK it. While ``delta_scale`` is
-        still flat (a fresh dataset with no grade-A archive), re-attempt calibration
-        from the round observations accumulated so far; the first fit that clears the
-        ``elimination_n_min`` warmth floor is adopted and never re-fit — so warm rounds
-        all compare on one shared ruler (comparability preserved), while the cold rounds
-        that preceded it already compared on the frozen subset's raw accuracy. Repeat/
-        reference-backed campaigns start warm at ``Cycle.start`` and skip this entirely.
-
-        A fresh campaign is cold for exactly one round: ``Cycle.start`` sees only C0, which is
-        one arm and so cannot identify δ (``_calibrate_delta_ruler``), and the first re-attempt
-        after round 1 closes reads that round's candidates back out of the archive. Round 1 is
-        therefore always measured on the frozen bank prefix — the deliberate consequence, since
-        an adaptive subset drawn against a one-arm ruler selects the incumbent's own failures.
-
-        Re-reading the archive is what re-warms it: this fires from ``absorb_round`` *after* the
-        round closed, so every candidate it scored is already banked grade-A — under its own
-        searchpoint identity. Feeding the in-cycle rounds in beside the archive read would only
-        re-enter the same measurements under a second name.
-        """
+        """The first fit clearing the warmth floor is adopted and never re-fit, so every warm round
+        shares one ruler. Fires after a round closed — its candidates are already banked grade-A."""
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -639,14 +541,8 @@ class Cycle:
                     rr.calibration_model = calibration_model
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
-        """Make ``new_incumbent`` the cycle's searchpoint — the ONE adoption seam for
-        an L1 win and an L2/L3 transition alike. Identity advances: ``new_incumbent``
-        already carries its own lineage (parent = the outgoing incumbent). The
-        persistent L2/L3 memory (wounds, l1_layout, l1_overrides, task_context) carries
-        forward from the outgoing incumbent via ``copy_memory_to``; only the surfaces in
-        ``advanced`` are then taken from ``new_incumbent`` — the layer that owns them
-        (L1 → task_context; L2 → task_context/l1_layout). The differentiated carry lives
-        here, not in two hand-coded call sites."""
+        """The ONE adoption seam for an L1 win and an L2/L3 transition alike: persistent memory
+        carries from the outgoing incumbent, and only ``advanced`` comes from the new one."""
         self.opt_sp.copy_memory_to(new_incumbent)
         for surface, val in advanced.items():
             setattr(new_incumbent.memory, surface, val)

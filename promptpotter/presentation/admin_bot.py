@@ -1,12 +1,5 @@
-"""On-box admin bot — the first operator-admin channel (ADR-0004).
-
-Long-polls Telegram **outbound only** and edits the local sign-in allowlist +
-ADR-0005 delegations. It opens no inbound port, which is the entire point: the
-privileged auth-gate mutation never leaves the protected zone, and an admin HTTP
-endpoint is the thing this exists instead of (threat model:
-``docs/adr/0004-operator-admin-channels.md``). Run it as the deploy-linux systemd
-unit or directly with ``python -m promptpotter.presentation.admin_bot``.
-"""
+"""On-box admin bot (ADR-0004) — long-polls Telegram OUTBOUND only and edits the allowlist + delegations. It opens no
+inbound port, which is the entire point: the privileged auth-gate mutation never leaves the protected zone."""
 
 from __future__ import annotations
 
@@ -38,12 +31,8 @@ _USAGE = (
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
-    """Parse a message into ``(command, argument)``.
-
-    When *passphrase* is set, the message must start with it (second factor);
-    the passphrase is stripped before parsing. Returns ``None`` when the text
-    fails the passphrase gate or carries no recognizable command.
-    """
+    """Parse a message into ``(command, argument)``. When *passphrase* is set the message must START with it (the second
+    factor), and it is stripped before parsing; a failed gate returns ``None``."""
     body = text.strip()
     if passphrase:
         prefix = passphrase.strip()
@@ -59,7 +48,6 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
 
 
 def handle_command(command: str, argument: str, actor: str) -> str:
-    """Apply *command* to the allowlist or the grant store and return the reply text."""
     paths = default_identity_paths()
     if command == "list":
         emails = list_emails(paths.allowlist)

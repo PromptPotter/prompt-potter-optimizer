@@ -1,8 +1,5 @@
-"""ID Token (JWS) verifier — RS256 only, the dialect Google emits.
-
-GitHub does not issue ID tokens (OAuth 2.0, not OIDC); GitHub identity
-extraction lives in `github.py` and never reaches this module.
-"""
+"""ID Token verifier — RS256 only, the dialect Google emits. GitHub issues no ID token, so its identity extraction never
+reaches this module."""
 
 from __future__ import annotations
 
@@ -20,7 +17,7 @@ from promptpotter.infrastructure.identity.jwks import JWKSCache
 
 
 class IDTokenInvalidError(ValueError):
-    """Raised when ID token verification fails for any reason."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -47,11 +44,8 @@ async def verify_id_token(
     jwks_cache: JWKSCache,
     leeway_s: int = 30,
 ) -> VerifiedIDToken:
-    """Verify *id_token* signature + claims; return the verified envelope.
-
-    Raises :class:`IDTokenInvalidError` on any failure — the caller treats it
-    as a hard 401 at the trust boundary.
-    """
+    """Verify signature + claims and return the envelope. Raises :class:`IDTokenInvalidError` on ANY failure — the caller
+    treats it as a hard 401 at the trust boundary."""
     try:
         header_b64, payload_b64, signature_b64 = id_token.split(".")
     except ValueError as exc:

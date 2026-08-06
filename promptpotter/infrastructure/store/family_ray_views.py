@@ -1,27 +1,5 @@
-"""The time-ray — one chronology across a course and everything below it.
-
-Every other served axis is round-indexed (``/rounds``), tree-structured (``/tree``), or a
-live edge with no history (the SSE tail seeks to EOF). The ray is the missing object — the
-ledgers of a course, its forks and its inner runs, merged into one ordered sequence — and it
-is the **replay endpoint** ``domain/projection_envelope.py`` names: a subscriber heals a
-sequence gap here, never via a ``since=`` on the tail.
-
-**Never read through** :meth:`CycleEventLog.iter` — a fork's ``iter()`` virtually replays
-the parent's prefix, and the ray reads the parent too, so every parent record would appear
-twice. This module reads each ledger's own file, as ``scan_ledger_candidates`` and
-``CycleLedgerTail`` do (the two-offset-spaces note on
-``infrastructure/ledger.py::CycleEventLog.iter``).
-
-**Windowing.** Records merge on one key — ``(ts_eff, encoded_path, offset)`` — and the
-cursor IS that key, taken from the oldest item a window returned: a deeper page is every
-record strictly below it, so consecutive windows partition the key space (no overlap, no
-hole). A cycle discovered after the head fetch (a new fork) has only keys above every
-outstanding cursor, so it enters at the next head fetch instead of corrupting a deep page.
-
-**Cost.** One forward pass per family ledger, retaining at most ``limit`` records per file.
-The pass parses every line: the monotonic timestamp clamp needs each record in file order,
-and a record's kind is only knowable after parsing. The ETag keeps that off the poll path.
-"""
+"""The time-ray — one chronology merging a course's own ledgers with its forks' and inner runs'.
+**Never read through ``CycleEventLog.iter``**: a fork's replays the prefix the ray already read."""
 
 from __future__ import annotations
 
@@ -147,11 +125,8 @@ class _Raw(NamedTuple):
 
 
 def _epoch(raw: object) -> float | None:
-    """A record timestamp as a sortable instant; ``None`` if absent or unparseable.
-
-    Parsed, not string-compared: ``utcnow_iso`` omits the fractional part when microseconds
-    are exactly zero, so ``...T12:00:00Z`` sorts *after* ``...T12:00:00.5Z`` lexically.
-    """
+    """A record timestamp as a sortable instant. Parsed, never string-compared — ``utcnow_iso`` omits
+    the fractional part at exactly zero microseconds, which sorts AFTER ``...T12:00:00.5Z``."""
     if not isinstance(raw, str) or not raw:
         return None
     try:
@@ -163,7 +138,6 @@ def _epoch(raw: object) -> float | None:
 
 
 def _curated(kind: str, rec: dict[str, Any], *, depth: int) -> bool:
-    """Does this record ride the ray? See ``_NEVER_KINDS`` / ``_INNER_KINDS``."""
     if kind in _NEVER_KINDS:
         return False
     if depth == 0:
@@ -176,19 +150,8 @@ def _curated(kind: str, rec: dict[str, Any], *, depth: int) -> bool:
 def _read_curated(
     ledger: Path, *, encoded_path: str, depth: int, keep: int, bound: RayCursor | None
 ) -> tuple[list[_Raw], bool]:
-    """The newest ``keep`` curated records whose merge key is below ``bound``, oldest-first.
-
-    Returns ``(rows, dropped)`` — ``dropped`` says older curated records fell out of the
-    window, i.e. this file still has history to page back into.
-
-    **The clamp runs over the whole file, not the window.** ``ts_eff = max(own ts, previous
-    ts_eff)``, carried in FILE order: records are stamped at construction but appended
-    later, so a raw-timestamp sort can place a record *before* the record that caused it,
-    and append order is the one authority a single file has. Starting the carry mid-file
-    would repair against a skipped record, so the pass reads from the top; the merge key
-    strictly increases within a file, so once it reaches ``bound`` the rest of the file is
-    above it and the loop stops.
-    """
+    """The newest ``keep`` curated records below ``bound``, oldest-first, plus whether older ones fell
+    out. Clamped over the WHOLE file: records are stamped at construction but appended later."""
     if not ledger.is_file():
         return [], False
     window: deque[_Raw] = deque(maxlen=keep)
@@ -250,17 +213,13 @@ def _read_curated(
 
 
 def encode_ray_cursor(key: RayCursor) -> str:
-    """The merge key of a window's oldest item, as an opaque token."""
     blob = json.dumps(list(key), separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(blob).decode()
 
 
 def decode_ray_cursor(raw: str | None) -> RayCursor | None:
-    """Parse a cursor; raises ``ValueError`` on a malformed token — the route maps it to 400.
-
-    Deliberately not tolerant: a cursor the client mangled would silently re-serve or skip
-    a window, and a chronology with a hole in it is worse than an error.
-    """
+    """Parse a cursor; ``ValueError`` on a malformed token, which the route maps to 400. Deliberately
+    intolerant — a mangled cursor re-serves or skips a window, and a chronology with a hole is worse."""
     if not raw:
         return None
     try:
@@ -284,14 +243,8 @@ def decode_ray_cursor(raw: str | None) -> RayCursor | None:
 def ray_validator_parts(
     courses: list[FamilyCourse], *, limit: int, before: str | None
 ) -> tuple[object, ...]:
-    """Everything the response body depends on: the query, and each course's ledger + index
-    mtimes.
-
-    Deep windows revalidate exactly like the head. By the cursor's key argument an append
-    lands above every outstanding cursor — but claiming byte-immutability would bet against
-    a backdated append, which the clamp bounds only within its own file. Revalidation is
-    cheap; a wrong 304 is silent.
-    """
+    """Everything the body depends on: the query, and each course's ledger + index mtimes. Deep windows
+    revalidate exactly like the head — claiming immutability would bet against a backdated append."""
     parts: list[object] = ["ray", limit, before]
     for course in courses:
         layout = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1]))
@@ -303,18 +256,8 @@ def ray_validator_parts(
 def build_family_ray(
     courses: list[FamilyCourse], *, limit: int, before: RayCursor | None
 ) -> RayResponse:
-    """Merge the family's ledgers into one ordered window, oldest-first.
-
-    The sort key is the merge key (see :data:`RayCursor`): two records in different cycles
-    inside the clock's resolution are ordered arbitrarily-but-stably by path — the honest
-    limit of one machine's clock. A distributed runner would need a family-scoped Lamport
-    counter; that does not exist and must not be faked.
-
-    ``FamilyCourse.depth`` is hop count off the family root — a FORK is depth 0 beside its
-    parent (it replaces the leaf hop rather than extending the path) while an inner run is
-    depth 1. Right for a chronology: a fork is the same campaign continuing on another
-    branch, and seeing it interleaved with the parent is the point.
-    """
+    """Merge the family's ledgers into one ordered window, oldest-first. ``FamilyCourse.depth`` puts a
+    FORK at depth 0 beside its parent — a chronology wants it interleaved, not indented under it."""
     pool: list[tuple[RayCursor, CyclePath, _Raw]] = []
     truncated = False
 

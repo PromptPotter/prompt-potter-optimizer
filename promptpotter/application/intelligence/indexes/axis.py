@@ -1,5 +1,3 @@
-"""AxisIndex — derived axis-keyed view + digest API for L1/L2/L3 prompts."""
-
 from __future__ import annotations
 
 import logging
@@ -18,7 +16,6 @@ from promptpotter.infrastructure.store import archive_views
 
 
 def _is_forbidden_axis(axis: str) -> bool:
-    """True iff ``<param>`` half is in ``PARAM_FORBIDDEN_KEYS`` (operator-locked)."""
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
 
@@ -41,14 +38,8 @@ def _value_preview(value: Any) -> str:
 def _fmt_axis_rankings(
     rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
 ) -> str:
-    """Render the top-axes line. When ``peaked_axes`` is provided, axes whose
-    trend has converged on a measured peak are tagged inline so the LLM
-    consuming the digest can't read the effect rank without also seeing
-    the peakedness — the prior split (effect ranks here, ``value_trends``
-    line elsewhere) let L1 latch onto "highest effect → mutate" while
-    silently ignoring "peaked → don't mutate". Single annotated line
-    removes the contradiction.
-    """
+    """The top-axes line, with peakedness tagged INLINE. Split across two lines it let L1 read
+    "highest effect ⇒ mutate" without ever seeing that the parent's value IS the measured peak."""
     peaked = peaked_axes or frozenset()
     parts: list[str] = []
     for a in rankings:
@@ -90,8 +81,6 @@ def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
 
 @dataclass
 class ValueRecord:
-    """A concrete value observed for an axis, with its performance stats."""
-
     value_preview: str
     mean_accuracy: float
     sample_count: int
@@ -99,8 +88,6 @@ class ValueRecord:
 
 @dataclass
 class AxisImpact:
-    """Parameter impact summary for one search space dimension."""
-
     axis: str
     effect_size: float
     consistency: float
@@ -111,8 +98,6 @@ class AxisImpact:
 
 @dataclass
 class RunRecord:
-    """One archive run's summary for the historical-best leaderboard."""
-
     run_id: str
     name: str
     accuracy: float
@@ -121,7 +106,6 @@ class RunRecord:
 
 
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
-    """Build a dict from (key, value) pairs, dropping pairs whose value is falsy."""
     out = {k: v for k, v in items if v}
     return out or None
 
@@ -150,13 +134,11 @@ class AxisIndex:
     # ----- axis analytics -----
 
     def peaked_axes(self) -> frozenset[str]:
-        """Axes whose value trend is ``peaked`` — parent's value IS the measured peak."""
         return frozenset(
             axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
         )
 
     def axis_rankings(self) -> list[AxisImpact]:
-        """All axes ranked by effect size desc; ``PARAM_FORBIDDEN_KEYS`` dropped."""
         impacts = [
             i
             for axis, vals in self._axis_values.items()
@@ -165,7 +147,6 @@ class AxisIndex:
         return sorted(impacts, key=lambda a: -a.effect_size)
 
     def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
-        """Axes thoroughly tested with negligible effect — further exploration wastes budget."""
         out = [
             i
             for axis, vals in self._axis_values.items()
@@ -177,7 +158,6 @@ class AxisIndex:
         return sorted(out, key=lambda a: a.effect_size)
 
     def _axis_value_trend(self, axis: str) -> str:
-        """One of: ``increasing``, ``decreasing``, ``peaked``, ``flat``, ``non_numeric``."""
         pairs: list[tuple[float, float]] = []
         for v, accs in self._axis_values.get(axis, {}).items():
             if not accs:
@@ -205,11 +185,8 @@ class AxisIndex:
     # ----- digest construction (single entry-point, layer-agnostic) -----
 
     def digest(self) -> dict[str, str] | None:
-        """Layer-agnostic axis-keyed digest — union of all axis observations.
-
-        Same payload rendered into every L1/L2/L3 prompt; per-layer
-        filtering, if it ever returns, lives in renderers, not here.
-        """
+        """Layer-agnostic axis-keyed digest — one payload into every L1/L2/L3 prompt. Per-layer filtering,
+        if it ever returns, lives in the renderers and not here."""
         rankings5 = self.axis_rankings()[:5]
         top_vals_str: str | None = None
         if rankings5:
@@ -281,7 +258,6 @@ class AxisIndex:
         )
 
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
-        """Format recent positive flips (miss→hit) for L1 critique injection."""
         positive = [f for f in self.sample_index.all_flips() if f["new_hit"] and not f["old_hit"]]
         if not positive:
             return None
@@ -296,7 +272,6 @@ class AxisIndex:
     # ----- failure-group correlation -----
 
     def _recompute_failure_group_correlations(self) -> None:
-        """Recompute failure-group × axis deltas; overwrites (resets to {} when no clusters)."""
         clusters = self.sample_index.failure_clusters(5)
         if not clusters:
             self._axis_failure_group_deltas = {}
@@ -340,21 +315,8 @@ class AxisIndex:
     # ----- ingest / refresh -----
 
     def _seed_from_fold(self, stores: Stores, dataset_name: str | None, formula_key: str) -> bool:
-        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust.
-
-        The cursor this seeds (``SampleIndex._seen_runs``) used to be in-process only, so every
-        start re-read and re-scored the entire dataset slice of the archive — 3.7 s of detail
-        reads plus a compiled-expression eval per measurement on a 1076-run store, growing
-        forever. The fold is the same derivation, already paid for.
-
-        **Validation is all-or-nothing, and that is the point.** A row is trustworthy only if it
-        was derived under the active formula (the fitness it folded is otherwise from a dead
-        vocabulary) and its detail has not changed since (the scoring walk re-saves a run after
-        every sample, so details grow under a reader). Rejecting the whole file on the first bad
-        row — rather than re-deriving that run and appending it — keeps the replay ORDER equal to
-        the original ingest order, which ``persistent_failures`` reads as a streak off the tail
-        of each sample's observations. A cheaper repair would silently reorder that.
-        """
+        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust. Validation is
+        all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
         if not dataset_name:
             return False
         rows = archive_views.sample_fold_rows(stores, dataset_name=dataset_name)
@@ -388,25 +350,8 @@ class AxisIndex:
         *,
         dataset_name: str | None,
     ) -> None:
-        """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution.
-
-        **A historical run this formula cannot score is SKIPPED, never fatal.** The archive is
-        cross-run and long-lived, so it holds rows written under an OLDER observation vocabulary —
-        the formula names a term they predate. ``rescore_results`` is deliberately fail-loud, and
-        for the LIVE scorer that is exactly right: there the namespace is materialized fresh, so a
-        missing name IS a broken formula. Here it is not — it is a row from another era, and
-        letting it raise would kill the cycle *after* its measurement has already been paid for.
-
-        Only a MISSING TERM is skipped (``ScoringTermMissingError``). A divide-by-zero or a
-        non-numeric result is a broken formula wherever it fires, and stays fatal — catching the
-        parent here would swallow a typo made five minutes ago.
-
-        Skips are COUNTED and LOGGED, never silent and never scored 0.0 — a fake zero would
-        poison the very digest the L1/L2/L3 prompts read. The run is still marked seen, so a
-        permanently-unscoreable row is not re-tried (and re-logged) on every refresh. **And the
-        skip binds BOTH halves of the refresh:** the axis fold below reads the same skip set, so
-        a run this formula cannot score reaches neither the per-sample index nor the axis
-        rankings and the top-runs leaderboard."""
+        """Incremental archive refresh, dataset-scoped. A row this formula cannot score is SKIPPED, counted
+        and logged — never 0.0, which would poison the digest — and the skip binds BOTH halves below."""
         formula_key = f"{scorer_id}\x1f{scorer_formula or ''}"
         if self._fold_seeded is None:
             self._fold_seeded = self._seed_from_fold(stores, dataset_name, formula_key)
@@ -485,11 +430,8 @@ class AxisIndex:
             )
 
     def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
-        """Top-K leaderboard, sorted by (composite_fitness, accuracy) desc.
-
-        Filters partial-coverage runs by keeping only modal ``total`` count —
-        non-comparable composites (8/20 vs 20/20) would inflate the leaderboard.
-        """
+        """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
+        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard."""
         from collections import Counter
 
         all_totals = [
@@ -531,7 +473,6 @@ class AxisIndex:
         self._top_runs = scored[:k]
 
     def top_runs(self, k: int = 3) -> list[RunRecord]:
-        """Top-K historical runs across the archive, by composite_fitness."""
         return self._top_runs[:k]
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
@@ -558,7 +499,6 @@ class AxisIndex:
         *,
         dataset_name: str | None,
     ) -> AxisIndex | None:
-        """Fresh ``AxisIndex`` + refresh once. Returns ``None`` when the store is missing."""
         if stores is None:
             return None
         idx = cls()
@@ -578,12 +518,8 @@ class AxisIndex:
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
     ) -> None:
-        """Fold one entry into ``axis_values``.
-
-        An entry that recorded no accuracy is skipped, not folded as ``0.0``: a fabricated
-        zero arm manufactures ``effect_size`` against every real arm on the same axis, and
-        that number is both L1's ``axis_memory`` panel and the ``l2_axis_yield_drought`` gate.
-        """
+        """Fold one entry into ``axis_values``. An entry with no accuracy is skipped, never folded as 0.0 —
+        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis."""
         scores = entry.get("scores") or {}
         if "accuracy" not in scores:
             return

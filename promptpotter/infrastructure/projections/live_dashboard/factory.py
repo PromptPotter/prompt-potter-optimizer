@@ -1,12 +1,5 @@
-"""Construction helper for ``LiveDashboardView.for_session``.
-
-The factory classmethod resolves the cycle's own dir, reads any prior
-``dashboard.json`` (from a seed dir — the cycle's own, or the parent's for a
-fork), and self-heals its stale ``round`` / ``best`` / ``rounds`` pointers
-against what completed-round checkpoints actually exist on disk. That
-disk-reconciliation logic lives here as a free function so the classmethod
-stays a thin assembly of: resolve ids → resolve resume state → construct.
-"""
+"""Construction helper for ``LiveDashboardView.for_session``: resolve ids, resolve resume state, construct. The disk
+reconciliation lives here as a free function so the classmethod stays a thin assembly."""
 
 from __future__ import annotations
 
@@ -21,7 +14,6 @@ __all__ = ["resolve_resume_state"]
 
 
 def _max_round_on_disk(rounds_dir: Path) -> int:
-    """Highest ``round_NNNN.json`` index in ``rounds_dir``, or ``0`` if none."""
     if not rounds_dir.is_dir():
         return 0
     highest = 0
@@ -37,27 +29,8 @@ def resolve_resume_state(
     active_cycle_dir: Path,
     resumed_from_round: int | None,
 ) -> LiveDashboardState | None:
-    """Read the prior ``dashboard.json`` and self-heal its trajectory pointers.
-
-    Returns the seed state for the :class:`LiveDashboardView` constructor, or ``None``
-    when no prior file exists. The file IS a ``LiveDashboardState`` dump, so it is
-    validated back into one here — the view then carries the whole prior state forward
-    instead of a hand-picked subset of its fields.
-
-    ``seed_dir`` is where the prior ``dashboard.json`` is read from — the cycle's own
-    dir on a root/resume, or the parent cycle's dir on a fork (the fork inherits the
-    parent's trajectory up to the cut). ``active_cycle_dir`` is always the cycle's own
-    dir; its ``rounds/`` checkpoints drive the round-pointer self-heal. Origin rides
-    ``rounds[0]`` like any round, so the seeded ``rounds`` already carries it — no
-    separate origin reconciliation.
-
-    **This is the one place the surviving trajectory is cut.** Rounds at or past
-    ``resumed_from_round`` are about to be re-run, so they are dropped here and ``best``
-    is re-derived from what is left via the shared ``best_round_by_measured_accuracy``
-    (the cycle index's ``_apply_best`` rides the same helper) — never trusted from the
-    prior scalar, whose rolling max is monotonic and would keep a high-water mark from a
-    round that no longer exists.
-    """
+    """Seed state from the prior ``dashboard.json``. **The one place the trajectory is cut**: rounds at or
+    past ``resumed_from_round`` drop and ``best`` is RE-DERIVED — a carried rolling max keeps a dead peak."""
     raw = read_json_tolerant(CycleLayout(seed_dir).dashboard)
     if not isinstance(raw, dict):
         return None

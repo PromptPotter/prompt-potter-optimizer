@@ -1,18 +1,5 @@
-"""User spend, summed from the canonical ledger.
-
-Spend is owned by the per-cycle ledger (``TokenUsageRecord``, ADR-0003 "token/cost
-on the canonical ledger") — **not** by ``dashboard.json``, which is a Display
-projection whose ``spend`` block is cumulative-from-seed (a fork/resume inherits the
-parent's whole spend block, then adds its own). Summing those snapshots double-counts
-inherited spend, so anything that needs an additive figure over a time window —
-the daily-cap gate (:mod:`quota`) and the Activity pane (``/auth/activity``) — reads
-it here, from the ledger, filtered by record ``timestamp``.
-
-``cost_usd`` may be absent on a record (Groq doesn't return wire cost); resolution
-falls back to the rate table × tokens so historical spend isn't silently zero. That
-resolution is ``shared/spend.py::compute_usd`` — the SAME function behind the sole
-``dashboard.json::spend`` writer. There is one cost policy, not one per consumer.
-"""
+"""User spend, summed from the canonical per-cycle ledger — NOT from ``dashboard.json``, whose spend
+block is cumulative-from-seed, so summing those snapshots double-counts a fork's inherited spend."""
 
 from __future__ import annotations
 
@@ -30,23 +17,8 @@ def start_of_utc_day() -> float:
 
 
 def iter_user_token_usage(*, stores: Stores, since: float, until: float) -> list[dict[str, Any]]:
-    """Walk every per-cycle ledger under the user's workspace — archived included,
-    via ``CampaignStore.iter_cycle_ledgers`` (archiving a campaign must not free
-    daily-cap budget).
-
-    The canonical per-cycle ledger lives at ``{cycle_dir}/.runtime/ledger.jsonl``
-    (the name ``events.jsonl`` is used only by the workspace-scoped sibling).
-    Filters to ``TokenUsageRecord`` rows whose ``timestamp`` lands in
-    ``[since, until)``.
-
-    Reads through ``iter_jsonl``, which is corruption-tolerant but NOT
-    failure-tolerant: an unreadable ledger raises rather than reporting that
-    cycle's spend as zero — :func:`sum_user_spend` feeds the daily cap, and a
-    zero fails open into a full remaining budget.
-
-    Returns ``cost_usd`` as ``None`` when the record didn't carry one, and carries
-    ``cached`` through; the caller resolves both via :func:`record_cost_usd`.
-    """
+    """Every ``TokenUsageRecord`` in ``[since, until)`` across the user's ledgers, archived included —
+    archiving must not free budget. An unreadable ledger RAISES: a zero fails open into a full budget."""
     out: list[dict[str, Any]] = []
     for ledger_path in stores.campaigns.iter_cycle_ledgers():
         for rec in iter_jsonl(ledger_path):
@@ -78,19 +50,8 @@ def iter_user_token_usage(*, stores: Stores, since: float, until: float) -> list
 
 
 def record_cost_usd(rec: dict[str, Any]) -> float:
-    """Billed USD for one usage record — ``0.0`` for a call that never reached the wire.
-
-    Resolution is :func:`~promptpotter.shared.spend.compute_usd`, the same one the
-    ``dashboard.json::spend`` writer rides: wire ``cost_usd`` short-circuits, else the
-    rate table × tokens.
-
-    ``cached`` is the split :class:`TokenUsageRecord` defines: only a call with
-    ``cached=False`` is money that left the account.
-
-    An unpriced model still resolves to ``0.0`` (``compute_usd`` says ``None``), which
-    under-counts the cap rather than over-counting it. The dashboard arms an "USD cap
-    inactive" warning on that case; this path has no channel to say so.
-    """
+    """Billed USD for one usage record; only ``cached=False`` is money that left the account. An unpriced
+    model resolves to ``0.0``, under-counting the cap — and this path has no channel to say so."""
     if rec.get("cached"):
         return 0.0
     raw = rec.get("cost_usd")
@@ -105,7 +66,6 @@ def record_cost_usd(rec: dict[str, Any]) -> float:
 
 
 def sum_user_spend(*, stores: Stores, since: float, until: float) -> float:
-    """Total billed USD over ``[since, until)`` from the user's per-cycle ledgers."""
     return sum(
         record_cost_usd(r) for r in iter_user_token_usage(stores=stores, since=since, until=until)
     )
