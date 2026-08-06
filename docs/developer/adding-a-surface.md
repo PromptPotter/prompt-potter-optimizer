@@ -139,9 +139,8 @@ mirror onto decides the cost, so ask first *whose* fact it is:
   `projections/live_dashboard/round_summary.py`.
 
 Reach for the round-level route only when the fact genuinely isn't a candidate's. Note that
-`RoundSummary.improved` / `electable_count` are served and rendered by nothing — a
-round-level field with no panel is dead served surface, which is this page's own warning
-pointed the other way.
+`RoundSummary.improved` is served and rendered by nothing — a round-level field with no
+panel is dead served surface, which is this page's own warning pointed the other way.
 
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No

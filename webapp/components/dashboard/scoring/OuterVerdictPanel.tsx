@@ -7,7 +7,7 @@
 
 import { memo, useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import type { OuterVerdict } from "@/lib/api/types";
+import type { OuterVerdict, RoundSummary } from "@/lib/api/types";
 import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
 
 const DECISION_TONE: Record<string, BadgeTone> = {
@@ -102,34 +102,41 @@ function ForestPlot({ verdict }: { verdict: OuterVerdict }) {
   );
 }
 
-function pickVerdict(rounds: { round: number; outer_verdict?: OuterVerdict | null }[]):
-  | OuterVerdict
-  | null {
-  for (const r of rounds.slice().reverse()) {
-    if (r.outer_verdict) return r.outer_verdict;
-  }
-  return null;
+// The LATEST post-origin round, not the latest one that happens to carry a verdict: a round can
+// lose its subject or its pairing, and scanning backwards past it re-presents an older round's
+// verdict as the current one. No round carrying a verdict means the cycle is not L4 at all.
+function pickRound(rounds: RoundSummary[]): RoundSummary | null {
+  const scored = rounds.filter((r) => r.round > 0);
+  if (!scored.some((r) => r.outer_verdict)) return null;
+  return scored[scored.length - 1] ?? null;
 }
 
 export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
   const { dash } = useDashboard();
-  const verdict = useMemo(() => pickVerdict(dash?.rounds ?? []), [dash?.rounds]);
+  const round = useMemo(() => pickRound(dash?.rounds ?? []), [dash?.rounds]);
+  const verdict = round?.outer_verdict ?? null;
 
   return (
     <CardFrame title="Outer verdict" headingTag="h2">
-      {!verdict ? (
+      {!round ? (
         <p className="l4-empty">
           Select a pp-self cycle with a completed round to see its blocked paired verdict
           (per-cell variant−origin effects pooled across the panel).
+        </p>
+      ) : !verdict ? (
+        <p className="l4-empty">
+          {round.electable_count === 0
+            ? `Round ${round.round} left no readable arm — every candidate's measurement was disqualified (mid-run abort, or degradation scoring a partial subset), so the round has no verdict subject.`
+            : `Round ${round.round} has no verdict: none of its arms shares a measured cell with the cached round-0 origin.`}
         </p>
       ) : (
         <>
           <p className="l4-lede">
             <Badge tone={DECISION_TONE[verdict.decision] ?? "default"}>{verdict.decision}</Badge>{" "}
-            {/* Which arm this is about. A round that crowned nobody still reports its best arm,
-                and reading that as an adopted winner would overstate what the round decided. */}
-            {verdict.variant_is_winner ? "Adopted variant" : "Best arm (none adopted)"} lifts the
-            optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
+            {/* Which arm this is about. A round that crowned nobody still reports its best
+                ELIGIBLE arm, and reading that as an adopted winner would overstate the round. */}
+            {verdict.variant_is_winner ? "Adopted variant" : "Best eligible arm (none adopted)"}{" "}
+            lifts the optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
             {fmt(verdict.ci_hi)}] across {verdict.n_cells} cell
             {verdict.n_cells === 1 ? "" : "s"} vs the cached round-0 origin.
             {verdict.decision === "inconclusive"

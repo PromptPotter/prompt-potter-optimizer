@@ -36,9 +36,10 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
+    is_electable,
     is_leader_eligible,
 )
-from promptpotter.domain.scoring import QueryMeasurement, is_answer_collapsed
+from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.statistics import paired_diff_posterior
 
@@ -110,6 +111,9 @@ async def l1_score(
         l1_diversity=yield_stats.l1_yield,
     )
 
+    # The REPLICATION cohort, deliberately the looser predicate: `scored` decides who gets extra
+    # draws, and collapse is a verdict on rows we would be about to add to. Admission to the
+    # ELECTION is `is_electable` below, over the rows this pass ends up with.
     aborted_ids = {cs.candidate_id for cs in candidate_scores if not is_leader_eligible(cs)}
     scored = [
         ind
@@ -221,15 +225,16 @@ async def l1_score(
                 "matched_origin_composite": matched["composite_fitness"] if matched else None,
             }
         )
-        # A candidate that answered ONE label to every sample is not a weak candidate — it carries
-        # no measurement of ability at all, and its accuracy is decided by how much of that label
-        # the drawn subset happens to contain. Leaving it electable fits θ to that artifact and
-        # feeds it to the L4 trajectory, where one such arm dragged its round 0.8 logits below
-        # origin. It keeps its matched-origin stamp above (the record stays honest); it just stops
-        # being a thing the election, the ruler, or the outer proxy can read. The round-level fact
-        # — that this optimizer prompt made its children stop answering — is charged separately, to
-        # the L4 floor + PoBB elimination (`domain/l4/proxies.py::floor_reason`).
-        if is_answer_collapsed(cand_results):
+        # `is_electable` is the admission rule, spelled once in the domain so the election, the
+        # ruler and the outer verdict cannot drift apart on it. Its collapse clause is why an
+        # arm can be scored here and still not enter: a candidate answering ONE label to every
+        # sample carries no measurement of ability, its accuracy is decided by how much of that
+        # label the drawn subset happens to contain, and fitting θ to that artifact dragged one
+        # round 0.8 logits below origin. It keeps its matched-origin stamp above (the record
+        # stays honest). The round-level fact — that this optimizer prompt made its children
+        # stop answering — is charged separately, to the L4 floor + PoBB elimination
+        # (`domain/l4/proxies.py::floor_reason`).
+        if not is_electable(candidate_scores[cs_idx], cand_results):
             continue
         electable.append(ind.lineage.id)
 

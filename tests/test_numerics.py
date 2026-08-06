@@ -3131,6 +3131,67 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
     assert errored.effect == pytest.approx(0.4)  # not dragged toward the floor by cell b
 
 
+def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
+    # A round that crowns nobody still gets a verdict, on its best arm — and `max(fitness)`
+    # reaches for exactly the arms that FAKE a score: a degradation abort scoring a partial
+    # subset, and a constant answerer scoring the drawn subset's label mix. The election already
+    # refuses both (`electable`); the verdict must refuse the same set or it convicts an arm the
+    # round would not crown. SILENT: the served verdict names a subject, carries a CI, and
+    # renders identically to one about a readable arm.
+    from promptpotter.domain.l4.verdict import compute_outer_verdict
+    from promptpotter.domain.results import is_electable
+    from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
+        build_round_summary,
+    )
+    from tests.factories import scored_candidate
+
+    truths = (("a", "T"), ("b", "F"), ("c", "T"), ("d", "F"))
+
+    def cells(fitness: float, *, constant: bool) -> list[dict[str, object]]:
+        # Truth VARIES, and there are more cells than labels — `is_answer_collapsed`
+        # self-normalizes below that, since one row per label cannot tell a constant answer
+        # from a correct one.
+        return [
+            {
+                "query": q,
+                "sample_id": i,
+                "fitness": fitness,
+                "ground_truth": gt,
+                "predicted": "T" if constant else gt,
+            }
+            for i, (q, gt) in enumerate(truths)
+        ]
+
+    origin = [{"query": q, "fitness": 0.4} for q, _ in truths]
+    measured = {"hot": cells(0.9, constant=True), "cool": cells(0.5, constant=False)}
+    hot = scored_candidate("hot", accuracy=0.9)
+    cool = scored_candidate("cool", accuracy=0.5)
+
+    # The predicate: leader-eligible, measured, and not a constant answerer — all three clauses.
+    assert is_leader_eligible(hot)  # nothing about its RUN was invalid
+    assert not is_electable(hot, measured["hot"])  # it still said one label to everything
+    assert not is_electable(hot, [])  # an arm with no rows has nothing to read
+    assert is_electable(cool, measured["cool"])
+
+    # And through the projection that feeds the verdict: the collapsed arm outscores the honest
+    # one, so an unfiltered `max` names "hot". The round could only read "cool".
+    rr = round_result(1, candidates_scored=0).model_copy(
+        update={
+            "candidates_scored": 2,
+            "candidate_scores": [hot, cool],
+            "all_candidate_results": measured,
+        }
+    )
+    summary = build_round_summary(rr, origin)
+    assert summary.outer_verdict is not None
+    assert summary.outer_verdict.variant_id == "cool"
+    assert summary.outer_verdict.effect == pytest.approx(0.1)
+
+    # Every arm refused — the round measured nothing it can attribute, so there is no subject.
+    # Reported as absence, never as the least-bad conviction.
+    assert compute_outer_verdict(measured, [], origin) is None
+
+
 def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
     # Turns the hand-computed "the panel needs ~N cells" into a number derived from disk. It
     # reads UNKNOWN on today's corpus (no state has ever been measured twice on one cell), so a

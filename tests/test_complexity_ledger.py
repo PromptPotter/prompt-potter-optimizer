@@ -83,7 +83,22 @@ LEDGER_BASELINE = {
     # replicate spread survives to the consumer whose job is measuring spread; `cells_dropped`
     # is the loud half of the error exclusion, since a census panel that quietly returns fewer
     # cells cannot be told from a small one.
-    "param_decls": 4056,
+    # 4056 -> 4054 (2026-08-06): `backfill_spend_rates` and `_cycle_spend` both deleted. The
+    # backfill's stated reason had gone stale (a cache hit DOES re-emit a record now) and what
+    # it still did was re-price a whole bucket at the FIRST model it ever saw; `_cycle_spend`
+    # hand-mapped six fields at the far end of the chain, where a forgotten half reads as a
+    # zero rather than an error. Both are now one fold beside the shape they fold.
+    # 4054 -> 4055 (2026-08-06): `model_cls` on `restamp._process`. A deliberate raise, and the
+    # cheapest possible one: the verb was hardcoded to `CampaignConfig` while the forbid-by-
+    # default flip obliges EVERY on-disk model, and the one it missed took down `init_services`
+    # for every `new`/`resume`. One parameter buys the third surface and any later one.
+    # 4055 -> 4057 (2026-08-06): `is_electable(cs, rows)`. A deliberate raise that RETIRES a
+    # duplicate: "an arm the round can read" had two spellings that silently disagreed — the
+    # election's inline three clauses and the outer verdict's `is_leader_eligible`, which omits
+    # answer-collapse. Three banked rounds convicted a constant answerer, one of them with
+    # `electable_count: 0` on the same record. Naming it costs two parameters and deletes a
+    # stamped `CandidateInfo` field plus the filter that read it.
+    "param_decls": 4057,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

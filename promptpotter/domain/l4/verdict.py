@@ -33,7 +33,15 @@ DECISION_INCONCLUSIVE = "inconclusive"
 
 
 class CandidateInfo(StrictModel):
-    """The minimal per-candidate facts the verdict needs (no RoundResult import)."""
+    """The minimal per-candidate facts the verdict needs (no RoundResult import).
+
+    Carries only arms the round could READ. Admission is the caller's to apply
+    (`domain/results.py::is_electable`) — it needs a `ScoredCandidate` and the arm's rows,
+    neither of which reaches here, and `results` imports this module so the law cannot ask
+    the predicate itself. Filtering there rather than stamping a flag here keeps the fact
+    derived at its one source instead of copied into a field a second construction site
+    could get wrong.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -212,20 +220,20 @@ def _variance_split(
 
 
 def _pick_variant(candidates: list[CandidateInfo]) -> tuple[CandidateInfo, bool] | None:
-    """The variant the verdict scores: the round's elected winner, else its best-scoring arm.
+    """The variant the verdict scores: the round's elected winner, else its best arm.
 
-    Returns ``(variant, is_winner)``. The fallback exists because gating the whole verdict on a
-    crowning discarded the measurement in exactly the case the operator most needs it: a round
-    that crowns nothing is a round whose answer is "inconclusive", and reporting nothing at all
-    is indistinguishable from "this round was never measured". Across the only complete pp-self
-    run, `outer_verdict` was null on all three rounds for this reason, so the CI and the
-    remaining MDE — the two numbers that say whether to buy another round — never reached the
-    operator at all.
+    Returns ``(variant, is_winner)``, or ``None`` when the round left no readable arm. The
+    fallback exists because gating the whole verdict on a crowning discards the measurement in
+    exactly the case the operator most needs it: a round that crowns nothing is a round whose
+    answer is "inconclusive", and reporting nothing at all is indistinguishable from "never
+    measured".
 
-    The old concern was that a `max(composite_fitness)` fallback could read ``adopt`` for an arm
-    the θ election declined. That is answered by `variant_is_winner` riding the record rather
-    than by withholding it: the decision is the CI's, and a reader can now see which subject it
-    was computed on. ``None`` only when there are no candidates."""
+    *Best-scoring* is not *readable*, and this ``max`` reaches for exactly the arms that fake a
+    score — a degradation abort scoring a partial subset, a constant answerer scoring the drawn
+    subset's label mix. Both are already gone: *candidates* holds only what
+    ``domain/results.py::is_electable`` admitted, which is the same set the round's own election
+    drew its winner from. ``variant_is_winner`` distinguishes crowned from best; it cannot
+    rescue a subject the round refused to read."""
     if (winner := next((c for c in candidates if c.is_winner), None)) is not None:
         return (winner, True)
     if not candidates:
@@ -243,7 +251,8 @@ def compute_outer_verdict(
     """The round's blocked-paired verdict against the **cached round-0 origin**
     (*origin_rows*, supplied by the caller — round 0 is never re-measured), or ``None``
     when there are no origin cells to pair against (a non-L4 round, or round 0 itself —
-    the origin is the control, not a verdict subject).
+    the origin is the control, not a verdict subject) or no arm the round left readable
+    (:func:`_pick_variant`).
 
     The caller passes the origin's ROWS, not a pre-extracted fitness map: this function needs two
     different readings of them (the fitness the decision pairs on, the measurand + precision the

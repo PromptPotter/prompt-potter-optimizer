@@ -19,6 +19,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
+from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
@@ -52,6 +53,7 @@ __all__ = [
     "WarningDict",
     "best_round_by_measured_accuracy",
     "candidate_label",
+    "is_electable",
     "is_leader_eligible",
     "is_round_winner",
     "unscoreable_cells",
@@ -243,6 +245,10 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     stopped the same way, so the round crowned nobody — silently, with `improved=False` and no
     reason recorded.
 
+    **Validity is not admissibility.** This asks only whether the measurement can be trusted;
+    whether the round can READ the arm is :func:`is_electable`, which adds the two clauses that
+    need the arm's rows. Reach for this one only where the rows are not in hand.
+
     Lives beside the model it judges, not in the L1 scoring module: it is a pure predicate
     over recorded facts, and every reader of a recorded round needs it — the live election,
     the mask read-model, the lineage backprop. Filed under the loop, it dragged the whole
@@ -251,6 +257,29 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
     return not cs.degradation_context
+
+
+def is_electable(cs: ScoredCandidate, rows: Sequence[Mapping[str, object]]) -> bool:
+    """Whether this arm is one the round can READ — the election's own admission rule.
+
+    Three clauses, and every reader needs all three: the arm is leader-eligible (its
+    measurement is valid at all — :func:`is_leader_eligible`), it was measured in this round
+    (``rows``; an arm absent from ``all_candidate_results`` has nothing to read), and it did not
+    answer one label to everything (:func:`~promptpotter.domain.scoring.is_answer_collapsed` —
+    a constant answerer carries no measurement of ability, so its score is an artifact of the
+    drawn subset).
+
+    Named because the concept had two spellings that silently disagreed. The election filtered
+    on all three inline; the outer verdict filtered on ``is_leader_eligible`` alone, so a
+    collapsed arm whose artifact score topped the round was reachable by the verdict's ``max``
+    in a round whose ``electable_count`` excluded it — the verdict scored an arm the round had
+    refused to crown. `winner.py` already stated the rule this encodes: such an arm "stops being
+    a thing the election, the ruler, or the outer proxy can read". The outer proxy is the
+    verdict, so it reads it here.
+
+    A round's ``electable_count`` is the count of this predicate over its candidates.
+    """
+    return is_leader_eligible(cs) and bool(rows) and not is_answer_collapsed(rows)
 
 
 def round_document_digest(rr: RoundResult) -> str:

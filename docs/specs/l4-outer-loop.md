@@ -127,7 +127,10 @@ Standing invariants (verified — don't re-chase):
   (`no_op_variant` → L2 heals). The noise-floor capability is the on-demand
   `python -m promptpotter noise-floor --k N` diagnostic, never wired into the loop. The
   per-round verdict (`domain/l4/verdict.py::compute_outer_verdict`) pairs the round's
-  variant against the **cached round-0 origin**.
+  variant against the **cached round-0 origin**. Its subject is the round's winner, else the
+  best arm the round admitted to its own election (`domain/results.py::is_electable` — the ONE
+  spelling of that rule, shared with `winner.py`'s `electable_count`) — a round that admits
+  none reports absence, never its least-bad conviction.
 - **Candidate-arm inner round-0 is NOT re-measured** — the tenant-global `measurements/`
   store under the cycle's `.inner/<key>/` sandbox + content-addressed reuse replays the
   origin-arm's rows into candidate arms by construction; a "share the origin across arms"

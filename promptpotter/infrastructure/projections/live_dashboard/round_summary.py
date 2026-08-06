@@ -18,6 +18,7 @@ from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
     RoundSummaryCandidate,
+    is_electable,
     is_round_winner,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -89,11 +90,11 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
     *origin_rows* is the cached round-0 origin's per-cell rows (``[]`` off an L4 round, or
     when summarizing round 0 itself — the origin is the control, never a verdict subject).
     """
-    # Both display models are strict name-subsets of ``ScoredCandidate`` plus a derived
-    # ``is_winner`` — so each is a ``model_dump(include=…)`` projection, not a hand-copy.
-    # The include-set is the target model's OWN field list minus ``is_winner``: a field
-    # added to the target can't be silently forgotten here (it just flows), and a field
-    # the source lacks fails loud at construction. One field-list, spelled at the model.
+    # Both display models are strict name-subsets of ``ScoredCandidate`` plus the derived flags
+    # below — so each is a ``model_dump(include=…)`` projection, not a hand-copy. The include-set
+    # is the target model's OWN field list minus those: a field added to the target can't be
+    # silently forgotten here (it just flows), and a field the source lacks fails loud at
+    # construction. One field-list, spelled at the model.
     candidates = [
         RoundSummaryCandidate(
             **c.model_dump(include=_SUMMARY_INCLUDE),
@@ -107,12 +108,15 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         if rr.round == 0
         else compute_outer_verdict(
             rr.all_candidate_results,
+            # Only arms the round could read reach the verdict — the same admission rule the
+            # election used, applied at the one place holding both the candidate and its rows.
             [
                 CandidateInfo(
                     **c.model_dump(include=_CANDIDATE_INFO_INCLUDE),
                     is_winner=is_round_winner(c.candidate_id, rr.winner_id),
                 )
                 for c in rr.candidate_scores
+                if is_electable(c, rr.all_candidate_results.get(c.candidate_id, []))
             ],
             origin_rows,
             measurand_key=OUTER_PROXY_KEYS[0] if OUTER_PROXY_KEYS else "",
