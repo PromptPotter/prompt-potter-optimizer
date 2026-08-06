@@ -31,6 +31,7 @@ export interface DegradationHealth {
   transient_count: number;
   no_result_count: number;
   hole_count: number;
+  answer_modal_share: number | null;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
   prior_clean_rounds: number;
@@ -353,6 +354,7 @@ export interface SpendBucket {
   used_usd: number;
   input_tokens: number;
   output_tokens: number;
+  reasoning_tokens: number;
   rate_known: boolean;
   model: string | null;
   unpriced_tokens: number;

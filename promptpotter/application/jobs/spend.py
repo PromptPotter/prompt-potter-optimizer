@@ -99,6 +99,7 @@ def record_cost_usd(rec: dict[str, Any]) -> float:
         int(rec.get("input_tokens", 0)),
         int(rec.get("output_tokens", 0)),
         override_usd=float(raw) if isinstance(raw, int | float) else None,
+        provider=rec.get("provider"),
     )
     return usd if usd is not None else 0.0
 

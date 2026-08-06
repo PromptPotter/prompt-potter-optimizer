@@ -218,6 +218,20 @@ class LiveDisplay(DerivedView):
             bits.append(f"{duration_s:.1f}s")
         if isinstance(total_tokens, int) and total_tokens > 0:
             bits.append(f"{total_tokens} tok")
+        # What the seconds beside it actually bought. A reasoning model can spend nearly its
+        # whole output budget thinking — measured at ~94% on the shipped optimizer route, where
+        # the answer is schema-capped at ~1300 characters — and the duration alone reads as a
+        # slow provider rather than as a node that was asked to think about something small.
+        # Silent at 0 so a non-reasoning model's line stays clean.
+        completion = usage.get("completion_tokens")
+        reasoning = usage.get("reasoning_tokens")
+        if (
+            isinstance(reasoning, int)
+            and reasoning > 0
+            and isinstance(completion, int)
+            and completion > 0
+        ):
+            bits.append(f"{reasoning / completion:.0%} reasoning")
         if cached:
             bits.append("cached")
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")

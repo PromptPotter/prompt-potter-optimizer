@@ -63,8 +63,10 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Look at which `{step}:{code}` is firing. This is shown in the warning lines.
-- If the step is `llm_only` with fatal code `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L2's brief should already point at `max_tokens` directly.
-- If the fatal code is `empty_response` or `output_truncated`: the LLM returned empty or truncated content for a non-reasoning reason. Often a sign the prompt is causing a refusal or the model is overloaded. L3 will eventually replan to avoid the failing region.
+- If the step is `llm_only` with `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L2's brief should already point at `max_tokens` directly.
+- If the code is `output_truncated`: the provider cut the response short. Same `max_tokens` lever; it is provider-fault, so it deprecates the sample without eliminating the candidate.
+- If the code is `reasoning_only_response`: the model spent its output on the hidden reasoning trace and then stopped on its own, without hitting the cap — so raising `max_tokens` will not help. That is the route, not the prompt: pick a different model or provider for the node. Also provider-fault, so the candidate survives.
+- If the code is `empty_response`: the LLM returned nothing parseable *and no retry recovered it*. Often a sign the prompt is causing a refusal or the model is overloaded. This one is candidate-fault and eliminates on a single sighting, so L3 will eventually replan to avoid the failing region.
 - If the step is a specific pipeline node: check that node's configuration in your campaign config — the degradation threshold may be set too tight, or the node may have a bug.
 
 ---

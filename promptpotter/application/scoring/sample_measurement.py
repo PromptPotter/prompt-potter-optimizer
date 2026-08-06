@@ -150,6 +150,7 @@ class StepTokenUsage(TypedDict):
     estimated: bool
     cost_usd: NotRequired[float]
     model: NotRequired[str]
+    provider: NotRequired[str]
     finish_reason: NotRequired[str]
     reasoning: NotRequired[int]
 
@@ -182,8 +183,10 @@ def emit_step_token_usage(
             kind="backend",
             input_tokens=in_tok,
             output_tokens=out_tok,
+            reasoning_tokens=entry.get("reasoning", 0),
             duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
             model=entry.get("model"),
+            provider=entry.get("provider"),
             cost_usd=cost_usd,
             cached=cached,
         )
@@ -210,10 +213,15 @@ def _compute_step_tokens(
     """
     out: dict[str, StepTokenUsage] = {}
 
-    def _configured_model(node_name: str) -> str | None:
+    def _configured(node_name: str, key: str) -> str | None:
+        """A string the dataset overlay pinned for this node — ``model`` or ``provider``.
+
+        Both are mandatory on an LLM node, and neither is guessable downstream: the
+        provider is half of a price (``shared/spend.py::lookup_rate``), so a node whose
+        provider is dropped here is billed by whichever vendor's key happens to match."""
         cfg = wire_params.get(node_name)
-        model = cfg.get("model") if isinstance(cfg, dict) else None
-        return model if isinstance(model, str) else None
+        value = cfg.get(key) if isinstance(cfg, dict) else None
+        return value if isinstance(value, str) else None
 
     raw = resp_data.get("step_tokens")
     if isinstance(raw, dict):
@@ -231,9 +239,18 @@ def _compute_step_tokens(
                 if isinstance(cost, (int, float)):
                     seeded["cost_usd"] = float(cost)
                 wire_model = entry.get("model")
-                model = wire_model if isinstance(wire_model, str) else _configured_model(node_name)
+                model = (
+                    wire_model if isinstance(wire_model, str) else _configured(node_name, "model")
+                )
                 if model is not None:
                     seeded["model"] = model
+                # The provider is NOT taken from the wire even when the backend reports
+                # one: the overlay is what actually routed the call, and TermNorm's own
+                # `spend.backend.model` is known to answer a provider slug where a model
+                # is expected. Whoever we configured is whoever billed us.
+                provider = _configured(node_name, "provider")
+                if provider is not None:
+                    seeded["provider"] = provider
                 # Forward the raw response shape so ``classify_result`` can
                 # distinguish a truncation (``finish_reason=length``) from a
                 # genuinely empty response. Dropping these collapses every
@@ -277,9 +294,12 @@ def _compute_step_tokens(
             "output": len(out_text) // 4,
             "estimated": True,
         }
-        model = _configured_model(node.name)
+        model = _configured(node.name, "model")
         if model is not None:
             estimated["model"] = model
+        provider = _configured(node.name, "provider")
+        if provider is not None:
+            estimated["provider"] = provider
         out[node.name] = estimated
 
     return out

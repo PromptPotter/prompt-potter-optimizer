@@ -66,39 +66,37 @@ LEDGER_BASELINE = {
     "any_params": 65,
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
-    # 72 -> 73 (2026-08-06): `cell_readings`. A deliberate raise that buys a subtraction — it
-    # is the SOLE definition of what counts as a measurement of an outer cell, with
-    # `cell_fitness` a mean over it. The paired verdict and the noise series used to decide
-    # that separately, and the noise series decided it wrong.
-    "domain_any_maps": 73,
-    # 4051 -> 4053 (2026-08-06): `_sample_series(sample_id, dots)` in the datasets router.
-    # A deliberate raise, for two params that buy the deletion of a rule the webapp could
-    # not keep: the hard-sample roster counted its own hit rate off the dots in hand, which
-    # on a graded scorer (`is_hit` = `fitness >= 1.0`, unreachable there) printed 0/N on
-    # every row of a healthy campaign. Serving the aggregate beside the series it aggregates
-    # is what makes the two unable to disagree — a reader-side sum over a different set is
-    # exactly the failure this replaces, so the surface moves to the side that owns it.
-    # 4053 -> 4056 (2026-08-06): `cell_readings` + `_cell_reading_lists` + `cells_dropped`.
-    # A deliberate raise. The first two split "every reading of a cell" from "its mean" so
-    # replicate spread survives to the consumer whose job is measuring spread; `cells_dropped`
-    # is the loud half of the error exclusion, since a census panel that quietly returns fewer
-    # cells cannot be told from a small one.
-    # 4056 -> 4054 (2026-08-06): `backfill_spend_rates` and `_cycle_spend` both deleted. The
-    # backfill's stated reason had gone stale (a cache hit DOES re-emit a record now) and what
-    # it still did was re-price a whole bucket at the FIRST model it ever saw; `_cycle_spend`
-    # hand-mapped six fields at the far end of the chain, where a forgotten half reads as a
-    # zero rather than an error. Both are now one fold beside the shape they fold.
-    # 4054 -> 4055 (2026-08-06): `model_cls` on `restamp._process`. A deliberate raise, and the
-    # cheapest possible one: the verb was hardcoded to `CampaignConfig` while the forbid-by-
-    # default flip obliges EVERY on-disk model, and the one it missed took down `init_services`
-    # for every `new`/`resume`. One parameter buys the third surface and any later one.
-    # 4055 -> 4057 (2026-08-06): `is_electable(cs, rows)`. A deliberate raise that RETIRES a
-    # duplicate: "an arm the round can read" had two spellings that silently disagreed — the
-    # election's inline three clauses and the outer verdict's `is_leader_eligible`, which omits
-    # answer-collapse. Three banked rounds convicted a constant answerer, one of them with
-    # `electable_count: 0` on the same record. Naming it costs two parameters and deletes a
-    # stamped `CandidateInfo` field plus the filter that read it.
-    "param_decls": 4057,
+    # 73 -> 74 (2026-08-06): `modal_answer_share`. A deliberate raise for the CONTINUOUS
+    # reading of a question the package could only ask as a bool — `is_answer_collapsed`
+    # needs a literal single label, so a model answering one label 95% of the time passed
+    # every check and graded `healthy`. It reports and never gates: hedging is the failure
+    # the loop corrects, so the number's value is its round-over-round series.
+    "domain_any_maps": 74,
+    # Six moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
+    # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
+    # bloat source. What the current number buys, newest first:
+    #
+    # +8 (the JustLogic bake-off's follow-up arc). Seven of the eight are ONE parameter each,
+    # threading a fact that was already measured to the surface that needed it, and the eighth
+    # generalises `_configured_model` to `_configured(node, key)` rather than adding a twin.
+    # `reasoning_tokens` on `emit_token_usage`: the wire reports how much of a call was
+    # thinking on every round-trip and only the parse-FAILURE path kept it, so the share was
+    # legible exactly when it was useless — measured ~94% on the shipped optimizer route,
+    # which is why the loop owns a third of an L4 cell's wall-clock. `provider` on
+    # `emit_token_usage` / `lookup_rate` / `compute_usd`: a rate belongs to the (provider,
+    # model) PAIR, and pricing off the model alone billed our OpenRouter calls at DeepSeek's
+    # own list — 1.6x, on the one route that returns no wire cost to contradict it.
+    # `answer_modal_share` on `compute_degradation_health` + `modal_answer_share` itself: see
+    # `domain_any_maps`. `rows` on `seed_screen._call_cost_and_latency`: the screen spends
+    # real money per pass and reported quality only, so the two axes an operator ranks ahead
+    # of quality were reachable only by hand-parsing the archive.
+    #
+    # Earlier the same day: `_sample_series` (serve the aggregate beside the series it
+    # aggregates), `cell_readings` + `_cell_reading_lists` + `cells_dropped` (split a cell's
+    # readings from their mean; make a dropped cell loud), `model_cls` on `restamp._process`
+    # (the verb was hardcoded to one on-disk model while the forbid flip obliges every one),
+    # and `is_electable`. Against those, `backfill_spend_rates` + `_cycle_spend` were deleted.
+    "param_decls": 4065,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

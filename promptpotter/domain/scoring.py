@@ -112,13 +112,40 @@ def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] |
     answers are identity-keyed (an L4 outer round's per-seed inner-result tokens) — in both
     cases every prediction is its own bucket and a constant answer cannot be detected.
 
-    One definition, three consumers: the ``answer_distribution`` panel that reports the constant
-    floor, and :func:`is_answer_collapsed`'s two gates. Deriving the rule twice is how the panel
-    could call a round collapsed while the scorer called it clean."""
+    One definition, four consumers: the ``answer_distribution`` panel that reports the constant
+    floor, :func:`is_answer_collapsed`'s two gates, and :func:`modal_answer_share`'s report.
+    Deriving the rule twice is how the panel could call a round collapsed while the scorer
+    called it clean."""
     truth = Counter(str(v) for r in rows if (v := r.get("ground_truth")) not in (None, ""))
     if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
         return None
     return truth
+
+
+def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
+    """Fraction of predictions that went to the single commonest label; ``None`` where
+    collapse is not a meaningful question (:func:`enumerable_truth_labels`) or nothing
+    parsed.
+
+    The CONTINUOUS reading of what :func:`is_answer_collapsed` answers as a bool, and the
+    two are deliberately not merged. Elimination needs the bool: at 1.0 the responses
+    carry no information about ability at all, so θ fitted to them is an artifact and the
+    arm has to leave. Everything below 1.0 is a MEASUREMENT of hedging, and hedging is the
+    failure the loop exists to correct — a candidate that moved a parent from 1.00 to 0.95
+    is progress, and cutting it would delete the gradient. So this reports and never gates.
+
+    It is over PREDICTIONS. The ``answer_distribution`` panel's ``constant`` is over GROUND
+    TRUTHS — that is the floor, what a constant answerer would SCORE, a different quantity
+    that happens to share the word. Measured 2026-08-06: the shipped JustLogic worker put
+    95% of its answers on one label against a 0.400 floor and graded ``healthy``, because
+    every check in the package asked the bool."""
+    if enumerable_truth_labels(rows) is None:
+        return None
+    said = Counter(str(v) for r in rows if (v := r.get("predicted")) not in (None, ""))
+    total = sum(said.values())
+    if total == 0:
+        return None
+    return said.most_common(1)[0][1] / total
 
 
 def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
@@ -152,4 +179,5 @@ __all__ = [
     "enumerable_truth_labels",
     "is_answer_collapsed",
     "is_hit",
+    "modal_answer_share",
 ]

@@ -14,6 +14,7 @@ from typing import Any
 
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.results import DegradationHealth, HealthGrade, RoundResult, WarningDict
+from promptpotter.domain.scoring import modal_answer_share
 
 # Degradation-health thresholds (explicit — no hidden defaults). The verdict
 # distinguishes a structurally-broken pipeline (abort-worthy) from transient
@@ -153,6 +154,7 @@ def compute_degradation_health(
     unreachable_count: int = 0,
     no_result_count: int = 0,
     hole_count: int = 0,
+    answer_modal_share: float | None = None,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
@@ -161,6 +163,13 @@ def compute_degradation_health(
     plus the cycle's track record. One denominator: every failure RATE is over
     ``attempted`` (all rows the round ran — health grades the round's WORK, and an
     errored row is exactly the evidence health exists to count).
+
+    ``answer_modal_share`` rides the verdict but is NOT graded and must not become a
+    precedence arm: a model hedging every row to one label is the failure the optimizer is
+    for, so halting on it would block the fix. It is carried because health is the one
+    per-round verdict every surface renders, and its round-over-round series is what says
+    whether the hedging is being optimized away. (The bool at 1.0 IS acted on — but by
+    ``PoBBCheck`` and the election, per candidate, never by this grade.)
 
     **Health does not grade PRECISION — never add a clause that does.** Grading an
     untested round ``degraded`` on a Wilson interval wider than ``DEGRADED_RATE_FLAG``
@@ -331,6 +340,8 @@ def compute_degradation_health(
         structural_count=structural_count,
         transient_count=transient_count,
         no_result_count=no_result_count,
+        hole_count=hole_count,
+        answer_modal_share=answer_modal_share,
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=consecutive_degraded_rounds,
         prior_clean_rounds=prior_clean_rounds,
@@ -504,6 +515,10 @@ def compute_round_health(
         unreachable_count=unreachable,
         no_result_count=no_result,
         hole_count=holes,
+        # Over every attempted row, not just the scoreable ones: hedging IS how a round
+        # produces unscoreable rows, so excluding them would hide the behaviour in the
+        # denominator. `modal_answer_share` ignores rows with no prediction itself.
+        answer_modal_share=modal_answer_share(results or []),
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
         is_origin=is_origin,

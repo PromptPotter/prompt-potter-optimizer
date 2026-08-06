@@ -181,6 +181,7 @@ class OpenAICompatibleClient(LLMClientBase):
         # by one full call). Zero unless a repair fires below.
         first_prompt = 0
         first_completion = 0
+        first_reasoning = 0
         if validation_err is not None:
             # The FAILING attempt's own account. Captured here because `response` is about
             # to be rebound to the retry's, and the retry cannot answer why this one was
@@ -262,6 +263,9 @@ class OpenAICompatibleClient(LLMClientBase):
                 # Fold the failed first attempt's tokens onto the salvaged repair response.
                 result.usage["prompt_tokens"] += first_prompt
                 result.usage["completion_tokens"] += first_completion
+                result.usage["reasoning_tokens"] = (
+                    result.usage.get("reasoning_tokens", 0) + first_reasoning
+                )
                 result.usage["total_tokens"] = (
                     result.usage["prompt_tokens"] + result.usage["completion_tokens"]
                 )
@@ -306,8 +310,18 @@ class OpenAICompatibleClient(LLMClientBase):
         usage = response.usage
         if reservation is not None and usage is not None:
             reservation.close(usage.total_tokens)
-        prompt_tokens = (usage.prompt_tokens if usage else 0) + first_prompt
-        completion_tokens = (usage.completion_tokens if usage else 0) + first_completion
+        attempt_prompt, attempt_completion, attempt_reasoning = _attempt_usage(response)
+        prompt_tokens = attempt_prompt + first_prompt
+        completion_tokens = attempt_completion + first_completion
+        # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, not a fourth total — the
+        # provider bills the thinking as output. It rides the success path because that is the
+        # only path on which the share is worth anything: until now it survived only on
+        # ``OptimizerPromptParseError``, so the one call that could report it was the one that
+        # had already failed. Measured on the shipped optimizer route, an ``l1_critique`` call
+        # billed 4790 completion tokens for a 1044-character answer — ~94% of the call, and of
+        # its 108 s, spent thinking, at ``reasoning_effort: low``. That is the fact behind the
+        # optimizer owning a third of every L4 cell's wall-clock, and no surface could say it.
+        reasoning_tokens = attempt_reasoning + first_reasoning
         return LLMResponse(
             content=content,
             reasoning=(
@@ -320,6 +334,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+                "reasoning_tokens": reasoning_tokens,
             },
             parsed=parsed,
             schema_repair_attempts=schema_repair_attempts,

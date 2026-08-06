@@ -76,8 +76,10 @@ def emit_token_usage(
     output_tokens: int,
     duration_s: float,
     model: str | None = None,
+    provider: str | None = None,
     cost_usd: float | None = None,
     cached: bool = False,
+    reasoning_tokens: int = 0,
 ) -> None:
     """Build ``TokenUsageRecord`` and append it to the active cycle ledger.
 
@@ -95,8 +97,10 @@ def emit_token_usage(
             kind=kind,
             node=node,
             model=model,
+            provider=provider,
             input_tokens=int(input_tokens),
             output_tokens=int(output_tokens),
+            reasoning_tokens=int(reasoning_tokens),
             duration_s=float(duration_s),
             cost_usd=cost_usd,
             cached=cached,

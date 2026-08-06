@@ -1493,6 +1493,57 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
     assert not unstamped.fatal_codes
 
 
+def test_content_empty_on_a_result_that_answered_is_not_an_empty_response() -> None:
+    """``content_empty`` describes ONE ATTEMPT; the backend retries it and the retry can
+    answer. Reading it as a verdict on the RESULT stamps ``empty_response`` — a fatal code
+    PoBB fast-cuts off a single sighting — onto a candidate that recovered and answered
+    correctly. Measured on three archived ``gpt-oss-20b:nitro`` rows carrying
+    ``content_empty`` + ``llm_retry`` (both stamped transient); two scored 1.0.
+
+    The empty verdict still fires when the result really is empty, including the scorer's
+    ``NO_RESULT`` sentinel — otherwise this guard would trade one silent misread for another.
+
+    Second axis: a result that emitted NOTHING but did REASON is the route's fault, not the
+    candidate's, whichever way the call ended. ``reasoning_tokens > 0`` proves the model
+    worked, so ``stop`` and ``length`` are the same fault at two budgets and both route to
+    infra, where they deprecate the sample without fast-eliminating the arm.
+    """
+    from promptpotter.config.settings import NO_RESULT
+    from promptpotter.domain.rendering import classify_result
+
+    def result(predicted: str, *, reasoning: int = 0, finish: str = "stop") -> dict[str, object]:
+        return {
+            "predicted": predicted,
+            "pipeline_data": {
+                "terminated_at": "llm_only",
+                "step_tokens": {"llm_only": {"finish_reason": finish, "reasoning": reasoning}},
+                "diagnostics": {
+                    "warnings": [
+                        {"step": "llm_only", "code": "content_empty", "kind": "transient"},
+                        {"step": "llm_only", "code": "llm_retry", "kind": "transient"},
+                    ]
+                },
+            },
+        }
+
+    recovered = classify_result(result("TRUE", reasoning=16))
+    assert not recovered.fatal_codes, "a row that answered is not an empty response"
+    assert "llm_only:content_empty" in recovered.advisory_codes
+
+    for empty in ("", NO_RESULT):
+        assert "llm_only:empty_response" in classify_result(result(empty)).fatal_codes
+
+    for finish, code in (
+        ("stop", "reasoning_only_response"),
+        ("length", "reasoning_budget_exhausted"),
+    ):
+        thought = classify_result(result("", reasoning=5352, finish=finish))
+        assert not thought.fatal_codes, (
+            f"{finish} after reasoning is route shape, not candidate fault"
+        )
+        assert f"llm_only:{code}" in thought.infra_codes
+
+
 # ===========================================================================
 # Pass B — proposal validators, PoBB posterior, round diagnostics, queue math
 # ===========================================================================
@@ -2419,6 +2470,45 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     assert h.suggested_action and "web_search" in h.suggested_action
     # The deterministic tripwire must NOT consume this signal — no auto-halt (R-48).
     assert backend_unreachable_tripped(h) is None
+
+
+def test_a_near_constant_answerer_is_reported_and_still_grades_healthy():
+    """A model hedging almost every row to one label is the failure the loop CORRECTS, so
+    the round reports the share and grades on nothing else.
+
+    Two halves, and the second is the operator's decision made testable. (1) The share is
+    visible at all: ``is_answer_collapsed`` needs a LITERAL single label, so a 19/20 hedger
+    passed every check in the package and health carried no number for it — the shipped
+    JustLogic worker sat at 95% against a 0.400 floor and graded ``healthy`` unremarked.
+    (2) It must STILL grade healthy: a collapse is addressable in the first rounds, so a
+    grade that halted on it would block the optimization that fixes it, and eliminating a
+    candidate that moved its parent 1.00 → 0.95 would delete the gradient.
+    """
+    from promptpotter.domain.results_health import compute_round_health
+    from promptpotter.domain.scoring import is_answer_collapsed, modal_answer_share
+
+    rows = [
+        {
+            "predicted": "Uncertain" if i < 19 else "TRUE",
+            "ground_truth": "TRUE" if i % 2 else "FALSE",
+        }
+        for i in range(20)
+    ]
+    assert modal_answer_share(rows) == 0.95
+    assert not is_answer_collapsed(rows), "0.95 is not literal collapse — elimination is unchanged"
+
+    h = compute_round_health(results=rows, prior_healths=[])
+    assert h is not None
+    assert h.answer_modal_share == 0.95
+    assert h.grade == "healthy"
+    assert h.reasons == [], "the share reports; it must never become a grading arm"
+
+    # Identity-keyed answers (every truth distinct — an L4 outer round's per-seed tokens)
+    # make collapse a meaningless question, and the report must abstain rather than read 1.0.
+    assert (
+        modal_answer_share([{"predicted": "x", "ground_truth": f"seed{i}"} for i in range(5)])
+        is None
+    )
 
 
 def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():

@@ -2360,13 +2360,20 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     (``scored_samples - total``) counts both, and both occur on real runs:
 
     * a PoBB-eliminated candidate simply stopped early — those cells were never attempted;
-    * a *deprecated* row is a sample the classifier marked fatal (``content_empty`` plus a
-      schema retry). It carries no ``error_category`` and is already excluded from
-      ``total``. Exactly one exists on disk, in a healthy inner round — the arithmetic form
-      would have halted that cycle, and through the L4 recursion a halted inner cycle is
-      itself unscoreable, so one transient retry would have taken the whole outer run down.
+    * a *deprecated* row is a sample the classifier marked fatal — ``content_empty`` where
+      the retry beside it never produced an answer either. It carries no ``error_category``
+      and is already excluded from ``total``, so the arithmetic form would halt an otherwise
+      healthy cycle; through the L4 recursion a halted inner cycle is itself unscoreable, so
+      one such sample would take the whole outer run down.
+
+    The row that motivated this guard was NOT of that kind: it carried ``content_empty`` and
+    answered on the retry, and only reached here because ``classify_result`` read an
+    attempt-level advisory as a verdict on the result. That is fixed at the predicate now
+    (``domain/rendering.py``), so a recovered retry is an ordinary scored row and never needs
+    this protection — which stays, for samples that really did come back empty.
     """
     from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.config.settings import NO_RESULT
     from promptpotter.domain.results import unscoreable_cells
 
     def row(sample_id: int, **extra: Any) -> dict[str, Any]:
@@ -2383,10 +2390,12 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     assert unscoreable_cells([row(i) for i in range(5)]) == 0
     assert unscoreable_cells([]) == 0
 
-    # The real inner C2.2 shape: a fatal-classified transient with NO error_category.
+    # The real inner C2.2 shape: a fatal-classified transient with NO error_category. The
+    # retry left nothing extractable, which is what separates it from the recovered row in
+    # ``test_content_empty_on_a_result_that_answered_is_not_an_empty_response``.
     deprecated = row(
         22,
-        predicted="Uncertain",
+        predicted=NO_RESULT,
         pipeline_data={
             "diagnostics": {
                 "warnings": [
@@ -2405,3 +2414,43 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
         "a classifier-deprecated sample was counted as a hole — the gate would halt a "
         "healthy cycle on a transient retry the loop already handles"
     )
+
+
+def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone() -> None:
+    """A price is a property of WHO billed it. The table registers one model under many
+    vendors at prices that differ several-fold, so a model-only lookup answers with
+    somebody else's list — and the old chain did exactly that, matching across providers
+    by suffix and then by bare substring.
+
+    The row that paid for this: every optimizer call goes to OpenRouter's
+    ``deepseek/deepseek-v4-flash``, which is character-for-character DeepSeek's own
+    first-party key at $0.14/$0.28 against OpenRouter's listed $0.088/$0.176. OpenRouter
+    returns no wire cost on that route, so the estimate was the only number and nothing
+    could contradict it. ``None`` is the honest answer; it arms the "USD cap inactive"
+    warning instead of quoting a 1.6x guess as a measurement.
+    """
+    from promptpotter.shared.spend import compute_usd, load_rates, lookup_rate
+
+    rates = load_rates()
+    if not rates:  # no bundled table in this environment — nothing to assert about keys
+        pytest.skip("rate table unavailable")
+
+    # 1. The defect. The bare key exists and is a DIFFERENT vendor's price.
+    assert lookup_rate("deepseek/deepseek-v4-flash") is not None, "fixture drift — bare key gone"
+    assert lookup_rate("deepseek/deepseek-v4-flash", "openrouter") is None
+
+    # 2. A routing suffix selects another upstream provider with its own rate (measured ~6x
+    #    on a nitro route), so the base-model price is not an approximation of it.
+    assert lookup_rate("openai/gpt-oss-20b:nitro", "openrouter") is None
+
+    # 3. Composition still resolves what it should: the provider-prefixed convention...
+    assert lookup_rate("openai/gpt-oss-20b", "openrouter") is not None
+    #    ...the wire echoing its own provider back inside the model id...
+    assert lookup_rate("groq:openai/gpt-oss-120b", "groq") == lookup_rate(
+        "openai/gpt-oss-120b", "groq"
+    )
+    #    ...and the bare namespace the table keeps first-party OpenAI/Anthropic in.
+    assert lookup_rate("gpt-4o", "openai") is not None
+
+    # 4. And the provider reaches the pricing call, not just the lookup beneath it.
+    assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None

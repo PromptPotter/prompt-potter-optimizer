@@ -23,6 +23,49 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+**From the 2026-08-06 JustLogic model bake-off.** Each carries its measurement; the four
+root fixes that arc DID land (reasoning-token share on the ledger, provider-aware pricing,
+`answer_modal_share`, the `reasoning_only_response` arm) are in `git log`, not here.
+
+- **`reasoning_effort` is not a lever on `deepseek-v4-flash`, and the optimizer owns a third
+  of every L4 cell.** Measured across 292 optimizer calls: `l1_generate` (effort `medium`)
+  53 s / 5352 output tokens median, `l1_critique` (effort **`low`**) 45 s / 4206, `l2_context`
+  23 s / 2157. One `l1_critique` round-trip billed 4790 completion tokens for a 1044-character
+  answer — **~94% reasoning, against a schema that caps the answer at ~1300 characters** — so a
+  two-step effort change buys ~27% and the knob is not the lever. `_MODEL_PROFILES` already
+  says this model "emits ~4k reasoning tokens before content"; what it advises (pair with
+  `reasoning_effort=low`) is what `l1_critique` was already doing. The real options are a
+  different optimizer model for the schema-bearing nodes or an explicit reasoning budget, and
+  both are choices, not cleanups. **Blocker: read the share off a live run first** — it is on
+  the ledger and the CLI call line as of this arc, and picking a model on the strength of a
+  one-cell reading is the mistake the bake-off itself documented. Its cheaper twin is already
+  the plan: `l1_generate` semantic widening at a net-SHORTER prompt.
+
+- **No structured-output route probe before a run spends money.** `inclusionai/ling-3.0-flash`
+  answered HTTP 405 `json_schema response format is not supported` (DeepInfra);
+  `z-ai/glm-4.7-flash` returned empty content + `finish_reason=stop` + 5352 reasoning chars,
+  burned a schema-repair re-prompt (~2x cost and latency), then ReadTimeout'd on both routes.
+  Both are decidable in one call, and both were discovered by paying for a screen.
+  `config.py::run_preflight_checks` grades budget/lives/couplings and
+  `check_model_reasoning_floors` hard-blocks a too-low `max_tokens`, but nothing asks whether
+  the route implements `response_format` — the failure the `&nitro_probe` anchor in
+  `assets/optimizer/pipeline.yaml` warns about **in prose**, whose whole point is that it does
+  not error. Same shape: swapping a model means hand-editing two lines of a dataset's
+  `pipeline.yaml` (`nodes.*.config.model` + an `available_models` entry) and remembering to
+  revert both, and a leaked pin silently mislabels the next run. **Blocker: a probe and a
+  swap-verb are both new capabilities, and the closing directive opens no new features until
+  the config is distributable.**
+
+- **The bundled rate table decays silently, and nothing schedules a refresh.**
+  `openrouter/openai/gpt-oss-20b` reads $0.02/$0.10 against a live $0.030/$0.130. `refresh_rates`
+  exists and clears the `load_rates` cache; no caller runs it and no surface reports the
+  table's age, so the floor `load_rates` falls back to is quietly whatever shipped. Now more
+  visible, not less: since pricing became provider-aware, a model the table lacks under its
+  real provider resolves to `None` rather than to another vendor's number — correct, and it
+  makes `unpriced_tokens` the load-bearing signal. Pairs with the **already-filed** "daily cap
+  can't see unpriced spend" entry below, which is what turns that signal into a gate the
+  operator can trust.
+
 - **Filler module names hiding several concepts each** (verified 2026-08-05; importer counts
   exact). `application/config.py` — 1169 lines, **42 importers**, one name over three
   concepts: the `CampaignConfig`/`OptimizationConfig` schema, the preflight validator

@@ -181,59 +181,59 @@ def load_rates() -> dict[str, tuple[float, float]]:
     return {}
 
 
-def lookup_rate(model: str | None) -> tuple[float, float] | None:
-    """Return ``(input_per_token, output_per_token)`` for *model*, or None.
+def lookup_rate(model: str | None, provider: str | None = None) -> tuple[float, float] | None:
+    """``(input_per_token, output_per_token)`` for *model* as billed by *provider*, or None.
 
-    Match is suffix-fuzzy: an exact key wins, otherwise the first key
-    that is contained in the needle (or vice versa) wins. Lowercased
-    so wire variants like ``"groq:openai/gpt-oss-120b"`` resolve to
-    LiteLLM's ``"groq/openai/gpt-oss-120b"`` without per-provider
-    normalization.
+    **A price is a property of the (provider, model) PAIR, and the table is keyed that
+    way** — LiteLLM registers eight distinct ``*/deepseek-v4-flash`` entries spanning
+    $0.10/$0.20 to $0.25/$1.75. So the provider is the first half of the question, not a
+    hint: given one, only a key that agrees with it can answer, and a bare key is not a
+    fallback but a different vendor's price list.
+
+    This replaced a chain that matched across providers by suffix and then by bare
+    substring. It resolved an OpenRouter ``deepseek/deepseek-v4-flash`` call onto
+    DeepSeek's own first-party key at $0.14/$0.28 against OpenRouter's listed
+    $0.088/$0.176 — ~1.6x, on the route where the wire returns no cost at all, so the
+    estimate was the only number and nothing could contradict it. Which of the eight it
+    picked was decided by key length. A wrong number that cannot be told from a right one
+    is worse than ``None``, which at least arms the "USD cap inactive" warning.
+
+    Threading the provider also RETIRES the suffix hack rather than replacing it: Groq
+    answers ``response.model = "openai/gpt-oss-120b"`` while the table keys it
+    ``groq/openai/gpt-oss-120b``, and ``provider="groq"`` composes that exactly.
+
+    A routing suffix (``:nitro``, ``:floor``) stays deliberately unpriceable. It selects a
+    different upstream provider with its own rate — measured, ``xiaomi/mimo-v2.5:nitro``
+    billed ~6x its base listing — so the base-model price is not an approximation of it.
     """
     if not model:
         return None
     needle = model.lower().strip()
     rates = load_rates()
-    if needle in rates:
-        return rates[needle]
-    # Wire form "provider:model" → LiteLLM's "provider/model". Try the
-    # slash-normalised whole and the post-colon tail, so e.g.
-    # "groq:openai/gpt-oss-120b" resolves to "groq/openai/gpt-oss-120b" and
-    # "openai:gpt-4o" resolves to "gpt-4o".
-    if ":" in needle:
-        normalised = needle.replace(":", "/")
-        if normalised in rates:
-            return rates[normalised]
-        tail = needle.split(":", 1)[1]
-        if tail in rates:
-            return rates[tail]
-    else:
-        normalised = needle
-    # Provider-less wire form: Groq returns ``response.model =
-    # "openai/gpt-oss-120b"`` while LiteLLM keys it ``groq/openai/gpt-oss-120b``.
-    # Match any registered key whose suffix is the needle (or its
-    # colon-normalised form); pick the shortest such key so a bare
-    # "openai/gpt-oss-120b" prefers a 2-segment match over a deeper one.
-    suffix_matches: list[tuple[int, str]] = [
-        (len(key), key)
-        for key in rates
-        if key.endswith("/" + needle) or key.endswith("/" + normalised)
-    ]
-    if suffix_matches:
-        suffix_matches.sort()
-        return rates[suffix_matches[0][1]]
-    # Last resort: any registered key that's a substring/suffix of the needle.
-    # Prefer the LONGEST (most-specific) match so a short key like "gpt-4" can't
-    # shadow "gpt-4o-mini" — and so the result is independent of dict order.
-    fuzzy = [
-        (len(key), key)
-        for key in rates
-        if key in needle or needle.endswith(key) or key in normalised or normalised.endswith(key)
-    ]
-    if fuzzy:
-        fuzzy.sort()
-        return rates[fuzzy[-1][1]]
-    return None
+    if provider:
+        prefix = provider.lower().strip()
+        # Some wires echo the provider back inside the model id, in either separator
+        # ("groq:openai/gpt-oss-120b"; "deepseek/deepseek-v4-flash" called AT DeepSeek).
+        # Stripping it is normalization, not a fallback — it makes the composition below
+        # idempotent instead of producing "deepseek/deepseek/deepseek-v4-flash".
+        needle = needle.removeprefix(f"{prefix}:").removeprefix(f"{prefix}/")
+        # Any colon SURVIVING that is a route selector, not a provider — unpriceable above.
+        if ":" in needle:
+            return None
+        qualified = rates.get(f"{prefix}/{needle}")
+        if qualified is not None or "/" in needle:
+            # A model id carrying a "/" already names a vendor's namespace, so reading it as
+            # a bare key means pricing our call off THAT vendor's list — the whole defect
+            # ("deepseek/deepseek-v4-flash" is simultaneously DeepSeek's own key and
+            # OpenRouter's model id, at different prices). Refuse; unpriced is the answer.
+            return qualified
+        # No "/" left ⇒ nothing to collide with, and the bare namespace is where the table
+        # keeps first-party OpenAI and Anthropic (523 unprefixed keys, "gpt-4o" not
+        # "openai/gpt-4o"). That is a naming convention, not a fallback.
+        return rates.get(needle)
+    # Provider unknown (a historical ledger row predating the field): an exact key is the
+    # only honest answer — it is the one match that cannot belong to somebody else.
+    return rates.get(needle)
 
 
 def compute_usd(
@@ -242,16 +242,18 @@ def compute_usd(
     output_tokens: int,
     *,
     override_usd: float | None = None,
+    provider: str | None = None,
 ) -> float | None:
     """USD cost for one call. ``override_usd`` short-circuits the rate lookup.
 
     Returns None when no override is given and no rate is on file —
     callers leave ``rate_known=False`` and fall back to a token-count
-    display for the spend chip.
+    display for the spend chip. ``provider`` is who billed it; without it only an
+    exact key resolves, because a price belongs to the pair (see :func:`lookup_rate`).
     """
     if override_usd is not None:
         return float(override_usd)
-    rate = lookup_rate(model)
+    rate = lookup_rate(model, provider)
     if rate is None:
         return None
     in_per_tok, out_per_tok = rate

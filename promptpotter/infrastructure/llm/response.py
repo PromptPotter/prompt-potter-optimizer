@@ -64,7 +64,12 @@ class LLMResponse(StrictModel):
     model: str = Field(..., description="Model used")
     usage: dict[str, int] = Field(
         default_factory=dict,
-        description="Token usage: prompt_tokens, completion_tokens, total_tokens",
+        description=(
+            "Token usage: prompt_tokens, completion_tokens, total_tokens, and "
+            "reasoning_tokens — the last a SUBSET of completion_tokens (the provider "
+            "bills thinking as output), absent for a non-reasoning model or a provider "
+            "that reports no breakdown."
+        ),
     )
     parsed: Any | None = Field(
         None,

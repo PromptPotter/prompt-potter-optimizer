@@ -69,6 +69,12 @@ class SpendBucket(StrictModel):
     used_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a
+    # SUBSET of it, so it is never added into a total. Here and not on ``CycleSpend``
+    # because the question is latency, not money: on the shipped optimizer route this
+    # runs ~94%, which is why the loop owns a third of an L4 cell's wall-clock while
+    # every worker-model swap left that third untouched.
+    reasoning_tokens: int = 0
     rate_known: bool = False
     model: str | None = None
     # Tokens billed under this bucket whose USD cost couldn't be resolved (no wire

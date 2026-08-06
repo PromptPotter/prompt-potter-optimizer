@@ -56,11 +56,12 @@ from __future__ import annotations
 import collections
 import logging
 import random
-from collections.abc import Callable
+import statistics
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import is_hit, modal_answer_share
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -100,11 +101,45 @@ class SeedReading:
     n: int
     class_floor: float
     origin_reads: tuple[float, ...]
+    # What the passes above COST to take, in the two axes an operator ranks before quality
+    # when choosing a target model. Both are already on every row this screen scored
+    # (``step_timings`` + the wire ``step_tokens[*].cost_usd``), so reporting them adds no
+    # call and no store — and without them the tool spends real money on the exact
+    # comparison it cannot answer. One per backend call, across every pass.
+    latencies: tuple[float, ...] = ()
+    cost_usd: float = 0.0
+    # How much of the model's OWN answering went to one label, over every pass
+    # (``domain/scoring.py::modal_answer_share``); ``None`` where the answer space makes the
+    # question meaningless. The bank-side twin of ``class_floor``: that says how much a
+    # constant answer would SCORE here, this says how nearly the model IS one. A candidate
+    # model can clear the floor while hedging almost everything — measured, the incumbent
+    # answered one label 95% of the time for +0.05 over a 0.400 floor — and a screen that
+    # ranks models has to show the operator which kind of margin they are buying.
+    answer_modal_share: float | None = None
 
     @property
     def origin_accuracy(self) -> float:
         """Mean over the independent passes — what the verdict reads."""
         return sum(self.origin_reads) / len(self.origin_reads)
+
+    @property
+    def latency_median(self) -> float:
+        """Median per-call wall-clock. The median, not the mean, is the route's normal
+        speed: a cold first call and a provider stall both land in the tail, and one 92 s
+        outlier in 20 moves a mean by more than it tells you."""
+        return statistics.median(self.latencies) if self.latencies else 0.0
+
+    @property
+    def latency_mean(self) -> float:
+        """Mean per-call wall-clock. Reported BESIDE the median rather than instead of it:
+        the gap between the two IS the instability signal."""
+        return sum(self.latencies) / len(self.latencies) if self.latencies else 0.0
+
+    @property
+    def cost_per_pass(self) -> float:
+        """Wire cost of one pass over this bank — what a comparison between models is
+        actually denominated in."""
+        return self.cost_usd / len(self.origin_reads) if self.origin_reads else 0.0
 
     @property
     def origin_spread(self) -> float:
@@ -164,8 +199,13 @@ class SeedReading:
             "origin_spread": self.origin_spread,
             "margin_se": self.margin_se,
             "reasoning_margin": self.reasoning_margin,
+            "answer_modal_share": self.answer_modal_share,
             "rewards_collapse": self.rewards_collapse,
             "verdict_settled": self.verdict_settled,
+            "latency_median": self.latency_median,
+            "latency_mean": self.latency_mean,
+            "cost_usd": self.cost_usd,
+            "cost_per_pass": self.cost_per_pass,
         }
 
 
@@ -184,6 +224,31 @@ def class_floor(bank: list[Sample]) -> float:
     """
     counts = collections.Counter(str(s.ground_truth) for s in bank)
     return max(counts.values()) / len(bank) if bank else 0.0
+
+
+def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[float], float]:
+    """``(per-call latencies, summed wire cost)`` for one pass's rows.
+
+    Latency sums ``step_timings`` rather than reading ``total_time``: the per-node timings
+    are what the backend actually measured for each LLM call, they cover a multi-node
+    pipeline the same way they cover a single-node one, and ``total_time`` reads 0.0 on a
+    row served from the measurement cache. Cost is the provider's own ``cost_usd`` off the
+    wire — never a rate-table estimate — so a row that carried none contributes nothing
+    rather than a guess.
+    """
+    latencies: list[float] = []
+    cost = 0.0
+    for row in rows:
+        pd = row.get("pipeline_data") or {}
+        seconds = sum(
+            float(v) for v in (pd.get("step_timings") or {}).values() if isinstance(v, int | float)
+        )
+        if seconds > 0:
+            latencies.append(seconds)
+        for entry in (pd.get("step_tokens") or {}).values():
+            if isinstance(entry, dict) and isinstance(entry.get("cost_usd"), int | float):
+                cost += float(entry["cost_usd"])
+    return latencies, cost
 
 
 def draw_bank(all_samples: list[Sample], n: int, seed: int) -> list[Sample]:
@@ -217,9 +282,10 @@ async def screen_inner_seeds(
     fabricated certainty, which is worse than the single read it replaced.
 
     Cost is ``repeat x n_samples`` target calls per seed and NO optimizer calls — a screen is not
-    a campaign. Quote it in wall-clock as well as dollars before a wide sweep (``<one-budget>``):
-    on the measured ``justlogic-d234`` rate one pass over one bank is roughly a minute and
-    ~$0.006.
+    a campaign. Each reading REPORTS its own wall-clock and wire cost (``latency_median`` /
+    ``latency_mean`` / ``cost_per_pass``), so price a wide sweep off the last reading rather than
+    off a figure written here (``<one-budget>``) — a hand-quoted rate goes stale the first time
+    the target model or the route moves, and the prose cannot tell you that it has.
     """
     from promptpotter.application.config import configure_and_apply_pipeline, load_campaign_config
     from promptpotter.application.datasets.authored import (
@@ -263,6 +329,9 @@ async def screen_inner_seeds(
     for seed in seeds:
         bank = draw_bank(all_samples, n_samples, seed)
         reads: list[float] = []
+        latencies: list[float] = []
+        all_rows: list[Mapping[str, Any]] = []
+        cost_usd = 0.0
         n_scored = 0
         for i in range(max(1, repeat)):
             rows, _scores, _signal = await score_search_point(
@@ -296,17 +365,28 @@ async def screen_inner_seeds(
                 )
             reads.append(sum(scored) / len(scored))
             n_scored = len(scored)
+            pass_latencies, pass_cost = _call_cost_and_latency(rows)
+            latencies += pass_latencies
+            cost_usd += pass_cost
+            all_rows += rows
         reading = SeedReading(
             seed=seed,
             n=n_scored,
             class_floor=class_floor(bank),
             origin_reads=tuple(reads),
+            latencies=tuple(latencies),
+            cost_usd=cost_usd,
+            # Pooled across passes: hedging is a property of the model on this bank, and one
+            # pass of 40 rows resolves a share no better than it resolves an accuracy.
+            answer_modal_share=modal_answer_share(all_rows),
         )
         readings.append(reading)
         log_fn(
             f"seed {seed}: floor {reading.class_floor:.3f} origin {reading.origin_accuracy:.3f} "
             f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
-            f"margin {reading.reasoning_margin:+.3f} +/-{reading.margin_se:.3f}"
+            f"margin {reading.reasoning_margin:+.3f} +/-{reading.margin_se:.3f} "
+            f"lat {reading.latency_median:.1f}s/{reading.latency_mean:.1f}s "
+            f"${reading.cost_per_pass:.4f}/pass"
             + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
         )
 

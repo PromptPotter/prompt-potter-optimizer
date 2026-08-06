@@ -896,6 +896,16 @@ class DegradationHealth(StrictModel):
     # round grade HEALTHIER the more of them it had — most consequentially at round 0,
     # where the grade feeds ``origin_gate_tripped`` and there is no panel gate to catch it.
     hole_count: int = 0
+    # Share of this round's predictions on its single commonest label
+    # (``domain/scoring.py::modal_answer_share``); ``None`` where the answer space makes
+    # collapse meaningless. REPORTED, never graded — no ``reasons`` entry, no precedence
+    # arm, deliberately. A model hedging to one label is the addressable failure the loop
+    # exists to correct in its first rounds, so grading it critical would halt the very
+    # optimization that fixes it, and the round-over-round series is the point: falling =
+    # working. It rides HERE because health is the only per-round verdict every surface
+    # already renders, and until now nothing outside the L1 prompt panel could see it — an
+    # origin answering one label 95% of the time graded ``healthy`` and nobody was told.
+    answer_modal_share: float | None = None
     degraded_rate: float
     consecutive_degraded_rounds: int
     prior_clean_rounds: int

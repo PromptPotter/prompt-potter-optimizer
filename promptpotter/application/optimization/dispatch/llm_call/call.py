@@ -373,8 +373,10 @@ async def llm_call(
                 kind="optimizer",
                 input_tokens=parse_err.prompt_tokens,
                 output_tokens=parse_err.completion_tokens,
+                reasoning_tokens=parse_err.reasoning_tokens,
                 duration_s=round(time.monotonic() - _t0, 2),
                 model=parse_err.model or merged.get("model"),
+                provider=merged["provider"],
             )
             raise
         finally:
@@ -426,6 +428,8 @@ async def llm_call(
         kind="optimizer",
         input_tokens=response.usage.get("prompt_tokens", 0),
         output_tokens=response.usage.get("completion_tokens", 0),
+        reasoning_tokens=response.usage.get("reasoning_tokens", 0),
+        provider=merged["provider"],
         duration_s=duration_s,
         model=response.model,
         cost_usd=float(cost_raw) if cost_raw is not None else None,

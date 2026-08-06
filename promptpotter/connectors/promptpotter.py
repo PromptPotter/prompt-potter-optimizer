@@ -35,12 +35,13 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner origin does: the shared optimizer prompt
     text (``promptpotter/assets/optimizer/pipeline.yaml``), the per-node information-flow
-    layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.yaml`` spec —
-    the inner benchmark NAME + task list (which bank, which seeds) plus
-    ``inner_benchmark_config`` (sample count, round / variant geometry, the
-    ``inner_optimizer_temperature`` clamp). Otherwise an outer origin scored under an old origin/config is
-    silently reused against candidates run under the new one — a stale-vs-fresh
-    comparison that fabricates (or masks) outer signal.
+    layouts, the engine version, the dataset's WHOLE ``inner_tasks.yaml`` spec — the inner
+    benchmark NAME + task list (which bank, which seeds) plus ``inner_benchmark_config``
+    (sample count, round / variant geometry, the ``inner_optimizer_temperature`` clamp) —
+    AND the inner benchmark's own per-node ``config`` (the worker model, temperature,
+    reasoning_effort, output schema). Otherwise an outer origin scored under an old
+    origin/config is silently reused against candidates run under the new one — a
+    stale-vs-fresh comparison that fabricates (or masks) outer signal.
     """
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         optimizer_manifest,
@@ -67,10 +68,37 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # candidate — a stale-vs-fresh comparison that fabricates outer signal (the exact bug this
     # fingerprint exists to prevent).
     inner_tasks = read_yaml_optional(dataset_dir / "inner_tasks.yaml") or {}
+    # ...and the inner benchmark's OWN node configs, which the name above does not carry.
+    # `inner_tasks.yaml` pins a per-cell `inner_model`/`inner_provider` and those ride the
+    # spec, but the DATASET DEFAULT — `datasets/{benchmark}/pipeline.yaml::nodes.*.config`,
+    # where the worker model, temperature, reasoning_effort and output schema actually live —
+    # escaped entirely. Repointing that model left this fingerprint unchanged, so every banked
+    # outer cell still matched: a pp-self run would replay cells measured on the OLD worker
+    # and report them as the new one's, having run nothing. Same stale-vs-fresh bug the rest
+    # of this fingerprint exists to prevent, one file further down.
+    #
+    # `config` only, deliberately. `available_models` is a permission list and
+    # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
+    # origin does, so widening either must not void a panel that cost an hour to measure.
+    # The benchmark resolves as a sibling of the outer dataset dir, which is how every layout
+    # ships it (repo `datasets/`, staged `assets/benchmarks/`, tenant root); an unresolvable
+    # one hashes as ``None``, which is a distinct input from any real config rather than a
+    # silent match.
+    benchmark = inner_tasks.get("inner_benchmark")
+    inner_pipeline = (
+        read_yaml_optional(dataset_dir.parent / str(benchmark) / "pipeline.yaml")
+        if benchmark
+        else None
+    )
     inner_spec = {
-        "benchmark": inner_tasks.get("inner_benchmark"),
+        "benchmark": benchmark,
         "config": inner_tasks.get("inner_benchmark_config") or {},
         "tasks": inner_tasks.get("tasks") or [],
+        "nodes": (
+            {name: (node or {}).get("config") for name, node in inner_pipeline["nodes"].items()}
+            if inner_pipeline and isinstance(inner_pipeline.get("nodes"), dict)
+            else None
+        ),
     }
     fingerprint = stable_hash([origin_manifest, layouts, APP_VERSION, inner_spec])[:12]
     return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}

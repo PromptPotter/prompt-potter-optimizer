@@ -48,12 +48,19 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     # Sorted by reasoning margin, and DISQUALIFIED banks first regardless of it: a bank where
     # collapse outscores the origin is not a weak cell to rank, it is one to reject.
     rows = sorted(outcome.readings, key=lambda r: (not r.rewards_collapse, -r.reasoning_margin))
+    # Speed and cost ride the same row as the margin, because choosing a target model is one
+    # decision over all three and reading them from separate places is how a model gets picked
+    # on quality it cannot afford. Median and mean are both shown: a gap between them is a
+    # route stalling, which no single number says.
     table = "\n".join(
         f"  seed {r.seed:<4d} {'REWARDS COLLAPSE' if r.rewards_collapse else 'ok              '}"
         f"  margin {r.reasoning_margin:+.3f} +/-{r.margin_se:.3f}"
         f"  {'settled' if r.verdict_settled else 'UNSETTLED'}"
         f"  origin {r.origin_accuracy:.3f} (spread {r.origin_spread:.3f} over {len(r.origin_reads)})"
+        f"  hedge {'--' if r.answer_modal_share is None else f'{r.answer_modal_share:.0%}'}"
         f"  floor {r.class_floor:.3f}"
+        f"  {r.latency_median:.1f}s med/{r.latency_mean:.1f}s mean"
+        f"  ${r.cost_per_pass:.4f}/pass"
         for r in rows
     )
     # A rejection requires a SETTLED margin. The floor is exact; the origin is not, so near the

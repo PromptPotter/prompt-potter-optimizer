@@ -593,7 +593,13 @@ class LiveDashboardView(DerivedView):
         out_tok = int(record.output_tokens)
         if record.model and not bucket.model:
             bucket.model = record.model
-        usd = compute_usd(record.model, in_tok, out_tok, override_usd=record.cost_usd)
+        usd = compute_usd(
+            record.model,
+            in_tok,
+            out_tok,
+            override_usd=record.cost_usd,
+            provider=record.provider,
+        )
 
         if usd is not None:
             bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
@@ -603,6 +609,7 @@ class LiveDashboardView(DerivedView):
         if not record.cached:
             bucket.input_tokens += in_tok
             bucket.output_tokens += out_tok
+            bucket.reasoning_tokens += int(record.reasoning_tokens)
             if usd is not None:
                 bucket.used_usd = round(bucket.used_usd + usd, 6)
                 bucket.rate_known = True

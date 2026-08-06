@@ -160,8 +160,24 @@ class TokenUsageRecord(StrictModel):
     kind: Literal["optimizer", "backend"]
     node: str
     model: str | None = None
+    provider: str | None = None
+    """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
+    and the rate table registers the same model under many vendors at prices that differ
+    several-fold, so a model alone cannot be priced (``shared/spend.py::lookup_rate``).
+    ``None`` on a row written before this field, where only an exact key resolves."""
     input_tokens: int
     output_tokens: int
+    reasoning_tokens: int = 0
+    """How much of ``output_tokens`` the model spent thinking — a SUBSET of it, never a
+    third total, because the provider bills the hidden trace as output. 0 for a
+    non-reasoning model and for a provider that reports no breakdown, which is why it
+    cannot be read as "this call did not think".
+
+    It is here rather than beside the cost because the question it answers is *latency*,
+    not money: an optimizer node whose answer is capped at ~1300 characters was measured
+    billing 4790 completion tokens for 1044 of them, so ~94% of that call — and of its
+    108 seconds — bought reasoning. The wire reported it on every call and only the
+    parse-FAILURE path kept it, so the share was legible exactly when it was useless."""
     duration_s: float = 0.0
     cost_usd: float | None = None
     cached: bool = False

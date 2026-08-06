@@ -151,16 +151,17 @@ The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memo
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` (`application/optimization/pobb/classification.py`) derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
+`classify_result()` (`domain/rendering.py`) derives **fatal** and **infra** codes from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
 
-Rule table:
+Rule table. Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, the backend retries beside it, and that retry can succeed; a row carrying a real `predicted` is not an empty response whatever the advisory says. Among the unanswered, `reasoning_tokens > 0` is proof the model **worked** (a refusal carries content, or `content_filter`), so emitting nothing after thinking is route shape whatever ended the call — `stop` and `length` are one fault at two budgets.
 
-- `content_empty` + `finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`
-- `content_empty` + `finish_reason=length` + `reasoning_tokens = 0` → `output_truncated`
-- `content_empty` + any other `finish_reason` → `empty_response`
+- `content_empty`, unanswered, `reasoning_tokens > 0`, `finish_reason=length` → `reasoning_budget_exhausted` *(infra)*
+- `content_empty`, unanswered, `reasoning_tokens > 0`, any other `finish_reason` → `reasoning_only_response` *(infra)*
+- `content_empty`, unanswered, `reasoning_tokens = 0`, `finish_reason=length` → `output_truncated` *(infra)*
+- `content_empty`, unanswered, `reasoning_tokens = 0`, any other `finish_reason` → `empty_response` *(fatal)*
 - `*:content_filtered` → passthrough as fatal
 
-Fatal codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
+Fatal codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is exactly why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate rather than reading it strictly. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
 
 Three load-boundary effects (consumed via `is_deprecated()`):
 

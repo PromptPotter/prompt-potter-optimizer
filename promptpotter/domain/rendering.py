@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
 
@@ -235,10 +235,32 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     fatals: set[str] = set()
 
     node = _terminal_node(result)
-    if f"{node}:content_empty" in advisories:
+    # ``content_empty`` describes ONE ATTEMPT, not the result: the backend raises it and
+    # retries (``llm_retry`` beside it, both stamped transient), and that retry can answer.
+    # A result carrying a real prediction is not an empty response whatever the advisory
+    # says — three archived rows recovered this way and two scored 1.0, yet all three were
+    # stamped ``empty_response``, whose FATAL routing fast-eliminates the candidate off one
+    # sighting. Read the result, not the attempt. ``NO_RESULT`` is the scorer's sentinel for
+    # "terminal node emitted nothing parseable" (``results_health`` owns the round-level
+    # version of this same question).
+    predicted = str(result.get("predicted") or "").strip()
+    answered = bool(predicted) and predicted != NO_RESULT
+    if f"{node}:content_empty" in advisories and not answered:
         finish_reason, reasoning_tokens = _terminal_llm_shape(result)
-        if finish_reason == "length" and reasoning_tokens > 0:
-            infra.add(f"{node}:reasoning_budget_exhausted")
+        # ``reasoning_tokens > 0`` is proof the model WORKED — it neither refused (a refusal
+        # carries content, or ``finish_reason=content_filter``) nor idled. Emitting nothing
+        # visible after thinking is a property of the ROUTE, deterministic for every prompt
+        # we could send it, so it routes to infra whatever ended the call: hitting the cap
+        # (``length``) and stopping on its own (``stop``) are the same fault seen at two
+        # budgets. Observed on ``z-ai/glm-4.7-flash`` — empty content, ``stop``, 5352
+        # reasoning chars, then a schema-repair re-prompt — and charging that to the
+        # candidate fast-eliminates a prompt that was never read.
+        if reasoning_tokens > 0:
+            infra.add(
+                f"{node}:reasoning_budget_exhausted"
+                if finish_reason == "length"
+                else f"{node}:reasoning_only_response"
+            )
         elif finish_reason == "length":
             infra.add(f"{node}:output_truncated")
         else:

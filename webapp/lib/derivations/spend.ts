@@ -28,6 +28,11 @@ export interface SpendView {
   backendTokens: number;
   loopTokens: number;
   totalTokens: number;
+  // Fraction of the LOOP bucket's output tokens the optimizer spent thinking rather
+  // than answering; null when nothing has been billed yet or the models report no
+  // breakdown. A subset of the output tokens, never an addition to them — it explains
+  // where the wall-clock went, not where the money did.
+  loopReasoningShare: number | null;
 }
 
 export function readSpend(dash: DashboardSnapshot | null): SpendView {
@@ -57,5 +62,7 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
     backendTokens,
     loopTokens,
     totalTokens: backendTokens + loopTokens,
+    loopReasoningShare:
+      loop && loop.output_tokens > 0 ? loop.reasoning_tokens / loop.output_tokens : null,
   };
 }
