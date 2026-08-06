@@ -42,7 +42,7 @@ from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
-from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
+from promptpotter.domain.results import CycleResult, RoundResult, SpendRollup
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
@@ -356,7 +356,7 @@ def _build_cycle_result(
     cycle_error: ErrorRecord | None,
     started_at: str,
     finished_at: str,
-    spend: CycleSpend | None,
+    spend: SpendRollup | None,
 ) -> CycleResult:
     """Assemble the terminal :class:`CycleResult`. ``cycle is None`` is the
     init-crash fallback (cycle_id was minted upstream so the run still finalizes);
@@ -588,7 +588,7 @@ async def _run_single_cycle(
         # In-memory, not the debounced ``dashboard.json``: at finalize (before ``drain_all``)
         # the live rollup is complete, and the L4 outer loop rolls this up onto its own
         # backend-cost channel.
-        spend=observers.dashboard.state.spend.totals(),
+        spend=observers.dashboard.state.spend,
     )
     langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
     if langfuse_trace_id is not None:

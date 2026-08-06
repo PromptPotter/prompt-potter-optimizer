@@ -36,7 +36,6 @@ __all__ = [
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
-    "CycleSpend",
     "DegradationContext",
     "DegradationHealth",
     "DiagnosticRunRecord",
@@ -49,6 +48,8 @@ __all__ = [
     "RoundSummaryCandidate",
     "ScoreboardRow",
     "ScoredCandidate",
+    "SpendBucket",
+    "SpendRollup",
     "SweepBatchResult",
     "WarningDict",
     "best_round_by_measured_accuracy",
@@ -658,37 +659,108 @@ class RoundResult(StrictModel):
         return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
 
 
-class CycleSpend(StrictModel):
-    """Terminal token/USD totals for a finished cycle — the summed cost across
-    the backend + optimizer-loop buckets.
+class SpendBucket(StrictModel):
+    """One spend sub-bucket (backend or optimizer-loop). Mutated only by
+    :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
+    ``dashboard.json::spend`` after the canonical-ledger collapse.
 
-    Read from the run's **in-memory** dashboard state at finalize, so a consumer
-    (notably the L4 outer loop rolling an inner campaign's spend up onto its own
-    backend-cost channel) gets the true total without racing the debounced
-    ``dashboard.json`` projection file.
+    Two costs, deliberately not one. ``used_usd`` is the BILL — money that left the
+    account, so cache hits contribute nothing. ``incurred_usd`` is what this search
+    would cost to run cold, cache hits priced from the tokens they recorded. The bill
+    is the headline and the budget gate; the incurred cost is what a *measurement* of a
+    candidate has to divide by, because it must not depend on what we already happen to
+    have in the cache. They coincide exactly on a cold cache — which is why this was
+    invisible until an L4 arm replayed a prior run and read as free.
 
-    Two costs, and picking the wrong one is a live bug class:
+    Lives in ``domain`` rather than beside the dashboard schema it is served in because
+    ``CycleResult`` carries a rollup of these, and a second flat re-declaration of the
+    same six fields one layer down is what this replaced.
+    """
 
-    - ``cost_usd`` / ``input_tokens`` / ``output_tokens`` — the BILL. Money that left
-      the account. What rolls up onto an outer campaign's spend and what a budget caps.
-    - ``incurred_usd`` — what this cycle would cost to run against a cold cache. The
-      only honest divisor for a *measurement of the search*, because the caches are
-      tenant-global: replay a cycle we already ran and the bill is $0 while the search
-      did exactly the same work. On a cold cache the two are equal."""
-
+    used_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_usd: float = 0.0
-    # Tokens billed with no resolvable USD rate, summed across both buckets. >0 means
-    # ``cost_usd`` UNDERSTATES real spend — it is a floor, not the total.
+    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a
+    # SUBSET of it, so it is never added into a total. The question it answers is latency,
+    # not money: on the shipped optimizer route this runs ~94%, which is why the loop owns
+    # a third of an L4 cell's wall-clock while every worker-model swap left that untouched.
+    reasoning_tokens: int = 0
+    rate_known: bool = False
+    model: str | None = None
+    # Tokens billed under this bucket whose USD cost couldn't be resolved (no wire
+    # cost AND no rate on file). >0 means the USD cap is blind to real spend here —
+    # the dashboard surfaces a "USD cap inactive" warning; the token cap backstops.
     unpriced_tokens: int = 0
 
     incurred_usd: float = 0.0
-    # Incurred-side twin of ``unpriced_tokens``. >0 ⇒ ``incurred_usd`` understates what the
-    # search costs, so a consumer that divides by it (the L4 efficiency proxy) would read
-    # cheapness that never happened and score the run fitter for it. Such a cell is refused,
-    # not scored.
+    # The incurred-side twin of ``unpriced_tokens``: >0 ⇒ ``incurred_usd`` UNDERSTATES
+    # what this search costs, so anything dividing by it would read cheapness that never
+    # happened. The L4 no-evidence guard refuses such a cell rather than score it fitter.
     incurred_unpriced_tokens: int = 0
+
+
+class SpendRollup(StrictModel):
+    """A cycle's spend: the two buckets, and the totals every consumer reads off them.
+
+    Serves both ``dashboard.json::spend`` (live, mutated in place by the projection) and
+    ``CycleResult.spend`` (terminal, read from the in-memory state at finalize so a
+    consumer — notably the L4 outer loop rolling an inner campaign up onto its own
+    backend-cost channel — does not race the debounced projection file).
+
+    **One shape, and the totals are properties.** A flat six-field twin used to sit at the
+    far end of that chain, hand-mapped from these buckets. Every billed field here has an
+    incurred twin that must move with it, and a half somebody forgot to map reads as a
+    ZERO rather than an error — which is indistinguishable from the honest zero a replayed
+    cycle gives. Derived totals cannot be forgotten.
+
+    Carries spend only; the armed USD ceiling lives in ``run_limits.spend_budget_usd``
+    (the single authoritative budget source every surface reads). There is no
+    ``budget_usd`` here — it was an always-null duplicate that let the RemoteBar and
+    the chat job-bar disagree.
+
+    Two costs, and picking the wrong one is a live bug class. ``total_used_usd`` and the
+    token counts are the BILL — money that left the account, what rolls up onto an outer
+    campaign and what a budget caps. ``total_incurred_usd`` is what this cycle would cost
+    against a cold cache, and it is the only honest divisor for a *measurement of the
+    search*: the caches are tenant-global, so replaying a cycle we already ran bills $0
+    while the search did the same work. On a cold cache the two are equal."""
+
+    backend: SpendBucket = Field(default_factory=SpendBucket)
+    loop: SpendBucket = Field(default_factory=SpendBucket)
+    total_used_usd: float = 0.0
+    total_incurred_usd: float = 0.0
+
+    @property
+    def input_tokens(self) -> int:
+        """Billed prompt tokens across both buckets."""
+        return self.backend.input_tokens + self.loop.input_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        """Billed completion tokens across both buckets."""
+        return self.backend.output_tokens + self.loop.output_tokens
+
+    @property
+    def total_tokens_used(self) -> int:
+        """Cumulative BILLED tokens across both buckets (input + output) — the token
+        halt probe's source, mirroring ``total_used_usd`` for the USD gate. Cache hits
+        are excluded for the same reason they are excluded from the bill: a cap exists
+        to bound what the run spends, not what it would have spent."""
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def unpriced_tokens(self) -> int:
+        """Billed tokens with no resolvable USD rate. >0 means ``total_used_usd``
+        UNDERSTATES real spend — it is a floor, not the total."""
+        return self.backend.unpriced_tokens + self.loop.unpriced_tokens
+
+    @property
+    def incurred_unpriced_tokens(self) -> int:
+        """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ ``total_incurred_usd``
+        understates what the search costs, so a consumer that divides by it (the L4
+        efficiency proxy) would read cheapness that never happened and score the run
+        fitter for it. Such a cell is refused, not scored."""
+        return self.backend.incurred_unpriced_tokens + self.loop.incurred_unpriced_tokens
 
 
 class CycleResult(StrictModel):
@@ -754,7 +826,7 @@ class CycleResult(StrictModel):
     resumed_from_round: int = 1
     # This cycle's total spend, captured from the live dashboard state at
     # finalize. ``None`` only on an init-crash before any observer wired up.
-    spend: CycleSpend | None = None
+    spend: SpendRollup | None = None
     # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``;
     # ``None`` on clean completions. The runner's ``except`` sites carry the
     # record returned by ``emit_error_record`` straight here — the same

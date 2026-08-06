@@ -24,10 +24,11 @@ from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
     CycleResult,
-    CycleSpend,
     DegradationHealth,
     RoundResult,
     ScoredCandidate,
+    SpendBucket,
+    SpendRollup,
 )
 
 # Repeated as the ground truth of every row a factory-built round measures. Deliberately
@@ -179,11 +180,10 @@ def cycle_result(
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",
         finished_at="2026-01-01T01:00:00Z",
-        spend=CycleSpend(
-            cost_usd=cost if billed is None else billed,
-            unpriced_tokens=0,
-            incurred_usd=cost,
-            incurred_unpriced_tokens=unpriced_tokens,
+        spend=SpendRollup(
+            total_used_usd=cost if billed is None else billed,
+            total_incurred_usd=cost,
+            loop=SpendBucket(incurred_unpriced_tokens=unpriced_tokens),
         ),
         **overrides,
     )

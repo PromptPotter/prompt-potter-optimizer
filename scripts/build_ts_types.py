@@ -45,6 +45,8 @@ from promptpotter.domain.results import (
     RoundSummaryCandidate,
     ScoreboardRow,
     ScoredCandidate,
+    SpendBucket,
+    SpendRollup,
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -54,8 +56,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     LoopWarning,
     RunLimits,
-    SpendBucket,
-    SpendRollup,
 )
 from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
 from promptpotter.infrastructure.store.lineage_views import (

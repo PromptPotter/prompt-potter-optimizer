@@ -72,7 +72,7 @@ from promptpotter.shared.instrument import (
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.results import CycleResult, CycleSpend
+    from promptpotter.domain.results import CycleResult, SpendRollup
     from promptpotter.domain.sample import Sample
     from promptpotter.shared.identity import IdentityContext
 
@@ -1077,7 +1077,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"{spec.n_rounds} + origin, {banked} already banked, at "
             f"{OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) and was cancelled"
         )
-    inner_spend: CycleSpend | None = result.spend
+    inner_spend: SpendRollup | None = result.spend
     elapsed = time.monotonic() - start
     # No exclusion decision here: `compute_outer_proxies` asks `no_evidence_reason` and raises
     # `InnerCycleUnscoreableError`, which `measure_sample`'s catch-all turns into this sample's
@@ -1122,12 +1122,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # Roll the inner campaign's total spend up onto the OUTER dashboard via the
     # existing backend-cost channel: the inner cost IS this outer sample's backend
     # cost. Keyed by the terminal node so it fans onto one TokenUsageRecord.
-    if inner_spend and (inner_spend.input_tokens or inner_spend.cost_usd):
+    if inner_spend and (inner_spend.input_tokens or inner_spend.total_used_usd):
         data["step_tokens"] = {
             "l1_critique": {
                 "input": inner_spend.input_tokens,
                 "output": inner_spend.output_tokens,
-                "cost_usd": inner_spend.cost_usd,
+                "cost_usd": inner_spend.total_used_usd,
                 "model": f"inner:{spec.inner_dataset}",
             }
         }

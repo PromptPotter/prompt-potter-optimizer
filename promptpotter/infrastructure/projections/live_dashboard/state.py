@@ -20,7 +20,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import CycleSpend, HeadlineMetric, RoundSummary
+from promptpotter.domain.results import HeadlineMetric, RoundSummary, SpendBucket, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -50,88 +50,6 @@ class BackfillLogEntry(StrictModel):
     candidate_total: int
     sample_id: int
     prior_ids: list[str]
-
-
-class SpendBucket(StrictModel):
-    """One spend sub-bucket (backend or optimizer-loop). Mutated only by
-    :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
-    ``dashboard.json::spend`` after the canonical-ledger collapse.
-
-    Two costs, deliberately not one. ``used_usd`` is the BILL — money that left the
-    account, so cache hits contribute nothing. ``incurred_usd`` is what this search
-    would cost to run cold, cache hits priced from the tokens they recorded. The bill
-    is the headline and the budget gate; the incurred cost is what a *measurement* of a
-    candidate has to divide by, because it must not depend on what we already happen to
-    have in the cache. They coincide exactly on a cold cache — which is why this was
-    invisible until an L4 arm replayed a prior run and read as free.
-    """
-
-    used_usd: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a
-    # SUBSET of it, so it is never added into a total. Here and not on ``CycleSpend``
-    # because the question is latency, not money: on the shipped optimizer route this
-    # runs ~94%, which is why the loop owns a third of an L4 cell's wall-clock while
-    # every worker-model swap left that third untouched.
-    reasoning_tokens: int = 0
-    rate_known: bool = False
-    model: str | None = None
-    # Tokens billed under this bucket whose USD cost couldn't be resolved (no wire
-    # cost AND no rate on file). >0 means the USD cap is blind to real spend here —
-    # the dashboard surfaces a "USD cap inactive" warning; the token cap backstops.
-    unpriced_tokens: int = 0
-
-    incurred_usd: float = 0.0
-    # The incurred-side twin of ``unpriced_tokens``: >0 ⇒ ``incurred_usd`` UNDERSTATES
-    # what this search costs, so anything dividing by it would read cheapness that never
-    # happened. The L4 no-evidence guard refuses such a cell rather than score it fitter.
-    incurred_unpriced_tokens: int = 0
-
-
-class SpendRollup(StrictModel):
-    """``state.spend`` — two-bucket spend rollup + total.
-
-    Carries spend only; the armed USD ceiling lives in ``run_limits.spend_budget_usd``
-    (the single authoritative budget source every surface reads). There is no
-    ``budget_usd`` here — it was a always-null duplicate that let the RemoteBar and
-    the chat job-bar disagree."""
-
-    backend: SpendBucket = Field(default_factory=SpendBucket)
-    loop: SpendBucket = Field(default_factory=SpendBucket)
-    total_used_usd: float = 0.0
-    total_incurred_usd: float = 0.0
-
-    @property
-    def total_tokens_used(self) -> int:
-        """Cumulative BILLED tokens across both buckets (input + output) — the token
-        halt probe's source, mirroring ``total_used_usd`` for the USD gate. Cache hits
-        are excluded for the same reason they are excluded from the bill: a cap exists
-        to bound what the run spends, not what it would have spent."""
-        return (
-            self.backend.input_tokens
-            + self.backend.output_tokens
-            + self.loop.input_tokens
-            + self.loop.output_tokens
-        )
-
-    def totals(self) -> CycleSpend:
-        """The two buckets summed — a finished cycle's terminal spend.
-
-        Bucket→total is written HERE, beside the buckets, because every billed field has an
-        incurred twin and the pair has to move together. Written at the far end of the chain
-        instead, a half somebody forgot to map reads as a zero rather than an error — and
-        zero is the answer a replayed cycle legitimately gives, so nothing looks wrong.
-        """
-        b, lp = self.backend, self.loop
-        return CycleSpend(
-            input_tokens=b.input_tokens + lp.input_tokens,
-            output_tokens=b.output_tokens + lp.output_tokens,
-            cost_usd=self.total_used_usd,
-            unpriced_tokens=b.unpriced_tokens + lp.unpriced_tokens,
-            incurred_usd=self.total_incurred_usd,
-            incurred_unpriced_tokens=b.incurred_unpriced_tokens + lp.incurred_unpriced_tokens,
-        )
 
 
 class BackendWarning(StrictModel):

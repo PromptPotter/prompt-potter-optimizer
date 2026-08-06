@@ -401,17 +401,6 @@ async def llm_call(
 
         duration_s = round(time.monotonic() - _t0, 2)
 
-        # Never cache a response that carries no payload. A provider returning empty
-        # content (`finish_reason: stop`, 2 completion tokens, schema repair exhausted)
-        # is a TRANSIENT failure; storing it converts that flake into a PERMANENT one,
-        # because the key is the prompt hash and every later call replays the emptiness.
-        # The caller then sees a zero-candidate round forever and reads it as provider
-        # flakiness. Harmless while the cache was per-sandbox and thrown away with the
-        # run; load-bearing now that it is tenant-global (`Stores.shared_root`).
-        usable = bool(response.content.strip()) or response.parsed is not None
-        if context.cache is not None and cache_key is not None and usable:
-            context.cache.save(cache_key, response.model_dump())
-
     # THE metering point: both branches above converge here, so a round-trip that returns is
     # metered by arriving rather than by each branch remembering to. The one path that skips it
     # is the parse failure, which raises and meters itself — it never reaches this line.
@@ -435,6 +424,23 @@ async def llm_call(
         cost_usd=float(cost_raw) if cost_raw is not None else None,
         cached=cached_payload is not None,
     )
+
+    # Meter first, THEN store — the provider has already billed this call, so nothing that
+    # can fail belongs between the response and its record. `cache.save` writes a file, and
+    # with it above the emit a disk error lost the row for a call we paid for: no ledger
+    # entry, no dashboard increment, no contribution to the budget gate, and the loss is
+    # silent because a missing record reads exactly like a call that never happened.
+    #
+    # Never cache a response that carries no payload. A provider returning empty content
+    # (`finish_reason: stop`, 2 completion tokens, schema repair exhausted) is a TRANSIENT
+    # failure; storing it converts that flake into a PERMANENT one, because the key is the
+    # prompt hash and every later call replays the emptiness. The caller then sees a
+    # zero-candidate round forever and reads it as provider flakiness. Harmless while the
+    # cache was per-sandbox and thrown away with the run; load-bearing now that it is
+    # tenant-global (`Stores.shared_root`). A hit has nothing to store — it came FROM here.
+    usable = bool(response.content.strip()) or response.parsed is not None
+    if cached_payload is None and context.cache is not None and cache_key is not None and usable:
+        context.cache.save(cache_key, response.model_dump())
 
     if context.ledger is not None:
         payload: dict[str, Any] = {

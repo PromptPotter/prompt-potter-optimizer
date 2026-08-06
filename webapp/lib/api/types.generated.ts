@@ -362,7 +362,7 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** ``state.spend`` — two-bucket spend rollup + total. */
+/** A cycle's spend: the two buckets, and the totals every consumer reads off them. */
 export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
