@@ -20,7 +20,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 | The ask sounds like | Load | How this kind goes wrong |
 |---|---|---|
-| **Run / watch a campaign** — "run bbeh", "start it", "how's it going" | `/potter-run` · `.goldmine/latest.log` · [`operations/`](docs/operations/) | Fired and left; config edited mid-flight. |
+| **Run / watch a campaign** — "run bbeh", "start it", "how's it going" | `/potter-run` · `logs/latest.log` · [`operations/`](docs/operations/) | Fired and left; config edited mid-flight. |
 | **Diagnose a live or stuck run** — "it's hung", "why did it stop" | ledger tail → `run_phase` → `.runtime/` flags → process → mtimes, **in that order** · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) | |
 | **L4 / `promptpotter-self`** self-improvement, the optimizer's own business logic, prompts and configuarations equally alike. | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line + § Running & supervising · `/l4-improve-l1-gen` · [`optimization/CLAUDE.md`](promptpotter/application/optimization/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) | A leader believed from a panel that cannot resolve arms. |
 | **Dataset / benchmark work** | [`datasets/CLAUDE.md`](datasets/CLAUDE.md) | Rows re-cut under the name they already had. |
@@ -36,7 +36,6 @@ What this file owns, and where each rule is stated. Names only — the section i
 - Classify the ask before loading → § First — decide what KIND of ask this is, then load for it
 - Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
 - Never commit or push unprompted → § Conventions
-- A silent optimizer-call retry is an open defect → ⛔ URGENT line above § Working principles
 - Reach for a doctrine by its trigger → § Working principles
 - Per-layer contracts — load only yours → § Pointers
 
@@ -62,8 +61,6 @@ When a fix would compensate for something an upstream layer should already have 
 **★ FIRST PRINCIPLE, THIS PHASE — fix it in the dispatch.** The target model is small: a prompt is one *information package* it must reason from, and it finds the right path only when that package is short and every line is unique, high-value, and in the right place. The **dispatch hub** (`application/optimization/dispatch/`) is where raw measurement is recomposed into those packages and wired into every optimizer prompt through **deterministic wires** (`DispatchHub.fill`). So the dispatch is the FIRST place to fix a bloated / low-value / misplaced prompt — and the one place to be **creative**: add functions, processing, recomposition, new panel logic, whatever shapes the incoming information to be *perfectly formed for its slot*. The wires stay deterministic; the intelligence lives in the shaping. Corollaries: a panel renders only what adds signal **for this task/state** and stays silent otherwise (the `answer_distribution` / suppressed-RANK rule); duplication, paraphrase, filler, and task-mismatched blocks are dispatch problems to reshape at source — never a mechanical downstream patch (a render-time dedup, a louder optimizer prompt clause) or a symptom papered over.
 </dispatch-first>
 
-⛔ **URGENT — an optimizer call can blow its wall, silently retry, and report nothing.** `_chat_under_deadline` treats a first wall-clock timeout as a provider hiccup and retries once, so one logical optimizer call can spend twice its stated budget while every on-disk surface stays clean: no ledger record, no round warning, nothing in the round file — only an outlier `duration_s` on the token-usage row, readable solely by comparing a node against its own precedent. Inside an L4 inner cell that time is spent against the OUTER per-sample wall, so a couple of these cancel the cell and the reaper stamps `producer_vanished` — the hole the panel gate and the resume repair exist to clean up *after* the fact, and plausibly its root. Observed on `justlogic-d234` seed-3 (2026-08-03): one `l1_critique` an order of magnitude past the same node's own precedent **on a smaller input**, so this is provider throughput, not a bloated package. **Fix the silence first** — a timeout-and-retry must land on the ledger like any other degradation, since a retry nobody can see is not a state. Only then argue about whether the retry should exist. Not a knob question: do not "address" it by tuning the deadline.
-
 ## Working principles
 
 Four *situational* guardrails against recurring AI blind spots live in [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine; reach for them by trigger:
@@ -86,9 +83,9 @@ python -m promptpotter resume --fork-on-divergence           # sibling cycle at 
 python -m uvicorn promptpotter.main:app --port 8001          # read-only API + webapp preview at the root (http://localhost:8001/)
 ```
 
-`new` and `resume` are the loop-mint verbs; lifecycle (`archive`/`delete`/`unarchive`/`reset`), run-control (`pause` — stops a running cycle at its next checkpoint, resumable, the terminal's half of the webapp control), and diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`/`reindex`) verbs also exist. Reads happen by opening files; there is no read CLI. What each verb does, its flags, identity and fork lineage → [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
+`new` and `resume` are the loop-mint verbs; lifecycle (`archive`/`delete`/`unarchive`/`reset`), run-control (`pause` — stops a running cycle at its next checkpoint, resumable, the terminal's half of the webapp control), and diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`/`reindex`/`restamp`/`rank-optimizer-prompts` — the last serves the outer panel's resolving power) verbs also exist. Reads happen by opening files; there is no read CLI. What each verb does, its flags, identity and fork lineage → [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
 
-**The project file tree IS the dashboard**, alongside a read-only webapp at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s. The most-recent run's terminal readout is mirrored ANSI-stripped to the gitignored **`.goldmine/latest.log`** — read it instead of asking the operator to paste console output (`LiveDisplay._write`). Onboarding: install → restart VS Code → `/potter-run`.
+**The project file tree IS the dashboard**, alongside a read-only webapp at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s. The most-recent run's terminal readout is mirrored ANSI-stripped to the gitignored **`logs/latest.log`** — read it instead of asking the operator to paste console output (`LiveDisplay._write`). Onboarding: install → restart VS Code → `/potter-run`.
 
 The **front door is a browser chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its work into the thread Perplexity-style (tool calls, web search, each round as it lands), and decisions surface as buttons that fire existing control-plane verbs. The chat is a **canonical agent-chat template** built on a generic activity taxonomy — keep the core (thread model + activity stream + transport), delete the optimizer panes. Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
 
@@ -110,11 +107,11 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 
 ## The closing directive
 
-**Ship a distributable `promptpotter-self`** — the optimizer optimizing its own optimizer prompts — **and open no new features until the config is distributable.** Escalate to the operator campaign spend approval, or a compaction handoff. The living finish-line plan is [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; read status there and nowhere else, remembering that several of its items stayed marked "gating" for months after they shipped.
+**Ship a distributable `promptpotter-self`** — the optimizer optimizing its own optimizer prompts — **and open no new features until the config is distributable.** Escalate to the operator campaign spend approval, or a compaction handoff. The living finish-line plan is [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; read status there and nowhere else.
 
 **What remains is (mostly) empirical, (mostly) not structural** — the loop, seams, recursion and scoring gateway all exist and are green; what remains is making the optimizer *behave well*, which is found by running running L3 campaigns as well as `promptpotter-self`, read what the loop produced, fix, re-run. **Every fix still goes to its ROOT (`<root-fix>` above)** — in this phase the root is usually a prompt or dispatch-hub. **Supervise every run actively — never fire-and-wait. (3 min intervals first, then adjust case dependent)** How to run + supervise + when to reach past prompts to code: [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Running & supervising.
 
-⚠️ **Read the panel's resolving power before its result** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line, item 7, which `python -m promptpotter rank-optimizer-prompts` serves live. Do that before quoting any outer number anywhere in this repo.
+⚠️ **Read the panel's resolving power before its result** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; no outer number is quoted from this repo without it.
 
 **When adding a state, ask what DERIVES it — not just what writes it.** The costliest bugs in this package have all been one shape: a *state the system could enter but not report*, downstream of a predicate that conflated two facts, invisible because the failure mode was silence rather than an error. A writer with no reader is not a state; it is a note nobody reads.
 

@@ -66,20 +66,20 @@ if TYPE_CHECKING:
 # the presentation "everything emitted to stdout is findable on disk" constraint. Truncated
 # per run in ``__init__``; ANSI-stripped per line. Captures the LiveDisplay stream only —
 # ``logging``-level warnings route through Python logging, not ``_write``.
-_GOLDMINE_PATH = Path(".goldmine/latest.log")
+_READOUT_PATH = Path("logs/latest.log")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def _open_goldmine() -> Path | None:
-    """Truncate the rolling goldmine capture for this run; ``None`` if the filesystem rejects
+def _open_readout() -> Path | None:
+    """Truncate the run-readout mirror for this run; ``None`` if the filesystem rejects
     it — capture is best-effort observability and must never abort a costly campaign run.
     """
     try:
-        _GOLDMINE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _GOLDMINE_PATH.write_text("", encoding="utf-8")
+        _READOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _READOUT_PATH.write_text("", encoding="utf-8")
     except OSError:
         return None
-    return _GOLDMINE_PATH
+    return _READOUT_PATH
 
 
 class LiveDisplay(DerivedView):
@@ -109,16 +109,16 @@ class LiveDisplay(DerivedView):
         self._round_started_at: float | None = None
         self._pobb_printed_for: str = ""
         self._pending_calls: dict[str, int] = {}
-        self._goldmine = _open_goldmine()
+        self._readout = _open_readout()
 
     def _write(self, line: str) -> None:
         print(line, flush=True)
-        if self._goldmine is not None:
+        if self._readout is not None:
             try:
-                with self._goldmine.open("a", encoding="utf-8") as f:
+                with self._readout.open("a", encoding="utf-8") as f:
                     f.write(_ANSI_RE.sub("", line) + "\n")
             except OSError:
-                self._goldmine = None  # stop retrying; never break the run for a dev mirror
+                self._readout = None  # stop retrying; never break the run for a dev mirror
 
     @property
     def origin_acc(self) -> float:

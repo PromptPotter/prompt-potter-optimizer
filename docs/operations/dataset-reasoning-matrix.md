@@ -71,16 +71,6 @@ Realistic candidates — production tier (not `:free`), priced ≤ ~$0.05 in / ~
 
 # More datasets
 
-## Held — next-priority after JustLogic
-
-Two recon-measured in-band candidates queued for wiring after JustLogic delivers its first cycle. Same model + effort + latency band as JustLogic — they slot into the same matrix row when wired. Full rationale + per-subtask measurements: [`dataset-selection-rationale.md`](dataset-selection-rationale.md) "Next-priority after JustLogic" section.
-
-| Dataset (planned) | Projected model | `reasoning_effort` | `max_tokens` | Notes |
-|---|---|---|---|---|
-| `planbench` *(not yet wired)* | `openai/gpt-oss-20b:nitro` (OpenRouter) | `low` | absent | PlanBench `task_1_plan_generation` (`tasksource/planbench`). Recon **36% (9/25)** at 1.5s/sample on multi-domain stratified slice (5 domains: blocksworld + logistics + 3 obfuscated). Wire-time work: PDDL plan-validator scorer (~half-day) replaces the recon's 50% action-call overlap. **Brand-new family** for the portfolio — no overlap with deduction (JustLogic), math (AIME), mixed reasoning (BBEH). |
-| `naturalplan` *(not yet wired)* | `openai/gpt-oss-20b:nitro` (OpenRouter) | `low` | absent | NaturalPlan (`google-deepmind/natural-plan` raw GitHub — NOT on HF). Recon **36% macro / 43% on `meeting_planning`-only**, 0.5s/sample. **Wire path: `meeting_planning`-only** (other two subtasks: `trip_planning` floor at 0%, `calendar_scheduling` ceiling at 67%). Per-subtask scorer dispatch required (day+time-slot for calendar, joined-list overlap for meeting, token overlap for trip). |
-
-Lower-priority subtask cuts (revisit only if PlanBench + NaturalPlan don't pan out):
-- **MuSiQue `3hop`-only** — 38% on the 3hop split; substring scorer with `answer_aliases` is clean. Multi-hop RC overlap with BBEH lowers marginal-diversity value.
-
-Rejected from this round: **AR-LSAT** (72% ceiling — solved at low) and **MuSiQue macro** (60% ceiling — 2hop coasts at 89%).
+**Which dataset is queued next, and every recon measurement behind it** — owned by
+[`dataset-selection-rationale.md`](dataset-selection-rationale.md) § Next-priority after
+JustLogic. This page gains a row only when one is actually wired.

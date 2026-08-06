@@ -1,6 +1,6 @@
 # L2 Internals
 
-L2 fires when L1 has stalled (per `l1_patience`), reads cycle state, and writes any subset of OSP fields to steer the next round. Concept role: [`../concepts/the-loop.md § L2 in detail`](../concepts/the-loop.md).
+L2 fires when L1 has stalled (per `l1_patience`), reads cycle state, and writes any subset of OSP fields to steer the next round. Concept role: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3, same `fill` path (from its `NODE_LAYOUTS["l2_context"].floor`), same `Bundle` per-call state. The hub is what stops L2 from accumulating its own renderers, its own surface object, its own escape hatches. See [`dispatch-hub.md`](dispatch-hub.md) for the registry it shares.
 
@@ -85,4 +85,4 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
 
-Cross-references: [`dispatch-hub.md`](dispatch-hub.md) (the layout L2 mutates + the dispatch hub both layers share); [`self-healing-internals.md`](self-healing-internals.md) (L2 is the nurse for Wounds 1 + 2; produces Wound 4).
+Cross-references: [`dispatch-hub.md`](dispatch-hub.md) (the layout L2 mutates + the dispatch hub both layers share); [`self-healing-internals.md`](self-healing-internals.md) (L2 produces wounds — its guard breaches — and heals none).

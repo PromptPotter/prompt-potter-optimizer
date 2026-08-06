@@ -52,7 +52,7 @@ operator-admin channel.
   by the same dispatcher — every kind, cycle-scoped included. A separate
   `RunnerCommandSubscriber` for the cycle-scoped acks was specified and
   never written; nothing else has ever produced one.
-- `POST /datasets/ingest` — multipart CSV upload; mints a durable `checkin` campaign and returns its `DraftCampaign` (`draft_id` IS the `campaign_id`; declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md § Ingest`). Workspace-scoped, identity-bound; the check-in shows in the sidebar + survives a restart, but nothing runs until the operator starts it via the separate `/commands/start-checkin` verb. Mutation verbs (`edit-draft-campaign`, `resolve-origin`) key on the `campaign_id` and persist to `campaigns/{id}/checkin/` via `CheckinDraftStore`.
+- `POST /datasets/ingest` — multipart CSV upload; mints a durable `checkin` campaign and returns its `DraftCampaign` (`draft_id` IS the `campaign_id`; declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md` § Ingest + chat-first web). Workspace-scoped, identity-bound; the check-in shows in the sidebar + survives a restart, but nothing runs until the operator starts it via the separate `/commands/start-checkin` verb. Mutation verbs (`edit-draft-campaign`, `resolve-origin`) key on the `campaign_id` and persist to `campaigns/{id}/checkin/` via `CheckinDraftStore`.
 - `POST /datasets/draft/candidate-library` and its `/from-column` sibling — **ingresses, not write paths.** A multipart upload and a column name are two ways to *derive* a `candidate_library`; both hand the derived terms to `commands.py::dispatch_draft_patch` and dispatch as `edit-draft-campaign`, so the edit is a `CommandRecord` on the check-in ledger. A route that mutates a draft outside that function is the bug this collapsed.
 
 **A 200 body never justifies bypassing the dispatcher.** `edit-draft-campaign` / `resolve-origin` / `start-checkin` are typed routes because each answers a domain object rather than a `CommandAcceptedBody` — but they dispatch through `CommandDispatcher.dispatch_checkin_command`, whose `CommandOutcome.result` carries that object back. They once applied inline for exactly this reason, and the consequence was that **no origin edit was recorded anywhere on disk, nor who made it** — a standing violation of `architecture.md` §0 ("sole `CommandDispatcher`"). The target is the check-in cycle `cycle_chk_*`, which exists from the first ingest action and is retained across the flip to `active`; a fork inherits its records via `CycleEventLog.inherit_from`. If a future verb needs a bespoke response, give it a typed route — never its own write path.
@@ -66,7 +66,7 @@ this section owns the terminal stream's half of it.
 
 Concretely: `LiveDisplay._write` (`views/live/display.py`) is the single stdout
 funnel for the live run readout, and it mirrors every line — ANSI-stripped — to the
-gitignored **`.goldmine/latest.log`**, truncated per run (most-recent-only) and
+gitignored **`logs/latest.log`**, truncated per run (most-recent-only) and
 best-effort (a filesystem error disables the mirror, never aborts the campaign). This
 is the "findable on disk" guarantee for the terminal stream, so a headless reader can
 open the last run instead of relying on a captured console. Caveat: it carries the

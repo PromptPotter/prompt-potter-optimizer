@@ -47,7 +47,7 @@ The overlay exposes description strings and a field permutation, **never a raw s
 
 **L2 unlocks through the surface it already has.** Its control vocabulary stays closed at `fork_proposal` + `terminate_proposal` ([`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)) — a *third* control output would be an architectural amendment. But `fork_proposal` is the right vehicle regardless of L2: `schema_field_rename` declares itself `Knob(Scope.POLICY, Estimand.SEARCH)` on its own `CampaignConfig` field, so unlocking an axis invalidates search comparability and **must** mint a sibling cycle rather than mutate the running one. It rides `ConfigOverrides` — the same channel `per_round_resubset` already uses for the operator's "behaviour-knob change → fork-at-offset-0" workflow.
 
-## Unlocking the name (lever 1) — SHIPPED contract, inert until unlocked
+## Unlocking the name (lever 1) — built, inert until unlocked
 
 The field **name** is the strongest lever and the one that breaks things (`../concepts/structured-output.md` § 1); it stays locked in base mode. The shipped contract:
 

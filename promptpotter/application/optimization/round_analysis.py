@@ -246,9 +246,7 @@ def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:
 def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
     """Surface queries other candidates hit but the winner missed.
 
-    Mirrors :func:`build_cross_candidate_diff` but returns line list
-    rather than a single concatenated string. Empty when fewer than two
-    candidates ran or the winner solved everything.
+    Empty when fewer than two candidates ran or the winner solved everything.
     """
     winner_results = round_result.results
     all_results = round_result.all_candidate_results

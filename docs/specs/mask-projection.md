@@ -79,17 +79,11 @@ behind the gateway / archive and is served; the webapp renders, never recomputes
    That closes the old "can order host on this fold?" question by removing its
    subject. Constraint stays a hypothesis; extract only when a real consumer lands.
 
-## Shipped read-side (code is the SoT)
+## The read-side — `application/mask/` is the SoT
 
-`find_divergences(record, verdict)` + verdict strategies live in
-`application/mask/` (`divergence.py`, `verdicts.py`, `record.py`, `load.py`);
-`value_with_mask_applied` sits in `application/scoring/metrics.py` next to
-`compute_composite_fitness` (missing evaluator name → `None` = honest absence,
-never a fabricated score); the API-edge selector is `_resolve_verdict(lens)` in
-`presentation/api/routers/campaigns/cycles.py`, which serves the tree (**one** `lens`
-query param: `score:<formula>` | `abort:<variant>`; `samples=` composes with a `score:`
-lens; the assembly rules live in `store/lineage_views.py`). **A record is campaign-scoped
-and the tree is not** — one is loaded per campaign the tree spans, and every index keys on
+The fold, the verdict strategies and the API-edge `lens` selector are all read off the
+code; a missing evaluator name serves `None` (honest absence, never a fabricated score).
+What the code cannot tell you: **a record is campaign-scoped and the tree is not** — one is loaded per campaign the tree spans, and every index keys on
 `(campaign, cycle, …)`: an inner run is its own campaign in its own `.inner/` sandbox, and a
 cycle_id is content-addressed on the origin so it repeats across them. A single root-scoped
 read leaves every inner candidate null, which reads as "the lens says nothing here" and is

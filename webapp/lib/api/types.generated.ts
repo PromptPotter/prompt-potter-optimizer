@@ -406,7 +406,6 @@ export interface RunLimits {
   pobb_epsilon: number;
   spend_budget_usd: number | null;
   token_budget: number | null;
-  lives_start: number | null;
   lives_cap: number | null;
 }
 

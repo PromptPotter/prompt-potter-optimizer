@@ -50,9 +50,7 @@ The wounds heal **candidate** failures. The prompt-budget unit is a
 **different mechanism** — not a tier or escape-hatch of the wound model —
 that guards one unrelated concern: the size of a composed optimizer
 optimizer prompt. It earns its own section because it isn't a wound, not
-because the taxonomy needed an exception. Two healing modes survive
-(the aggregate shed allocator + the `prompt_budget_status` L2-self-heal
-injection + the `PROMPT_BUDGET` halt were deleted — `git log` has them):
+because the taxonomy needed an exception. It has exactly two healing modes:
 
 1. **Truncate** — per-injection `char_cap`; an over-cap block is
    section-aware truncated in the hub (`facade.py`), with an

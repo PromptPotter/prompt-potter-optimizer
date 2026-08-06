@@ -48,53 +48,19 @@ pair appear in `opt_sp.wounds.runtime_failures[*].observed_config`?
   exploration. Flag in analysis when a candidate proposes a value
   near a known-failing one without justification.
 
-## C. PEAKED-axis mutations without justification
+## C. Candidates against the standing constraints of `l1_generate/1`
 
-The HARD BLOCKS section of `l1_generate/1` says: if `axis_memory` marks
-an axis as PEAKED, do NOT mutate it unless the critique names that axis
-(`priority_fix` or `suggested_axes`), OR
-`escalation_panel.exploration_budget == wide`.
+The generator's own prompt is the single owner of what a candidate may
+propose — PEAKED-axis discipline, param-field axes as a last resort, the
+numeric envelopes. **Read those constraints off
+`promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts['l1_generate/1']`
+at review time, never off this page:** it is an L4-searched surface, so a
+constraint quoted here is a constraint that has already moved.
 
-This is **not** enforced by a validator today. Manual check:
-
-- Read the rendered `AXIS MEMORY` block from the L1 input. Note axes
-  marked `PEAKED — do not mutate unless the critique names this axis ...`.
-- For each candidate whose `target_axis` is a PEAKED axis: read its
-  `evidence_grounding.citation` — does it quote the critique naming
-  that axis, or `escalation_panel.exploration_budget =
-  wide`? If neither, flag as **`peaked_axis_violation`** in the
-  analysis report and recommend adding a code-level validator
-  (follow-up PR).
-
-## D. Continuous-axis envelope (±50% of parent value)
-
-HARD BLOCKS rule 3: for numeric knobs (`max_tokens`, `temperature`,
-`top_p`), stay within ±50% of the parent value unless justified.
-
-Not enforced by validator. Manual check:
-
-- For each numeric `pipeline_params_override` value: compare against the
-  parent's value (visible in the L1 input's `CURRENT PROMPT` block or
-  the round-display table's `Parent` column).
-- If the proposed value is outside ±50% of parent and the candidate's
-  evidence_grounding doesn't cite the critique / runtime_failures /
-  exploration_budget=wide, flag as **`envelope_violation`**.
-
-## E. PARAM-FIELD axes are LAST RESORT
-
-HARD BLOCKS rule 4: AT MOST 1 of `{{n_variants}}` candidates may target
-a param-field axis (`temperature`, `max_tokens`, `reasoning_effort`,
-`top_p`), AND only when `L1_CRITIQUE.suggested_axes` explicitly names
-a param axis OR `runtime_failures` carries a quantitative signature.
-
-Not enforced by validator. Manual check:
-
-- Count candidates whose `target_axis` is in
-  `{llm_only.temperature, llm_only.max_tokens, llm_only.reasoning_effort, llm_only.top_p}`
-  (or backend equivalents). If > 1, flag as **`param_axis_overuse`**.
-- For the one allowed, check: was either condition met (critique named
-  it, or runtime_failures had a quantitative pointer)? If not, flag
-  as **`unjustified_param_mutation`**.
+None are validator-enforced. The check is the same shape for each: for
+every candidate that crosses one, read its `evidence_grounding.citation`
+and ask whether the evidence the prompt demands is actually quoted there.
+If it is not, flag it by the constraint's own name in the analysis report.
 
 ## F. Intra-round paraphrase / mode collapse
 
@@ -148,12 +114,11 @@ and worth flagging.
 
 ## Enforced by validators today (just for orientation)
 
-| Check | Validator |
-|---|---|
-| Schema compliance (allowed-models, param_allowed_values, type) | `L1_SCHEMA_COMPLIANCE` |
-| Forbidden axes (`model`, `provider`) | `validate_overrides()` (always locked) |
-| Re-propose known-failing config | `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` |
-| L3 plan length floor / verbatim repeat | `L3_PLAN_LENGTH_FLOOR`, `L3_PLAN_VERBATIM_REPEAT` |
+The enforced set is the registry itself —
+`application/optimization/validators/l1_strict.py` — plus `validate_overrides()`,
+which locks the forbidden axes (`model`, `provider`) unconditionally. Read the
+registry before assuming a check is unenforced; a table here goes stale the
+first time one is added.
 
 (There are no L2 `task_context` validators: L2 cannot write `task_context` at all —
 `TaskDecomposition.merge` refuses it — so the breach is not representable. L2's framing

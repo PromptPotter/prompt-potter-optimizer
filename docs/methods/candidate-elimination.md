@@ -10,7 +10,7 @@ Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt
 
 Every candidate in a round walks **one deterministic shared order**, built once from the seed's per-sample outcomes (`build_round_order`, `promptpotter/application/intelligence/adaptive_queue_mechanism.py`): seed-MISS samples first (ascending δ — the only place a candidate can *win*, so both futility evidence and the deterministic-exhaustion bound accrue fastest), a seed-HIT regression probe every 4th slot (descending δ — likeliest regression points first, feeding losses to the gates early), unknowns riding the MISS stratum. The order is a pure function of (seed grades, δ ruler, sample ids) — resume re-derives it exactly; shared prefixes keep the paired stats comparable across candidates.
 
-**The order is shared, never re-ranked per candidate** — owned by [`../concepts/adaptive-queue-mechanism.md`](../concepts/adaptive-queue-mechanism.md) § Why the order is shared, not per-candidate. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
+**The order is shared, never re-ranked per candidate** — owned by [`verdict-resolution.md`](verdict-resolution.md) § The round order — `build_round_order`, one static order per round. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
 
 ## Bayesian PoBB
 
@@ -29,12 +29,12 @@ Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule o
 
 ## Two regimes
 
-**Both manifest** over a campaign. PoBB is at-least-as-good-as Wilcoxon in every regime and strictly better in early high-signal where over-investment costs the most.
+**Both manifest** over a campaign.
 
 - **Early — high-signal.** LLM-generated prompts differ a lot; some clearly dominate. Between-candidate ability gaps large. The θ posteriors separate fast; `P(cand > prior)` becomes lopsided within 3–5 queries. Example: candidates at 0.8 vs 0.4 hit-rate → `P(loser > leader)` < 0.05 by query 4–5. Wilcoxon needs ≥ 8 queries at α=0.2 because it's variance-agnostic.
 - **Late — low-signal.** L2/L3 escalation has narrowed the population. True gaps ≤ 0.02. The Bayesian *best*-test cannot confidently abort a near-tie (P(best) ≈ 0.5), so a tie rides to the sample cap and the winner is picked by the θ election. A futility gate cut those early and was removed (§ The full elimination ladder, below); buying that back means one gate on the θ ruler, never a second comparator beside it.
 
-PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all** candidates and asking the actually-relevant question. Population-aware; ~60 LOC vs LUCB's ~120.
+PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all** candidates and asking the actually-relevant question — population-aware, not pairwise.
 
 ## Tunable knobs
 
@@ -46,8 +46,7 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 Deferred until empirical data informs the design.
 
 1. **Tie-breaking at budget cap.** When the round cap is reached and top 2–3 candidates have similar P(best) (e.g. each between 0.25 and 0.45), no test declares a clean winner. Ship pick-by-point-estimate; design a cap-extension policy after observing how often this fires.
-2. **ε default.** `0.05` is an educated initial pick. First BBEH run will tell whether too conservative (PoBB barely fires) or too aggressive (round winners swap round-over-round).
-3. **Small-*n* θ edge cases.** With few observations the Laplace `se` on θ is wide, so `p_best` sits near 0.5 and the gate stays conservative (won't eliminate) until evidence accumulates — the EB hyperprior on the ability variance is what keeps the small-*n* fit from collapsing.
+2. **Small-*n* θ edge cases.** With few observations the Laplace `se` on θ is wide, so `p_best` sits near 0.5 and the gate stays conservative (won't eliminate) until evidence accumulates — the EB hyperprior on the ability variance is what keeps the small-*n* fit from collapsing.
 
 ## References
 

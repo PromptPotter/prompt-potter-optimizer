@@ -99,19 +99,11 @@ PromptPotter's sequential elimination (Bayesian Posterior-of-Being-Best with an 
 | Configuration space | `pipeline_params` + 8-field prompt decomposition |
 | Problem instance | One dataset query |
 | Runtime / cost metric | Scoring formula output |
-| Racing test | Bayesian Posterior-of-Being-Best (Russo 2016): joint Normal-CLT posterior over candidate accuracy, MC argmax, stop when `P(c is best) < ε` |
+| Racing test | Bayesian Posterior-of-Being-Best (Russo 2016) — `elimination_p_best`; the model is owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) |
 | Sampling model | L1 generator (LLM) + L1-critique-guided L2/L3 |
 | Termination | `sp_budget_ttest` budget, convergence, or operator interrupt (Ctrl+C) |
 
-#### Lineage entry: Wilcoxon → PoBB transition
-
-Until this revision, PromptPotter's racing test was paired Wilcoxon signed-rank + Holm-Bonferroni (α=0.2). It was retired in favor of Bayesian PoBB on three grounds:
-
-1. **Pairwise → population.** Wilcoxon compared the current candidate against each prior independently and Holm-corrected across the comparisons. PoBB samples the joint posterior over all candidates, asking the actually-relevant question "what is each candidate's probability of being the round winner?"
-2. **Variance-agnostic → variance-adaptive.** Signed-rank uses ranks of paired differences. PoBB's Normal-CLT posterior tightens with observed variance, so high-signal regimes (low variance + clear gap) abort within 3–5 queries vs Wilcoxon's ≥8.
-3. **Operator-illegible → operator-readable.** P(c is best) renders per-query in the live dashboard ("c042 73% probability of winning round"); Wilcoxon's Holm-stepped p-values do not.
-
-The replacement does not change PromptPotter's standing in the lineage table — both Wilcoxon and PoBB are racing procedures in the F-Race / irace family. PoBB is closer to OCBA (Chen 2000) and Top-Two Thompson Sampling (Russo 2016), the Bayesian descendants of the racing tradition that the AutoML lineage didn't initially include but that the bandit BAI literature has spent two decades developing.
+PoBB sits closest to OCBA (Chen 2000) and Top-Two Thompson Sampling (Russo 2016) — the Bayesian descendants of the racing tradition the AutoML lineage didn't initially include, but that the bandit BAI literature has spent two decades developing.
 
 `pipeline_params` optimization is the closest direct analogue to classical algorithm configuration — node parameters are exactly the kind of numerical/categorical knobs irace was built for. The 8-field prompt decomposition is the prompt-native extension: each field is a semantic parameter that the L1→L2→L3 critique loop mutates. That critique loop is the one piece irace lacks — irace's sampling models are numerical (truncated normals, discrete distributions); it has no notion of "reflect on why this configuration failed and propose a better one." Conversely, PromptPotter lacks irace's formal guarantees on configuration-space coverage and its convergence proofs.
 

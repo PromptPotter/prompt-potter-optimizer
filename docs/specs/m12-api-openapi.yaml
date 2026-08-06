@@ -30,9 +30,6 @@
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
-#
-# Status: Profile -1 scaffold. paths{} is intentionally empty. Profile B
-# fills it with the migrated 6 sanctioned POSTs + M12-new command kinds.
 
 openapi: 3.1.0
 
@@ -3740,8 +3737,7 @@ components:
         One entry in the `GET /datasets` response (endpoint declaration
         deferred to the read-surface PR — pinned here so the wire shape is
         fixed before the read handler lands). Flat list with a `tier`
-        discriminator; no two-section UI per
-        `docs/specs/roadmap.md § Collection`.
+        discriminator; no two-section UI.
       properties:
         slug:
           type: string

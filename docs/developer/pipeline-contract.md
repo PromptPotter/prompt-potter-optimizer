@@ -40,9 +40,8 @@ rejection and content-hash sensitivity by
 (`description`, `runtime`, `short_circuit`, `input_schema`) is the **backend's
 self-description**: it states the node's own topology for a human or a future reader,
 and no `PipelineNode` field carries it. That is by design, not rot — do not re-file
-these as dead keys. The mirror rule: a key PP does not *use* gets no model field
-(`PipelineNode.short_circuit` was deleted 2026-07-17 for exactly that), but the key
-still belongs in the file and in this table. "Required" below means *a connector must
+these as dead keys. The mirror rule: a key PP does not *use* gets no model field, but
+the key still belongs in the file and in this table. "Required" below means *a connector must
 publish it*, not *PP reads it*.
 
 | Field | Required | Type | Notes |

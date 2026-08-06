@@ -31,20 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
-
-**Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
-
-### Per-layer composition
-
-| Layer | Composition path | Layout source |
-|-------|------------------|---------------|
-| L1 generate | `fill(template, opt_sp.l1_layout, bundle)` | L2's live `opt_sp.l1_layout` |
-| L1 critique | `fill(template, NODE_LAYOUTS["l1_critique"].floor, bundle)` | node floor (L4-editable, slice 6) |
-| L2 context | `fill(template, NODE_LAYOUTS["l2_context"].floor, bundle)` | node floor |
-| L3 plan | `fill(template, NODE_LAYOUTS["l3_plan"].floor, bundle)` | node floor |
-
-Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/l1_layout.py::NODE_LAYOUTS`); `l1_generate` is the only layer whose layout is *also* L2-mutable in-campaign. Same hub, same registry, same `InjectionBundle` for every call.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 
 ### Field channels between layers
 
@@ -59,12 +46,6 @@ Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/
 | `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
 **Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
-
-### Injection registry — what's in `INJECTIONS`
-
-Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). The slots are whatever `INJECTIONS` holds — no count is repeated here, because one stated in prose drifts on the next capability that registers a signal. Each is registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/injections/{layer_state,panels,catalogues,wounds}.py`) — the renderer beneath each `@signal` line is the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
-
-L2 owns the L1-only injection subset via `l1_layout`; see [`dispatch-hub.md`](dispatch-hub.md) § L1 layout. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
 ---
 
@@ -128,7 +109,7 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
 
-**Schema** (`domain/sample.py::Measurement`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
+**Schema:** the frozen dataclass `domain/sample.py::Measurement` — read its fields there.
 
 **Extension seams:**
 

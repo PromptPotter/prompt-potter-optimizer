@@ -61,18 +61,18 @@ Kill any stale `campaign_runner` processes to avoid wasting API credits.
 
 ## Active Session Issues
 
-PromptPotter uses `.promptpotter/active_session.json` to remember the current campaign (like a browser's active tab). `resume` reads from it; `new <name>` overwrites it.
+PromptPotter uses `.promptpotter/projects/{tenant_id}/.workspace/active_session.json` to remember the current campaign (like a browser's active tab). `resume` reads from it; `new <name>` overwrites it.
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `No active session.` | No `.promptpotter/active_session.json` exists | Run `new <name>` to mint a fresh session |
+| `No active session.` | No active-session pointer exists for that workspace | Run `new <name>` to mint a fresh session |
 | `Session '{id}' not found for backend '{bid}'` | Pointer references a deleted/moved session | Re-run `new <name>` to create a fresh session |
 | `new <name>` creates a new campaign instead of resuming | That's by design — `new` always mints fresh. On content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree. The prior campaign is preserved. | To resume the existing cycle, run `resume` alone — the active pointer handles it. |
 | Wrong `backend_id` after fresh mint | `--backend-id` not passed, defaulted to `local` | Pass `--backend-id` explicitly or let it auto-derive from `dataset_name` in the config. Fix: edit `active_session.json` to point to the correct `backend_id` and `session_id`. |
 
 **Key rule:** `new <name>` = new campaign. To resume, run `resume` alone — the active pointer handles it.
 
-To inspect: `cat .promptpotter/active_session.json`
+To inspect: `cat .promptpotter/projects/{tenant_id}/.workspace/active_session.json`
 
 ## Backend Connectivity
 

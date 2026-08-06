@@ -1047,7 +1047,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # Name the directory the abandoned campaign is IN. The reason reaches the operator
         # through the outer ERROR row, but that row names only the cell — so the on-disk
         # campaign it abandoned, holding real banked rounds, was unfindable from either
-        # surface. Reading `.goldmine/latest.log` beside the tree is how the two get joined.
+        # surface. Reading `logs/latest.log` beside the tree is how the two get joined.
         logger.warning(
             "inner cell %s abandoned at its %.0fs wall-clock deadline; its partial campaign "
             "is at %s",

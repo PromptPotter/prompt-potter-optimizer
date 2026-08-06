@@ -15,8 +15,8 @@ nodes.{name}.config`, never in the backend's repo.
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
 | `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
-> **`llm_only` is a NODE name, never a connector.** The six single-node benchmarks
-> declare an `llm_only` node inside a `termnorm` pipeline and route over HTTP to the
+> **`llm_only` is a NODE name, never a connector.** Every single-node benchmark
+> declares an `llm_only` node inside a `termnorm` pipeline and routes over HTTP to the
 > server like any other. A connector of that name once existed (the no-server "Feature
 > A" case) and was **deleted** — it had zero dataset adopters, and its in-process answer
 > extraction merely duplicated what TermNorm's `_step_llm_only` already does over the

@@ -6,7 +6,7 @@ Source of truth: `notebooks/bbeh_potter.ipynb`.
 
 Authored and launched from the notebook — it owns what CLI doesn't: HF `BBEH/bbeh` load via `shared_config.py::load_and_split()`, `{input,target}` → `{query,ground_truth}` normalisation, per-task test eval of the global winner across 23 tasks, and `results_potter.json` export.
 
-**Resume via CLI works**: `run_optimization_notebook` auto-mints a session+cycle pair and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `new <name>`. So `python -m promptpotter resume` resumes an interrupted notebook run via the active pointer. State reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly — no CLI read commands.
+**Resume via CLI works**: `run_optimization_notebook` auto-mints a session+cycle pair and claims the workspace's `.workspace/active_session.json` with the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `new <name>`. So `python -m promptpotter resume` resumes an interrupted notebook run via the active pointer. State reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly — no CLI read commands.
 
 Default with no active BBEH session → open the notebook. With an active BBEH campaign dir on disk → confirm which surface the user wants.
 

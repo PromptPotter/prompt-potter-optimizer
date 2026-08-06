@@ -32,4 +32,4 @@ Five LLM call sites: `checkin` (one-time decomposition at init), `l1_generate`, 
 - Dispatch routing + four wounds: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md), [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md)
 - L1 / L2 internals: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md), [`../developer/l2-internals.md`](../developer/l2-internals.md)
 - Candidate elimination (PoBB): [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)
-- Escalation signal stream: [`../operations/observability.md`](../operations/observability.md#escalation-rule-signal-stream-signalsjsonl)
+- Escalation signal stream: [`../operations/observability.md`](../operations/observability.md)

@@ -183,11 +183,10 @@ class RunLimits(StrictModel):
     pobb_epsilon: float
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    # The ♥ bank's declared ceilings, the DENOMINATOR for the live ``hearts`` count.
-    # Without them ``hearts: 3`` is scaleless — the operator cannot tell healthy-of-four
+    # The ♥ bank's declared ceiling, the DENOMINATOR for the live ``hearts`` count.
+    # Without it ``hearts: 3`` is scaleless — the operator cannot tell healthy-of-four
     # from nearly-dead-of-seven, and in lives mode ``max_rounds`` is null, so the round
     # counter it replaces carried the only scale there was. ``None`` when lives is off.
-    lives_start: int | None = None
     lives_cap: int | None = None
 
 

@@ -163,9 +163,8 @@ world is a strict containment hierarchy:
 
 **A campaign has one root cycle — there is no Session tier.** A campaign
 owns a root cycle plus its fork/diag/sweep descendants, and that is the
-whole containment story: `campaign → cycle → fork` was two tiers wearing
-three names (`list_sessions` was always length 1), so the tier was
-removed. What survives is *not* an entity:
+whole containment story — `campaign → cycle → fork` would be two tiers
+wearing three names. What survives is *not* an entity:
 
 - **`Session`** (`application/initialization/session.py`) — the in-process
   **wiring object**: stores, LLM clients, connectors, the resolved
@@ -282,11 +281,9 @@ per-cycle `.runtime/ledger.jsonl` as a `CommandRecord` by a sole
 `CommandDispatcher` at the FastAPI seam (kwargs-only `emit_command`,
 ContextVar-scoped identity + cycle); it applies the mutation inline and
 acknowledges via a sibling `CommandAckRecord` on the same ledger
-(kwargs-only `emit_command_ack`). One writer for both halves — a
-`RunnerCommandSubscriber` was specified for the ack and stood written
-down here, in `presentation/CLAUDE.md`, and ticked ☑ in ADR-0001 for
-months; it was never built, and the dispatcher doing both is simpler
-than the split it was supposed to be.
+(kwargs-only `emit_command_ack`). **One writer for both halves** — never
+split the ack onto a second subscriber; the dispatcher doing both is
+simpler than the split.
 
 Runtime FLAGS are the separate mechanism, and the one the runner really
 does read: `pause` / `skip` / `spend_cap` are polled at the next sample
@@ -330,11 +327,10 @@ separation is a structural invariant (fails loud at import; see
 `tests/CLAUDE.md`) so data types stay free of I/O and the orchestrator can be
 reused without dragging a backend client along. A **concept-first re-hierarchy** (slicing this
 layer cut into per-concept vertical packages) was investigated and
-**rejected** (2026-06): the recurring multi-directory fix signature is
-the inherent footprint of changing the central state spine
-(`opt_search_point` reaches 66 files across every layer) — a flow that
-is correctly layered, not a defect to carve away. The cut stays; don't
-re-propose (analysis in `git log`). SearchPoint types are
+**rejected**: the recurring multi-directory fix signature is the inherent
+footprint of changing the central state spine — a flow that is correctly
+layered, not a defect to carve away. The cut stays; don't re-propose
+(analysis in `git log`). SearchPoint types are
 **immutable**: once created, their fields can't change. That makes
 their content hash a trustworthy identity, which is what lets
 `--from N` resume a campaign with different hyperparameters and

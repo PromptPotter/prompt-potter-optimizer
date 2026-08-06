@@ -4,14 +4,10 @@
 
 PromptPotter can optimize **its own optimizer prompts**. The four optimizer LLM calls — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — are themselves prompts driven by the eight-field `PromptTemplate` scheme. Expose those template fields as a connector's `pipeline_params`, point an outer PromptPotter cycle at them, and you get **PromptPotter optimizing PromptPotter**.
 
-This is the headline self-referential capability of M12. 
+Most prompt-optimization work treats the *optimizer prompt* as fixed — written by humans and frozen. But optimizer prompts are prompts; they are as optimizable as any task prompt.
 Connector: `promptpotter/connectors/promptpotter.py`. 
 Demo dataset: `datasets/promptpotter-self/`. 
 Spec: [`../specs/roadmap.md`](../specs/roadmap.md) § Connectors + L4 inner-cycle execution.
-
-## Why it's interesting
-
-Most prompt-optimization work treats the *optimizer prompt* as fixed — the L1 and critique templates are written by humans and frozen. But the optimizer prompts are prompts; they're as optimizable as any task prompt.
 
 ## What stays the same on the outer cycle
 

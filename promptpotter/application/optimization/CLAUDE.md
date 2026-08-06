@@ -49,12 +49,9 @@ Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strat
 **Reviewing an L1 round trace.** Load
 [`../../../docs/developer/l1-candidate-analysis-checklist.md`](../../../docs/developer/l1-candidate-analysis-checklist.md)
 before reporting findings on any operator-pasted round dump or
-self-optimizing campaign cycle review. The checklist enumerates the eight checks
-that historically slipped past — evidence-availability in the rendered
-input, re-proposal of known-failing configs, PEAKED-axis violations,
-±50% envelope, param-axis overuse, intra-round paraphrase, citation
-hallucinations, output-format integrity — and notes which are enforced
-by validators today vs which are pure analysis responsibility.
+self-optimizing campaign cycle review. It enumerates the checks that
+historically slipped past and says which are validator-enforced today
+versus pure analysis responsibility.
 
 ## L2-layer — l2_context
 

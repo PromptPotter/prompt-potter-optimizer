@@ -73,7 +73,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 
 | Resource | Covers |
 |----------|--------|
-| [![self-healing-internals](https://img.shields.io/badge/self--healing--internals-red?style=for-the-badge)](self-healing-internals.md) | Four LLM-to-LLM wounds |
+| [![self-healing-internals](https://img.shields.io/badge/self--healing--internals-red?style=for-the-badge)](self-healing-internals.md) | LLM-to-LLM wounds — detection point × nurse owner |
 | [![candidate-elimination](https://img.shields.io/badge/candidate--elimination-black?style=for-the-badge)](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through PoBB cutoff |
 | [![developer/README](https://img.shields.io/badge/developer%2FREADME-red?style=for-the-badge)](README.md) | Architecture brief — prompt structure, dispatch, scoring node, cross-run memory |
 | [![observability](https://img.shields.io/badge/observability-black?style=for-the-badge)](../operations/observability.md) | Node tracing and Langfuse integration |

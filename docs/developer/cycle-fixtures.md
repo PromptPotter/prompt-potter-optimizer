@@ -9,10 +9,9 @@ edge-case cycle states.
 
 The fixture tree is the **canonical debug surface** for cycle state, in
 the same way `dashboard.json` on disk is the canonical runtime surface.
-A frozen fixture turns "this bug requires me to point my dev server at
-Nieena's laptop's `~/.promptpotter/...`" into "this bug is the second
-file under `tests/fixtures/cycles/`." Any collaborator reproduces it
-cold.
+A frozen fixture turns "this bug reproduces only on one machine's
+`~/.promptpotter/`" into "this bug is a file under
+`tests/fixtures/cycles/`." Any collaborator reproduces it cold.
 
 Both Python (`pytest`) and TypeScript (`vitest`) tests reach into this
 tree — that's why it lives at the repo's canonical `tests/` location
@@ -29,9 +28,8 @@ Note the two fixtures hold **different files**: a cycle's `dashboard.json` and a
 campaign's `campaign.json`. The tree is keyed by bug class, not by file kind.
 
 Add more as they're needed for specific bug classes (see § "Freezing a
-new fixture" below). Recommended additions when their bug class lands:
-`l3_terminal/`, `l1_clean/` (regression guard), `origin_only/`
-(warming-up edge), `mid_round_l1_score/` (live-round happy path).
+new fixture" below) — one per bug class that actually lands, never
+speculatively.
 
 ## How a Vitest test loads a fixture
 
@@ -89,7 +87,7 @@ write the smallest JSON that triggers the bug. Identifiers can be
 deterministic placeholders (`fixture__<name>`, `cycle_<name>01`) — the
 test asserts on derived shape, not on identity.
 
-This is how `l2_terminal/` was built: ~110 lines of JSON, fully
+This is how `l2_terminal/` was built: hand-written JSON, fully
 human-auditable, no anonymization concerns.
 
 ### Option 2: strip an existing cycle dir
@@ -112,8 +110,8 @@ Then:
    the fixture captures and which bug class it exercises (see existing
    fixtures for the shape).
 
-A scripted-strip helper is worth writing when the third such fixture
-needs the same treatment; until then hand-strip.
+Hand-strip; a scripted helper only earns its place once several fixtures
+need the same treatment.
 
 ## Testing posture (mirrors `webapp/CLAUDE.md`)
 

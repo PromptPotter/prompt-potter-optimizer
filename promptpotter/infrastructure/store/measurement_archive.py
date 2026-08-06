@@ -614,7 +614,6 @@ def _to_measurement(
         node_configs=node_configs,
         pipeline_data=item.get("pipeline_data") or {},
         created_at=detail.get("created_at", ""),
-        run_scores=detail.get("scores") or {},
     )
 
 

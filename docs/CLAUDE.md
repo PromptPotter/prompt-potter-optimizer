@@ -31,7 +31,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 |---|---|
 | Where does concept X live? | [`developer/concept-map.md`](developer/concept-map.md) |
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
-| The situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine (the two universal gates stay in root [`CLAUDE.md`](../CLAUDE.md)) |
+| The situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine |
 | How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
@@ -43,7 +43,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 L4 (PromptPotter optimizing its own optimizer prompts) is the project's closing focus: finishing the recursion into a **distributable `promptpotter-self`**.
 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, what the outer fitness measures today (`mean_round_delta`) and what is still open about it, cost realism.
-2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan: § Finish line (distributable goal), § Live-run learnings (MAX_PATH flat `.inner/` registry, gsm8k→`justlogic-d234` headroom), and the slice order.** Read first — and read item 7 before trusting any outer number: the panel's resolving power is served (`rank-optimizer-prompts`) and currently reads `UNKNOWN`.
+2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan.** Read § Finish line first; it is the single owner of L4 status, and of the panel's resolving power, which is read before any outer number is trusted.
 3. The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
 
 ## Editing a doc

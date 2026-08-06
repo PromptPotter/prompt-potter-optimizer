@@ -80,9 +80,12 @@ data/
 # Linting cache
 .ruff_cache/
 
-# Claude's goldmine capture — rolling mirror of the last campaign's live stdout
-# (most-recent-only) + active-work scratch. latest.log is already caught by *.log.
-.goldmine/
+# The last run's terminal readout, ANSI-stripped and truncated per run.
+# Sole writer: LiveDisplay._write. Nothing else belongs in here.
+logs/
+
+# Ad-hoc human/agent dumps — launch logs, scratch notes. Never engine-written.
+.scratch/
 
 # Local dev tools
 .claude/*

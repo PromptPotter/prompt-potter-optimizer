@@ -31,8 +31,6 @@ async def run_sweep_generation_only(
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
         ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
-    elif _rr := session.state.audit_projection:
-        _rr.begin_round(round_num)
 
     candidates, yield_stats = await generate_or_load_candidates(
         round_num,
@@ -78,8 +76,6 @@ async def run_sweep_generation_only(
                 payload={"status": "generation_only", "n_candidates": len(candidates)},
             )
         )
-    elif _rr := session.state.audit_projection:
-        _rr.flush()
 
 
 __all__ = ["run_sweep_generation_only"]

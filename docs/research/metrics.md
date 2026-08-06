@@ -29,13 +29,4 @@ Absolute accuracy is meaningful only when you know the base model and the origin
 
 ---
 
-## Proposed table format
-
-| Method       | Model        | Acc   | HC    | SE₉₀  | R₉₀ |
-|-------------|-------------|-------|-------|--------|-----|
-| Zero-shot    | Llama-3-8B  |   —   | —     | —      | —   |
-| MIPROv2      | Llama-3-8B  |   —   | —     | —      | —   |
-| adv-CoT      | Llama-3-8B  |   —   | —     | —      | —   |
-| PromptPotter | Llama-3-8B  |   —   | —     | —      | —   |
-
-Filled from `results_*.json` after M11 runs complete. See [`benchmarks.md`](benchmarks.md) for the evaluation protocol and dataset specs.
+A published table reports all four per (method, model), from `results_*.json`. See [`benchmarks.md`](benchmarks.md) for the evaluation protocol and dataset specs.

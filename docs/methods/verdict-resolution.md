@@ -107,7 +107,9 @@ regression probe inside the first `elimination_n_min` window, plus steady loss
 accrual for regressors.
 
 It is a **pure function** of (seed grades, ruler, sample ids), so a resumed round
-re-derives the identical order with no recorded sidecar.
+re-derives the identical order with no recorded sidecar. The hard-samples
+artifact's `pick_score.sample_order` is this same order seeded by the best
+candidate — the order the engine will actually execute next round.
 
 **Why static beats adaptive here:** an ability re-fit after every measurement
 empirically front-loads the seed's hit set — the zero-information region, where

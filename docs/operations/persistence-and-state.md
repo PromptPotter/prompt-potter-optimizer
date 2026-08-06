@@ -18,7 +18,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 
 ## Active session pointer
 
-`.promptpotter/active_session.json` (`{tenant_id, session_id, campaign_id, cycle_id}`) is your active tab.
+`projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your active tab — the workspace root selects the file, so the tenant is the path, not a payload field (`store/session_pointer.py::_active_pointer_path`).
 
 - **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
@@ -34,8 +34,10 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 
 ```
 .promptpotter/
-  active_session.json                  # { tenant_id, session_id, campaign_id, cycle_id }
   projects/{tenant_id}/
+    .workspace/
+      active_session.json              # { session_id, campaign_id, cycle_id }
+      events.jsonl                     # workspace ledger — commands with no cycle to address
     sessions/{session_id}/session.json
     campaigns/{campaign_id}/            # {dataset}__{rand6_hex}, fresh per `new`
       campaign.json                    # manifest (dataset, config snapshot, declaration hashes — no run state)
@@ -73,7 +75,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
-The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped, also mirrors to the repo-root gitignored **`.goldmine/latest.log`** — the headless tail when you're not watching `dashboard.json::current_round`.
+The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped, also mirrors to the repo-root gitignored **`logs/latest.log`** — the headless tail when you're not watching `dashboard.json::current_round`.
 
 Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 

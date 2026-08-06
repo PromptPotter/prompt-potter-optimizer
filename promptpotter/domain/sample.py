@@ -60,7 +60,6 @@ class Measurement:
     node_configs: list[tuple[str, dict[str, Any]]]
     pipeline_data: dict[str, Any]
     created_at: str
-    run_scores: dict[str, Any]
 
 
 __all__ = ["Measurement", "Sample"]

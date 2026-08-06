@@ -471,7 +471,7 @@ def render_sp_diff(view: SpDiffView) -> str:
         out.append(_node_line(f"{CYAN}Values:{RESET}"))
         for code, full in legend:
             # full may be a multi-line prompt-field value — prefix every physical line so an
-            # embedded newline doesn't break the box (console + .goldmine/latest.log).
+            # embedded newline doesn't break the box (console + logs/latest.log).
             out.extend(_node_lines(f"  {code} {full}"))
 
     return "\n".join(out)

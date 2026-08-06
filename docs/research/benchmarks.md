@@ -1,12 +1,8 @@
 # Benchmark Methodology
 
-## Priority (2026-04-29)
+## PEvol-Bench — the AC-grade bench definition (v1 draft)
 
-**Bench framing.** PromptPotter is an Algorithm Configuration solver in prompt space; the bench definition is § PEvol-Bench below. What that bench requires (canonical split, population-grade size, non-saturated or procgen) is what distinguishes a credible AC benchmark from a method-comparison harness.
-
-**What we actually ran.** Datasets to date were chosen for headroom and head-to-head comparability against peer optimizers (CAPO/GEPA/MIPROv2/Bootstrap) — not as PEvol-Bench-grade benchmarks. Run log below.
-
-## PEvol-Bench — the AC-grade bench definition (v1 draft, 2026-04-29)
+PromptPotter is an Algorithm Configuration solver in prompt space, and what this bench requires — canonical split, population-grade size, non-saturated or procgen — is what separates a credible AC benchmark from a method-comparison harness. The datasets we have actually run were chosen for headroom and head-to-head comparability against peer optimizers, not as PEvol-Bench-grade instances; which dataset is live and why is owned by [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md).
 
 Definition only; instance assembly TBD. PromptPotter is the reference solver.
 
@@ -14,20 +10,6 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
 - **Requirements.** (1) **Pre-assembled canonical split — hard requirement** (else every paper compares on slightly different distributions and the field can't accumulate knowledge); (2) DSPy-style compound-system pipeline description; (3) population large enough for a real **config set** (what the algorithm searches over) / **test set** (held-out, same distribution, evaluates generalization) split. BBEH / AIME / GSM8K are too small and/or saturated — you can't meaningfully split 250 instances and claim population representativeness.
 - **v1 candidates.** Procedurally generated tasks (unlimited test set) are the ideal. Curated picks: **MMLU-Pro** (~12k questions, diverse, harder than MMLU, unsaturated, canonical split) for breadth + **MATH** (7,500 test instances, clean baked-in split, understood difficulty distribution) for depth — both HuggingFace-native, no assembly required. **LiveBench** is the contamination-resistant watch item (monthly updates make a fixed test set harder).
 - **Long-term node-type coverage.** LLM-only: MMLU-Pro, MATH, LiveBench · retrieval+LLM: HotpotQA, PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench, FRAMES. Aspiration: ship our own procedurally-generated instances; v1 sticks to curated existing datasets.
-
-## Trials log
-
-Status as of 2026-04-29.
-
-| Dataset | Status | Model used | Result snapshot | Notes / why this status |
-|---|---|---|---|---|
-| GSM8K | Dropped (cited only) | `gpt-oss-120b` | Saturated | No headroom under current model setup |
-| AIME 2025 | Dropped (cited only) | `gpt-oss-120b` | Saturated, n=30 | Shorter, simpler inputs than BBEH (a usability win) but population too small for config/test split |
-| LCA-TermNorm | Active | `gpt-oss-120b` (Groq) | Custom multi-node pipeline | Self-healing + multi-step pipeline demos; full 6-node pipeline incl. `llm_ranking` |
-| BBEH (mini) | Active (M11 head-to-head) | `mistralai/mistral-small-3.2-24b-instruct` (OpenRouter) | M11 publication target | Verbose inputs trip `gpt-oss-120b` reasoning-budget ceiling → swapped to OpenRouter Mistral at `reasoning_effort: low`. Same model used across all peer methods in the head-to-head. Mini split too small for AC generalization claims; kept for method comparison only |
-| MMLU-Pro | Planned | tbd | n/a | PEvol-Bench v1 candidate |
-| MATH | Planned | tbd | n/a | PEvol-Bench v1 candidate |
-| LiveBench | Watching | tbd | n/a | Procgen candidate; fixed-test-set workflow design pending |
 
 ## Datasets
 
@@ -76,33 +58,7 @@ Multi-hop question answering over Wikipedia paragraphs. Requires reasoning acros
 
 Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M11 Wave 1.**
 
-#### HotPotQA SOTA reference
-
-**Distractor setting** — Beam Retrieval (single model):
-
-| Metric | Score |
-|---|---|
-| Answer EM | 72.69 |
-| Answer F1 | 85.04 |
-| Supporting-fact EM | 66.25 |
-| Supporting-fact F1 | 90.09 |
-| Joint EM | 50.53 |
-| Joint F1 | 77.54 |
-
-**Fullwiki setting** — AISO (single model):
-
-| Metric | Score |
-|---|---|
-| Answer EM | 67.46 |
-| Answer F1 | 80.52 |
-| Supporting-fact EM | 61.17 |
-| Supporting-fact F1 | 86.02 |
-| Joint EM | 44.87 |
-| Joint F1 | 72.00 |
-
-Source: HotpotQA homepage leaderboard.
-
-**`gpt-oss-120b` expectations.** No published HotpotQA-specific score found. Model-card general-reasoning signals — GPQA Diamond 80.1, MMLU 90.0, SWE-Bench Verified 62.4, Codeforces Elo 2463 (high reasoning) — suggest a strong origin. HotPotQA is retrieval-heavy and multi-hop, so actual performance depends on whether supporting documents are provided and what retrieval stack is used. Headroom under `gpt-oss-120b` almost certainly exists in the fullwiki / retrieval-coupled setting; in the distractor setting headroom will be tighter because the hard work (retrieval) is already done.
+Per-setting SOTA: the [HotpotQA homepage leaderboard](https://hotpotqa.github.io/). Headroom is tighter in the distractor setting than in fullwiki, because there the hard work — retrieval — is already done.
 
 ### GSM8K, AIME 2025 — Saturated, cited only
 
@@ -155,7 +111,6 @@ The bbeh-comparison harness is deliberately scoped to **prompt-optimization peer
 | PromptPotter | LLM-driven program evolution | This work |
 | AlphaEvolve | LLM-driven program evolution | [DeepMind, 2025](https://arxiv.org/abs/2506.13131) |
 | OpenEvolve | Open re-implementation of AlphaEvolve | [repo](https://github.com/algorithmicsuperintelligence/openevolve) |
-|--------|-------------|--------|
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
 | MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
 | GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
@@ -165,52 +120,8 @@ The bbeh-comparison harness is deliberately scoped to **prompt-optimization peer
 
 ---
 
-## Results
-
-### Main Results — BBEH Mini (Primary)
-
-**Model:** gpt-oss-120b via Groq | **Split:** 10/task train, 10/task test, seed=42 | **Scoring:** Exact match, macro-average across 23 tasks
-
-<!-- Filled from results_*.json after M11 runs complete -->
-
-| Method | Overall | Source |
-|--------|---------|--------|
-| **PromptPotter (full)** | **—** | Ours (CLI) |
-| PromptPotter (L1+L2) | — | Ours (CLI) |
-| PromptPotter (L1 only) | — | Ours (CLI) |
-| GEPA | — | `bbeh_dspy.ipynb` |
-| MIPROv2 | — | `bbeh_dspy.ipynb` |
-| BootstrapFewShot | — | `bbeh_dspy.ipynb` |
-| CAPO | — | `bbeh_capo.ipynb` |
-| Zero-shot | — | Ours |
-
-Per-task breakdown (23 tasks × methods) will be added once experiments complete. Reproducible notebooks: [`bbeh-comparison/`](bbeh-comparison/).
-
-### HotPotQA (Secondary, pending saturation probe)
-
-<!-- Filled only if saturation probe shows headroom at gpt-oss-120b -->
-
-| Method | HotPotQA F1 | HotPotQA EM | Source |
-|--------|-------------|-------------|--------|
-| Zero-shot | — | — | Ours |
-| MIPROv2 | — | — | Cited |
-| GEPA | — | — | Cited |
-| **PromptPotter (full)** | **—** | **—** | **Ours** |
-
-### Saturated Datasets (cited literature only)
-
-GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numbers included for context only; no new runs planned under current model setup.
-
-| Dataset | Method | Reported | Source |
-|---------|--------|----------|--------|
-| GSM8K EM | MIPROv2 | — | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
-| GSM8K EM | PromptWizard | — | [Agarwal et al., 2024](https://arxiv.org/abs/2405.18369) |
-| AIME 2025 EM | GEPA | — | [GEPA, 2025](https://arxiv.org/abs/2507.19457) |
-
----
-
 ## Infrastructure Notes
 
-Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
+Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`).
 
 See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, the head-to-head numbers, and (§ Algorithm configuration: the classical lineage) the classical AutoML racing ancestry.

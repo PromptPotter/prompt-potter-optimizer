@@ -95,11 +95,6 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 - **BBEH-mini @ `medium`** (44% with paren-strip ~48%): in band but **24.7s mean with 1.8-219.9s range** — operationally unviable for per-cycle wall-clock. Operator note: "really only if other things don't work."
 - **BoardgameQA Main-depth3 @ `low`** (64% above ceiling): same class-collapse as BBEH boardgame_qa subtask; 0.5s/sample (very cheap). Revisit as part of the class-collapse-recovery campaign above.
 
-## Held for later (in-band but not preferred)
-
-- **BBEH-mini @ `medium`** — 44% in band, but the 24.7s mean latency with 219.9s outliers is operationally bad. Use only as fallback if `low` candidates exhaust.
-- **BoardgameQA Main-depth3 @ `low`** — 64% above ceiling, but **0.5s/sample latency = very cheap**; class-collapse is the problem (0/8 `disproved`-gold hits). **Class-collapse may actually be what PromptPotter is anti-built against** — the L1 mutation surface is exactly the kind of prompt edit ("commit to all three classes; do not default to the safest hedge") that the optimizer is designed to discover. A future campaign could trial BBEH-mini @ low + BoardgameQA as a *class-collapse-recovery* benchmark — measure whether L1 can systematically unblock the hedge. Held for later — operator's call 2026-05-19 to wire JustLogic d≥6 first.
-
 ## Trialed and rejected — 2026-05-19 recon trail
 
 7 datasets trialed, 7 rejected before MMLU-ProX-sw landed. **Default recon conditions: `openai/gpt-oss-20b @ reasoning_effort: low`, `temperature: 0.0`** (matches every dataset's wired `pipeline.yaml` — the operator's pinned self-optimizing campaign setting). Provider was Groq for the first wave (until rate-limits), then OpenRouter `:nitro` routing for the rest. The `effort` column below flags any deviation from the `low` default.

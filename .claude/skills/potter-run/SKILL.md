@@ -41,7 +41,7 @@ covered, re-read state from disk — that is what makes turn 0 and turn 100 the 
 1. `projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}`
 2. that cycle's `dashboard.json` (`run_phase`, `round`, `best`, `hearts`, `error_count`) + the
    newest `rounds/round_NNNN.json`
-3. `.goldmine/latest.log` tail — the most recent run's terminal readout, ANSI-stripped
+3. `logs/latest.log` tail — the most recent run's terminal readout, ANSI-stripped
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 

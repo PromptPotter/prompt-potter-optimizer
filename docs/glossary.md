@@ -120,8 +120,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
 ## Hierarchy — workspace / dataset / campaign / session / unit
 
 The persisted world is a four-entity containment hierarchy
-(outermost → innermost). The Session is a unit of a campaign;
-`active_session.json` is the operator's pointer/lens to the active one.
+(outermost → innermost). The Session is a unit of a campaign.
 
 - **Workspace** — the tenant-level container and queryable datastore:
   every dataset, every campaign, the shared `archive/`. On disk
@@ -166,12 +165,10 @@ The persisted world is a four-entity containment hierarchy
   pipeline origin, context text, and the optimizer prompts it runs
   under. A first-class entity holding one session root + its fork/diag/
   sweep descendants. Directory `campaigns/{campaign_id}/` +
-  `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` —
-  minted fresh per `new` call by `mint_campaign_id`; each `new` produces
-  a distinct campaign. The declaration rides `campaign.json` as
-  properties, never as the id: `root_content_hash` (resume's config-drift
-  check) + `optimizer_prompt_hash` (audit join key — optimizer drift is
-  asked per round). `domain/campaign.py`.
+  `campaign.json` manifest; the id is minted per `new` by
+  `mint_campaign_id`, and what the manifest carries beside it is owned by
+  [`operations/persistence-and-state.md`](operations/persistence-and-state.md).
+  `domain/campaign.py`.
 - **Run init** — the ordered chain from a `new` / `resume` invocation to
   the first round: `init_services` → `populate_session_scoring` →
   `init_cycle` → `init_optimization_loop`, in `application/initialization/`.
@@ -310,8 +307,8 @@ The persisted world is a four-entity containment hierarchy
   per-dataset (`graduate_ruler_model`) only where a data-rich dataset wins
   held-out cross-validation — so it never regresses a dataset. The richer
   `(δ, a)` value rides inside the one ruler, so the switch is invisible above
-  `fit_theta_given_delta`. Operator knob `enable_2pl_graduation`. Shipped —
-  slice 3 of [`specs/fitness-comparability.md`](specs/fitness-comparability.md).
+  `fit_theta_given_delta`. Operator knob `enable_2pl_graduation`.
+  [`specs/fitness-comparability.md`](specs/fitness-comparability.md).
 - **specific objectivity** — the Rasch property that makes θ comparable
   across candidates measured on *different* subsets. The reason θ gates
   instead of subset accuracy. Same spec.
@@ -417,9 +414,9 @@ The persisted world is a four-entity containment hierarchy
 - **Optimizer prompt** — a prompt the optimizer itself runs on: the
   `PromptTemplate` behind `l1_generate` / `l1_critique` / `l2_context` /
   `l3_plan` / `checkin`. Its opposite number is the **target prompt** — the
-  prompt being optimized. Formerly called a "meta-prompt"; that word named both
-  halves of the loop and is retired (root `CLAUDE.md` § Conventions). The
-  literature calls the technique meta-prompting (PromptWizard / DSPy / OPRO).
+  prompt being optimized. Never "meta-prompt" — that word names both halves at
+  once (root `CLAUDE.md` § Conventions), though the literature calls the
+  technique meta-prompting (PromptWizard / DSPy / OPRO).
 - **Prompt homes** — three, don't confuse them. The **target** prompt the optimizer
   evolves: `datasets/{name}/prompts/{node}.yaml`. The **optimizer's** optimizer prompts
   (install-global): `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — keyed

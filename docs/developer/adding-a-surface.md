@@ -194,9 +194,8 @@ or `infrastructure/backend.py`.**
    **A credential is a per-backend fact and belongs on the connector**, never read at
    the construction site — `build_backend_client` (`infrastructure/backend.py`) is the
    one place a `BackendClient` is built, and it takes the token off the connector it
-   was handed. Four sites once passed `settings.TERMNORM_TOKEN` to whatever connector
-   had been resolved, so registering a second `remote_http` backend would have POSTed
-   TermNorm's bearer token to that third-party host.
+   was handed. Read a token at the construction site instead and registering a second
+   `remote_http` backend POSTs the first one's bearer token to a third-party host.
 
 **Guard (import-time, no standing test):** the registry guard at the bottom of
 `connectors/__init__.py` raises at import if any row is half-wired — registry key ≠

@@ -12,51 +12,12 @@ PromptPotter's shared round order intentionally violates that: it front-loads
 the decision-relevant samples (the seed's misses — the only place a candidate
 can win) so a dead candidate is abandoned within a handful of queries instead
 of burning the full sample budget. That non-iid ordering breaks PoBB's
-premise — below is the failure mode it creates, the paired-sample fix that
-keeps the speedup, and the on-disk shape that lets resume replay paired
+premise: two arms measured on near-disjoint sample sets get compared as
+though they were iid, so a leader that ran only the easy prefix reads as
+unbeatable, and every later candidate — measured hard-first — is eliminated
+against a rate the leader never had to earn. Below is the paired-sample fix
+that keeps the speedup, and the on-disk shape that lets resume replay paired
 decisions without re-running them.
-
-## The pathology
-
-A real example from the AIME 2025 cycle that motivated this fix:
-
-```
-Round 1, 5 candidates evaluated:
-  3b6553… : sample_ids {0,1,2,3,4,5,6,7}, 8/8 hits = 100%  ← leader-locked
-  e589d4b7: sample_ids {0..19},          10/20 hits =  50%
-  68c5d7fa: sample_ids {0..6},            4/7  hits =  57%  (eliminated)
-  0067efd2: sample_ids {0..10},           6/11 hits =  55%  (eliminated)
-  795183e0: sample_ids {0..19},           8/20 hits =  40%
-
-Round 2, 3 candidates: all PoBB-eliminated at q6, p_best=0.0
-Round 3, 6 candidates: all PoBB-eliminated at q6, p_best=0.0
-```
-
-The round-1 "winner" `3b6553…` was leader-locked at exactly the floor
-(`lock_in_n_min=8`, `lock_in≥0.95`) by getting 8/8 on the easy prefix —
-samples 0–7, the first eight the sorter hands out. The two candidates
-that completed the full 20 scored 40% and 50% on the same prompt family.
-The lock-in fired on a lucky-prefix streak, not on a genuinely dominant
-candidate.
-
-Rounds 2 and 3 then compared every new candidate against that "100%"
-leader using **unpaired** PoBB:
-
-* Leader vector: `[1, 1, 1, 1, 1, 1, 1, 1]` on samples `{0..7}`.
-* Candidate vector: `[0, 0, 0, 0, 0, 0]` on samples `{9, 12, 13, 6, 14, 8}`
-  (sorter's hard-first order, hardest for this round).
-
-The two arms share exactly one sample (#6). The MC posterior on those
-vectors says the candidate has ~0% chance of being best, so it gets
-eliminated at q6 — but the comparison is statistically meaningless: the
-candidate was tested on samples the leader was never tested on. The
-leader's 100% is unbeatable in principle because it never had to face
-the hard samples.
-
-Origin missed all five hard samples (`#8, #9, #12, #13, #14`); the
-leader's prompt is a small variant of origin and almost certainly misses
-most of them too. The optimizer keeps reporting "100% — no improvement"
-while every candidate looks dead-on-arrival.
 
 ## The mechanism
 
@@ -141,17 +102,13 @@ its keep — backfill guarantees the priors have outcomes on the candidate's
 *contested* (hard) samples, which is exactly where the θ comparison gets its
 discriminating information.
 
-### 4. Lucky-prefix is self-correcting
+### 4. Lucky-prefix inflation is self-correcting
 
-Re-run the pathology above with pairing on: as round 2's candidate
-measures its hard-first order, backfill forces the locked leader onto
-those same samples — its history gains real hard-sample coverage
-(mostly misses; the same prompt family scores 50% on the full set),
-and its recorded mean deflates from the false 100% toward its true
-rate. The candidate may still lose, but the comparison is honest.
-No separate "lower the lock-in threshold" code path, no display patch
-for "100% on n=8": the inflation was a mechanical consequence of
-unpaired comparison, and paired comparison mechanically removes it.
+Backfill forces a locked leader onto the candidate's hard-first order, so
+its recorded mean deflates toward its true rate before the comparison is
+made. No "lower the lock-in threshold" code path and no display patch: the
+inflation was a mechanical consequence of unpaired comparison, and paired
+comparison mechanically removes it.
 
 ## Cost
 
@@ -235,8 +192,9 @@ named inline above.
 
 Backfill makes the paired comparison statistically valid; the shared
 **iteration order** is what makes it cheap — win-opportunity samples first,
-so decision evidence arrives before the budget is spent. Split out to its
-own page: [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md).
+so decision evidence arrives before the budget is spent. Owned by
+[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)
+§ The round order — `build_round_order`, one static order per round.
 
 ## Elimination: one gate, on the θ ruler
 
@@ -261,5 +219,5 @@ this layer must not add a second one beside the θ ruler.
 * `git log` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` contestedness snapshot.
-* [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md) — the shared
-  round order that sets every candidate's iteration order.
+* [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) — the
+  shared round order that sets every candidate's iteration order.

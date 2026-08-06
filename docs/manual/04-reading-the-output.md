@@ -89,13 +89,13 @@ The optimizer has already handled it — these exist for audit, not to ask for i
   ```
   .promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard.json
   ```
-  The active campaign + cycle ids are in `.promptpotter/active_session.json`. Open the file directly for live state.
+  The active campaign + cycle ids are in `.promptpotter/projects/{tenant_id}/.workspace/active_session.json`. Open the file directly for live state.
 - **Webapp preview** — same `dashboard.json`, rendered in the browser. In a separate terminal, run:
   ```bash
   python -m uvicorn promptpotter.main:app --port 8001
   ```
   then open <http://127.0.0.1:8001/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
-- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the gitignored `.goldmine/latest.log` — the most-recent run's stdout, ANSI-stripped.
+- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the gitignored `logs/latest.log` — the most-recent run's stdout, ANSI-stripped.
 
 `dashboard.json` lives in the cycle's **own** dir. When you fork, the fork's dir is flat alongside its root at `campaigns/{campaign_id}/cycles/{fork_cycle_id}/`, and its `dashboard.json` lives there too — each cycle owns its stream. Tail the cycle you're actually running.
 

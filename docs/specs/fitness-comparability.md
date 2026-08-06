@@ -4,14 +4,7 @@
 
 ## Why — one quality number, accidentally split into two
 
-A candidate's quality was computed **twice, by two modules that never reconciled** — the split this spec closed:
-
-- **Ability (θ)** — `application/intelligence/exploration.py::fit_rasch(observations) -> RaschPosterior` fits a hierarchical **1PL Rasch** model (EB / Laplace-EM) and returns per-candidate `theta[cid]` + `theta_se` and per-sample difficulty `delta[sid]` + `delta_se`. θ is **difficulty-aware**: it discounts for *which* samples a candidate saw. It is refit every round and every online measurement. But θ was consumed **only** by sample selection (`select_round_subset`, the online adaptive queue) and the hard-samples heatmap ordering (`hard_sample_sorter.py`) + the artifact writer — **θ did not reach fitness.**
-- **Fitness (accuracy / composite)** — `application/scoring/metrics.py::compute_composite_fitness` averages raw per-sample `fitness`/`hit` over **the candidate's own measured subset**. It is **difficulty-blind**. That was the number that gated: election, PoBB elimination and the `improved` flag all compared candidates on it.
-
-The two were a **dormant duplication**, and what woke it is per-round resubset. Under a *fixed* subset every candidate sees the same samples, so raw accuracy is monotone with θ — the two paths agree and the split is invisible. With resubset **ON** (candidates measured on different, signal-chased subsets), accuracy stops tracking difficulty and the paths **disagree**: the heatmap orders candidates by ability while election/PoBB order them by raw subset accuracy. That disagreement *is* the per-candidate-fitness distortion, and it is what kept resubset off until θ gated.
-
-The existing fitness path is not naïve — `elect_round_winner` already does *paired* matching (candidate vs origin on their common samples, `paired_delta_lcb`), a partial drift-guard. But that is candidate-vs-origin only; across candidates on different subsets the headline number still drifts. θ is the complete, cross-candidate-invariant version of what the paired matching is reaching for.
+Quality was computed twice by modules that never reconciled: a difficulty-aware **ability θ** that reached only sample selection and the heatmap, and a difficulty-blind **accuracy/composite** that did the gating. **Per-round resubset is what woke that dormant duplication** — under a fixed subset raw accuracy is monotone with θ and the split is invisible, but once candidates are measured on different signal-chased subsets the two orderings disagree. That disagreement IS the per-candidate-fitness distortion, and it is what kept resubset off until θ gated. Paired candidate-vs-origin matching was only a partial guard; θ is the cross-candidate-invariant version of what it was reaching for.
 
 ## Decision — gating fitness IS θ
 
@@ -40,9 +33,8 @@ Per-round resubset can turn back **ON** once fitness is θ, because θ makes the
 
 ## Implementation order
 
-1. **θ into the gating seams + resubset ON — SHIPPED.** Election, the `delta_ok`/`improved` gate, and PoBB compare on θ; accuracy/composite stay recorded display; `improvement_threshold` recalibrates to logits per round.
-2. **The one fixed δ ruler — SHIPPED.** `fit_theta_given_delta` on the per-cycle `cycle.delta_scale` (grade-A archive calibration, flat-where-cold, warm-and-lock) is the single primitive every comparator reads — `c0_ok`, the L2/L3 stall ladder, election, PoBB, and the divergence replayers all land on one θ scale; `per_round_resubset` defaults ON (the thin-bank coupling is `info`, not `collision`).
-3. **2PL graduation — SHIPPED** (`fit_rasch_2pl` behind the seam; `graduate_ruler_model` BIC + held-out CV + hysteresis, per-dataset, never regresses; knob `enable_2pl_graduation`, default True). *Open follow-up:* `select_round_subset` + `hard_sample_sorter` still fit 1PL for the selection/heatmap δ — feed the graduated discrimination into the **acquisition** term so signal-chasing weights by real aₛ.
+**Slices 1–3 have shipped** — θ into the gating seams + resubset ON · the one fixed δ ruler (`fit_theta_given_delta` on the per-cycle `cycle.delta_scale`) · 2PL graduation behind the seam. The numbers survive because code cites them (`optimization/cycle.py`, `intelligence/exploration.py`). *Open follow-up to slice 3:* `select_round_subset` + `hard_sample_sorter` still fit 1PL for the selection/heatmap δ — feed the graduated discrimination into the **acquisition** term so signal-chasing weights by real aₛ.
+
 4. **Webapp parity — surface θ so the θ-elected winner is never shown losing on a number with no explanation, and let the operator choose which metric they read.** The engine now *decides* on θ but the webapp reads no contract carrying candidate-level θ — every surface (fitness bars, lineage node values, scoring inspector, "Best" tile, sidebar `best_accuracy`) still renders subset-relative `accuracy`/`composite_fitness`. The visible failure: in an expanded lineage lane the θ-winner glyph can sit beside a *losing* sibling showing a **higher** accuracy, unexplained — the operator sees a contradiction the engine resolved internally. Reach parity in three parts:
 
    **(i) Thread θ onto the read-models.** `theta`/`theta_se` on `ScoredCandidate` → `RoundSummaryCandidate` (dashboard) + `LineageNode` (the served tree), stamped from the single election fit (`elect_round_winner` now returns `(winner_id, abilities)`); TS types regenerated. Live `current_round` θ deferred — mid-round has no election fit (it would be the online adaptive-queue θ, a different source).
@@ -86,8 +78,6 @@ silently substituted with raw accuracy, which is the subset-relative quantity th
 exists to stop headlining.
 
 Unbuilt: pointing the three cross-round surfaces at it.
-
-   **(iii) Teach θ / 1PL / 2PL — SHIPPED.** `docs/glossary.md` θ/δ/1PL/2PL/specific-objectivity entries (AI/dev corpus) + `webapp/components/candidates/AbilityInfo.tsx::AbilityHelp` ("why a lower-accuracy candidate can win" + calibration model), revealed inside the candidates card's `⋯` menu — read-once teach copy, so it owns no permanent control. `_calibrate_delta_ruler` returns the fitted model, which rides the `cumulative_theta` path (`RoundResult` → `RoundSummary` → `dashboard.json`) to it.
 
    > **The ruler has THREE states, not two.** A cold ruler is **flat** — θ degenerates to logit-accuracy — so it is neither 1PL nor 2PL; `calibration_model` is `None` there, and the popover says *not yet calibrated*. Naming it "1PL" claims a fitted difficulty ruler where none exists, so never collapse the third state into the first.
 
