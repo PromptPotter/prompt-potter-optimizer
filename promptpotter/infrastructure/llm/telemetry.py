@@ -85,9 +85,9 @@ def emit_token_usage(
 
     Reads ledger + round from ContextVars (per-asyncio-task isolation —
     concurrent cycles for M12+ just work). The overlong-prompt signal is the
-    char gate at the pre-call site (``OPTIMIZER_PROMPT_WARN_CHARS``), which
-    fires before the call on the composed prompt — the duplicate post-call
-    token gate that could never fire first is gone.
+    per-node char gate at the pre-call site (``OPTIMIZER_PROMPT_BUDGET_CHARS``),
+    which fires before the call on the composed prompt — the duplicate
+    post-call token gate that could never fire first is gone.
 
     ``cached`` marks a call served from a content-addressed cache: it consumed the
     recorded tokens but spent no money. See ``TokenUsageRecord`` for why the ledger

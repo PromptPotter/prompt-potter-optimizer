@@ -25,14 +25,16 @@ collects everything else.
   how it got that way is git's job (commit message, `CHANGELOG.md`), and
   architecture facts belong in the layer's CLAUDE.md or `docs/`.
   `__init__.py` gets a one-line namespace marker plus a pointer, never a
-  package essay. Three named carve-outs are **product surfaces with their
-  own budget**, not documentation: the optimizer response models in
-  `dispatch/schemas.py` (class docstring → JSON-Schema `description` → the
-  LLM prompt; editing one is a prompt change — regenerate via
-  `scripts/build_optimizer_schemas.py`), the `EXPORTED_MODELS` docstring
-  FIRST lines (→ generated TS JSDoc — regenerate via
-  `scripts/build_ts_types.py`), and FastAPI route docstrings (→ the OpenAPI
-  descriptions the docs UI serves).
+  package essay. Two named carve-outs are **product surfaces with their own
+  budget**, not documentation: the `EXPORTED_MODELS` docstring FIRST lines
+  (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`), and
+  FastAPI route docstrings (→ the OpenAPI descriptions the docs UI serves).
+  The optimizer response models in `dispatch/schemas.py` are **not** a third
+  one, and used to be: Pydantic hoisted each class docstring into the wire
+  JSON Schema, so our design notes rode every optimizer call.
+  `OptimizerResponseModel` drops them. What ships there is
+  `Field(description=)` — editing one IS a prompt change, so regenerate via
+  `scripts/build_optimizer_schemas.py`.
 - **Pipeline components are nodes** — never "building blocks", never
   "services".
 
@@ -110,10 +112,12 @@ only in the specific situation named before it.
 So: **price a proposal in the axis the operator named AND in the ones they didn't**, in the same breath — the units they'd feel, not the flattering ones (an inner cell costs ~11 minutes *and* ~$0.05; quote both). Trading one axis for another is an increase and is asked for explicitly. And when the budget genuinely binds, the move is to get more out of the measurements already being paid for — a better estimator, a signal already recorded and thrown away, a larger effect to detect — never a bigger N in whichever unit currently looks cheap.
 </one-budget>
 
-**When an LLM call is slow / costly / token-heavy → `<simplify-the-problem>`:**
+**When an LLM call is slow / costly / token-heavy, OR you are adding anything to a prompt → `<simplify-the-problem>`:**
 
 <simplify-the-problem>
 When an LLM call is slow, costly, or timeout-prone because it emits a large number of tokens, treat the token volume as a **prompt-quality symptom, not a capacity problem**. A tightly-scoped prompt poses a *simpler* problem, so the model reasons less and answers shorter. The first move is to tighten the input — constrain the ask, cut open-ended or redundant injections (don't re-dump raw evidence a downstream node was already handed pre-digested), bound the output shape, lower reasoning effort to match the real difficulty — **not** to reach for a faster/bigger provider or raise the timeout/token cap. Simplify the problem so the model doesn't *need* the tokens; the deadline, the token cap, and the provider are safety rails, not the fix. (A specialization of <root-fix>: the cause is upstream in how we posed the problem.)
+
+**Input length is a QUALITY tax, not only a bill — which is why this fires before anything is slow.** Every LLM degrades as its input grows: attention spreads, the middle is recalled worst, instructions compete. A block harmless at 200 chars is not harmless at 4000, so adding one obliges you to say what it displaces. And **attribute before you diagnose** — a prompt's weight is never where it feels like it is, and reasoning about the code cannot find it: dump ONE real payload from a ledger `llm_call` record and account for every character by block, counting the template fields, the dispatch panels inside them, and **the response JSON Schema, which is prompt text and is the one nobody counts** (`l1_generate` ran ~17.8k chars for months — 40% panels, 32% static prose, 23% wire schema, over half of that Python class docstrings Pydantic had hoisted into `description`).
 </simplify-the-problem>
 
 **When simplifying / labelling a change "refactor" / doing LOC work → `<surface-ledger>`:**

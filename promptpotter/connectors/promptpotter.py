@@ -34,7 +34,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner origin does: the shared optimizer prompt
-    text (``promptpotter/assets/optimizer/pipeline.yaml``), the per-node information-flow
+    text (``promptpotter/assets/optimizer/pipeline.yaml``) AND its response schemas, the
+    per-node information-flow
     layouts, the engine version, the dataset's WHOLE ``inner_tasks.yaml`` spec — the inner
     benchmark NAME + task list (which bank, which seeds) plus ``inner_benchmark_config``
     (sample count, round / variant geometry, the ``inner_optimizer_temperature`` clamp) —
@@ -43,8 +44,12 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     origin/config is silently reused against candidates run under the new one — a
     stale-vs-fresh comparison that fabricates (or masks) outer signal.
     """
+    from promptpotter.application.optimization.dispatch.injections.registry import (
+        injection_source_digest,
+    )
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         optimizer_manifest,
+        optimizer_resolved_schemas,
     )
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.l1_layout import NODE_LAYOUTS
@@ -56,7 +61,15 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # comment-bearing YAML — byte-hashing would void every banked outer measurement
     # the moment someone documented a node, a change with no behavioural content.
     origin_manifest = optimizer_manifest()
+    # The response schemas are prompt text — they ride `response_format` on every call, and
+    # their field names and `description` prose ARE the mechanism where the grammar does not
+    # bind (`docs/concepts/structured-output.md`). They sit in the generated sibling, so
+    # hashing the manifest alone left them out.
+    origin_schemas = optimizer_resolved_schemas()
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
+    # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
+    # is code, so nothing above reaches it — see `injection_source_digest`.
+    panel_text = injection_source_digest()
     # The inner-run config is part of the inner origin's effective behavior, so it
     # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
     # knob) invalidates outer-sample rows measured under the prior value instead of
@@ -100,7 +113,9 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
             else None
         ),
     }
-    fingerprint = stable_hash([origin_manifest, layouts, APP_VERSION, inner_spec])[:12]
+    fingerprint = stable_hash(
+        [origin_manifest, origin_schemas, layouts, panel_text, APP_VERSION, inner_spec]
+    )[:12]
     return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}
 
 

@@ -216,10 +216,14 @@ def _diag_ranker(
         ]
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
+    # A width-1 ranking has no ranking to report, and the panel prints these on MISS lines
+    # only — so `gt_in_ranked` was False on every line it could ever appear on. `None` where
+    # the fact is absent, which the panel's `is not None` guard already reads.
+    ranked = len(candidates) >= 2
     return {
-        "gt_in_ranked": pos is not None,
+        "gt_in_ranked": (pos is not None) if ranked else None,
         "n_final_ranking": len(candidates),
-        "gt_rank": pos,
+        "gt_rank": pos if ranked else None,
         "top_score_gap": top_score_gap,
     }
 

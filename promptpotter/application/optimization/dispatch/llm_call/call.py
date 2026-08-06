@@ -30,7 +30,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
 )
 from promptpotter.config.settings import (
     OPTIMIZER_CALL_DEADLINE_S,
-    OPTIMIZER_PROMPT_WARN_CHARS,
+    OPTIMIZER_PROMPT_BUDGET_CHARS,
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.run_records import (
@@ -293,14 +293,17 @@ async def llm_call(
         # opening dashboard.json. Routes through Python logging to the terminal.
         # An oversized prompt logs at warn level so it stands out the same way
         # the CLI marker turns yellow.
-        oversize = prompt_chars > OPTIMIZER_PROMPT_WARN_CHARS
+        # The node's own ceiling, not one line across all of them. Crossing it means a
+        # bound at some item's PRODUCTION site failed — the fix is there, never here.
+        budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(node or "")
+        oversize = budget is not None and prompt_chars > budget
         log = logger.warning if oversize else logger.info
         log(
             "→ optimizer call: %s · %s · %d-char prompt%s",
             node or "llm_call",
             merged["model"],
             prompt_chars,
-            f" (over the {OPTIMIZER_PROMPT_WARN_CHARS}-char warn line)" if oversize else "",
+            f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
         )
         # Heartbeat task — appends LLMCallProgressRecord every
         # HEARTBEAT_INTERVAL_S so the CLI display + webapp dashboard

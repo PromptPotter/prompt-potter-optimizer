@@ -63,7 +63,11 @@ LEDGER_BASELINE = {
     "settings_env": 19,
     "settings_const": 15,
     "opt_search_point_fields": 25,
-    "any_params": 65,
+    # 65 -> 66 (2026-08-06): `_keep_known_keys._v`, whose `Any` is the same one its peer
+    # `_truncate._v` carries — a Pydantic `BeforeValidator` runs before coercion, so the
+    # value it inspects is genuinely untyped. Typing it narrower would be a claim the parse
+    # boundary cannot make.
+    "any_params": 66,
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
     # 73 -> 74 (2026-08-06): `modal_answer_share`. A deliberate raise for the CONTINUOUS
@@ -72,9 +76,23 @@ LEDGER_BASELINE = {
     # every check and graded `healthy`. It reports and never gates: hedging is the failure
     # the loop corrects, so the number's value is its round-over-round series.
     "domain_any_maps": 74,
-    # Six moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
+    # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
     # bloat source. What the current number buys, newest first:
+    #
+    # +2: `_keep_known_keys(allowed)` + its `_v`, closing the one channel where an LLM could
+    # grow a rendered surface without limit. `L2ContextOutput.l1_overrides` is a
+    # `dict[str, Any]` the layer writes and `_parse_l2` MERGES forward on every fire, while
+    # only two keys are ever read — so an invented key was never read, never pruned, and
+    # rendered uncapped for the rest of the campaign. Filtering to the vocabulary at parse is
+    # what earns that panel its `char_cap=None`: its render is now two scalars by construction.
+    #
+    # +2: `_drop_class_description(schema, model)`, the `json_schema_extra` hook that keeps
+    # class docstrings out of the wire schema. Pydantic hoists a class docstring into the schema's
+    # `description`, so our own design notes — module paths, why a lever is not wired — rode
+    # every optimizer call: 2088 of `l1_generate`'s 3513 schema chars, 63% of `l2_context`'s.
+    # Two params on one inherited classmethod is what buys ~12% off `l1_generate`'s input and
+    # ~21% off `l2_context`'s, at all three sites a wire schema is built.
     #
     # +8 (the JustLogic bake-off's follow-up arc). Seven of the eight are ONE parameter each,
     # threading a fact that was already measured to the surface that needed it, and the eighth
@@ -96,7 +114,7 @@ LEDGER_BASELINE = {
     # readings from their mean; make a dropped cell loud), `model_cls` on `restamp._process`
     # (the verb was hardcoded to one on-disk model while the forbid flip obliges every one),
     # and `is_electable`. Against those, `backfill_spend_rates` + `_cycle_spend` were deleted.
-    "param_decls": 4065,
+    "param_decls": 4069,
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

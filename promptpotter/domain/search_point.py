@@ -132,6 +132,12 @@ FRAMING_FIELDS: frozenset[str] = frozenset(
 # inviting a page.
 FRAMING_VALUE_BUDGET = 600
 
+# ...and a TOTAL, because five legal fields are not a legal framing: the per-field budget
+# alone permits 3000 chars, which renders VERBATIM into every optimizer prompt. It has held
+# only because a human wrote the shipped ones (640 / 1003 / 1186); the check-in decomposition
+# writes these five with an LLM, which is where a page arrives.
+FRAMING_TOTAL_BUDGET = 1500
+
 
 @dataclass
 class TaskDecomposition:
@@ -241,22 +247,31 @@ class TaskDecomposition:
         return self.from_dict(base)
 
     def check_budget(self, *, source: str) -> None:
-        """Raise if any FRAMING field exceeds :data:`FRAMING_VALUE_BUDGET`.
+        """Raise if a FRAMING field exceeds :data:`FRAMING_VALUE_BUDGET`, or all of them
+        together exceed :data:`FRAMING_TOTAL_BUDGET`.
 
         Called once, at the run-start seam, so an over-budget field stops the campaign
         before it starts instead of being clipped on every render for the campaign's whole
         life. ``source`` names the file to edit — the error is only useful if it says where.
+
+        Both bounds, because the per-field one cannot see the sum: five individually legal
+        fields compose a framing larger than the whole prompt budget of the nodes that
+        render it.
         """
-        over = [
-            (k, len(v))
-            for k, v in self.to_dict().items()
-            if k in FRAMING_FIELDS and len(v) > FRAMING_VALUE_BUDGET
-        ]
-        if not over:
+        sizes = {k: len(v) for k, v in self.to_dict().items() if k in FRAMING_FIELDS}
+        over = [(k, n) for k, n in sizes.items() if n > FRAMING_VALUE_BUDGET]
+        total = sum(sizes.values())
+        if not over and total <= FRAMING_TOTAL_BUDGET:
             return
-        detail = ", ".join(f"{k} is {n} chars" for k, n in sorted(over))
+        detail = (
+            ", ".join(f"{k} is {n} chars" for k, n in sorted(over))
+            if over
+            else f"the five fields total {total} chars"
+        )
+        budget = FRAMING_VALUE_BUDGET if over else FRAMING_TOTAL_BUDGET
+        scope = "per-field" if over else "total"
         raise ValueError(
-            f"task_context framing exceeds the {FRAMING_VALUE_BUDGET}-char per-field budget "
+            f"task_context framing exceeds the {budget}-char {scope} budget "
             f"in {source}: {detail}. These fields render verbatim into every optimizer "
             f"prompt — edit them down rather than letting a renderer choose which half the "
             f"model sees. Put the detail in task_description.md, which has no budget."

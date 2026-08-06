@@ -15,8 +15,10 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
+from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
+from promptpotter.domain.results_health import evidence_starved_node
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +26,9 @@ logger = logging.getLogger(__name__)
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    # A RAIL, not a budget the writer honours. Stating the char budget in l3_plan's
-    # answer_format did not work and could not: a model cannot count the characters it is
-    # emitting, so "<=2000 chars" was an instruction it had no way to comply with — live
-    # plans arrived at ~3.2k and the rail silently dropped the strategy's back five
-    # sections, on most rounds. The budget is now expressed where the writer CAN honour it
-    # (at most 6 one-sentence bullets); this only catches a genuine runaway.
-    char_cap=2000,
+    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`, same number).
+    # A rail above that could never fire; one below would re-cut a plan already declared legal.
+    char_cap=800,
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> str:
@@ -195,8 +193,13 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
     already open*. Reachability is read off the declaration, never off a node name:
     teaching a lever the campaign cannot pull is the same defect as a citable panel
     that never renders, and hardcoding ``"l1_generate"`` here would re-file the
-    knowledge of the target that ``node_param_keys`` exists to hold."""
-    if not b.rebase_capability:
+    knowledge of the target that ``node_param_keys`` exists to hold.
+
+    Gated on ``exploration_budget`` for the same reason, one level up: the block's own text
+    conditions the lever on stalled rounds with no lift, and that is already measured — the
+    SAME threshold ``citable_fields`` uses to license ``stall_exploration``. At ``tight`` the
+    round has no grounds to fork, so the block taught against its own evidence."""
+    if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
         return ""
     schema = b.pipeline_schema
     unlockable = (
@@ -208,18 +211,21 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
 
 
 _TERMINATE_CAPABILITY_TEXT = (
-    "TERMINATE PROPOSAL — stop the whole cycle. Evaluate this FIRST, before any refinement: if "
-    "the EVIDENCE STARVED panel above names a node that failed across ~all of this round's "
-    "samples (an enricher whose backend quota or rate-limit is exhausted), the measurement "
-    "itself is unreliable and the round's failure clusters — including "
-    "critique.failure_highlights and the axis-memory cluster, often a downstream matcher — are "
-    "CASCADE NOISE from that dead node, not real targets. Do NOT chase them with a refinement "
-    "first: no framing nudge recovers a starved backend, and another round just burns spend on "
-    'noise. TERMINATE NOW — emit terminate_proposal = {"reason": "<1-2 sentences naming the '
-    'dead node and what the operator must fix>"}; the cycle halts, the operator fixes the '
-    "backend and resumes. For every OTHER fault terminate is rare — default omit; use it ONLY "
-    "for an unrecoverable upstream/backend fault, never for a hard task or a stalled-but-healthy "
-    "search (rewind or keep refining for those)."
+    "TERMINATE PROPOSAL — stop the whole cycle by emitting terminate_proposal = "
+    '{"reason": "<1-2 sentences naming what the operator must fix>"}; the cycle halts, the '
+    "operator fixes it and resumes. Rare: use it ONLY for a fault no framing nudge or replan "
+    "can recover — an unrecoverable upstream/backend fault — never for a hard task or a "
+    "stalled-but-healthy search (rewind or keep refining for those). Default: omit."
+)
+
+# The starvation coaching, rendered only in the round it describes — see `_r_terminate_capability`.
+_TERMINATE_STARVED_TEXT = (
+    " THIS ROUND, EVALUATE IT FIRST, BEFORE ANY REFINEMENT: '{node}' failed across ~all of this "
+    "round's samples (a backend quota or rate-limit exhausted), so the measurement itself is "
+    "unreliable and this round's failure clusters — critique.failure_highlights and the "
+    "axis-memory cluster, often a downstream matcher — are CASCADE NOISE from that dead node, "
+    "not real targets. Do NOT chase them with a refinement: no framing nudge recovers a starved "
+    "backend, and another round just burns spend on noise. TERMINATE NOW, naming that node."
 )
 
 
@@ -232,7 +238,15 @@ _TERMINATE_CAPABILITY_TEXT = (
 def _r_terminate_capability(b: InjectionBundle) -> str:
     """Render the terminate_proposal instruction, gated by
     ``OptimizationConfig.terminate_capability``. Off ⇒ empty string so the L2/L3
-    prompt body is bit-for-bit identical to a no-terminate ablation run (R-48)."""
+    prompt body is bit-for-bit identical to a no-terminate ablation run (R-48).
+
+    The starvation coaching is gated a second time, on the round actually having a starved
+    node — it used to point at "the EVIDENCE STARVED panel above", which renders nothing on a
+    healthy round. The lever itself stays unconditional: starvation is its canonical first
+    user, not its only one."""
     if not b.terminate_capability:
         return ""
-    return _TERMINATE_CAPABILITY_TEXT
+    starved = evidence_starved_node(b.digest.node_failure_rates)
+    return _TERMINATE_CAPABILITY_TEXT + (
+        _TERMINATE_STARVED_TEXT.format(node=starved) if starved else ""
+    )

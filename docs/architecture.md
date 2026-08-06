@@ -68,9 +68,11 @@ Repeat until goal hit, `max_rounds`, or escalation chooses to stop.
 **Escalation (two layers, both lazy) — self-healing with a HITL escape
 hatch.** L2 (`l2_context`) fires when L1 stalls — or preemptively on
 `l2_axis_yield_drought` (no axis-novel candidates) or
-`l1_evidence_starved` (a node failed across ~all samples) — and refines
-`task_context`, the framing dict every prompt reads. L3 (`l3_plan`)
-fires when L2 stalls — rewrites the strategic plan. Higher layers
+`l1_evidence_starved` (a node failed across ~all samples) — and steers
+what L1 *looks at* (`l1_layout`) and how hard it explores
+(`l1_overrides`). It does **not** rewrite `task_context`: the framing is
+operator-authored and frozen for the run, so no layer edits it. L3
+(`l3_plan`) fires when L2 stalls — rewrites the strategic plan. Higher layers
 constrain lower ones, never replace them. The split is deliberate: a
 *healthy* round is L1-critique's job (analyse, mutate); a *systemic
 fault* (evidence-starvation) routes to L2, which either self-heals or —
@@ -114,6 +116,20 @@ state into a prompt's body. One registry (`dispatch_hub.INJECTIONS`).
 One `validate_template()` at module load that catches typos.
 **Adding a new piece of info to a prompt is one new injection
 renderer, period.** No sidecar paths, no out-of-band state mounting.
+
+**Everything that reaches a model is bounded where it is PRODUCED** —
+an LLM-written field at its parse boundary (`dispatch/schemas.py`:
+`max_length` plus a truncating validator), operator-authored framing
+at its mint-time `check_budget`, a derived view at its render cap. A
+bound at the *composition* site could only choose which half the model
+sees, so a composed prompt over its node's ceiling
+(`OPTIMIZER_PROMPT_BUDGET_CHARS`; `prompt_chars` on the ledger is the
+measurement) is a **report that a producer bound failed**, never the
+place to fix it. Two corollaries are easy to miss: input length is a
+quality tax and not only a bill — every model degrades as its input
+grows — and **the response JSON Schema is prompt text**, riding
+`response_format` on every call, so its field names and `description`
+prose are bounded on the same rule.
 
 **Four entities (outermost → innermost).** PromptPotter's persisted
 world is a strict containment hierarchy:
@@ -536,6 +552,14 @@ the PR description.
   we don't use Langfuse cloud yet."
 - **`axis_memory` injection** — the one new injection from the
   recent arc that earned its keep. Cross-round AxisIndex digest.
+- **`injection_source_digest` inside `_identity_config`**
+  (`dispatch/injections/registry.py` → `connectors/promptpotter.py`) —
+  the injection renderers compose most of every optimizer prompt, so
+  their text is L4 measurement identity. AST-normalized, so a comment
+  or a reflow costs nothing while a panel's prose, its `char_cap` or
+  its render condition voids the banked origins. One caller, looks
+  droppable; dropping it compares candidates against a stale origin
+  and says nothing.
 - **`pipeline.yaml` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."

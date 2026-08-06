@@ -16,8 +16,12 @@ size, so healthy rounds are untouched. ``None`` only for the small, internally-c
 
 from __future__ import annotations
 
+import ast
+import functools
+import hashlib
 import inspect
 from collections.abc import Mapping
+from pathlib import Path
 
 from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
@@ -41,6 +45,34 @@ INJECTIONS: dict[str, _Injection] = injection_registry()
 # measured stall licenses ("no panel points anywhere — explore"). Offered only when the
 # escalation panel's budget has widened past `tight`.
 STALL_EXPLORATION = "stall_exploration"
+
+
+@functools.cache
+def injection_source_digest() -> str:
+    """What these renderers EMIT, as a digest — the L4 measurement identity's engine half.
+
+    ``_identity_config`` hashes the prompt TEMPLATES and the layouts naming which panels fill
+    them, but the panels' text is code, so ~40% of every inner prompt sat outside measurement
+    identity. Normalized through the AST — comments and docstrings stripped, formatting
+    canonicalized — so documenting a renderer costs nothing while its prose or its render
+    CONDITION moves the number. Scope is this package: the declared measurement→prompt seam.
+    """
+    parts: list[str] = []
+    for module in (catalogues, layer_state, panels, wounds):
+        tree = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)) and (
+                body := getattr(node, "body", None)
+            ):
+                head = body[0]
+                if (
+                    isinstance(head, ast.Expr)
+                    and isinstance(head.value, ast.Constant)
+                    and isinstance(head.value.value, str)
+                ):
+                    del body[0]
+        parts.append(ast.unparse(tree))
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 def citable_fields(

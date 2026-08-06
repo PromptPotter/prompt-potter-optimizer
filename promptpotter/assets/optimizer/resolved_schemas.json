@@ -10,7 +10,6 @@
         "$defs": {
           "L1Variant": {
             "additionalProperties": false,
-            "description": "One candidate variant proposed by ``l1_generate``.\n\nThree override slots, each carrying a different layer's mutations:\n\n- ``pipeline_params_override`` — per-node tunables, shape ``{node:\n  {param: value}}``. Inner shape is grafted at runtime by\n  :func:`l1_validators.build_l1_response_schema` from the active\n  ``PipelineSchema``; the keys at this level remain ``dict[str, dict]``\n  so the Pydantic parse never fails on a legitimately backend-specific\n  node name.\n- ``prompt_fields_override`` — top-level prompt fields, shape\n  ``{field_name: string}``. Keys constrained to ``PROMPT_STRING_FIELDS``\n  by the runtime-built JSON Schema.\n- ``task_context_override`` — pipeline-context strings, shape\n  ``{field_name: string}``. Keys constrained to ``TASK_CONTEXT_OVERRIDES``\n  by the runtime-built JSON Schema.\n\nAt least one of the three must be non-empty — enforced HERE, at parse\n(:meth:`_reject_empty_mutation`), so an all-empty variant re-asks the provider\n(`openai_compat`'s one-shot schema repair, which feeds the error text back) instead\nof costing a candidate slot. :func:`detect_invariants` keeps the parent-RELATIVE\ncheck — a variant whose overrides merely restate the parent's own values — which\nthis model cannot see.",
             "properties": {
               "evidence_grounding": {
                 "anyOf": [
@@ -61,7 +60,6 @@
           },
           "VariantEvidenceGrounding": {
             "additionalProperties": false,
-            "description": "One row of evidence justifying a variant's chosen mutation.\n\n``field`` names the panel entry the LLM is grounding on. The allowed values are\nper-round — the evidence panels the node's live layout renders, plus the stall\nescape hatch — so the ``enum`` is grafted onto the wire schema at build time by\n:func:`l1_strict.build_l1_response_schema` from ``registry.citable_fields``, not\nfrozen here. A model-level enum could only restate a set this model cannot see, and\nwould go stale the moment a layout edit changed what L1 is shown.\n\nThe parse boundary stays permissive — providers like Groq don't honor the enum and a\nsingle off-script value would otherwise crash the round. The canonical enforcement is\nthe ``evidence_grounding_present`` behavior check (see :mod:`l1_behavior`).",
             "properties": {
               "field": {
                 "description": "A citable panel named in the prompt, or stall_exploration.",
@@ -82,7 +80,6 @@
           }
         },
         "additionalProperties": false,
-        "description": "Top-level shape returned by the ``l1_generate`` optimizer prompt.",
         "properties": {
           "variants": {
             "items": {
@@ -111,7 +108,6 @@
       "strict": false,
       "schema": {
         "additionalProperties": false,
-        "description": "Critique returned at round-end. Three load-bearing fields only:\n``priority_fix`` (the headline steer), ``failure_highlights`` (per-\nsample evidence quotes), ``suggested_axes`` (for L2's axis pick).\nProse ``summary`` + ``positive_critique`` + ``negative_critique``\nwere dropped — priority_fix already names axis+change, origin_strengths\npanel carries the preserve signal, failure_highlights enumerates the\nother open clusters.",
         "properties": {
           "failure_highlights": {
             "description": "≤3 failure diagnoses quoting the decisive transcript evidence — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
@@ -159,10 +155,11 @@
         "$defs": {
           "ForkProposal": {
             "additionalProperties": false,
-            "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n**The layer decides WHETHER; UCB decides WHERE.** There is deliberately no\n``round_offset`` here. The rewind target is selected by\n``mask/backprop.py::select_rewind_round`` — UCB1 over the backpropagated lineage\n(each ancestor's mean θ, traded off against how little it has been explored). The\nlayer supplies the one judgment a rule makes badly (\"this subtree is spent\") and is\nrelieved of the one it made blindly: no panel ever enumerated the ancestor rounds\nand their fitness, so a free-form offset was an unanchored guess carrying the most\nexpensive decision in the loop.\n\nWhen emitted, the runner mints a sibling via ``_mint_fork(L{2,3}_REBASE,\nfork_from_round=<UCB pick>)``, exits with ``StopReason.REBASED``, and auto-continues\non the new fork (capped at ``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind — the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
             "properties": {
               "reason": {
                 "default": "",
+                "description": "1-2 sentences naming the cause and what the operator must fix.",
+                "maxLength": 150,
                 "title": "Reason",
                 "type": "string"
               },
@@ -178,10 +175,11 @@
           },
           "TerminateProposal": {
             "additionalProperties": false,
-            "description": "L2/L3-emitted decision to terminate the cycle — the intelligent-tier\ncounterpart to the deterministic stop conditions.\n\nMirrors :class:`ForkProposal` (a layer-emitted control output), but instead of\nrewinding it ends the run: the layer has judged the fault unrecoverable through\nany framing refinement or replan (the canonical first user is an evidence-starved\nenricher — a node failing across the round because its backend quota is exhausted —\nwhich no prompt change can fix). When set, ``_run_transition`` raises\n``StopLoop(StopReason.ABORT)`` after adopting the layer's output; the cycle finalizes\nHALTED on the current cycle_id. ``reason`` carries the operator-facing specifics\n(\"L2: web_search dead 2 rounds, no framing recovers it — fix the backend + resume\").\nA deterministic rule cannot judge \"is this recoverable?\"; the LLM tier can (R-48).",
             "properties": {
               "reason": {
                 "default": "",
+                "description": "1-2 sentences naming the cause and what the operator must fix.",
+                "maxLength": 150,
                 "title": "Reason",
                 "type": "string"
               }
@@ -191,10 +189,10 @@
           }
         },
         "additionalProperties": false,
-        "description": "L2 refinement. All fields optional — the LLM sets only what it\nwants to change.\n\nThere is deliberately **no ``task_context``**: the framing fields are operator-authored\nand frozen for the run (``TaskDecomposition.FRAMING_FIELDS``). L2 steers by choosing\nwhat L1 *looks at* (``l1_layout``) and how hard it explores (``l1_overrides``) — never\nby rewriting what the operator wrote about the task. ``l1_layout`` is a flexible\n``{slot: [placeholder, ...]}`` map validated downstream by :func:`validate_l1_layout`.\n\nThere is also no ``action``: L2 cannot request a probe round. See\n``optimization/CLAUDE.md`` § *Probe rounds — deferred* for what a probe round is meant\nto be and why the lever is not wired.",
         "properties": {
           "axis_targeted": {
             "default": "",
+            "maxLength": 30,
             "title": "Axis Targeted",
             "type": "string"
           },
@@ -210,11 +208,13 @@
           },
           "l1_overrides": {
             "additionalProperties": true,
+            "description": "Optional runtime knobs; only 'creativity' and 'n_variants' are read.",
             "title": "L1 Overrides",
             "type": "object"
           },
           "rationale": {
             "default": "",
+            "maxLength": 400,
             "title": "Rationale",
             "type": "string"
           },
@@ -261,10 +261,11 @@
         "$defs": {
           "ForkProposal": {
             "additionalProperties": false,
-            "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n**The layer decides WHETHER; UCB decides WHERE.** There is deliberately no\n``round_offset`` here. The rewind target is selected by\n``mask/backprop.py::select_rewind_round`` — UCB1 over the backpropagated lineage\n(each ancestor's mean θ, traded off against how little it has been explored). The\nlayer supplies the one judgment a rule makes badly (\"this subtree is spent\") and is\nrelieved of the one it made blindly: no panel ever enumerated the ancestor rounds\nand their fitness, so a free-form offset was an unanchored guess carrying the most\nexpensive decision in the loop.\n\nWhen emitted, the runner mints a sibling via ``_mint_fork(L{2,3}_REBASE,\nfork_from_round=<UCB pick>)``, exits with ``StopReason.REBASED``, and auto-continues\non the new fork (capped at ``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind — the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
             "properties": {
               "reason": {
                 "default": "",
+                "description": "1-2 sentences naming the cause and what the operator must fix.",
+                "maxLength": 150,
                 "title": "Reason",
                 "type": "string"
               },
@@ -280,10 +281,11 @@
           },
           "TerminateProposal": {
             "additionalProperties": false,
-            "description": "L2/L3-emitted decision to terminate the cycle — the intelligent-tier\ncounterpart to the deterministic stop conditions.\n\nMirrors :class:`ForkProposal` (a layer-emitted control output), but instead of\nrewinding it ends the run: the layer has judged the fault unrecoverable through\nany framing refinement or replan (the canonical first user is an evidence-starved\nenricher — a node failing across the round because its backend quota is exhausted —\nwhich no prompt change can fix). When set, ``_run_transition`` raises\n``StopLoop(StopReason.ABORT)`` after adopting the layer's output; the cycle finalizes\nHALTED on the current cycle_id. ``reason`` carries the operator-facing specifics\n(\"L2: web_search dead 2 rounds, no framing recovers it — fix the backend + resume\").\nA deterministic rule cannot judge \"is this recoverable?\"; the LLM tier can (R-48).",
             "properties": {
               "reason": {
                 "default": "",
+                "description": "1-2 sentences naming the cause and what the operator must fix.",
+                "maxLength": 150,
                 "title": "Reason",
                 "type": "string"
               }
@@ -293,19 +295,21 @@
           }
         },
         "additionalProperties": false,
-        "description": "L3 strategic replan.",
         "properties": {
           "plan": {
+            "maxLength": 800,
             "title": "Plan",
             "type": "string"
           },
           "note": {
             "default": "",
+            "maxLength": 150,
             "title": "Note",
             "type": "string"
           },
           "rationale": {
             "default": "",
+            "maxLength": 125,
             "title": "Rationale",
             "type": "string"
           },
@@ -361,7 +365,6 @@
         "$defs": {
           "CheckinTaskContext": {
             "additionalProperties": false,
-            "description": "Domain-context sub-object inside the checkin output.\n\nEvery field renders into the ``task_context`` panel of EVERY optimizer prompt, VERBATIM —\nnothing truncates it, and nothing in the loop rewrites it afterwards. It is frozen for the\nrun, so what is written here is what every optimizer call reads on every round.\n\nEach is ONE tight sentence, never a paragraph. That is a real budget, not a style note:\nit is checked once at mint (``TaskDecomposition.check_budget``, ``FRAMING_VALUE_BUDGET``)\nand an over-budget field REFUSES the campaign rather than being clipped. Terse framing also\nkeeps the prompt short enough that the reasoning model does not over-reason. Detail that\ndoes not fit belongs in ``task_description.md``, which is preserved whole and unbudgeted.",
             "properties": {
               "domain": {
                 "default": "",
@@ -411,7 +414,6 @@
           },
           "OriginFinding": {
             "additionalProperties": false,
-            "description": "One origin-readiness field the resolver proposes a value for.\n\n``evidence`` is mandatory in spirit — a finding citing nothing from the\ninput (a header name, a sample value, an operator statement) is rejected by\nthe apply loop, mirroring the ``evidence_grounding`` contract on\n``l1_generate``. Only ``confidence == \"high\"`` auto-confirms; ``\"low\"``\nlands the field PROPOSED and waits for an operator click.",
             "properties": {
               "field": {
                 "default": "",
@@ -443,7 +445,6 @@
           },
           "OriginNextAction": {
             "additionalProperties": false,
-            "description": "What the resolver wants to happen next. The deterministic checklist —\nnot this field — decides completeness; a false ``ready`` is re-checked and\nrejected.",
             "properties": {
               "kind": {
                 "default": "propose",
@@ -465,7 +466,6 @@
           },
           "OriginQuestion": {
             "additionalProperties": false,
-            "description": "One operator-facing question on a ``kind='ask'`` turn.\n\n``field`` names the checklist field the answer resolves so the panel can\napply it as a confirmed patch directly (closing the resolver→operator\nloop), rather than the operator hunting for the matching control.\n``options``, when non-empty, is a closed set the answer must come from\n(rendered as a picker); empty means free text.",
             "properties": {
               "field": {
                 "default": "",
@@ -493,7 +493,6 @@
           }
         },
         "additionalProperties": false,
-        "description": "Output of the checkin prompt. Two modes share one shape:\n\n* **Task decomposition** (CLI ``new``) — raw context → the Layer-1 prompt\n  fields + ``task_context`` sub-object. The origin block stays empty.\n* **Origin resolution** (web ingest check-in) — a draft-campaign origin →\n  ``assessment`` + ``findings`` (proposed field values, each evidence-cited)\n  + ``next_action``, plus a ``task_description`` framing carried on the\n  relevant finding. The Layer-1 fields are ALSO authored here (decomposed\n  from the proposed task_description) to seed the campaign's starting prompt.",
         "properties": {
           "persona": {
             "default": "",

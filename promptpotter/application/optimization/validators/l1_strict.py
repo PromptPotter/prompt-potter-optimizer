@@ -133,6 +133,11 @@ def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str])
         variant["required"] = [field_names.get(k, k) for k in required]
 
 
+# Per-field ceiling on the description prose L1 writes. Sized off the shipped ones (the
+# widest, `llm_only.answer` on justlogic, is ~230 chars): generous for a sentence that has
+# to sit beside a slot, tight enough that the lever cannot become a second instruction.
+SCHEMA_DESCRIPTION_MAX_CHARS = 400
+
 _SCHEMA_DESCRIPTIONS_INSTRUCTION = (
     "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
     "schema. This prose sits adjacent to the slot it governs, inside the field-"
@@ -176,7 +181,13 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
         return {
             "type": "object",
             "description": _SCHEMA_DESCRIPTIONS_INSTRUCTION,
-            "properties": {f: {"type": "string"} for f in out_schema.fields},
+            # Bounded HERE, the only production site this prose has. It rides forward — the
+            # winner's descriptions become the next round's parent — so an unbounded one
+            # compounds exactly like `l3_plan.plan` did.
+            "properties": {
+                f: {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
+                for f in out_schema.fields
+            },
             "additionalProperties": False,
         }
     if param == "layout":

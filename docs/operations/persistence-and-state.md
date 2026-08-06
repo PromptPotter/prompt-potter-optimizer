@@ -245,8 +245,12 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
 
 4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the
    origin.** `connectors/promptpotter.py::_identity_config` fingerprints the optimizer
-   manifest (`promptpotter/assets/optimizer/pipeline.yaml`), the per-node information-flow
-   layouts, `APP_VERSION`, the dataset's whole `inner_tasks.yaml`, and the node configs of the
+   manifest (`promptpotter/assets/optimizer/pipeline.yaml`) and its generated response-schema
+   sibling — which is prompt text, riding every optimizer call as `response_format` — plus the
+   per-node information-flow layouts, **the injection renderers' own source**
+   (`injection_source_digest`, normalized through the AST so a comment or docstring costs
+   nothing and a panel's prose or render condition voids the origin),
+   `APP_VERSION`, the dataset's whole `inner_tasks.yaml`, and the node configs of the
    inner benchmark that file names — the worker model included, since swapping it changes what
    every cell measures. Fact 2 does not cover
    these — they are read live, not snapshotted into `campaign.json` — so an edit lands on the

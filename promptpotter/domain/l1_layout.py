@@ -226,13 +226,16 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # Framing layer — must see the framing dict it refines (`task_context`), the distilled
-    # failure signal (`critique`), its own edit vocabulary (`l1_signal_catalogue`), and the
-    # raw round evidence (`diagnostics`). Everything else on the floor is excisable.
+    # Framing layer — must see the distilled failure signal (`critique`), its own edit
+    # vocabulary (`l1_signal_catalogue`), and the raw round evidence (`diagnostics`).
+    # `task_context` is NOT one of them and is off the floor: L2 cannot write the framing
+    # (`L2ContextOutput` declares no such field — it is operator-authored and frozen for the
+    # run), so the mandatory rail here guarded a capability that does not exist, and what it
+    # guarded IN was 752-1298 chars of static text, identical on every fire of every round.
+    # It stays in `possible`, which turns it from a law into an axis L4 can search back in.
     # The two layer-control directives (`rebase_capability` / `terminate_capability`) ride
     # the layout — mandatory, so no L4 edit can sever the channel (the sanctioned
-    # off-switch stays the config bit, which renders them empty). They sit LAST so the
-    # terminate directive's "EVIDENCE STARVED panel above" reference resolves.
+    # off-switch stays the config bit, which renders them empty).
     "l2_context": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -256,7 +259,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         mandatory=frozenset(
             {
-                "task_context",
                 "critique",
                 "l1_signal_catalogue",
                 "diagnostics",
@@ -277,17 +279,17 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "rare_hit_samples",
                 "critique",
                 "l1_overrides",
-                "task_context",
                 "l1_signal_catalogue",
                 "rebase_capability",
                 "terminate_capability",
             ],
         ),
     ),
-    # Strategic replan — must see the current `plan` it rewrites, the framing it steers
-    # (`task_context`), and the raw evidence (`diagnostics`). The floor carries evidence_health
-    # so the shared terminate directive's "EVIDENCE STARVED panel above" reference resolves in an
-    # L3 prompt (L3 holds terminate authority too); optional adds archive_top_runs.
+    # Strategic replan — must see the current `plan` it rewrites and the raw evidence
+    # (`diagnostics`). `task_context` is off the floor for the same reason as `l2_context`
+    # above: frozen, unwritable from here, and identical on every fire. The floor keeps
+    # `evidence_health` on its own merit — the round's per-node failure rates, which L3 needs
+    # to judge a fault unrecoverable; optional adds archive_top_runs.
     "l3_plan": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -308,7 +310,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         mandatory=frozenset(
             {
                 "plan",
-                "task_context",
                 "diagnostics",
                 "rebase_capability",
                 "terminate_capability",
@@ -317,7 +318,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         floor=L1Layout(
             problem_description=[
                 "plan",
-                "task_context",
                 "diagnostics",
                 "evidence_health",
                 "l1_wounds",

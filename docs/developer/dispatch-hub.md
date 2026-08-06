@@ -128,6 +128,20 @@ flowchart LR
 
 **The registered signals** are every `@signal(…)` across four modules (`injections/layer_state.py` · `panels.py` · `catalogues.py` · `wounds.py` — each renderer is its slot's SoT), plus 1 structural input (`l1_layout`) and 2 caller extras (`n_variants`, `citable_fields`). The highest-traffic slots are detailed below, grouped by role; numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
+### Every item that reaches an LLM carries an upper limit — bounded where it is PRODUCED
+
+**No injectable is unbounded, and a `char_cap` alone does not bound one.** A cap is a render-side backstop; the limit has to exist at the site the text is *authored*, because that is the only place an overlong item can be judged **faulty** rather than quietly shortened. Truncating at render turns a producer's fault into a silent content loss with nobody at fault — `l3_plan` arrived at ~3.2k against a 2000-char rail and the strategy's back five bullets vanished with every gate green.
+
+So each item is bounded twice, and the two must agree:
+
+| where it is produced | the bound that judges it |
+|---|---|
+| an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | `max_length` + a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary, where over-budget is the producer's fault |
+| operator-authored framing (`task_context`) | `TaskDecomposition.check_budget` at mint — per field **and** in total, so five legal fields cannot compose an illegal framing |
+| a derived/measurement view | its own `*_RENDER_CAP` top-K, which bounds rows rather than characters |
+
+`char_cap` then catches only what those missed, and says so on the ledger (`injection_budget_overrun`). **A per-item bound never bounds the composition — and nothing here tries to.** The composed total is *measured*, not enforced: `prompt_chars` on every `llm_call` record, read against the node's `OPTIMIZER_PROMPT_BUDGET_CHARS` ceiling, which marks the call ⚠ when crossed. Shedding a panel there would answer a producer's failure by choosing which half the model sees. Bound it where it is written, cap it where it is rendered, and read the sum as the alarm it is.
+
 Each entry in `INJECTIONS` is a frozen `_Injection(name, kind, render, char_cap, citable)`. `kind` is one of:
 
 - **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `l1_wounds`, `guard_breaches`).

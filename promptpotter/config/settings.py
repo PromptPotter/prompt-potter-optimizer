@@ -113,14 +113,20 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 # retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-# OPTIMIZER_PROMPT_WARN_CHARS — soft size line. A composed optimizer prompt
-# above this renders its CLI marker yellow with a ⚠ and logs at warn level.
-# It warns; it never truncates. The only bound that CUTS is the per-injection
-# ``char_cap``. Ledger ``prompt_chars`` is the measurement of record, and it
-# says every mid-campaign l1_generate round has been running well past this
-# line — so the marker is a standing flag, not an exception. Treat a quiet
-# round as the goal, not as the status quo.
-OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
+# OPTIMIZER_PROMPT_BUDGET_CHARS — per-node ceiling on a COMPOSED optimizer prompt. It
+# ALARMS; it never cuts. Length is bounded where each item is PRODUCED (`docs/architecture.md`
+# §0, Dispatch hub), so a prompt over its node's ceiling is the report that one of those
+# bounds failed — cutting here could only choose which half the model sees. It replaces a
+# single 8000-char line shared across every node: measured over 262 calls, ``prompt_chars``
+# ran 9312-16617 on l1_generate and 8551-11941 on l2_context, so one number fired on 100% of
+# calls and taught nothing. Sized at each node's measured maximum plus ~13%. `l3_plan` has
+# never fired and takes l2_context's; `checkin` runs around the loop and never composes here.
+OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
+    "l1_generate": 19_000,
+    "l1_critique": 14_500,
+    "l2_context": 12_000,
+    "l3_plan": 12_000,
+}
 
 # PoBB elimination — default posterior-of-being-best threshold ε. A
 # candidate stops when its P(best) drops below ε. The runtime value is
@@ -255,7 +261,7 @@ __all__ = [
     "LOCK_TIMEOUT",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",
-    "OPTIMIZER_PROMPT_WARN_CHARS",
+    "OPTIMIZER_PROMPT_BUDGET_CHARS",
     "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
     "TASK_CONTEXT_OVERRIDES",

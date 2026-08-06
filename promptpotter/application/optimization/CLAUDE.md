@@ -130,6 +130,10 @@ Beyond steering L1's attention / rewriting `plan`, L2 and L3 have **exactly two*
 
 **The layer decides WHETHER to rewind; UCB decides WHERE.** `fork_proposal` carries no round: the target is selected by `application/mask/backprop.py::select_rewind_round` — UCB1 over the lineage tree, whose nodes carry each round's Rasch ability backpropagated to its ancestors. With expansion (a round) and simulation (the deterministic eval pass) already in place, that closes all four MCTS phases: this is AlphaZero-shaped MCTS over the lineage, not greedy descent plus an escape hatch. A layer never had the evidence to name a round — no panel enumerated the ancestors and their fitness — so asking it to was a phantom citation on the loop's most expensive decision. See [`../../../docs/research/related-work.md#comparison-to-mcts`](../../../docs/research/related-work.md#comparison-to-mcts).
 
+## Editing a renderer's PROSE is a measurement change
+
+`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` puts this package's source in `_identity_config`, AST-normalized: a comment, docstring or reflow costs nothing; a panel's prose, its `char_cap` or its render condition voids the banked origins. Expect the re-measure; the bug is the reverse.
+
 ## Signals come from measurement, not from the calendar
 
 Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives from stall depth + mutation history, not `round ≥ 3`. `exploration_budget` widens with `stall_rounds`, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.

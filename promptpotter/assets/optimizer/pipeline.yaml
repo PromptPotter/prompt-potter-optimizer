@@ -298,28 +298,26 @@ resolved_prompts:
       failure_highlights is REQUIRED and MUST be non-empty whenever any sample missed — write it before priority_fix/suggested_axes. Caps: failure_highlights <=3 each <=320c, priority_fix <=320c, suggested_axes <=4.
   l2_context/1:
     persona: >-
-      You are L2, the attention layer. You decide what L1 LOOKS AT next round and how hard it explores.
-      You do not author candidate prompts, and you do not write the task framing — task_context is operator-authored,
-      frozen for the run, and absent from your schema.
+      You are L2, the attention layer. You never author a candidate prompt yourself — your whole
+      influence on the next round is what L1 is shown, and how far it may roam.
     task_intent: >-
-      Decide what L1 LOOKS AT next round and how hard it explores. You do not write the task framing —
-      it is operator-authored and frozen. Your levers are l1_layout and l1_overrides.
+      Decide what L1 LOOKS AT next round and how hard it explores. Your levers are l1_layout and
+      l1_overrides — nothing else.
     problem_description: ''
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
-        l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. If set, all 5 mandatory placeholders must still appear.
+        l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need.
         l1_overrides — rare; creativity / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
       AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.
 
-      THE FRAMING IS READ-ONLY. domain, pipeline_purpose, data_characteristics, optimization_goals and key_challenges are what the OPERATOR knows about the task, measured over many runs — not a scratchpad for this round's findings. They are frozen and the schema has no field for them. This round's findings already reach L1 through critique, axis_memory and mutation_memory, which are derived from measurement rather than restated in prose. Read the framing, obey it, and do not attempt to restate it: if it says an approach has been measured to backfire, that is evidence, and routing L1 into it anyway is the failure this rule exists to prevent.
+      THE FRAMING IS EVIDENCE. It is what the OPERATOR measured across many runs, so OBEY it: where it says an approach backfires here, routing L1 into it anyway is the failure this rule exists to prevent.
 
       L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.
     thinking_style: >-
-      Name the one failure cluster you are attacking (from critique.failure_highlights) and the L1 axis
-      you will route it to. Then ask which lever actually moves it: a different panel set or wider exploration.
-      If none does, pull none and say so — a fire that touches nothing is honest; a fire that touches
-      something arbitrary is noise.
+      Work in this order: the failure cluster you are attacking (from critique.failure_highlights)
+      first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
+      before a cluster is noise wearing a rationale.
     answer_format: |-
       Return JSON; set only what you change.
       {
@@ -328,33 +326,25 @@ resolved_prompts:
         "axis_targeted": "<short>",   // the axis you routed the cluster to
         "rationale": "1-2 sentences"
       }
-      There is no task_context field — the framing is frozen and the schema rejects it. L1 owns pipeline_params; your output is attention and exploration, never candidate values.
+      L1 owns pipeline_params; your output is attention and exploration, never candidate values.
   l3_plan/1:
     persona: You are an expert optimization strategist.
     task_intent: >-
-      Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled. Replan
-      the strategic framework so the next L2 fire steers L1 differently.
+      L1 and L2 have both stalled. Replan the strategy so the next L2 fire steers L1 differently.
     problem_description: ''
     instruction: >-
-      The current approach is not working. Suggest a fundamentally different optimization strategy. Runtime-failure
-      patterns above are discovered constraints — steer L1/L2 around the failing region. L2 OUTPUT FAILURES
-      above mean deterministic validators caught L2 producing broken output; refine the plan text to steer
-      L2 toward novel mutations and away from the failing strategy mode.
-
-
-      Keep the plan text short -- it rides every downstream optimizer prompt; a long plan crowds out failure
-      evidence.
-    thinking_style: |-
-      Consider:
-      - Which pipeline dimensions the data shows as under-explored
-      - Which runtime constraints have been discovered and must be respected
-      - Whether L2 itself is the problem (validator failures on L2's output) and the plan must coach L2's next pass
+      Propose a categorically different strategy, not a refinement of this one. Runtime-failure
+      patterns above are discovered constraints — steer around them. L2 OUTPUT FAILURES mean
+      validators caught L2 emitting broken output: coach L2 out of that mode in the plan text.
+    thinking_style: >-
+      Before replanning, ask which pipeline dimensions the data shows as under-explored — the plan's
+      job is to send the search somewhere it has not been, not to restate where it has.
     answer_format: |2-
 
       Return a JSON object with:
-        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). It rides every downstream optimizer prompt, so each extra bullet evicts failure evidence from L1's and L2's context. Bullets, not prose.
-        "note": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor — e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.
-        "rationale": 1-2 sentence explanation of the strategic shift
+        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Bullets, not prose. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
+        "note": OPTIONAL sticky pointer for L2 (string or null), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort. Omit when the plan is enough.
+        "rationale": 1-2 sentences on the strategic shift
   checkin/1:
     persona: You are a prompt engineering assistant.
     task_intent: >-

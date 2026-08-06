@@ -45,7 +45,7 @@ from promptpotter.domain.opt_search_point import (
     same_idea,
 )
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
-from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
+from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
 from promptpotter.shared.errors import is_error_result
 
@@ -94,10 +94,13 @@ def _r_evidence_health(b: InjectionBundle) -> str:
         for node, rate in ranked[:NODE_FAILURE_RENDER_CAP]
     ]
     body = "PIPELINE NODE FAILURES (round-level):\n" + "\n".join(lines)
-    worst_node, worst_rate = ranked[0]
-    if worst_rate >= EVIDENCE_STARVED_RATE:
+    # The typed predicate, not a second comparison against the same constant — the health
+    # grade, the L2 router and `terminate_capability` all ask this one function, so the panel
+    # cannot say STARVED on a round the router calls healthy, or stay silent on one it doesn't.
+    if starved := evidence_starved_node(rates):
+        worst_rate = rates[starved]
         body += (
-            f"\nEVIDENCE STARVED — '{worst_node}' failed on {worst_rate:.0%} of samples this "
+            f"\nEVIDENCE STARVED — '{starved}' failed on {worst_rate:.0%} of samples this "
             "round. That is an upstream/backend fault (e.g. quota / rate-limit exhausted), NOT a "
             "prompt problem L1 can fix. Do not propose a param change to chase it: name the dead "
             "node in priority_fix and flag that this round's measurement is unreliable."
@@ -177,10 +180,13 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
     if d.n_valid:
         rb = d.rank_buckets
-        # Suppress RANK block when every query is `not_found` — schema has no ranker, so reporting
-        # 0%-all only steers L2 toward hallucinated "fix the ranker" advice.
-        all_not_found = rb.get("not_found", 0) == d.n_valid
-        if not all_not_found:
+        # Renders only where ranking DISCRIMINATED — some ground truth landed below r=1. With
+        # every rank at 1-or-absent the buckets are the hit/miss split wearing ranking
+        # vocabulary, which L2 already has. That is the common case, not the edge: `llm_only`
+        # maps its one output onto `final_ranking`, so the schema-level "has a ranker?" test
+        # reads True on a width-1 list and the 0s only steer L2 toward "fix the ranker".
+        discriminated = any(rb.get(k, 0) for k in ("2-5", "6-10", "11-20"))
+        if discriminated:
             rank_line = (
                 f"RANK DISTRIBUTION ({d.n_valid} queries): "
                 f"r=1: {rb.get('1', 0)} | r=2-5: {rb.get('2-5', 0)} | "

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.views.view_models import AnyView
-from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
+from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.rendering import round_winner_key
@@ -165,7 +165,10 @@ class LiveDisplay(DerivedView):
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        oversize = record.prompt_chars > OPTIMIZER_PROMPT_WARN_CHARS
+        # The node's own budget, not one line across all of them: a shared 8000 sat below
+        # every node's minimum, so the marker was yellow on every call and meant nothing.
+        budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(record.node)
+        oversize = budget is not None and record.prompt_chars > budget
         marker = "⚠ " if oversize else "↻ "
         bits = [f"{marker}optimizer call: {node_label} · {model}"]
         if record.prompt_chars > 0:
