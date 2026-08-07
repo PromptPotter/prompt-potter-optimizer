@@ -16,7 +16,7 @@ from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import error_category, is_error_result
-from promptpotter.shared.instrument import MeasuredCandidate, set_measured_candidate
+from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate_scope
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -248,7 +248,7 @@ async def score_search_point(
     *,
     label: str = "Score",
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
-    on_sample_starting: Callable[[str, int, int, int], None] | None,
+    on_sample_starting: Callable[[str, int, int, int, int], None] | None,
     source: str = "",
     degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,
@@ -262,7 +262,6 @@ async def score_search_point(
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
     """``opt_sp``, ``measured`` and the two per-sample callbacks are required keywords with NO
     default — each decides what the numbers MEAN, and the signature is the only enforcement."""
-    set_measured_candidate(measured)
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
@@ -359,22 +358,25 @@ async def score_search_point(
         fold. It rides the sample snapshot, so a file-tree reader watches the composite converge."""
         return _composite(results)
 
-    batch = await run_query_loop(
-        search_point,
-        dataset,
-        session,
-        cached_sample_results=cached_sample_results,
-        deprecated_samples=deprecated_samples,
-        on_sample_scored=on_sample_scored,
-        on_sample_starting=on_sample_starting,
-        degradation_checks=degradation_checks,
-        candidate_idx=candidate_idx,
-        n_total_candidates=n_total_candidates,
-        axes=axes,
-        persist_fresh=_persist_fresh,
-        running_scores=_running_scores,
-        on_sample_pre_check=on_sample_pre_check,
-    )
+    # Bound over the walk alone: it is the only part reaching the backend seam, the seam is the
+    # only reader, and the scope bounds `on_sample_pre_check`'s re-entry into this same function.
+    with measured_candidate_scope(measured):
+        batch = await run_query_loop(
+            search_point,
+            dataset,
+            session,
+            cached_sample_results=cached_sample_results,
+            deprecated_samples=deprecated_samples,
+            on_sample_scored=on_sample_scored,
+            on_sample_starting=on_sample_starting,
+            degradation_checks=degradation_checks,
+            candidate_idx=candidate_idx,
+            n_total_candidates=n_total_candidates,
+            axes=axes,
+            persist_fresh=_persist_fresh,
+            running_scores=_running_scores,
+            on_sample_pre_check=on_sample_pre_check,
+        )
     results = batch.results
     escalation_signal = _resolve_partial_escalation(
         batch,

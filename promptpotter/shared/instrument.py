@@ -3,8 +3,10 @@ binding the three subtractions; re-split it and forgetting one still looks like 
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import enum
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,7 +19,7 @@ __all__ = [
     "instrument_depth",
     "instrument_mode",
     "measured_candidate",
-    "set_measured_candidate",
+    "measured_candidate_scope",
 ]
 
 # How deep the recursion may nest. L4 (an outer campaign scoring inner campaigns) is depth 1;
@@ -95,10 +97,16 @@ _MEASURED: contextvars.ContextVar[MeasuredCandidate | None] = contextvars.Contex
 )
 
 
-def set_measured_candidate(candidate: MeasuredCandidate | None) -> None:
-    """Declare the candidate the outer loop is scoring, for anything it spawns. Set never reset;
-    ``None`` means no candidate was in scope — an origin pass, which is an answer, not an omission."""
-    _MEASURED.set(candidate)
+@contextlib.contextmanager
+def measured_candidate_scope(candidate: MeasuredCandidate | None) -> Iterator[None]:
+    """The candidate the outer loop is scoring, for anything it spawns; ``None`` is an origin pass.
+    Scoped, never a bare set: scoring re-enters itself in the SAME task (a prior catch-up), and
+    without the restore that callee's stamp mis-keys the rest of this walk's ``inner_campaign_id``."""
+    token = _MEASURED.set(candidate)
+    try:
+        yield
+    finally:
+        _MEASURED.reset(token)
 
 
 def measured_candidate() -> MeasuredCandidate | None:
