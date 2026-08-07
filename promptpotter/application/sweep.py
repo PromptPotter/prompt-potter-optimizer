@@ -259,7 +259,6 @@ async def run_sweep_batch(
                     campaign_config,
                     session=fork_session,
                     observers=observers,
-                    task_context=fork_ctx.task_context,
                     mode=RunMode(sweep=True),
                     fork_payload=fork_payload,
                 )

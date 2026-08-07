@@ -195,6 +195,7 @@ async def screen_inner_seeds(
     )
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
+    from promptpotter.application.optimization.task_context import committed_task_context
     from promptpotter.application.origin import resolve_origin_opt_search_point
     from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.scoring.formula import split_scoring_block
@@ -223,8 +224,13 @@ async def screen_inner_seeds(
         scorer_id=scoring_spec.scorer_id,
         source=f"seed_screen:{dataset_name}",
     )
+    # Same framing the run's C0 carries — a screen measures the BANK, so its origin must be the
+    # prompt the campaign will actually score. Without it the screen's `reasoning_margin` grades a
+    # prompt no run ever sends, and stops predicting the origin it exists to choose seats for.
     origin_sp = resolve_origin_opt_search_point(
-        [session.llm_node_name()], session.dataset_config_dir
+        [session.llm_node_name()],
+        session.dataset_config_dir,
+        task_context=committed_task_context(stores, dataset_name),
     ).to_job_search_point(pipeline_params, schema=session.pipeline_schema)
 
     readings: list[SeedReading] = []

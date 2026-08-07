@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 
@@ -150,7 +150,6 @@ async def _emit_preflight_and_init_session(
 
 def _build_and_start_cycle(
     origin: CampaignOrigin,
-    task_context: TaskDecomposition,
     scoring_round_formula: str | None,
     session: Session,
     config: CampaignConfig,
@@ -168,7 +167,6 @@ def _build_and_start_cycle(
     cycle = Cycle.start(
         resolved_origin,
         origin.report,
-        task_context=task_context,
         schema=session.pipeline_schema,
         origin_results=origin.origin_results,
         session=session,
@@ -321,7 +319,6 @@ async def init_optimization_loop(
     config: CampaignConfig,
     *,
     cb: RunCallbacks,
-    task_context: TaskDecomposition,
     scoring_formula: str | None,
     scoring_round_formula: str | None,
     scorer_id: str,
@@ -341,7 +338,6 @@ async def init_optimization_loop(
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,
-        task_context,
         scoring_round_formula,
         session,
         config,

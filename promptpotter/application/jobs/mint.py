@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import auto_mint_session
+from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -70,16 +71,18 @@ def resolve_cycle_plan(
     origin = resolve_origin_opt_search_point(
         prompt_node_names=schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
+        # PURE read, and the reason identity can hold the framing at all: check-in commits
+        # `task_context.yaml` before anything asks for an id, so the id can hash the prompt the
+        # run will actually score. A decomposition cannot happen here — it needs a cycle to bill,
+        # which is the thing being computed.
+        task_context=committed_task_context(session.store, session.dataset_name),
         seed=_campaign_origin_seed(origin_override),
     )
     return CyclePlan(
         pipeline_params=pipeline_params,
         origin=origin,
-        # Config-aware identity: pass the overlay-merged params (connector model/config
-        # included) so the cycle id reflects the connector config and agrees with the
-        # measurement key. Resume recomputes this for drift detection — an existing
-        # config-blind campaign's stored hash won't match, handled as a benign re-stamp
-        # when the config diff is NONE (resume.py).
+        # Config-aware identity: the overlay-merged params (connector model/config included) AND
+        # the origin's framing, so the id reflects the same render the measurement key does.
         cycle_id=build_origin_cycle_id(origin, schema, dataset, pipeline_params),
     )
 

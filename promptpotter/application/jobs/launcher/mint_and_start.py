@@ -40,16 +40,11 @@ from promptpotter.application.jobs.quota import (
     effective_spend_cap_usd,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
-from promptpotter.application.optimization.task_context import (
-    checkin_call_context,
-    load_or_build_task_context,
-)
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -282,25 +277,6 @@ async def mint_campaign_command(
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
 
-        # Run-start framing: read the committed ``task_context.yaml`` (written at
-        # commit from the check-in's decomposition) — or decompose a benchmark's
-        # ``task_description.md`` once on first sight. No second LLM call once the
-        # file exists, and never mint with empty framing.
-        _t_framing0 = time.perf_counter()
-        task_context = await load_or_build_task_context(
-            stores,
-            session.dataset_name,
-            campaign_id=campaign_id,
-            context=checkin_call_context(
-                stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-            ),
-        )
-        logger.info(
-            "mint-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
-            dataset_name,
-            time.perf_counter() - _t_framing0,
-            time.perf_counter() - _t0,
-        )
     except BaseException as exc:
         stopped = launch_interrupted(exc)
         job_registry.mark_finished(
@@ -324,7 +300,6 @@ async def mint_campaign_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         ),
@@ -461,19 +436,6 @@ async def start_run_command(
 
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-        _t_framing0 = time.perf_counter()
-        task_context = await load_or_build_task_context(
-            stores,
-            session.dataset_name,
-            campaign_id=hop.campaign_id,
-            context=checkin_call_context(stores, hop),
-        )
-        logger.info(
-            "start-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
-            dataset_name,
-            time.perf_counter() - _t_framing0,
-            time.perf_counter() - _t0,
-        )
         # Bind the session to the EXISTING campaign/cycle before launch. Without
         # this `_ensure_session_minted` (guards on an empty session_id) would mint
         # a fresh random campaign + root cycle and steal the active pointer —
@@ -509,7 +471,6 @@ async def start_run_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
             stop_after_rounds=stop_after_rounds,
@@ -527,7 +488,6 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
-    task_context: TaskDecomposition,
     halt_at_accuracy: float | None,
     spend_budget_usd: float | None,
     stop_after_rounds: int | None = None,
@@ -557,7 +517,6 @@ async def _run_in_background(
             campaign_config,
             session=session,
             observers=observers,
-            task_context=task_context,
             mode=RunMode(halt_at_accuracy=halt_at_accuracy, stop_after_rounds=stop_after_rounds),
             spend_budget_usd=spend_budget_usd,
         )

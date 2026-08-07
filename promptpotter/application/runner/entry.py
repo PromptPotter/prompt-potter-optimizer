@@ -49,7 +49,6 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
@@ -177,7 +176,6 @@ class _PreparedRun:
     campaign_config: CampaignConfig
     spend_budget_usd: float | None
     scoring_spec: ScoringSpec
-    task_context: TaskDecomposition
 
 
 def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
@@ -214,7 +212,6 @@ async def _prepare_run(
     session: Session,
     observers: RunObservers,
     origin: CampaignOrigin | None,
-    task_context: TaskDecomposition | dict[str, Any] | None,
     spend_budget_usd: float | None,
 ) -> _PreparedRun:
     cb = observers.callbacks
@@ -266,10 +263,6 @@ async def _prepare_run(
             )
             session.human_intervened = True
 
-    # Coerced BEFORE the origin seam, not after: the framing splices into the target prompt, so
-    # resolving it later scored C0 on a prompt no candidate runs.
-    resolved_task_context = TaskDecomposition.coerce(task_context)
-
     if origin is None:
         # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like any
         # other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns (token
@@ -284,7 +277,6 @@ async def _prepare_run(
             dataset,
             campaign_config,
             seed=seed,
-            task_context=resolved_task_context,
             listener=cb,
         )
         if observers.display is not None and hasattr(observers.display, "set_origin"):
@@ -295,7 +287,6 @@ async def _prepare_run(
         campaign_config=campaign_config,
         spend_budget_usd=spend_budget_usd,
         scoring_spec=split_scoring_block(campaign_config.scoring),
-        task_context=resolved_task_context,
     )
 
 
@@ -408,7 +399,6 @@ async def _run_single_cycle(
             dataset,
             campaign_config,
             cb=cb,
-            task_context=prep.task_context,
             scoring_formula=prep.scoring_spec.per_sample,
             scoring_round_formula=prep.scoring_spec.per_round,
             scorer_id=prep.scoring_spec.scorer_id,
@@ -630,7 +620,6 @@ async def run_optimization(
     session: Session,
     observers: RunObservers,
     origin: CampaignOrigin | None = None,
-    task_context: TaskDecomposition | dict[str, Any] | None = None,
     langfuse_session_id: str | None = None,
     mode: RunMode | None = None,
     fork_payload: ForkSpec | None = None,
@@ -667,7 +656,6 @@ async def run_optimization(
             session=session,
             observers=observers,
             origin=origin,
-            task_context=task_context,
             spend_budget_usd=spend_budget_usd,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

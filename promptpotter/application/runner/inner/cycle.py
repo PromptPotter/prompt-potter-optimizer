@@ -456,10 +456,6 @@ async def _run_inner_campaign(
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
-    from promptpotter.application.optimization.task_context import (
-        checkin_call_context,
-        load_or_build_task_context,
-    )
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.application.runner.entry import RunMode, run_optimization
     from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
@@ -578,12 +574,6 @@ async def _run_inner_campaign(
         # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
         # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
-    task_context = await load_or_build_task_context(
-        session.store,
-        session.dataset_name,
-        campaign_id=session.campaign_id,
-        context=checkin_call_context(session.store, session.hop),
-    )
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
@@ -598,7 +588,6 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            task_context=task_context,
             mode=RunMode(),
             spend_budget_usd=campaign_config.optimization.spend_budget_usd,
         )

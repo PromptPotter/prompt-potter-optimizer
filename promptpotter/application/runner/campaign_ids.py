@@ -42,8 +42,8 @@ def build_origin_cycle_id(
     dataset: list[Sample],
     base_pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """Origin cycle id — config-AWARE, so it agrees with the measurement key and a connector-config edit yields a
-    DISTINCT origin. The schema is REQUIRED: two callers holding it differently stamped two ids for one origin."""
+    """Origin cycle id — config-AWARE and over the RENDER, so it agrees with the measurement key and the origin must
+    arrive already framed. The schema is REQUIRED: two callers holding it differently stamped two ids for one origin."""
     base_pp = (
         base_pipeline_params if base_pipeline_params is not None else schema.to_pipeline_params()
     )

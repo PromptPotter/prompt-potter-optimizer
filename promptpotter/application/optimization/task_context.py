@@ -16,18 +16,32 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
-    readable_dataset_dir,
     readable_task_context,
 )
-from promptpotter.infrastructure.store.io import read_text_optional
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
 
 __all__ = [
     "checkin_call_context",
+    "committed_task_context",
     "decompose_prompt_fields",
-    "load_or_build_task_context",
 ]
+
+
+def committed_task_context(stores: Stores, dataset_name: str | None) -> TaskDecomposition:
+    """The framing check-in committed, read PURELY — the half IDENTITY may use, since a
+    decomposition needs a cycle to bill to and a mint is computing that cycle."""
+    if dataset_name is None:
+        return TaskDecomposition()
+    existing = readable_task_context(stores, dataset_name)
+    if not existing:
+        return TaskDecomposition()
+    task_context = TaskDecomposition.from_dict(existing)
+    # The budget is enforced HERE too, not only on the async path: whichever seam reads the
+    # framing first is the one that must refuse an over-budget field, or the clip lands on
+    # every render for the run's whole life.
+    task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
+    return task_context
 
 
 def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
@@ -88,40 +102,3 @@ async def decompose_prompt_fields(
     # (defaults to empty string on the model). Materialize to dict for
     # downstream consumers that pre-date the typed boundary.
     return result.model_dump()
-
-
-async def load_or_build_task_context(
-    stores: Stores,
-    dataset_name: str | None,
-    *,
-    campaign_id: str,
-    context: LLMCallContext,
-) -> TaskDecomposition:
-    """Resolve the dataset's ``task_context.yaml``, else decompose once on first sight. Takes the store and the
-    NAME, never a dir: handed a dir it wrote back into whichever tier it was handed."""
-    if dataset_name is None:
-        return TaskDecomposition()
-    existing = readable_task_context(stores, dataset_name)
-    if existing:
-        task_context = TaskDecomposition.from_dict(existing)
-        # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
-        # Clipping at render instead amputates an over-budget field on every prompt for the
-        # run's whole life, visible only as a log line.
-        task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
-        return task_context
-    task_description = read_text_optional(
-        readable_dataset_dir(stores, dataset_name) / "task_description.md"
-    )
-    if not task_description:
-        return TaskDecomposition()
-    result = await decompose_prompt_fields(
-        task_description, campaign_id=campaign_id, context=context
-    )
-    tc_dict = dict(result["task_context"])
-    tc_dict["raw_description"] = task_description
-    task_context = TaskDecomposition.from_dict(tc_dict)
-    # Persist BEFORE gating: the decomposition call is already paid for, so a verbose checkin
-    # leaves an editable file behind rather than burning the call and vanishing.
-    path = stores.tenant_datasets.save_task_context(dataset_name, task_context.to_dict())
-    task_context.check_budget(source=str(path))
-    return task_context

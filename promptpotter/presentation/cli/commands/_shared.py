@@ -220,7 +220,6 @@ async def drive_cycle(
             campaign_config,
             session=session,
             observers=observers,
-            task_context=ctx.task_context,
             mode=mode,
             spend_budget_usd=getattr(args, "spend_budget_usd", None)
             or campaign_config.optimization.spend_budget_usd,

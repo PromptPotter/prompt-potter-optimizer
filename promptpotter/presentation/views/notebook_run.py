@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
     "init_notebook_session",
@@ -203,7 +202,6 @@ async def run_optimization_notebook(
     *,
     session: Session,
     langfuse_session_id: str | None = None,
-    task_context: TaskDecomposition | dict[str, Any] | None = None,
 ) -> CycleResult | None:
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
@@ -214,7 +212,6 @@ async def run_optimization_notebook(
         session=session,
         observers=observers,
         origin=origin,
-        task_context=task_context,
         langfuse_session_id=langfuse_session_id,
     )
 

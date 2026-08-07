@@ -238,21 +238,23 @@ def resolve_origin_opt_search_point(
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
+    task_context: TaskDecomposition,
     seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
     """Resolve the origin OptSearchPoint by precedence: a seed with non-empty prompt fields wins
     outright and short-circuits the dataset lookup, then ``{dataset_dir}/prompts``, then empty."""
+    names = prompt_node_names or []
+    origin: OptSearchPoint | None = None
+
     if seed is not None and seed.origin_prompt_fields:
-        return OptSearchPoint.from_prompt_fields(
+        origin = OptSearchPoint.from_prompt_fields(
             seed.origin_prompt_fields,
             lineage=IndividualLineage(
                 changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source],
                 source=seed.origin_source,
             ),
         )
-
-    names = prompt_node_names or []
-    if dataset_dir is not None and names:
+    elif dataset_dir is not None and names:
         from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 
         if has_dataset_prompts(dataset_dir):
@@ -261,20 +263,30 @@ def resolve_origin_opt_search_point(
                     template = load_node_prompt(dataset_dir, node_name, "default")
                 except FileNotFoundError:
                     continue
-                return OptSearchPoint.from_prompt_fields(
+                origin = OptSearchPoint.from_prompt_fields(
                     template.prompt_field_dict(),
                     lineage=IndividualLineage(
                         changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
                         source="origin",
                     ),
                 )
+                break
 
-    return OptSearchPoint(
-        lineage=IndividualLineage(
-            changes_description="Origin (no prompt node active — param-only optimization)",
-            source="origin",
-        ),
-    )
+    if origin is None:
+        origin = OptSearchPoint(
+            lineage=IndividualLineage(
+                changes_description="Origin (no prompt node active — param-only optimization)",
+                source="origin",
+            ),
+        )
+
+    # The framing RENDERS — `_field_value` splices up/downstream around `problem_description` —
+    # so an origin resolved without it is a DIFFERENT prompt from the one the run scores, and
+    # `build_origin_cycle_id` hashes exactly that render. Stamped here, on every branch, because
+    # each caller that attached it itself got a different answer: identity read one prompt while
+    # the run measured another.
+    origin.memory.task_context = task_context
+    return origin
 
 
 async def establish_campaign_origin(
@@ -283,22 +295,21 @@ async def establish_campaign_origin(
     campaign_config: CampaignConfig,
     *,
     seed: CycleSeed | None,
-    task_context: TaskDecomposition,
     listener: Any | None,
 ) -> CampaignOrigin:
     """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
     branches, which return the same :class:`CampaignOrigin` shape."""
+    from promptpotter.application.optimization.task_context import committed_task_context
+
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
+        # The SAME read identity used. Handed the framing instead, this seam could be given a
+        # value the cycle id never saw — which is exactly how C0 came to render a prompt its own
+        # id did not name.
+        task_context=committed_task_context(session.store, session.dataset_name),
         seed=seed,
     )
-    # C0 renders on the SAME basis every candidate will: `upstream_context`/`downstream_context`
-    # splice into the target prompt, so an origin scored before the framing was attached is
-    # measured on a prompt none of its challengers run. It was — the resolver takes no
-    # `task_context`, and the runner coerced it one statement AFTER this seam, which handed the
-    # incumbent a shorter prompt than the whole search that follows it.
-    resolved_origin.memory.task_context = task_context
     inherited = try_inherit_fork_origin(session, seed, resolved_origin=resolved_origin)
     if inherited is not None:
         return inherited
@@ -333,10 +344,13 @@ async def prepare_scoring_context(
     from promptpotter.application.datasets.loaders import sample_dataset
 
     if resolved_origin is None:
+        from promptpotter.application.optimization.task_context import committed_task_context
+
         prompt_nodes = pipeline_schema.prompt_node_names()
         resolved_origin = resolve_origin_opt_search_point(
             prompt_node_names=prompt_nodes,
             dataset_dir=getattr(svc, "dataset_config_dir", None),
+            task_context=committed_task_context(svc.store, svc.dataset_name),
             seed=seed,
         )
     dataset = train_data or []

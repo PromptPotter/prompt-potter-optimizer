@@ -2239,20 +2239,17 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-async def test_first_sight_framing_never_writes_into_install_content(
-    built_stores: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A benchmark shipping no ``task_context.yaml`` gets one decomposed on first run —
-    into the TENANT tree, never beside the definition it was derived from.
+def test_committed_framing_never_writes_into_install_content(built_stores: Any) -> None:
+    """Framing committed for a benchmark lands in the TENANT tree, never beside the definition it
+    was derived from — and the ONE reader finds it there.
 
-    Four of the ten shipped benchmarks are in exactly this state, ``email-tagging``
-    (the one ``docs/manual/02-install.md`` opens with) among them. Under a wheel the
-    definition dir resolves inside ``site-packages``: pip deletes it on upgrade and a
-    system install refuses the write. The ROW half of this rule got a test when the
-    rows moved out; this is the half that shipped without one, so the same defect
-    survived in the framing path.
+    Four of the shipped benchmarks ship a ``task_description.md`` with no ``task_context.yaml``,
+    ``email-tagging`` (the one ``docs/manual/02-install.md`` opens with) among them. Under a wheel
+    the definition dir resolves inside ``site-packages``: pip deletes it on upgrade and a system
+    install refuses the write. The ROW half of this rule got a test when the rows moved out; this
+    is the half that shipped without one.
     """
-    from promptpotter.application.optimization import task_context as tc_mod
+    from promptpotter.application.optimization.task_context import committed_task_context
 
     install = built_stores.benchmarks_root / "gsm8k"
     install.mkdir(parents=True)
@@ -2260,30 +2257,15 @@ async def test_first_sight_framing_never_writes_into_install_content(
     (install / "task_description.md").write_text("Solve grade-school math.\n", encoding="utf-8")
     before = _tree_bytes(install)
 
-    async def _decompose(*_a: Any, **_k: Any) -> dict[str, Any]:
-        return {"task_context": {"domain": "grade-school arithmetic"}}
+    built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
 
-    monkeypatch.setattr(tc_mod, "decompose_prompt_fields", _decompose)
-    resolved = await tc_mod.load_or_build_task_context(
-        built_stores, "gsm8k", campaign_id="c", context=None
-    )
-
-    assert resolved.domain == "grade-school arithmetic"
     assert _tree_bytes(install) == before, (
         "the decomposition was written into benchmarks_root — install content, "
         "read-only under a wheel (site-packages)"
     )
     assert built_stores.tenant_datasets.task_context_path("gsm8k").is_file()
-
-    # Second run reads it back with no LLM call at all.
-    async def _explode(*_a: Any, **_k: Any) -> dict[str, Any]:
-        raise AssertionError("a cached decomposition was recomputed")
-
-    monkeypatch.setattr(tc_mod, "decompose_prompt_fields", _explode)
-    again = await tc_mod.load_or_build_task_context(
-        built_stores, "gsm8k", campaign_id="c", context=None
-    )
-    assert again.domain == "grade-school arithmetic"
+    # The one reader every seam uses — identity, C0, seed-screen — resolves tenant-first.
+    assert committed_task_context(built_stores, "gsm8k").domain == "grade-school arithmetic"
 
 
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:

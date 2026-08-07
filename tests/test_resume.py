@@ -23,6 +23,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
@@ -213,7 +214,9 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
     unmodified_seed = CycleSeed(origin_prompt_fields=dict(prompt), origin_source="fork_seed")
-    unmodified_osp = resolve_origin_opt_search_point({}, seed=unmodified_seed)
+    unmodified_osp = resolve_origin_opt_search_point(
+        {}, task_context=TaskDecomposition(), seed=unmodified_seed
+    )
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         unmodified_seed,
@@ -234,7 +237,9 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,
-        resolved_origin=resolve_origin_opt_search_point({}, seed=edited_seed),
+        resolved_origin=resolve_origin_opt_search_point(
+            {}, task_context=TaskDecomposition(), seed=edited_seed
+        ),
     )
     assert edited is None
 
