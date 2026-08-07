@@ -140,6 +140,12 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 Every ledger record is already typed; combined with `inherit_from`, "human in the loop" is just "operator chooses where to fork." No dedicated record type, no watched-file ingest, no new I/O kind — the existing fork primitive (Persistence) carries the whole semantic. See also [`../architecture.md`](../architecture.md) §0 (the five I/O kinds) and [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) (sanctioned mutating endpoints).
 
+**Make a slow round finish sooner — the look-ahead button.** When the operator is watching a run crawl through its samples, the remote's **⇉ Look-ahead** button runs the *next round's scoring* with two samples in flight instead of one, roughly halving that round's wall clock. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever that needs no config change and no restart.
+
+Three things to say when suggesting it. It **expires by itself** after that one round — the button unlights, so it is armed per round rather than set and forgotten. It **does not make the cycle babysat**: samples are absorbed in walk order and an in-flight one is discarded rather than recorded, so the run's rows are identical either way (unlike Skip, which does taint the cycle). And it **costs at most one discarded backend call per eliminated candidate**, shown as `sample_lookahead_discards` on the dashboard.
+
+It is browser-only and host-admin-gated (`scoring.lookahead`) — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the button but cannot press it. It also has no effect on `promptpotter-self`, where one sample is a whole inner campaign. Contract: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
+
 ### Sweep batch — `new --sweep-batch`
 
 Breadth-first comparison of N L1-prompt hypotheses: instead of one trial cycle on the active OSP, mint N cheap sibling cycles, each from a different operator-authored override. Sweep cycles sit flat under `cycles/` with `sibling_kind: "sweep"` and a shared `sweep_batch_id`.

@@ -57,6 +57,14 @@
 .remote-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-btn:disabled{opacity:.45;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
+/* Look-ahead arm — fills when armed, because the state is transient (one round) and has to
+   read at a glance. The label carries the depth ("2×"), so it is never colour alone. */
+.remote-sample-lookahead.armed{
+  border-color:var(--color-accent);
+  background:var(--color-accent);
+  color:var(--color-background);
+}
+.remote-sample-lookahead.armed:hover:not(:disabled){filter:brightness(1.08)}
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */

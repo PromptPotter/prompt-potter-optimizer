@@ -124,6 +124,16 @@ controls:
         (I6). Client connection loss dims/labels it stale — it never unmounts while the last-known
         server phase is in-flight.
     status: ok
+  - id: remote_sample_lookahead_arm
+    do: Arms sample look-ahead for the next round of scoring (2 samples in flight, ~half the
+        wall clock). An ARM button, not a switch — the arming is spent by one round and the
+        button unlights itself, so pressing it while lit is a cancel. Lit state reads
+        dashboard.json::sample_lookahead > 1 (I6 — never a local boolean, which would stay lit
+        after the round consumed it). Label carries the depth ("2×"), never colour alone. The
+        title reports sample_lookahead_discards, the arming's running cost. Host-admin only: a
+        non-admin identity 404s at the dispatcher, so the button is present but its press
+        reports a failure rather than being hidden — the surface does not encode authority.
+    status: ok
 ```
 
 ### Auth modal

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postSkipSearchpoint, IngestApiError } from "@/lib/api";
+import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel, isInFlight } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -44,7 +44,7 @@ export function RemoteBar({ onFollowed }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
   const { campaignId, cycleId, cycles, following, followActive } = useWorkspace();
   const { dash, dashRound, status } = useDashboard();
-  const [pending, setPending] = useState<"skip" | null>(null);
+  const [pending, setPending] = useState<"skip" | "sample-lookahead" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   if (!campaignId || !cycleId) return null;
@@ -90,7 +90,13 @@ export function RemoteBar({ onFollowed }: Props) {
       ? String(dash?.candidate || "").split("/")[0]
       : "";
 
-  const act = async (which: "skip", fn: () => Promise<unknown>) => {
+  // SERVER state, never a local toggle (I6): the arming expires on its own, so a client-held
+  // boolean would stay lit after the round spent it.
+  const lookahead = dash?.sample_lookahead ?? 1;
+  const sampleLookaheadArmed = lookahead > 1;
+  const discards = dash?.sample_lookahead_discards ?? 0;
+
+  const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
     setPending(which);
     setErr(null);
     try {
@@ -148,6 +154,31 @@ export function RemoteBar({ onFollowed }: Props) {
       >
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
+      </button>
+      {/* An ARM button, not a switch: it spends itself after one round of scoring. */}
+      <button
+        type="button"
+        className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
+        onClick={() =>
+          void act("sample-lookahead", () =>
+            postSetSampleLookahead(campaignId, cycleId, !sampleLookaheadArmed),
+          )
+        }
+        disabled={runPhase !== "running" || pending !== null}
+        aria-pressed={sampleLookaheadArmed}
+        aria-label={
+          sampleLookaheadArmed
+            ? "Cancel sample look-ahead (currently 2 samples in flight)"
+            : "Arm sample look-ahead for the next round of scoring"
+        }
+        title={
+          sampleLookaheadArmed
+            ? `Look-ahead armed — 2 samples in flight, about half the wall clock. Expires when this round finishes scoring. Costs at most one discarded backend call per eliminated candidate${discards > 0 ? ` (${discards} so far)` : ""}; the measurement is unchanged and the cycle is NOT marked babysat.`
+            : "Run the next round's scoring with 2 samples in flight instead of 1 — roughly half the wall clock. Expires after that one round. The measurement is unchanged."
+        }
+      >
+        <span aria-hidden="true">⇉</span>
+        <span className="remote-btn-label">{sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}</span>
       </button>
       <span className="remote-status" aria-live="off">
         {/* The candidate label ("C2.3") already encodes the round (the 2), so

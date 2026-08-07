@@ -35,13 +35,25 @@ signup is a user, and users hold nearly all of an owner's rights. What separates
 admin is a small, explicitly-named set, never an implicit "and also…".
 
 **What host-admin can do** is one definition: `ADMIN_CAPABILITIES` (`shared/identity.py`).
-It is **empty today**, and that is an honest statement rather than a placeholder: every
-current host-admin power ships through the **operator-admin channel**
+*Most* host-admin power still ships through the **operator-admin channel**
 (`presentation/admin_bot.py` — sign-in allowlist, `/grant`, `/revoke`, provider config),
 which [ADR-0004](../adr/0004-operator-admin-channels.md) fixes as outbound-only and
-explicitly **not** an inbound API route. There is simply no API-side admin power yet. The
-tier stays declared so the next one lands there instead of being re-invented at a call
-site — the seam is the point, not its current cardinality.
+explicitly **not** an inbound API route. The set holds what that channel cannot express: a
+host privilege that is a **command against a running campaign**.
+
+Its one member today is **`scoring.sample_lookahead`** — arming the scoring walk to hold two
+samples in flight (`/commands/set-sample-lookahead`). It sits here rather than on a campaign
+tier because of *whose* resource it spends: not the campaign's budget but the **box's**
+shared provider key and rate bucket, so a tenant holding it would throttle every other
+tenant to finish sooner. It is deliberately **not** `campaign.babysit` either — babysit marks
+a cycle whose measurement an operator steered, and this verb cannot steer one (the overshoot
+sample is discarded precisely so the recorded rows stay identical at either depth).
+
+**It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. That
+inverts `<entry-point-parity>` on purpose: the surfaces a capability is *absent* from are part
+of its gate, since the CLI is where automation and AI assistants operate. Adding a verb "for
+parity" removes the boundary. Noted in root `CLAUDE.md` § Conventions so it is not re-litigated
+as an oversight.
 
 **Who is host-admin** is *two deliberate predicates* — **never merge them** (merging
 regrants admin to every OIDC signup):
@@ -182,7 +194,7 @@ not backend-supplied.
 
 | Concern | Look at |
 |---|---|
-| Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (empty; powers ride the ADR-0004 channel) |
+| Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
