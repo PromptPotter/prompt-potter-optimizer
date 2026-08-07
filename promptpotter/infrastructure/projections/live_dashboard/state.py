@@ -190,9 +190,17 @@ class LiveDashboardState(StrictModel):
     total_queries_scored: int = 0
     total_backend_calls: int = 0
 
-    # In-flight sample markers (cleared on ``sample_scored``).
+    # In-flight sample markers — the OLDEST open sample, derived from the open set rather than
+    # assigned per event, since look-ahead leaves more than one open
+    # (``view.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
     current_sample_id: int | None = None
+
+    # What the LOOP held in flight, never what the operator asked for (that is
+    # `.runtime/sample_lookahead.flag`); the two differ for up to one sample.
+    sample_lookahead: int = 1
+    # Samples launched then discarded unabsorbed — the arming's whole running cost, cumulative.
+    sample_lookahead_discards: int = 0
 
     last_query_elapsed_s: float = 0.0
     wallclock_serialized_at: str | None = None

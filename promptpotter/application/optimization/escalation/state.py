@@ -103,7 +103,7 @@ class EscalationFSM:
     def would_exhaust_lives(
         self, improved: bool, lives: LivesConfig | None, *, compared: bool = True
     ) -> bool:
-        """Would banking this round empty the bank? Pure lookahead — reads THROUGH ``_bank_life`` so it can
+        """Would banking this round empty the bank? Pure lives-bank lookahead — reads THROUGH ``_bank_life`` so it can
         never disagree with what ``observe_round`` is about to do."""
         if lives is None:
             return False

@@ -463,6 +463,8 @@ export interface LiveDashboardState {
   total_backend_calls: number;
   current_query_payload: string | null;
   current_sample_id: number | null;
+  sample_lookahead: number;
+  sample_lookahead_discards: number;
   last_query_elapsed_s: number;
   wallclock_serialized_at: string | null;
   n_variants: number;

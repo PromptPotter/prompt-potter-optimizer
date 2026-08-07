@@ -14,18 +14,19 @@ from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
 # do that a tenant owner cannot". Adding an admin power = adding it to this
 # frozenset; nowhere else.
 #
-# It is EMPTY today, and that is a true statement about the system rather than a
-# placeholder: every host-admin power currently ships through the operator-admin
-# CHANNEL (`presentation/admin_bot.py` — allowlist, `/grant`, `/revoke`, provider
-# config), which ADR-0004 fixes as outbound-only and explicitly NOT an inbound API
-# route. So there is no API-side admin power to name yet. The tier stays declared
-# because the boundary is real and must remain legible: the next admin-only API
-# power lands here instead of being re-invented ad hoc at a call site.
+# Most host-admin power ships through the operator-admin CHANNEL
+# (`presentation/admin_bot.py`), which ADR-0004 fixes as outbound-only and NOT an
+# inbound API route. This tier holds what that channel cannot express: an admin-only
+# power that is a COMMAND against a running campaign.
 #
-# `datasets.benchmarks.read` was its one historical member and MUST NOT come back.
-# It gated repo `datasets/`, which is tracked in git and therefore already on the
-# disk of anyone holding the install — see `infrastructure/store/dataset_access.py`.
-ADMIN_CAPABILITIES: frozenset[str] = frozenset()
+# `datasets.benchmarks.read` MUST NOT come back — it gated repo `datasets/`, already
+# on the disk of anyone holding the install (`infrastructure/store/dataset_access.py`).
+
+# Host-admin rather than a campaign tier because it spends the BOX's shared provider
+# rate bucket, not a campaign budget. Not `campaign.babysit` either: it taints nothing.
+SCORING_SAMPLE_LOOKAHEAD_CAP = "scoring.sample_lookahead"
+
+ADMIN_CAPABILITIES: frozenset[str] = frozenset({SCORING_SAMPLE_LOOKAHEAD_CAP})
 
 # Control-plane command capabilities — one per privilege tier of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
@@ -128,6 +129,7 @@ __all__ = [
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
     "PROMPTPOTTER_ADMIN_ENV",
+    "SCORING_SAMPLE_LOOKAHEAD_CAP",
     "IdentityContext",
     "capabilities_from_tiers",
     "claim_email",

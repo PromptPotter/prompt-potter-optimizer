@@ -125,6 +125,11 @@ class Session:
     # one searchpoint is cut, not the whole round.
     skip_check: Callable[[], bool] | None = None
     skip_consume: Callable[[], None] | None = None
+    # `sample_lookahead_check`: the operator armed the walk to hold a second sample in flight. Same
+    # read-and-consume pair as skip, spent a phase later — skip by the searchpoint it cuts,
+    # look-ahead by the ROUND that scores under it.
+    sample_lookahead_check: Callable[[], bool] | None = None
+    sample_lookahead_consume: Callable[[], None] | None = None
     # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
     # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one
     # object, so the two cadences can't disagree and a mid-flight ceiling change moves both.

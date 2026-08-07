@@ -49,6 +49,7 @@ from promptpotter.shared.identity import (
     CAMPAIGN_LIFECYCLE_CAP,
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
+    SCORING_SAMPLE_LOOKAHEAD_CAP,
     has_capability,
 )
 
@@ -112,6 +113,7 @@ CycleScopedKind = Literal[
     "delete-cycle",
     "cleanup-empty-cycles",
     "pause-cycle",
+    "set-sample-lookahead",
     "origin-gate-decision",
     "change-spend-budget",
     "start-run",
@@ -153,6 +155,10 @@ CAP_FOR_KIND: dict[str, str] = {
     # Gating it on the owner-held lifecycle tier keeps a babysit-delegate from
     # self-authorizing by adding their own model to the allow-list.
     "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
+    # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
+    # bucket rather than the campaign's own budget, so no tenant tier carries it — see
+    # `shared/identity.py::SCORING_SAMPLE_LOOKAHEAD_CAP`.
+    "set-sample-lookahead": SCORING_SAMPLE_LOOKAHEAD_CAP,
 }
 
 # Import-time exhaustiveness — a new dispatched kind with no cap is a silent
@@ -570,6 +576,13 @@ class CommandDispatcher:
             return lambda: self._apply_cleanup_empty(hop)
         if kind == "pause-cycle":
             return lambda: self._apply_pause_cycle(hop)
+        if kind == "set-sample-lookahead":
+            enabled = payload_extras.get("enabled")
+            # Strictly boolean: this verb both arms and cancels, so a coerced value picks one of
+            # two opposite acts.
+            if not isinstance(enabled, bool):
+                raise PayloadInvalidError("set-sample-lookahead requires a boolean `enabled`.")
+            return lambda: self._apply_set_sample_lookahead(hop, enabled=enabled)
         if kind == "origin-gate-decision":
             decision = str(payload_extras.get("decision", ""))
             if decision not in ("rescore", "proceed", "abort"):
@@ -669,6 +682,17 @@ class CommandDispatcher:
 
     def _apply_pause_cycle(self, hop: CycleHop) -> None:
         flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).pause_flag
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
+
+    def _apply_set_sample_lookahead(self, hop: CycleHop, *, enabled: bool) -> None:
+        """Arm/disarm the walk's second in-flight sample; the next round that scores spends it.
+        Pointedly does NOT ``mark_human_intervened`` as its neighbour above does — skip changes what
+        was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
+        flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).sample_lookahead_flag
+        if not enabled:
+            flag.unlink(missing_ok=True)
+            return
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 

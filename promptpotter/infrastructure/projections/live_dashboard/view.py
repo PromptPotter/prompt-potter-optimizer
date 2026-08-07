@@ -140,6 +140,10 @@ class LiveDashboardView(DerivedView):
         )
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
+        # Launched, not yet absorbed, in launch order. HEAD drives the in-flight markers; whatever
+        # remains at candidate close was discarded.
+        # sample_id -> (query_text, sample_idx, sample_total, candidate_idx, cand_total)
+        self._open_samples: dict[int, tuple[str, int, int, int, int]] = {}
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail. Each ``LLMCallRecord`` mutates the matching phase-keyed slot;
         # the audit-trail records the same event independently into its round flush.
@@ -430,14 +434,26 @@ class LiveDashboardView(DerivedView):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         if ev == "sample_started":
-            self._update_sample_markers(ci, ct, qi, qt)
-            self.state.current_query_payload = (payload.get("query_text") or "")[:120]
             sid = payload.get("sample_id")
-            self.state.current_sample_id = int(sid) if sid is not None else None
+            self.state.sample_lookahead = int(payload.get("sample_lookahead") or 1)
+            if sid is not None:
+                self._open_samples[int(sid)] = (
+                    (payload.get("query_text") or "")[:120],
+                    qi,
+                    qt,
+                    ci,
+                    ct,
+                )
+            self._refresh_open_sample_markers()
             self._set_state(DashboardState.SCORING)
         elif ev == "sample_scored":
             result = payload.get("result") or {}
-            self._update_sample_markers(ci, ct, qi, qt)
+            # No marker write here — `_absorb_sample_scored` re-derives them, and is the one writer.
+            # `is not None`, never `or`: sample_id 0 is falsy, and coercing it to a sentinel leaves
+            # every candidate's first sample open, so it lands in the discard count.
+            scored_sid = result.get("sample_id")
+            if scored_sid is not None:
+                self._open_samples.pop(int(scored_sid), None)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
             self._buffer.append_sample(ci, ct, qi, qt, result)
         elif ev == "candidate_started":
@@ -455,6 +471,11 @@ class LiveDashboardView(DerivedView):
             )
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
+            # Still open at close ⇒ launched and never absorbed. Derived from records that already
+            # flow — launched-minus-scored at the one boundary where the difference is final.
+            if self._open_samples:
+                self.state.sample_lookahead_discards += len(self._open_samples)
+                self._open_samples.clear()
             self._update_current_acc(scores)
             self._buffer.set_candidate_scores(ci, ct, scores)
         elif ev == "p_best_update":
@@ -548,6 +569,19 @@ class LiveDashboardView(DerivedView):
         s.candidate = f"{candidate_label(s.round, ci)}/{ct}"
         s.query = f"{qi + 1}/{qt}"
 
+    def _refresh_open_sample_markers(self) -> None:
+        """Point the in-flight scalars at the OLDEST open sample. Derived, not assigned: under
+        look-ahead ``sample_started`` for *n+1* precedes ``sample_scored`` for *n*."""
+        s = self.state
+        if not self._open_samples:
+            s.current_query_payload = None
+            s.current_sample_id = None
+            return
+        sid, (query_text, qi, qt, ci, ct) = next(iter(self._open_samples.items()))
+        s.current_query_payload = query_text
+        s.current_sample_id = sid
+        self._update_sample_markers(ci, ct, qi, qt)
+
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
         pd = result.get("pipeline_data") or {}
@@ -566,8 +600,9 @@ class LiveDashboardView(DerivedView):
             # at measure_sample (one TokenUsageRecord per pipeline node per
             # uncached sample); _handle_token_usage is the sole writer.
 
-        s.current_query_payload = None
-        s.current_sample_id = None
+        # Not cleared outright: under look-ahead another sample is often still open when this one
+        # lands, and blanking the panel would report "nothing in flight" mid-request.
+        self._refresh_open_sample_markers()
         s.last_query_elapsed_s = round(query_time, 2)
         self._set_state(
             DashboardState.BETWEEN_CANDIDATES

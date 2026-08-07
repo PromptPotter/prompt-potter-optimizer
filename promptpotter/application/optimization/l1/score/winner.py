@@ -131,6 +131,12 @@ async def l1_score(
     # series. The added spend is the truncated tail only, and a retained champion replays from
     # cache whatever it has already measured.
     parent = await rescore_parent(cycle, dataset, round_num, callbacks=callbacks)
+    # The round's scoring ends here, so an armed look-ahead is spent here — inside the scoring
+    # phase, not at the round boundary, so a press landing during critique waits for the next round
+    # instead of being consumed having sped up nothing. Not in a `finally`: an unwound round did
+    # not score, and `clear_run_control_flags` drops the residue at the next launch.
+    if session.sample_lookahead_consume is not None:
+        session.sample_lookahead_consume()
     # The PARENT reference — the shared comparison anchor for the θ election + paired diff.
     # Its single-draw noise is correlated across arms, so it floods every candidate's
     # comparison equally rather than favouring one (the 0.808 the variance read found).

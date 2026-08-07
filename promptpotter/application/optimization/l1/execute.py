@@ -244,7 +244,7 @@ async def execute_round(
     # critique + the terminal L2 fire together burned 15.8% of all inner wall time producing
     # output that died with the cycle. Both boundaries must be checked: the calendar cap
     # (`is_final_round`, known before the round) and the lives bank emptying (knowable only
-    # now, from this round's `improved` verdict — asked through the FSM so the lookahead can
+    # now, from this round's `improved` verdict — asked through the FSM so the lives-bank lookahead can
     # never disagree with the banking `post_round` is about to do).
     will_stop = is_final_round or cycle.escalation.would_exhaust_lives(
         round_result.improved,

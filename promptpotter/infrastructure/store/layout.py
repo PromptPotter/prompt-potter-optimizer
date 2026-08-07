@@ -222,6 +222,10 @@ class CycleLayout:
         return self.runtime / "checkin.flag"
 
     @property
+    def sample_lookahead_flag(self) -> Path:
+        return self.runtime / "sample_lookahead.flag"
+
+    @property
     def gate_decision(self) -> Path:
         return self.runtime / "gate_decision.json"
 

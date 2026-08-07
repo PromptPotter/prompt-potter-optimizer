@@ -179,13 +179,26 @@ class RunCallbacks:
         )
 
     def on_sample_started(
-        self, ci: int, ct: int, query_text: str, qi: int, qt: int, sample_id: int
+        self,
+        ci: int,
+        ct: int,
+        query_text: str,
+        qi: int,
+        qt: int,
+        sample_id: int,
+        sample_lookahead: int = 1,
     ) -> None:
+        """``sample_lookahead`` is what the walk held in flight as it launched this one — what the loop
+        did, not what the operator's flag asked for."""
         self._snapshot(
             "sample_started",
             ci,
             ct,
-            {"query_text": query_text, "sample_id": int(sample_id)},
+            {
+                "query_text": query_text,
+                "sample_id": int(sample_id),
+                "sample_lookahead": int(sample_lookahead),
+            },
             sample_idx=qi,
             sample_total=qt,
         )

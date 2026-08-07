@@ -203,6 +203,12 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # exactly one searchpoint is cut.
     session.skip_check = skip_flag.is_file
     session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
+    # Deliberately NOT composed with the inherited outer predicate the way `pause_check` is above:
+    # a stop must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
+    # multiply concurrency at every nested level at once.
+    sample_lookahead_flag = layout.sample_lookahead_flag
+    session.sample_lookahead_check = sample_lookahead_flag.is_file
+    session.sample_lookahead_consume = partial(sample_lookahead_flag.unlink, missing_ok=True)
 
 
 async def _prepare_run(

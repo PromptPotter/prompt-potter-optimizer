@@ -167,14 +167,17 @@ LEDGER_BASELINE = {
     # rather than two field reads, so it earns a named function — and `establish_campaign_origin`'s
     # `task_context`, which is what makes C0 render on the same basis as the candidates that
     # challenge it. The resolver taking no framing is precisely how they came to differ.
-    # 4076 -> 4065 (2026-08-07): framing stopped being THREADED. It is dataset content now — check-in
+    # 4076 -> 4065 (2026-08-07): framing stopped being THREADED. It is dataset content now â€” check-in
     # commits `task_context.yaml`, and one pure reader (`committed_task_context`) serves identity,
     # C0, seed-screen and the notebook alike. That deletes the parameter from `run_optimization`,
     # `_prepare_run`, `init_optimization_loop`, `_build_and_start_cycle`, `Cycle.start`,
     # `_build_initial_opt_sp`, both launchers and `PreparedCheckinRun`, against the ONE it adds to
     # the resolver. A value carried through eight frames to reach the object that should have been
     # born holding it is the shape this counts.
-    "param_decls": 4065,
+    # 4065 -> 4066 (2026-08-07): `_sample_lookahead_depth(session)`. A predicate rather than a
+    # stored int because the answer changes mid-candidate and is refused for an in-process
+    # connector.
+    "param_decls": 4066,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -212,10 +215,14 @@ LEDGER_BASELINE = {
     # Both state a rule the code's shape cannot, and the long form lives at the `ability_delta`
     # field note rather than being repeated at each reader.
     #
-    # 3389 -> 3391 (2026-08-07): `committed_task_context`, a two-gate survivor — it states WHY the
+    # 3389 -> 3391 (2026-08-07): `committed_task_context`, a two-gate survivor â€” it states WHY the
     # pure reader exists (a decomposition needs a cycle to bill to, and a mint is computing that
     # cycle), which no reading of its body recovers.
-    "docstring_lines": 3391,
+    #
+    # 3391 -> 3410 (2026-08-07): sample look-ahead. Each survivor states the one fact no
+    # signature carries and no layer CLAUDE.md owns — a throughput toggle cannot reach a
+    # measurement — and its violation is silent.
+    "docstring_lines": 3410,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,
