@@ -15,8 +15,8 @@ from promptpotter.shared import (
 
 
 def _gsm8k_match(predicted: str, ground_truth: str) -> float:
-    gt = extract_gsm8k_number(ground_truth or "")
-    pred = extract_gsm8k_number(predicted or "")
+    gt = extract_gsm8k_number(ground_truth)
+    pred = extract_gsm8k_number(predicted)
     if gt is None or pred is None:
         return 0.0
     return 1.0 if gt == pred else 0.0
@@ -34,7 +34,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
     except (ValueError, AttributeError):
         return 0.0
 
-    pred_num = extract_boxed_number(predicted or "")
+    pred_num = extract_boxed_number(predicted)
     if pred_num is None:
         return 0.0
     try:
@@ -46,8 +46,8 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 def _exact_match(predicted: str, ground_truth: str) -> float:
     """Exact match after bold-strip + lowercase. Markdown bold markers stripped both sides."""
-    p = extract_last_bold(predicted or "").strip().lower()
-    g = extract_last_bold(ground_truth or "").strip().lower()
+    p = extract_last_bold(predicted).strip().lower()
+    g = extract_last_bold(ground_truth).strip().lower()
     return 1.0 if p == g else 0.0
 
 
@@ -113,7 +113,7 @@ EXTRACTION_NOTES: dict[str, str] = {
 def extraction_note_for_scoring(scoring: str) -> str:
     """The answer-format contract the committed prompt must satisfy — the union of notes for every matcher the formula
     names. Empty when no extract-then-compare matcher is used, since the raw output is then compared as-is."""
-    return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in (scoring or ""))
+    return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in scoring)
 
 
 __all__ = [

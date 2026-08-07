@@ -258,7 +258,7 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
 def compute_prompt_compactness(*, opt_sp: OptSearchPoint | None = None, **_: Any) -> float | None:
     if opt_sp is None:
         return None
-    rendered = opt_sp.render() or ""
+    rendered = opt_sp.render()
     if not rendered:
         return None
     return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)

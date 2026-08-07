@@ -78,7 +78,7 @@ def classify_sample_failure(
     structural_node: str | None = None
     transient_node: str | None = None
     warned_nodes: set[str] = set()
-    for w in warnings or []:
+    for w in warnings:
         node = str(w.get("step") or "") or None
         if node is not None:
             warned_nodes.add(node)  # explained (has a warning), even if kind is unclassifiable
@@ -289,11 +289,11 @@ def assemble_prior_healths(
 def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float]:
     """Round-LEVEL rate: a node failing transiently across many samples surfaces here even though
     each sample is individually recoverable. The grade and the L1-critique panel share this helper."""
-    total = len(results or [])
+    total = len(results)
     if total <= 0:
         return {}
     counts: dict[str, int] = {}
-    for r in results or []:
+    for r in results:
         diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
         statuses = diag.get("step_statuses") or {}
         warnings = diag.get("warnings") or []
@@ -312,7 +312,7 @@ def _collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]
     """Connector-agnostic — whatever message a node raises shows up, so a brand-new node's real
     error surfaces rather than a hardcoded guess. Deduped by ``(step, code)``."""
     seen: dict[str, dict[str, str]] = {}
-    for r in results or []:
+    for r in results:
         warnings = ((r.get("pipeline_data") or {}).get("diagnostics") or {}).get("warnings") or []
         for w in warnings:
             if w.get("kind") not in ("structural", "transient"):
@@ -340,7 +340,7 @@ def compute_round_health(
 
     structural = transient = unreachable = no_result = holes = 0
     structural_nodes: dict[str, int] = {}
-    for r in results or []:
+    for r in results:
         # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
         # invisible to classify_sample_failure — count them off the typed error channel
         # instead. CONNECTION = the transport failed; ``skipped_after_consecutive_errors``
@@ -406,7 +406,7 @@ def compute_round_health(
                 break
 
     return compute_degradation_health(
-        attempted=len(results or []),
+        attempted=len(results),
         structural_count=structural,
         transient_count=transient,
         prior_clean_rounds=prior_clean,
@@ -418,7 +418,7 @@ def compute_round_health(
         # Over every attempted row, not just the scoreable ones: hedging IS how a round
         # produces unscoreable rows, so excluding them would hide the behaviour in the
         # denominator. `modal_answer_share` ignores rows with no prediction itself.
-        answer_modal_share=modal_answer_share(results or []),
+        answer_modal_share=modal_answer_share(results),
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
         is_origin=is_origin,
