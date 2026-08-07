@@ -27,7 +27,6 @@ __all__ = [
     "REPLAYERS",
     "ReplayContext",
     "ReplayMismatch",
-    "Replayer",
     "replay_all_mismatches",
     "replay_decisions",
 ]

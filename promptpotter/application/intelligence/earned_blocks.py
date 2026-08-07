@@ -16,13 +16,7 @@ from promptpotter.shared.instrument import instrument_mode
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = [
-    "OPEN_ANSWER_SPACE",
-    "EarnedBlock",
-    "answer_space_signature",
-    "earned_library_for",
-    "mine_earned_blocks",
-]
+__all__ = ["answer_space_signature", "earned_library_for", "mine_earned_blocks"]
 
 # The short, reusable framing fields — the only ones a block library should carry. The long
 # fields (instruction, problem_description) are task-specific detail, not transferable material.

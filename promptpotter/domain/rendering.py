@@ -275,8 +275,6 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
 
 __all__ = [
-    "DISPLAY_EXTRACTORS",
-    "ResultClassification",
     "classify_result",
     "display_fitness",
     "extract_display_answer",

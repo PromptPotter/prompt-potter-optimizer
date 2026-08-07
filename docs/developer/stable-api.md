@@ -228,6 +228,7 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 
 - **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `INJECTIONS`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
+- **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.

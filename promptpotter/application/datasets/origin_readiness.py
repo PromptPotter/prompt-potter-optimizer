@@ -267,7 +267,6 @@ def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
 
 __all__ = [
     "FieldGap",
-    "OriginReadiness",
     "field_values",
     "origin_delta",
     "origin_projection",

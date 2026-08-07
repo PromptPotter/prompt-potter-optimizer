@@ -175,10 +175,4 @@ async def periodic_sweep(
         sleep_for = interval_s
 
 
-__all__ = [
-    "DEAD_AFTER_S",
-    "periodic_sweep",
-    "reap_cycle_by_id",
-    "reclaim_orphan_sandboxes",
-    "sweep_dead_cycles",
-]
+__all__ = ["periodic_sweep", "reap_cycle_by_id", "reclaim_orphan_sandboxes", "sweep_dead_cycles"]

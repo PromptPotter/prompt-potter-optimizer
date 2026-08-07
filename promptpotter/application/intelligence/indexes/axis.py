@@ -565,4 +565,4 @@ class AxisIndex:
         )
 
 
-__all__ = ["NOISE_THRESHOLD", "AxisImpact", "AxisIndex", "ValueRecord"]
+__all__ = ["NOISE_THRESHOLD", "AxisIndex"]

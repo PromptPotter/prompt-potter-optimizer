@@ -19,7 +19,6 @@ __all__ = [
     "ARTIFACT_SCHEMA_VERSION",
     "build_hard_samples_artifact",
     "build_hard_samples_artifact_from_observations",
-    "empty_artifact",
 ]
 
 ARTIFACT_SCHEMA_VERSION = 5

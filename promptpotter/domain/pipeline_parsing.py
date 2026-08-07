@@ -24,7 +24,6 @@ __all__ = [
     "merge_node_blocks",
     "parse_pipeline_response",
     "parse_resolved_schema",
-    "strip_lone_surrogates",
 ]
 
 # The node-definition sub-blocks a partial overlay AUGMENTS rather than replaces.

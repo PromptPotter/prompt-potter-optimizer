@@ -90,9 +90,4 @@ def silence_proactor_disconnect_noise() -> None:
     loop.set_exception_handler(handler)
 
 
-__all__ = [
-    "LOG_DATE_FORMAT",
-    "LOG_FORMAT",
-    "setup_logging",
-    "silence_proactor_disconnect_noise",
-]
+__all__ = ["setup_logging", "silence_proactor_disconnect_noise"]

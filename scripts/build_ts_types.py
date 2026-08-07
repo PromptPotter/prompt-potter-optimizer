@@ -76,7 +76,7 @@ from promptpotter.presentation.api.routers.campaigns.files import (
     FileEntry,
     FilesResponse,
 )
-from promptpotter.presentation.api.routers.campaigns.registry import (
+from promptpotter.presentation.api.routers.campaigns.manifests import (
     CampaignListResponse,
     CampaignSummary,
 )
@@ -140,7 +140,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CyclesResponse,
     # --- commands middleware ---
     CommandAcceptedBody,
-    # --- campaigns/registry router ---
+    # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
     # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---

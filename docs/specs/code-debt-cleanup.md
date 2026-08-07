@@ -66,36 +66,10 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
   can't see unpriced spend" entry below, which is what turns that signal into a gate the
   operator can trust.
 
-- **Filler module names hiding several concepts each.** The `application/config.py` case is
-  SHIPPED — split into `campaign_config` / `preflight` / `pipeline_resolve`, which also let all
-  seven of its function-local imports become module-level. **These are RENAMES, not splits**, so
-  each is one `git mv` plus its importers, and they are independent of each other — take them one
-  per commit. `runner/inner/cycle.py` → `spawn.py` is SHIPPED — it was the worst of them, two
-  files named for the same noun one layer apart. In descending order of what still misleads a
-  reader:
-  - `l1/resume.py` — candidate-cache reuse *within a round*. Nothing to do with campaign resume
-    (`optimization/resume_and_fork/resume.py`), which is what the name reads as.
-  - `registry.py` ×4 — one is a FastAPI router (`api/routers/campaigns/registry.py`); the others
-    are real registries. Rename the router, leave the rest.
-  - `session.py` ×3, `state.py` ×2, `base.py` ×2 — verify each is genuinely ambiguous before
-    renaming; a `state.py` inside one projection package may be perfectly clear in place.
-  ⚠️ `shared/identity.py` (the capability/tier **authz** vocabulary) colliding with
-  `domain/identity.py` is flagged only — the access model is the operator's call.
-
-  **Blocker: none. What to watch** — `test_integrity.py::test_every_test_named_by_the_package_exists`
-  reads `git ls-files`, so stage a deletion or it reads a path that is gone; `ruff check .` skips
-  `docs/` while the pre-commit hook lints staged paths directly, so an importer under
-  `docs/research/` passes the manual gate and fails at commit — sweep it by hand; and `modules`
-  sits at its baseline, so a rename is free but a split is not.
-
-- **115 `__all__` entries with zero external reference**, across 73 modules (recounted
-  2026-08-06; the filed 80/57 had drifted, and 1166 entries across 235 modules is the base).
-  Verified INERT in both directions that could have made it matter: no `import *` anywhere,
-  and `pyproject.toml` sets `implicit_reexport = true`, so nothing — runtime or mypy — reads
-  these lists. The cost is a reader misled about a module's public surface, against a 73-file
-  diff; `stable-api.md` already says unlisted names are internal. Densest:
-  `presentation/api/routers/auth.py` (5), `dispatch/llm_call/prompts.py` (4),
-  `validators/l2_behavior.py` (4), `scoring/evaluators.py` (4), `llm/rate_limit.py` (4).
+- ⚠️ **`shared/identity.py` (the capability/tier authz vocabulary) collides with
+  `domain/identity.py`** — flagged only, never acted on: the access model is the operator's call
+  ([`../operations/access-model.md`](../operations/access-model.md)). The rest of the
+  filler-name sweep is closed; see § Considered, not debt for the four names that keep theirs.
 
 - **One unregistered hook script** — `.claude/hooks/detect_correction.py`, unregistered in all
   four settings files and instructing a write to `.claude/skills/potter-dev/rules.md`, a
@@ -196,6 +170,7 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 - **Benchmarks are NOT gated from the distributed app** — settled the other way by `20d17ea8`: repo `datasets/` is *install content* (tracked in git, readable by anyone who has the install), so the `datasets.benchmarks.read` capability + `PROMPTPOTTER_ADMIN=1` gate were deleted and the tier is now `yours`/`install`. The gate existed to hide one gitignored scratch cut, and its cost was a blank pipeline hero + hard-sample leaderboard on every benchmark campaign. A private cut belongs in the tenant, where path isolation already protects it. Don't re-file the old "hide benchmarks from the default identity" entry.
 - **Display-only recomputes do NOT breach scoring authority** — `headline-stats.ts::fitnessTrend` folds already-served values, and `presentation/views/live/phase.py` recomputes recall@k for the terminal readout. Serving either would add wire coupling for identical behaviour. (The bare `except: pass` around the recall block WAS the real smell, and was fixed.) **`hit_rate` sat on this list and should not have:** a fold is display-only only where its result is REACHABLE, and `is_hit` is `fitness >= 1.0` — unreachable on a graded scorer, so the column printed `0/N` on every row of a healthy campaign while this entry vouched for it. Now served (`SampleSeries.n_hits` / `mean_fitness`) and renamed `mean_fitness`. Check a proposed exemption at its threshold before granting one.
 - **Sample look-ahead is LIVE, and every part of it looks removable** — it defaults off, no committed campaign enables it, `ADMIN_CAPABILITIES` has exactly one member so the tier reads like scaffolding, and `_sample_lookahead_depth` returns 1 on `promptpotter-self` (the campaign most often read), so a reader concludes the branch never fires. It fires on every remote-HTTP dataset the moment the operator presses the button. Four pieces that must move together or not at all: the `.runtime/sample_lookahead.flag` write/poll/consume triple, the acquire/absorb split in `query_loop.py`, `dashboard.json::sample_lookahead` + `sample_lookahead_discards`, and the `scoring.lookahead` cap. **Never "recover" the discarded acquisition** — recording it makes the run's rows depend on in-flight depth, which forces a `human_intervened` stamp and devalues the campaign; that discard is the design, not an oversight. Why it is browser-only with no CLI verb: [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a.
+- **`session.py` ×3, `state.py` ×2, `base.py` ×2 keep their names — the package path already carries the concept.** Filed as a filler-name collision; the verification the entry asked for says no. Checked two ways and both come back clean: the three `session.py` are the run `Session` (`initialization/`), the CLI's accessor over that same noun (`cli/`), and the cookie→JSON auth store (`infrastructure/identity/`) — and **no module in the tree imports the auth one alongside either other**, so the only real ambiguity is never experienced; there is no disambiguating `import … as` anywhere, which is the friction a genuine clash produces. `escalation/state.py` vs `live_dashboard/state.py` and `llm/base.py` vs `projections/base.py` are each one concept per package, and `base.py`-holds-this-package's-ABC is a language-wide convention, not a filler name. Renaming any of them buys a longer import line and costs every citation that names it. Re-open only for a name whose *own package* cannot resolve it.
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs by design; the "which do I use" rule is in [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_log`** — not a roundtrip shim; foreign fork-siblings + historical cycles have no live ledger, so the on-disk `index.json` is the only source. (Its round twin `from_disk_round` had zero callers and was deleted.)
 - **`measurement_archive.py` `.get(…, default)` at `save()`** — looks dead (the production writer always sets the keys) but `save()` has direct test-fixture callers with partial dicts; live boundary guards.

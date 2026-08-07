@@ -8,8 +8,8 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
+from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
 from promptpotter.application.optimization.l1.critique import run_l1_critique
-from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
 from promptpotter.application.optimization.l1.score.winner import l1_score
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (

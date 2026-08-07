@@ -270,11 +270,4 @@ async def post_round(
         await escalate_or_stop(cycle, config, session, round_num, cb)
 
 
-__all__ = [
-    "close_round",
-    "count_positive_yield_axes",
-    "emit_origin_round",
-    "escalate_or_stop",
-    "persist_round",
-    "post_round",
-]
+__all__ = ["close_round", "emit_origin_round", "escalate_or_stop", "persist_round", "post_round"]

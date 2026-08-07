@@ -419,7 +419,6 @@ def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
 
 
 __all__ = [
-    "CycleSnapshot",
     "ScorerSetup",
     "Session",
     "auto_mint_session",

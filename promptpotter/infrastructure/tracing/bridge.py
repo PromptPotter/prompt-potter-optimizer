@@ -44,7 +44,7 @@ from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NodeTrace", "ObservabilityBridge", "observed_node"]
+__all__ = ["ObservabilityBridge", "observed_node"]
 
 _E = TypeVar("_E", bound=Event)
 

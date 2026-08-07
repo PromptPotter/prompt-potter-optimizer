@@ -878,9 +878,4 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     return {"data": data}
 
 
-__all__ = [
-    "INNER_RESULT_KEY",
-    "InnerSpawnContext",
-    "publish_inner_spawn_context",
-    "run_inner_cycle",
-]
+__all__ = ["InnerSpawnContext", "publish_inner_spawn_context", "run_inner_cycle"]

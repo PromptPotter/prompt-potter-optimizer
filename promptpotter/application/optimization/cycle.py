@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Cycle", "CycleRoundState"]
+__all__ = ["Cycle"]
 
 
 def _origin_round(

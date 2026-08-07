@@ -4,9 +4,7 @@ import math
 import re
 
 __all__ = [
-    "BOXED_RE",
     "GSM8K_ANSWER_RE",
-    "NUMBER_RE",
     "extract_boxed_number",
     "extract_gsm8k_number",
     "extract_last_bold",

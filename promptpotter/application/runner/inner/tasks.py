@@ -190,9 +190,7 @@ def inner_instrument_config(
 
 __all__ = [
     "InnerBenchmarkConfig",
-    "InnerTask",
     "InnerTaskSpec",
-    "InnerTasks",
     "inner_instrument_config",
     "load_inner_tasks",
     "resolve_inner_task",

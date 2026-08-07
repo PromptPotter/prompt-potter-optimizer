@@ -193,4 +193,4 @@ CONNECTOR = Connector(
 )
 
 
-__all__ = ["CONNECTOR", "PromptPotterSession", "promptpotter_wire_adapter"]
+__all__ = ["CONNECTOR", "PromptPotterSession"]

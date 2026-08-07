@@ -24,7 +24,7 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
     return _v
 
 
-# The only two keys anything reads off `l1_overrides` (`l1/resume.py`). Filtered at parse
+# The only two keys anything reads off `l1_overrides` (`l1/candidate_source.py`). Filtered at parse
 # because `_parse_l2` MERGES this LLM-written dict forward on every fire: an invented key was
 # never read, never pruned, and rendered uncapped for the rest of the campaign.
 L1_OVERRIDE_KEYS: frozenset[str] = frozenset({"creativity", "n_variants"})

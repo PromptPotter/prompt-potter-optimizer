@@ -89,9 +89,4 @@ def _parse_provider(name: str, raw: object) -> OIDCProviderConfig | None:
     )
 
 
-__all__ = [
-    "OIDCConfigError",
-    "OIDCProviderConfig",
-    "ProviderConfigBundle",
-    "load_provider_config",
-]
+__all__ = ["OIDCProviderConfig", "ProviderConfigBundle", "load_provider_config"]

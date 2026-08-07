@@ -240,6 +240,5 @@ __all__ = [
     "OuterVariance",
     "OuterVerdict",
     "cell_fitness",
-    "cell_measurand",
     "compute_outer_verdict",
 ]

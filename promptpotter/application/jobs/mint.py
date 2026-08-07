@@ -159,10 +159,4 @@ def prepare_fresh_cycle(
     )
 
 
-__all__ = [
-    "CyclePlan",
-    "MintedCycle",
-    "fresh_campaign_id",
-    "prepare_fresh_cycle",
-    "resolve_cycle_plan",
-]
+__all__ = ["CyclePlan", "fresh_campaign_id", "prepare_fresh_cycle", "resolve_cycle_plan"]

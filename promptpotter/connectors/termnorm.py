@@ -289,4 +289,4 @@ CONNECTOR = Connector(
 )
 
 
-__all__ = ["CONNECTOR", "TermNormSession", "termnorm_wire_adapter"]
+__all__ = ["CONNECTOR", "TermNormSession"]

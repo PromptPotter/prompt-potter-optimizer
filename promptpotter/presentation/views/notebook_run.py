@@ -44,13 +44,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
-__all__ = [
-    "init_notebook_session",
-    "prepare_origin_notebook",
-    "render_completion",
-    "render_completion_html",
-    "run_optimization_notebook",
-]
+__all__ = ["init_notebook_session", "prepare_origin_notebook", "run_optimization_notebook"]
 
 
 def render_completion_html(result: CycleResult) -> str:

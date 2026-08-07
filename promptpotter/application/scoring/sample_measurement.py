@@ -109,12 +109,7 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = [
-    "compare_rerun",
-    "execute_stale_data_protocol",
-    "find_gt_rank",
-    "measure_sample",
-]
+__all__ = ["execute_stale_data_protocol", "find_gt_rank", "measure_sample"]
 
 # Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
 # ``reasoning_trace`` = the task model's chain-of-thought (head-capped at the

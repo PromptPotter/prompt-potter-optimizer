@@ -346,7 +346,6 @@ __all__ = [
     "backend_unreachable_result",
     "bind_session_identity",
     "build_observers",
-    "campaign_result_human",
     "confirm_tty",
     "cycle_result_command",
     "drive_cycle",

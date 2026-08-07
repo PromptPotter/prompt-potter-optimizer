@@ -53,7 +53,6 @@ def build_origin_cycle_id(
 
 __all__ = [
     "build_origin_cycle_id",
-    "content_hash_of",
     "cycle_config_identity",
     "mint_campaign_id",
     "mint_checkin_cycle_id",

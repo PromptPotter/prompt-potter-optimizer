@@ -12,13 +12,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     ValidatorContext,
 )
 
-__all__ = [
-    "L2_CHECK_REGISTRY",
-    "L2_RATIONALE_FLOOR_CHARS",
-    "extract_l2_output",
-    "l2_fired",
-    "run_all_l2_checks",
-]
+__all__ = ["run_all_l2_checks"]
 
 
 # An L2 rationale below this is a stub, not a diagnosis — mirrors the

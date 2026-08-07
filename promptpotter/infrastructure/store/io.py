@@ -249,7 +249,6 @@ __all__ = [
     "read_json",
     "read_json_optional",
     "read_json_tolerant",
-    "read_text_optional",
     "read_yaml",
     "read_yaml_optional",
     "rmtree_robust",

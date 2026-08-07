@@ -421,7 +421,6 @@ __all__ = [
     "L1_POSSIBLE",
     "NODE_LAYOUTS",
     "L1Layout",
-    "LayoutValidationResult",
     "NodeLayoutSpec",
     "coerce_l1_layout",
     "default_l1_layout",
