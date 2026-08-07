@@ -436,7 +436,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     deltas, or overruns the panel cap (1200c head-keep would clip the LATEST
     rounds), the outer loop is evidence-starved again with no error and no
     symptom (run b786e9: transcripts degenerated to identity tokens)."""
-    from promptpotter.application.runner.inner.cycle import _inner_narrative
+    from promptpotter.application.runner.inner.spawn import _inner_narrative
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
@@ -1585,7 +1585,7 @@ def test_every_shipped_dataset_dir_is_recognized(built_stores) -> None:
 def test_the_l4_dataset_is_recognized_as_one() -> None:
     """The is-this-L4 probe and the loader must agree — a disagreement is silent.
 
-    ``runner/inner/cycle.py`` decides whether to verify the outer observation contract
+    ``runner/inner/spawn.py`` decides whether to verify the outer observation contract
     by probing for the inner-task spec. Miss it and the check is skipped, undeclared
     inner keys are dropped, and the outer formula scores a measurement nobody took.
 
@@ -2284,7 +2284,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     varied per process would never find its own campaign, so every retry would re-mint and
     the continuation would silently never happen.
     """
-    from promptpotter.application.runner.inner.cycle import inner_campaign_id
+    from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
 
     spec = InnerTaskSpec(
@@ -2314,7 +2314,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
         [
             sys.executable,
             "-c",
-            "from promptpotter.application.runner.inner.cycle import inner_campaign_id;"
+            "from promptpotter.application.runner.inner.spawn import inner_campaign_id;"
             "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
             "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4,n_variants=3);"
             "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",

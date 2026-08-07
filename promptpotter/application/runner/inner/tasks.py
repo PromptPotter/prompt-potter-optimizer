@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.io import read_yaml_optional
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.runner.inner.cycle import InnerSpawnContext
+    from promptpotter.application.runner.inner.spawn import InnerSpawnContext
 
 
 class InnerBenchmarkConfig(StrictModel):

@@ -13,7 +13,7 @@ nodes.{name}.config`, never in the backend's repo.
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
 > **`llm_only` is a NODE name, never a connector.** Every single-node benchmark
 > declares an `llm_only` node inside a `termnorm` pipeline and routes over HTTP to the
@@ -65,7 +65,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
 `in_process_run`, a `remote_http` one MUST NOT. One connector rides the seam today:
 
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
-  `application/runner/inner/cycle.py::run_inner_cycle` (running a whole inner
+  `application/runner/inner/spawn.py::run_inner_cycle` (running a whole inner
   campaign is heavy orchestration — it belongs in `application/runner`, not the
   connector). That runner calls `run_optimization` in its **own `asyncio.Task`**
   (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,

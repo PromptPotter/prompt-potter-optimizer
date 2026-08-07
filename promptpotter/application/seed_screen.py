@@ -171,7 +171,7 @@ def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[floa
 
 
 def draw_bank(all_samples: list[Sample], n: int, seed: int) -> list[Sample]:
-    """The SAME draw ``runner/inner/cycle.py`` performs, spelled once here and imported there — a
+    """The SAME draw ``runner/inner/spawn.py`` performs, spelled once here and imported there — a
     screen that drew differently would screen a bank nobody runs, and nothing would report it."""
     return random.Random(seed).sample(all_samples, min(n, len(all_samples)))
 

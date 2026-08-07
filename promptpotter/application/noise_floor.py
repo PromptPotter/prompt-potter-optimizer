@@ -51,7 +51,7 @@ async def measure_noise_floor(
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-    from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
+    from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 

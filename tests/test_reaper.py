@@ -586,7 +586,7 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
 ) -> None:
     """Clearing the terminal latch makes a cycle reapable, and only a fresh producer closes it.
 
-    The L4 continuation (``inner/cycle.py::_open_inner_campaign``) re-enters an abandoned
+    The L4 continuation (``inner/spawn.py::_open_inner_campaign``) re-enters an abandoned
     inner campaign so its banked rounds are not orphaned, which means clearing
     ``finished_at``. That field is the ONLY thing protecting the cycle from the sweep while
     its last attempt's ``dashboard.json`` is still hours stale: ``TERMINAL`` is refused, but

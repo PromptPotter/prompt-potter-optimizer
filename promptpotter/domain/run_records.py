@@ -177,7 +177,7 @@ class LLMCallProgressRecord(StrictModel):
     round: int | None = None
     elapsed_s: float
     # Optional live sub-status for the tick — the inner-campaign heartbeat
-    # (``runner/inner/cycle.py``) sets it to ``"inner rX/Y · best Z%"`` so the
+    # (``runner/inner/spawn.py``) sets it to ``"inner rX/Y · best Z%"`` so the
     # outer L4 chat/dashboard stay live while a multi-minute inner cycle runs.
     # ``None`` on ordinary optimizer heartbeats (unchanged behavior).
     detail: str | None = None

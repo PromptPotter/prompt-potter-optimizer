@@ -204,7 +204,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     shape of the code that achieves it.
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
-    from promptpotter.application.runner.inner import cycle
+    from promptpotter.application.runner.inner import spawn
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
@@ -218,7 +218,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             return len(self.records)
 
     monkeypatch.setattr(heartbeat_mod, "HEARTBEAT_INTERVAL_S", 0.01)
-    monkeypatch.setattr(cycle, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
+    monkeypatch.setattr(spawn, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
 
     started = asyncio.Event()
     cancelled = asyncio.Event()
@@ -258,7 +258,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             finished_at="",
         )
 
-    monkeypatch.setattr(cycle, "_run_inner_campaign", _hanging_inner)
+    monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
     # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,
     # round cap and target score are declared, or the spawn raises.
     write_json(
@@ -272,8 +272,8 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             "tasks": [{"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}],
         },
     )
-    cycle._INNER_SPAWN.set(
-        cycle.InnerSpawnContext(
+    spawn._INNER_SPAWN.set(
+        spawn.InnerSpawnContext(
             inner_sandbox_root=tmp_path,
             dataset_config_dir=tmp_path,
             identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it
@@ -285,8 +285,8 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
-    with pytest.raises(cycle.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await cycle.run_inner_cycle("justlogic-d234/seed-0", {})
+    with pytest.raises(spawn.InnerCycleUnscoreableError, match="wall-clock deadline"):
+        await spawn.run_inner_cycle("justlogic-d234/seed-0", {})
 
     assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"

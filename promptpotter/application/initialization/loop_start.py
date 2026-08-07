@@ -370,8 +370,8 @@ async def init_optimization_loop(
     )
     # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
     # published before any of that resolved (a child may recurse before this point). Local
-    # import: `runner.inner.cycle` reaches back into this package for `Session`.
-    from promptpotter.application.runner.inner.cycle import retarget_inner_spawn
+    # import: `runner.inner.spawn` reaches back into this package for `Session`.
+    from promptpotter.application.runner.inner.spawn import retarget_inner_spawn
 
     retarget_inner_spawn(session)
 
