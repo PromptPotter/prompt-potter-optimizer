@@ -359,9 +359,13 @@ controls:
     do: ONE multi-select (Acc/Comp/θ) driving the bar series AND every node label in both views.
         Never empty. θ rides a right-hand axis and stays sparse (a missing θ is never a 0 bar).
     status: ok
-  - id: candidates.lens_whatif
-    do: Lens re-projects under an alternative criterion (served); What-If reveals evaluator
-        checkboxes and becomes the master lens.
+  - id: candidates.menu
+    do: The ⋯ overflow, lit while any member is active. Lens re-projects under an alternative
+        criterion (served); What-If reveals evaluator checkboxes and becomes the master lens;
+        Fixed sample set re-bases every bar on one set (off when the bars are courses — a run
+        is not a scored row); Loaded from cache draws the dashed replayed-share line, off by
+        default and NEVER disabled — a banked C0 is the usual replay, so greying out on it
+        hides the case the control exists for.
     status: ok
   - id: samples
     do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a

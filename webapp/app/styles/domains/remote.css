@@ -1,7 +1,7 @@
 /* Remote bar — the global bottom-fixed hovering pill (components/shell/RemoteBar.tsx).
    Present on every tab while a cycle is live: run-phase, play/pause (the reused
-   .run-ctl), Skip, Stop, concise round/spend, and the babysat tag. Floats over
-   content (position:fixed) — a remote control, not a layout band. */
+   .run-ctl), Skip, concise round/spend, and the babysat tag. Floats over content
+   (position:fixed) — a remote control, not a layout band. */
 .remote-bar{
   position:fixed;
   left:50%;
@@ -21,7 +21,19 @@
   color:var(--color-text-secondary);
 }
 
-/* The run-phase chip (.phase-chip) is shared chrome — see shell.css. */
+/* The run-phase chip (.phase-chip) is shared chrome — see shell.css. Pinned, it
+   floats the breadcrumb's .follow-active-btn ABOVE the pill on hover — not
+   inline: the pill is centre-anchored, so an inline reveal would re-centre it
+   out from under the cursor. */
+.remote-follow{position:relative;padding:0;border:0;background:none;font-family:inherit;cursor:pointer}
+.remote-follow:focus-visible{outline:none;border-radius:6px;box-shadow:0 0 0 2px var(--color-accent)}
+.remote-follow .follow-active-btn{
+  position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);
+  margin-left:0;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:opacity .12s ease;
+}
+.remote-follow:hover .follow-active-btn,
+.remote-follow:focus-visible .follow-active-btn{opacity:1}
 
 /* Connection lost (poll.tsx status === "offline") — the bar stays mounted
    (it reads the server's last-known run_phase, not the connection), just

@@ -22,6 +22,10 @@ import { activeNodeId } from "@/components/workflow";
 // samples of the searchpoint scoring now, accepts the partial, and the cycle
 // continues — and marks the cycle human_intervened. Enabled only while running
 // (skipping only means something mid-scoring).
+//
+// The run-phase chip doubles as the follow-active control while the view is
+// PINNED. While following it stays a plain span — `followActive()` is a no-op
+// there, and a button that does nothing is a lie (surface-contract I3).
 
 const SKIP_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
@@ -30,9 +34,15 @@ const SKIP_ICON = (
   </svg>
 );
 
-export function RemoteBar() {
+interface Props {
+  // Called after the operator follows the active run, so the shell can switch to
+  // the Dashboard view — same contract as RunningJobsButton's `onPicked`.
+  onFollowed?: () => void;
+}
+
+export function RemoteBar({ onFollowed }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
-  const { campaignId, cycleId, cycles } = useWorkspace();
+  const { campaignId, cycleId, cycles, following, followActive } = useWorkspace();
   const { dash, dashRound, status } = useDashboard();
   const [pending, setPending] = useState<"skip" | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -48,6 +58,15 @@ export function RemoteBar() {
   // Hidden only when terminal, checkin, or no run yet.
   if (!isInFlight(runPhase)) return null;
   const offline = status === "offline";
+
+  // Hoisted so the chip's two forms render byte-identical contents.
+  const phaseLabel = runPhaseLabel(runPhase, dash?.stop_reason);
+  const phase = (
+    <>
+      <span className="phase-dot" aria-hidden="true" />
+      {phaseLabel}
+    </>
+  );
 
   // Babysat marker for the in-view cycle — the canonical flag rides the cycle
   // list (index.json::human_intervened), permanent once an operator intervenes.
@@ -90,10 +109,26 @@ export function RemoteBar() {
       role="group"
       aria-label="Campaign remote control"
     >
-      <span className={cx("phase-chip", `phase-${runPhase}`)}>
-        <span className="phase-dot" aria-hidden="true" />
-        {runPhaseLabel(runPhase, dash?.stop_reason)}
-      </span>
+      {following ? (
+        <span className={cx("phase-chip", `phase-${runPhase}`)}>{phase}</span>
+      ) : (
+        <button
+          type="button"
+          className={cx("phase-chip", "remote-follow", `phase-${runPhase}`)}
+          onClick={() => {
+            followActive();
+            onFollowed?.();
+          }}
+          aria-label={`${phaseLabel} — pinned to this campaign. Follow the campaign the CLI is currently running.`}
+        >
+          {phase}
+          {/* The breadcrumb's own button, floated above the pill. The tag IS the
+              tooltip, so no `title` on top of it. */}
+          <span className="follow-active-btn" aria-hidden="true">
+            ↪ Follow active
+          </span>
+        </button>
+      )}
       {offline ? (
         <span
           className="remote-offline"

@@ -38,6 +38,7 @@ function node(
     composite_ci_hi: null,
     scored_samples: null,
     expected_samples: null,
+    cached_samples: null,
     lens_value: null,
     sample_set_accuracy: null,
     sample_set_n: null,

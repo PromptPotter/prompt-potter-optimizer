@@ -2237,6 +2237,11 @@ components:
         composite_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
         expected_samples: { type: [integer, "null"] }
+        cached_samples:
+          type: [integer, "null"]
+          description: |
+            Of `scored_samples`, how many were replayed from the MeasurementArchive rather
+            than measured. Null on a course and on any candidate never measured.
         cumulative_theta:
           type: [number, "null"]
           description: |

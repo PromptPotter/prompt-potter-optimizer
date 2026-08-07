@@ -159,6 +159,7 @@ def build_score_report(
         elimination_stopped=elimination_stopped,
         scored_samples=len(query_results),
         expected_samples=len(dataset),
+        cached_samples=sum(1 for r in query_results if r.get("cached")),
         partial_reason=str(score_summary.get("partial_reason", "")),
         invalid=invalid,
         validation_failures=list(opt_sp.memory.wounds.validation_failures),

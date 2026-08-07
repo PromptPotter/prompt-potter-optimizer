@@ -88,6 +88,10 @@ def individual_summary_from_dict(
         n_str = f"{scored_q} samples {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
     else:
         n_str = f"{n} samples"
+    # 📖 is the per-sample tape's cache mark; this is its total for the candidate.
+    n_cached = int(scores.get("cached_samples") or 0)
+    if n_cached:
+        n_str += f" ({n_cached}📖)"
     body_line = f"{mutations_chunk}{n_str}  vs origin: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []

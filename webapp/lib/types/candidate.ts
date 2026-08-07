@@ -53,6 +53,10 @@ export interface CandidateRow {
   // Total sample budget for this candidate; null when not yet announced
   // (only meaningful when `< n_samples` is possible mid-round).
   n_expected: number | null;
+  // Of `n_samples`, how many were replayed from the archive rather than measured (served).
+  // `null` where there is no measured panel to describe — a course, or a sliced bar, whose
+  // basis this count does not match.
+  cached_samples: number | null;
   // Which source the row came from. Lets renderers tag in-flight bars,
   // and lets the derivation layer prove its own dedup discipline.
   source: CandidateSource;

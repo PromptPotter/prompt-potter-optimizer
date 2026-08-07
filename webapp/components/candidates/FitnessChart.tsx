@@ -1,6 +1,8 @@
 "use client";
 import { memo, useMemo } from "react";
-import { Bar } from "react-chartjs-2";
+// `Chart`, not `Bar`: the cache overlay is a line dataset on a bar chart, and the per-type
+// `Bar` wrapper types its data as bar-only. Both controllers register in `lib/theme.ts`.
+import { Chart } from "react-chartjs-2";
 import { cssRgba, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import type { HeadlineMetric } from "@/lib/derivations";
 import type { CandidateView } from "@/lib/types";
@@ -55,6 +57,10 @@ declare module "chart.js" {
   }
 }
 
+// Four sites join on this label — the dataset, the sample-count plugin's bars-only
+// filter, and both tooltip callbacks.
+const CACHE_SERIES = "cached";
+
 const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
   id: "sampleCount",
   afterDatasetsDraw(chart, _args, opts) {
@@ -69,9 +75,11 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
     ctx.textBaseline = "bottom";
     counts.forEach((n, i) => {
       if (n == null) return;
-      // Highest (smallest y) bar top across every series for this candidate.
+      // Highest (smallest y) bar top across every series for this candidate. BARS only —
+      // letting the cache line into this minimum drags the count label onto the dash.
       let topY = Infinity;
-      chart.data.datasets.forEach((_ds, di) => {
+      chart.data.datasets.forEach((ds, di) => {
+        if (ds.label === CACHE_SERIES) return;
         const el = chart.getDatasetMeta(di).data[i] as { y?: number } | undefined;
         if (el && typeof el.y === "number" && el.y < topY) topY = el.y;
       });
@@ -307,6 +315,8 @@ interface Props {
   // The card's metric axis — one bar series per selected metric. Never empty.
   metrics: ReadonlySet<HeadlineMetric>;
   showWhatIf: boolean;
+  // Draw the dashed cache-provenance line at each candidate's replayed share.
+  showCache: boolean;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
   // Bar index where the active mask first diverges from the realized record —
@@ -326,6 +336,7 @@ export const FitnessChart = memo(function FitnessChart({
   views,
   metrics,
   showWhatIf,
+  showCache,
   selectedKey,
   onSelect,
   divergenceBoundary,
@@ -391,7 +402,23 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, selectedKey, themeVersion]);
 
   const hasVerify = useMemo(() => views.some((v) => v.diag != null), [views]);
-  const data = useMemo<ChartData<"bar">>(() => {
+
+  // Origin INCLUDED — a banked C0 is the most common replay, and the first thing this is
+  // opened for. `null` is a GAP (no measured panel: a course, a sliced bar); a measured 0 is
+  // plotted on the floor, because "every sample was paid for" is an answer.
+  const cacheShare = useMemo(
+    () =>
+      views.map((v) => {
+        if (v.cached_samples == null) return null;
+        const n = v.n_samples;
+        return n != null && n > 0 ? v.cached_samples / n : null;
+      }),
+    [views],
+  );
+
+  const data = useMemo<ChartData<"bar" | "line">>(() => {
+    // BAR series only — the cache line sits on top of the group rather than inside it, so
+    // counting it would narrow every bar the moment the overlay appeared.
     const seriesCount = metrics.size + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
     const cat =
       seriesCount <= 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
@@ -421,7 +448,7 @@ export const FitnessChart = memo(function FitnessChart({
       maxBarThickness: maxBar,
       minBarLength: 2,
     };
-    const datasets: ChartData<"bar">["datasets"] = [];
+    const datasets: ChartData<"bar" | "line">["datasets"] = [];
     if (showAccuracy) {
       datasets.push({
         label: "accuracy",
@@ -483,9 +510,29 @@ export const FitnessChart = memo(function FitnessChart({
         ...shared,
       });
     }
+    if (showCache) {
+      // Provenance, not a metric — a LINE over the group rather than another bar beside
+      // them. `spanGaps:false`: bridging a gap claims a share for a candidate that has none.
+      datasets.push({
+        type: "line" as const,
+        label: CACHE_SERIES,
+        data: cacheShare,
+        borderColor: getCss("--color-cache"),
+        borderDash: [6, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: false,
+        yAxisID: "y",
+        // ON TOP of the bars, and the sign is counterintuitive: chart.js sorts metasets
+        // ASCENDING by `order` and then draws them in REVERSE (`Chart#_drawDatasets`), so the
+        // LOWEST order paints last. Raising this to +1 hides the line behind the bars.
+        order: -1,
+      });
+    }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, metrics, showAccuracy, showComposite, showAbility, showWhatIf, hasVerify, themeVersion, selectionBorder]);
+  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, cacheShare, metrics, showAccuracy, showComposite, showAbility, showWhatIf, showCache, hasVerify, themeVersion, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
     if (label === "verify") {
@@ -500,6 +547,13 @@ export const FitnessChart = memo(function FitnessChart({
     if (label === "ability") {
       const v = thetaRaw[idx];
       return `ability θ: ${v == null ? "—" : v.toFixed(2)}`;
+    }
+    if (label === CACHE_SERIES) {
+      // The served integers, never the share: the height is geometry, the counts are the
+      // measurement, and only the measurement gets written down.
+      const c = views[idx]?.cached_samples;
+      const n = views[idx]?.n_samples;
+      return c == null || n == null ? "cached: —" : `cached: ${c} of ${n} samples`;
     }
     const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
     const v = src[idx];
@@ -570,6 +624,11 @@ export const FitnessChart = memo(function FitnessChart({
                   : `${n} sample${n === 1 ? "" : "s"} scored`,
               );
             }
+            // Silent at 0 — the normal case, and noise on every bar.
+            const cached = views[idx]?.cached_samples;
+            if (cached != null && cached > 0 && n != null) {
+              lines.push(`${cached} of ${n} samples from cache`);
+            }
             // Difficulty-adjusted ability — the metric the winner is elected on, so a
             // shorter (lower-accuracy) winner bar reads as "won on harder samples".
             const theta = views[idx]?.theta;
@@ -608,7 +667,14 @@ export const FitnessChart = memo(function FitnessChart({
 
   return (
     <div className="fitness-chart-frame">
-      <Bar data={data} options={options} plugins={CHART_PLUGINS} />
+      {/* Explicit type argument — `type="bar"` alone infers the bar-only generic and
+          rejects the cache overlay's line dataset. */}
+      <Chart<"bar" | "line">
+        type="bar"
+        data={data}
+        options={options}
+        plugins={CHART_PLUGINS}
+      />
     </div>
   );
 });

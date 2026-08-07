@@ -23,6 +23,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     elimination_stopped: false,
     scored_samples: 0,
     expected_samples: 0,
+    cached_samples: 0,
     partial_reason: "",
     invalid: false,
     validation_failures: [],

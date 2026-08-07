@@ -439,6 +439,8 @@ class LedgerCandidate(StrictModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
     expected_samples: int | None = None
+    # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
+    cached_samples: int | None = None
     # The always-on whisker, over this candidate's own rows. A warm-ruler round OVERRIDES it
     # at close with the tighter θ-implied band (`LedgerRoundClose.abilities`).
     composite_ci_lo: float | None = None

@@ -1745,6 +1745,18 @@
             ],
             "title": "Best Accuracy"
           },
+          "cached_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Of `scored_samples`, how many were replayed from the MeasurementArchive rather than measured. `None` on a course and on any candidate never measured.",
+            "title": "Cached Samples"
+          },
           "children": {
             "items": {
               "$ref": "#/components/schemas/LineageNode"

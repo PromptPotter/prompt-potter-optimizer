@@ -19,6 +19,10 @@
   /* Composite-fitness CI whisker on the fitness chart — a neutral mark, not a
      status colour, so it reads as "statistical range" not "good/bad". */
   --color-ci:#9ca3af;
+  /* The dashed share-from-cache line on the fitness chart. Violet sits outside the
+     lava register on purpose — it rides the accuracy axis and must not read as a
+     metric. An annotation colour like --color-ci, not a status one. */
+  --color-cache:#a78bfa;
   /* Dashboard layout — one source for the centred spines. NarrowSpine
      wraps the header + diagnostics; WideSpine wraps the panel grids. */
   --dash-narrow-max:980px;
