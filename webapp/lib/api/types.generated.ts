@@ -451,7 +451,7 @@ export interface LiveDashboardState {
   rounds: RoundSummary[];
   best: number;
   current_acc: number;
-  headline_delta: number | null;
+  ability_delta: number | null;
   composite_fitness_formula: string | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';
   degraded_count: number;

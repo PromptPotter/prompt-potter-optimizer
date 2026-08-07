@@ -694,14 +694,16 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # Lead with the running winner's LIFT over origin — the SERVED
-        # ``headline_delta`` (LiveDashboardState), the same number the webapp
-        # headline reads, so the two surfaces cannot disagree.
-        delta = dash.get("headline_delta")
+        # Lead with the running winner's LIFT over origin — the SERVED ``ability_delta``
+        # (LiveDashboardState), the same number the webapp headline reads, so the two surfaces
+        # cannot disagree. It is LOGITS, not a fraction: printed as `%` it read `Δ+19%` off a
+        # cell whose ability never moved. `best` rides along as what a round actually MEASURED,
+        # labelled so it cannot be mistaken for the lift.
+        delta = dash.get("ability_delta")
         if isinstance(delta, int | float) and isinstance(best, int | float):
-            lift = f"Δ{delta:+.0%} (best {best:.0%})"
+            lift = f"Δθ{delta:+.2f} (best measured {best:.0%})"
         elif isinstance(best, int | float):
-            lift = f"best {best:.0%}"
+            lift = f"best measured {best:.0%}"
         else:
             lift = "best —"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"

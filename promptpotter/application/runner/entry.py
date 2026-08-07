@@ -266,6 +266,10 @@ async def _prepare_run(
             )
             session.human_intervened = True
 
+    # Coerced BEFORE the origin seam, not after: the framing splices into the target prompt, so
+    # resolving it later scored C0 on a prompt no candidate runs.
+    resolved_task_context = TaskDecomposition.coerce(task_context)
+
     if origin is None:
         # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like any
         # other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns (token
@@ -276,12 +280,15 @@ async def _prepare_run(
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
         # would re-roll under a nondeterministic backend); everything else scores it.
         origin = await establish_campaign_origin(
-            session, dataset, campaign_config, seed=seed, listener=cb
+            session,
+            dataset,
+            campaign_config,
+            seed=seed,
+            task_context=resolved_task_context,
+            listener=cb,
         )
         if observers.display is not None and hasattr(observers.display, "set_origin"):
             observers.display.set_origin(origin.report.accuracy)
-
-    resolved_task_context = TaskDecomposition.coerce(task_context)
 
     return _PreparedRun(
         origin=origin,

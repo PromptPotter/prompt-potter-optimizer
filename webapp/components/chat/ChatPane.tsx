@@ -9,7 +9,7 @@ import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { TERMS } from "@/lib/terms";
 import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0, fmtPctSigned } from "@/lib/format";
+import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
 import { Switch } from "@/components/ui";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
@@ -194,12 +194,14 @@ export function ChatPane({
 
   // Headline KPIs + spend — both read through the shared derivations so the
   // chat job-bar can't disagree with the console telemetry strip.
-  const { best, delta } = headlineStats(dash);
+  const { best, abilityDelta } = headlineStats(dash);
   const bestPctOnly = fmtPct0(best);
   // Lead the job-bar with the running winner's LIFT over origin — the meaningful
   // number for a live run; absolute best rides as secondary context (the log keeps
-  // absolute). `delta` is the same-basis `best − origin` from `headlineStats`.
-  const deltaPct = fmtPctSigned(delta);
+  // absolute). `abilityDelta` is SERVED and is in LOGITS, so it is formatted as θ and
+  // never as a percent — the two are different bases, not different renderings.
+  const deltaTheta =
+    abilityDelta != null ? `θ ${abilityDelta >= 0 ? "+" : ""}${abilityDelta.toFixed(2)}` : "—";
 
   const {
     backendUsd,
@@ -212,10 +214,11 @@ export function ChatPane({
     loopTokens,
     totalTokens,
   } = readSpend(dash);
+  // Lift per dollar, on the same LOGIT basis as the chip above — "pp/$" named percentage
+  // points and would have quietly relabelled logits as points.
   const deltaPerSpend =
-    delta != null && usedUsd != null && usedUsd > 0 ? delta / usedUsd : null;
-  const effChip =
-    deltaPerSpend != null ? `${(deltaPerSpend * 100).toFixed(2)} pp/$` : "—";
+    abilityDelta != null && usedUsd != null && usedUsd > 0 ? abilityDelta / usedUsd : null;
+  const effChip = deltaPerSpend != null ? `${deltaPerSpend.toFixed(2)} θ/$` : "—";
 
   // ETA to budget — pure client-side derivation. The wallclock read lives in
   // the module-level `etaToBudget` helper (not the component body) so React's
@@ -248,7 +251,7 @@ export function ChatPane({
           >
             <span className="chip-row">
               <span className="chip" title={TERMS.newjob_bar_best}>
-                <span className="chip-lbl">Lift</span> <strong>{deltaPct}</strong>
+                <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
                 {best != null && <span className="chip-origin"> · best {bestPctOnly}</span>}
               </span>
               <span className="chip" title={TERMS.newjob_bar_eta}>

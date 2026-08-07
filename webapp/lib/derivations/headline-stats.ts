@@ -79,8 +79,12 @@ export interface HeadlineStats {
   best: number | null;
   // Origin's round-0 measured accuracy (same basis as `best`), finite or null.
   origin: number | null;
-  // best − origin when both are present; null otherwise.
-  delta: number | null;
+  // Served lift over origin, in LOGITS on the cycle's fixed δ ruler — NOT a fraction, so
+  // never format it with a percent. It is deliberately not `best − origin`: under
+  // `per_round_resubset` each round draws a fresh subset, so that difference is the luckiest
+  // draw minus the fullest one and read `+19%` off a cycle whose ability never moved. Ability
+  // is the only cross-round-comparable series (see `RoundSummary.cumulative_theta`).
+  abilityDelta: number | null;
 }
 
 function finite(v: unknown): number | null {
@@ -90,14 +94,15 @@ function finite(v: unknown): number | null {
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // `best` is the server-side rolling max of `rounds[].accuracy` — what each round
   // actually MEASURED (LiveDashboardView._absorb_round_complete is the sole writer;
-  // it is NOT composite-based). `delta` is SERVED (`headline_delta`, the same basis)
-  // — never recomputed here, so this chip and the L4 inner progress line read one
-  // number (R-36).
+  // it is NOT composite-based). `abilityDelta` is SERVED (`ability_delta`) — never
+  // recomputed here, so this chip and the L4 inner progress line read one number (R-36).
+  // The two are on DIFFERENT bases now, deliberately: `best` answers "what did a round
+  // measure", `abilityDelta` answers "how far above origin is the incumbent".
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;
-  const delta = finite(dash?.headline_delta);
-  return { best, origin, delta };
+  const abilityDelta = finite(dash?.ability_delta);
+  return { best, origin, abilityDelta };
 }
 
 export interface FitnessTrend {

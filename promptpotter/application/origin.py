@@ -18,6 +18,7 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -282,6 +283,7 @@ async def establish_campaign_origin(
     campaign_config: CampaignConfig,
     *,
     seed: CycleSeed | None,
+    task_context: TaskDecomposition,
     listener: Any | None,
 ) -> CampaignOrigin:
     """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
@@ -291,6 +293,12 @@ async def establish_campaign_origin(
         dataset_dir=session.dataset_config_dir,
         seed=seed,
     )
+    # C0 renders on the SAME basis every candidate will: `upstream_context`/`downstream_context`
+    # splice into the target prompt, so an origin scored before the framing was attached is
+    # measured on a prompt none of its challengers run. It was — the resolver takes no
+    # `task_context`, and the runner coerced it one statement AFTER this seam, which handed the
+    # incumbent a shorter prompt than the whole search that follows it.
+    resolved_origin.memory.task_context = task_context
     inherited = try_inherit_fork_origin(session, seed, resolved_origin=resolved_origin)
     if inherited is not None:
         return inherited

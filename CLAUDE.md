@@ -111,6 +111,8 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 
 ⚠️ **Read a leader against its own interval, never against its rank** — owned by [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line; deepen a candidate with `verify`, never by re-asking a cell it already answered.
 
+⚠️ **The 2026-08-07 fixes are verified on the C0 panel only — the OUTER round-1 election is UNMEASURED.** Deliberate: a round-1 election costs ~14 more cells and the operator is building concurrency first. Re-check it on the next `new promptpotter-self`, not before — what to look for is [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line.
+
 **When adding a state, ask what DERIVES it — not just what writes it.** The costliest bugs in this package have all been one shape: a *state the system could enter but not report*, downstream of a predicate that conflated two facts, invisible because the failure mode was silence rather than an error. A writer with no reader is not a state; it is a note nobody reads.
 
 ## Pointers

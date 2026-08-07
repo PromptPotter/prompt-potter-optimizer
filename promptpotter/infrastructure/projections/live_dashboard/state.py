@@ -154,12 +154,21 @@ class LiveDashboardState(StrictModel):
 
     best: float = 0.0
     current_acc: float = 0.0
-    # Served headline lift: ``best − rounds[0].accuracy`` (one basis on both sides —
-    # each side a real measurement of ONE configuration). The ONE derivation of
-    # "how far above origin is the incumbent" —
-    # the webapp headline chip and the L4 inner progress line read it, neither
-    # recomputes it. ``None`` until round 0 has settled.
-    headline_delta: float | None = None
+    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's
+    # ``cumulative_theta`` minus the origin's. The ONE derivation of "how far above origin is
+    # the incumbent" — the webapp headline chip and the L4 inner progress line read it, neither
+    # recomputes it. ``None`` until round 0 has settled with an ability.
+    #
+    # It was ``best − rounds[0].accuracy``, and claimed "one basis on both sides". That is false
+    # under ``per_round_resubset``: each round draws a FRESH subset, so ``best`` is a running max
+    # over numbers measured on different sample sets — it selects the luckiest draw, and the
+    # origin it subtracts was measured on the full bank. On `justlogic-d234` seed-0 that served
+    # **+19%** for a cell whose ability never moved (θ +0.6823 in all four rounds, C0 winning
+    # every one, stop `lives_exhausted`). Ability is the only cross-round-comparable series here
+    # — the same reason `RoundSummary.cumulative_theta` exists — so the headline reads it.
+    # Renamed off `headline_delta` because the units changed; `headline_metric` still picks which
+    # fitness number headlines per-candidate TEXT, which is a different question.
+    ability_delta: float | None = None
     composite_fitness_formula: str | None = None
     # Campaign default for which fitness number headlines the operator's text
     # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is

@@ -162,7 +162,12 @@ LEDGER_BASELINE = {
     # taking no default — is the rule working. What a pass can retire is the rest: transport.
     # 4073 -> 4074 (2026-08-06): `_count_docstrings(py_files)`, the one parameter the new
     # `docstrings` dimension below costs. It takes the same file list its ten neighbours do.
-    "param_decls": 4074,
+    # 4074 -> 4076 (2026-08-07): `_ability_delta(rounds)` — the served headline lift is now read
+    # off `cumulative_theta` rather than `best − rounds[0].accuracy`, a fold over the round list
+    # rather than two field reads, so it earns a named function — and `establish_campaign_origin`'s
+    # `task_context`, which is what makes C0 render on the same basis as the candidates that
+    # challenge it. The resolver taking no framing is precisely how they came to differ.
+    "param_decls": 4076,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -194,7 +199,12 @@ LEDGER_BASELINE = {
     # plus the survivor of the two gates, rare by construction because anything binding a SET
     # of symbols belongs to a layer `CLAUDE.md`. That set is pinned when the sweep reaches it;
     # until then every drop here is ordinary prose deleted, and the number only falls.
-    "docstring_lines": 3386,
+    #
+    # 3386 -> 3389 (2026-08-07): two-gate survivors on the headline-lift fix — `_ability_delta`
+    # (why LATEST and not max) and one line on `_field_value` (the splice takes an EMPTY middle).
+    # Both state a rule the code's shape cannot, and the long form lives at the `ability_delta`
+    # field note rather than being repeated at each reader.
+    "docstring_lines": 3389,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

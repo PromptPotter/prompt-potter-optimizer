@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
-from promptpotter.domain.results import HeadlineMetric, candidate_label
+from promptpotter.domain.results import HeadlineMetric, RoundSummary, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -81,6 +81,23 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.MODIFY_PLAN: DashboardState.L3_REPLANNING,
     CampaignPhase.ESCALATION: DashboardState.ESCALATION,
 }
+
+
+def _ability_delta(rounds: list[RoundSummary]) -> float | None:
+    """Latest round carrying an ability, over the origin — never the max (winner's curse in logit
+    space). Skipping only unfit rounds is ``adopted_level_trajectory``'s own carry-forward rule."""
+    origin = next((r.cumulative_theta for r in rounds if r.round == 0), None)
+    if origin is None:
+        return None
+    latest = next(
+        (
+            r.cumulative_theta
+            for r in sorted(rounds, key=lambda r: r.round, reverse=True)
+            if r.cumulative_theta is not None
+        ),
+        None,
+    )
+    return None if latest is None else round(latest - origin, 4)
 
 
 class LiveDashboardView(DerivedView):
@@ -332,6 +349,34 @@ class LiveDashboardView(DerivedView):
             self._flush_pending_persist()
             return
 
+        if record.phase == "round" and record.event == "complete":
+            # A round can close TWICE: `runner/loop.py` re-persists round 0 once the ruler warms,
+            # because the origin's θ could not be fit at its own close (a Rasch fit needs two
+            # arms). That re-emit carries only this lean record — `on_round_complete`, which
+            # fires the `display` arm below, is not called again — so the served `rounds[0]` kept
+            # the COLD θ while the round file and the ledger carried the warm one, and anything
+            # differencing a later round against it subtracted across two rulers. Absorb the
+            # correction in place; the live scalars are the `display` arm's and stay untouched.
+            theta = record.payload.get("cumulative_theta")
+            if isinstance(theta, int | float):
+                se = record.payload.get("cumulative_theta_se")
+                self.state.rounds = [
+                    r.model_copy(
+                        update={
+                            "cumulative_theta": float(theta),
+                            "cumulative_theta_se": float(se)
+                            if isinstance(se, int | float)
+                            else None,
+                        }
+                    )
+                    if r.round == record.round
+                    else r
+                    for r in self.state.rounds
+                ]
+                self.state.ability_delta = _ability_delta(self.state.rounds)
+                self._flush_pending_persist()
+            return
+
         if record.phase == "round" and record.event == "display":
             payload = record.payload
             # Full RoundResult rides the in-memory-only field (the persisted
@@ -354,11 +399,10 @@ class LiveDashboardView(DerivedView):
                 rounds_list.sort(key=lambda r: r.round)
                 self.state.rounds = rounds_list
                 # Settle the served headline lift AFTER the append so round 0's own
-                # summary is present when it computes its first value.
-                origin = next((r.accuracy for r in self.state.rounds if r.round == 0), None)
-                self.state.headline_delta = (
-                    round(self.state.best - origin, 4) if origin is not None else None
-                )
+                # summary is present when it computes its first value. Both ends come off
+                # `cumulative_theta` — the subset-invariant series — so the difference is a real
+                # lift rather than the luckiest draw minus the fullest one.
+                self.state.ability_delta = _ability_delta(self.state.rounds)
                 self._flush_pending_persist()
             return
 

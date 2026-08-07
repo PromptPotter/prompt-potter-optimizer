@@ -106,7 +106,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     rounds: [],
     best: 0,
     current_acc: 0,
-    headline_delta: null,
+    ability_delta: null,
     composite_fitness_formula: null,
     headline_metric: "accuracy",
     degraded_count: 0,
