@@ -66,21 +66,31 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
   can't see unpriced spend" entry below, which is what turns that signal into a gate the
   operator can trust.
 
-- **Filler module names hiding several concepts each** (verified 2026-08-05; importer counts
-  exact). `application/config.py` — 1169 lines, **42 importers**, one name over three
-  concepts: the `CampaignConfig`/`OptimizationConfig` schema, the preflight validator
-  (`run_preflight_checks`), the pipeline resolver (`configure_and_apply_pipeline`). Splitting
-  it adds 2 modules against a ledger with **zero slack** (`modules` is at its baseline), so it
-  costs a baseline edit. Same class, smaller: `cycle.py` ×2 (`optimization/cycle.py` is the
-  cycle aggregate; `runner/inner/cycle.py`, 1128 lines, is inner-**campaign spawning**),
-  `registry.py` ×4 (`api/routers/campaigns/registry.py` is a FastAPI router), `session.py` ×3,
-  `state.py` ×2, `base.py` ×2, and `l1/resume.py` (candidate-cache reuse within a round, not
-  campaign resume). ⚠️ `shared/identity.py` (21 importers) is the capability/tier **authz**
-  vocabulary colliding with `domain/identity.py` — flagged only; the access model is the
-  operator's call.
+- **Filler module names hiding several concepts each.** The `application/config.py` case is
+  SHIPPED — split into `campaign_config` / `preflight` / `pipeline_resolve`, which also let all
+  seven of its function-local imports become module-level. **These are RENAMES, not splits**, so
+  each is one `git mv` plus its importers, and they are independent of each other — take them one
+  per commit. In descending order of what actually misleads a reader:
+  - `runner/inner/cycle.py` — inner-**campaign spawning**, sitting beside `optimization/cycle.py`,
+    which is the cycle aggregate. The worst of the six: two files named for the same noun, one
+    layer apart, and the L4 reader needs both.
+  - `l1/resume.py` — candidate-cache reuse *within a round*. Nothing to do with campaign resume
+    (`optimization/resume_and_fork/resume.py`), which is what the name reads as.
+  - `registry.py` ×4 — one is a FastAPI router (`api/routers/campaigns/registry.py`); the others
+    are real registries. Rename the router, leave the rest.
+  - `session.py` ×3, `state.py` ×2, `base.py` ×2 — verify each is genuinely ambiguous before
+    renaming; a `state.py` inside one projection package may be perfectly clear in place.
+  ⚠️ `shared/identity.py` (the capability/tier **authz** vocabulary) colliding with
+  `domain/identity.py` is flagged only — the access model is the operator's call.
 
-- **116 `__all__` entries with zero external reference**, across 73 modules (recounted
-  2026-08-06; the filed 80/57 had drifted, and 1162 entries across 236 modules is the base).
+  **Blocker: none. What to watch** — `test_integrity.py::test_every_test_named_by_the_package_exists`
+  reads `git ls-files`, so stage a deletion or it reads a path that is gone; `ruff check .` skips
+  `docs/` while the pre-commit hook lints staged paths directly, so an importer under
+  `docs/research/` passes the manual gate and fails at commit — sweep it by hand; and `modules`
+  sits at its baseline, so a rename is free but a split is not.
+
+- **115 `__all__` entries with zero external reference**, across 73 modules (recounted
+  2026-08-06; the filed 80/57 had drifted, and 1166 entries across 235 modules is the base).
   Verified INERT in both directions that could have made it matter: no `import *` anywhere,
   and `pyproject.toml` sets `implicit_reexport = true`, so nothing — runtime or mypy — reads
   these lists. The cost is a reader misled about a module's public surface, against a 73-file
@@ -146,7 +156,7 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 - **`*_override → *_updates` L1 delta-key rename.** `prompt_fields_override` / `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements, but named "override." **Decision (settle first):** unify the pipeline delta to the glossary word **`pipeline_overlay`** everywhere (kills the short/long two-name tax); the prompt/context deltas become `*_updates`. Rename writer→reader in one commit (schema `dispatch/schemas.py::L1Variant` is the source of truth — the LLM contract auto-propagates). Full site map: grep `*_override`. **The old rider "collapse `searchPoint.ts` + `candidateSearchPoint.ts` into one `wireToCandidateSearchPoint`" is DROPPED (verified 2026-07-16):** they answer different questions over one served field — `ObserveConfig` is a read-only view (keeps `steps`, carries a label), `CandidateSearchPoint` is an editable fork seed (drops `steps`). `lib/derivations/searchPoint.ts`'s module comment says so in-code. Merging would fuse a read projection with a write seed; the only real overlap is two lines of `candidate_scores.find`. **Blocker:** invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against a FRESH cycle that completes round 1, not a resume.
 
 **Security posture / migration:**
-- **The forbid-by-default flip obliges every on-disk model — now discharged by a table, and the table is what to check.** `application/restamp.py::_SURFACES` is the coverage contract: `CampaignConfig` (twice — the minted snapshot's config and the dataset template), `Campaign`, `BackendConnection`, `User`, `DiagnosticRunRecord`. **Adding a persisted `StrictModel` without adding its row is the bug**, and it has already cost one outage (`5a69ca67` dropped `BackendConnection.last_synced_at`; `init_services` raised `extra_forbidden` and every `new`/`resume` died at load). Two kinds are outside it *by design*, stated in the module docstring so the absence reads as a decision: `RoundResult` is the one `extra="ignore"` on-disk model (a stale key must never make a paid measurement unreadable), and `LLMResponse` under `archive/optimizer_calls/` is a content-addressed cache — evictable, not migratable. **Open, and the operator's call:** 3 round files under `promptpotter-self__af6252/cycle_277352830c98` fail `RoundResult.model_validate` on a *missing* `diagnostics.samples[].fitness` — dead data from an older schema that no re-stamp can repair, since a dropped field leaves no default behind. Blocker: none for the table; the 3 files are a keep-or-drop decision, not a fix.
+- **The forbid-by-default flip obliges every on-disk model — now discharged by a table, and the table is what to check.** `application/restamp.py::_SURFACES` is the coverage contract: `CampaignConfig` (twice — the minted snapshot's config and the dataset template), `Campaign`, `BackendConnection`, `User`, `DiagnosticRunRecord`. **Adding a persisted `StrictModel` without adding its row is the bug**, and it has already cost one outage (`5a69ca67` dropped `BackendConnection.last_synced_at`; `init_services` raised `extra_forbidden` and every `new`/`resume` died at load). Two kinds are outside it *by design*, stated in the module docstring so the absence reads as a decision: `RoundResult` is the one `extra="ignore"` on-disk model (a stale key must never make a paid measurement unreadable), and `LLMResponse` under `archive/optimizer_calls/` is a content-addressed cache — evictable, not migratable. **Open, and the operator's call:** 3 of the 9 public round files fail `RoundResult.model_validate`, all three in `promptpotter-self__af6252/cycle_277352830c98`, and on TWO causes rather than the one filed (re-measured 2026-08-06). *Extra* `health.ci_lo`/`ci_hi` a re-stamp could drop; and a *missing* `diagnostics.samples[].fitness`, which it cannot — a dropped field leaves no default behind, so no repair reconstructs it. What that costs today: `verify`, `resume` and the `ab` replay all read that cycle through the sole typed round loader and raise; a `score:`/`abort:` lens reads the summary fields and still serves it. Blocker: none for the table; the 3 files are a keep-or-drop decision, not a fix.
 - **Backend-registration dedup** — `webapp/lib/hooks/useConnector.ts` client-side `distinct`/`seenEndpoints` collapse is a back-compat shim for per-dataset `BackendConnection` rows minted before the `wiring.py` one-row-per-`(base_url, backend_type)` fix. NOT a row-delete: it's a 3-step migration — (1) rewrite each campaign's `campaign.yaml::backend_id` to the canonical `local` (8 stale ids across 82 campaigns, all → the same `127.0.0.1:8000` endpoint); (2) collapse the duplicate rows (needs a new `BackendStore.remove`); (3) make every re-wire path reuse the canonical id. Then delete the loop. Also: `wiring.py` `not backend_id` reuse block should guard on `existing.base_url == backend_url` (mint a distinct id on mismatch). Blocker: write + operator-run the idempotent migration on their data first — the loop is load-bearing until then.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**

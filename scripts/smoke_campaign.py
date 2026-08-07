@@ -26,13 +26,13 @@ try:
 except ImportError:
     pass
 
-from promptpotter.application.config import (  # noqa: E402
-    configure_and_apply_pipeline,
-    load_campaign_config,
-)
+from promptpotter.application.campaign_config import load_campaign_config  # noqa: E402
 from promptpotter.application.datasets.loaders import (  # noqa: E402
     dataset_loader,
     loadable_dataset_names,
+)
+from promptpotter.application.pipeline_resolve import (  # noqa: E402
+    configure_and_apply_pipeline,
 )
 from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
 from promptpotter.presentation.views.notebook_run import (  # noqa: E402

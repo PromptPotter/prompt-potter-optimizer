@@ -11,7 +11,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import LivesConfig
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 

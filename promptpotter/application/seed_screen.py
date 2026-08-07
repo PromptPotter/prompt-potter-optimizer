@@ -188,7 +188,7 @@ async def screen_inner_seeds(
 ) -> SeedScreenOutcome:
     """Each reading REPORTS its own wall-clock and wire cost, so price a wide sweep off the last
     reading rather than a figure written here (``<one-budget>``) — a quoted rate goes stale."""
-    from promptpotter.application.config import configure_and_apply_pipeline, load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
@@ -196,6 +196,7 @@ async def screen_inner_seeds(
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.origin import resolve_origin_opt_search_point
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.infrastructure.store.io import write_json

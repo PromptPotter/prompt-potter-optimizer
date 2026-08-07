@@ -28,7 +28,7 @@ from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecor
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.exploration import Observation, RulerEntry
     from promptpotter.application.intelligence.indexes.axis import AxisIndex

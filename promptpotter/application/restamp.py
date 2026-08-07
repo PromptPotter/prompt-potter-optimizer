@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, Union, get_args, get_origin
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.application.config import CampaignConfig, freeze_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign

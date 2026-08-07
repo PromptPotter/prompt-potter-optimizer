@@ -5,7 +5,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.config.settings import DATASET_NAME

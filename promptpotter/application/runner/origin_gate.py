@@ -21,7 +21,7 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks

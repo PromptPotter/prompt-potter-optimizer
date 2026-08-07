@@ -18,7 +18,7 @@ from promptpotter.shared.identity import IdentityContext
 if TYPE_CHECKING:
     import argparse
 
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.runner.entry import RunMode

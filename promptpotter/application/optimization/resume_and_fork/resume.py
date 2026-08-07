@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.config import freeze_campaign_config
+from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,

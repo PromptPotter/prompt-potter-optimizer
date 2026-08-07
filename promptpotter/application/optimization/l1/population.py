@@ -6,13 +6,13 @@ import copy
 import logging
 from typing import Any
 
-from promptpotter.application.config import apply_node_overlay
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
     L1_PROMPT_BLOCKS_IN_LIBRARY,
     L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
 )
+from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema

@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import Query
 from pydantic import Field
 
-from promptpotter.application.config import (
+from promptpotter.application.campaign_config import (
     CampaignConfig,
     Estimand,
     MechanismConfig,

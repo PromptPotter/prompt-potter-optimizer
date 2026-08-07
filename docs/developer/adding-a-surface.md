@@ -172,7 +172,7 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ## 5. A connector (backend)
 
-A new backend kind. Intentionally local — **no edits to `application/config.py`
+A new backend kind. Intentionally local — **no edits to `application/campaign_config.py`
 or `infrastructure/backend.py`.**
 
 **Recipe:**

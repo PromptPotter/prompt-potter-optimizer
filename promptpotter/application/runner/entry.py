@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.config import CampaignConfig, apply_node_overlay
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
@@ -24,6 +24,7 @@ from promptpotter.application.origin import (
     CampaignOrigin,
     establish_campaign_origin,
 )
+from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.run_observers import (
     ForkInfo,
     RunObservers,

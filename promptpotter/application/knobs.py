@@ -14,12 +14,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from promptpotter.application.config import (
-    CampaignConfig,
-    Estimand,
-    Knob,
-    Scope,
-)
+from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 
 logger = logging.getLogger(__name__)
@@ -92,7 +87,7 @@ def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[Knob
             "knob is invisible to the config map and classifies DATA_AFFECTING on every "
             "resume. Declare its scope + estimand(s) on the field itself: "
             "`Annotated[<type>, Knob(Scope.POLICY, Estimand.STOPPING)]` "
-            "(promptpotter/application/config.py)."
+            "(promptpotter/application/campaign_config.py)."
         )
     return out
 

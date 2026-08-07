@@ -263,7 +263,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | Token shape | `promptpotter/domain/run_records.py` |
 | Sole spend writer + halt accessor | `promptpotter/infrastructure/projections/live_dashboard/view.py` |
 | Bucket shapes + cycle totals | `promptpotter/infrastructure/projections/live_dashboard/state.py` |
-| Budget config | `promptpotter/application/config.py` |
+| Budget config | `promptpotter/application/campaign_config.py` |
 | Stop reason | `promptpotter/domain/phases.py` |
 | Budget probe + halt | `promptpotter/application/runner/entry.py` |
 | CLI flag | `promptpotter/presentation/cli/parsers.py` |

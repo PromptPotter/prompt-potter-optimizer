@@ -40,7 +40,7 @@ from promptpotter.presentation.views.display import (
 from promptpotter.presentation.views.live.display import LiveDisplay
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition

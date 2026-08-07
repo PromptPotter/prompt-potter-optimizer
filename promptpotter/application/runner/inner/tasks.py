@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field, ValidationError
 
-from promptpotter.application.config import CampaignConfig, LivesConfig
+from promptpotter.application.campaign_config import CampaignConfig, LivesConfig
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel

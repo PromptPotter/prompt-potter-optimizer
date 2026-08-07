@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from promptpotter.application.config import (
+from promptpotter.application.campaign_config import (
     MechanismConfig,
     OptimizationConfig,
     PromptBlockCatalogue,

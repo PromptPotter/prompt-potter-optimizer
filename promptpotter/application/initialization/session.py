@@ -19,7 +19,7 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.mint import CyclePlan
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
@@ -181,10 +181,11 @@ def auto_mint_session(
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
     L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
-    from promptpotter.application.config import freeze_campaign_config, resolved_dataset_name
+    from promptpotter.application.campaign_config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
+    from promptpotter.application.pipeline_resolve import resolved_dataset_name
     from promptpotter.domain.campaign import Campaign
 
     target_hash = hop.cycle_id.removeprefix("cycle_")
@@ -326,7 +327,7 @@ def finalize_checkin_to_active(
 ) -> None:
     """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — the cycle id stays the provisional
     ``cycle_chk_*``, since drift reads ``root_content_hash`` and not the parsed id. This mints nothing new."""
-    from promptpotter.application.config import freeze_campaign_config
+    from promptpotter.application.campaign_config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )

@@ -7,9 +7,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.config import configure_and_apply_pipeline, resolved_dataset_name
 from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolved_dataset_name,
+)
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
@@ -17,7 +20,7 @@ from promptpotter.domain.run_records import CycleSeed
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample

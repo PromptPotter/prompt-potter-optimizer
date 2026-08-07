@@ -4,7 +4,7 @@ Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
 ``Connector(...)`` binding (`protocol.py`), registered via the dict in
 `__init__.py`. Adding a connector is intentionally local — no edits to
-`application/config.py` or `infrastructure/backend.py`. Operating one is
+`application/campaign_config.py` or `infrastructure/backend.py`. Operating one is
 local too: model/provider switches go in `datasets/{name}/pipeline.yaml::
 nodes.{name}.config`, never in the backend's repo.
 

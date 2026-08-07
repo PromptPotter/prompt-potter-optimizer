@@ -37,7 +37,7 @@ LEDGER_BASELINE = {
     # capability, not a relocation — and it is fenced exactly like `noise-floor`, so the loop
     # never learns it exists. The alternative was a scratchpad script, which would have left
     # the panel's composition unreproducible.
-    "modules": 300,
+    "modules": 302,
     "init_files": 47,
     # A FLOOR: none of the 5 is a shim, and emptying any of them breaks the app. `connectors`
     # and `presentation/api/routers/campaigns` ARE registries — the submodule imports run the

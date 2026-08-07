@@ -11,7 +11,6 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import Field
 
-from promptpotter.application.config import resolve_pipeline_config_params
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
@@ -21,6 +20,7 @@ from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response

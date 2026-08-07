@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.config import (
+from promptpotter.application.campaign_config import (
     CampaignConfig,
     apply_inherited_overlay,
-    configure_and_apply_pipeline,
     load_campaign_config,
 )
 from promptpotter.application.datasets.authored import (
@@ -45,6 +44,7 @@ from promptpotter.application.optimization.task_context import (
     checkin_call_context,
     load_or_build_task_context,
 )
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop

@@ -44,7 +44,7 @@ from promptpotter.shared.identity import claim_email
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.search_point import TaskDecomposition
 

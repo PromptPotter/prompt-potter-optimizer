@@ -90,7 +90,7 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     inner optimizer spend its whole budget reasoning and emit zero content
     (``reasoning_budget_exhausted``) — a paid-for, loop-stalling failure with no wrong-answer
     symptom, so the gate NOT firing is the silent harm here."""
-    from promptpotter.application.config import check_model_reasoning_floors
+    from promptpotter.application.preflight import check_model_reasoning_floors
     from promptpotter.infrastructure.llm.registry import model_profile
 
     prof = model_profile("deepseek/deepseek-v4-flash:nitro")
@@ -806,7 +806,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     `campaign.json`), scoring a no-op as a legitimate mutation. (3) `populate_by_name` must
     stay off: if the old key still validated, a rename the model ignored would look applied.
     """
-    from promptpotter.application.config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
@@ -1597,7 +1597,7 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
     scales. Silent in the worst way: every cell completes, every number is plausible, and the
     pooled verdict is wrong with no symptom.
     """
-    from promptpotter.application.config import load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.runner.inner.tasks import (
         inner_instrument_config,
         load_inner_tasks,

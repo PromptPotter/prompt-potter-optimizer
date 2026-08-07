@@ -10,7 +10,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
@@ -106,12 +106,12 @@ async def _emit_preflight_and_init_session(
     cb: RunCallbacks,
     session: Session,
 ) -> None:
-    from promptpotter.application.config import (
-        check_model_reasoning_floors,
-        run_preflight_checks,
-    )
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         get_optimizer_schema,
+    )
+    from promptpotter.application.preflight import (
+        check_model_reasoning_floors,
+        run_preflight_checks,
     )
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 

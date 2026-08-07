@@ -45,7 +45,7 @@ from promptpotter.shared.instrument import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult, SpendRollup
     from promptpotter.domain.sample import Sample
@@ -447,7 +447,7 @@ async def _run_inner_campaign(
     # Lazy imports: heavy application machinery, and `run_optimization` would be a
     # package-internal import cycle (`entry.py` imports `publish_inner_spawn_context`
     # from here). Deferring to call time keeps this module import-light.
-    from promptpotter.application.config import load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,

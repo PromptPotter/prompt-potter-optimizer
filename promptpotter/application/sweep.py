@@ -28,7 +28,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx
 
@@ -92,8 +92,8 @@ async def run_sweep_batch(
 ) -> SweepBatchResult:
     """Mint one fork per payload; restore the active pointer on exit. ``reload_ctx`` is INJECTED, not called: the pointer moves
     once per payload, so a single pre-resolved session would bind every fork to the first."""
-    from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.initialization.wiring import init_services
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
 

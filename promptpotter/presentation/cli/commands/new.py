@@ -30,7 +30,7 @@ from promptpotter.presentation.views.startup_checklist import checkin_line
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
@@ -286,7 +286,7 @@ async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
-    from promptpotter.application.config import load_campaign_config as _load_cfg
+    from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,

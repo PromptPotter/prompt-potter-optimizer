@@ -25,7 +25,7 @@ from promptpotter.presentation.cli.commands._shared import (
 from promptpotter.presentation.cli.session import load_session
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
