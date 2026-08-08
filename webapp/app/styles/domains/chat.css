@@ -379,3 +379,168 @@
 .chat-decision-btn.btn-primary{border-color:var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent)}
 .chat-decision-btn.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger)}
 .chat-decision-err{margin:0;font-size:12px;color:var(--color-danger)}
+
+/* ── The run card ─────────────────────────────────────────────────
+   THREE boxes, not one compartment: stats and config side by side, the
+   samples preview full-width beneath them. The card itself is only a grid
+   — no border, no fill — so the boxes read as separate objects sitting on
+   the chat's own background rather than as panels planted in a frame.
+
+   Each box is compact BY DEFAULT and complete on click; the height budget
+   is what makes the card liveable in a thread, so keep summaries to one
+   line and put everything else behind the disclosures.
+
+   LIVE it pins to the bottom of the scrollport (`.chat-messages` is the
+   scroll container) and is height-capped, so a tall card cannot eat the
+   conversation it belongs to; stopped, it un-pins and sits in the log.
+   The columns wrap via auto-fit — no breakpoint of its own, which keeps
+   this out of the css-breakpoints allowlist. */
+/* Two boxes SIDE BY SIDE, and no titles on either: the card gets about six
+   lines in a chat thread, and three of them used to go to headings that named
+   what the content already showed. `flex-wrap` stacks them again when the
+   thread is too narrow to hold both — no breakpoint of its own. */
+.run-card{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;width:100%;align-self:stretch}
+.run-card.is-live{position:sticky;bottom:0;z-index:2;max-height:min(48vh,460px);overflow:auto;padding-top:6px}
+/* The SECONDARY surface, not the primary one: `.chat-panel` is primary, so a
+   primary box was a card the reader could not see the edges of. This is the
+   same surface the thread's own AI messages sit on. */
+.run-box{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+.run-card.is-live .run-box{border-color:rgba(var(--color-accent-rgb),0.45)}
+/* Opening a disclosure takes the whole row back. Half a card is the right size
+   for a summary and the wrong size for a prompt or a 400-row table, and the
+   thing the reader just opened is the thing that should get the width. */
+.run-box:has(.run-diff[open]),.run-box:has(.hsp-full){flex-basis:100%}
+/* The head is ONE row and stays one — the picker and the copy button hold their
+   width, the numbers give theirs up first. */
+.run-box-head{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-height:20px}
+.run-box-head>*{flex:0 0 auto}
+.run-box-note{margin:0;font-size:12px;color:var(--color-text-tertiary)}
+
+/* The headline — cost, lift, and the accuracy pair, on one line. `spent` sits
+   in the same row as the figure so the box needs no label above it. */
+.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:5px;flex-wrap:nowrap;min-width:0;overflow:hidden;font-size:11.5px;color:var(--color-text-secondary)}
+.run-headline strong{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--color-text-primary)}
+.run-headline-unit{font-size:11px;color:var(--color-text-tertiary)}
+.run-headline-sep{color:var(--color-border)}
+.run-headline-lift,.run-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
+.run-headline-was{color:var(--color-text-tertiary)}
+/* The cut-short panel size. Quietest weight the card has — a stopped arm is the
+   normal outcome of elimination, so a badge for it would shout on most rounds. */
+.run-headline-cut{font-size:10.5px;color:var(--color-text-tertiary)}
+/* Hover/focus targets advertise themselves with a dotted rule, NOT `cursor:help`
+   — the OS arrow-with-question-mark reads as an error state, and the native
+   `title` delay it came with made the card look broken before it appeared. */
+.run-headline-acc,.run-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
+.run-headline-acc:focus-visible,.run-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
+.run-lift-card{max-width:280px}
+.run-lift-theta{margin:0 0 3px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary)}
+.run-lift-note{margin:0;font-size:11.5px;line-height:1.45;color:var(--color-text-tertiary)}
+.run-lift-note+.run-lift-note{margin-top:4px}
+
+/* Config — the summary line IS the summary: which fields moved, named. The
+   full node surface is the disclosure body. */
+.run-diff>summary{cursor:pointer;display:flex;flex-direction:column;gap:2px;list-style:revert}
+.run-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
+.run-diff-label{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary)}
+/* The change summary: one group per dict, the glyph as its key. Flat, it ran
+   `changed: A · B · C · llm_only.output_schema` — every node name repeated in
+   front of every param, on a line already the widest in the box. */
+.run-diff-changes{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;line-height:1.45;color:var(--color-text-primary)}
+.run-diff-group{display:flex;align-items:baseline;gap:4px;min-width:0}
+.run-diff-key{flex:0 0 auto;font-size:10px;color:var(--color-text-tertiary)}
+.run-diff-node{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary)}
+.run-diff-verdict{font-size:11.5px;line-height:1.4;color:var(--color-text-tertiary)}
+.run-diff[open]>summary{margin-bottom:6px}
+
+/* Flipped rows — which samples changed hands, BY ID. Direction reads from
+   the label ("now right" / "now wrong"), never from colour alone. ONE row that
+   wraps, not a stack: the four segments are one partition, and stacked they read
+   as four independent claims. */
+.run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 5px;font-size:11.5px;line-height:1.6}
+.run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-tertiary)}
+.run-flip-sep{color:var(--color-border)}
+.run-flip-line{margin:0;color:var(--color-text-secondary)}
+.run-flip-line strong{font-family:var(--font-mono);color:var(--color-text-primary)}
+.run-flip-line.is-gained strong{color:var(--color-success)}
+.run-flip-line.is-lost strong{color:var(--color-danger)}
+/* The ids and their before→after, in the card behind the count. Inline they ran
+   wider than every other line in the box; here they cost nothing until asked
+   for, and carry the evidence `title` could only whisper. */
+.run-flip-card{max-width:340px;max-height:280px;overflow:hidden}
+.run-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:11px}
+.run-flip-list li{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.run-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}
+.run-flip-was{font-family:var(--font-mono);color:var(--color-text-tertiary);text-decoration:line-through}
+.run-flip-now{font-family:var(--font-mono);color:var(--color-text-primary)}
+.run-flip-gt{margin-left:auto;color:var(--color-text-tertiary)}
+
+/* Hard-samples preview — the middle rung between the one-glyph strip and the
+   full table, and a WINDOW rather than a list: three rows, a gutter to slide
+   them along the walk, and the roster's shape stacked beside them. Three
+   columns instead of three stacked blocks is what keeps the whole box three
+   lines tall; `flex-wrap` folds the spread underneath on a narrow thread, so
+   this needs no breakpoint of its own. */
+.hsp{display:flex;flex-direction:column;gap:4px}
+.hsp-note{margin:0;font-size:12px;color:var(--color-text-tertiary)}
+.hsp-walk{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+
+/* The gutter IS the axis: ▲ past, ▼ future, and the hairline between them says
+   the three rows are a window sliding along something longer. */
+.hsp-nav{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:1px}
+.hsp-nav-line{flex:1 1 auto;width:1px;background:var(--color-border);min-height:4px}
+.hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:9px;line-height:1;color:var(--color-text-tertiary);cursor:pointer}
+.hsp-nav-btn:hover:not(:disabled){color:var(--color-accent)}
+.hsp-nav-btn:disabled{opacity:.28;cursor:default}
+.hsp-nav-btn:focus-visible,.hsp-nav-home:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+/* Back to the head of the walk — present only while the window is parked away
+   from it, so it never reads as a control with nothing to do. */
+.hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:8px;line-height:1;color:var(--color-accent);cursor:pointer}
+
+/* REAL rows: one bordered block, banded, with a rule between each. Three
+   floating lines read as a fragment of a paragraph; this reads as a table. */
+.hsp-rows{list-style:none;margin:0;padding:0;flex:1 1 260px;min-width:0;display:flex;flex-direction:column;border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);overflow:hidden}
+/* ONE line per row, always. No query text lives here — a JustLogic row is 1,500
+   characters of premises, and printing it rebuilds the wall this box replaces. The
+   text is on `title`; the full table is one click below. */
+.hsp-row{display:flex;align-items:baseline;gap:8px;padding:1px 6px;font-size:11.5px;min-width:0;line-height:1.7;white-space:nowrap}
+.hsp-row+.hsp-row{border-top:1px solid var(--color-border)}
+.hsp-row:nth-child(even){background:var(--color-background-tint)}
+.hsp-row.is-now{background:rgba(var(--color-accent-rgb),0.10)}
+.hsp-mark{flex:0 0 auto;width:1em;text-align:center;color:var(--color-text-tertiary)}
+.hsp-row.is-now .hsp-mark{color:var(--color-accent)}
+.hsp-row.is-done .hsp-mark{color:var(--color-success)}
+.hsp-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto;min-width:3.6em}
+/* Colour by the SAME bucket the stacked counts use, so the column beside these
+   rows reads as their legend. It rides the rate, which states the fact in
+   words either way — never colour alone. */
+.hsp-rate{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);flex:0 0 auto}
+.hsp-rate.is-never{color:var(--color-danger)}
+.hsp-rate.is-partly{color:var(--color-warn)}
+.hsp-rate.is-always{color:var(--color-success)}
+/* The state label, and it carries the row's meaning — the marks are decoration
+   over it, never the only carrier (no colour-alone state). */
+.hsp-tag{margin-left:auto;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);flex:0 0 auto}
+.hsp-row.is-now .hsp-tag{color:var(--color-accent)}
+
+/* The spread summarises the roster, so it IS the control that opens the roster
+   — a separate "show all" line said the same thing and cost a row. Its own box
+   beside the rows: same three lines, a different question, so a shared frame
+   would have read as three more rows. */
+.hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px 8px;border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);font:inherit;text-align:left;cursor:pointer}
+.hsp-spread:hover{border-color:var(--color-accent)}
+.hsp-spread:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+.hsp-b{display:flex;align-items:baseline;gap:5px;font-size:11px;line-height:1.7;color:var(--color-text-tertiary)}
+.hsp-b strong{font-family:var(--font-mono);color:var(--color-text-primary)}
+.hsp-dot{width:6px;height:6px;border-radius:50%;align-self:center;flex:0 0 auto}
+.hsp-b.is-never .hsp-dot{background:var(--color-danger)}
+.hsp-b.is-partly .hsp-dot{background:var(--color-warn)}
+.hsp-b.is-always .hsp-dot{background:var(--color-success)}
+.hsp-of{font-size:11px;color:var(--color-text-tertiary)}
+.hsp-full{margin-top:4px}
+
+/* The frozen item — a finished run, left in the log. Deliberately plain:
+   it is a message, not a pane, and nothing in it can update. */
+.chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:4px}
+.run-summary-title{font-size:12.5px;font-weight:600;color:var(--color-text-primary)}
+.run-summary-line{font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-secondary)}
+.run-summary-changes{margin:0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}

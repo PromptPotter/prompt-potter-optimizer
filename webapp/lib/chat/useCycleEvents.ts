@@ -5,6 +5,7 @@ import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import {
   projectionToActivity,
+  sampleOrderFrom,
   sampleScoredCandidate,
   snapshotToActivity,
   type ActivityItem,
@@ -57,6 +58,11 @@ interface CycleEventsState {
   // The single transient "scoring i/n" chip — replaced, never appended.
   progress: ActivityItem | null;
   connected: boolean;
+  // The declared scoring order for the candidate being scored — STATE, not an item,
+  // which is why it rides beside the feed rather than in it. This stream is its only
+  // channel (`sampleOrderFrom`); nothing persists it to `dashboard.json`, so without
+  // this field no surface can say which sample comes next.
+  sampleOrder: number[] | null;
 }
 
 // Addressed by the viewed CYCLE PATH, not bare ids: the feed follows the LEAF hop
@@ -69,6 +75,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
   const [trail, setTrail] = useState<ActivityItem[]>([]);
   const [progress, setProgress] = useState<ActivityItem | null>(null);
   const [connected, setConnected] = useState(false);
+  const [sampleOrder, setSampleOrder] = useState<number[] | null>(null);
 
   // Render-phase guarded reset on unit switch (webapp/CLAUDE.md § State reset on
   // prop change): clear the prior cycle's feed in the same commit, no stale frame.
@@ -81,6 +88,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     setTrail([]);
     setProgress(null);
     setConnected(false);
+    setSampleOrder(null);
   }
   // Keep the current path for the subscribe without depending on the array's
   // per-render identity — the effect keys on the stable `key` string alone.
@@ -129,7 +137,17 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
         setSummaries(snapshotToActivity(env.payload));
         setTrail([]);
         setProgress(null);
+        // The snapshot is dashboard.json, which does not carry the order — so a
+        // reconnect mid-candidate legitimately has no forward view until the next
+        // candidate starts. Clearing is the honest move; keeping the prior order
+        // would point at a walk that is no longer running.
+        setSampleOrder(null);
         return;
+      }
+      const order = sampleOrderFrom(env);
+      if (order) {
+        setSampleOrder(order);
+        return; // state, not an item — nothing to append
       }
       // Live candidate fitness from the running composite the scorer rides on
       // each sample — a plain upsert (no boundary clear), so the candidate's
@@ -158,5 +176,5 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     return () => es.close();
   }, [key, addressGone]);
 
-  return { activity: [...summaries, ...trail], progress, connected };
+  return { activity: [...summaries, ...trail], progress, connected, sampleOrder };
 }

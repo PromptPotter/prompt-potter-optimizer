@@ -297,7 +297,65 @@ controls:
                  # do not "restore" it to a live-looking toggle (I3)
   - id: welcome_illustration
     do: Empty chat (no thread yet) shows the welcome illustration, not a scripted fake
-        conversation. There is no demo thread.
+        conversation. There is no demo thread. Suppressed once ANY tail content exists —
+        the live activity segment or the run card — never drawn over a bound campaign.
+    status: ok
+  - id: run_card
+    do: Last item in the thread; renders only with a cycle bound and something measured.
+        TWO untitled boxes — what the run cost and changed, then where it is in the data.
+        LIVE it pins to the bottom of the scrollport and is height-capped (a tall card must
+        not eat the conversation); stopped it un-pins and stays put. On the live→stopped
+        edge the thread also gains ONE frozen `run` record per cycle, holding captured
+        values — a `resume` must leave it saying what the finished run ended at. Every
+        number is served (runSummary). The visible lift is the PERCENT pair — the shown
+        candidate and matched_origin_accuracy on its own rows, "from X" absent when
+        unstamped and an absent floor never drawn as 0. θ is jargon, so it rides the hover
+        card behind that pair and only while `best` is shown: ability_delta is the
+        incumbent's, per cycle, so captioning another candidate with it would be a lie.
+        With no measured rate at all, θ takes the visible slot rather than vanishing.
+        A panel CUT SHORT (scored_samples &lt; expected_samples — elimination or an
+        escalation abort) trails the pair as `23/28` in the card's quietest weight, and
+        the hover names it a partial panel, NOT a verdict. Silent when the panel is
+        whole, and silent mid-round: expected_samples lands at round close, so this
+        never doubles as a progress bar.
+    status: ok
+  - id: run_card.flips
+    do: ONE line, and it is a partition that CLOSES — the reference NAMED, rows both sides
+        measured, then origin-missed→shown-hits, then its regression twin, then the
+        UNCHANGED remainder that makes them add up. The reference is stated because it is
+        NOT the percent pair's: that floor is served matched_origin_accuracy, computed off
+        RoundParent.results, so it is the candidate's parent (the origin at round 1, the
+        prior winner after). These rows are the campaign origin — the only per-sample panel
+        this app is served, since a round document's `results` carries the elected winner's
+        rows when there is one. Both directions labelled in text. The denominator is
+        stated once, never repeated per direction: two numerators over one total read as
+        slices that fail to reach it, and the remainder is the largest group in every real
+        run. Follows the searchpoint PICKER — one subject per box, the same one the label
+        and the diff name; a control that moves two of three lines reads as broken, not as
+        scoped. Shown searchpoint is round 0 → SILENT, because the verdict line already
+        says the round elected nobody. Only the COUNTS are on the line; the ids and their
+        before→after answers are in the hover card behind them, untruncated. Rows joined on
+        sample_id only.
+    status: ok
+  - id: run_card.samples
+    do: THREE rows, always, and they are a window on an axis — not a top-N list. Running,
+        the axis is the declared scoring order and the cursor is the sample in flight
+        (scoring now / just measured / next in line, and never the word "will" — PoBB can
+        stop a candidate before the order is reached). Idle, the axis is the served
+        hard_sample_rank order from rank 1. ▲/▼ slide the window one step and are DISABLED
+        at the ends, never hidden; a pinned window follows the run again as soon as it is
+        stepped back onto the cursor, and drops entirely when the candidate changes. The
+        never/partly/always counts stack beside the rows and are themselves the control
+        that opens the full table. Colour is a second carrier only — every bucket keeps its
+        word, every row its label.
+    status: ok
+  - id: run_card.searchpoint
+    do: best | latest | selected — same picker, same resolution, as the pipeline node
+        detail (one hook). An UNAVAILABLE state is DROPPED, never rendered disabled, and a
+        one-option group is not rendered at all (the surface's own label already names what
+        is shown). `selected` appears only while a candidate is picked on another surface.
+        The three absences read differently: loading / scoring-in-progress / nothing
+        measured — an empty config table would read as "this program has no params".
     status: ok
 ```
 

@@ -43,14 +43,15 @@ the §0 schema-first gate is untouched by it (no new command, no new event, no n
 
 One thread is an ordered list of typed **items**. Extend — do not duplicate — the existing
 durable message model: `ChatMsg` in `webapp/lib/hooks/useIngestFlow.ts`
-(`user-file | user | ai | warning | error`, with the standing comment "the conversation renders from a
-list of these"). The thread carries three item families:
+(`user-file | user | ai | warning | error | run`, with the standing comment "the conversation renders from a
+list of these"). The thread carries four item families:
 
 | Family | Items | Source |
 |---|---|---|
 | **Message** | `user`, `user-file`, `ai`, `warning`, `error` | operator input + assistant replies (existing `ChatMsg`) |
 | **Activity** | the **generic** agent vocabulary — `step` (running → done), `progress`, `warning`, `error`, `merge` — plus the **optimizer specialization** `candidate` / `round` | projected from the cycle event stream (§2) |
 | **Decision** | a labelled button group with a pending/acted state | raised by the copilot; fires an existing command (§4) |
+| **Record** | `run` — a finished run, frozen (`RunSummary`) | committed by the client on the live→stopped edge |
 
 **The imprint is the generic `step`.** Everything the Potter *does* — an optimizer LLM call, a
 web search, a code execution, an MCP call, a backend match — is one `step`: an icon + label +
@@ -66,6 +67,21 @@ team deletes (§6).
 Activity and decision items are **rendered, never authored by the client** — the client
 projects them from the stream and from copilot turns. Message items are the only ones the
 operator and assistant write. This is the structural line that keeps the thread honest.
+
+**The `run` record is the one deliberate crossing of that line, and the reason is that a
+task which has ENDED is neither.** Its facts stop changing, and the thread has to keep
+saying what it ended at while the surface above moves on to the next run. So the live view
+— the **run card**: what the run cost and changed, over a three-row window on the scoring
+walk, pinned to the thread tail while the cycle runs — is an ordinary projection like any other;
+the moment the run stops, the client freezes a **snapshot of served values** into the
+message list as a `run` item. It holds values rather than a pointer *because* a `resume`
+re-animates `dashboard.json`, and `resume --from N` can rewrite the round files beneath it
+— anything holding a pointer would silently restate itself as the next run. One item per
+cycle, and the guard lives with the list it protects.
+
+The snapshot is in-memory for the session and does **not** survive a reload until thread
+persistence lands (§5). A reload of a stopped campaign shows the run card in its final
+state and no frozen item — correct, since there is no *earlier* run to log.
 
 ## 1a. Liveness — the Focus chain (the *now*, complementing the stream)
 
@@ -127,7 +143,7 @@ frontend accessibility invariant.
 
 **The feed is curated, not the firehose** (`webapp/lib/chat/activity.ts`):
 high-signal kinds become items; the per-sample `sample_scored` torrent collapses
-into a single replaced **progress chip**; `sample_order_preview` / `pobb_backfill` /
+into a single replaced **progress chip**; `pobb_backfill` /
 detail-less `llm_call_progress` heartbeats / `token_usage` map to `null` — with the one
 special case that the **L4 inner-campaign** heartbeat *does* carry `detail`
 ("inner rX/Y · best Z%") and upserts one stable-id **progress** chip, so the outer chat
@@ -136,6 +152,15 @@ never reads as silent; **`command`** surfaces as the small "control applied" **m
 a non-item *unless rejected* — acking an applied command would print the same fact twice.
 `decision` / `stream_snapshot` are non-items.
 Every `ProjectionKind` maps to an item or an explicit `null` — no orphan.
+
+**A non-item is not the same as discarded.** `sample_order_preview` yields no item
+(nothing *happened* — it is the order the scorer is about to walk), but the stream is
+its **only** channel: `LiveDashboardView` never persists it, so `dashboard.json` carries
+the sample being scored *now* and, on closed rounds, the order after the fact
+(`RoundSummary.selection`). The forward view exists nowhere else. It is therefore read
+as STATE beside the feed (`sampleOrderFrom` → `useCycleEvents().sampleOrder`) and drives
+the run card's "next in line". A *declared* order, never a promise — PoBB can stop a
+candidate before its tail is reached, so no surface may word it as "will".
 
 ## 3. Transport — the first SSE consumer, over a cross-process ledger tail
 
@@ -229,8 +254,13 @@ clean internal structure plus a documented **delete-list**:
   `ProjectionEnvelope → ActivityItem` translator (§2) + the SSE client (§3) + the
   conversation endpoint (§4a).
 - **Delete to de-PromptPotter:** the optimizer-specific panes (`webapp/components/dashboard/`,
-  `verify/`, `tree/`) and the optimizer-specific activity mappings (round-summary, PoBB,
-  candidate scoreboard) — leaving a generic chat + tool-activity app.
+  `verify/`, `tree/`), the optimizer-specific activity mappings (round-summary, PoBB,
+  candidate scoreboard), and the **run card + its `run` record**
+  (`components/chat/RunCard.tsx`, `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`)
+  — leaving a generic chat + tool-activity app.
+  The *pattern* the card is an instance of — one always-current pane pinned to the
+  thread tail while a task runs, frozen into the log when it ends — is worth keeping;
+  its contents are not.
 
 State in the spec that this core **can be lifted into its own module later**; the seam is
 reversible by design. Don't pay the extraction cost until a second consumer earns it

@@ -22,10 +22,16 @@ assistant" endpoint is a deferred Arc 2 (see chat-foundation.md §4a).
   (`ProjectionEnvelope → ActivityItem`, 1:1 with the CLI's `LiveDisplay`; curated,
   with the per-sample firehose mapped to `null` / a single progress chip).
 - **The SSE client** — `lib/chat/useCycleEvents.ts` (snapshot → tail →
-  heartbeat → reconnect), the webapp's first EventSource consumer.
+  heartbeat → reconnect), the webapp's first EventSource consumer. It carries one
+  piece of STATE beside the item feed — `sampleOrder`, the scorer's declared order
+  (`sampleOrderFrom`) — because that frame is a non-item the stream alone reports.
 - **The decision surface** — `lib/chat/decision.ts` + `components/chat/LiveSegment.tsx`
   (button-gated agency over the existing `/commands/{kind}` set; the origin gate
   was folded in here from the removed global modal).
+- **The sticky-then-frozen shape** — an always-current pane pinned to the thread tail
+  while the task runs, snapshotted into the durable message list when it ends (the
+  `run` `ChatMsg` kind). The *shape* is reusable for any long task; what fills it here
+  is not (see the delete-list).
 
 ## Delete to de-PromptPotter
 
@@ -42,6 +48,9 @@ To strip this down to a generic chat + tool-activity app, remove:
 - **The optimizer-specific decision** in `lib/chat/decision.ts` (the origin-gate
   group); keep the `DecisionItem` shape + `LiveSegment`'s button rendering and
   point them at your own gated commands.
+- **The run card** — `components/chat/RunCard.tsx` plus the three derivations it reads,
+  `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`, and the `runCard` slot in
+  `IngestConversation`. Keep the `run` item kind and re-point it at your own task summary.
 - The job-bar + pipeline hero + settings card inside `ChatPane.tsx` (the campaign
   telemetry chrome) — leave the `.chat-panel` thread + `LiveSegment`.
 

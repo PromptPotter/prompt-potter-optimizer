@@ -8,7 +8,7 @@ import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { TERMS } from "@/lib/terms";
-import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
+import { headlineStats, isSelfOptimization, readSpend, runSummary } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
 import { Switch } from "@/components/ui";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
@@ -24,6 +24,7 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
 import { deriveDecision } from "@/lib/chat/decision";
 import { LiveSegment } from "@/components/chat/LiveSegment";
+import { RunCard } from "@/components/chat/RunCard";
 
 // Fireflies orbiting the wand frame. Offset, phase and size are all that differ
 // between them, so they are data rather than eight near-identical CSS rules.
@@ -106,7 +107,7 @@ export function ChatPane({
   onMinted,
 }: Props) {
   // Self-sourced live state + identity for the job bar + spend chips.
-  const { dash } = useDashboard();
+  const { dash, isLive } = useDashboard();
   // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
   // hop the dashboard shows) — drilling into an L4 inner campaign tails that inner
   // cycle's own activity, not the outer thread's candidate cards. The gate decision
@@ -142,6 +143,25 @@ export function ChatPane({
     setPrevNewCampaignTick(newCampaignTick);
     setComposing(true);
     ingest.reset();
+  }
+
+  // Freeze a run into the thread on the live→stopped EDGE, so a later `resume`
+  // leaves the finished one behind as a log entry instead of re-animating it.
+  // Render-phase guarded, and the state being adjusted belongs to a hook this
+  // component owns — the sanctioned "adjust state when an input changes" recipe.
+  //
+  // The identity check is load-bearing, not belt-and-braces: switching from a LIVE
+  // cycle to a stopped one walks the same false→null edge, and by then `dash`
+  // describes the cycle just navigated TO. Without it that click would file the new
+  // cycle's numbers under the old cycle's ending.
+  const liveCycleKey = cycleId && isLive ? cycleId : null;
+  const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
+  if (liveCycleKey !== prevLiveCycle) {
+    setPrevLiveCycle(liveCycleKey);
+    const ended = runSummary(dash);
+    if (prevLiveCycle && !liveCycleKey && ended?.cycleId === prevLiveCycle) {
+      ingest.pushRunSummary(ended);
+    }
   }
 
   // The chat's curated layer over the cycle event stream (the webapp's first
@@ -336,6 +356,24 @@ export function ChatPane({
             flow={ingest}
             variant="inline"
             liveSegment={composing ? undefined : liveSegment}
+            runCard={
+              composing || !cycleId ? undefined : (
+                <RunCard
+                  datasetName={datasetName}
+                  datasetItems={datasetItems}
+                  datasetMeasuredCount={datasetMeasuredCount}
+                  datasetUnmeasuredCount={datasetUnmeasuredCount}
+                  datasetSplitTest={datasetSplitTest}
+                  archivePerSample={archivePerSample}
+                  datasetTotals={datasetTotals}
+                  datasetStale={datasetStale}
+                  datasetError={datasetError}
+                  hardSamplesScope={hardSamplesScope}
+                  onHardSamplesScopeChange={onHardSamplesScopeChange}
+                  sampleOrder={live.sampleOrder}
+                />
+              )
+            }
           />
         </div>
 
