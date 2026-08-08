@@ -25,10 +25,7 @@ from promptpotter.application.views.view_models import (
     ViewContext,
     WarningEntry,
 )
-from promptpotter.domain.opt_search_point import (
-    build_candidate_flat,
-    flatten_sp_summary,
-)
+from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate

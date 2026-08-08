@@ -2546,7 +2546,7 @@
       },
       "NodeOutputSchema": {
         "additionalProperties": false,
-        "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``validators/l1_strict.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``\nact on the optimizer side; the target-side axis is spec-only today.",
+        "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``\nact on the optimizer side; the target-side axis is spec-only today.",
         "properties": {
           "field_descriptions": {
             "additionalProperties": {

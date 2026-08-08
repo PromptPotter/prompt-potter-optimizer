@@ -19,7 +19,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   is asked to return. `domain/pipeline_schema.py::NodeOutputSchema`, edited at
   `datasets/{name}/pipeline.yaml::nodes.{node}.config.output_schema`. (2) the
   **optimizer's own** response schema: what `l1_generate` returns, built by
-  `validators/l1_strict.py::build_l1_response_schema`. The L4 levers named
+  `dispatch/l1_wire_schema.py::build_l1_response_schema`. The L4 levers named
   `output_schema_*` act on (2). Sense (1) is where a "describe the fields" axis
   belongs; building it against (2) is the mistake this section was written for.
 - **`seed`** — three senses. (1) **`CycleSeed`** — the chosen starting point a
@@ -258,7 +258,11 @@ The persisted world is a four-entity containment hierarchy
 - **Fitness / composite** — the scorer expression compiled from
   `campaign.yaml::scoring.per_sample` and `per_round`. Each measurement
   carries `{scorer_id: {score, hit, formula}}`. Rescored on every load.
-  `application/scoring/search_point_scorer.py`.
+  Computed by `application/scoring/metrics.py::compute_composite_fitness`;
+  reached through the gateway `application/scoring/search_point_scorer.py`.
+  **The gateway is not the computer** — a change to how the number is
+  *derived* lands in `metrics.py`; the gateway only guarantees that every
+  scoring call passes through one door.
 - **metric / basis** — the cell any fitness number occupies: *metric* ∈ {accuracy,
   composite, ability θ} × *basis* ∈ {subset, matched, cumulative}. A cross-product,
   not redundancy — a candidate has a subset AND a matched AND a cumulative value at

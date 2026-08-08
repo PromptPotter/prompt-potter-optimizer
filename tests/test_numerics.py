@@ -1325,7 +1325,7 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     the run completes, the dashboard looks fine, the lineage decays toward whoever drew
     the gentlest samples. The election ranks θ on the cycle's fixed δ ruler, so it does not.
     """
-    from promptpotter.application.scoring.metrics import elect_round_winner
+    from promptpotter.application.scoring.selection import elect_round_winner
 
     def res(hit: bool, sid: int) -> dict:
         return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
@@ -1373,7 +1373,7 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
         candidate_abilities,
         theta_lift_over_origin,
     )
-    from promptpotter.application.scoring.metrics import elect_round_winner, paired_fitness
+    from promptpotter.application.scoring.selection import elect_round_winner, paired_fitness
 
     def res(sid: int, fitness: float, errored: bool = False) -> dict:
         row = {"sample_id": sid, "hit": fitness > 0.5, "fitness": fitness}
@@ -1415,7 +1415,7 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     Silent harm: provider noise laundered into a round winner — the thin fluke becomes
     the next generation's parent with no error and a plausible-looking dashboard.
     """
-    from promptpotter.application.scoring.metrics import (
+    from promptpotter.application.scoring.selection import (
         _distinct_valid_cells,
         elect_round_winner,
     )
@@ -1644,7 +1644,7 @@ from promptpotter.application.optimization.pobb.checks import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
 )
-from promptpotter.application.optimization.validators.l1_strict import (  # noqa: E402
+from promptpotter.application.optimization.validators.l1_invariants import (  # noqa: E402
     detect_invariants,
 )
 from promptpotter.application.optimization.validators.l3_output import (  # noqa: E402
@@ -2819,7 +2819,7 @@ def test_degradation_health_none_when_unmeasured():
 
 def test_l2_behavior_checks_score_conformant_vs_stub_fires():
     """Conformant L2 fire passes every behaviour check; stub fails them; no-fire ⇒ no results."""
-    from promptpotter.application.optimization.validators.l1_behavior import ValidatorContext
+    from promptpotter.application.optimization.validators.behavior_base import ValidatorContext
     from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 
     def _round(response: dict) -> dict:
@@ -3052,7 +3052,7 @@ def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     Graded inputs must separate a plainly-better candidate; binary inputs must be
     bit-identical to the historical hit-vector behavior.
     """
-    from promptpotter.application.scoring.metrics import elimination_p_best
+    from promptpotter.application.scoring.selection import elimination_p_best
 
     sids = list(range(12))
     ruler: dict[int, float] = {}  # cold ruler — flat δ, the common early-cycle case

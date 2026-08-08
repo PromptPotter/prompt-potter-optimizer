@@ -61,11 +61,12 @@ When a fix would compensate for something an upstream layer should already have 
 
 ## Working principles
 
-Four *situational* guardrails against recurring AI blind spots live in [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine; reach for them by trigger:
+Five *situational* guardrails against recurring AI blind spots live in [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine; reach for them by trigger:
 - **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, in both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, and is asked for explicitly. When the budget binds, get more from measurements already paid for.
 - **slow / costly / token-heavy LLM call, OR adding anything to a prompt** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens; the timeout, cap and provider are safety rails, not the fix. **Length is a quality tax, not only a bill** — every model degrades as its input grows, so this fires before anything is slow. Attribute a real payload per block before diagnosing, and count the response JSON Schema: it is prompt text.
 - **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason — a win nobody re-pinned rots the baseline exactly as an unexamined raise does.
 - **changed what the engine DECIDES, or added a capability at one entry point** → `<entry-point-parity>`: four ways in — CLI, AIs (skill: `/potter-run`), REST API, Js-Webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it.
+- **about to open a file you'll WORK in, or search across >3 files** → `<read-once>`: a narrow read *feels* frugal and isn't — the window keeps every line, so N pokes cost N times. Read whole at four-plus touches; never read file content through `sed`/`cat`/`head`; delegate a >3-file search and ask for the verdict, not the excerpts. And when a lookup misses, fix the [`concept-map.md`](docs/developer/concept-map.md) / [`glossary.md`](docs/glossary.md) row that should have answered it — that is the read you never pay again.
 
 ## Commands
 

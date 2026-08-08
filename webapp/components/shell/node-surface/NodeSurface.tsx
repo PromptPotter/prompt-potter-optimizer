@@ -2,9 +2,9 @@
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
-import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
-import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
-import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";
+import { PromptFieldsEditor } from "./PromptFieldsEditor";
+import { NodeConfigEditor } from "./NodeConfigEditor";
+import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
 
 // The one node surface: config → prompt → output, rendered as an inseparable
 // unit so config can never be gated away from its prompt. It renders exactly

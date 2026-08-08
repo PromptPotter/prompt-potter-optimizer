@@ -7,7 +7,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { activeNodeId } from "./layout";
 import { fmtSecs, fmtValue } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
-import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
+import { NodeConfigEditor } from "@/components/shell/node-surface/NodeConfigEditor";
 import type { NodeBlock } from "@/lib/types";
 
 interface Props {

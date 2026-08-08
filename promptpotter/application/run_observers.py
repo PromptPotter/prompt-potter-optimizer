@@ -7,9 +7,6 @@ from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.origin import (
-    build_campaign_emitter,
-)
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -40,6 +37,7 @@ __all__ = [
     "ForkInfo",
     "RunCallbacks",
     "RunObservers",
+    "build_campaign_emitter",
     "build_run_observers",
 ]
 
@@ -48,6 +46,35 @@ __all__ = [
 # slice this off a full query it was handed; the cap belongs at the writer, where the record
 # is decided.
 QUERY_PREVIEW_CHARS = 120
+
+
+def build_campaign_emitter(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    origin_accuracy: float,
+    resumed_from_round: int | None = None,
+    recorder: AuditTrailView | None = None,
+    seed_from_cycle_id: str | None = None,
+    langfuse_trace_url: str | None = None,
+) -> LiveDashboardView | None:
+    """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
+    cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
+    when the session carries no cycle to write into — the type says so now; it used to say ``Any``."""
+    opt = campaign_config.optimization
+    return LiveDashboardView.for_session(
+        session.hop,
+        tenant_root=session.tenant_root,
+        session_id=session.session_id,
+        l1_patience=opt.l1_patience,
+        n_variants=opt.n_variants,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        headline_metric=campaign_config.headline_metric,
+        langfuse_trace_url=langfuse_trace_url,
+        resumed_from_round=resumed_from_round,
+        recorder=recorder,
+        seed_from_cycle_id=seed_from_cycle_id,
+    )
 
 
 @dataclass
@@ -367,6 +394,16 @@ def build_run_observers(
         )
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
+
+    # `for_session` answers `None` on an incomplete address — the two halves the guard above
+    # already covers, plus `tenant_root` / `session_id`. Binding that None to the ledger would
+    # raise here anyway; saying which field is empty costs one line and names the cause.
+    if dashboard is None:
+        raise RuntimeError(
+            "build_run_observers: LiveDashboardView.for_session returned None — the session "
+            f"address is incomplete (tenant_root={session.tenant_root!r}, "
+            f"session_id={session.session_id!r}, hop={session.hop})"
+        )
 
     # Profile A — the outbound SSE highway is served by tailing the on-disk
     # ledger (``CycleLedgerTail``), cross-process, so there's nothing to register

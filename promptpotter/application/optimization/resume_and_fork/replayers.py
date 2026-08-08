@@ -13,10 +13,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     GatingMode,
     ResumeCheckpointKind,
 )
-from promptpotter.application.scoring.metrics import (
-    elect_round_winner,
-    elimination_p_best,
-)
+from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
 from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:

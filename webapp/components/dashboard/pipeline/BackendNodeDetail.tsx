@@ -6,7 +6,7 @@ import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
 import { useSelection } from "@/lib/SelectionContext";
 import { observeOptions, type ObserveState } from "@/lib/derivations";
 import { SegmentedControl } from "@/components/ui";
-import { NodeSurface } from "./NodeSurface";
+import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
 // Detail for the node clicked in the pipeline. It dispatches on LIFECYCLE, not on
 // node-presence:

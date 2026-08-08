@@ -140,7 +140,7 @@ def _rebank_on_branch(
 def _resync_round_headline(t: RoundResult) -> bool:
     """Re-project the round's headline off the winner's OWN row. A projection, never a second
     election — miss it and the trajectory keeps quoting the holed panel."""
-    from promptpotter.application.scoring.metrics import count_degraded_samples
+    from promptpotter.application.scoring.diagnostics import count_degraded_samples
 
     if not _headline_disagrees(t):
         return False

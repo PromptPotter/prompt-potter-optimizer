@@ -13,7 +13,7 @@ from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
     l1_generate,
 )
-from promptpotter.application.optimization.validators.l1_strict import (
+from promptpotter.application.optimization.validators.l1_invariants import (
     L1YieldStats,
     detect_invariants,
 )

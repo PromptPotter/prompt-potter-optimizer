@@ -38,8 +38,8 @@ from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
+from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.results import CycleResult, RoundResult, SpendRollup
 from promptpotter.domain.run_records import (
     ConfigOverrides,

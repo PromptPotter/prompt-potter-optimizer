@@ -148,7 +148,7 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a release.** (1) The `ui/HoverCard` primitive rides ONE hover, while the native `title=` tooltips spread across the webapp are the same job — consolidate incrementally, alongside the three bespoke popovers vs `ui/Popover`. (2) Keep candidate-CI resolution one seam if a third whisker source ever appears (CLT default vs θ-band override). (3) **Never examined, and the one with real reach:** `promptpotter/application/optimization/CLAUDE.md` asserts L2/L3/L4 are "the same family — each mutates a slower-changing surface of the level below", yet each is built from scratch (L2/L3 are escalation strategies, L4 a connector recursion). Whether the family should share machinery has never been asked, only asserted. The L2↔L4 hunt found one real collision underneath it (`NodeLayoutSpec.editor` claimed two owners of `l1_generate`'s layout, fixed `d1d792b0`), so the assertion is load-bearing enough to be wrong in places.
 
 - **`idea_fingerprint` cannot see a SEMANTIC re-proposal, and the gate built on it is the only
-  cross-round one.** `domain/opt_search_point.py::idea_fingerprint` matches content-word overlap
+  cross-round one.** `domain/candidate_diff.py::idea_fingerprint` matches content-word overlap
   between mutated VALUES, so it catches a re-proposal only when the wording survives. Measured on
   the banked corpus: **0 of 15 real re-proposal pairs caught** — including the `justlogic-d234`
   case the gate was written for, one idea ("exhaust modus tollens before answering Uncertain")

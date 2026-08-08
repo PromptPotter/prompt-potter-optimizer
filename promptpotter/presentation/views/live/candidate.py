@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
-from promptpotter.domain.opt_search_point import flatten_sp_summary
+from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.presentation.views.display import (
     CYAN,
     DIM,

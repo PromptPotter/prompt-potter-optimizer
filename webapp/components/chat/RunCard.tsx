@@ -27,7 +27,7 @@ import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import { fmtPct0, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { CopyButton, HoverCard, SegmentedControl } from "@/components/ui";
-import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
+import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPreview";
 import { SelfOptSamplesPointer } from "@/components/dashboard/samples/SelfOptSamplesPointer";
 

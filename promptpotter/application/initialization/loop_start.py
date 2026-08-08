@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import node_config_items
+from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig

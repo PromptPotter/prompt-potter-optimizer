@@ -37,7 +37,22 @@ LEDGER_BASELINE = {
     # capability, not a relocation — and it is fenced exactly like `noise-floor`, so the loop
     # never learns it exists. The alternative was a scratchpad script, which would have left
     # the panel's composition unreproducible.
-    "modules": 302,
+    #
+    # 302 -> 310 (2026-08-08): eight modules, all of them a name that had stopped describing
+    # its contents. NOT a refactor and not labelled one — each split is justified by root
+    # `CLAUDE.md` § STOP, and the measured read cost only set the ORDER. `behavior_base.py`
+    # (the check vocabulary `l2_behavior` had to import out of `l1_behavior`, re-declaring
+    # `CheckFn` verbatim beside it); `review_md.py` (the pure renderer whose module carried
+    # TWO `__all__`, the second silently shadowing the first, so its one externally-called
+    # function was never exported); `pipeline_overlay.py` + `candidate_diff.py` (two halves of
+    # `opt_search_point.py` containing zero references to its models, with disjoint callers);
+    # `l1_wire_schema.py` + `l1_invariants.py` (schema EMISSION, which neither rejects nor
+    # scores and so belonged in `dispatch/`, and the round-local collapse gates, which need no
+    # schema at all); `selection.py` + `diagnostics.py` (out of `metrics.py`, a bag name over
+    # three concerns). Two re-exports were DELETED on the way — `INVARIANT_REASONS` from
+    # `l1_strict` (claimed three call sites, had one) and `find_gt_rank`'s dead `__all__`
+    # entry — and `build_campaign_emitter` moved out of `origin.py`, which builds no projection.
+    "modules": 310,
     "init_files": 47,
     # A FLOOR: none of the 5 is a shim, and emptying any of them breaks the app. `connectors`
     # and `presentation/api/routers/campaigns` ARE registries — the submodule imports run the
@@ -82,7 +97,13 @@ LEDGER_BASELINE = {
     # 66 -> 65 (2026-08-06): `ab_replay_cycle`'s local `_rescore(items: Any)`. Its rescore now
     # happens inside the replay verdict, on a typed `RoundResult` the fold hands it, so the
     # `Any` that existed only to swallow "results or all_candidate_results, whichever" is gone.
-    "any_params": 65,
+    #
+    # 65 -> 64 (2026-08-08): `build_campaign_emitter` returned `Any` because a function-local
+    # import kept `LiveDashboardView` out of its own signature. Moving it to `run_observers.py`,
+    # which already imports that class, let the real type be written — and the honest
+    # `LiveDashboardView | None` immediately surfaced that `build_run_observers` binds the
+    # result to the ledger unguarded. The `Any` had been hiding a `None` nothing checked.
+    "any_params": 64,
     # New (2026-08-05). Lowering it is what makes the cycle-index modelling question
     # (`docs/specs/code-debt-cleanup.md`) falsifiable rather than a judgment call.
     # 73 -> 74 (2026-08-06): `modal_answer_share`. A deliberate raise for the CONTINUOUS
@@ -286,7 +307,16 @@ LEDGER_BASELINE = {
     # position dropped 118 replayed decisions in the dry run. `refile_round_decisions` states
     # what makes a foreign entry harmful rather than untidy: `replay_decisions` re-derives it
     # against the wrong round's measurements, and resume halts or fails to.
-    "docstring_lines": 3471,
+    #
+    # 3471 -> 3549 (2026-08-08): the eight-module split above (78). Every new module's
+    # docstring answers the question its existence raises — *why is this not in the file it
+    # came from* — with the defect that forced it, because a reader who cannot see that will
+    # put the next function back. `l1_wire_schema` names its twin `build_l1_response_model`
+    # and why a disagreement between them fails every parse; `selection` records that
+    # `composite_ci` may not travel with the fitness gateway because `_mean_fitness_by_cell`
+    # must stay un-predicated; `behavior_base` names the verbatim `CheckFn` duplication it
+    # ended.
+    "docstring_lines": 3549,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

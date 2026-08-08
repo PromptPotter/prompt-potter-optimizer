@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
-from promptpotter.domain.opt_search_point import node_config_items
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeType
 
 logger = logging.getLogger(__name__)

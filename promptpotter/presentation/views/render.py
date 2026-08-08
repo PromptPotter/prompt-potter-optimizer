@@ -18,7 +18,7 @@ from promptpotter.application.views.view_models import (
     RoundStartView,
     SpDiffView,
 )
-from promptpotter.domain.opt_search_point import group_diff_keys
+from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.rendering import round_winner_key
 from promptpotter.presentation.views.display import (
     BOLD,

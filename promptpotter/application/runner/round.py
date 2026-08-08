@@ -13,9 +13,7 @@ from promptpotter.application.optimization.escalation.firing import escalate_l2
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
-from promptpotter.application.optimization.validators.l1_strict import (
-    DROPPED_MANDATORY_PLACEHOLDER,
-)
+from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.output import (
     write_hard_samples_artifacts,
     write_log_md,

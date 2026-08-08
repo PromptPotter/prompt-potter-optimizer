@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.validators.l1_strict import INVARIANT_REASONS
-from promptpotter.domain.opt_search_point import node_config_items
+from promptpotter.domain.escalation_signals import INVARIANT_REASONS
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.rendering import display_fitness, round_winner_key
 
 if TYPE_CHECKING:

@@ -138,7 +138,7 @@ class NodeOutputSchema(StrictModel):
     backend node produces, parsed from ``GET /pipeline``.
 
     This is the ``output_schema`` the word belongs to. NOT the optimizer's own
-    response schema (``validators/l1_strict.py::build_l1_response_schema``), which
+    response schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which
     describes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``
     act on the optimizer side; the target-side axis is spec-only today.
     """

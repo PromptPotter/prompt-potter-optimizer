@@ -10,11 +10,8 @@ from promptpotter.application.initialization.loop_start import populate_session_
 from promptpotter.application.initialization.session import Session
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import (
-    IndividualLineage,
-    OptSearchPoint,
-    overlay_is_locked_axis_only,
-)
+from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
+from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
@@ -31,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignOrigin",
-    "build_campaign_emitter",
     "establish_campaign_origin",
     "prepare_scoring_context",
     "rescore_parent",
@@ -95,36 +91,6 @@ async def rescore_parent(
             # synthesized round name here ("origin", "round_2") names no candidate.
             label=cycle.rounds[-1].label,
         ),
-    )
-
-
-def build_campaign_emitter(
-    session: Session,
-    campaign_config: CampaignConfig,
-    *,
-    origin_accuracy: float,
-    resumed_from_round: int | None = None,
-    recorder: Any | None = None,
-    seed_from_cycle_id: str | None = None,
-    langfuse_trace_url: str | None = None,
-) -> Any:
-    """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
-    cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir."""
-    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
-
-    opt = campaign_config.optimization
-    return LiveDashboardView.for_session(
-        session.hop,
-        tenant_root=session.tenant_root,
-        session_id=session.session_id,
-        l1_patience=opt.l1_patience,
-        n_variants=opt.n_variants,
-        sp_budget_ttest=campaign_config.sp_budget_ttest,
-        headline_metric=campaign_config.headline_metric,
-        langfuse_trace_url=langfuse_trace_url,
-        resumed_from_round=resumed_from_round,
-        recorder=recorder,
-        seed_from_cycle_id=seed_from_cycle_id,
     )
 
 

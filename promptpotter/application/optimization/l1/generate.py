@@ -4,6 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
 from promptpotter.application.optimization.dispatch.injections.registry import citable_fields
+from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+    build_l1_response_schema,
+    effective_l1_field_names,
+)
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
@@ -16,10 +20,6 @@ from promptpotter.application.optimization.dispatch.schemas import (
     L1GenerateOutput,
     VariantEvidenceGrounding,
     build_l1_response_model,
-)
-from promptpotter.application.optimization.validators.l1_strict import (
-    build_l1_response_schema,
-    effective_l1_field_names,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding

@@ -14,7 +14,7 @@ import {
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
 import { Dialog } from "@/components/ui";
-import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
+import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 import { SampleRowItem } from "@/components/dashboard/samples/SampleRowItem";
 

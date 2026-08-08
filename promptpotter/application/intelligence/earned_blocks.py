@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
-from promptpotter.domain.opt_search_point import candidate_delta
+from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.instrument import instrument_mode

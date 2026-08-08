@@ -51,9 +51,9 @@ a live producer.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
-| `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
-| `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+| `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
+| `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
@@ -142,10 +142,18 @@ Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
 no-drift gate #4 — never an independent field). Composite over ten focused
-leaf stores: `backends` (`BackendStore`), `tenant_datasets`, `sessions`,
-`campaigns` (`store/campaign_store/`), `checkin` (`CheckinDraftStore`),
-`sweeps`, `archive` (`MeasurementArchive`), `optimizer_calls`
-(`OptimizerCallCache`), `diagnostic_runs`, `users`. Shared I/O in
+leaf stores — **the attribute, then the class, then the file**, because the
+attribute is what a call site shows you and the file is what you have to open:
+`backends` → `BackendStore` (`store/backend_store.py`), `tenant_datasets` →
+`TenantDatasetStore` (`store/tenant_dataset_store.py`), `sessions` →
+`SessionStore` (`store/session_store.py`), `campaigns` → `CampaignStore`
+(`store/campaign_store/store.py`), `checkin` → `CheckinDraftStore`
+(`store/checkin_draft_store.py`), `sweeps` → `SweepStore`
+(`store/sweep_store.py`), `archive` → `MeasurementArchive`
+(`store/measurement_archive.py`), `optimizer_calls` → `OptimizerCallCache`
+(`store/stores.py`, defined inline), `diagnostic_runs` → `DiagnosticRunStore`
+(`store/diagnostic_run_store.py`), `users` → `UserStore`
+(`store/user_store.py`). Shared I/O in
 `store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
 code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
 measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
@@ -205,7 +213,9 @@ not raw `str`/`Path` — as does `CycleHop`, which every per-cycle
 `CampaignStore` method takes in place of a `(campaign_id, cycle_id)`
 pair (both `str`, so a swapped call read as "no data" rather than
 raising). Build it from the carrier that owns both, never by re-pairing. `archive/` is cross-cycle/cross-tenant;
-`MeasurementArchive` is the DB core.
+`MeasurementArchive` (`store/measurement_archive.py`) is the DB core, and
+`store/archive_views.py` is its single-writer facade — a write that does not
+go through that facade is the bug.
 
 `CampaignStore` (`store/campaign_store/store.py`) exposes
 `write_cycle_seed`/`read_cycle_seed`, which append/scan the **read-once** cycle

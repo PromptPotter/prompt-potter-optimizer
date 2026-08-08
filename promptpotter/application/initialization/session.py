@@ -252,7 +252,7 @@ def auto_mint_session(
     save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-    from promptpotter.application.origin import build_campaign_emitter
+    from promptpotter.application.run_observers import build_campaign_emitter
     from promptpotter.shared.errors import graceful
 
     with graceful("Pre-seeding dashboard.json failed"):
@@ -390,7 +390,7 @@ def finalize_checkin_to_active(
     cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
-    from promptpotter.application.origin import build_campaign_emitter
+    from promptpotter.application.run_observers import build_campaign_emitter
     from promptpotter.shared.errors import graceful
 
     with graceful("Pre-seeding dashboard.json failed"):
