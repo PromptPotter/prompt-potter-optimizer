@@ -367,7 +367,7 @@ The persisted world is a four-entity containment hierarchy
   the table and the `log.md` leaderboard all read it and none derives
   one, because an ordering is a score. Distinct from the two orders
   above: neither the engine's execution order nor the Rasch matrix's
-  δ column axis is this. `routers/datasets.py::_resolve_leaderboard_page`.
+  δ column axis is this. `routers/datasets/leaderboard.py::_resolve_leaderboard_page`.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the shared round order.
 - **prediction (terminal ranking)** — the per-sample `predicted` is the

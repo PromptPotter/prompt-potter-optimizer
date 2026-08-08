@@ -52,14 +52,33 @@ LEDGER_BASELINE = {
     # three concerns). Two re-exports were DELETED on the way — `INVARIANT_REASONS` from
     # `l1_strict` (claimed three call sites, had one) and `find_gt_rank`'s dead `__all__`
     # entry — and `build_campaign_emitter` moved out of `origin.py`, which builds no projection.
-    "modules": 310,
-    "init_files": 47,
+    #
+    # 310 -> 316 (2026-08-08): six more, same rule as the eight above — a name that stopped
+    # describing its contents. `resume_and_fork/repair.py` (the cut/correct/re-bank machinery;
+    # `resume.py` now asks only whether the run DIVERGED, and the two are asked independently —
+    # the repair runs whatever the config diff says). `domain/dashboard_rows.py` (`RoundSummary`
+    # + `RoundSummaryCandidate`: one importing package, `live_dashboard/`, against 62 for
+    # `results.py`; NOT named `round_summary.py`, because the projection that builds them
+    # already owns that name a layer up). And `routers/datasets/` as four — `_router`, `index`,
+    # `ingest`, `leaderboard` — the `routers/campaigns/` pattern, for the same reason: one
+    # resource carrying several unrelated concerns.
+    "modules": 316,
+    #
+    # 47 -> 48 (2026-08-08): `routers/datasets/__init__.py`. A router package cannot avoid one —
+    # the submodules' decorators must run before the populated router is re-exported.
+    "init_files": 48,
     # A FLOOR: none of the 5 is a shim, and emptying any of them breaks the app. `connectors`
     # and `presentation/api/routers/campaigns` ARE registries — the submodule imports run the
     # `@campaigns_router` decorators, so emptying the latter mounts ZERO routes. `shared`,
     # `application/scoring/formula` and `application/views/render` hold real code in the body,
     # which a text test cannot see.
-    "reexport_shims": 5,
+    #
+    # 5 -> 6 (2026-08-08): `routers/datasets/__init__.py`, the SIXTH — and deliberately the
+    # same sanctioned kind as the fifth (`routers/campaigns/__init__.py`), not a new one. A
+    # FastAPI router package has no other shape: the alternative is `main.py` importing three
+    # submodules purely for their decorator side effects, which is the same coupling with
+    # nothing naming it. A seventh of a DIFFERENT kind still needs its own argument.
+    "reexport_shims": 6,
     # ``len(KNOBS)`` — the registry in ``application/knobs.py`` IS the taxonomy, so the
     # ledger does not carry a second opinion about what counts as one leaf.
     #
@@ -316,7 +335,12 @@ LEDGER_BASELINE = {
     # `composite_ci` may not travel with the fitness gateway because `_mean_fitness_by_cell`
     # must stay un-predicated; `behavior_base` names the verbatim `CheckFn` duplication it
     # ended.
-    "docstring_lines": 3549,
+    #
+    # 3549 -> 3584 (2026-08-08): the six modules above (35). Same rule as the raise before it —
+    # each says why it is not in the file it came from. `repair.py` records that the cut must be
+    # read off the round documents BEFORE the correction, since the correction plugs the holes
+    # it is read from; `dashboard_rows.py` records why it is not called `round_summary`.
+    "docstring_lines": 3584,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

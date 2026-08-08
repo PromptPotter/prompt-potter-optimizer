@@ -10,7 +10,7 @@ or talks to a network without going through one of these seams.
 Forks via `CycleEventLog.inherit_from(parent, offset)` — an IN-PROCESS binding
 that writes nothing, so a later reader sees a fork's ledger begin at its own
 first append. Anything a fork must answer for ITSELF is appended to it: a
-repair's corrected rounds reach the branch via `resume.py::_rebank_on_branch`,
+repair's corrected rounds reach the branch via `repair.py::_rebank_on_branch`,
 because a round file written with no ingress behind it is invisible to every
 scan and readers silently fall back to the parent. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_observers.py`) — a

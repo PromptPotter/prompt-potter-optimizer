@@ -970,6 +970,337 @@ export interface DiagnosticRunListResponse {
   runs: DiagnosticRunRecord[];
 }
 
+/** One OIDC provider currently bound to the active session. */
+export interface ConnectedAccount {
+  provider: string;
+  email: string | null;
+}
+
+/** Current identity envelope. Returned by ``GET /auth/me`` only. */
+export interface MeResponse {
+  user_id: string;
+  tenant_id: string;
+  issuer: string | null;
+  email: string | null;
+  name: string | null;
+  provider: string | null;
+  connected_accounts: ConnectedAccount[];
+  available_providers: string[];
+  capabilities: string[];
+  terms_version: string;
+  terms_accepted_version: string | null;
+}
+
+/** Live snapshot of the abuse-limit knobs vs. today's usage. */
+export interface QuotaStatus {
+  spend_used_today_usd: number;
+  spend_budget_usd_daily: number | null;
+  concurrent_running: number;
+  max_concurrent_cycles: number;
+  campaigns_today: number;
+  max_campaigns_per_day: number;
+}
+
+/** Per-user preferences surfaced in Account → Preferences. */
+export interface UserSettings {
+  demo_mode_enabled: boolean;
+}
+
+/** One bucket of the Activity pane's three stacked bar charts. */
+export interface ActivityBucket {
+  ts: number;
+  spend_usd: number;
+  tokens: number;
+  requests: number;
+  series_spend: Record<string, number>;
+  series_tokens: Record<string, number>;
+  series_requests: Record<string, number>;
+}
+
+/** Time-bucketed spend / requests / tokens over the requested window. */
+export interface ActivityResponse {
+  window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
+  group_by: 'model' | 'api_key';
+  since: number;
+  until: number;
+  buckets: ActivityBucket[];
+  series_labels: string[];
+  total_spend_usd: number;
+  total_tokens: number;
+  total_requests: number;
+}
+
+export interface BackendResponse {
+  /** Backend identifier */
+  id: string;
+  /** Human-readable backend name */
+  name: string;
+  /** Backend type (e.g. 'default') */
+  backend_type: string;
+  /** Backend API base URL */
+  base_url: string;
+  /** ISO 8601 creation timestamp */
+  created_at: string;
+}
+
+export interface BackendHealthResponse {
+  /** Backend identifier */
+  backend_id: string;
+  /** Backend API base URL probed */
+  base_url: string;
+  /** Reachability: 'live', 'unreachable', or 'error' */
+  status: 'live' | 'unreachable' | 'error';
+  /** ISO 8601 probe timestamp */
+  checked_at: string;
+  /** Error detail when not 'live' */
+  detail: string | null;
+}
+
+export interface MachineHolder {
+  /** user_id of the operator whose run owns the slot */
+  user: string;
+  campaign_id: string;
+  cycle_id: string;
+  /** ISO start time of the holding run; null if still pending */
+  started_at: string | null;
+}
+
+export interface MachineStatusResponse {
+  /** True iff a *different* user holds a running job (the server runs one campaign
+   * at a time). */
+  busy: boolean;
+  /** Who holds the slot; null when free for this caller. */
+  holder: MachineHolder | null;
+}
+
+/** One row in the dataset registry — backs the Dashboard ``New campaign`` view. */
+export interface DatasetIndexEntry {
+  /** Slug used as the path segment under `datasets/`. */
+  name: string;
+  /** Display title (from `dataset.md`). */
+  title: string | null;
+  /** ``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``.
+   * ``install`` = content that ships with the product at ``datasets/{slug}/``
+   * (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable
+   * by anyone using the install. A ``yours`` slug shadows an ``install`` one. */
+  tier: 'yours' | 'install';
+  /** Sample bank size from ``cache.json``; ``0`` when the cache hasn't been
+   * materialized yet. */
+  n_samples: number;
+}
+
+export interface DatasetIndexResponse {
+  datasets: DatasetIndexEntry[];
+}
+
+export interface OriginEntry {
+  /** Origin content identity — a campaign's root_content_hash (or the dataset's
+   * prospective origin hash for a prepared origin) */
+  origin_id: string;
+  /** Dataset this origin starts from */
+  dataset_name: string;
+  /** Operator-supplied label, if any */
+  label: string;
+  /** Dataset sample count (0 if unmaterialized) */
+  n_samples: number;
+  /** Active campaigns minted from this origin (0 = prepared, not yet run) */
+  n_campaigns: number;
+  /** The origin's C0 score, from the canonical campaign's index.json */
+  origin_accuracy: number | null;
+  /** True = a ready dataset config with no campaign yet */
+  prepared: boolean;
+  /** ISO 8601 — earliest campaign on this origin */
+  created_at: string;
+}
+
+export interface OriginListResponse {
+  /** Runnable origins, newest first */
+  origins: OriginEntry[];
+  /** Number of origins */
+  total: number;
+}
+
+export interface CampaignStorageResponse {
+  /** The campaign measured */
+  campaign_id: string;
+  /** Whole campaign-dir footprint — sum of the six leaves */
+  on_disk_bytes: number;
+  /** langfuse ground-truth mirror (the input-data copy) */
+  dataset_bytes: number;
+  /** Backend-produced: node-I/O cache + per-sample arrays */
+  connector_bytes: number;
+  /** Loop resume point: round searchpoint state + overrides */
+  state_bytes: number;
+  /** Loop telemetry: streams, prompts, langfuse loop trace */
+  trace_bytes: number;
+  /** Loop event spine: ledger.jsonl */
+  history_bytes: number;
+  /** Readable output: manifest + reports + hard_samples */
+  reports_bytes: number;
+}
+
+export interface WorkspaceStorageEntry {
+  campaign_id: string;
+  dataset_name: string;
+  lifecycle_status: string;
+  /** Whole campaign-dir footprint */
+  on_disk_bytes: number;
+  dataset_bytes: number;
+  connector_bytes: number;
+  state_bytes: number;
+  trace_bytes: number;
+  history_bytes: number;
+  reports_bytes: number;
+}
+
+export interface WorkspaceStorageResponse {
+  /** The tenant's real on-disk total — campaigns + caches + other */
+  total_bytes: number;
+  /** Cross-campaign reuse caches (measurements/ + optimizer_calls/) — survive
+   * delete */
+  shared_cache_bytes: number;
+  /** Everything else under the tenant: sessions, workspace ledger, dataset/backend
+   * stores */
+  other_bytes: number;
+  /** Fattest-first per-campaign totals (active + archived) */
+  campaigns: WorkspaceStorageEntry[];
+}
+
+export interface DatasetStorageEntry {
+  dataset_name: string;
+  /** On disk — the sum of the six leaves */
+  total_bytes: number;
+  dataset_bytes: number;
+  connector_bytes: number;
+  state_bytes: number;
+  trace_bytes: number;
+  history_bytes: number;
+  reports_bytes: number;
+}
+
+export interface DatasetStorageResponse {
+  /** Grand total across the caller's datasets */
+  total_bytes: number;
+  /** Fattest-first per-dataset leaf splits */
+  datasets: DatasetStorageEntry[];
+}
+
+export interface CampaignDetailResponse {
+  /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
+  campaign_id: string;
+  /** Dataset this campaign optimizes */
+  dataset_name: string;
+  /** Operator-supplied campaign label */
+  label: string;
+  /** ISO 8601 creation timestamp */
+  created_at: string;
+  /** The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the
+   * campaign's ORIGIN identity. Campaigns on one declaration share it and
+   * differ only in the random `campaign_id` suffix, which is what makes them
+   * separate RUNS of that origin; the sidebar groups the forest by this key. */
+  root_cycle_id: string;
+  /** Backend this campaign optimizes against */
+  backend_id: string;
+  /** Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …),
+   * read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test
+   * for a self-optimizing (L4) campaign — it renders the 'inner loops'
+   * disclosure and the pp-self panel variants on it. Empty when the dataset
+   * config is gone (a campaign outlives its dataset dir); callers treat empty
+   * as 'not self-optimizing'. */
+  backend_type: string;
+  /** UserId of the operator who minted the campaign */
+  owner_user_id: string;
+  /** Operator visibility intent: 'active' (default sidebar), 'archived' (hidden),
+   * 'deleted' (soft-marked, data retained) */
+  lifecycle_status: string;
+  /** ISO 8601 timestamp of last lifecycle transition */
+  lifecycle_changed_at: string;
+  /** Optional operator-supplied reason for the last lifecycle transition */
+  lifecycle_reason: string;
+  /** Content hash of the origin search point — the campaign identity */
+  root_content_hash: string;
+  /** Frozen CampaignConfig snapshot for this campaign */
+  config: Record<string, unknown>;
+}
+
+export interface MechanismToggle {
+  /** Field key under its group (e.g. 'epsilon_elimination') */
+  key: string;
+  /** Human-readable toggle name */
+  label: string;
+  /** What the mechanism does, on vs off */
+  description: string;
+  /** Default value (preserves stock loop behavior) */
+  default: boolean;
+}
+
+export interface MechanismGroup {
+  /** Group key under optimization.mechanisms (e.g. 'elimination') */
+  key: string;
+  /** Human-readable group name */
+  label: string;
+  /** What this group of mechanisms governs */
+  description: string;
+  /** Toggles in this group, in declared order */
+  toggles: MechanismToggle[];
+}
+
+/** Self-describing descriptor for the campaign-config mechanism toggles. */
+export interface MechanismSchemaResponse {
+  /** Mechanism groups, in declared order */
+  groups: MechanismGroup[];
+}
+
+export interface ConfigKnob {
+  /** Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor) */
+  path: string;
+  /** Short display name (prefix-stripped) */
+  label: string;
+  /** Effective value in this campaign's frozen config */
+  value: unknown;
+  /** Where the value came from: default | campaign (operator-set) | required |
+   * constant */
+  source: string;
+}
+
+export interface ConfigEstimandGroup {
+  /** Estimand key (selection, difficulty, ability, …) */
+  key: string;
+  /** Human-readable estimand name */
+  label: string;
+  /** Plain-language one-liner of what this estimand is */
+  doc: string;
+  /** Knobs that move this estimand, in declared order */
+  knobs: ConfigKnob[];
+}
+
+export interface ConfigCoupling {
+  /** Coupling id */
+  name: string;
+  /** Dotted knob paths the coupling relates */
+  knobs: string[];
+  /** Short display names for those knobs */
+  labels: string[];
+  /** The shared estimand the knobs co-determine */
+  estimand: string;
+  /** The relationship rule, plain language */
+  relation: string;
+  /** What goes wrong when the combination is violated */
+  consequence: string;
+  /** collision (soundness) | inert (wasted knob) | info (relationship) */
+  severity: string;
+  /** True when this campaign's config is in the violating combination */
+  active: boolean;
+}
+
+/** The config-map for one campaign: every knob grouped by the statistical */
+export interface ConfigMapResponse {
+  /** Estimand groups, in declared order */
+  groups: ConfigEstimandGroup[];
+  /** Declared couplings, active ones flagged */
+  couplings: ConfigCoupling[];
+}
+
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 

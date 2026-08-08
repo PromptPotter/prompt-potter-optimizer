@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter
 from pydantic import Field
 
@@ -23,10 +25,17 @@ class BackendResponse(StrictModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
+# The probe's closed answer set — server-owned, so the browser derives its union from this
+# rather than re-declaring three string literals a rename would silently desync.
+BackendReachability = Literal["live", "unreachable", "error"]
+
+
 class BackendHealthResponse(StrictModel):
     backend_id: str = Field(description="Backend identifier")
     base_url: str = Field(description="Backend API base URL probed")
-    status: str = Field(description="Reachability: 'live', 'unreachable', or 'error'")
+    status: BackendReachability = Field(
+        description="Reachability: 'live', 'unreachable', or 'error'"
+    )
     checked_at: str = Field(description="ISO 8601 probe timestamp")
     detail: str | None = Field(default=None, description="Error detail when not 'live'")
 

@@ -1,33 +1,23 @@
+"""The hard-sample leaderboard and everything that reads a MEASUREMENT: the scope resolver
+(cycle / campaign / dataset), the paging walk, the preview rows and the per-sample series.
+
+Scores are served, never recomputed here — the artifact is read off disk and paged; the ordering
+it carries is the backend's answer (`webapp/CLAUDE.md` § Scoring authority)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
+from fastapi import Query
 from pydantic import Field
 
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.datasets.csv_ingest import (
-    MAX_SAMPLES,
-    IngestError,
-    candidate_library_from_rows,
-    parse_candidate_library,
-)
-from promptpotter.application.datasets.ingest import (
-    MAX_UPLOAD_BYTES,
-    SlugTakenError,
-    draft_from_dataset,
-    ingest_draft,
-)
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
-from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
-from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.strict_model import StrictModel
@@ -37,12 +27,10 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.dataset_access import (
-    dataset_pipeline_path,
-    list_readable_datasets,
     readable_dataset_dir,
     readable_dataset_rows,
 )
-from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
@@ -50,242 +38,15 @@ from promptpotter.presentation.api.deps import (
     decode_descend,
     get_cycle_dir_or_404,
 )
-from promptpotter.presentation.api.routers.commands import (
-    dispatch_draft_patch,
-    ensure_idempotency_key,
-)
+from promptpotter.presentation.api.routers.datasets._router import datasets_router
 from promptpotter.shared.errors import (
     BadRequestError,
-    ConflictError,
-    ContentTooLargeError,
     NotFoundError,
-    PayloadInvalidError,
 )
-
-datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
 # Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
-
-
-class DatasetIndexEntry(StrictModel):
-    """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
-
-    Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.
-    """
-
-    name: str = Field(description="Slug used as the path segment under `datasets/`.")
-    title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
-    tier: Literal["yours", "install"] = Field(
-        description=(
-            "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
-            "``install`` = content that ships with the product at ``datasets/{slug}/`` "
-            "(benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by "
-            "anyone using the install. A ``yours`` slug shadows an ``install`` one."
-        ),
-    )
-    n_samples: int = Field(
-        default=0,
-        description="Sample bank size from ``cache.json``; ``0`` when the cache hasn't been materialized yet.",
-    )
-
-
-class DatasetIndexResponse(StrictModel):
-    datasets: list[DatasetIndexEntry]
-
-
-@datasets_router.get("", response_model=DatasetIndexResponse)
-def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
-    """Every dataset this identity may read — its own tenant Origins, then install content.
-
-    The rule lives once in ``store/dataset_access.py`` and is shared with the
-    per-dataset read endpoints, so the picker can never list a dataset that
-    ``GET /datasets/{name}/...`` would then deny.
-    """
-    return DatasetIndexResponse(
-        datasets=[
-            DatasetIndexEntry(
-                name=ref.name, title=ref.title, tier=ref.tier, n_samples=ref.n_samples
-            )
-            for ref in list_readable_datasets(stores)
-        ]
-    )
-
-
-def _too_large(observed: int | str) -> ContentTooLargeError:
-    return ContentTooLargeError(
-        f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
-    )
-
-
-async def _read_capped(request: Request, upload: UploadFile, cap: int) -> bytes:
-    """Read ``upload`` into memory, aborting with 413 the moment it exceeds ``cap``. Fast-reject on
-    the declared ``Content-Length``, then stream in chunks — the header can lie or be absent."""
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > cap:
-        raise _too_large(declared)
-
-    chunk_size = 1024 * 1024  # 1 MiB
-    buf = bytearray()
-    while chunk := await upload.read(chunk_size):
-        buf.extend(chunk)
-        if len(buf) > cap:
-            raise _too_large(len(buf))
-    return bytes(buf)
-
-
-@datasets_router.post("/ingest")
-async def ingest_dataset(
-    request: Request,
-    stores: StoresDep,
-    file: Annotated[
-        UploadFile,
-        File(description="Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns."),
-    ],
-    slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
-) -> dict[str, Any]:
-    """Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in
-    campaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).
-
-    Wire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.
-    The check-in campaign appears in the sidebar immediately and survives a restart;
-    nothing runs until the operator starts it via ``/commands/start-checkin``.
-    """
-    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-
-    # Parse → mint the check-in campaign → persist its bank. Shared with the CLI
-    # `new <file>` path (`application/datasets/ingest.py`) so both surfaces drive
-    # the identical orchestration; the handler only maps errors to HTTP.
-    try:
-        draft = ingest_draft(
-            stores=stores,
-            blob=blob,
-            filename=file.filename or "",
-            slug=slug,
-        )
-    except IngestError as exc:
-        exc.details["max_samples"] = MAX_SAMPLES
-        raise
-    except ValueError as exc:
-        raise PayloadInvalidError(str(exc), details={"reason": "bad_slug"}) from None
-    except SlugTakenError as exc:
-        # The chat turns this into an in-flow choice (use existing / save as new),
-        # so it needs BOTH names: the colliding one (to offer "use existing") and
-        # the free suggestion (to offer "save as new").
-        raise ConflictError(
-            f"A dataset named '{exc.slug}' already exists.",
-            code="slug_collision",
-            details={"slug": exc.slug, "suggested_slug": exc.suggested},
-        ) from None
-    return draft_wire_with_locks(draft)
-
-
-@datasets_router.post("/draft/candidate-library")
-async def upload_candidate_library(
-    request: Request,
-    stores: StoresDep,
-    file: Annotated[
-        UploadFile,
-        File(description="Target library — one entry per line, or a single-column CSV/Excel."),
-    ],
-    draft_id: Annotated[
-        str, Form(description="Draft to attach the library to.", min_length=8, max_length=128)
-    ],
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
-    """Attach a candidate library to a draft — the operator's "drop in place" for an
-    unfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its
-    ``dependencies`` block now reports the dependency ``fulfilled``).
-
-    A multipart ingress for an `edit-draft-campaign`: the upload is parsed into the
-    patch value, then dispatched, so the edit lands on the check-in ledger like every
-    other origin mutation. Nothing runs until Start. Wire contract pinned in
-    ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
-    ``draft_id`` is the check-in campaign id.
-    """
-    idemp = ensure_idempotency_key(idempotency_key)
-    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-    terms = parse_candidate_library(blob, file.filename or "")
-    if not terms:
-        raise PayloadInvalidError(
-            "The candidate library has no usable entries (every line was blank).",
-            code="ingest_failed",
-            details={"reason": "empty"},
-        )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=draft_id,
-        patch_raw={"candidate_library": terms},
-        idempotency_key=idemp,
-    )
-
-
-class _BuildLibraryBody(StrictModel):
-    """Body for building a candidate library from one of the draft's own columns."""
-
-    # `draft_id` IS the owning `campaign_id`; bound it exactly as every other
-    # check-in route does (`commands.py::_require_checkin_id`), not 64.
-    draft_id: str = Field(min_length=8, max_length=128)
-    column: str = Field(min_length=1, max_length=256)
-
-
-@datasets_router.post("/draft/candidate-library/from-column")
-async def build_candidate_library_from_column(
-    stores: StoresDep,
-    body: _BuildLibraryBody,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
-    """Build a draft's candidate library from the distinct values of one of its own
-    columns — the unified "build from dataset" path (no external file).
-
-    When the targets already live in the data (the ground-truth/target column, the
-    union of the dataset's category sheets), the library is derived rather than
-    uploaded. The derived terms become an `edit-draft-campaign` patch, so this lands
-    on the check-in ledger exactly like the upload does. Returns the updated draft
-    wire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in
-    `docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
-    `draft_id` is the check-in campaign id.
-    """
-    idemp = ensure_idempotency_key(idempotency_key)
-    draft = load_checkin_draft(stores, body.draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
-    if body.column not in draft.headers:
-        raise PayloadInvalidError(
-            f"column {body.column!r} is not one of the dataset's columns {list(draft.headers)}."
-        )
-    bank = stores.checkin.load_bank(body.draft_id)
-    if bank is None:
-        raise PayloadInvalidError("draft has no cached rows to build from.")
-    terms = candidate_library_from_rows(bank.get("items", []), body.column)
-    if not terms:
-        raise PayloadInvalidError(
-            f"column {body.column!r} has no usable values.",
-            code="ingest_failed",
-            details={"reason": "empty"},
-        )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=body.draft_id,
-        patch_raw={"candidate_library": terms},
-        idempotency_key=idemp,
-    )
-
-
-@datasets_router.post("/{name}/draft")
-def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
-    """Open an authored dataset's files as a durable check-in campaign.
-
-    The direct path behind "open this dataset in the ingest panel" — a demo /
-    benchmark / owned Origin becomes a prefilled check-in (``draft_id`` ==
-    ``campaign_id``) without a browser-side CSV round-trip. Identity-gated through
-    the same resolver as the other dataset reads; nothing runs until the operator
-    starts it via ``/commands/start-checkin``.
-    """
-    dataset_dir = readable_dataset_dir(stores, name)
-    draft = draft_from_dataset(stores=stores, dataset_dir=dataset_dir, dataset_name=name)
-    return draft_wire_with_locks(draft)
 
 
 def _load_dataset_rows(
@@ -808,74 +569,8 @@ def get_dataset_measurement_series(
     )
 
 
-class DatasetPipelineResponse(StrictModel):
-    """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
-    `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling.
-    """
-
-    name: str
-    connector: str
-    # The connector KIND read straight off the raw overlay (`termnorm` / `promptpotter` / …).
-    # A connector-level fact, peer of `connector` — NOT a `PipelineSchema` field, so it is
-    # surfaced here rather than smuggled through `pipeline` (the parser drops unknown keys).
-    # The webapp branches self-optimization (pp-self) rendering on it.
-    backend_type: str | None
-    pipeline: dict[str, Any]
-    view: dict[str, Any] | None
-    # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
-    # included, carrying no value), because `optimizer_tunable` is summed per node to
-    # answer "is this node optimizer-locked". The config editor filters to the widget
-    # kinds; `optimizer_locked` marks what the optimizer may never permute
-    # (model/provider), which the operator may still set on a fork seed.
-    node_config_schema: dict[str, list[NodeConfigParam]]
-    # Per-node structured-output contract (read-only) — the steer panel shows it
-    # beside the config so the operator sees the WHOLE node (model + params +
-    # prompt + the structured output it produces). None for nodes with no schema.
-    node_output_schema: dict[str, NodeOutputSchema | None]
-
-
-@datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
-def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema, graph view, and per-node
-    config + output schema.
-
-    Identity-gated through the same resolver as the other dataset reads — there is
-    no unauthenticated path to a benchmark's pipeline/overlay config.
-    """
-    dataset_dir = readable_dataset_dir(stores, name)
-    pipeline_path = dataset_pipeline_path(dataset_dir)
-    if not pipeline_path.is_file():
-        raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")
-    raw = read_yaml(pipeline_path)
-    # `parse_pipeline_response` strips lone surrogates at parse time so the
-    # rendered model is already wire-safe (some overlays carry escape
-    # sequences pointing at lone low surrogates that crash UTF-8 encode).
-    schema = parse_pipeline_response(raw)
-    connector = (raw.get("backend_name") or raw.get("name") or name).strip()
-    backend_type = raw.get("backend_type")
-    # Apply the dataset's default search-space narrowing so the setup editor opens
-    # showing the recommended per-node locks (e.g. retrieval nodes origin-locked); the
-    # draft's own overlay edits layer on top client-side. model/provider are always
-    # optimizer-locked (operator-owned axes), so no per-campaign policy is read here.
-    campaign_path = dataset_campaign_path(dataset_dir)
-    if campaign_path.is_file():
-        cfg = load_dataset_campaign_config(campaign_path)
-        schema = schema.narrow(cfg.optimizer_narrowing)
-    return DatasetPipelineResponse(
-        name=name,
-        connector=connector,
-        backend_type=backend_type,
-        pipeline=schema.model_dump(by_alias=True),
-        view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
-        node_config_schema=schema.node_config_schema(),
-        node_output_schema=schema.node_output_schemas(),
-    )
-
-
 __all__ = [
     "DatasetItem",
-    "DatasetPipelineResponse",
     "DatasetPreviewResponse",
     "MeasurementDot",
     "MeasurementSeriesResponse",

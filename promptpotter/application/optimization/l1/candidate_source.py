@@ -18,11 +18,7 @@ from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
 )
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
-from promptpotter.domain.results import (
-    CandidateProposal,
-    candidate_label,
-    round_document_digest,
-)
+from promptpotter.domain.results import CandidateProposal, candidate_label, round_document_digest
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
 
 # Module-level alias for test monkeypatching.

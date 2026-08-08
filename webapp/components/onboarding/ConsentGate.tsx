@@ -20,7 +20,7 @@
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
-import { acceptTerms } from "@/lib/api/mutations";
+import { acceptTerms } from "@/lib/api/account";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 
 const NOOP = () => {};

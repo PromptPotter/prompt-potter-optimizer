@@ -101,6 +101,16 @@ Two on-disk surfaces back the dashboard. Read from the right one:
 
 If you find yourself adding a "merge in-flight with historical" or "fall back to round-file when dashboard hasn't written X yet" branch, you're re-introducing the stitch pattern the display-source unification collapsed. Pick one source per data class.
 
+## A wire shape is GENERATED — never hand-declared
+
+**Every response type comes from `lib/api/types.generated.ts`**, emitted by `scripts/build_ts_types.py` off the Pydantic model. Adding a field server-side reaches the browser by regeneration; hand-writing the interface instead is how a type drifts fields behind its model with every gate green. To add a shape: register the model in that script's `EXPORTED_MODELS`, regenerate, re-export it from `lib/api/types.ts`.
+
+**Two allowed escapes, both narrow.** A route with no `response_model` has nothing to generate from, so its shape stays hand-written *and says so* (`reads.ts::HealthResponse`, and `LifecycleFilter`, whose server-side member set genuinely differs). And a narrow alias is **derived**, never re-declared — `export type ActivityWindow = ActivityResponse["window"]` reads the closed set back off the generated interface, so a member added in Python arrives here. Re-typing the members is the thing this rule forbids.
+
+**A closed set belongs on the server.** `ActivityResponse.window` and `BackendHealthResponse.status` were bare `str` in Python while the browser narrowed them to unions — the only named version of each lived here and nothing could catch a rename. They are `Literal`s server-side now; if you find a union declared only in TypeScript, that is the bug.
+
+**`lib/api` is five write modules, not one.** `errors.ts` (`throwApiError`, `mintIdempotencyKey`, `IngestApiError` — it lands first; the other two throw through it) · `commands.ts` (the closed-set `/commands/{kind}` highway) · `ingest.ts` (the writes that CREATE what a command later addresses) · `draft-types.ts` (pure wire types, and the single owner of `lib/`'s one import from `components/`) · `account.ts` (per-user identity, which is why it is not a command). `reads.ts` stays whole: it is one job.
+
 ## Viewed identity — one address (CyclePath)
 
 **"What am I looking at?" has ONE answer — `viewedPath`, and no surface may keep a second.** It is a **`CyclePath`** (`lib/ids.ts`): the chain of `(campaign, cycle)` hops from top-level root to leaf, mirroring the engine's re-entrant `.inner/` sandbox — 1 hop for a top-level cycle, 2 for an L4 inner loop, deeper for L5+. `lib/workspace.tsx` owns it as `pinnedPath` + `following`, with `viewedPath` derived. Drilling in is `drillInto(campaignId, cycleId)` (the workspace appends the hop; a cell bar, an L4 panel row and the hard-samples pointer all just name a run), backing out `backToOuter()`.

@@ -2,12 +2,12 @@
 // (dot + footer) and the cross-tab CriticalAlertBanner are the two consumers —
 // they MUST agree, so the predicate lives here once, not inlined in each.
 //
-// `health` is the `/backends/{id}/health` probe (`BackendHealth | null`):
+// `health` is the `/backends/{id}/health` probe (`BackendHealthResponse | null`):
 //   null            → not probed yet / no backend resolved → "probing"
 //   status==="live" → reachable                            → "live"
 //   anything else   → unreachable                          → "down"
 
-import type { BackendHealth } from "@/lib/api";
+import type { BackendHealthResponse } from "@/lib/api";
 
 export interface ConnectorReachability {
   reachable: boolean;
@@ -19,7 +19,7 @@ export interface ConnectorReachability {
   stateLabel: string;
 }
 
-export function connectorReachability(health: BackendHealth | null): ConnectorReachability {
+export function connectorReachability(health: BackendHealthResponse | null): ConnectorReachability {
   const reachable = health?.status === "live";
   const down = health != null && !reachable;
   return {

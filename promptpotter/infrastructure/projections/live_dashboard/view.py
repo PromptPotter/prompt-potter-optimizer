@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
-from promptpotter.domain.results import HeadlineMetric, RoundSummary, candidate_label
+from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,

@@ -112,6 +112,10 @@
             "type": "array"
           },
           "group_by": {
+            "enum": [
+              "model",
+              "api_key"
+            ],
             "title": "Group By",
             "type": "string"
           },
@@ -143,6 +147,17 @@
             "type": "number"
           },
           "window": {
+            "enum": [
+              "15m",
+              "30m",
+              "1h",
+              "3h",
+              "1d",
+              "2d",
+              "1w",
+              "1mo",
+              "1y"
+            ],
             "title": "Window",
             "type": "string"
           }
@@ -193,6 +208,11 @@
           },
           "status": {
             "description": "Reachability: 'live', 'unreachable', or 'error'",
+            "enum": [
+              "live",
+              "unreachable",
+              "error"
+            ],
             "title": "Status",
             "type": "string"
           }

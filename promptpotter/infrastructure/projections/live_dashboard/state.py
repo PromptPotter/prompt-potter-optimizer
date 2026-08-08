@@ -8,8 +8,9 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, RoundSummary, SpendBucket, SpendRollup
+from promptpotter.domain.results import HeadlineMetric, SpendBucket, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 

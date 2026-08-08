@@ -8,7 +8,7 @@
 // loop when the session dies instead of 401-storming.
 
 import { useCallback, useState } from "react";
-import { fetchMachineStatus, type MachineStatus } from "@/lib/api";
+import { fetchMachineStatus, type MachineStatusResponse } from "@/lib/api";
 import { useAuthGate } from "@/lib/auth-context";
 import { usePoll } from "@/lib/hooks/usePoll";
 
@@ -16,11 +16,11 @@ import { usePoll } from "@/lib/hooks/usePoll";
 // reachability cadence and stays cheap (one tiny JSON read off the jobs dir).
 const BUSY_INTERVAL_MS = 5000;
 
-const FREE: MachineStatus = { busy: false, holder: null };
+const FREE: MachineStatusResponse = { busy: false, holder: null };
 
-export function useMachineStatus(): MachineStatus {
+export function useMachineStatus(): MachineStatusResponse {
   const { authed, onAuthError } = useAuthGate();
-  const [status, setStatus] = useState<MachineStatus>(FREE);
+  const [status, setStatus] = useState<MachineStatusResponse>(FREE);
 
   const tick = useCallback(
     async (signal: AbortSignal) => {
