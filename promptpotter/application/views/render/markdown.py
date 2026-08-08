@@ -120,6 +120,7 @@ def _render_hard_samples(view: HardSamplesView | None) -> list[str]:
     heatmap = render_hard_sample_heatmap(
         view.artifact,
         sample_query_lookup=view.sample_query_lookup,
+        order=view.order,
     ).strip()
     if not heatmap:
         return []

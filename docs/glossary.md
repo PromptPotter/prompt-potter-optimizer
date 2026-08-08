@@ -350,10 +350,20 @@ The persisted world is a four-entity containment hierarchy
   `pick_score.per_sample` on the hard-samples artifact: the
   pick-value for a fresh mutation of the seed, ability
   prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
-  population-mean anchor 0). Consumed by the webapp dataset table.
+  population-mean anchor 0). The key behind `hard_sample_rank` under
+  the default `hard_sample_order`.
   The artifact's `pick_score.sample_order` is `build_round_order`
   seeded by the best candidate — the order the engine will actually
   execute next round.
+- **hard_sample_rank** — the served 1-based position of a sample on the
+  hard-sample leaderboard (`DatasetItem`), ranked under the campaign's
+  `hard_sample_order` — `info_gain` (the pick_score snapshot, default)
+  or `difficulty` (δ_s). Rows measured in the requested scope rank
+  first; the rest trail by sample_id. **THE ordering** — the heatmap,
+  the table and the `log.md` leaderboard all read it and none derives
+  one, because an ordering is a score. Distinct from the two orders
+  above: neither the engine's execution order nor the Rasch matrix's
+  δ column axis is this. `routers/datasets.py::_resolve_leaderboard_page`.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the shared round order.
 - **prediction (terminal ranking)** — the per-sample `predicted` is the

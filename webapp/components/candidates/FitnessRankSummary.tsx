@@ -1,13 +1,11 @@
 import type { CandidateView } from "@/lib/types";
 import { fmtNum } from "@/lib/format";
 
-// 1-based rank of each line by value descending; lines with a null value
-// are dropped (unranked).
-function ranks(lines: { key: string; v: number | null }[]): Map<string, number> {
-  const sortable = lines.filter((l) => l.v != null).slice().sort((a, b) => (b.v as number) - (a.v as number));
-  const m = new Map<string, number>();
-  sortable.forEach((l, i) => m.set(l.key, i + 1));
-  return m;
+// Both rank maps are SERVED (`composite_rank` / `lens_rank`, ranked among siblings by the
+// backend) — this panel folds them, it does not build them. An ordering is a score, and the
+// local sort that used to live here re-answered the question under its own tie rule.
+function ranks(lines: { key: string; r: number | null }[]): Map<string, number> {
+  return new Map(lines.filter((l) => l.r != null).map((l) => [l.key, l.r as number]));
 }
 
 // Top bar by composite value — NOT the campaign winner (the real crown is
@@ -46,9 +44,11 @@ export function FitnessRankSummary({
     label: b.label,
     actual: b.composite ?? null,
     whatif: b.whatif,
+    actualRank: b.compositeRank,
+    whatifRank: b.whatifRank,
   }));
-  const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));
-  const rankWhatif = ranks(lines.map((l) => ({ key: l.key, v: l.whatif })));
+  const rankActual = ranks(lines.map((l) => ({ key: l.key, r: l.actualRank })));
+  const rankWhatif = ranks(lines.map((l) => ({ key: l.key, r: l.whatifRank })));
   const wA = topByFitness(rankActual);
   const wW = topByFitness(rankWhatif);
   const topLabel = (k: string | null) =>

@@ -145,6 +145,18 @@ class LineageNode(StrictModel):
         "server-side from its stored evaluator namespace. Null without a lens, or when the "
         "namespace can't satisfy the formula.",
     )
+    composite_rank: int | None = Field(
+        default=None,
+        description="1-based position by `composite_fitness` descending among THIS node's "
+        "siblings — the bars one chart draws. Null where the value is. An ordering is a "
+        "score, so it is served rather than sorted client-side; the rank-shift read-out "
+        "against `lens_rank` is then a comparison of two served numbers.",
+    )
+    lens_rank: int | None = Field(
+        default=None,
+        description="The same sibling ordering under `lens_value`. Null without a lens. Read "
+        "against `composite_rank` to see which candidates the alternative formula moves.",
+    )
     sample_set_accuracy: float | None = Field(
         default=None,
         description="Scorer-faithful accuracy over the request's `samples=` subset. Null "
@@ -676,6 +688,28 @@ def _candidate_node(
     )
 
 
+def rank_by_composite(kids: list[LineageNode]) -> list[LineageNode]:
+    """Stamp `composite_rank` across one course's candidate children — the bars one chart
+    draws. Served because an ordering IS a score: a client sorting its own re-answers the
+    question under its guess at the formula. Courses take none — a course is not a round and
+    holds no election. Ties break on id so N bars read 1..N."""
+    scored = {
+        k.id: k.composite_fitness
+        for k in kids
+        if k.kind == "candidate" and k.composite_fitness is not None
+    }
+    if not scored:
+        return kids
+    position = {
+        cid: i + 1
+        for i, (cid, _) in enumerate(sorted(scored.items(), key=lambda kv: (-kv[1], kv[0])))
+    }
+    return [
+        k.model_copy(update={"composite_rank": position.get(k.id)}) if k.kind == "candidate" else k
+        for k in kids
+    ]
+
+
 def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
     leaf = path[-1]
     index = _read_index(stores, leaf)
@@ -707,23 +741,25 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
         grafts.setdefault(cut_from, []).extend(contribution.replayed_runs)
         retired |= _retired_by(fork, candidates, contribution.reach)
 
-    kids = _fold_contributions(
-        [
-            _candidate_node(
-                cand,
-                close=closed.get(cand.candidate_id, _NO_CLOSE),
-                children=[
-                    _build(c.store, c.path, depth=depth - 1, reads=reads)
-                    for c in buckets.get(cand.candidate_id, [])
-                    if depth > 0
-                ]
-                + grafts.get(cand.candidate_id, []),
-                retired_by=retired.get(cand.candidate_id),
-                hops=hops,
-            )
-            for cand in candidates
-        ],
-        contributions,
+    kids = rank_by_composite(
+        _fold_contributions(
+            [
+                _candidate_node(
+                    cand,
+                    close=closed.get(cand.candidate_id, _NO_CLOSE),
+                    children=[
+                        _build(c.store, c.path, depth=depth - 1, reads=reads)
+                        for c in buckets.get(cand.candidate_id, [])
+                        if depth > 0
+                    ]
+                    + grafts.get(cand.candidate_id, []),
+                    retired_by=retired.get(cand.candidate_id),
+                    hops=hops,
+                )
+                for cand in candidates
+            ],
+            contributions,
+        )
     )
 
     scalars = _course_scalars(stores, leaf, index, reads)

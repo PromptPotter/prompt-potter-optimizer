@@ -140,7 +140,10 @@ async def score_population(
             opt_sp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
-        # The shared order at candidate start — webapp table + console read it.
+        # The shared order at candidate start, and the ONLY channel carrying it: the
+        # dashboard projection does not persist it, so `dashboard.json` reports the
+        # sample in flight and (at round close) the order after the fact. Read off the
+        # ledger by the console and, over SSE, by the chat's run card for "next in line".
         callbacks.on_sample_order_preview(
             round_num,
             idx,

@@ -81,10 +81,11 @@ export interface PersistedState {
   widths: Partial<Record<ColId, number>>;
   folded: ColId[];
   wrapped: ColId[];
-  // When true ("Auto-sort"), the table ranks every row by Info gain
-  // (pick_score) descending — the queue mechanism's expected decision-information-
-  // gain — and header-click sorting is suppressed. The Info gain column
-  // carries the sort marker. Default ON.
+  // When true ("Auto-sort"), the table renders in the SERVED `hard_sample_rank`
+  // order and header-click sorting is suppressed. Which key that rank uses is the
+  // campaign's `hard_sample_order` (default Info gain — the queue mechanism's
+  // expected decision-information gain), so the marker follows the served key
+  // rather than being pinned to a column here. Default ON.
   syncLive: boolean;
   // When true ("Hide unmeasured"), rows with no measurements yet
   // (pick_score === null) are filtered out. Same behaviour under both

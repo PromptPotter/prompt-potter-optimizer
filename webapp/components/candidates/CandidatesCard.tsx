@@ -427,6 +427,10 @@ export function CandidatesCard() {
           : (n.cached_samples ?? live?.stats?.cached_samples ?? null),
         source: live && own == null ? "inflight" : "history",
         whatif: sliced ? null : n.lens_value,
+        // Ranks follow their values exactly: suppressed on the same two conditions, or a
+        // bar would carry a position in an ordering whose number it is not showing.
+        compositeRank: sliced || isCourse ? null : n.composite_rank,
+        whatifRank: sliced ? null : n.lens_rank,
         started: accuracy != null,
         // A course is not a round and holds no election of its own.
         roundOpen: !isCourse && !closed.has(n.round ?? 0),

@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.intelligence.exploration import build_observations
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
@@ -35,6 +36,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import (
     DegradationHealth,
+    HardSampleOrder,
     RoundResult,
     ScoredCandidate,
     candidate_label,
@@ -542,6 +544,7 @@ def from_disk_log(
     hard_samples_artifact: dict[str, Any] | None = None,
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
+    hard_sample_order: HardSampleOrder = "info_gain",
 ) -> LogMdView:
     """``fork_indices`` is the sibling-cycle ``index.json`` blobs, rendered as ``## Cycles`` on the
     campaign digest; the per-cycle log.md passes ``None``."""
@@ -596,6 +599,7 @@ def from_disk_log(
         HardSamplesView(
             artifact=dict(hard_samples_artifact),
             sample_query_lookup=_sample_queries(rounds),
+            order=hard_sample_order,
         )
         if hard_samples_artifact
         else None
@@ -665,6 +669,7 @@ def _render_cycle_log_md(
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
     layout = CycleLayout(store.cycle_dir(hop))
+    campaign = store.load_campaign(hop.campaign_id)
     content = to_markdown(
         from_disk_log(
             index,
@@ -672,6 +677,13 @@ def _render_cycle_log_md(
             hard_samples_artifact=hard_samples_artifact,
             streams_dir=layout.streams,
             fork_indices=None,
+            # The typed knob, never a raw-dict key read: the manifest persists only the delta
+            # from defaults, so an unset `hard_sample_order` is absent rather than spelled out.
+            hard_sample_order=(
+                load_campaign_config(campaign.config).hard_sample_order
+                if campaign is not None
+                else "info_gain"
+            ),
         )
     )
     write_text(layout.log_md, content)

@@ -14,7 +14,6 @@ import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-import { compareHardSamples } from "./hard-sample-order";
 
 interface Props {
   datasetName: string | null;
@@ -137,19 +136,21 @@ export function HardSamplesHeatmap({
     return out;
   }, [archivePerSample, dash, dashRound]);
 
-  // Tile order — the shared hard-sample ranking (`compareHardSamples`), the same
-  // comparator the table sorts on. This used to be a second sort that sank rows on
-  // `pick_score === null` while the table sank them on dot-presence, so under campaign
-  // scope the two surfaces disagreed — while this comment claimed they agreed.
-  const sortedItems = useMemo(() => {
-    const measuredIn = (it: DatasetItem): boolean =>
-      (archivePerSample.get(it.sample_id)?.measurements.length ?? 0) > 0;
-    return [...datasetItems].sort((a, b) => compareHardSamples(a, b, measuredIn));
-  }, [datasetItems, archivePerSample]);
+  // Tile order is the order `/preview` SERVED — `items[i].hard_sample_rank === i + 1`
+  // (`datasets.py`), so `datasetItems` IS the ranking and nothing here arranges it. Two
+  // hand-written comparators lived here and in the table; sorting on the served rank
+  // instead only made the re-derivation agree with itself. An ordering is a score: the
+  // fix is not to sort it correctly, it is not to sort it.
 
-  // A failed read and an empty roster are different facts and read differently.
-  // Both used to `return null`, so a 404 was indistinguishable from a collapsed
-  // panel — the operator's only recourse was the network tab.
+  // THREE facts, three sentences. A failed read and an empty roster were split
+  // first (both used to `return null`, so a 404 was indistinguishable from a
+  // collapsed panel); the third — STILL LOADING — stayed folded into "empty", and
+  // that is the one an operator meets most. The roster is four `limit=1000` reads
+  // awaited together, so the first load is genuinely slow, and for its whole
+  // duration this panel asserted the campaign had no samples and hid its two
+  // controls with it. `useDatasetPreview` already reports that state
+  // (`isStale` with an empty slice, its comment: "show a loading affordance, not
+  // blank chrome") — the claim was made over the top of the signal.
   if (datasetError) {
     return (
       <div className="hs-heat-wrap">
@@ -164,7 +165,9 @@ export function HardSamplesHeatmap({
     return (
       <div className="hs-heat-wrap">
         <p className="hs-heat-empty" role="status">
-          No samples on this campaign&rsquo;s dataset yet.
+          {datasetStale
+            ? "Loading this campaign’s samples…"
+            : "No samples on this campaign’s dataset yet."}
         </p>
       </div>
     );
@@ -192,7 +195,7 @@ export function HardSamplesHeatmap({
           title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
         >
           <span className="hs-heat-mini" aria-hidden="true">
-            {sortedItems.map((it) => {
+            {datasetItems.map((it) => {
               const ms = perSample.get(it.sample_id);
               let cls: "hit" | "miss" | "none" = "none";
               if (ms && ms.length > 0) {

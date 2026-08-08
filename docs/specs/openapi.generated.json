@@ -1101,6 +1101,11 @@
             "title": "Ground Truth",
             "type": "string"
           },
+          "hard_sample_rank": {
+            "description": "1-based position in the served hard-sample ranking under this response's `order`. THE ordering — a client renders rows in it and never re-derives one, since an ordering is a score and a locally-sorted one silently answers a different question in the same slot. Rows measured in this scope rank first; the rest trail.",
+            "title": "Hard Sample Rank",
+            "type": "integer"
+          },
           "n_obs": {
             "description": "Times this sample has been tried",
             "title": "N Obs",
@@ -1154,6 +1159,7 @@
           "sample_id",
           "query",
           "ground_truth",
+          "hard_sample_rank",
           "n_obs"
         ],
         "title": "DatasetItem",
@@ -1250,6 +1256,15 @@
             "title": "Name",
             "type": "string"
           },
+          "order": {
+            "description": "The key `items` are ranked by — the request's `order` when it named one, else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent no override can label what it is showing without guessing the default.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
           "row_count": {
             "title": "Row Count",
             "type": "integer"
@@ -1270,6 +1285,7 @@
         "required": [
           "name",
           "row_count",
+          "order",
           "items"
         ],
         "title": "DatasetPreviewResponse",
@@ -1797,6 +1813,18 @@
             ],
             "title": "Composite Fitness"
           },
+          "composite_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based position by `composite_fitness` descending among THIS node's siblings — the bars one chart draws. Null where the value is. An ordering is a score, so it is served rather than sorted client-side; the rank-shift read-out against `lens_rank` is then a comparison of two served numbers.",
+            "title": "Composite Rank"
+          },
           "course_kind": {
             "anyOf": [
               {
@@ -1920,6 +1948,18 @@
             "description": "`C{round}.{n}` on the campaign's ONE timeline: this course's own candidates keep their minted label; an attempt a fork contributed takes the next free index of its round, by mint time — UNLESS the cut superseded, where it keeps its own label because it replaced that position rather than joining it, and the candidate it replaced carries `superseded_by`. So one label can appear twice in a round: at most once LIVE, the other retired.",
             "title": "Label",
             "type": "string"
+          },
+          "lens_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same sibling ordering under `lens_value`. Null without a lens. Read against `composite_rank` to see which candidates the alternative formula moves.",
+            "title": "Lens Rank"
           },
           "lens_value": {
             "anyOf": [
@@ -4994,7 +5034,7 @@
     },
     "/api/v1/datasets/{name}/measurement-series": {
       "get": {
-        "description": "Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order\n+ limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).",
+        "description": "Chronological per-sample series for the Meas heat-map column. Same page, same order as\n`/preview` — both resolve it through `_resolve_leaderboard_page`, so alignment is a shared\nfunction rather than two matching sort keys. `ord` is opaque (only row alignment).",
         "operationId": "get_dataset_measurement_series_api_v1_datasets__name__measurement_series_get",
         "parameters": [
           {
@@ -5108,6 +5148,28 @@
               "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
               "title": "Descend"
             }
+          },
+          {
+            "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info_gain",
+                    "difficulty"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
+              "title": "Order"
+            }
           }
         ],
         "responses": {
@@ -5183,7 +5245,7 @@
     },
     "/api/v1/datasets/{name}/preview": {
       "get": {
-        "description": "Hard-sample leaderboard — hardest-first by δ_s, unmeasured trail by sample_id.\n\nCounts of measured/unmeasured come from the companion `/measurement-series` (a sample's\nseries carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent\nfits, so it overcounts on its own.",
+        "description": "Hard-sample leaderboard, served in rank order — `items[i].hard_sample_rank == i + 1`.\n\nRows measured in this scope rank first by the `order` key, the rest trail by sample_id.\n*Measured* is dot presence in the companion `/measurement-series`, not a δ entry: the\nRasch ruler persists across rounds and inherits from parent fits, so it overcounts on its\nown. Both routes resolve the page through one function, so they cannot disagree.",
         "operationId": "get_dataset_preview_api_v1_datasets__name__preview_get",
         "parameters": [
           {
@@ -5296,6 +5358,28 @@
               ],
               "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
               "title": "Descend"
+            }
+          },
+          {
+            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info_gain",
+                    "difficulty"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+              "title": "Order"
             }
           }
         ],

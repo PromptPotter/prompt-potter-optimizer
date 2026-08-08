@@ -57,7 +57,13 @@ LEDGER_BASELINE = {
     # knob the halt would be unconditional, and the operator who genuinely wants to elect on
     # a short panel would have no way to say so — which is the shape a gate needs to be a
     # policy rather than a law.
-    "config_leaf_fields": 38,
+    #
+    # 38 -> 39 (2026-08-07): ``hard_sample_order``. The hard-sample leaderboard had THREE
+    # orderings and no owner — δ_s served by `/preview`, `build_round_order` in the engine,
+    # and an info-gain sort the browser invented and applied over the served one. Naming the
+    # key is what lets one served rank replace all three, and it is a `Estimand.DISPLAY` knob
+    # beside `headline_metric`: it picks the order a human READS and reaches no decision.
+    "config_leaf_fields": 39,
     # 16 -> 19 (2026-08-05): `BRAND_SHORT_NAME` / `BRAND_SERVICE_NAME` / `BRAND_DOCS_URL`.
     # A deliberate raise. They are the engine's half of the whitelabel declaration —
     # `deploy-linux/deploy.config`'s brand block, fanned out by `brand-env.sh` into `.env`
@@ -177,7 +183,12 @@ LEDGER_BASELINE = {
     # 4065 -> 4066 (2026-08-07): `_sample_lookahead_depth(session)`. A predicate rather than a
     # stored int because the answer changes mid-candidate and is refused for an in-process
     # connector.
-    "param_decls": 4066,
+    # 4066 -> 4089 (2026-08-07): serving the hard-sample rank. `_LeaderboardPage` +
+    # `_resolve_leaderboard_page` + `_page_series` give the two routes that must agree on a
+    # page ONE resolver instead of two hand-copied sort keys, and the fields it carries are
+    # counted here. The rank needs the Rasch maps AND the per-sample series at once, which is
+    # why neither route could hold it and the browser ended up owning the ordering.
+    "param_decls": 4089,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -222,7 +233,15 @@ LEDGER_BASELINE = {
     # 3391 -> 3410 (2026-08-07): sample look-ahead. Each survivor states the one fact no
     # signature carries and no layer CLAUDE.md owns — a throughput toggle cannot reach a
     # measurement — and its violation is silent.
-    "docstring_lines": 3410,
+    #
+    # 3410 -> 3440 (2026-08-07): the served hard-sample rank. Two-gate survivors only, and
+    # each states a rule its signature cannot: *measured* is dot presence in THIS scope and
+    # not a δ entry (the ruler inherits from parent fits, so δ overcounts); SELECTION and RANK
+    # are deliberately different keys, because the series is fetched only for rows already
+    # selected; the `log.md` GRID stays δ-sorted whatever the knob says, since a Rasch matrix
+    # reads as a staircase only while difficulty runs monotonically across its columns. Every
+    # one of those is silent when violated — the ordering simply comes out wrong.
+    "docstring_lines": 3440,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

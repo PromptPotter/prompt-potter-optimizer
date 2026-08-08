@@ -1748,8 +1748,8 @@ def test_claude_md_claims_resolve() -> None:
        stops the card becoming a second owner of the rule it indexes: the only content it
        may carry is a string that also exists as a heading.
     4. No banned token. A `file.py:120` reference rots on the next edit to that file and
-       cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo has
-       never had (`potter-debt-sweep/SKILL.md` says so itself).
+       cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo does
+       not have.
 
     (4) runs over **every tracked `docs/**/*.md` and `docs/**/*.yaml`**, not just the
     CLAUDE.md tree, because both its bans govern all docs rather than the contract-file

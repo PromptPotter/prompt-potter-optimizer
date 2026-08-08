@@ -40,6 +40,8 @@ function node(
     expected_samples: null,
     cached_samples: null,
     lens_value: null,
+    composite_rank: null,
+    lens_rank: null,
     sample_set_accuracy: null,
     sample_set_n: null,
     divergence: null,

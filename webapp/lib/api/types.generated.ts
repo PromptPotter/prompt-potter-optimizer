@@ -482,6 +482,12 @@ export interface DatasetItem {
   query: string;
   ground_truth: string;
   task: string | null;
+  /** 1-based position in the served hard-sample ranking under this response's
+   * `order`. THE ordering — a client renders rows in it and never re-derives
+   * one, since an ordering is a score and a locally-sorted one silently
+   * answers a different question in the same slot. Rows measured in this
+   * scope rank first; the rest trail. */
+  hard_sample_rank: number;
   /** Times this sample has been tried */
   n_obs: number;
   /** Queue-mechanism's blended objective on this sample for a brand-new candidate
@@ -505,6 +511,11 @@ export interface DatasetPreviewResponse {
    * `row_count` above — the bank IS the preview, so a second field restated
    * it. */
   split_test: number | null;
+  /** The key `items` are ranked by — the request's `order` when it named one, else
+   * the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that
+   * sent no override can label what it is showing without guessing the
+   * default. */
+  order: 'info_gain' | 'difficulty';
   items: DatasetItem[];
 }
 
@@ -865,6 +876,15 @@ export interface LineageNode {
    * side from its stored evaluator namespace. Null without a lens, or when
    * the namespace can't satisfy the formula. */
   lens_value: number | null;
+  /** 1-based position by `composite_fitness` descending among THIS node's siblings
+   * — the bars one chart draws. Null where the value is. An ordering is a
+   * score, so it is served rather than sorted client-side; the rank-shift
+   * read-out against `lens_rank` is then a comparison of two served numbers. */
+  composite_rank: number | null;
+  /** The same sibling ordering under `lens_value`. Null without a lens. Read
+   * against `composite_rank` to see which candidates the alternative formula
+   * moves. */
+  lens_rank: number | null;
   /** Scorer-faithful accuracy over the request's `samples=` subset. Null without a
    * `samples=` mask, or when this candidate never ran any selected sample. */
   sample_set_accuracy: number | null;

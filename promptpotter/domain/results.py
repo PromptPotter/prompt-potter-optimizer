@@ -38,6 +38,7 @@ __all__ = [
     "DegradationHealth",
     "DiagnosticRunRecord",
     "EliminationContext",
+    "HardSampleOrder",
     "HeadlineMetric",
     "PayloadOutcome",
     "RoundParent",
@@ -724,6 +725,13 @@ HealthGrade = Literal["healthy", "degraded", "critical"]
 # declares the campaign default and `LiveDashboardState` serves it, so the two cannot
 # drift into a wide `str` on one side and a closed union on the other.
 HeadlineMetric = Literal["accuracy", "composite", "ability"]
+
+# Which key ranks the hard-sample leaderboard. Same one-owner rule as `HeadlineMetric`
+# above. `info_gain` is the queue mechanism's own acquisition score (`pick_value`) — what
+# the leaderboard has always shown; `difficulty` is the Rasch ruler δ_s alone. Ranks what
+# the operator READS and nothing else: the order the engine actually scores in is
+# `build_round_order`, which no knob here reaches.
+HardSampleOrder = Literal["info_gain", "difficulty"]
 
 
 class DegradationHealth(StrictModel):

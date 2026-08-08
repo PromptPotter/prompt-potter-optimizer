@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.results import HardSampleOrder
+
 __all__ = [
     "AnyView",
     "CandidatesGeneratedView",
@@ -298,6 +300,8 @@ class HardSamplesView:
 
     artifact: dict[str, Any]
     sample_query_lookup: dict[int, str] = field(default_factory=dict)
+    order: HardSampleOrder = "info_gain"
+    """`CampaignConfig.hard_sample_order` — ranks the leaderboard block, not the matrix."""
 
 
 @dataclass(frozen=True)
