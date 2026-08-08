@@ -6,6 +6,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.10] — 2026-08-08
+
+> Continued 0.8.x beta-hardening toward the 0.9.0 broad launch. 123 commits since `v0.8.8` <!-- 0.8.9 was an in-flight version bump with no release of its own; consolidated here -->. No paired backend release this cycle. Zero released-between and zero long-lived on-disk data, so contract and on-disk changes ship without compatibility shims — **start clean** (see BREAKING).
+
+### The build, in order of completion
+
+One shape dominates: a number, a verdict or a prompt **composed from more than one thing and published as one**. Each arc collapses another instance to a single owner.
+
+- **One accuracy basis** *(Jul 27 – Aug 1)* — a published accuracy was a union of rows measured by *different* configurations: the sidebar read 57%→78% beside a best-candidate bar of 0.679. One basis now, and `hit`/`hits` are deleted — an unreachable ceiling made every surface hanging off them read zero on a graded scorer.
+- **L4 gets one measurand** *(Jul 28 – Aug 1)* — outer fitness is what the inner search *kept*, not the arms it discarded. Four multiplicative factors over eight proxies were measured on the first complete 39-cell panel, disqualified, and replaced by **one linear term** whose effect *is* the mean logit lift. New `rank-optimizer-prompts` ranks optimizer-prompt edits against the unedited original at zero LLM calls.
+- **The wheel is the product** *(Jul 30 – Aug 1)* — PromptPotter is a package, not a checkout: `REPO_ROOT` had resolved to `site-packages/` once installed. Three named roots replace it, a dataset's shipped definition splits from its fetched rows, and a third party registers a connector through an entry-point group without forking us.
+- **Verdicts stop grading on holes** *(Aug 2 – 7)* — an unscoreable cell raised the denominator and never the numerator, so a hole flattered a candidate; the verdict's subject could be an arm the round had refused to crown. `replicate_survivors` is out and **`verify`** is in — more samples, never the same cell twice.
+- **Resume, fork and repair grow a memory** *(Aug 3 – 8)* — a round fingerprints its optimizer packages and stamps the optimizer that ran it, resolved model included; a correction cuts at a candidate, not a round. The escalation fold was dead across 89 real L2 fires, so every resume had been re-spending a spent budget.
+- **Metering** *(Aug 5 – 6)* — OpenRouter DeepSeek priced **1.6×** off DeepSeek's own first-party key; a silent deadline retry and a mis-ordered cache write each lost a paid call with every on-disk surface clean. Metering now precedes storing, and reasoning tokens are recorded on the success path.
+
+- **The prompt budget — bounded where it is produced** *(Aug 6 – 7)* — our own design notes were shipping as prompt text: a Pydantic class docstring rides the response schema on every optimizer call, **2088 of `l1_generate`'s 3513 schema characters and 63% of `l2_context`'s**. Net **`l2_context` −31.5% of the call, `l1_generate` −10.4%**. Candidate prompts had been shipping the parent's fields twice on 26% of candidates. §0 now carries the general rule.
+- **The dead air is at process start** *(Aug 6)* — a round is ~99% LLM latency, so the cost sits at process boundaries, which supervision pays over and over. The sample index persists its delta cursor instead of re-scoring the whole slice on every start: **7.15 s → 0.58 s**.
+- **Two samples in flight, on a button** *(Aug 7)* — arm the scoring walk to hold two, **~1.4×**. Absorbed in walk order with the overshoot discarded, so a candidate's rows are identical at either depth and no campaign becomes babysat for using it. Browser-only, host-admin, one round per arming; no CLI verb, by design.
+- **The self-optimization surface** *(Aug 7 – 8)* — a candidate bar says whether it was measured or replayed; ranking is served instead of rebuilt by two panes that disagreed about the same rows; the running node is served, so the canvas no longer goes dark for a whole optimizer call; the run is the last item in the chat thread.
+- **One gate** *(Aug 8)* — `scripts/gate.py` runs every check CI runs in one invocation, re-execing into the locked environment. 80 s against 299 s serial; its first run caught a real red.
+
+### Bug Fixes
+
+- **A measurement is filed under the asker that paid for it** — three provenance bugs had been re-running measurements already banked, and none of them raised: the ids were merely wrong.
+- Two dataset-name rules disagreed, so an upload that succeeded 400'd at mint; a bare `reset` addressed the pre-sign-in directory; the daily quota was keyed to the local day.
+- CI: a 3.12 wheel venv against a `>=3.13` requirement, a stale OpenAPI snapshot, and four endpoints declared camelCase where the app serves snake_case.
+
+### BREAKING Changes
+
+- **Many, and none shimmed** — there is nothing released to be compatible with. The install layout, a dozen config keys, `hit`/`hits` and five verbs moved or went; `restamp --apply` migrates what can migrate.
+- **Start clean.** Measurement identity now also hashes the response schemas, the renderers' own source and the inner benchmark's node configs, so banked self-optimization outer rows re-measure; inner rows cache-serve.
+- **Same backend as 0.8.8** — runs against TermNorm v1.2.0; no new pairing.
+
+### Technical Details
+
+- **123 commits since `v0.8.8`** (2026-07-19 → 2026-08-08): 46 fixes, 28 refactors, 28 features, 14 docs, 3 chore, 2 perf, 1 test (+ one squashed sweep PR and merges).
+- `APP_VERSION` + `pyproject.toml` → 0.8.10. 0.8.9 was an in-flight bump with no release of its own.
+- See individual sections above for the full change set.
+
 ## [0.8.8] — 2026-07-19
 
 > Continued 0.8.x beta-hardening toward the 0.9.0 broad launch. 292 commits since `v0.8.2` <!-- last published release was v0.8.2; 0.8.3–0.8.7 were internal version bumps with no separate notes, consolidated here -->. This is a **paired release** with the TermNorm backend (see BREAKING → Paired backend). Zero released-between and zero long-lived on-disk data, so on-disk and contract changes ship without compatibility shims — **start clean** (see BREAKING).
@@ -83,7 +122,7 @@ This release is a five-week arc, and the order the work landed *is* the story �
 - **`CampaignConfig` field renames remain data migrations.** Both on-disk surfaces now persist the **delta from defaults** (a knob nobody set is absent, so renaming it is free); a knob the operator *did* set is still written down. `deploy-linux/update.sh` runs `promptpotter restamp --apply` on every deploy.
 - **`CycleResult.n_rounds → n_l1_rounds`** (origin-exclusive count).
 - **Elimination config** — PoBB `pobb_epsilon` + dominance/equivalence are replaced by one `margin_elimination` paired-gate knob.
-- **Paired backend.** 0.8.8 pairs with the TermNorm backend on the web-search `strategy` axis + the structured-output seam (`llm_only` returns `content=""` with a `content_empty:` advisory rather than substituting the reasoning trace). <!-- TODO(release): stamp the exact paired TermNorm version once its minor release is cut. -->
+- **Paired backend.** 0.8.8 pairs with the TermNorm backend on the web-search `strategy` axis + the structured-output seam (`llm_only` returns `content=""` with a `content_empty:` advisory rather than substituting the reasoning trace). Paired with **TermNorm v1.2.0**.
 
 ### Technical Details
 
