@@ -5,7 +5,13 @@
 // `unknown`, which would hand back exactly the "typechecks anything" hole the generated
 // types exist to close.
 
-import type { LiveDashboardState, RoundResult, ScoredCandidate } from "@/lib/types";
+import type {
+  LiveDashboardState,
+  RoundResult,
+  RoundSummary,
+  RoundSummaryCandidate,
+  ScoredCandidate,
+} from "@/lib/types";
 
 export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
   return {
@@ -135,6 +141,51 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     backfill_log: [],
     current_round: {},
     error: null,
+    ...over,
+  };
+}
+
+// The `dash.rounds[]` display row and its candidate — the summary shapes, distinct
+// from the `round_NNNN.json` document above. Same rule: every field the server
+// always sends is filled inert here so a test names only what it is about.
+export function summaryCandidate(
+  over: Partial<RoundSummaryCandidate> = {},
+): RoundSummaryCandidate {
+  return {
+    candidate_id: "c",
+    label: "C1.1",
+    accuracy: 0,
+    composite_fitness: 0,
+    scored_samples: 0,
+    expected_samples: 0,
+    cached_samples: 0,
+    is_winner: false,
+    evaluators: {},
+    changes_description: "",
+    partial_reason: "",
+    theta: null,
+    theta_se: null,
+    composite_ci_lo: null,
+    composite_ci_hi: null,
+    matched_origin_accuracy: null,
+    matched_origin_composite: null,
+    ...over,
+  };
+}
+
+export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
+  return {
+    round: 0,
+    accuracy: 0,
+    composite_fitness: 0,
+    cumulative_theta: null,
+    calibration_model: null,
+    improved: null,
+    electable_count: null,
+    candidates: [],
+    selection: [],
+    health: null,
+    outer_verdict: null,
     ...over,
   };
 }

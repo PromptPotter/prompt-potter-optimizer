@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { DraftPatch } from "@/lib/api";
-import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
+import { cx } from "@/lib/cx";
+import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
 
 // The starting-prompt control panel. The check-in's decomposition (or an
 // authored dataset's prompt) lands on `draft.origin_prompt_fields` as a
@@ -11,18 +12,24 @@ import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 // (the minted-campaign node panel shows the origin prompt with no draft to
 // write to).
 
-// Per-field UI copy, keyed by the canonical `PROMPT_STRING_FIELDS` (the TS/Py seam
-// lives in `lib/prompt-fields.ts`); the render order + membership come from that
-// shared list, so a rename crosses the seam in one place.
-const FIELD_META: Record<string, { label: string; hint: string; rows: number }> = {
-  persona: { label: "Persona", hint: "Who the model should act as", rows: 2 },
-  task_intent: { label: "Task intent", hint: "The goal, in one line", rows: 2 },
-  problem_description: { label: "Problem", hint: "What each input is", rows: 2 },
-  instruction: { label: "Instructions", hint: "The directive the model follows", rows: 3 },
-  thinking_style: { label: "Thinking style", hint: "How to reason before answering", rows: 2 },
-  answer_format: { label: "Answer format", hint: "Exact shape of the output", rows: 2 },
+// AUTHORING layout per field — the placeholder hint and how tall the box starts.
+// The field's NAME is not here: `promptFieldLabel` owns it, beside the canonical
+// key list (the TS/Py seam, `lib/prompt-fields.ts`), because the run card's
+// "changed vs origin" summary names the same fields and two labels for one field is
+// a synonym, not a second fact. Render order + membership come from that list too.
+const FIELD_META: Record<string, { hint: string; rows: number }> = {
+  persona: { hint: "Who the model should act as", rows: 2 },
+  task_intent: { hint: "The goal, in one line", rows: 2 },
+  problem_description: { hint: "What each input is", rows: 2 },
+  instruction: { hint: "The directive the model follows", rows: 3 },
+  thinking_style: { hint: "How to reason before answering", rows: 2 },
+  answer_format: { hint: "Exact shape of the output", rows: 2 },
 };
-const FIELDS = PROMPT_STRING_FIELDS.map((key) => ({ key, ...FIELD_META[key] }));
+const FIELDS = PROMPT_STRING_FIELDS.map((key) => ({
+  key,
+  label: promptFieldLabel(key),
+  ...FIELD_META[key],
+}));
 
 function asStrings(value: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -38,6 +45,7 @@ export function PromptFieldsEditor({
   onApply,
   flat = false,
   readOnly = false,
+  compact = false,
 }: {
   value: Record<string, unknown>;
   onApply?: (patch: DraftPatch) => void;
@@ -47,6 +55,11 @@ export function PromptFieldsEditor({
   // When true, disable every field — the minted-campaign node panel shows the
   // origin prompt read-only (no draft to persist to).
   readOnly?: boolean;
+  // Half-width host (the chat run card): shorter boxes, and — read-only only —
+  // empty fields dropped. An empty slot is an affordance while AUTHORING and pure
+  // noise while inspecting, so the drop is gated on `readOnly`, never on `compact`
+  // alone; hiding a typeable slot would make the prompt look shorter than it is.
+  compact?: boolean;
 }) {
   // Fingerprint the incoming prompt; render-phase reset when it changes (e.g.
   // the check-in just populated it) so external updates flow in without a stale
@@ -74,8 +87,10 @@ export function PromptFieldsEditor({
     ? (value.few_shot_examples as unknown[]).length
     : 0;
 
+  const shown = compact && readOnly ? FIELDS.filter((f) => (fields[f.key] ?? "").trim()) : FIELDS;
+
   return (
-    <section className={flat ? "prompt-editor is-flat" : "prompt-editor"}>
+    <section className={cx("prompt-editor", flat && "is-flat", compact && "is-compact")}>
       {flat ? (
         <span className="prompt-editor-title">Starting prompt</span>
       ) : (
@@ -85,12 +100,12 @@ export function PromptFieldsEditor({
         </header>
       )}
       <div className="prompt-editor-grid">
-        {FIELDS.map((f) => (
+        {shown.map((f) => (
           <label key={f.key} className="prompt-field">
             <span className="prompt-field-label">{f.label}</span>
             <textarea
               className="prompt-field-input"
-              rows={f.rows}
+              rows={compact ? 2 : f.rows}
               value={fields[f.key]}
               placeholder={f.hint}
               readOnly={readOnly}

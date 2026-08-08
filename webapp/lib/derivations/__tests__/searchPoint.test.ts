@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  bestObserveTarget,
   candidateObserveConfig,
+  latestClosedTarget,
   liveCandidateObserveConfig,
   liveObserveConfig,
+  observeOptions,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { dash, roundDoc, scored } from "@/lib/test-fixtures";
+import { dash, roundDoc, scored, summaryCandidate, summaryRound } from "@/lib/test-fixtures";
 
 type InputCandidate = {
   idx?: number;
@@ -116,5 +119,91 @@ describe("candidateObserveConfig", () => {
     expect(candidateObserveConfig(doc, "C9.9", "x")).toBeNull();
     expect(candidateObserveConfig(null, "C2.1", "x")).toBeNull();
     expect(candidateObserveConfig(roundDoc({ round: 1 }), "C2.1", "x")).toBeNull();
+  });
+});
+
+// The two observe TARGETS. Both read served facts only — a crown (`is_winner`) and a
+// position — so neither may re-rank, and a round that crowned nobody must not have one
+// invented for it.
+describe("bestObserveTarget — the incumbent", () => {
+  const crowned = (round: number, winnerIdx: number, n: number) =>
+    summaryRound({
+      round,
+      candidates: Array.from({ length: n }, (_, i) =>
+        summaryCandidate({ candidate_id: `r${round}c${i}`, is_winner: i === winnerIdx }),
+      ),
+    });
+
+  it("takes the MOST RECENT served crown, not the highest round number on file", () => {
+    const t = bestObserveTarget(dash({ rounds: [crowned(2, 1, 3), crowned(0, 0, 1), crowned(1, 2, 3)] }));
+    expect(t?.round).toBe(2);
+    expect(t?.courseLabel).toBe("C2.2");
+    expect(t?.candidateId).toBe("r2c1");
+  });
+
+  it("skips a round that crowned nobody and keeps walking back", () => {
+    const uncrowned = summaryRound({
+      round: 3,
+      candidates: [summaryCandidate({ candidate_id: "r3c0" }), summaryCandidate({ candidate_id: "r3c1" })],
+    });
+    const t = bestObserveTarget(dash({ rounds: [crowned(2, 0, 2), uncrowned] }));
+    expect(t?.round).toBe(2);
+  });
+
+  it("skips an empty (L2/L3-terminal) round rather than reading it as a round with no winner", () => {
+    const t = bestObserveTarget(dash({ rounds: [crowned(1, 0, 2), summaryRound({ round: 2 })] }));
+    expect(t?.round).toBe(1);
+  });
+
+  it("badges a sole-arm crown as `origin`, a contested one as `best`", () => {
+    expect(bestObserveTarget(dash({ rounds: [crowned(0, 0, 1)] }))?.label).toBe("origin · C0");
+    expect(bestObserveTarget(dash({ rounds: [crowned(1, 0, 3)] }))?.label).toBe("best · C1.1");
+  });
+
+  it("returns null before anything is crowned", () => {
+    expect(bestObserveTarget(null)).toBeNull();
+    expect(bestObserveTarget(dash({}))).toBeNull();
+    expect(bestObserveTarget(dash({ rounds: [summaryRound({ round: 0 })] }))).toBeNull();
+  });
+});
+
+describe("latestClosedTarget — the newest searchpoint that closed", () => {
+  it("takes the LAST candidate of the last round with candidates — winner or not", () => {
+    const t = latestClosedTarget(
+      dash({
+        rounds: [
+          summaryRound({ round: 1, candidates: [summaryCandidate({ candidate_id: "a", is_winner: true })] }),
+          summaryRound({
+            round: 2,
+            candidates: [
+              summaryCandidate({ candidate_id: "b", is_winner: true }),
+              summaryCandidate({ candidate_id: "c" }),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(t?.courseLabel).toBe("C2.2");
+    expect(t?.candidateId).toBe("c");
+    expect(t?.label).toBe("latest · C2.2");
+  });
+
+  it("returns null with no closed round", () => {
+    expect(latestClosedTarget(null)).toBeNull();
+    expect(latestClosedTarget(dash({ rounds: [summaryRound({ round: 0 })] }))).toBeNull();
+  });
+});
+
+describe("observeOptions", () => {
+  it("DROPS unavailable states rather than disabling them, and keeps one order", () => {
+    expect(observeOptions({ best: true, latest: true, selected: false })).toEqual([
+      { value: "best", label: "Best" },
+      { value: "latest", label: "Most recent" },
+    ]);
+    expect(observeOptions({ best: false, latest: true, selected: true })).toEqual([
+      { value: "latest", label: "Most recent" },
+      { value: "selected", label: "Selected" },
+    ]);
+    expect(observeOptions({ best: false, latest: false, selected: false })).toEqual([]);
   });
 });

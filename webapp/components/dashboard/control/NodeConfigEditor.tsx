@@ -36,6 +36,11 @@ export function NodeConfigEditor(props: {
   // principal holding `campaign.babysit`. Default true keeps every other caller
   // (draft setup, inspect) unchanged; the steer form passes the operator's cap.
   babysitEditable?: boolean;
+  // values mode only: fold params still sitting at the pipeline default behind a
+  // disclosure, leaving the ones this searchpoint actually moved. For the half-width
+  // hosts (the chat run card) where the full table does not fit. Authoring
+  // (search-space) never compacts — a hidden lock is a lock nobody set.
+  compact?: boolean;
   onApply?: (patch: DraftPatch) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
@@ -194,6 +199,7 @@ function ValuesEditor({
   node,
   readOnly = false,
   babysitEditable = true,
+  compact = false,
   onChange,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
@@ -201,6 +207,7 @@ function ValuesEditor({
   node?: string;
   readOnly?: boolean;
   babysitEditable?: boolean;
+  compact?: boolean;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
   const rows = useMemo(
@@ -228,26 +235,49 @@ function ValuesEditor({
     onChange?.(seedOverlayFromRows(rows, next));
   };
 
+  const renderRow = (r: ConfigRow) => {
+    const key = `${r.node}.${r.key}`;
+    const edit = edits[key];
+    const value = edit !== undefined ? edit : r.value;
+    // An optimizer-locked axis (model / provider) stays read-only unless the
+    // operator holds `campaign.babysit` — editing a value the optimizer owns is
+    // the babysit act, and it taints the branch (grade C) on the backend.
+    const rowReadOnly = readOnly || (!babysitEditable && r.optimizerLocked);
+    return (
+      <ConfigRowView
+        key={key}
+        row={{ ...r, value }}
+        mode="values"
+        readOnly={rowReadOnly}
+        onValue={(v) => set(key, v)}
+      />
+    );
+  };
+
+  if (!compact) return <div className="config-editor">{rows.map(renderRow)}</div>;
+
+  // Compact: lead with the params this searchpoint MOVED. `value !== baseValue` is
+  // the same predicate `nodeOverlayPatch` writes an override on, so the two cannot
+  // disagree about what counts as moved — and it is not `fromCandidate`, which the
+  // OBSERVE path leaves true for nearly every row (the resolved config carries every
+  // param's running value, not a sparse delta). Nothing is hidden, only folded.
+  const moved = rows.filter((r) => r.value !== r.baseValue);
+  const atDefault = rows.filter((r) => r.value === r.baseValue);
   return (
-    <div className="config-editor">
-      {rows.map((r) => {
-        const key = `${r.node}.${r.key}`;
-        const edit = edits[key];
-        const value = edit !== undefined ? edit : r.value;
-        // An optimizer-locked axis (model / provider) stays read-only unless the
-        // operator holds `campaign.babysit` — editing a value the optimizer owns is
-        // the babysit act, and it taints the branch (grade C) on the backend.
-        const rowReadOnly = readOnly || (!babysitEditable && r.optimizerLocked);
-        return (
-          <ConfigRowView
-            key={key}
-            row={{ ...r, value }}
-            mode="values"
-            readOnly={rowReadOnly}
-            onValue={(v) => set(key, v)}
-          />
-        );
-      })}
+    <div className="config-editor is-compact">
+      {moved.length > 0 ? (
+        moved.map(renderRow)
+      ) : (
+        <small className="config-hint">Every param is still at its pipeline default.</small>
+      )}
+      {atDefault.length > 0 ? (
+        <details className="config-rest">
+          <summary>
+            {atDefault.length} more at default
+          </summary>
+          {atDefault.map(renderRow)}
+        </details>
+      ) : null}
     </div>
   );
 }

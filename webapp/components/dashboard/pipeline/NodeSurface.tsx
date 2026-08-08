@@ -37,6 +37,7 @@ export function NodeSurface({
   babysitEditable,
   readOnly,
   flat,
+  compact,
   onClose,
   onApply,
   onConfigChange,
@@ -61,6 +62,10 @@ export function NodeSurface({
   babysitEditable?: boolean;
   readOnly?: boolean;
   flat?: boolean;
+  // Half-width host (the chat run card): params at their default fold away, prompt
+  // boxes shorten, the output contract collapses. It changes what is IN VIEW, never
+  // what exists — every part stays one disclosure away.
+  compact?: boolean;
   onClose?: () => void;
   // Prompt edits + search-space config edits ride this DraftPatch. Values-mode
   // config edits ride `onConfigChange` (the flat fork overlay). Absent → that
@@ -96,6 +101,7 @@ export function NodeSurface({
         seedOverlay={configSeed}
         babysitEditable={babysitEditable}
         readOnly={configReadOnly}
+        compact={compact}
         onApply={onApply}
         onChange={onConfigChange}
       />
@@ -107,12 +113,20 @@ export function NodeSurface({
             value={point.origin_prompt_fields}
             flat
             readOnly={promptReadOnly}
+            compact={compact}
             onApply={promptReadOnly ? undefined : onApply}
           />
         </>
       ) : null}
 
-      <NodeOutputSchemaView schema={nodeOutput} />
+      {compact ? (
+        <details className="node-output-fold">
+          <summary>Output contract</summary>
+          <NodeOutputSchemaView schema={nodeOutput} />
+        </details>
+      ) : (
+        <NodeOutputSchemaView schema={nodeOutput} />
+      )}
     </>
   );
 

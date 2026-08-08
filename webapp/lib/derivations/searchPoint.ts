@@ -25,8 +25,39 @@ import {
 import { candidateLabel } from "@/lib/candidate-label";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import type { RoundResult } from "@/lib/types";
+import { roundHasCandidates, sortedRounds } from "./round-candidates";
+import { wasElected } from "./election";
 
-export type ObserveState = "live" | "historical";
+// WHICH searchpoint the observe box shows. Each state answers a question an
+// operator actually asks, which is why none of them names a data source:
+//
+//   best     — the incumbent: what the search is currently expanding from.
+//   latest   — the newest searchpoint touched: in-flight while running, else
+//              the last candidate the last closed round measured.
+//   selected — the candidate picked on another surface (a candidates-card bar,
+//              a sidebar row). Offered ONLY while such a pick exists.
+//
+// The predecessors were `live | historical`, and both misreported themselves:
+// `live` was offered (disabled) on a stopped run, and `historical` silently meant
+// "whatever you clicked on the Dashboard tab", with no label saying so.
+export type ObserveState = "best" | "latest" | "selected";
+
+const OBSERVE_LABELS: Record<ObserveState, string> = {
+  best: "Best",
+  latest: "Most recent",
+  selected: "Selected",
+};
+
+// The button set, shared so the two hosts (the pipeline node detail and the chat's
+// run card) cannot drift on wording or order. An UNAVAILABLE state is DROPPED, not
+// disabled: a permanently-dead button is the affordance dishonesty this rename was
+// for. `selected` is last because it only ever appears transiently.
+export function observeOptions(
+  avail: Record<ObserveState, boolean>,
+): { value: ObserveState; label: string }[] {
+  const order: ObserveState[] = ["best", "latest", "selected"];
+  return order.filter((s) => avail[s]).map((s) => ({ value: s, label: OBSERVE_LABELS[s] }));
+}
 
 export interface ObserveConfig {
   // The searchpoint's evolved prompt fields (OptSearchPoint.prompt_field_dict()
@@ -139,4 +170,62 @@ export function candidateObserveConfig(
   if (!Array.isArray(scores) || !courseLabel) return null;
   const row = (scores as LiveInputCandidate[]).find((c) => c.label === courseLabel);
   return rowConfig(row, display, nodeId);
+}
+
+// WHICH past candidate a state points at, before its round file is loaded. Held
+// apart from `ObserveConfig` on purpose: availability of a state is a served fact
+// (does such a candidate exist), while the config is a fetch that may not have
+// landed — conflating them made a button flicker with its own round file.
+//
+// `courseLabel` is the POSITIONAL join key `candidateObserveConfig` needs;
+// `label` is the decorated header string and must never be joined on.
+export interface ObserveTarget {
+  round: number;
+  idx: number;
+  courseLabel: string;
+  label: string;
+  candidateId: string;
+}
+
+function targetAt(round: number, idx: number, candidateId: string, prefix: string): ObserveTarget {
+  const courseLabel = candidateLabel(round, idx);
+  return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
+}
+
+// THE INCUMBENT — the individual the search is currently expanding from. Walk the
+// closed rounds back to the most recent SERVED crown (`is_winner`); a round that
+// crowned nobody (no candidate was electable) is skipped rather than inventing one,
+// which is why this is a walk and not `rounds.at(-1)`. Round 0 is included: on a
+// campaign that has only measured its origin, C0 IS the incumbent.
+//
+// It reads served crowns and takes the most recent — it re-sorts nothing and computes
+// no number, so it stays inside the scoring-authority rule. **Under a REWIND** (the
+// search re-expanding an earlier ancestor) the most recent crown is still what the
+// search expands from, but it is not necessarily the highest-θ individual ever
+// measured; a strict global best would need a SERVED pointer, not a client re-pick.
+export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
+  const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
+  for (const r of rounds) {
+    const idx = r.candidates.findIndex((c) => c.is_winner);
+    const w = idx >= 0 ? r.candidates[idx] : null;
+    if (!w?.candidate_id) continue;
+    // Only badge `best` as a win when the round it won had rivals — round 0 crowns
+    // its sole arm by default and must not claim an election.
+    return targetAt(r.round, idx, w.candidate_id, wasElected(true, r.candidates.length) ? "best" : "origin");
+  }
+  return null;
+}
+
+// The newest searchpoint that has CLOSED — the last candidate of the last round with
+// candidates. This is the historical half of `latest`; while the cycle is running the
+// state resolves to the in-flight candidate through `liveObserveConfig` instead, and
+// the host makes that switch (it is the only side that knows whether the run is live).
+export function latestClosedTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
+  const rounds = sortedRounds(dash).filter(roundHasCandidates);
+  const last = rounds.at(-1);
+  if (!last) return null;
+  const idx = last.candidates.length - 1;
+  const c = last.candidates[idx];
+  if (!c?.candidate_id) return null;
+  return targetAt(last.round, idx, c.candidate_id, "latest");
 }
