@@ -185,7 +185,7 @@ Per-poll re-renders cascade through the chart tree by default. **Any chart consu
 
 ## Testing posture
 
-The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by CI (`.github/workflows/ci.yml`, `webapp` job):
+The webapp gate is **compile-time + smoke + a small Vitest scope**. Run it with `python scripts/gate.py --web`, which is also what CI's `webapp` job runs — the check list lives there and nowhere else, so what you run locally is what reds `main`:
 
 - `npm run lint` — ESLint.
 - `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real). `noUncheckedIndexedAccess` is ON; what you may do with the possibly-`undefined` it surfaces is § Scoring authority.

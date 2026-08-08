@@ -16,8 +16,10 @@
 // Everything past the cursor is DECLARED, not promised: PoBB can stop a candidate
 // before the order is exhausted. No caller may word it as "will".
 
-import { liveL1Candidates, type DashboardSnapshot, type LiveCandidate } from "@/lib/poll";
-import { parseSampleLine } from "@/lib/sample-line";
+import { roundCandidates } from "./round-candidates";
+import { samplesForRow } from "./round-samples";
+import type { DashboardSnapshot } from "@/lib/poll";
+import type { CandidateRow } from "@/lib/types";
 
 export interface SampleWalk {
   // The axis, in walk order. Empty when nothing is running.
@@ -31,24 +33,6 @@ export interface SampleWalk {
 
 const EMPTY: SampleWalk = { ids: [], cursor: -1, walkKey: "idle" };
 
-// The ids the live candidate has measured so far, in tape order. The tape is TEXT
-// ("0.4s #001 sid:099 HIT …") or a dict, exactly as the heat-map's live merge reads
-// it. `#NNN` is the loop POSITION — the dataset id rides `sid:`, so a line without
-// one contributes nothing rather than reporting a position as an id.
-function measuredIds(c: { samples?: unknown[] } | undefined): number[] {
-  const out: number[] = [];
-  for (const s of c?.samples ?? []) {
-    if (typeof s === "string") {
-      const p = parseSampleLine(s);
-      if (typeof p.sampleId === "number") out.push(p.sampleId);
-    } else if (s && typeof s === "object") {
-      const id = (s as { sample_id?: unknown }).sample_id;
-      if (typeof id === "number") out.push(id);
-    }
-  }
-  return out;
-}
-
 export function sampleWalk(
   dash: DashboardSnapshot | null,
   order: number[] | null,
@@ -59,12 +43,17 @@ export function sampleWalk(
   if (!dash || !isLive) return EMPTY;
 
   // The latest-seeded candidate is the one being scored; earlier ones in this round
-  // have already finished their own walk.
-  let latest: LiveCandidate | undefined;
-  for (const c of liveL1Candidates(dash)) {
-    if (!latest || Number(c.idx ?? -1) > Number(latest.idx ?? -1)) latest = c;
+  // have already finished their own walk. Through the spine, so the tape is parsed
+  // once for the whole app (`samplesForRow` routes it off the row's own source tag)
+  // and this is not a second reading of the candidate list.
+  let latest: CandidateRow | undefined;
+  for (const row of roundCandidates(dash)) {
+    if (row.source !== "inflight") continue;
+    if (!latest || row.idx > latest.idx) latest = row;
   }
-  const measured = measuredIds(latest);
+  const measured = latest
+    ? samplesForRow(latest, dash, null).flatMap((s) => (s.sample_id == null ? [] : [s.sample_id]))
+    : [];
   const inFlight = typeof dash.current_sample_id === "number" ? dash.current_sample_id : null;
   const walkKey = `${dash.cycle_id}:${dash.current_round.round}:${latest?.idx ?? "-"}`;
 

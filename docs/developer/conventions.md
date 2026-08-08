@@ -11,8 +11,7 @@ collects everything else.
   `List[str]`.
 - **`logging` module only** — no `print()` in `promptpotter/`. Setup via
   `promptpotter/config/logging.py`.
-- **Ruff line-length: 100.** Run `ruff check . && ruff format --check .` in
-  the CI chain.
+- **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a
   contract, lean on it.
@@ -114,7 +113,7 @@ collects everything else.
 
 ## Reasoning doctrine
 
-Five situational guardrails against recurring AI blind spots — unlike the
+Six situational guardrails against recurring AI blind spots — unlike the
 universal gates in root `CLAUDE.md` (see the top of this page), each fires
 only in the specific situation named before it.
 
@@ -168,3 +167,16 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 
 **And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the row in [`concept-map.md`](concept-map.md) or [`../glossary.md`](../glossary.md) that should have answered it, in the same session, while you still know what you were looking for.
 </read-once>
+
+**When you reach for the shell, a sub-agent, or a wait → `<wall-clock>`:**
+
+<wall-clock>
+**The AI blind spot this guards against:** an AI prices its own loop in tokens, because tokens are the only cost it is ever shown. Seconds are invisible to it and are the only cost the operator actually watches — so it reaches for a shell pipeline where a file tool would do, sends sub-agents out one at a time, and waits by sleeping. Measured across the same corpus as <read-once>, over six days: **`Bash` spent 14.1 hours across 5,406 calls; `Read` + `Grep` + `Edit` + `Write` together spent 0.4 hours across 5,573.** Same order of work, thirty-five times the clock.
+
+1. **A shell call carries a fixed toll the file tools do not** — `Bash` runs a median 2.4s and a mean 9.4s against ~0.1–0.4s for the file tools. This is the same conclusion <read-once> rule 2 reaches from the token side, and the two agree: the shell is for things that are not file content. When you do need it, put the whole errand in ONE call rather than five.
+2. **Delegation is cheap in tokens and expensive in wall-clock.** A sub-agent is ~5 minutes. <read-once> rule 3 prices it at 3.3% of spend and is right about tokens, but **75 of 75 launches in that corpus went out alone**, so N searches cost N × 5 minutes when they could have cost one. Send them in a single message, or do the search yourself.
+3. **Never `sleep`-poll in a shell.** Two polling loops in one recorded session burned seven minutes producing nothing. Run the thing in the background and let the notification arrive; a wait implemented as a loop is a wait nobody can interrupt.
+4. **Iterate on the targeted check; run the gate once.** Gate commands were over half of all shell time. While editing, run the one tool — or the one test file — that owns what you touched; `scripts/gate.py` is the thing you run before you hand the work over, not between edits.
+
+**And be honest about the context effect rather than reaching for it.** Turn latency does rise with the window — a median 1.4s at 50k against 4.4s at 700k — but that is seconds, and it is the whole of it: shell latency measured flat across a session, so nothing is degrading. It does not justify a five-minute delegation to save twenty thousand tokens.
+</wall-clock>

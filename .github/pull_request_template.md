@@ -29,7 +29,6 @@ concept` and skip to Checks.**
 
 ## Checks
 
-- [ ] `ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q` green
-- [ ] Webapp touched? `cd webapp && npm run lint && npx tsc --noEmit && npm run build` green
+- [ ] `python scripts/gate.py` green — every check CI runs, including the webapp half
 - [ ] No backward-compat shim, re-export alias, fallback chain, or `# legacy`
       comment introduced
