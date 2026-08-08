@@ -54,7 +54,7 @@ from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge

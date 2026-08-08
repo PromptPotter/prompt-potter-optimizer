@@ -49,6 +49,13 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     return f"L3 NOTE TO L2:\n{note}" if note else ""
 
 
+_TARGET_PROMPT_HEADER = (
+    "CURRENT PROMPT — the text an override REPLACES, field by field. These sections "
+    "concatenate VERBATIM in this order to form the prompt; a field you do not name is "
+    "carried forward unchanged, so restating one field's text inside another ships it twice."
+)
+
+
 _OPTIMIZER_PROMPT_HEADER = (
     "CURRENT INNER OPTIMIZER PROMPTS — the text an override REPLACES, field by field.\n"
     "Text in doubled curly braces is an injection slot the inner loop fills; a replacement "
@@ -73,8 +80,14 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
     """The artifact under edit — a target prompt, inner optimizer prompts, or both; each half empty where
     it is not the mutation surface. An L4 outer point is INERT: its levers ride ``pipeline_params``."""
     sections: list[str] = []
-    if body := b.opt_sp.render():
-        sections.append(f"CURRENT PROMPT:\n---\n{body}\n---")
+    # Field by field, like the optimizer-prompt half below. Rendered as one blob, the
+    # boundaries the override schema keys on were simply absent, so a generator asked to
+    # replace `instruction` swept in the neighbouring paragraphs it could not attribute —
+    # and since the fields concatenate verbatim, they shipped twice. 26% of banked
+    # candidates carried a duplicated paragraph; the worst ran 2.13x its parent's length.
+    if fields := b.opt_sp.render_fields():
+        sections.append(_TARGET_PROMPT_HEADER)
+        sections.extend(f"[{field}]\n{text}" for field, text in fields)
     inner = effective_optimizer_prompts(b.pipeline_schema, b.cycle_slice.pipeline_params)
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)

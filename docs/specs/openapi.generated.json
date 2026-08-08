@@ -1745,6 +1745,18 @@
             ],
             "title": "Best Accuracy"
           },
+          "cached_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Of `scored_samples`, how many were replayed from the MeasurementArchive rather than measured. `None` on a course and on any candidate never measured.",
+            "title": "Cached Samples"
+          },
           "children": {
             "items": {
               "$ref": "#/components/schemas/LineageNode"
@@ -2925,7 +2937,7 @@
       },
       "SpawnedBy": {
         "additionalProperties": false,
-        "description": "The outer work-item an L4 inner cycle was spawned to measure.\n\nStamped at inner-cycle mint (``runner/inner/cycle.py``) — an inner campaign's own\nids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its\nOWN origin), so without this the fan-out can only be numbered by launch order.",
+        "description": "The outer work-item an L4 inner cycle was spawned to measure.\n\nStamped at inner-cycle mint (``runner/inner/spawn.py``) — an inner campaign's own\nids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its\nOWN origin), so without this the fan-out can only be numbered by launch order.",
         "properties": {
           "candidate_id": {
             "anyOf": [

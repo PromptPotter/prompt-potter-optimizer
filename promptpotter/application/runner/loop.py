@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import traceback
 
-from promptpotter.application.config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.facade import InjectionRenderError

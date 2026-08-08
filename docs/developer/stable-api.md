@@ -32,7 +32,7 @@ class Connector:
 anything = "my_package.connector:CONNECTOR"
 ```
 
-The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
+The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
 Three rules a plugin is held to, all enforced at import in `connectors/__init__.py`:
 
@@ -99,14 +99,14 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 ### `campaign.yaml`
 
-Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
+Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
 **Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a
 self-describing field on `OptimizationConfig` in
-`application/config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
+`application/campaign_config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
 `Field(description=…)` — and `application/knobs.py::KNOBS` is the walked
 taxonomy. Only `improvement_threshold` and `degradation_threshold` are
 required; everything else defaults. Read defaults off the fields, never

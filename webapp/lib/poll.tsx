@@ -78,6 +78,9 @@ export interface LiveCandidate {
     evaluators?: Record<string, number>;
     hits?: number;
     total?: number;
+    // Same name as the closed bar's `RoundSummaryCandidate.cached_samples` — one fact, one
+    // name, whether the round is still running or over.
+    cached_samples?: number;
   };
 }
 

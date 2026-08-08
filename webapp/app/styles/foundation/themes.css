@@ -22,6 +22,7 @@
   --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
   --color-selection:#55251D;                 /* oxblood — cross-panel selection stroke */
   --color-ci:#525252;                        /* composite-fitness CI whisker — neutral, not status */
+  --color-cache:#6D28D9;                     /* share-from-cache overlay — violet, the one hue that is neither cobalt, oxblood nor olive */
   --color-background-tint:rgba(0,0,0,0.04);
   --color-background-tint-strong:rgba(0,0,0,0.12);
   --status-tint:0.18; --status-edge:0.45;    /* paper needs a heavier fill than lava */

@@ -128,6 +128,10 @@ def build_l1_score_block(
             ),
             "hits": served.get("hits"),
             "total": served.get("total"),
+            # The report wins once it lands; until then the buffer holds every scored row.
+            "cached_samples": served.get("cached_samples")
+            if served.get("cached_samples") is not None
+            else sum(1 for s in samples if s.get("cached")),
             "invalid": served.get("invalid", False),
             "validation_failures": served.get("validation_failures") or [],
         }

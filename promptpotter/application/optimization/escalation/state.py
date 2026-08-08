@@ -11,7 +11,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import LivesConfig
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -103,7 +103,7 @@ class EscalationFSM:
     def would_exhaust_lives(
         self, improved: bool, lives: LivesConfig | None, *, compared: bool = True
     ) -> bool:
-        """Would banking this round empty the bank? Pure lookahead — reads THROUGH ``_bank_life`` so it can
+        """Would banking this round empty the bank? Pure lives-bank lookahead — reads THROUGH ``_bank_life`` so it can
         never disagree with what ``observe_round`` is about to do."""
         if lives is None:
             return False

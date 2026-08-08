@@ -57,6 +57,9 @@
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
 .fitness-legend .dot.ability{background:var(--color-text-tertiary)}
 .fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+/* A dashed rule, not a dot — a swatch would imply a fifth bar series. */
+.fitness-legend .dash{display:inline-block;width:16px;height:0;margin-right:5px;vertical-align:middle;border-top:1.5px dashed transparent}
+.fitness-legend .dash.cached{border-top-color:var(--color-cache)}
 
 /* The genealogy strip — the whole point of the merge. Its box is inset by the
    chart's own plot-area gutters (inline padding, set from the published plot

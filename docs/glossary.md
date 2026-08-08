@@ -316,7 +316,7 @@ The persisted world is a four-entity containment hierarchy
   knob *moves*: the scored subset, the difficulty ruler δ, the ability θ,
   the gate, the stopping rule, … The axis the config map groups knobs by;
   knobs sharing an estimand are the ones that can collide.
-  `application/config.py::Estimand`.
+  `application/campaign_config.py::Estimand`.
 - **knob** — one leaf of `CampaignConfig`, declaring on its own field (as
   `Annotated[..., Knob(scope, *estimands)]`) both what it shapes — `Scope.POLICY`
   (a decision knob; resume keeps the data trace) vs `Scope.DATA` (resume runs
@@ -370,7 +370,7 @@ The persisted world is a four-entity containment hierarchy
   *escalation*, never the run's remaining life — Lives own that.
 - **Lives** / **hearts** — one concept, two words, the same operator-facing
   split as **Unit** / **Cycle** above: the improvement-banked round budget
-  (`LivesConfig`, `application/config.py`) is `lives` in config and on disk,
+  (`LivesConfig`, `application/campaign_config.py`) is `lives` in config and on disk,
   and **hearts** wherever the operator reads it (the ♥ bank in the terminal
   readout, `hearts` / `hearts_cap` on the view models). Opt-in alternative to
   the fixed `max_rounds` ceiling.
@@ -428,7 +428,7 @@ The persisted world is a four-entity containment hierarchy
 - **L4** — PromptPotter optimizing its own optimizer prompts: an outer cycle whose backend
   is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
   L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
-  (`connectors/promptpotter.py`) + `runner/inner/cycle.py::run_inner_cycle`, driven
+  (`connectors/promptpotter.py`) + `runner/inner/spawn.py::run_inner_cycle`, driven
   by `datasets/promptpotter-self/`. Plan: `docs/specs/l4-outer-loop.md`.
 - **sweep** — a cheap A/B of L1 candidates ahead of full promotion: sibling cycles
   under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter new --sweep-batch`.

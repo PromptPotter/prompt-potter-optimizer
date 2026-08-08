@@ -171,7 +171,7 @@ def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[floa
 
 
 def draw_bank(all_samples: list[Sample], n: int, seed: int) -> list[Sample]:
-    """The SAME draw ``runner/inner/cycle.py`` performs, spelled once here and imported there — a
+    """The SAME draw ``runner/inner/spawn.py`` performs, spelled once here and imported there — a
     screen that drew differently would screen a bank nobody runs, and nothing would report it."""
     return random.Random(seed).sample(all_samples, min(n, len(all_samples)))
 
@@ -188,14 +188,16 @@ async def screen_inner_seeds(
 ) -> SeedScreenOutcome:
     """Each reading REPORTS its own wall-clock and wire cost, so price a wide sweep off the last
     reading rather than a figure written here (``<one-budget>``) — a quoted rate goes stale."""
-    from promptpotter.application.config import configure_and_apply_pipeline, load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
     )
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
+    from promptpotter.application.optimization.task_context import committed_task_context
     from promptpotter.application.origin import resolve_origin_opt_search_point
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.infrastructure.store.io import write_json
@@ -222,8 +224,13 @@ async def screen_inner_seeds(
         scorer_id=scoring_spec.scorer_id,
         source=f"seed_screen:{dataset_name}",
     )
+    # Same framing the run's C0 carries — a screen measures the BANK, so its origin must be the
+    # prompt the campaign will actually score. Without it the screen's `reasoning_margin` grades a
+    # prompt no run ever sends, and stops predicting the origin it exists to choose seats for.
     origin_sp = resolve_origin_opt_search_point(
-        [session.llm_node_name()], session.dataset_config_dir
+        [session.llm_node_name()],
+        session.dataset_config_dir,
+        task_context=committed_task_context(stores, dataset_name),
     ).to_job_search_point(pipeline_params, schema=session.pipeline_schema)
 
     readings: list[SeedReading] = []

@@ -21,7 +21,7 @@ from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.intelligence.exploration import RulerEntry
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement

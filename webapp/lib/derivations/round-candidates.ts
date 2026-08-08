@@ -101,6 +101,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         is_winner: c.is_winner,
         n_samples: c.scored_samples,
         n_expected: c.expected_samples,
+        cached_samples: c.cached_samples,
         source: "history",
       });
     });
@@ -142,6 +143,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         is_winner: false,
         n_samples: c.samples?.length ?? null,
         n_expected: null,
+        cached_samples: c.stats?.cached_samples ?? null,
         source: "inflight",
       });
     }

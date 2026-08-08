@@ -100,6 +100,12 @@ class BackendClient:
         round-tripping through ``BackendClient``'s own methods."""
         return self._get_http()
 
+    @property
+    def execution(self) -> ConnectorExecution:
+        """The connector's declared transport — asked by callers that must know whether a query is a
+        network round trip or work this process does itself."""
+        return self._execution
+
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"params": params} if params else {}
         resp = await self._get_http().get(

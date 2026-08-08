@@ -57,7 +57,7 @@ def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
 class SpawnedBy(StrictModel):
     """The outer work-item an L4 inner cycle was spawned to measure.
 
-    Stamped at inner-cycle mint (``runner/inner/cycle.py``) — an inner campaign's own
+    Stamped at inner-cycle mint (``runner/inner/spawn.py``) — an inner campaign's own
     ids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its
     OWN origin), so without this the fan-out can only be numbered by launch order.
     """

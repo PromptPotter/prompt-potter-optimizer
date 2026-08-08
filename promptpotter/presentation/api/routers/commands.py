@@ -612,13 +612,17 @@ async def post_command(
         # (wire schema: m12-api-openapi.yaml::OperatorForkOverride).
         extras["seed"] = payload.get("seed")
         extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
-    elif kind in ("change-spend-budget", "origin-gate-decision"):
+    elif kind in ("change-spend-budget", "origin-gate-decision", "set-sample-lookahead"):
         # Passed through, NOT validated here: `_build_cycle_applier` validates every
         # cycle-scoped kind's extras, and it is the seam the CLI reaches too. A second
         # spelling here re-derived the same rules and disagreed with them — it rejected
         # a negative max_usd that the dispatcher's `(usd < 0) and (tok < 0)` let through.
         extras.update(
-            {k: payload[k] for k in ("max_usd", "max_tokens", "decision") if k in payload}
+            {
+                k: payload[k]
+                for k in ("max_usd", "max_tokens", "decision", "enabled")
+                if k in payload
+            }
         )
     elif kind == "start-run":
         kind_raw = payload.get("kind")

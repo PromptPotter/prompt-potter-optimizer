@@ -45,6 +45,10 @@ interface CandidatesState {
   weights: Record<string, number>;
   seededForCycle: string | null;
 
+  // The dashed cache-provenance line. Off until asked for, and asked for is the only way it
+  // appears — the card never answers "was this paid for?" unprompted.
+  showCache: boolean;
+
   // Forest lane expand set — LANE KEYS (`nodeKeyOf`), not cycle ids: inner cycle ids
   // repeat across sibling sandboxes, so an id would expand two lanes at once. Lives
   // here rather than in `useLineage`'s local state so it survives the tab swap like
@@ -64,6 +68,7 @@ let state: CandidatesState = {
   selected: new Set<string>(),
   weights: {},
   seededForCycle: null,
+  showCache: false,
   expanded: new Set<string>(),
   expandedForCampaign: null,
   expandedForLane: null,

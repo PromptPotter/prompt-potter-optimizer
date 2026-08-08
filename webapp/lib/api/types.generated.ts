@@ -10,6 +10,7 @@ export interface RoundSummaryCandidate {
   composite_fitness: number;
   scored_samples: number;
   expected_samples: number;
+  cached_samples: number;
   is_winner: boolean;
   evaluators: Record<string, number>;
   changes_description: string;
@@ -190,6 +191,7 @@ export interface ScoredCandidate {
   elimination_stopped: boolean;
   scored_samples: number;
   expected_samples: number;
+  cached_samples: number;
   partial_reason: string;
   invalid: boolean;
   validation_failures: ValidationFailure[];
@@ -449,7 +451,7 @@ export interface LiveDashboardState {
   rounds: RoundSummary[];
   best: number;
   current_acc: number;
-  headline_delta: number | null;
+  ability_delta: number | null;
   composite_fitness_formula: string | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';
   degraded_count: number;
@@ -461,6 +463,8 @@ export interface LiveDashboardState {
   total_backend_calls: number;
   current_query_payload: string | null;
   current_sample_id: number | null;
+  sample_lookahead: number;
+  sample_lookahead_discards: number;
   last_query_elapsed_s: number;
   wallclock_serialized_at: string | null;
   n_variants: number;
@@ -847,6 +851,9 @@ export interface LineageNode {
   composite_ci_hi: number | null;
   scored_samples: number | null;
   expected_samples: number | null;
+  /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather
+   * than measured. `None` on a course and on any candidate never measured. */
+  cached_samples: number | null;
   /** Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-
    * invariant, cross-round-comparable series the trend plots. Carried by the
    * round's WINNER only: it is a property of the advancing spine, and a

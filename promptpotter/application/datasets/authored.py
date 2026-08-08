@@ -10,8 +10,10 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.config import CampaignConfig
-from promptpotter.application.config import load_campaign_config as validate_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import (
+    load_campaign_config as validate_campaign_config,
+)
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml_optional

@@ -154,12 +154,21 @@ class LiveDashboardState(StrictModel):
 
     best: float = 0.0
     current_acc: float = 0.0
-    # Served headline lift: ``best − rounds[0].accuracy`` (one basis on both sides —
-    # each side a real measurement of ONE configuration). The ONE derivation of
-    # "how far above origin is the incumbent" —
-    # the webapp headline chip and the L4 inner progress line read it, neither
-    # recomputes it. ``None`` until round 0 has settled.
-    headline_delta: float | None = None
+    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's
+    # ``cumulative_theta`` minus the origin's. The ONE derivation of "how far above origin is
+    # the incumbent" — the webapp headline chip and the L4 inner progress line read it, neither
+    # recomputes it. ``None`` until round 0 has settled with an ability.
+    #
+    # It was ``best − rounds[0].accuracy``, and claimed "one basis on both sides". That is false
+    # under ``per_round_resubset``: each round draws a FRESH subset, so ``best`` is a running max
+    # over numbers measured on different sample sets — it selects the luckiest draw, and the
+    # origin it subtracts was measured on the full bank. On `justlogic-d234` seed-0 that served
+    # **+19%** for a cell whose ability never moved (θ +0.6823 in all four rounds, C0 winning
+    # every one, stop `lives_exhausted`). Ability is the only cross-round-comparable series here
+    # — the same reason `RoundSummary.cumulative_theta` exists — so the headline reads it.
+    # Renamed off `headline_delta` because the units changed; `headline_metric` still picks which
+    # fitness number headlines per-candidate TEXT, which is a different question.
+    ability_delta: float | None = None
     composite_fitness_formula: str | None = None
     # Campaign default for which fitness number headlines the operator's text
     # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is
@@ -181,9 +190,17 @@ class LiveDashboardState(StrictModel):
     total_queries_scored: int = 0
     total_backend_calls: int = 0
 
-    # In-flight sample markers (cleared on ``sample_scored``).
+    # In-flight sample markers — the OLDEST open sample, derived from the open set rather than
+    # assigned per event, since look-ahead leaves more than one open
+    # (``view.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
     current_sample_id: int | None = None
+
+    # What the LOOP held in flight, never what the operator asked for (that is
+    # `.runtime/sample_lookahead.flag`); the two differ for up to one sample.
+    sample_lookahead: int = 1
+    # Samples launched then discarded unabsorbed — the arming's whole running cost, cumulative.
+    sample_lookahead_discards: int = 0
 
     last_query_elapsed_s: float = 0.0
     wallclock_serialized_at: str | None = None

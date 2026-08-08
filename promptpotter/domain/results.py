@@ -154,6 +154,9 @@ class ScoredCandidate(StrictModel):
     elimination_stopped: bool = False
     scored_samples: int = 0
     expected_samples: int = 0
+    # Of ``scored_samples``, how many were replayed from the MeasurementArchive rather than
+    # measured. Non-zero off the origin means the searchpoint already existed — a duplicate.
+    cached_samples: int = 0
     # Why a partial subset was scored (``scored_samples < expected_samples``):
     # "" (full / not partial) | "skip" (operator early-abort — marks the cycle
     # ``human_intervened``). Distinct from ``elimination_stopped``/``escalation_aborted``.
@@ -680,6 +683,7 @@ class RoundSummaryCandidate(StrictModel):
     composite_fitness: float
     scored_samples: int
     expected_samples: int
+    cached_samples: int
     is_winner: bool
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""

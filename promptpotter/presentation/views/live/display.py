@@ -100,6 +100,8 @@ class LiveDisplay(DerivedView):
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
         self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
+        # Last look-ahead depth printed; the tape carries transitions, not the value.
+        self._sample_lookahead_depth = 1
         # Live round-leader tracker, ordered by the shared `round_winner_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
@@ -231,6 +233,16 @@ class LiveDisplay(DerivedView):
         ev = record.event
         # sample_started: LiveDashboardView pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
         if ev == "sample_started":
+            # …except a look-ahead TRANSITION: armed mid-run, expiring a round later, and nothing
+            # else on the tape would show it. Per-sample repetition would bury the tape.
+            depth = int(payload.get("sample_lookahead") or 1)
+            if depth != self._sample_lookahead_depth:
+                self._sample_lookahead_depth = depth
+                self._write(
+                    f"  {DIM}⇉ sample look-ahead depth {depth}"
+                    f"{' (armed — expires when this round finishes scoring)' if depth > 1 else ' (back to sequential)'}"
+                    f"{RESET}"
+                )
             return
         if ev == "sample_scored":
             self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)

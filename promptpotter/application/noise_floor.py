@@ -45,13 +45,13 @@ async def measure_noise_floor(
 ) -> NoiseFloorOutcome:
     """Re-score the cached round-0 origin *k* times with ``force_fresh`` and report the spread. On a pp-self cycle the
     origin's backend IS the recursion, so this reads the inner noise floor. ``k``× real spend, never loop-triggered."""
-    from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.config import (
+    from promptpotter.application.campaign_config import (
         load_campaign_config as validate_campaign_config,
     )
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+    from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 

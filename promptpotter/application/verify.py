@@ -72,13 +72,13 @@ async def verify_candidate(
 ) -> VerifyOutcome:
     """Re-score one candidate on *samples* UNMEASURED samples. Raises :class:`VerifyError` when it cannot be resolved off
     disk."""
-    from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.config import (
+    from promptpotter.application.campaign_config import (
         load_campaign_config as validate_campaign_config,
     )
     from promptpotter.application.initialization.loop_start import populate_session_scoring
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.optimization.l1.population import merge_pipeline_params
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.scoring.formula import rescore_results, split_scoring_block
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point

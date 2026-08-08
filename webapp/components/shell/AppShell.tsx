@@ -450,9 +450,11 @@ function AppShellInner() {
         )}
       </main>
       {/* Global remote — a bottom-fixed hovering pill, present on every tab while
-          a cycle is live (play/pause/stop/skip + round/spend + babysat tag).
-          Self-sources identity + live state; renders null when idle/terminal. */}
-      <RemoteBar />
+          a cycle is live (play/pause/skip + round/spend + babysat tag).
+          Self-sources identity + live state; renders null when idle/terminal.
+          Following the active run lands on its dashboard, same as the topbar
+          jobs dock. */}
+      <RemoteBar onFollowed={() => setTab("dashboard")} />
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}

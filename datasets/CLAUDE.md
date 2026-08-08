@@ -26,7 +26,7 @@ Optional:
 
 **Backend overlay (`nodes.{name}.config` in `pipeline.yaml`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
 
-`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/config.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
+`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
 ## Registered datasets
 

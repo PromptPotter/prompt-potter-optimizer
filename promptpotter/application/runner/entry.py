@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.config import CampaignConfig, apply_node_overlay
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
@@ -24,13 +24,14 @@ from promptpotter.application.origin import (
     CampaignOrigin,
     establish_campaign_origin,
 )
+from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.run_observers import (
     ForkInfo,
     RunObservers,
     build_run_observers,
 )
 from promptpotter.application.run_phase_control import declare_run_phase
-from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
+from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
@@ -48,7 +49,6 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 # re-invoke ``resume`` if they want to keep going.
 #
 # PER LEVEL, not per run: an L4 inner campaign gets its own budget of 10, so it multiplies the
-# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (runner/inner/cycle.py) bounds. The
+# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (runner/inner/spawn.py) bounds. The
 # product is finite, and that deadline is what makes it so — sizing either one means reading both.
 MAX_AUTO_REBASES = 10
 
@@ -176,7 +176,6 @@ class _PreparedRun:
     campaign_config: CampaignConfig
     spend_budget_usd: float | None
     scoring_spec: ScoringSpec
-    task_context: TaskDecomposition
 
 
 def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
@@ -204,6 +203,12 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # exactly one searchpoint is cut.
     session.skip_check = skip_flag.is_file
     session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
+    # Deliberately NOT composed with the inherited outer predicate the way `pause_check` is above:
+    # a stop must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
+    # multiply concurrency at every nested level at once.
+    sample_lookahead_flag = layout.sample_lookahead_flag
+    session.sample_lookahead_check = sample_lookahead_flag.is_file
+    session.sample_lookahead_consume = partial(sample_lookahead_flag.unlink, missing_ok=True)
 
 
 async def _prepare_run(
@@ -213,7 +218,6 @@ async def _prepare_run(
     session: Session,
     observers: RunObservers,
     origin: CampaignOrigin | None,
-    task_context: TaskDecomposition | dict[str, Any] | None,
     spend_budget_usd: float | None,
 ) -> _PreparedRun:
     cb = observers.callbacks
@@ -275,19 +279,20 @@ async def _prepare_run(
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
         # would re-roll under a nondeterministic backend); everything else scores it.
         origin = await establish_campaign_origin(
-            session, dataset, campaign_config, seed=seed, listener=cb
+            session,
+            dataset,
+            campaign_config,
+            seed=seed,
+            listener=cb,
         )
         if observers.display is not None and hasattr(observers.display, "set_origin"):
             observers.display.set_origin(origin.report.accuracy)
-
-    resolved_task_context = TaskDecomposition.coerce(task_context)
 
     return _PreparedRun(
         origin=origin,
         campaign_config=campaign_config,
         spend_budget_usd=spend_budget_usd,
         scoring_spec=split_scoring_block(campaign_config.scoring),
-        task_context=resolved_task_context,
     )
 
 
@@ -400,7 +405,6 @@ async def _run_single_cycle(
             dataset,
             campaign_config,
             cb=cb,
-            task_context=prep.task_context,
             scoring_formula=prep.scoring_spec.per_sample,
             scoring_round_formula=prep.scoring_spec.per_round,
             scorer_id=prep.scoring_spec.scorer_id,
@@ -622,7 +626,6 @@ async def run_optimization(
     session: Session,
     observers: RunObservers,
     origin: CampaignOrigin | None = None,
-    task_context: TaskDecomposition | dict[str, Any] | None = None,
     langfuse_session_id: str | None = None,
     mode: RunMode | None = None,
     fork_payload: ForkSpec | None = None,
@@ -659,7 +662,6 @@ async def run_optimization(
             session=session,
             observers=observers,
             origin=origin,
-            task_context=task_context,
             spend_budget_usd=spend_budget_usd,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):

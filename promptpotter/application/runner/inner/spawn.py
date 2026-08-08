@@ -45,7 +45,7 @@ from promptpotter.shared.instrument import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult, SpendRollup
     from promptpotter.domain.sample import Sample
@@ -447,7 +447,7 @@ async def _run_inner_campaign(
     # Lazy imports: heavy application machinery, and `run_optimization` would be a
     # package-internal import cycle (`entry.py` imports `publish_inner_spawn_context`
     # from here). Deferring to call time keeps this module import-light.
-    from promptpotter.application.config import load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
@@ -455,10 +455,6 @@ async def _run_inner_campaign(
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
-    )
-    from promptpotter.application.optimization.task_context import (
-        checkin_call_context,
-        load_or_build_task_context,
     )
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.application.runner.entry import RunMode, run_optimization
@@ -578,12 +574,6 @@ async def _run_inner_campaign(
         # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
         # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
-    task_context = await load_or_build_task_context(
-        session.store,
-        session.dataset_name,
-        campaign_id=session.campaign_id,
-        context=checkin_call_context(session.store, session.hop),
-    )
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
@@ -598,7 +588,6 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            task_context=task_context,
             mode=RunMode(),
             spend_budget_usd=campaign_config.optimization.spend_budget_usd,
         )
@@ -694,14 +683,16 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # Lead with the running winner's LIFT over origin — the SERVED
-        # ``headline_delta`` (LiveDashboardState), the same number the webapp
-        # headline reads, so the two surfaces cannot disagree.
-        delta = dash.get("headline_delta")
+        # Lead with the running winner's LIFT over origin — the SERVED ``ability_delta``
+        # (LiveDashboardState), the same number the webapp headline reads, so the two surfaces
+        # cannot disagree. It is LOGITS, not a fraction: printed as `%` it read `Δ+19%` off a
+        # cell whose ability never moved. `best` rides along as what a round actually MEASURED,
+        # labelled so it cannot be mistaken for the lift.
+        delta = dash.get("ability_delta")
         if isinstance(delta, int | float) and isinstance(best, int | float):
-            lift = f"Δ{delta:+.0%} (best {best:.0%})"
+            lift = f"Δθ{delta:+.2f} (best measured {best:.0%})"
         elif isinstance(best, int | float):
-            lift = f"best {best:.0%}"
+            lift = f"best measured {best:.0%}"
         else:
             lift = "best —"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"

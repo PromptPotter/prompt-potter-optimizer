@@ -134,6 +134,7 @@ export function CandidatesCard() {
     selected,
     weights,
     seededForCycle,
+    showCache,
   } = useCandidatesState();
   const seeded = seededForCycle != null && seededForCycle === cycleId;
   const setShowWhatIf = (v: boolean) => setCandidatesState({ showWhatIf: v });
@@ -421,6 +422,9 @@ export function CandidatesCard() {
         is_winner: n.is_winner,
         n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.stats?.total ?? null),
         n_expected: sliced ? (sampleSet?.length ?? null) : n.expected_samples,
+        cached_samples: sliced
+          ? null
+          : (n.cached_samples ?? live?.stats?.cached_samples ?? null),
         source: live && own == null ? "inflight" : "history",
         whatif: sliced ? null : n.lens_value,
         started: accuracy != null,
@@ -550,6 +554,13 @@ export function CandidatesCard() {
 
   const lensActive = lens !== "" && !whatifActive;
 
+  // Rides the menu label as a count, never as a gate: a disabled control cannot tell you C0
+  // was replayed, which is the answer the origin is most often opened for.
+  const cacheHitCount = useMemo(
+    () => views.filter((v) => (v.cached_samples ?? 0) > 0).length,
+    [views],
+  );
+
   // One quiet disclosure, not a view switch: it appends the forest below, it never
   // takes the bars away. Carries the descendant count, because the forest is the
   // only thing that can draw siblings — so "there are 3" belongs on the control
@@ -635,9 +646,15 @@ export function CandidatesCard() {
             renderTrigger={({ open, toggle }) => (
               <Chip
                 icon
-                on={open || lensActive || showWhatIf || (sampleSet != null && !barsAreCourses)}
+                on={
+                  open ||
+                  lensActive ||
+                  showWhatIf ||
+                  showCache ||
+                  (sampleSet != null && !barsAreCourses)
+                }
                 ariaLabel="More candidate options"
-                title="Lens, What-If, sample set, and the θ explainer"
+                title="Lens, What-If, sample set, cache overlay, and the θ explainer"
                 onClick={toggle}
               >
                 <IconMore />
@@ -680,6 +697,15 @@ export function CandidatesCard() {
                 >
                   Fixed sample set{sampleSet && !barsAreCourses ? ` · ${sampleSet.length}` : ""}
                 </MenuCheck>
+                {/* Never disabled — the origin is normally the cached one, so greying out
+                    when only C0 was replayed hides the case this is opened for. */}
+                <MenuCheck
+                  on={showCache}
+                  onClick={() => setCandidatesState({ showCache: !showCache })}
+                  title="Show how much of each candidate's samples were replayed from the archive instead of measured."
+                >
+                  Loaded from cache{cacheHitCount > 0 ? ` · ${cacheHitCount}` : ""}
+                </MenuCheck>
                 <MenuSep />
                 {/* The θ explainer — read once, then never again, so it lives here
                     rather than owning a permanent toolbar button. The ruler locks
@@ -707,7 +733,9 @@ export function CandidatesCard() {
             dendrogram's x-alignment depends on sitting in the same box as the
             canvas it hangs under. */}
         <div className="fitness-chart-wrap">
-          {(metrics.size > 1 || showWhatIf) && (
+          {/* `showCache` forces the legend on even at one metric: the dashed line rides the
+              accuracy axis, so without a key 0.50 reads as a score. */}
+          {(metrics.size > 1 || showWhatIf || showCache) && (
             <div className="fitness-legend">
               {metrics.has("accuracy") && (
                 <span><span className="dot accuracy" />accuracy</span>
@@ -719,12 +747,18 @@ export function CandidatesCard() {
                 <span><span className="dot composite" />composite</span>
               )}
               {showWhatIf && <span><span className="dot whatif" />what-if</span>}
+              {showCache && (
+                <span title="Share of each candidate's scored panel that was replayed from the archive">
+                  <span className="dash cached" />share from cache
+                </span>
+              )}
             </div>
           )}
           <FitnessChart
             views={views}
             metrics={metrics}
             showWhatIf={showWhatIf}
+            showCache={showCache}
             divergenceBoundary={divergenceBoundary}
             inFlightIndex={inFlightIndex}
             selectedKey={selectedKey}

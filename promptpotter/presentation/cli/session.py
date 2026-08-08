@@ -9,7 +9,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
 
 
 @dataclass
@@ -41,10 +41,8 @@ class SessionCtx:
     def campaign_config(self) -> CampaignConfig:
         """The dataset's LIVE ``campaign.json`` with the frozen snapshot's overlay re-applied — that overlay exists only on
         the snapshot. Resolution is tenant-FIRST: repo-root-only made every ingested dataset resume off the snapshot."""
-        from promptpotter.application.config import (
-            apply_inherited_overlay,
-        )
-        from promptpotter.application.config import (
+        from promptpotter.application.campaign_config import apply_inherited_overlay
+        from promptpotter.application.campaign_config import (
             load_campaign_config as validate_campaign_config,
         )
         from promptpotter.application.datasets.authored import (

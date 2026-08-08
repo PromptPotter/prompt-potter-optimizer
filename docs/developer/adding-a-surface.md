@@ -172,7 +172,7 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ## 5. A connector (backend)
 
-A new backend kind. Intentionally local — **no edits to `application/config.py`
+A new backend kind. Intentionally local — **no edits to `application/campaign_config.py`
 or `infrastructure/backend.py`.**
 
 **Recipe:**
@@ -205,7 +205,7 @@ or `infrastructure/backend.py`.**
 `KeyError` at `get()`.
 
 **The `in_process` arm is SHIPPED**, and one connector rides it: `promptpotter` (an
-inner cycle — L4, via `runner/inner/cycle.py`). It does not raise
+inner cycle — L4, via `runner/inner/spawn.py`). It does not raise
 `NotImplementedError`.
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).

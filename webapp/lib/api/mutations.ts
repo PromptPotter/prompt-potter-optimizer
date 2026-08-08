@@ -211,6 +211,22 @@ export async function postSkipSearchpoint(
   return _postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
 
+// Arm (or cancel) sample look-ahead — two samples in flight instead of one, for ONE round
+// of scoring, then it disarms itself, so `enabled: false` is a cancel. Unlike skip it does
+// NOT mark the cycle babysat: the in-flight acquisition is discarded, so the measurement is
+// identical at either depth. Host-admin only. Per `m12-api-openapi.yaml::setSampleLookahead`.
+export async function postSetSampleLookahead(
+  campaignId: string,
+  cycleId: string,
+  enabled: boolean,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("set-sample-lookahead", {
+    campaign_id: campaignId,
+    cycle_id: cycleId,
+    enabled,
+  });
+}
+
 // Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes
 // `.runtime/spend_cap.json` ({max_usd, max_tokens}); the round loop's BudgetGate
 // re-reads it every clean round — `0` on a ceiling halts at the next round

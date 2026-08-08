@@ -18,7 +18,7 @@ from promptpotter.shared.identity import IdentityContext
 if TYPE_CHECKING:
     import argparse
 
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.runner.entry import RunMode
@@ -220,7 +220,6 @@ async def drive_cycle(
             campaign_config,
             session=session,
             observers=observers,
-            task_context=ctx.task_context,
             mode=mode,
             spend_budget_usd=getattr(args, "spend_budget_usd", None)
             or campaign_config.optimization.spend_budget_usd,

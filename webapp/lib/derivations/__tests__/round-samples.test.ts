@@ -30,6 +30,7 @@ function row(source: CandidateRow["source"]): CandidateRow {
     is_winner: false,
     n_samples: null,
     n_expected: null,
+    cached_samples: null,
     source,
   };
 }

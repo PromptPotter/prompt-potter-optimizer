@@ -23,12 +23,20 @@ def is_checkin(cycle_dir: Path) -> bool:
     return CycleLayout(cycle_dir).checkin_flag.is_file()
 
 
+def is_sample_lookahead(cycle_dir: Path) -> bool:
+    """``.runtime/sample_lookahead.flag`` present — the operator's REQUEST that the walk hold a second
+    sample in flight. What the loop ran at is ``dashboard.json::sample_lookahead``; never serve
+    this as that."""
+    return CycleLayout(cycle_dir).sample_lookahead_flag.is_file()
+
+
 def clear_run_control_flags(cycle_dir: Path) -> None:
-    """Drop any consumed ``pause.flag`` / ``skip.flag``: a fresh launch IS the operator's intent to
-    run. A stale one-shot flag would otherwise pause the very next resume on its first poll."""
+    """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
+    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one."""
     layout = CycleLayout(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
+    layout.sample_lookahead_flag.unlink(missing_ok=True)
 
 
 def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:

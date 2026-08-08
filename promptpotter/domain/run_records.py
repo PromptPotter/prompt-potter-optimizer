@@ -177,7 +177,7 @@ class LLMCallProgressRecord(StrictModel):
     round: int | None = None
     elapsed_s: float
     # Optional live sub-status for the tick — the inner-campaign heartbeat
-    # (``runner/inner/cycle.py``) sets it to ``"inner rX/Y · best Z%"`` so the
+    # (``runner/inner/spawn.py``) sets it to ``"inner rX/Y · best Z%"`` so the
     # outer L4 chat/dashboard stay live while a multi-minute inner cycle runs.
     # ``None`` on ordinary optimizer heartbeats (unchanged behavior).
     detail: str | None = None
@@ -439,6 +439,8 @@ class LedgerCandidate(StrictModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
     expected_samples: int | None = None
+    # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
+    cached_samples: int | None = None
     # The always-on whisker, over this candidate's own rows. A warm-ruler round OVERRIDES it
     # at close with the tighter θ-implied band (`LedgerRoundClose.abilities`).
     composite_ci_lo: float | None = None

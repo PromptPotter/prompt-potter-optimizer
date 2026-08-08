@@ -23,6 +23,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
@@ -213,7 +214,9 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
     unmodified_seed = CycleSeed(origin_prompt_fields=dict(prompt), origin_source="fork_seed")
-    unmodified_osp = resolve_origin_opt_search_point({}, seed=unmodified_seed)
+    unmodified_osp = resolve_origin_opt_search_point(
+        {}, task_context=TaskDecomposition(), seed=unmodified_seed
+    )
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         unmodified_seed,
@@ -234,7 +237,9 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,
-        resolved_origin=resolve_origin_opt_search_point({}, seed=edited_seed),
+        resolved_origin=resolve_origin_opt_search_point(
+            {}, task_context=TaskDecomposition(), seed=edited_seed
+        ),
     )
     assert edited is None
 
@@ -326,7 +331,10 @@ def test_resume_preserves_per_campaign_locks_dropped_by_dataset_rebuild() -> Non
     """The lock-drop regression: resume rebuilds config from the live dataset file,
     which never carries `optimizer_narrowing`, so per-param locks reopen. The
     inherited-overlay re-merge must restore them from the frozen snapshot."""
-    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+    from promptpotter.application.campaign_config import (
+        apply_inherited_overlay,
+        load_campaign_config,
+    )
 
     # Config as rebuilt from the live dataset file: no narrowing (the bug surface).
     live = load_campaign_config({"optimization": _OPT})
@@ -339,7 +347,10 @@ def test_resume_preserves_per_campaign_locks_dropped_by_dataset_rebuild() -> Non
 def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None:
     """A steered fork edits one node's locks; its seed `optimizer_narrowing`
     overrides the campaign-wide narrowing for THAT node, leaving others inherited."""
-    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+    from promptpotter.application.campaign_config import (
+        apply_inherited_overlay,
+        load_campaign_config,
+    )
 
     frozen = {
         "optimization": _OPT,
@@ -376,7 +387,10 @@ def test_a_campaign_frozen_before_todays_config_still_loads(built_stores: Stores
     import json
     from pathlib import Path
 
-    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+    from promptpotter.application.campaign_config import (
+        apply_inherited_overlay,
+        load_campaign_config,
+    )
     from promptpotter.application.knobs import DiffScope, classify_config_diff
 
     fixture = Path(__file__).parent / "fixtures" / "cycles" / "frozen_campaign" / "campaign.json"
@@ -443,7 +457,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
     (``observe_round``). A mismatch is silent — a resumed run would grant a different
     round budget than the un-interrupted run, quietly changing how long it optimizes."""
-    from promptpotter.application.config import LivesConfig
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.run_records import PhaseRecord

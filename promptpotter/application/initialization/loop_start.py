@@ -10,12 +10,12 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 
@@ -106,12 +106,12 @@ async def _emit_preflight_and_init_session(
     cb: RunCallbacks,
     session: Session,
 ) -> None:
-    from promptpotter.application.config import (
-        check_model_reasoning_floors,
-        run_preflight_checks,
-    )
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         get_optimizer_schema,
+    )
+    from promptpotter.application.preflight import (
+        check_model_reasoning_floors,
+        run_preflight_checks,
     )
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
@@ -150,7 +150,6 @@ async def _emit_preflight_and_init_session(
 
 def _build_and_start_cycle(
     origin: CampaignOrigin,
-    task_context: TaskDecomposition,
     scoring_round_formula: str | None,
     session: Session,
     config: CampaignConfig,
@@ -168,7 +167,6 @@ def _build_and_start_cycle(
     cycle = Cycle.start(
         resolved_origin,
         origin.report,
-        task_context=task_context,
         schema=session.pipeline_schema,
         origin_results=origin.origin_results,
         session=session,
@@ -321,7 +319,6 @@ async def init_optimization_loop(
     config: CampaignConfig,
     *,
     cb: RunCallbacks,
-    task_context: TaskDecomposition,
     scoring_formula: str | None,
     scoring_round_formula: str | None,
     scorer_id: str,
@@ -341,7 +338,6 @@ async def init_optimization_loop(
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,
-        task_context,
         scoring_round_formula,
         session,
         config,
@@ -374,8 +370,8 @@ async def init_optimization_loop(
     )
     # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
     # published before any of that resolved (a child may recurse before this point). Local
-    # import: `runner.inner.cycle` reaches back into this package for `Session`.
-    from promptpotter.application.runner.inner.cycle import retarget_inner_spawn
+    # import: `runner.inner.spawn` reaches back into this package for `Session`.
+    from promptpotter.application.runner.inner.spawn import retarget_inner_spawn
 
     retarget_inner_spawn(session)
 

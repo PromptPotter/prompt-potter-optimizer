@@ -209,12 +209,8 @@ resolved_prompts:
 
 
       TEMPERAMENT — read escalation_panel.exploration_budget AND mutation_memory. At tight/normal, REFINE
-      — and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. The six
-      fields concatenate VERBATIM into one prompt (the render does not dedupe) — each owns a distinct
-      slice. Edit only the field that owns the change; NEVER restate another field's text inside it (persona
-      copied into instruction, or a format rule repeated across fields) — that duplication costs the small
-      model the exact tokens it needs to reason. Preserve a directive by leaving the field that holds
-      it, not by copying it into the one you edit; beside your edit you may reframe, repair garbled tokens,
+      — and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. Edit only
+      the field that owns the change; beside your edit you may reframe, repair garbled tokens,
       OR cut instruction not paying its way. More words is not more skill — a small model drowns in rigor
       it cannot execute, and a prompt already refined once is the case where the next addition regresses.
       If mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated:

@@ -59,12 +59,14 @@ class PromptTemplate(SearchPoint):
         ),
     )
 
+    def render_fields(self) -> list[tuple[str, str]]:
+        pairs = [(f, v) for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
+        if block := self._render_few_shot_block():
+            pairs.append(("few_shot_examples", block))
+        return pairs
+
     def render(self) -> str:
-        parts = [v for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
-        block = self._render_few_shot_block()
-        if block:
-            parts.append(block)
-        return "\n\n".join(parts)
+        return "\n\n".join(v for _, v in self.render_fields())
 
     def _field_value(self, name: str) -> str:
         """Subclass override point — see ``OptSearchPoint`` for task-context splicing."""
@@ -215,9 +217,10 @@ class OptSearchPoint(PromptTemplate):
         target.memory = self.memory.model_copy(deep=True)
 
     def _field_value(self, name: str) -> str:
-        """Splice ``task_context`` up/downstream context around ``problem_description``."""
+        """Splice ``task_context`` up/downstream context around ``problem_description`` — which may
+        be EMPTY, and they still render; they are mutable because they reach the target prompt."""
         v: str = getattr(self, name)
-        if name != "problem_description" or not v:
+        if name != "problem_description":
             return v
         tc = self.memory.task_context
         if not (tc.upstream_context or tc.downstream_context):

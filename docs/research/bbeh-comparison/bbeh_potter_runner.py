@@ -11,12 +11,9 @@ from typing import Any
 
 from shared_config import MODEL_ID, export_results
 
-from promptpotter.application.config import (
-    CampaignConfig,
-    configure_and_apply_pipeline,
-    load_campaign_config,
-)
+from promptpotter.application.campaign_config import CampaignConfig, load_campaign_config
 from promptpotter.application.datasets import samples_from_dicts
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample

@@ -30,7 +30,7 @@ from promptpotter.presentation.views.startup_checklist import checkin_line
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
@@ -235,58 +235,62 @@ async def _ingest_and_prepare_checkin(
     )
 
 
-async def _checkin_task(
+async def _commit_task_framing(
     session: Session,
-    session_id: str,
     *,
     task_file: str | None,
     task_text: str | None,
 ) -> None:
-    """Resolve the run's ``task_context`` and stash it on session state so ``resume`` reads it back —
-    no second check-in call recomputes what ingest already decomposed."""
+    """``--task-file`` / ``--task-text`` IS a check-in: decompose the operator's context and COMMIT
+    it as the dataset's framing. Runs BEFORE the mint because framing renders — the cycle id hashes
+    it, so a framing that arrives afterwards names a prompt the id never saw."""
+    from promptpotter.application.initialization.session import mint_checkin_skeleton
     from promptpotter.application.optimization.task_context import (
         checkin_call_context,
+        committed_task_context,
         decompose_prompt_fields,
-        load_or_build_task_context,
     )
-    from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.cycle_paths import CycleHop
 
-    # The campaign + root cycle are already minted (`_mint_fresh_session` /
-    # `_ingest_and_prepare_checkin` run first), so the decomposition bills the
-    # campaign it seeds rather than going unrecorded.
-    campaign_id = session.campaign_id
-    context = checkin_call_context(session.store, session.hop)
-
-    if task_file:
-        override: str | None = Path(task_file).read_text(encoding="utf-8")
-    else:
-        override = task_text
-    if override:
-        result = await decompose_prompt_fields(override, campaign_id=campaign_id, context=context)
-        tc_dict = dict(result.get("task_context") or {})
-        tc_dict["raw_description"] = override
-        task_context = TaskDecomposition.from_dict(tc_dict)
-    else:
-        task_context = await load_or_build_task_context(
-            session.store, session.dataset_name, campaign_id=campaign_id, context=context
-        )
-
-    if not task_context:
-        checkin_line("task check-in", "no task description — skipped")
+    override = Path(task_file).read_text(encoding="utf-8") if task_file else task_text
+    if not override:
+        # Absent framing is legitimate, but SILENT absent framing is not: the run scores an
+        # unframed prompt and the id honestly says so, which looks identical to a dataset that
+        # never had framing. Four shipped benchmarks are in exactly this state.
+        if not committed_task_context(session.store, session.dataset_name) and (
+            session.dataset_config_dir is not None
+            and (Path(session.dataset_config_dir) / "task_description.md").is_file()
+        ):
+            checkin_line(
+                "task check-in",
+                f"no committed framing — running unframed. "
+                f"`new {session.dataset_name} --task-file "
+                f"datasets/{session.dataset_name}/task_description.md` commits it",
+            )
         return
-
-    n = len(task_context)
-    checkin_line("task check-in", f"resolved ({n} field{'' if n == 1 else 's'})")
-    state = session.store.sessions.read(session_id) or {}
-    state["task_context"] = task_context.to_dict()
-    session.store.sessions.update(session_id, state)
+    dataset_name = session.dataset_name or ""
+    # The check-in's own campaign is where the decomposition bills — the same skeleton the web
+    # ingest mints, and the reason one exists: "the origin isn't authored yet, so there is no
+    # content hash to address it by".
+    _sid, campaign_id, cycle_id = mint_checkin_skeleton(session.store, slug=dataset_name)
+    result = await decompose_prompt_fields(
+        override,
+        campaign_id=campaign_id,
+        context=checkin_call_context(
+            session.store, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+        ),
+    )
+    framing = dict(result.get("task_context") or {})
+    framing["raw_description"] = override
+    session.store.tenant_datasets.save_task_context(dataset_name, framing)
+    checkin_line("task check-in", f"committed framing for {dataset_name}")
 
 
 async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
-    from promptpotter.application.config import load_campaign_config as _load_cfg
+    from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
     from promptpotter.application.datasets.authored import (
         dataset_campaign_path,
         read_campaign_config_file,
@@ -331,8 +335,11 @@ async def _mint_fresh_session(
 
     train_data = session.samples
 
-    # The one shared mint prologue — same application seam the web mint runs
-    # (detached). The CLI keeps only the inline check-in lines + task-context step.
+    # Framing BEFORE identity — the cycle id about to be minted hashes the prompt this commits,
+    # so an operator-supplied description has to land as dataset content first.
+    await _commit_task_framing(session, task_file=args.task_file, task_text=args.task_text)
+
+    # The one shared mint prologue — same application seam the web mint runs (detached).
     minted = prepare_fresh_cycle(
         session,
         campaign_config,
@@ -439,9 +446,9 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     refresh_rates_in_background()
 
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
-        session, campaign_config, dataset_name, session_id = await _ingest_and_prepare_checkin(args)
+        session, campaign_config, dataset_name, _sid = await _ingest_and_prepare_checkin(args)
     else:
-        session, campaign_config, dataset_name, session_id = await _mint_fresh_session(args)
+        session, campaign_config, dataset_name, _sid = await _mint_fresh_session(args)
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
@@ -451,13 +458,6 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     train_data = session.samples
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
     checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
-
-    await _checkin_task(
-        session,
-        session_id,
-        task_file=args.task_file,
-        task_text=args.task_text,
-    )
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config

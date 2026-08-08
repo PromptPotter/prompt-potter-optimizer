@@ -109,7 +109,7 @@ class FileSink:
         if parent_observation_id is not None:
             observation["parentObservationId"] = parent_observation_id
         # An INSTRUMENT does not dump per-observation traces. Same argument that already
-        # force-disables the cloud sink for an inner cycle (`runner/inner/cycle.py`:
+        # force-disables the cloud sink for an inner cycle (`runner/inner/spawn.py`:
         # "per-(sample x candidate x round) traces have no operator value"), applied to the
         # local one — and measured: `.inner/` reached 343 MB across 9 sandboxes, 60% of the
         # whole store, essentially all of it this one write. Nothing in the repo reads

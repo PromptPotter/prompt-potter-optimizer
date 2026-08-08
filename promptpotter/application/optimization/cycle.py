@@ -25,17 +25,16 @@ from promptpotter.domain.results import (
     merge_known_outcomes,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
-from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.exploration import Observation, RulerEntry
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CalibrationModel
     from promptpotter.domain.scoring import QueryMeasurement
-    from promptpotter.domain.search_point import TaskDecomposition
 
 logger = logging.getLogger(__name__)
 
@@ -97,17 +96,13 @@ def _origin_round(
     )
 
 
-def _build_initial_opt_sp(
-    resolved_origin: OptSearchPoint, task_context: TaskDecomposition
-) -> OptSearchPoint:
-    """Copies ``l1_overrides`` so later L2/L3 mutations do not share references with the origin."""
+def _build_initial_opt_sp(resolved_origin: OptSearchPoint) -> OptSearchPoint:
+    """Copies ``l1_overrides`` so later L2/L3 mutations do not share references with the origin.
+    The framing is NOT re-set here: the resolver stamped it, and it is what identity hashed."""
     return resolved_origin.model_copy(
         update={
             "memory": resolved_origin.memory.model_copy(
-                update={
-                    "task_context": task_context,
-                    "l1_overrides": dict(resolved_origin.memory.l1_overrides),
-                }
+                update={"l1_overrides": dict(resolved_origin.memory.l1_overrides)}
             ),
         }
     )
@@ -317,7 +312,6 @@ class Cycle:
         resolved_origin: OptSearchPoint,
         origin_report: ScoredCandidate,
         *,
-        task_context: TaskDecomposition,
         schema: PipelineSchema,
         origin_results: list[dict[str, Any]] | None = None,
         session: Session,
@@ -326,7 +320,7 @@ class Cycle:
         """``origin_report`` arrives ALREADY measured — nothing here recomputes its accuracy,
         composite or evaluator namespace."""
         origin_accuracy = origin_report.accuracy
-        opt_sp = _build_initial_opt_sp(resolved_origin, task_context)
+        opt_sp = _build_initial_opt_sp(resolved_origin)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,

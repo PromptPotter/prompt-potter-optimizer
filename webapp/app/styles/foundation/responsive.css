@@ -147,6 +147,8 @@
 @media (pointer:coarse){
   .hs-header-tools{opacity:1}
   .hs-heat-mini-btn::after{opacity:1}
+  /* Stays pointer-events:none, so it can't intercept a tap meant for the chip. */
+  .remote-follow .follow-active-btn{opacity:1}
 }
 
 /* ── Touch-pointer floor (Phase 0 foundation) ─────────────────────

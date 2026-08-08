@@ -126,6 +126,11 @@ class LineageNode(StrictModel):
     composite_ci_hi: float | None = None
     scored_samples: int | None = None
     expected_samples: int | None = None
+    cached_samples: int | None = Field(
+        default=None,
+        description="Of `scored_samples`, how many were replayed from the MeasurementArchive "
+        "rather than measured. `None` on a course and on any candidate never measured.",
+    )
     cumulative_theta: float | None = Field(
         default=None,
         description="Ability of the adopted lineage on the cycle's fixed δ ruler — the "
@@ -660,6 +665,7 @@ def _candidate_node(
         composite_ci_hi=ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
+        cached_samples=cand.cached_samples,
         # A RETIRED candidate wears no crown — the branch re-asks that election.
         is_winner=close.is_winner and retired_by is None,
         theta=close.theta,

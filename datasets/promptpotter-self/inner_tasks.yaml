@@ -72,7 +72,7 @@ inner_benchmark_config:
 #   2. The thin-positive-margin rule that actually retired seed-4 (+0.021) is written here and
 #      nowhere in code: `seed_screen.py`'s only coded disqualifier is `class_floor > origin`, so
 #      seed-4 would print `ok` today. The runtime now WARNS when a seat's floor meets its origin
-#      (`runner/inner/cycle.py`), which catches the collapse case on the seats that actually ran
+#      (`runner/inner/spawn.py`), which catches the collapse case on the seats that actually ran
 #      — it does not catch the thin-margin case, which needs a numeric threshold nobody has set.
 #
 # seed-7 is EXCLUDED from the candidate pool (operator, 2026-08-02). It measured the lowest origin

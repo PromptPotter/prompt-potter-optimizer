@@ -159,6 +159,57 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/set-sample-lookahead:
+    post:
+      operationId: setSampleLookahead
+      summary: Arm or disarm sample look-ahead on the scoring walk — host-admin only.
+      description: |
+        Writes or removes `.runtime/sample_lookahead.flag`. While armed, the scoring walk holds
+        **two** samples in flight instead of one, roughly halving the wall clock of a
+        candidate's sample walk. Depth is fixed at 2 and is deliberately not a parameter.
+
+        **Armed for ONE round of scoring**, then it disarms itself: the flag is consumed
+        when a round's scoring completes, so a press landing outside a scoring phase waits
+        for the next one rather than expiring unused. `dashboard.json::sample_lookahead`
+        reports the depth the loop actually ran at — this flag is only the request.
+
+        **The measurement is unchanged.** Samples are acquired in parallel but absorbed in
+        walk order, and an acquisition still in flight when the walk stops is discarded
+        rather than recorded, so the rows a candidate persists and the sample it is cut at
+        are identical at either depth. The cost is at most one billed-then-discarded backend
+        call per cut candidate — zero when the cut lands before that request went out.
+        Because nothing measured changes, this does **not** set `human_intervened` — unlike
+        `skip-searchpoint`, which does.
+
+        Ignored (depth stays 1) when the campaign's connector declares
+        `execution: in_process`, where one "sample" is an entire nested campaign.
+
+        Requires the host-admin `scoring.sample_lookahead` capability — it spends the box's shared
+        provider rate bucket, so no tenant tier carries it. Deliberately has **no CLI verb**:
+        the browser remote is the only surface, which is the boundary itself.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-sample-lookahead }
+                    payload: { $ref: '#/components/schemas/SetSampleLookaheadPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/origin-gate-decision:
     post:
       operationId: originGateDecision
@@ -2237,6 +2288,11 @@ components:
         composite_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
         expected_samples: { type: [integer, "null"] }
+        cached_samples:
+          type: [integer, "null"]
+          description: |
+            Of `scored_samples`, how many were replayed from the MeasurementArchive rather
+            than measured. Null on a course and on any candidate never measured.
         cumulative_theta:
           type: [number, "null"]
           description: |
@@ -2583,6 +2639,20 @@ components:
 
     SkipSearchpointPayload:
       $ref: '#/components/schemas/CycleRef'
+
+    SetSampleLookaheadPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+              description: >
+                True arms look-ahead (depth 2) for the next round that scores; false
+                disarms it before it is spent. Armed look-ahead also expires on its own
+                once that round's scoring completes, so `false` is a cancel, not the
+                normal way it ends.
 
     StepCyclePayload:
       allOf:

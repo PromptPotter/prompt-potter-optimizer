@@ -35,7 +35,7 @@ _MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
 
 
 def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Layers node DEFINITIONS — one level above ``application.config.apply_node_overlay``,
+    """Layers node DEFINITIONS — one level above ``application.pipeline_resolve.apply_node_overlay``,
     which merges ``pipeline_params``. Only :data:`_MERGED_NODE_SUB_BLOCKS` merge by name."""
     out = copy.deepcopy(base)
     for node_name, node_def in overlay.items():

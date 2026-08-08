@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.config import freeze_campaign_config, load_campaign_config
+from promptpotter.application.campaign_config import freeze_campaign_config, load_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,

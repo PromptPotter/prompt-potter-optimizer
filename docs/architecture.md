@@ -290,7 +290,9 @@ archive/delete, a separate axis. (3) **Control-local** — `pause_check` on
 "Pause run" button rides this kind by writing a `.runtime/pause.flag`
 file the running loop polls via `pause_check`; the API route writing
 the flag is an explicitly-sanctioned mutation listed in
-`promptpotter/presentation/CLAUDE.md`. (4) **Control-remote** —
+`promptpotter/presentation/CLAUDE.md`. Its siblings are `skip.flag` and
+`sample_lookahead.flag` — the same shape (write, poll, consume) for cutting a
+searchpoint and for arming the scoring walk's second in-flight sample. (4) **Control-remote** —
 HTTP-ingressed mutations authored by signed-in operators or
 signed-in clients. Every command is appended to the canonical
 per-cycle `.runtime/ledger.jsonl` as a `CommandRecord` by a sole
@@ -411,7 +413,7 @@ projections written by sole-writer subscribers under the single-writer
 invariant (pinned above). Operator hand-edits to these files are not
 the input channel; the next ledger event overwrites them. Operator
 input flows through the **Control** kinds only: Control-local
-(`.runtime/pause.flag`, polled by `pause_check`) and Control-remote
+(`.runtime/{pause,skip,sample_lookahead}.flag`, polled per checkpoint) and Control-remote
 (HTTP → `CommandRecord` on the ledger → runner subscriber → `CommandAckRecord`).
 The early "folder-UI" workflow of just opening files was — and remains —
 a read-out workflow; writes have always landed via the running loop.

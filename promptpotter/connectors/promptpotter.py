@@ -174,7 +174,7 @@ def _extract_experiment(
 async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Run an inner cycle and return its three proxy metrics. The runner sandboxes it under a FLAT
     ``<workspace>/.inner/<key>/`` registry — never nested, because physical nesting blew MAX_PATH."""
-    from promptpotter.application.runner.inner.cycle import run_inner_cycle
+    from promptpotter.application.runner.inner.spawn import run_inner_cycle
 
     return await run_inner_cycle(query, payload)
 

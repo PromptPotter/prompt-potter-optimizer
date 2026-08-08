@@ -173,7 +173,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ³ **`task_context`** ← `opt_sp.task_context`
   - 5 rendered fields: `domain`🧩, `pipeline_purpose`🧩, `data_characteristics`🧩, `optimization_goals`🧩, `key_challenges`🧩
   - Seeded by `checkin` decomposition at `init`; L2_CONTEXT merges on each fire — broadcast to every layer as the persistent task framing
-  - 3 model-only sub-fields skipped by the renderer: `raw_description`🧩, `upstream_context`🧩, `downstream_context`🧩
+  - `raw_description`🧩 renders nowhere. `upstream_context`🧩 / `downstream_context`🧩 skip THIS panel but splice around `problem_description` into the TARGET prompt (`_field_value`) — even an empty one, which is why they are the half L1 may mutate and have a scored effect
 - **`l3_to_l2_note`** ← `opt_sp.wounds.l3_note` · L2_CONTEXT template only; explicitly excluded from L1_GENERATE.
 
 ### Cross-round derived
@@ -184,8 +184,8 @@ This is where the reader's mental model of a round usually starts: candidates we
 
 ### Current state
 
-- **`rendered_prompt`** ← `opt_sp.render()` **⊕ `effective_optimizer_prompts(pipeline_schema, pipeline_params)`**
-  - 8-field `PromptTemplate` compiled to one string
+- **`rendered_prompt`** ← `opt_sp.render_fields()` **⊕ `effective_optimizer_prompts(pipeline_schema, pipeline_params)`**
+  - Both halves render one LABELLED section per field — `[field]` for the target prompt, `[node.field]` for the inner optimizer prompts. The override schema keys on those names, so a blob asked the generator to attribute a paragraph the render had just stripped the boundary from; it guessed, swept in neighbours, and since the fields concatenate verbatim they shipped twice. The labels come off `render_fields()`, the same walk `render()` joins, so one cannot claim a boundary the other lacks.
   - Structurally L1_SCORE's output: each round's winner becomes next round's `opt_sp`, so its render is the next parent prompt. The cycle lives in orchestration, not the diagram.
   - The panel is **the artifact under edit**, and on the recursion that is not the searchpoint: an L4 outer point's prompt fields reach no node (`prompt_node_names()` is empty there), while the real levers are the inner nodes' own `PromptTemplate` fields carried as `pipeline_params`. Both halves render, each empty where it is not the mutation surface — so a normal campaign is bit-identical and L4 stops rendering a MANDATORY panel as nothing. Base ⊕ the incumbent's adopted overrides, whole fields only: every mutation here is a complete-field replacement, so a truncated render would be worse than an absent one (hence the cap sits above the recursion's own ~10k bundle).
 - ⁹ **`pipeline_param_catalogue`** ← attributes on `pipeline_schema`: `node_param_keys`🧩, `param_allowed_values`🧩, `param_descriptions`🧩, `available_models`🧩

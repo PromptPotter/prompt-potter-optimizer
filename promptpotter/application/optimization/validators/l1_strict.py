@@ -7,12 +7,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
-from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolve_node_override,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS, ValidationFailure

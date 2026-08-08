@@ -37,7 +37,7 @@ LEDGER_BASELINE = {
     # capability, not a relocation — and it is fenced exactly like `noise-floor`, so the loop
     # never learns it exists. The alternative was a scratchpad script, which would have left
     # the panel's composition unreproducible.
-    "modules": 300,
+    "modules": 302,
     "init_files": 47,
     # A FLOOR: none of the 5 is a shim, and emptying any of them breaks the app. `connectors`
     # and `presentation/api/routers/campaigns` ARE registries — the submodule imports run the
@@ -162,7 +162,22 @@ LEDGER_BASELINE = {
     # taking no default — is the rule working. What a pass can retire is the rest: transport.
     # 4073 -> 4074 (2026-08-06): `_count_docstrings(py_files)`, the one parameter the new
     # `docstrings` dimension below costs. It takes the same file list its ten neighbours do.
-    "param_decls": 4074,
+    # 4074 -> 4076 (2026-08-07): `_ability_delta(rounds)` — the served headline lift is now read
+    # off `cumulative_theta` rather than `best − rounds[0].accuracy`, a fold over the round list
+    # rather than two field reads, so it earns a named function — and `establish_campaign_origin`'s
+    # `task_context`, which is what makes C0 render on the same basis as the candidates that
+    # challenge it. The resolver taking no framing is precisely how they came to differ.
+    # 4076 -> 4065 (2026-08-07): framing stopped being THREADED. It is dataset content now â€” check-in
+    # commits `task_context.yaml`, and one pure reader (`committed_task_context`) serves identity,
+    # C0, seed-screen and the notebook alike. That deletes the parameter from `run_optimization`,
+    # `_prepare_run`, `init_optimization_loop`, `_build_and_start_cycle`, `Cycle.start`,
+    # `_build_initial_opt_sp`, both launchers and `PreparedCheckinRun`, against the ONE it adds to
+    # the resolver. A value carried through eight frames to reach the object that should have been
+    # born holding it is the shape this counts.
+    # 4065 -> 4066 (2026-08-07): `_sample_lookahead_depth(session)`. A predicate rather than a
+    # stored int because the answer changes mid-candidate and is refused for an in-process
+    # connector.
+    "param_decls": 4066,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -194,7 +209,20 @@ LEDGER_BASELINE = {
     # plus the survivor of the two gates, rare by construction because anything binding a SET
     # of symbols belongs to a layer `CLAUDE.md`. That set is pinned when the sweep reaches it;
     # until then every drop here is ordinary prose deleted, and the number only falls.
-    "docstring_lines": 3386,
+    #
+    # 3386 -> 3389 (2026-08-07): two-gate survivors on the headline-lift fix — `_ability_delta`
+    # (why LATEST and not max) and one line on `_field_value` (the splice takes an EMPTY middle).
+    # Both state a rule the code's shape cannot, and the long form lives at the `ability_delta`
+    # field note rather than being repeated at each reader.
+    #
+    # 3389 -> 3391 (2026-08-07): `committed_task_context`, a two-gate survivor â€” it states WHY the
+    # pure reader exists (a decomposition needs a cycle to bill to, and a mint is computing that
+    # cycle), which no reading of its body recovers.
+    #
+    # 3391 -> 3410 (2026-08-07): sample look-ahead. Each survivor states the one fact no
+    # signature carries and no layer CLAUDE.md owns — a throughput toggle cannot reach a
+    # measurement — and its violation is silent.
+    "docstring_lines": 3410,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

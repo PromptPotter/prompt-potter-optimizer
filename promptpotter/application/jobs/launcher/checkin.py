@@ -30,10 +30,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.application.jobs.quota import check_launch_quotas, effective_spend_cap_usd
-from promptpotter.application.optimization.task_context import (
-    checkin_call_context,
-    load_or_build_task_context,
-)
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
@@ -44,9 +40,8 @@ from promptpotter.shared.identity import claim_email
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.search_point import TaskDecomposition
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +87,6 @@ class PreparedCheckinRun:
     session: Session
     campaign_config: CampaignConfig
     train_data: list[Any]
-    task_context: TaskDecomposition
     cycle_id: str
     session_id: str
 
@@ -172,17 +166,10 @@ async def prepare_checkin_run(
             CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin"),
         )
 
-    task_context = await load_or_build_task_context(
-        stores,
-        session.dataset_name,
-        campaign_id=hop.campaign_id,
-        context=checkin_call_context(stores, hop),
-    )
     return PreparedCheckinRun(
         session=session,
         campaign_config=campaign_config,
         train_data=train_data,
-        task_context=task_context,
         cycle_id=hop.cycle_id,
         session_id=session_id,
     )
@@ -261,7 +248,6 @@ async def start_checkin_campaign(
             train_data=prepared.train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            task_context=prepared.task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         ),

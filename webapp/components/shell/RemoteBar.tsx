@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postSkipSearchpoint, IngestApiError } from "@/lib/api";
+import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel, isInFlight } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -22,6 +22,10 @@ import { activeNodeId } from "@/components/workflow";
 // samples of the searchpoint scoring now, accepts the partial, and the cycle
 // continues — and marks the cycle human_intervened. Enabled only while running
 // (skipping only means something mid-scoring).
+//
+// The run-phase chip doubles as the follow-active control while the view is
+// PINNED. While following it stays a plain span — `followActive()` is a no-op
+// there, and a button that does nothing is a lie (surface-contract I3).
 
 const SKIP_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
@@ -30,11 +34,17 @@ const SKIP_ICON = (
   </svg>
 );
 
-export function RemoteBar() {
+interface Props {
+  // Called after the operator follows the active run, so the shell can switch to
+  // the Dashboard view — same contract as RunningJobsButton's `onPicked`.
+  onFollowed?: () => void;
+}
+
+export function RemoteBar({ onFollowed }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
-  const { campaignId, cycleId, cycles } = useWorkspace();
+  const { campaignId, cycleId, cycles, following, followActive } = useWorkspace();
   const { dash, dashRound, status } = useDashboard();
-  const [pending, setPending] = useState<"skip" | null>(null);
+  const [pending, setPending] = useState<"skip" | "sample-lookahead" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   if (!campaignId || !cycleId) return null;
@@ -48,6 +58,15 @@ export function RemoteBar() {
   // Hidden only when terminal, checkin, or no run yet.
   if (!isInFlight(runPhase)) return null;
   const offline = status === "offline";
+
+  // Hoisted so the chip's two forms render byte-identical contents.
+  const phaseLabel = runPhaseLabel(runPhase, dash?.stop_reason);
+  const phase = (
+    <>
+      <span className="phase-dot" aria-hidden="true" />
+      {phaseLabel}
+    </>
+  );
 
   // Babysat marker for the in-view cycle — the canonical flag rides the cycle
   // list (index.json::human_intervened), permanent once an operator intervenes.
@@ -71,7 +90,13 @@ export function RemoteBar() {
       ? String(dash?.candidate || "").split("/")[0]
       : "";
 
-  const act = async (which: "skip", fn: () => Promise<unknown>) => {
+  // SERVER state, never a local toggle (I6): the arming expires on its own, so a client-held
+  // boolean would stay lit after the round spent it.
+  const lookahead = dash?.sample_lookahead ?? 1;
+  const sampleLookaheadArmed = lookahead > 1;
+  const discards = dash?.sample_lookahead_discards ?? 0;
+
+  const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
     setPending(which);
     setErr(null);
     try {
@@ -90,10 +115,26 @@ export function RemoteBar() {
       role="group"
       aria-label="Campaign remote control"
     >
-      <span className={cx("phase-chip", `phase-${runPhase}`)}>
-        <span className="phase-dot" aria-hidden="true" />
-        {runPhaseLabel(runPhase, dash?.stop_reason)}
-      </span>
+      {following ? (
+        <span className={cx("phase-chip", `phase-${runPhase}`)}>{phase}</span>
+      ) : (
+        <button
+          type="button"
+          className={cx("phase-chip", "remote-follow", `phase-${runPhase}`)}
+          onClick={() => {
+            followActive();
+            onFollowed?.();
+          }}
+          aria-label={`${phaseLabel} — pinned to this campaign. Follow the campaign the CLI is currently running.`}
+        >
+          {phase}
+          {/* The breadcrumb's own button, floated above the pill. The tag IS the
+              tooltip, so no `title` on top of it. */}
+          <span className="follow-active-btn" aria-hidden="true">
+            ↪ Follow active
+          </span>
+        </button>
+      )}
       {offline ? (
         <span
           className="remote-offline"
@@ -113,6 +154,31 @@ export function RemoteBar() {
       >
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
+      </button>
+      {/* An ARM button, not a switch: it spends itself after one round of scoring. */}
+      <button
+        type="button"
+        className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
+        onClick={() =>
+          void act("sample-lookahead", () =>
+            postSetSampleLookahead(campaignId, cycleId, !sampleLookaheadArmed),
+          )
+        }
+        disabled={runPhase !== "running" || pending !== null}
+        aria-pressed={sampleLookaheadArmed}
+        aria-label={
+          sampleLookaheadArmed
+            ? "Cancel sample look-ahead (currently 2 samples in flight)"
+            : "Arm sample look-ahead for the next round of scoring"
+        }
+        title={
+          sampleLookaheadArmed
+            ? `Look-ahead armed — 2 samples in flight, about half the wall clock. Expires when this round finishes scoring. Costs at most one discarded backend call per eliminated candidate${discards > 0 ? ` (${discards} so far)` : ""}; the measurement is unchanged and the cycle is NOT marked babysat.`
+            : "Run the next round's scoring with 2 samples in flight instead of 1 — roughly half the wall clock. Expires after that one round. The measurement is unchanged."
+        }
+      >
+        <span aria-hidden="true">⇉</span>
+        <span className="remote-btn-label">{sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}</span>
       </button>
       <span className="remote-status" aria-live="off">
         {/* The candidate label ("C2.3") already encodes the round (the 2), so

@@ -12,6 +12,7 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import io
 import json
@@ -23,11 +24,14 @@ import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pydantic
 import pytest
 import yaml
 
+from promptpotter.application.scoring import query_loop
+from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -90,7 +94,7 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     inner optimizer spend its whole budget reasoning and emit zero content
     (``reasoning_budget_exhausted``) — a paid-for, loop-stalling failure with no wrong-answer
     symptom, so the gate NOT firing is the silent harm here."""
-    from promptpotter.application.config import check_model_reasoning_floors
+    from promptpotter.application.preflight import check_model_reasoning_floors
     from promptpotter.infrastructure.llm.registry import model_profile
 
     prof = model_profile("deepseek/deepseek-v4-flash:nitro")
@@ -436,7 +440,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     deltas, or overruns the panel cap (1200c head-keep would clip the LATEST
     rounds), the outer loop is evidence-starved again with no error and no
     symptom (run b786e9: transcripts degenerated to identity tokens)."""
-    from promptpotter.application.runner.inner.cycle import _inner_narrative
+    from promptpotter.application.runner.inner.spawn import _inner_narrative
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
@@ -806,7 +810,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     `campaign.json`), scoring a no-op as a legitimate mutation. (3) `populate_by_name` must
     stay off: if the old key still validated, a rename the model ignored would look applied.
     """
-    from promptpotter.application.config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
@@ -1585,7 +1589,7 @@ def test_every_shipped_dataset_dir_is_recognized(built_stores) -> None:
 def test_the_l4_dataset_is_recognized_as_one() -> None:
     """The is-this-L4 probe and the loader must agree — a disagreement is silent.
 
-    ``runner/inner/cycle.py`` decides whether to verify the outer observation contract
+    ``runner/inner/spawn.py`` decides whether to verify the outer observation contract
     by probing for the inner-task spec. Miss it and the check is skipped, undeclared
     inner keys are dropped, and the outer formula scores a measurement nobody took.
 
@@ -1597,7 +1601,7 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
     scales. Silent in the worst way: every cell completes, every number is plausible, and the
     pooled verdict is wrong with no symptom.
     """
-    from promptpotter.application.config import load_campaign_config
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.runner.inner.tasks import (
         inner_instrument_config,
         load_inner_tasks,
@@ -2239,20 +2243,17 @@ def _tree_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-async def test_first_sight_framing_never_writes_into_install_content(
-    built_stores: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A benchmark shipping no ``task_context.yaml`` gets one decomposed on first run —
-    into the TENANT tree, never beside the definition it was derived from.
+def test_committed_framing_never_writes_into_install_content(built_stores: Any) -> None:
+    """Framing committed for a benchmark lands in the TENANT tree, never beside the definition it
+    was derived from — and the ONE reader finds it there.
 
-    Four of the ten shipped benchmarks are in exactly this state, ``email-tagging``
-    (the one ``docs/manual/02-install.md`` opens with) among them. Under a wheel the
-    definition dir resolves inside ``site-packages``: pip deletes it on upgrade and a
-    system install refuses the write. The ROW half of this rule got a test when the
-    rows moved out; this is the half that shipped without one, so the same defect
-    survived in the framing path.
+    Four of the shipped benchmarks ship a ``task_description.md`` with no ``task_context.yaml``,
+    ``email-tagging`` (the one ``docs/manual/02-install.md`` opens with) among them. Under a wheel
+    the definition dir resolves inside ``site-packages``: pip deletes it on upgrade and a system
+    install refuses the write. The ROW half of this rule got a test when the rows moved out; this
+    is the half that shipped without one.
     """
-    from promptpotter.application.optimization import task_context as tc_mod
+    from promptpotter.application.optimization.task_context import committed_task_context
 
     install = built_stores.benchmarks_root / "gsm8k"
     install.mkdir(parents=True)
@@ -2260,30 +2261,15 @@ async def test_first_sight_framing_never_writes_into_install_content(
     (install / "task_description.md").write_text("Solve grade-school math.\n", encoding="utf-8")
     before = _tree_bytes(install)
 
-    async def _decompose(*_a: Any, **_k: Any) -> dict[str, Any]:
-        return {"task_context": {"domain": "grade-school arithmetic"}}
+    built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
 
-    monkeypatch.setattr(tc_mod, "decompose_prompt_fields", _decompose)
-    resolved = await tc_mod.load_or_build_task_context(
-        built_stores, "gsm8k", campaign_id="c", context=None
-    )
-
-    assert resolved.domain == "grade-school arithmetic"
     assert _tree_bytes(install) == before, (
         "the decomposition was written into benchmarks_root — install content, "
         "read-only under a wheel (site-packages)"
     )
     assert built_stores.tenant_datasets.task_context_path("gsm8k").is_file()
-
-    # Second run reads it back with no LLM call at all.
-    async def _explode(*_a: Any, **_k: Any) -> dict[str, Any]:
-        raise AssertionError("a cached decomposition was recomputed")
-
-    monkeypatch.setattr(tc_mod, "decompose_prompt_fields", _explode)
-    again = await tc_mod.load_or_build_task_context(
-        built_stores, "gsm8k", campaign_id="c", context=None
-    )
-    assert again.domain == "grade-school arithmetic"
+    # The one reader every seam uses — identity, C0, seed-screen — resolves tenant-first.
+    assert committed_task_context(built_stores, "gsm8k").domain == "grade-school arithmetic"
 
 
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
@@ -2302,7 +2288,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     varied per process would never find its own campaign, so every retry would re-mint and
     the continuation would silently never happen.
     """
-    from promptpotter.application.runner.inner.cycle import inner_campaign_id
+    from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
 
     spec = InnerTaskSpec(
@@ -2332,7 +2318,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
         [
             sys.executable,
             "-c",
-            "from promptpotter.application.runner.inner.cycle import inner_campaign_id;"
+            "from promptpotter.application.runner.inner.spawn import inner_campaign_id;"
             "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
             "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4,n_variants=3);"
             "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",
@@ -2477,3 +2463,136 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
+
+
+# --- sample look-ahead: the depth must not reach the record -------------------
+
+
+class _OrderedFakeBackend:
+    """Finishes LATER samples FIRST. With uniform latency two slots complete in submission order
+    anyway, so the test would pass without the loop ordering anything."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.calls: list[int] = []
+
+    async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+        self.calls.append(sample.id)
+        await asyncio.sleep((self.n - sample.id + 1) * 0.01)
+        return {
+            "sample_id": sample.id,
+            "query": sample.query,
+            "ground_truth": sample.ground_truth,
+            "predicted": sample.ground_truth,
+            "fitness": 1.0,
+            "cached": False,
+            "error": None,
+            "pipeline_data": {"total_time": 0.5},
+        }
+
+
+class _CutAfter:
+    """Stands in for the PoBB gate on the same seam, firing where the test picks rather than
+    where a posterior has to be coaxed to."""
+
+    name = "cut_after"
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def check(self, results: list[Any], ci: int, ct: int) -> Any:
+        if len(results) < self.n:
+            return None
+        return EscalationSignal(
+            check_name=self.name,
+            target=EscalationTarget.ELIMINATE_CANDIDATE,
+            check_result={"queries_scored": len(results)},
+            candidate_idx=ci,
+            candidates_scored=len(results),
+            candidates_skipped=0,
+        )
+
+
+async def _walk(
+    dataset: list[Sample],
+    *,
+    armed: bool,
+    cut_at: int | None,
+    execution: str = "remote_http",
+) -> dict[str, Any]:
+    backend = _OrderedFakeBackend(len(dataset))
+    # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
+    with mock.patch.object(query_loop, "measure_sample", backend.measure):
+        session = types.SimpleNamespace(
+            scoring=types.SimpleNamespace(
+                scorer=lambda r: 1.0, scorer_id="fake", scorer_formula=None, round_scorer=None
+            ),
+            pause_check=None,
+            skip_check=None,
+            skip_consume=None,
+            budget_tripped=None,
+            sample_lookahead_check=(lambda: armed),
+            sample_lookahead_consume=None,
+            backend_client=types.SimpleNamespace(execution=execution),
+        )
+        depths: list[int] = []
+        result = await query_loop.run_query_loop(
+            types.SimpleNamespace(pipeline_params={}),
+            dataset,
+            session,
+            cached_sample_results={},
+            deprecated_samples={},
+            on_sample_scored=None,
+            on_sample_starting=lambda q, i, t, sid, depth: depths.append(depth),
+            degradation_checks=[_CutAfter(cut_at)] if cut_at else [],
+            candidate_idx=0,
+            n_total_candidates=1,
+            axes=None,
+            persist_fresh=lambda rows: {"accuracy": 1.0},
+            running_scores=lambda rows: {"accuracy": 1.0},
+            on_sample_pre_check=None,
+        )
+    return {
+        "rows": result.results,
+        "stop_reason": result.stop_reason,
+        "calls": list(backend.calls),
+        "max_depth": max(depths) if depths else 0,
+    }
+
+
+async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
+    """Look-ahead must move the wall clock and NOTHING a measurement is read from.
+
+    Silent by construction: if the second in-flight sample could reach the archive, or shift where a
+    candidate is cut, one campaign would record different rows under a throughput toggle with
+    nothing raised — and the arming would become a steer, forcing a babysat stamp."""
+    dataset = [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
+
+    # 1. A candidate that runs to completion records byte-identical rows, and costs the same.
+    d1 = await _walk(dataset, armed=False, cut_at=None)
+    d2 = await _walk(dataset, armed=True, cut_at=None)
+    assert d2["max_depth"] == 2, "arming did not open the window — the rest proves nothing"
+    assert d1["max_depth"] == 1
+    assert d1["rows"] == d2["rows"]
+    assert d1["calls"] == d2["calls"]
+
+    # 2. Absorption is in WALK order even though the backend finished later samples first.
+    assert [r["sample_id"] for r in d2["rows"]] == [s.id for s in dataset]
+
+    # 3. A candidate cut mid-walk is cut at the same sample and records the same rows — the
+    #    in-flight acquisition is discarded, not appended, and not error-filled twice.
+    c1 = await _walk(dataset, armed=False, cut_at=4)
+    c2 = await _walk(dataset, armed=True, cut_at=4)
+    assert c2["max_depth"] == 2, "window never opened on the cut walk"
+    assert c1["stop_reason"] == c2["stop_reason"] == "escalation"
+    assert c1["rows"] == c2["rows"]
+
+    # 4. …and the only difference is on the bill: AT MOST one extra call, sometimes none (awaiting
+    #    an already-finished task does not yield, so the slot is cancelled before its request went
+    #    out). Equality here would pin a scheduling accident; two would mean the window overgrew.
+    assert 0 <= len(c2["calls"]) - len(c1["calls"]) <= 1
+
+    # 5. An in-process connector ignores the arming: there a "sample" is a whole nested campaign.
+    inproc = await _walk(dataset, armed=True, cut_at=None, execution="in_process")
+    assert inproc["max_depth"] == 1
+    assert inproc["rows"] == d1["rows"]
