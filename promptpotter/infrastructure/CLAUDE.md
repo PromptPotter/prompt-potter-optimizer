@@ -26,6 +26,27 @@ canonical ledger, no process global, no sink-installation indirection. **Which
 shape a new surface takes, and the full add-a-surface recipe** — owned by
 [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
+**The ledger is a CHRONOLOGY, and a payload earns its place only by needing one.** It answers
+which round, which candidate, in what order, against which rival — nothing else can. So the test
+for a field is not "is it useful?" but *is the ordering what makes it findable?* A value the
+archive holds keyed `(dataset_name, node_configs, sample_id)`, or that `rounds/round_NNNN.json`
+carries per candidate, is already addressable without it. Two shapes are declared, not optional:
+the projection at the writer (`RunCallbacks` → `domain/scoring.py::ledger_sample_view`,
+`ViewContext.ledger_anchors`) keeps a record to the union of what its subscribers RENDER, and a
+field that is live-only rides `Field(exclude=True)` (`PhaseRecord.data`, `.live_round_result`) so
+nothing decides per-key at the seam what serializes. Measured before the rule existed: one L2
+prompt stored three times, twice in the same file, and 37 of 39 MB of `pipeline_data` was the
+archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
+
+**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold`
+read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume
+rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros.
+They are fields on `L2RefineExitView` / `PlanExitView` now. When a shape moves like that,
+`application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across:
+it CALLS the writer's projections rather than restating them, preserves the line count (the line
+index IS `sequence`), tmp + `os.replace` (`append` is not crash-atomic), and skips any cycle with
+a live producer.
+
 **Newtype-guarded projections** under `projections/`:
 
 | Projection | Scope | Writes | Role |

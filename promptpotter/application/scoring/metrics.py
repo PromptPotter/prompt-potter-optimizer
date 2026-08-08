@@ -242,7 +242,7 @@ def compute_composite_fitness(
     evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
     # L1-generation quality is a batch property, not a per-result derivation —
     # injected after registry materialization so operator formulas can
-    # reference ``l1_diversity`` via campaign.json::scoring / scoring_steer.json.
+    # reference ``l1_diversity`` via campaign.json::scoring.
     evaluator_values["l1_diversity"] = float(l1_diversity)
 
     if not results:

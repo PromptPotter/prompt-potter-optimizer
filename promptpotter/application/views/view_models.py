@@ -58,6 +58,16 @@ class ViewContext:
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
 
+    def ledger_anchors(self) -> dict[str, Any]:
+        """The four scalars a ledger subscriber re-syncs from (``LiveDisplay._phase_ctx``). Not
+        ``asdict``: that re-emitted both whole ``*_sp_flat`` prompts per candidate and per round."""
+        return {
+            "origin_accuracy": self.origin_accuracy,
+            "origin_composite_fitness": self.origin_composite_fitness,
+            "composite_fitness_formula": self.composite_fitness_formula,
+            "composite_fitness_formula_short": self.composite_fitness_formula_short,
+        }
+
 
 @dataclass(frozen=True)
 class WarningEntry:
@@ -236,8 +246,18 @@ class L2RefineExitView:
     l1_layout_changed: bool
     axis_targeted: str
     changes_description: str
-    l2_prompt: str
-    l2_response_json: Any | None
+    # Post-fire L2 counters — the four scalars ``EscalationFSM.fold`` rebuilds resume state
+    # from. They ride the VIEW because the view is the persisted half of the record: they used
+    # to travel in ``PhaseEvent.data``, which is in-memory-only, so every resume silently
+    # rebuilt L2 as never-fired. A resume-critical fact is a declared field, not a loose key.
+    l2_round: int
+    l2_stall_count: int
+    l2_best_composite_fitness_at_entry: float
+    l2_best_theta_at_entry: float | None
+    # `l2_prompt` / `l2_response_json` are NOT here. The rendered call is already on this
+    # ledger as the `l2_context` LLMCallRecord and assembled human-readably in the audit twin
+    # (`.runtime/cache/rounds/round_NNNN.json::nodes.l2_context`, uncapped) — one prompt, three
+    # copies, two of them in this file. The terminal readout addresses the twin.
 
 
 @dataclass(frozen=True)
@@ -251,6 +271,11 @@ class PlanEnterView:
 class PlanExitView:
     new_plan_preview: str
     changes_description: str
+    # Post-fire L3 counters — same contract as ``L2RefineExitView``'s four above.
+    l3_round: int
+    l3_stall_count: int
+    l3_best_composite_fitness_at_entry: float
+    l3_best_theta_at_entry: float | None
 
 
 # --- Aggregate views for log.md (post-hoc, disk-derived only) -------------

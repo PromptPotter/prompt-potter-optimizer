@@ -412,12 +412,13 @@ class LiveDashboardView(DerivedView):
 
         payload = record.payload
         view = payload.get("view")
-        data = payload.get("data") or {}
+        # ``record.data`` is in-memory-only (``exclude=True``): populated on the direct
+        # subscriber path, empty on a ledger replay, where ``view`` carries the same facts.
         event = PhaseEvent(
             phase=record.phase,
             event=record.event,
             round=record.round,
-            data=data,
+            data=record.data,
         )
         self._apply_phase(event, view)
         # L1_GENERATE:enter wipes the live candidate buffer (current_round.nodes.l1_score) —
@@ -438,7 +439,7 @@ class LiveDashboardView(DerivedView):
             self.state.sample_lookahead = int(payload.get("sample_lookahead") or 1)
             if sid is not None:
                 self._open_samples[int(sid)] = (
-                    (payload.get("query_text") or "")[:120],
+                    str(payload.get("query_preview") or ""),
                     qi,
                     qt,
                     ci,
@@ -544,12 +545,6 @@ class LiveDashboardView(DerivedView):
                 token_budget=opt.token_budget,
                 lives_cap=opt.lives.cap if opt.lives else None,
             )
-        elif phase == "scoring_steer" and event.event == "applied":
-            # Operator hot-swap — custom formulas render verbatim (no short form).
-            new_formula = data.get("formula")
-            if new_formula:
-                s.composite_fitness_formula = new_formula
-                self.short_formula_template = None
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             new_round = int(data.get("round", s.round) or 0)
             s.round = new_round

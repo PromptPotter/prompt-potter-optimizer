@@ -11,6 +11,7 @@ and fix it.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
@@ -508,6 +509,188 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     assert exhaust.next_action is NextAction.STOP_LIVES
     assert exhaust.stop_reason is StopReason.LIVES_EXHAUSTED
     assert last_event is not None  # streak never stopped mid-sequence
+
+
+def test_l2_l3_escalation_state_survives_resume() -> None:
+    """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
+
+    Builds the records the way the firing seam writes them — the same ``CampaignPhase``, and the
+    counters on the typed exit VIEW — so this pins reader-against-writer rather than
+    reader-against-itself. It has to, because the arm has been wrong in both halves at once:
+    ``fold`` compared ``record.phase`` to ``"l2_context"``/``"l3_plan"`` (the NODE names, which
+    no PhaseRecord carries) and read the counters from ``payload["data"]``, which is
+    in-memory-only and never reached disk. Either alone rebuilds L2/L3 as never-fired, handing
+    the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
+    in the resume sense: nothing raises, the counters just read zero.
+    """
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
+    from promptpotter.domain.phases import CampaignPhase
+    from promptpotter.domain.run_records import PhaseRecord
+
+    def snapshot(f: EscalationFSM) -> tuple[int, int, float, int, int, float, int]:
+        return (
+            f.l2_round,
+            f.l2_stall_count,
+            f.l2_best_composite_fitness_at_entry,
+            f.l3_round,
+            f.l3_stall_count,
+            f.l3_best_composite_fitness_at_entry,
+            f.l1_stall_count,
+        )
+
+    live = EscalationFSM()
+    live_trace = []
+    live.record_l2_fired(best_composite_fitness=0.60)
+    live_trace.append(snapshot(live))
+    # A second request at an unimproved fitness bumps the L2 stall before the fire banks it.
+    live.observe_l2_escalation(current_composite_fitness=0.60, l2_patience=3, l3_patience=2)
+    live.record_l2_fired(best_composite_fitness=0.60)
+    live_trace.append(snapshot(live))
+    # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
+    # or the L2 half of this test would assert zeros and pass against the bug it exists for.
+    live.record_l3_fired(best_composite_fitness=0.75)
+    live_trace.append(snapshot(live))
+
+    def l2_view(l2_round: int, stall: int, comp: float) -> L2RefineExitView:
+        return L2RefineExitView(
+            param_changes_count=0,
+            l1_layout_changed=False,
+            axis_targeted="",
+            changes_description="",
+            l2_round=l2_round,
+            l2_stall_count=stall,
+            l2_best_composite_fitness_at_entry=comp,
+            l2_best_theta_at_entry=None,
+        )
+
+    # What the exit records carry on disk: the post-fire state, on the persisted view. Real
+    # views, not dicts — a namespace here would let a renamed field pass with every gate green.
+    banked: list[tuple[CampaignPhase, object]] = [
+        (CampaignPhase.REFINE_STRATEGY, l2_view(1, 0, 0.60)),
+        (CampaignPhase.REFINE_STRATEGY, l2_view(2, 1, 0.60)),
+        (
+            CampaignPhase.MODIFY_PLAN,
+            PlanExitView(
+                new_plan_preview="",
+                changes_description="",
+                l3_round=1,
+                l3_stall_count=0,
+                l3_best_composite_fitness_at_entry=0.75,
+                l3_best_theta_at_entry=None,
+            ),
+        ),
+    ]
+    replay = EscalationFSM()
+    replay_trace = []
+    for phase, view in banked:
+        # Round-trip through Pydantic exactly as a resume does: `fold` must read the
+        # dict `ledger.iter()` hands back, not only the live dataclass.
+        on_disk = PhaseRecord.model_validate_json(
+            PhaseRecord(phase=phase, event="exit", payload={"view": view}).model_dump_json()
+        )
+        replay.fold(on_disk, lives=None)
+        replay_trace.append(snapshot(replay))
+
+    assert replay_trace == live_trace
+    # Pinned literally too: an arm that never matches leaves every one of these at 0/0.0.
+    assert replay_trace == [
+        (1, 0, 0.60, 0, 0, 0.0, 0),
+        (2, 1, 0.60, 0, 0, 0.0, 0),
+        (0, 0, 0.75, 1, 0, 0.75, 0),
+    ]
+
+
+def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) -> None:
+    """A decision must reach the ledger once and the round document only if that round made it.
+
+    Both halves are silent and both bite resume. (1) ``persist_round`` drained the whole buffer
+    into whichever round happened to be closing, and ``to_dict()`` drops ``round`` — so a
+    foreign record was indistinguishable from a native one, and ``replay_decisions``
+    re-derives every REPLAYED kind in that list against THIS round's measurements. On disk
+    that had filed 42 ``round_winner`` and 76 ``elimination_cut`` records under a round that
+    did not make them, so the divergence seam compared one round's decision to another
+    round's data — a spurious halt or a missed one, with nothing to see. (2) Escalation fires
+    after its round has already persisted, so a cycle stopping right there had no next
+    ``persist_round``: 8 of 89 real L2 fires carry no decision at all.
+    """
+    from types import SimpleNamespace
+
+    from promptpotter.application.optimization.resume_and_fork.decisions import (
+        ResumeCheckpointKind,
+        record_decision,
+    )
+    from promptpotter.application.runner.round import flush_pending_decisions, persist_round
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import ResumeCheckpointRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from tests.factories import round_result
+
+    cycle_dir = CycleDir(tmp_path)
+    (tmp_path / ".runtime").mkdir()
+    ledger = CycleEventLog.open(cycle_dir)
+    # `cycle_id=None` short-circuits the store half of `persist_round`; the ledger is real.
+    session = SimpleNamespace(
+        state=SimpleNamespace(ledger=ledger, cycle_id=None, audit_projection=None)
+    )
+    cycle = SimpleNamespace(pending_decisions=[], axes=None)
+
+    # Round 1's own cut, then round 1's post-round escalation — recorded AFTER round 1
+    # persisted, so it is still pending when round 2 closes.
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.ELIMINATION_CUT,
+        {"round_num": 1},
+        True,
+        round=1,
+    )
+    rr1 = round_result(1)
+    persist_round(cycle, rr1, 1, session)  # type: ignore[arg-type]
+    assert [d["kind"] for d in rr1.decisions] == ["elimination_cut"]
+
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        {"round_num": 1},
+        True,
+        round=1,
+    )
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.ROUND_WINNER,
+        {"round_num": 2},
+        "c2",
+        round=2,
+    )
+    rr2 = round_result(2)
+    persist_round(cycle, rr2, 2, session)  # type: ignore[arg-type]
+    # Round 2's document carries round 2's decision and NOT round 1's escalation.
+    assert [d["kind"] for d in rr2.decisions] == ["round_winner"]
+
+    # A fire with no round after it: the buffer is the only copy until teardown flushes it.
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        {"round_num": 2},
+        True,
+        round=2,
+    )
+    assert flush_pending_decisions(cycle, session) == 1  # type: ignore[arg-type]
+    assert cycle.pending_decisions == []
+    assert flush_pending_decisions(cycle, session) == 0  # type: ignore[arg-type]
+
+    # Every decision reached the ledger exactly once, each stamped with the round that made it.
+    on_disk = [
+        (r.kind.value, r.round)
+        for r in CycleEventLog(ledger.path).iter()
+        if isinstance(r, ResumeCheckpointRecord)
+    ]
+    assert on_disk == [
+        ("elimination_cut", 1),
+        ("l2_escalation_trigger", 1),
+        ("round_winner", 2),
+        ("l2_escalation_trigger", 2),
+    ]
 
 
 def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:

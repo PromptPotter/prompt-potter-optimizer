@@ -145,12 +145,6 @@ def _node_line(text: str) -> str:
     return f"│  {text}"
 
 
-def _node_lines(text: str) -> list[str]:
-    """``_node_line`` for a possibly-multi-line value — prefix EACH physical line, or an embedded newline
-    escapes the box and breaks the frame in both the terminal and ``latest.log``."""
-    return [_node_line(line) for line in text.split("\n")]
-
-
 def _node_block(label: str, *lines: str, label_right: str = "") -> str:
     parts = [_node_top(label, label_right)]
     parts.extend(_node_line(line) for line in lines)

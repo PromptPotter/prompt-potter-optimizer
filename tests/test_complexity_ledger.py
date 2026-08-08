@@ -188,7 +188,30 @@ LEDGER_BASELINE = {
     # page ONE resolver instead of two hand-copied sort keys, and the fields it carries are
     # counted here. The rank needs the Rasch maps AND the per-sample series at once, which is
     # why neither route could hold it and the browser ended up owning the ordering.
-    "param_decls": 4089,
+    # 4089 -> 4092 (2026-08-08): the SP-diff legend stopped re-printing values and started
+    # ADDRESSING them, which the two closures that mint a code could not do without knowing
+    # which flat key and which column each value came from — `_get_code` and `_cell` each gain
+    # that pair (+4), against `_node_lines` deleted (-1). It buys a real subtraction the ledger
+    # does not count: the legend was 39.6% of `logs/latest.log` re-serializing `prompt_fields`
+    # once per round, and one measured round-1 diff went 7,627 -> 1,421 chars.
+    # 4092 -> 4098 (2026-08-08): `ledger_sample_view` (domain/scoring) and `_view_fields`
+    # (escalation/state) — the projection that keeps the ledger to what its subscribers render,
+    # and the reader that takes escalation's resume counters off the PERSISTED view instead of
+    # the in-memory-only `payload["data"]` they were silently rebuilt from. Both are seams that
+    # REPLACE loose dict keys with declared ones (the keep-set carries an import-time subset
+    # assert; the counters are now fields on `L2RefineExitView` / `PlanExitView`), so what grew
+    # here is the typed surface and what shrank is the untyped one. Plus the three that carry
+    # the same projections back over data already written (`compact_cycle_ledgers` and its two
+    # helpers, on the existing `restamp --apply` — a second stripper would drift from the
+    # writer, so they CALL it). Measured across 60 real ledgers: 102.6 MB -> 44.5 MB.
+    # 4098 -> 4100 (2026-08-08): `flush_pending_decisions(cycle, session)` — teardown's half of
+    # `persist_round`'s drain. Escalation fires after its round persisted, so a cycle stopping
+    # right there had no next round to carry the record: 8 of 89 real L2 fires reached disk with
+    # no decision beside them, and the resumed run re-spent budget it had already spent.
+    # 4100 -> 4102 (2026-08-08): `refile_round_decisions` + `_document_decisions` — the same
+    # verb's reconciler for data already written, since the writer fix is forward-only and 199
+    # records on disk named a round that did not make them.
+    "param_decls": 4102,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -241,7 +264,29 @@ LEDGER_BASELINE = {
     # selected; the `log.md` GRID stays δ-sorted whatever the knob says, since a Rasch matrix
     # reads as a staircase only while difficulty runs monotonically across its columns. Every
     # one of those is silent when violated — the ordering simply comes out wrong.
-    "docstring_lines": 3440,
+    #
+    # 3440 -> 3452 (2026-08-08): six two-line survivors from the ledger-payload pass, each
+    # stating a hazard its signature cannot and each silent when violated. `ledger_sample_view`
+    # — NEW dicts, never a pop, because the argument is the same object the archive row, the
+    # round file and `trajectory_results` all hold. `_view_fields` — a replay hands back a dict
+    # where the live path holds the frozen view. `ViewContext.ledger_anchors` — why not `asdict`
+    # (it re-emitted both whole prompts per candidate). `on_sample_started` — the query preview
+    # is capped at the WRITER now, so the reader's slice is gone and cannot drift from it.
+    # `_compact_one` — tmp + `os.replace`, because `append` is not crash-atomic and a torn
+    # rewrite loses the cycle. `_compact_record` — what "already current" means for a stored row.
+    #
+    # 3452 -> 3459 (2026-08-08): `flush_pending_decisions` (5) + the test it guards (2). The
+    # function's says WHY a second flush site exists at all — a decision recorded after the
+    # last round persisted has no next `persist_round`, and dies in memory. Nothing about the
+    # signature suggests a teardown seam, and the failure is a silently re-spent budget.
+    #
+    # 3459 -> 3471 (2026-08-08): the re-file pass (12). `_document_decisions` states the one
+    # thing its body cannot: it keys on the ROUND STAMP and never on ledger position, because
+    # round 0 closes twice and the next close after a round-1 decision reads 0 — trusting
+    # position dropped 118 replayed decisions in the dry run. `refile_round_decisions` states
+    # what makes a foreign entry harmful rather than untidy: `replay_decisions` re-derives it
+    # against the wrong round's measurements, and resume halts or fails to.
+    "docstring_lines": 3471,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

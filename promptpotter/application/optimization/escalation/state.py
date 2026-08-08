@@ -4,15 +4,24 @@ access is property-only, so "signals from measurement, not calendar" is structur
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
+
+
+def _view_fields(record: PhaseRecord) -> dict[str, Any]:
+    """``payload["view"]`` as a mapping. A ledger replay deserializes it to a dict; the live
+    in-process path still holds the frozen view dataclass, and ``fold`` must read either."""
+    view = record.payload.get("view")
+    if is_dataclass(view) and not isinstance(view, type):
+        return asdict(view)
+    return view if isinstance(view, dict) else {}
 
 
 class NextAction(enum.StrEnum):
@@ -259,8 +268,15 @@ class EscalationFSM:
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
         self._l2_best_theta_at_entry = best_theta
 
-    # Reducer: round-complete → L1 stall; l2_context.exit → l2 state; l3_plan.exit → l3 state + l2 reset.
-    # Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
+    # Reducer: round-complete → L1 stall; refine_strategy.exit → l2 state; modify_plan.exit → l3
+    # state + l2 reset. Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
+    # Match the CampaignPhase members, never their spellings — `phase` is a bare `str`, so only the
+    # enum reference makes a wrong name an import-time AttributeError instead of an arm that
+    # silently never matches. The L2/L3 node names are NOT their phase names.
+    #
+    # Read the counters off `payload["view"]` — the PERSISTED half. `payload["data"]` was the
+    # builder's in-memory input and never reached disk, so every resume rebuilt L2/L3 as
+    # never-fired. `L2RefineExitView` / `PlanExitView` declare the four scalars each arm needs.
 
     def fold(self, record: CycleRecord, *, lives: LivesConfig | None = None) -> None:
         """Advance state from one ledger record. ``lives`` reconstructs from the same ``improved`` sequence
@@ -274,8 +290,8 @@ class EscalationFSM:
                 lives,
                 compared=int(record.payload["electable_count"]) > 0,
             )
-        elif record.phase == "l2_context" and record.event == "exit":
-            escalation_state = record.payload["data"]
+        elif record.phase == CampaignPhase.REFINE_STRATEGY and record.event == "exit":
+            escalation_state = _view_fields(record)
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
@@ -284,8 +300,8 @@ class EscalationFSM:
             )
             l2_theta = escalation_state.get("l2_best_theta_at_entry")
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
-        elif record.phase == "l3_plan" and record.event == "exit":
-            escalation_state = record.payload["data"]
+        elif record.phase == CampaignPhase.MODIFY_PLAN and record.event == "exit":
+            escalation_state = _view_fields(record)
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             l3_theta = escalation_state.get("l3_best_theta_at_entry")
             best_theta = None if l3_theta is None else float(l3_theta)

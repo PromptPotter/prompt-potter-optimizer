@@ -264,16 +264,11 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    it again. The function's docstring carries why a stale join would be the worse outcome.
    **Land config fixes before an origin is measured, never between its rounds.**
 
-## Steering composite scoring between rounds
+## Changing the composite formula — fork, never swap
 
-Hot-swap the cycle's per-round formula by dropping a file; the next round-end consumes it, the running optimizer never restarts.
+**There is no live swap, and the reason is a gate rather than plumbing.** `round_scorer` compiles once during run init (`initialization/loop_start.py::populate_session_scoring`) from `campaign.json::scoring` and is never re-read. To change it: author a `per_round` formula over the names below, edit `campaign.json::scoring`, and `resume --fork-on-divergence` — the sibling starts at the divergence point and every round it banks is scored under one formula.
 
-1. Author a `per_round` formula over the active evaluator registry (check `evaluators` in any `rounds/round_NNNN.json` for valid names).
-2. Write `cycles/{cycle_id}/scoring_steer.json`:
-   ```json
-   {"per_round": "0.5 * accuracy + 0.3 * prompt_compactness + 0.2 * latency_norm"}
-   ```
-3. Wait for the next round. The formula is smoke-compiled against a synthetic namespace first, so undefined names or syntax errors fail *before* the swap; on success the file is renamed `scoring_steer.applied.{ts}.json`, on failure the running formula stays and you fix + retry.
+Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._advanced` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/m12-api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
 
 ### Available names
 
@@ -293,8 +288,6 @@ Gated by `applies(schema)` — present only when the matching node is active.
 | `mean_retrieval_shortfall` | `[0, 1]` | Mean `min(observed/target, 1.0)` across `max_*`/`num_*` nodes |
 
 Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `exp`, `pow`. Output clamped to `[0, 1]`; undefined names raise `NameError` — fail loud is the contract.
-
-**Don't steer per-sample by file-drop.** Changing the per-sample scorer mid-run rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on next resume — use `resume --fork-on-divergence` instead.
 
 The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs origin 0.5012)` per candidate, with the full formula text always in `log.md` (source of truth when reviewing finished cycles).
 

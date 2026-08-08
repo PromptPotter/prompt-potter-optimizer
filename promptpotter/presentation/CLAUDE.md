@@ -72,3 +72,14 @@ is the "findable on disk" guarantee for the terminal stream, so a headless reade
 open the last run instead of relying on a captured console. Caveat: it carries the
 **display** stream only — `logging`-level warnings route through Python `logging`, not
 `_write`, so full parity would need a sibling logging `FileHandler`.
+
+**And the converse: a value already on disk is ADDRESSED here, never reprinted.** The
+readout is a map — phase and round rules, candidate boxes, verdicts, the cost spine —
+so a payload belongs in it only if nothing else holds one. Name the canonical home plus
+the size and move on (`render.py`'s `Values:` legend and its L2 pointer are the pattern).
+Reprinting is not merely bulk: the `Values:` dump was 39.6% of `latest.log`, re-emitted
+Start and Parent once per round for the life of the run, and its `[a]`/`[b]` indirection
+stripped the key→value association `candidate_scores[].prompt_fields` keeps — so the copy
+was *worse* than the record it duplicated. A `[:N]` slice is not the fix either; it makes
+the log neither readable nor addressable, and the one on the L2 response silently
+amputated it. If a value has no on-disk home, that is the bug — give it one first.

@@ -96,6 +96,14 @@ class PhaseRecord(StrictModel):
     # subscribers (LiveDashboardView, LiveDisplay) read this field; no disk
     # re-reader does. ``None`` on every record but ``round:display``.
     live_round_result: Any = Field(default=None, exclude=True, repr=False)
+    # In-memory-only carrier for ``PhaseEvent.data`` — the live handles and bulk a phase
+    # builder was called with. Same ``exclude=True`` rationale as the field above, and the
+    # same audit: NO disk re-reader consumes it. The three ledger subscribers that need
+    # phase state read the typed ``payload['view']``, which is capped and human-readable;
+    # ``LiveDisplay`` alone reads this, for the ``env``/``state`` handles a resume-rewind
+    # rebuild needs, and those exist only on the direct in-memory path anyway. Off disk it
+    # also stops carrying the resolved dataset and a candidate's full prompt twice.
+    data: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

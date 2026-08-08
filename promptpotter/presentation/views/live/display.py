@@ -41,6 +41,7 @@ from promptpotter.presentation.views.display import (
     _node_bottom,
     _node_line,
     _node_top,
+    _round_rule,
 )
 from promptpotter.presentation.views.live.candidate import (
     fmt_individual_header,
@@ -151,7 +152,7 @@ class LiveDisplay(DerivedView):
                 phase=record.phase,
                 event=record.event,
                 round=record.round,
-                data=payload.get("data") or {},
+                data=record.data,
             ),
             payload.get("view"),
         )
@@ -279,6 +280,11 @@ class LiveDisplay(DerivedView):
     # --- Public callback API (pre-ledger paths call these directly) ---
 
     def on_phase(self, event: PhaseEvent, view: AnyView | None = None) -> None:
+        # Round 0 gets the same rule every later round gets. The banner used to fire only on
+        # L1_GENERATE:enter, so the origin's samples and its C0 box sat above `✓ Initialized`
+        # under no round marker at all — the one stretch of the readout with nothing to seek to.
+        if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
+            self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
         if view is not None and (rendered := to_text(view)):
@@ -319,10 +325,6 @@ class LiveDisplay(DerivedView):
                         "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
                     }
                 )
-        if event.phase == "scoring_steer" and event.event == "applied":
-            new_formula = event.data.get("formula")
-            if new_formula:
-                self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_scored(
         self, cand_idx: int, result: dict[str, Any], sample_idx: int, n_samples: int
@@ -415,7 +417,14 @@ class LiveDisplay(DerivedView):
         changes_description: str,
         pp_override: dict[str, Any] | None,
     ) -> None:
-        self._write(fmt_individual_header(idx, total, changes_description, pp_override))
+        self._write(
+            fmt_individual_header(
+                candidate_label(self._core.round_num, idx),
+                total,
+                changes_description,
+                pp_override,
+            )
+        )
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66

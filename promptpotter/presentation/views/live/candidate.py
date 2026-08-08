@@ -14,6 +14,7 @@ from promptpotter.presentation.views.display import (
     _fmt_delta,
     fmt_ci,
 )
+from promptpotter.shared import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 
 
@@ -23,18 +24,24 @@ def fmt_pp_override(pp: dict[str, Any] | None) -> str:
     return "  ".join(f"{k}: {v}" for k, v in flatten_sp_summary(pp).items())
 
 
+# A prose fallback is unbounded at its source, and one measured line ran 435 chars — wider than
+# the score box it heads. Roughly one terminal row once the label is prefixed.
+_HEADER_BODY_MAX = 120
+
+
 def fmt_individual_header(
-    idx: int,
+    label: str,
     total: int,
     changes_description: str,
     pp_override: dict[str, Any] | None,
 ) -> str:
-    label = f"ind {idx + 1}/{total}"
+    """``label`` is the candidate's ``C{round}.{n}``, so this header and the score box that closes
+    the candidate name it identically — ``ind 2/2`` was a second vocabulary for one individual."""
     body = fmt_pp_override(pp_override)
     if not body and changes_description:
-        body = changes_description.strip()
+        body = truncate(changes_description.strip(), _HEADER_BODY_MAX)
     body = f"{DIM}parent re-eval{RESET}" if not body else f"{CYAN}{body}{RESET}"
-    return f"  {label}  {body}"
+    return f"  {label}/{total}  {body}"
 
 
 @dataclass(frozen=True)

@@ -387,10 +387,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_restamp = sub.add_parser(
         "restamp",
-        help="Prune knobs the engine no longer has from every on-disk CampaignConfig — "
-        "the minted snapshots and the dataset templates. The sanctioned remedy after a "
-        "field rename; every dropped key is reported with the value its file held. "
-        "Dry-run by default. Pure disk work, zero spend.",
+        help="Bring on-disk data onto today's shape. (1) Prune knobs the engine no longer "
+        "has from every CampaignConfig — the minted snapshots and the dataset templates; "
+        "every dropped key is reported with the value its file held. (2) Re-project each "
+        "finished cycle's ledger onto the current record shape, dropping what the archive "
+        "and the round files already hold and lifting escalation's resume counters onto "
+        "the persisted view. A cycle with a live producer is left alone. The sanctioned "
+        "remedy after a field rename or a record-shape change. Dry-run by default. "
+        "Pure disk work, zero spend.",
     )
     p_restamp.add_argument(
         "--apply", action="store_true", help="Rewrite the files (default: report only)."

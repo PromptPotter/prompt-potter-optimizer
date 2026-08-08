@@ -835,12 +835,17 @@ paths:
     post:
       operationId: changeScoringComposite
       x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Hot-swap a cycle's `scoring_steer.json` composite.
+      summary: Set a cycle's composite formula.
       description: |
-        Wire form of the existing file-edit interface
-        (`campaigns/{c}/cycles/{cy}/scoring_steer.json`). Composite payload
-        validated against ScoringContext; runner picks up at the next
-        scoring boundary without restart.
+        Wire form of editing `campaign.json::scoring`. There is no live-swap
+        counterpart to be the wire form OF: `round_scorer` compiles once at run
+        init and is never re-read, and a mid-cycle redefinition makes the
+        composite incomparable to its own past — `EscalationFSM._advanced` reads
+        `best_composite_fitness` as the L2/L3 stall gate whenever the θ ruler is
+        unavailable. So this must land as a FORK (the wire twin of
+        `resume --fork-on-divergence`), never as a swap into the running cycle.
+        Rationale: `docs/operations/persistence-and-state.md`
+        § Changing the composite formula — fork, never swap.
       tags: [scoring]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3055,9 +3060,10 @@ components:
               type: object
               additionalProperties: true
               description: |
-                Full `scoring_steer.json` content. Validated server-side
-                against ScoringContext; reject as 422 `payload_invalid`
-                when the composite references unknown evaluator ids.
+                The `scoring` block as it would be written to `campaign.json`.
+                Validated server-side against ScoringContext; reject as 422
+                `payload_invalid` when the composite references unknown
+                evaluator ids.
 
     SetAllowedModelsPayload:
       allOf:
