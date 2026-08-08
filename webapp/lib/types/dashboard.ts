@@ -16,6 +16,8 @@ export type {
 } from "@/lib/poll";
 
 export type {
+  CurrentRound,
+  DashboardCandidate,
   LiveDashboardState,
   RoundSummary,
   RoundSummaryCandidate,

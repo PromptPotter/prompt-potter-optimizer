@@ -12,7 +12,9 @@ export * from "./selection";
 // `@/lib/api/types` — already surfaced via ./round, so name the rest here.
 export type {
   BucketResult,
+  CurrentRound,
   CycleStreamState,
+  DashboardCandidate,
   DashboardSnapshot,
   LiveDashboardState,
   L1ScoreOutput,

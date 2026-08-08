@@ -16,8 +16,10 @@ from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     ForkDirection,
     ForkTrigger,
+    LedgerAbility,
     LedgerCandidate,
 )
+from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -124,6 +126,12 @@ class LineageNode(StrictModel):
     )
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = Field(
+        default=None,
+        description="Which bar the band above brackets — the composite one or the accuracy "
+        "one. Served with the bounds; both scales coexist within a round, so a client that "
+        "re-derives it picks the wrong bar for every eliminated or cold-ruler candidate.",
+    )
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -329,6 +337,7 @@ class _CloseFacts(NamedTuple):
     cumulative_theta: float | None
     composite_ci_lo: float | None
     composite_ci_hi: float | None
+    ci_scale: CiScale | None
 
 
 def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _CloseFacts]:
@@ -342,16 +351,17 @@ def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
             continue
         # A HELD round adopted the incumbent, which is not among these — so nobody is crowned.
         won = cand.label == close.winner_label
-        ability = close.abilities.get(cand.label, {})
+        ability = close.abilities.get(cand.label) or LedgerAbility()
         out[cand.candidate_id] = _CloseFacts(
             is_winner=won,
-            theta=ability.get("theta"),
-            theta_se=ability.get("theta_se"),
+            theta=ability.theta,
+            theta_se=ability.theta_se,
             # The frontier belongs to the spine: only the adopted candidate advanced it.
             cumulative_theta=close.cumulative_theta if won else None,
             # Only where the warm ruler implied a band; else the candidate's own whisker stands.
-            composite_ci_lo=ability.get("composite_ci_lo"),
-            composite_ci_hi=ability.get("composite_ci_hi"),
+            composite_ci_lo=ability.composite_ci_lo,
+            composite_ci_hi=ability.composite_ci_hi,
+            ci_scale=ability.ci_scale,
         )
     return out
 
@@ -640,6 +650,7 @@ _NO_CLOSE = _CloseFacts(
     cumulative_theta=None,
     composite_ci_lo=None,
     composite_ci_hi=None,
+    ci_scale=None,
 )
 
 
@@ -653,12 +664,13 @@ def _candidate_node(
 ) -> LineageNode:
     """One candidate as the tree serves it — ledger identity plus its round-CLOSE facts, two
     appends to one ledger that identity joins (:func:`_close_facts`)."""
-    # Its OWN whisker unless a warm-ruler election implied a tighter band. Both bounds move
-    # together: read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it.
-    ci_lo, ci_hi = (
-        (close.composite_ci_lo, close.composite_ci_hi)
+    # Its OWN whisker unless a warm-ruler election implied a tighter band. All THREE move
+    # together — read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it,
+    # and a scale left behind labels the new band with the old band's units.
+    ci_lo, ci_hi, ci_scale = (
+        (close.composite_ci_lo, close.composite_ci_hi, close.ci_scale)
         if close.composite_ci_lo is not None
-        else (cand.composite_ci_lo, cand.composite_ci_hi)
+        else (cand.composite_ci_lo, cand.composite_ci_hi, cand.ci_scale)
     )
     return LineageNode(
         kind="candidate",
@@ -675,6 +687,7 @@ def _candidate_node(
         evaluators=cand.evaluators,
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
+        ci_scale=ci_scale,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,

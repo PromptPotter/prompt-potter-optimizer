@@ -285,6 +285,14 @@ class EscalationFSM:
             return
         if record.phase == "round" and record.event == "complete":
             # Audit emit only; display fires under "display" and is never folded.
+            #
+            # ROUND 0 BANKS NOTHING — the origin is the baseline, with no prior round to have
+            # improved over. Live that rule is structural and unwritten (`emit_origin_round`
+            # reaches `close_round` without `post_round`, the sole caller of `observe_round`),
+            # so replay had to state it and did not. It is also the one round that closes
+            # TWICE, so folding it stepped the stall counter by two on every resume.
+            if record.round == 0:
+                return
             self._bank_round(
                 bool(record.payload["improved"]),
                 lives,

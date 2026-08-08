@@ -145,18 +145,20 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
   const cr = asRec(payload.current_round);
   const crRound = num(cr.round);
   if (crRound != null && crRound >= 0) {
+    // Planned candidates come from the l1_score node INPUT — the seed half, the only place a
+    // candidate appears before it has a number. The numbers come from the served row.
     const l1 = asRec(asRec(cr.nodes).l1_score);
     const inputs = Array.isArray(asRec(l1.input).candidates) ? asRec(l1.input).candidates : [];
-    const outputs = Array.isArray(asRec(l1.output).candidates) ? asRec(l1.output).candidates : [];
-    const statByLabel = new Map<string, Record<string, unknown>>();
-    for (const c of outputs as unknown[]) {
+    const rows = Array.isArray(cr.candidates) ? (cr.candidates as unknown[]) : [];
+    const rowByLabel = new Map<string, Record<string, unknown>>();
+    for (const c of rows) {
       const label = str(asRec(c).label);
-      if (label) statByLabel.set(label, asRec(asRec(c).stats));
+      if (label) rowByLabel.set(label, asRec(c));
     }
     (inputs as unknown[]).forEach((c, i) => {
       const label = str(asRec(c).label) ?? candidateLabel(crRound, i);
-      const stats = statByLabel.get(label);
-      out.push(candidateItem(label, stats ? fitPct(stats) : undefined));
+      const row = rowByLabel.get(label);
+      out.push(candidateItem(label, row ? fitPct(row) : undefined));
     });
   }
 

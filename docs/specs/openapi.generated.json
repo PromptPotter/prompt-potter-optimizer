@@ -1800,6 +1800,22 @@
             "title": "Children",
             "type": "array"
           },
+          "ci_scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "composite",
+                  "accuracy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which bar the band above brackets — the composite one or the accuracy one. Served with the bounds; both scales coexist within a round, so a client that re-derives it picks the wrong bar for every eliminated or cold-ruler candidate.",
+            "title": "Ci Scale"
+          },
           "composite_ci_hi": {
             "anyOf": [
               {

@@ -238,13 +238,14 @@ async def l1_score(
         cs_idx = cs_by_id[cid]
         cs = candidate_scores[cs_idx]
         theta_se_c = abilities.theta_se[cid]
-        theta_update: dict[str, float] = {"theta": theta_c, "theta_se": theta_se_c}
+        theta_update: dict[str, Any] = {"theta": theta_c, "theta_se": theta_se_c}
         # Show the difficulty-adjusted ability band (what the election ranks on) as the whisker
         # only where it brackets the bar's quantity: warm ruler AND composite == accuracy.
         if abs(cs.composite_fitness - cs.accuracy) < 1e-9:
             band = theta_accuracy_ci(theta_c, theta_se_c, cycle.delta_scale)
             if band is not None:
                 theta_update["composite_ci_lo"], theta_update["composite_ci_hi"] = band
+                theta_update["ci_scale"] = "accuracy"
         candidate_scores[cs_idx] = cs.model_copy(update=theta_update)
     record_decision(
         decisions,

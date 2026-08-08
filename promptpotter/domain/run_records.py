@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -449,10 +450,24 @@ class LedgerCandidate(StrictModel):
     expected_samples: int | None = None
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
     cached_samples: int | None = None
-    # The always-on whisker, over this candidate's own rows. A warm-ruler round OVERRIDES it
-    # at close with the tighter θ-implied band (`LedgerRoundClose.abilities`).
+    # The always-on whisker, over this candidate's own rows. A warm-ruler round overrides it at
+    # close with the θ-implied band (`LedgerRoundClose.abilities`), which is a different
+    # QUANTITY rather than a tighter reading of the same one — hence `ci_scale`.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = None
+
+
+class LedgerAbility(StrictModel):
+    """One candidate's round-CLOSE numbers, keyed by LABEL in :class:`LedgerRoundClose`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    theta: float | None = None
+    theta_se: float | None = None
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = None
 
 
 class LedgerRoundClose(StrictModel):
@@ -465,7 +480,7 @@ class LedgerRoundClose(StrictModel):
     winner_label: str = ""
     cumulative_theta: float | None = None
     cumulative_theta_se: float | None = None
-    abilities: dict[str, dict[str, float]] = Field(default_factory=dict)
+    abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
 
 
 class CycleSeedRecord(StrictModel):

@@ -55,6 +55,26 @@ a live producer.
 | `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
+**`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round`
+was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to
+answer the two questions its only consumer asks — so the webapp inferred both, each by joining
+facts written on different ledger events. Four rules follow, each a field or a filter rather than
+a convention:
+
+- **`active_node` is served**, over a `_STATE_TO_NODE` map that is TOTAL over `DashboardState`
+  with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing
+  is running", which is a lie for every state it omits.
+- **`current_round.round` is `state.round`, always** — so a reader selects this block over the
+  audit twin by equality. There is deliberately no `live` flag beside it.
+- **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is
+  most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
+  `round`: presence in the served map is the client's whole definition of "this node has fired".
+- **A live candidate is the same shape as a closed one** (`DashboardCandidate`,
+  `domain/dashboard_rows.py`), and `composite_ci_lo/hi` carries its `ci_scale`. Two shapes for one
+  entity force the client to merge them field by field, which put a bar and its error whisker on
+  two different polls. Every value is present at `candidate_scored` — the projection simply was
+  not copying them.
+
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
 (API server, CLI, a future MCP client) tails the cycle's `.runtime/ledger.jsonl`

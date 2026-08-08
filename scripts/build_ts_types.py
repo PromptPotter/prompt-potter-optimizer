@@ -25,7 +25,11 @@ from promptpotter.application.optimizer_prompt_ranking import (
     RankedOptimizerPrompt,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
+from promptpotter.domain.dashboard_rows import (
+    DashboardCandidate,
+    RoundSummary,
+    RoundSummaryCandidate,
+)
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVariance, OuterVerdict
@@ -50,10 +54,12 @@ from promptpotter.domain.results import (
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,
+    CurrentRound,
     DashboardError,
     InFlightCall,
     LiveDashboardState,
     LoopWarning,
+    PobbBlock,
     RunLimits,
 )
 from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
@@ -125,6 +131,7 @@ from promptpotter.presentation.api.routers.verify import DiagnosticRunListRespon
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
+    DashboardCandidate,
     RoundSummaryCandidate,
     DegradationHealth,
     OuterCellEffect,
@@ -156,6 +163,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RunLimits,
     InFlightCall,
     BackfillLogEntry,
+    PobbBlock,
+    CurrentRound,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,

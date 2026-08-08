@@ -52,7 +52,11 @@ declare module "chart.js" {
     sampleCount?: { counts: (number | null)[] };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
-    compositeCiWhisker?: { ciLo: (number | null)[]; ciHi: (number | null)[] };
+    compositeCiWhisker?: {
+      ciLo: (number | null)[];
+      ciHi: (number | null)[];
+      scales: (string | null)[];
+    };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
 }
@@ -91,33 +95,32 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
   },
 };
 
-// Error-bar whisker on the primary metric bar — a vertical line from `ciLo` to
-// `ciHi` (mapped value→pixel via the left [0,1] y scale) with short end-caps, so
-// no point estimate stands alone. It rides whichever 0–1-scale bar is shown —
-// accuracy (the default-on metric) if present, else composite — so the CI is
-// visible by default without toggling the composite metric on. Drawn at that
-// dataset's OWN rendered x (which shifts within the bar group depending on how
-// many series show), not the category center — a whisker must sit on the bar it
-// brackets. Bars with a null CI (in-flight round) are skipped.
+// Error-bar whisker — a vertical line from `ciLo` to `ciHi` (mapped value→pixel via the left
+// [0,1] y scale) with short end-caps, so no point estimate stands alone. Drawn at the bracketed
+// dataset's OWN rendered x (which shifts within the bar group depending on how many series
+// show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
+// CI are skipped.
+//
+// WHICH bar it brackets is served per candidate (`ci_scale`) and resolved per index: the two
+// scales coexist within one round, since the election rewrites the band to the θ-implied
+// accuracy scale only for arms electable on a warm ruler. One guess for the whole chart —
+// "composite if that series is drawn, else accuracy" — bracketed accuracy bars with
+// composite-scale intervals as the common case, accuracy being the default-on metric.
 const compositeCiWhiskerPlugin: Plugin<
   "bar",
-  { ciLo: (number | null)[]; ciHi: (number | null)[] }
+  { ciLo: (number | null)[]; ciHi: (number | null)[]; scales: (string | null)[] }
 > = {
   id: "compositeCiWhisker",
   afterDatasetsDraw(chart, _args, opts) {
     const ciLo = opts?.ciLo;
     const ciHi = opts?.ciHi;
+    const scales = opts?.scales;
     const yScale = chart.scales.y;
-    if (!ciLo || !ciHi || !yScale) return;
-    // The whisker data IS composite_ci_lo/hi — composite-scale by default, and the backend only
-    // rewrites it to the θ-accuracy band where composite == accuracy (`winner.py::l1_score`), in
-    // which case the accuracy bar carries the identical value. So sit on the COMPOSITE bar when
-    // it is drawn (a composite-formula run: bracketing the accuracy bar with a composite CI is the
-    // bug), and fall back to accuracy only when composite is hidden — exactly the θ-band case.
-    let dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "composite");
-    if (dsIndex < 0) dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "accuracy");
-    if (dsIndex < 0) return;
-    const meta = chart.getDatasetMeta(dsIndex);
+    if (!ciLo || !ciHi || !scales || !yScale) return;
+    const metaFor = new Map<string, ReturnType<typeof chart.getDatasetMeta>>();
+    chart.data.datasets.forEach((ds, di) => {
+      if (typeof ds.label === "string") metaFor.set(ds.label, chart.getDatasetMeta(di));
+    });
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
@@ -126,7 +129,12 @@ const compositeCiWhiskerPlugin: Plugin<
     for (let i = 0; i < ciLo.length; i++) {
       const lo = ciLo[i];
       const hi = ciHi[i];
-      if (lo == null || hi == null) continue;
+      const scale = scales[i];
+      if (lo == null || hi == null || !scale) continue;
+      // The bar this band belongs on is hidden — draw nothing rather than hang it on a
+      // neighbour measuring something else.
+      const meta = metaFor.get(scale);
+      if (!meta) continue;
       const el = meta.data[i] as
         | { getProps?: (p: string[], final: boolean) => Record<string, number> }
         | undefined;
@@ -659,6 +667,8 @@ export const FitnessChart = memo(function FitnessChart({
       compositeCiWhisker: {
         ciLo: views.map((v) => v.compositeCiLo),
         ciHi: views.map((v) => v.compositeCiHi),
+        // Per candidate: the two scales coexist inside one round.
+        scales: views.map((v) => v.ciScale),
       },
       xBridge: { onGeometry },
     },

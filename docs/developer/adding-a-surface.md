@@ -129,12 +129,13 @@ dropped the other twelve.
 **But the webapp does not read round files** — it reads `dashboard.json`. Which model you
 mirror onto decides the cost, so ask first *whose* fact it is:
 
-- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to
-  `RoundSummaryCandidate` and stop. The projection's include-set is derived from
-  `model_fields`, so the copy flows with **zero** edits to `round_summary.py`; it lands on
-  `dash.rounds[].candidates[]`, and the webapp seam is `CandidateRow`
-  (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which has two arms —
-  historical and in-flight; the in-flight one is `null` for anything stamped at round close).
+- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to **`DashboardCandidate`**
+  and stop. Not `RoundSummaryCandidate`, which only narrows that base for a CLOSED round: a
+  field declared there reaches `dash.rounds[].candidates[]` and never the live row. The
+  projection's include-set is derived from `model_fields`, so the copy flows with **zero** edits
+  to `round_summary.py`, and `build_candidate_rows` fills the live half off the same
+  `candidate_scored` payload. The webapp seam is `CandidateRow` (`lib/types/candidate.ts` +
+  `lib/derivations/round-candidates.ts`, which maps both halves through ONE function).
 - **Per-ROUND** → mirror onto `RoundSummary` *and* hand-write the line in
   `projections/live_dashboard/round_summary.py`.
 

@@ -6,12 +6,53 @@
 // types exist to close.
 
 import type {
+  CurrentRound,
+  DashboardCandidate,
   LiveDashboardState,
   RoundResult,
   RoundSummary,
   RoundSummaryCandidate,
   ScoredCandidate,
 } from "@/lib/types";
+
+// `current_round` is a MODEL now, not a free-form dict, so a test naming one or two of its
+// keys still has to produce the whole shape. This fills the rest inert.
+export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
+  return {
+    round: 0,
+    active_node: null,
+    candidates: [],
+    nodes: {},
+    pobb: { current_id: "", n_samples: 0, leader_prob: 0, posterior_width: 1, top: [] },
+    ...over,
+  };
+}
+
+// A live `current_round.candidates[]` row. Same field list as `summaryCandidate` below minus
+// what only closing settles — they are one model, `DashboardCandidate`, and this is the half
+// that has not finished yet.
+export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandidate {
+  return {
+    label: "C1.1",
+    candidate_id: null,
+    accuracy: null,
+    composite_fitness: null,
+    scored_samples: 0,
+    cached_samples: 0,
+    expected_samples: null,
+    evaluators: {},
+    changes_description: "",
+    partial_reason: "",
+    theta: null,
+    theta_se: null,
+    composite_ci_lo: null,
+    composite_ci_hi: null,
+    ci_scale: null,
+    matched_origin_accuracy: null,
+    matched_origin_composite: null,
+    ...over,
+  };
+}
 
 export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
   return {
@@ -42,6 +83,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     theta_se: null,
     composite_ci_lo: null,
     composite_ci_hi: null,
+    ci_scale: null,
     ...over,
   };
 }
@@ -139,7 +181,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     },
     in_flight: null,
     backfill_log: [],
-    current_round: {},
+    current_round: currentRound(),
     error: null,
     ...over,
   };
@@ -167,6 +209,7 @@ export function summaryCandidate(
     theta_se: null,
     composite_ci_lo: null,
     composite_ci_hi: null,
+    ci_scale: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
     ...over,

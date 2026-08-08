@@ -95,17 +95,21 @@ template carries to any project, no pre-knowledge required:
 |---|---|---|---|
 | **Live** | Is it alive? | the heartbeat / pulse | `run_phase` + poll freshness (`isLive`) |
 | **Stage** | What part of the work? | Check-in / Generating / Scoring / Refining / Replanning | `dashboard.json::state` |
-| **Step** | Which operation right now? | the active optimizer node | `activeNodeId(in_flight.node, state)` |
+| **Step** | Which operation right now? | the active optimizer node | `dashboard.json::current_round.active_node` |
 | **Item** | Which unit right now? | the candidate being scored (`C3.2`) | `dashboard.json::candidate` |
 | **Progress** | How far through the item? | samples `24/40`, rate | `dashboard.json::query` |
 
-**One canonical "active" signal, read everywhere.** The Step level resolves through a single
-function — `activeNodeId` (`webapp/components/workflow/layout.ts`) — that every surface reads
-(the optimizer-canvas pulse, the RemoteBar, the TopStrip, the node detail). It reads the
-**in-flight LLM call's node** first (`dashboard.json::in_flight.node`, which names the live node
-directly for `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`), falling back
-to the scoring states → `l1_score` only because scoring fires no optimizer LLM call. The rule:
-**derive "what's active" once, from the authoritative on-disk signal; never re-infer it per surface.**
+**One canonical "active" signal, and the SERVER resolves it.** The Step level is a declared
+field — `current_round.active_node` (`live_dashboard/view.py::_active_node`) — that every surface
+reads verbatim (the optimizer-canvas pulse, the RemoteBar, the TopStrip, the node detail). The
+**in-flight LLM call's node** wins when there is one (`in_flight.node` names it directly for
+`l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`); otherwise the phase does,
+through a map that is TOTAL over `DashboardState` and raises at import if a member is missing.
+
+The rule: **derive "what's active" once, at the writer, and never re-infer it per surface.**
+Totality is the fix, not the relocation — the client version covered three states and every
+other one resolved to "nothing running", which a partial map on the server would reproduce
+exactly.
 
 **Item / Step are the optimizer specialization of the generic levels.** Exactly as §1 frames
 `candidate` / `round` as the optimizer-specific layer on the generic activity vocabulary, the

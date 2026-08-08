@@ -5,7 +5,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1, fmtPctSigned } from "@/lib/format";
 import type { CandidateRow, SelectedCandidate } from "@/lib/types";
-import { liveCandidate } from "@/lib/poll";
+import { liveCandidateRow } from "@/lib/poll";
 import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
@@ -50,12 +50,12 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const data = useMemo<{ composite?: number; accuracy?: number; total?: number } | null>(() => {
     if (!selected) return null;
     if (isLive) {
-      const c = liveCandidate(dash, selected.round, selected.candidate_id);
-      if (!c?.stats) return null;
+      const c = liveCandidateRow(dash, selected.round, selected.candidate_id);
+      if (!c) return null;
       return {
-        composite: c.stats.composite_fitness,
-        accuracy: c.stats.accuracy ?? undefined,
-        total: c.stats.total ?? undefined,
+        composite: c.composite_fitness ?? undefined,
+        accuracy: c.accuracy ?? undefined,
+        total: c.scored_samples,
       };
     }
     const e = doc?.scoreboard.find((c) => c.candidate_id === selected.candidate_id);

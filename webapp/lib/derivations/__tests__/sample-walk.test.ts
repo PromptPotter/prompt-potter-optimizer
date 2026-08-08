@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { sampleBucket, sampleSpread, sampleWalk } from "../sample-walk";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { dash } from "@/lib/test-fixtures";
+import { currentRound, dash, liveRow } from "@/lib/test-fixtures";
 
-// The live candidate's tape, as `dashboard.json` carries it: the compact TEXT lines
-// the terminal prints, plus the dict shape.
+// The live candidate as `dashboard.json` carries it — BOTH halves, because the projection
+// writes both: the ROW under `current_round.candidates` (what a bar plots) and the tape under
+// the l1_score node block (what the walk reads).
 const live = (samples: unknown[], currentSampleId: number | null = null): DashboardSnapshot =>
   dash({
     current_sample_id: currentSampleId,
-    current_round: {
+    current_round: currentRound({
       round: 1,
+      candidates: [liveRow({ label: "C1.1" })],
       nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples }] } } },
-    },
+    }),
   });
 
 describe("sampleWalk", () => {
@@ -80,10 +82,21 @@ describe("sampleWalk", () => {
     const b = sampleWalk(
       dash({
         current_sample_id: 419,
-        current_round: {
+        current_round: currentRound({
           round: 1,
-          nodes: { l1_score: { output: { candidates: [{ idx: 1, label: "C1.2", samples: tape }] } } },
-        },
+          // Two rows: the walk follows the LATEST-seeded candidate, so C1.2 at position 1.
+          candidates: [liveRow({ label: "C1.1" }), liveRow({ label: "C1.2" })],
+          nodes: {
+            l1_score: {
+              output: {
+                candidates: [
+                  { idx: 0, label: "C1.1", samples: [] },
+                  { idx: 1, label: "C1.2", samples: tape },
+                ],
+              },
+            },
+          },
+        }),
       }),
       order,
       true,

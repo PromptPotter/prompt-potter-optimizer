@@ -16,7 +16,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
-from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.scoring import CiScale, is_answer_collapsed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
@@ -188,6 +188,9 @@ class ScoredCandidate(StrictModel):
     # (fit-restricted). No composite point estimate should stand alone.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    # WHICH quantity the band above brackets — stamped by whichever site last set the bounds,
+    # never re-derived downstream. See `domain/scoring.py::CiScale`.
+    ci_scale: CiScale | None = None
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:

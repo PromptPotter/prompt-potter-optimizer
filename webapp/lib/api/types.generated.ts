@@ -2,16 +2,15 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
-/** Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`. */
-export interface RoundSummaryCandidate {
-  candidate_id: string;
+/** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
+export interface DashboardCandidate {
   label: string;
-  accuracy: number;
-  composite_fitness: number;
+  candidate_id: string | null;
+  accuracy: number | null;
+  composite_fitness: number | null;
   scored_samples: number;
-  expected_samples: number;
   cached_samples: number;
-  is_winner: boolean;
+  expected_samples: number | null;
   evaluators: Record<string, number>;
   changes_description: string;
   partial_reason: string;
@@ -19,8 +18,31 @@ export interface RoundSummaryCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
+  ci_scale: 'composite' | 'accuracy' | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+}
+
+/** A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`. */
+export interface RoundSummaryCandidate {
+  label: string;
+  candidate_id: string;
+  accuracy: number;
+  composite_fitness: number;
+  scored_samples: number;
+  cached_samples: number;
+  expected_samples: number;
+  evaluators: Record<string, number>;
+  changes_description: string;
+  partial_reason: string;
+  theta: number | null;
+  theta_se: number | null;
+  composite_ci_lo: number | null;
+  composite_ci_hi: number | null;
+  ci_scale: 'composite' | 'accuracy' | null;
+  matched_origin_accuracy: number | null;
+  matched_origin_composite: number | null;
+  is_winner: boolean;
 }
 
 /** Context-aware degradation verdict for a round (origin included), computed */
@@ -204,6 +226,7 @@ export interface ScoredCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
+  ci_scale: 'composite' | 'accuracy' | null;
 }
 
 /** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
@@ -433,6 +456,24 @@ export interface BackfillLogEntry {
   prior_ids: string[];
 }
 
+/** ``current_round.pobb`` — round-wide elimination telemetry, rebuilt every persist. */
+export interface PobbBlock {
+  current_id: string;
+  n_samples: number;
+  leader_prob: number;
+  posterior_width: number;
+  top: Record<string, unknown>[];
+}
+
+/** ``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist. */
+export interface CurrentRound {
+  round: number;
+  active_node: string | null;
+  candidates: DashboardCandidate[];
+  nodes: Record<string, Record<string, unknown>>;
+  pobb: PobbBlock;
+}
+
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
 export interface LiveDashboardState {
   campaign_id: string;
@@ -473,7 +514,7 @@ export interface LiveDashboardState {
   spend: SpendRollup;
   in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];
-  current_round: Record<string, unknown>;
+  current_round: CurrentRound;
   error: DashboardError | null;
 }
 
@@ -860,6 +901,11 @@ export interface LineageNode {
   evaluators: Record<string, number>;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
+  /** Which bar the band above brackets — the composite one or the accuracy one.
+   * Served with the bounds; both scales coexist within a round, so a client
+   * that re-derives it picks the wrong bar for every eliminated or cold-ruler
+   * candidate. */
+  ci_scale: 'composite' | 'accuracy' | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather

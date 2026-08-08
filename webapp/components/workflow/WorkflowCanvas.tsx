@@ -1,13 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-  CANVAS_W,
-  CANVAS_H,
-  DOT_R,
-  EDGES,
-  LAYOUT,
-  activeNodeId,
-} from "./layout";
+import { CANVAS_W, CANVAS_H, DOT_R, EDGES, LAYOUT } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
@@ -50,13 +43,18 @@ export function WorkflowCanvas({ pipeline }: Props) {
   const edges = EDGES;
   const canvasW = CANVAS_W;
   const canvasH = CANVAS_H;
-  const activeId = activeNodeId(dash?.in_flight?.node ?? null, dash?.state);
+  const activeId = dash?.current_round.active_node ?? null;
   // The optimizer can only ever depict ONE round, so the round axis is this
   // card's own scope — its picker sits in the toolbar and its dots, labels and
   // pulse all read the round it resolves. Node selection rides the shared
   // SelectionContext so the Now lane can swap in OptimizerNodeDetail below.
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const { nodes: roundNodes, round: viewedRound, isLiveRound: viewingLive } = useRoundNodes();
+  const {
+    nodes: roundNodes,
+    round: viewedRound,
+    showsCurrent: viewingLive,
+    loading: nodesLoading,
+  } = useRoundNodes();
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
   const [themeTick, setThemeTick] = useState(0);
@@ -197,6 +195,9 @@ export function WorkflowCanvas({ pipeline }: Props) {
               ]
                 .filter(Boolean)
                 .join(" ");
+              // An audit twin still in flight is not an idle node. Every source flip spends at
+              // least one round-trip with an empty map, and rendering that as "idle" told the
+              // operator a node had never fired when the answer had simply not arrived.
               const sub =
                 n.kind === "io"
                   ? ""
@@ -204,7 +205,9 @@ export function WorkflowCanvas({ pipeline }: Props) {
                     ? nodeKindLabel(n.kind)
                     : hasData
                       ? data.model || "—"
-                      : "idle";
+                      : nodesLoading
+                        ? "…"
+                        : "idle";
               const tip = TERMS[`node_${n.id}`] || undefined;
               // Label placement: default is centred below the dot; the
               // vertical layout overrides to sit beside the dot.

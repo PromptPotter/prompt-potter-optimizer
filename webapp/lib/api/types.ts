@@ -37,6 +37,8 @@ export type {
   LoopWarning,
   RunLimits,
   MeasurementDot,
+  CurrentRound,
+  DashboardCandidate,
   MeasurementSeriesResponse,
   NodeConfigParam,
   NodeOutputSchema,

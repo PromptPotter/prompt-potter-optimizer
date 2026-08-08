@@ -486,11 +486,29 @@ def test_lives_resume_fold_matches_live_observe() -> None:
 
     replay = EscalationFSM()
     replay_trace: list[int | None] = []
-    for improved, electable in sequence:
+    # Round 0 leads, TWICE — the shape a real ledger has. The origin closes once at its own
+    # `emit_origin_round` and again when the ruler warms at round 1 (`runner/loop.py`), because
+    # its θ cannot be fit before a second arm exists. The live side banks neither: the origin
+    # reaches `close_round` without going through `post_round`, so `observe_round` never sees
+    # it. Folding them advanced the stall counter by two per resume and escalated to L2 early.
+    for _ in range(2):
         replay.fold(
             PhaseRecord(
                 phase="round",
                 event="complete",
+                round=0,
+                payload={"improved": False, "electable_count": 0},
+            ),
+            lives=cfg,
+        )
+    assert (replay.lives, replay.l1_stall_count) == (None, 0), "round 0 banks nothing"
+
+    for i, (improved, electable) in enumerate(sequence, start=1):
+        replay.fold(
+            PhaseRecord(
+                phase="round",
+                event="complete",
+                round=i,
                 payload={"improved": improved, "electable_count": electable},
             ),
             lives=cfg,
@@ -498,6 +516,9 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         replay_trace.append(replay.lives)
 
     assert replay_trace == live_trace == [3, 4, 4, 4, 4, 3, 2]
+    # The counter the two round-0 records used to inflate. Live: three trailing non-improving
+    # rounds, one of them uncompared — all three advance the stall.
+    assert replay.l1_stall_count == live.l1_stall_count == 3
     # And exhausting the bank on the resumed FSM stops with the same reason the live loop uses.
     replay.observe_round(
         improved=False, compared=True, current_accuracy=0.5, l1_patience=99, lives=cfg

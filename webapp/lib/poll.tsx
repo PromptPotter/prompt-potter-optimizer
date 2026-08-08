@@ -18,7 +18,7 @@ import { failureKind, fetchDashboardByPath } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
-import type { LiveDashboardState } from "./api/types";
+import type { DashboardCandidate, LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 import { useWorkspace } from "./workspace";
 
@@ -71,17 +71,10 @@ export interface LiveCandidate {
   label?: string;
   model?: string;
   samples?: (LiveSample | string)[];
-  stats?: {
-    accuracy?: number;
-    composite_fitness?: number;
-    composite_fitness_formula?: string | null;
-    evaluators?: Record<string, number>;
-    hits?: number;
-    total?: number;
-    // Same name as the closed bar's `RoundSummaryCandidate.cached_samples` — one fact, one
-    // name, whether the round is still running or over.
-    cached_samples?: number;
-  };
+  // No numbers here: they moved to `current_round.candidates`, in the same shape a closed
+  // round serves, so no surface merges two shapes field by field. The tape is what this half
+  // still owns. (The block also carries the value-inlined formula and the self-healing state
+  // for a folder-UI reader; no component reads either, so neither is declared.)
 }
 
 // `current_round.nodes.l1_score.input.candidates[]` shape — the *input* half
@@ -126,6 +119,18 @@ export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[
   return l1?.output?.candidates ?? NO_CANDIDATES;
 }
 
+const NO_ROWS: DashboardCandidate[] = Object.freeze(
+  [] as DashboardCandidate[],
+) as DashboardCandidate[];
+
+// The in-flight round's candidate rows — SAME shape a closed round serves
+// (`rounds[].candidates`), so a reader takes a whole row from whichever half has it. Filling one
+// in from the other per field is what drew a bar from the 2 s dashboard poll and its error
+// whisker from the 5 s tree poll.
+export function liveCandidates(dash: DashboardSnapshot | null): DashboardCandidate[] {
+  return dash?.current_round.candidates ?? NO_ROWS;
+}
+
 const NO_INPUT_CANDIDATES: LiveInputCandidate[] = Object.freeze(
   [] as LiveInputCandidate[],
 ) as LiveInputCandidate[];
@@ -159,13 +164,28 @@ function matchLiveCandidate<T extends { idx?: number }>(
   return null;
 }
 
-// Output-candidate slot (the scored half).
+// Output-candidate slot — the sample tape. For a candidate's numbers, `liveCandidateRow`.
 export const liveCandidate = (
   dash: DashboardSnapshot | null,
   round: number | null,
   candidateId: string,
 ): LiveCandidate | null =>
   matchLiveCandidate(liveL1Candidates(dash), round, candidateId);
+
+// The in-flight row's NUMBERS, by the id the selection carries. Positional, matching
+// `matchLiveCandidate` above and the id `roundCandidates` stamps on an in-flight row — one
+// rule for construction and match, or a finished candidate resolves in neither.
+export function liveCandidateRow(
+  dash: DashboardSnapshot | null,
+  round: number | null,
+  candidateId: string,
+): DashboardCandidate | null {
+  const rows = liveCandidates(dash);
+  for (let i = 0; i < rows.length; i++) {
+    if (liveCandidateId(round, i) === candidateId) return rows[i] ?? null;
+  }
+  return null;
+}
 
 // Input-candidate slot — the seed-able prompt_fields / resolved_pipeline_params
 // half, for steer-fork seeding from a still-in-flight candidate.
@@ -233,11 +253,9 @@ export interface BucketResult {
   termKey: string;
 }
 
-// Canonical round number across the dashboard. `current_round.round` is the
-// authoritative field (live_dashboard.py:750); the top-level `round` is the
-// inherited-from-prior-dashboard value used during cycle re-instantiation
-// before any phase fires. Prefer the nested one, fall through to top-level,
-// return null only when neither is a number.
+// Canonical round number across the dashboard. `current_round.round` is authoritative and is
+// stamped from the projection's own `state.round` on every write, so it cannot lag the
+// top-level one. The fall-through covers cycle re-instantiation, before any phase has fired.
 export function roundOf(dash: DashboardSnapshot | null): number | null {
   const r = dash?.current_round.round ?? dash?.round;
   return typeof r === "number" ? r : null;

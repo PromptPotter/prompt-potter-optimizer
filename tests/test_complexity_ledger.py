@@ -251,7 +251,15 @@ LEDGER_BASELINE = {
     # 4100 -> 4102 (2026-08-08): `refile_round_decisions` + `_document_decisions` — the same
     # verb's reconciler for data already written, since the writer fix is forward-only and 199
     # records on disk named a round that did not make them.
-    "param_decls": 4102,
+    # 4102 -> 4106 (2026-08-08): the live dashboard's projection seams (`build_candidate_rows`,
+    # `_active_node`, `_current_round_nodes`, `_restamp_theta`, `_served`) plus `LedgerAbility`.
+    # Every one REPLACES a client-side derivation — the webapp was inferring which optimizer
+    # node is running and what a candidate's value±interval is by joining facts written on
+    # different events, and each join is deleted. `current_round` stopped being
+    # `dict[str, Any]` in an otherwise strict model, which is what let it go so long without
+    # answering either question; `LedgerAbility` is the same move on `LedgerRoundClose`, whose
+    # `abilities` had to be typed rather than widened to `Any` to carry one extra field.
+    "param_decls": 4106,
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -340,7 +348,17 @@ LEDGER_BASELINE = {
     # each says why it is not in the file it came from. `repair.py` records that the cut must be
     # read off the round documents BEFORE the correction, since the correction plugs the holes
     # it is read from; `dashboard_rows.py` records why it is not called `round_summary`.
-    "docstring_lines": 3584,
+    #
+    # 3584 -> 3627 (2026-08-08): `CurrentRound`, `DashboardCandidate`, `RoundSummaryCandidate`,
+    # `LedgerAbility` and the projection seams that fill them. Paid deliberately, because the
+    # raise is ON A SCHEMA and the field notes ARE the contract a reader needs to not
+    # re-introduce the bug: `CurrentRound` records that there is no `live` flag beside `round`
+    # and why re-deriving one as "has this round closed" blanks the canvas through the whole
+    # post-round escalation window. The first draft of this arc was 3648 — the difference is
+    # provenance prose that belonged in the commit body, and the same two stories written out
+    # ten times each across the diff. One anchor per rule (`domain/scoring.py::CiScale`), a
+    # pointer everywhere else.
+    "docstring_lines": 3627,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

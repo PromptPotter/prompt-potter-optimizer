@@ -28,6 +28,7 @@ from promptpotter.infrastructure.projections.audit_trail import (
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_dashboard.factory import resolve_resume_state
 from promptpotter.infrastructure.projections.live_dashboard.render import (
+    build_candidate_rows,
     build_l1_score_block,
     build_pobb_block,
 )
@@ -39,6 +40,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,
+    CurrentRound,
     DashboardError,
     InFlightCall,
     LiveDashboardState,
@@ -49,6 +51,7 @@ from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
     apply_phase,
+    roll_p_best_at_round_complete,
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
@@ -57,7 +60,6 @@ from promptpotter.shared.errors import has_pipeline_warnings
 from promptpotter.shared.spend import compute_usd
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,33 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.MODIFY_PLAN: DashboardState.L3_REPLANNING,
     CampaignPhase.ESCALATION: DashboardState.ESCALATION,
 }
+
+
+# Which optimizer node each activity state is the work OF — the served `active_node`.
+# TOTAL over `DashboardState`, asserted below: an omitted member does not fail, it reads as
+# "nothing running", so a new state must state its node here rather than silently mean idle.
+# `checkin` is the merged check-in + origin node the canvas draws; scoring fires no optimizer
+# LLM call of its own, so it belongs to `l1_score`.
+_STATE_TO_NODE: dict[DashboardState, str | None] = {
+    DashboardState.INIT: "checkin",
+    DashboardState.ORIGIN: "checkin",
+    DashboardState.SCORING: "l1_score",
+    DashboardState.BETWEEN_SAMPLES: "l1_score",
+    DashboardState.BETWEEN_CANDIDATES: "l1_score",
+    DashboardState.L1_GENERATE: "l1_generate",
+    DashboardState.L2_REFINING: "l2_context",
+    DashboardState.L3_REPLANNING: "l3_plan",
+    # The post-round escalation gate is the critique's own work.
+    DashboardState.ESCALATION: "l1_critique",
+    # The one honest `None`: a stopped cycle is running nothing.
+    DashboardState.STOPPED: None,
+}
+
+if set(_STATE_TO_NODE) != set(DashboardState):
+    raise RuntimeError(
+        "_STATE_TO_NODE must cover every DashboardState — a missing member reads as "
+        f"'nothing running': {set(DashboardState) - set(_STATE_TO_NODE)}"
+    )
 
 
 def _ability_delta(rounds: list[RoundSummary]) -> float | None:
@@ -362,24 +391,20 @@ class LiveDashboardView(DerivedView):
             # the COLD θ while the round file and the ledger carried the warm one, and anything
             # differencing a later round against it subtracted across two rulers. Absorb the
             # correction in place; the live scalars are the `display` arm's and stay untouched.
+            # Candidate ids are ROUND-SCOPED, so a P(best) map carried into the next round ranks
+            # a candidate against a stranger. `LiveDisplay` has always rolled here; this
+            # projection never did, so `pobb` kept naming the closed round's leader.
+            roll_p_best_at_round_complete(self._core)
             theta = record.payload.get("cumulative_theta")
             if isinstance(theta, int | float):
                 se = record.payload.get("cumulative_theta_se")
+                theta_se = float(se) if isinstance(se, int | float) else None
                 self.state.rounds = [
-                    r.model_copy(
-                        update={
-                            "cumulative_theta": float(theta),
-                            "cumulative_theta_se": float(se)
-                            if isinstance(se, int | float)
-                            else None,
-                        }
-                    )
-                    if r.round == record.round
-                    else r
+                    self._restamp_theta(r, float(theta), theta_se) if r.round == record.round else r
                     for r in self.state.rounds
                 ]
                 self.state.ability_delta = _ability_delta(self.state.rounds)
-                self._flush_pending_persist()
+            self._flush_pending_persist()
             return
 
         if record.phase == "round" and record.event == "display":
@@ -393,7 +418,7 @@ class LiveDashboardView(DerivedView):
             if round_result is not None:
                 self._absorb_round_complete(round_result.accuracy, l1_stall, hearts)
                 if self._recorder is not None:
-                    self._recorder.set_l1_score(self._l1_score_block(round_result))
+                    self._recorder.set_l1_score(self._l1_score_block(live=False))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
@@ -422,11 +447,28 @@ class LiveDashboardView(DerivedView):
             data=record.data,
         )
         self._apply_phase(event, view)
-        # L1_GENERATE:enter wipes the live candidate buffer (current_round.nodes.l1_score) —
-        # historical `rounds[]` is untouched.
-        if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+        # The candidate buffer belongs to ONE round, so it clears when the round NUMBER moves,
+        # not at `L1_GENERATE:enter`: `round:enter` advances the number first, so the old rule
+        # left the closed round's candidates standing under the new number for the whole
+        # generate call. Historical `rounds[]` is untouched.
+        if self._buffer.round_num != self.state.round:
             self._buffer.reset(self.state.round)
         self._flush_pending_persist()
+
+    @staticmethod
+    def _restamp_theta(r: RoundSummary, theta: float, theta_se: float | None) -> RoundSummary:
+        """The warm-ruler correction, applied to the round AND to round 0's candidate row.
+
+        Round 0 holds no election fit of its own, so the round's θ IS its one candidate's; later
+        rounds stamp per candidate at ``l1_score`` and are left alone. Only the frontier was
+        patched here before, so ``rounds[0].candidates[0].theta`` stayed null forever while the
+        round file carried the warm value."""
+        candidates = (
+            [c.model_copy(update={"theta": theta, "theta_se": theta_se}) for c in r.candidates]
+            if r.round == 0
+            else r.candidates
+        )
+        return r.model_copy(update={"cumulative_theta": theta, "candidates": candidates})
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event
@@ -760,34 +802,53 @@ class LiveDashboardView(DerivedView):
 
     # -- Block builders (delegated to render.py) ------------------------------
 
-    def _l1_score_block(self, round_result: RoundResult | None = None) -> dict[str, Any]:
-        return build_l1_score_block(
-            self._buffer,
-            self.state.composite_fitness_formula,
-            self.short_formula_template,
-            round_result,
-        )
+    def _l1_score_block(self, *, live: bool) -> dict[str, Any]:
+        return build_l1_score_block(self._buffer, self.short_formula_template, live=live)
 
     # -- Internal --------------------------------------------------------------
 
+    def _active_node(self) -> str | None:
+        """Which optimizer node is working. The in-flight LLM call names its node and wins;
+        otherwise the phase does, which is what keeps a node lit across the gap between two
+        calls in one phase."""
+        in_flight = self.state.in_flight
+        if in_flight is not None:
+            return in_flight.node
+        return _STATE_TO_NODE[self.state.state]
+
+    def _current_round_nodes(self) -> dict[str, dict[str, Any]]:
+        """THIS round's node blocks. ``_sticky_llm_calls`` is most-recent-fire-per-slot and
+        survives round transitions, so it is filtered by each block's own ``round``: presence in
+        this map is the client's whole definition of "this node has fired", and unfiltered, a new
+        round opened showing the previous one's models as its own."""
+        blocks = {
+            node: block
+            for node, block in self._sticky_llm_calls.items()
+            if block.get("round") == self.state.round
+        }
+        if self._buffer.candidates:
+            blocks["l1_score"] = self._l1_score_block(live=True)
+        # Reading order, not execution order: generate and critique head the block because they
+        # are what an operator opens the file for.
+        ordered = {
+            k: blocks.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in blocks
+        }
+        ordered.update(blocks)
+        return ordered
+
     def _persist(self) -> None:
         # Atomic tmp+rename via write_json — polling readers never see a torn payload.
-        # `nodes` mirrors round_NNNN.json::nodes but only for the current round.
-        # `_sticky_llm_calls` is the sole source for non-l1_score blocks; the
-        # audit-trail records the same events independently into round_NNNN.json.
-        nodes: dict[str, Any] = dict(self._sticky_llm_calls)
-        if self._buffer.candidates:
-            nodes["l1_score"] = self._l1_score_block()
-        ordered = {
-            k: nodes.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in nodes
-        }
-        ordered.update(nodes)
         s = self.state
-        s.current_round = {
-            "round": self._buffer.round_num,
-            "nodes": ordered,
-            "pobb": build_pobb_block(self._core, self._buffer.p_best_top),
-        }
+        s.current_round = CurrentRound(
+            # `state.round`, never the candidate buffer's — the buffer only advances at
+            # `L1_GENERATE:enter`, so this read one behind from `round:enter` onward and every
+            # reader comparing the two concluded the round had already closed.
+            round=s.round,
+            active_node=self._active_node(),
+            candidates=build_candidate_rows(self._buffer),
+            nodes=self._current_round_nodes(),
+            pobb=build_pobb_block(self._core, self._buffer.p_best_top),
+        )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape: every scalar field's presence +
         # type is guaranteed because the schema constructs it and `extra="forbid"`

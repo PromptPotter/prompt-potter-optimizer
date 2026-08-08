@@ -4,7 +4,6 @@ import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesVie
 import { availableRounds, isWidgetParam } from "@/lib/derivations";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { activeNodeId } from "./layout";
 import { fmtSecs, fmtValue } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
 import { NodeConfigEditor } from "@/components/shell/node-surface/NodeConfigEditor";
@@ -41,7 +40,12 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   // The round's node blocks come from the one resolver this card shares with the
   // canvas above it (`useRoundNodes`) — same round, same source-selection rule.
   // Splitting that switch across the two surfaces is what let them disagree.
-  const { nodes, round: activeRound, isLiveRound: activeIsLive } = useRoundNodes();
+  const {
+    nodes,
+    round: activeRound,
+    showsCurrent: activeIsLive,
+    loading: nodesLoading,
+  } = useRoundNodes();
   // Completed rounds are owned by `availableRounds` (round-axis) — ascending,
   // so the most recent fired round is the tail. Used only for the status line.
   const completed = availableRounds(dash, isLive).completed;
@@ -68,7 +72,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
     ? `${usage.prompt_tokens ?? "—"}p / ${usage.completion_tokens ?? "—"}c / ${usage.total_tokens ?? "—"}t`
     : "";
 
-  const livePhaseNode = activeNodeId(dash?.in_flight?.node ?? null, dash?.state ?? null);
+  const livePhaseNode = dash?.current_round.active_node ?? null;
   // `activeIsLive` too: a node inspected on a historical round is not live, even
   // when that same node happens to be firing in the round currently running.
   const isLiveNow = isLive && activeIsLive && livePhaseNode === id;
@@ -154,7 +158,9 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
             ? "System step — no LLM call. See the configuration footer for the wired params."
             : kind === "phase"
               ? "Phase marker — no LLM call."
-              : "This node has not fired in any cached round yet."}
+              : nodesLoading
+                ? "Loading this round's audit trail…"
+                : "This node has not fired in any cached round yet."}
         </div>
       ) : (
         <div className="opt-detail-cols">

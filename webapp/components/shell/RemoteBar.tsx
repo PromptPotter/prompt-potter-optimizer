@@ -7,7 +7,6 @@ import { cx } from "@/lib/cx";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
-import { activeNodeId } from "@/components/workflow";
 
 // The global remote control — a bottom-fixed hovering pill, rendered as shell
 // chrome on every tab while a cycle is live. It consolidates the run controls
@@ -86,7 +85,7 @@ export function RemoteBar({ onFollowed }: Props) {
   // the scorer — that's the window where it's the live position. This is the
   // finer "where am I" the remote was missing: round AND candidate.
   const scoringCand =
-    activeNodeId(dash?.in_flight?.node ?? null, dash?.state) === "l1_score"
+    dash?.current_round.active_node === "l1_score"
       ? String(dash?.candidate || "").split("/")[0]
       : "";
 

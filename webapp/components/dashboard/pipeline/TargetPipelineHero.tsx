@@ -9,17 +9,11 @@ import { useSelection } from "@/lib/SelectionContext";
 import { liveObserveConfig } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 
-// The backend target LLM is being called throughout L1 scoring (and origin).
-// `dash.state` cycles scoring → between_samples/between_candidates → scoring as
-// each sample lands, so all four count as active or the node would flicker to
-// "idle" between every sample. The optimizer phases (l1_generate / l2_refining /
-// …) are NOT here — there the optimizer LLM runs and the backend sits idle.
-const BACKEND_ACTIVE_PHASES = new Set([
-  "scoring",
-  "origin",
-  "between_samples",
-  "between_candidates",
-]);
+// The backend target LLM is being called exactly while the OPTIMIZER's scoring node is active.
+// `l1_score` covers origin scoring too and does not flicker between samples the way `dash.state`
+// does (scoring → between_samples → scoring per sample, which forced a four-member phase set
+// here). During the optimizer phases that node is inactive and the backend sits idle.
+const BACKEND_SCORING_NODE = "l1_score";
 
 // The node's static origin model from the dataset overlay (the `model` param in
 // the node-config schema) — the fallback when no live searchpoint is resolved.
@@ -131,16 +125,16 @@ function interiorNodes(view: PipelineView): PipelineViewNode[] {
 function SingleNodeChip({
   node,
   liveModelFor,
-  phase,
+  activeNode,
   isLive,
 }: {
   node: PipelineViewNode;
   liveModelFor: LiveModelFor;
-  phase: string | null;
+  activeNode: string | null;
   isLive: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const active = isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
+  const active = isLive && activeNode === BACKEND_SCORING_NODE;
   const model = active ? (liveModelFor(node.id) ?? "running") : "idle";
   const isSelected = selected?.scope === "target" && selected.id === node.id;
   return (
@@ -201,13 +195,13 @@ function MultiNodeStrip({
   view,
   connector,
   liveModelFor,
-  phase,
+  activeNode,
   isLive,
 }: {
   view: PipelineView;
   connector: string | null;
   liveModelFor: LiveModelFor;
-  phase: string | null;
+  activeNode: string | null;
   isLive: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
@@ -252,7 +246,7 @@ function MultiNodeStrip({
         {interior.map((n, i) => {
           const isSelected = selected?.scope === "target" && selected.id === n.id;
           const isLlm = n.kind === "llm";
-          const active = isLlm && isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
+          const active = isLlm && isLive && activeNode === BACKEND_SCORING_NODE;
           // Same rest/active reading as SingleNodeChip — an LLM node at rest is
           // "idle", not blank. Only LLM nodes get the sub-line: a tool node has no
           // model, so "idle" there would imply a call that never happens.
@@ -311,6 +305,7 @@ function MultiNodeStrip({
 export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const cv = useConnector();
   const { dash } = useDashboard();
+  const activeNode = dash?.current_round.active_node ?? null;
   const interior = cv.view ? interiorNodes(cv.view) : [];
   const soleNode = interior.length === 1 ? interior[0] : undefined;
   // The running searchpoint's resolved model when live; static origin otherwise.
@@ -349,7 +344,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         <SingleNodeChip
           node={soleNode}
           liveModelFor={liveModelFor}
-          phase={cv.phase}
+          activeNode={activeNode}
           isLive={cv.isLive}
         />
       ) : (
@@ -357,7 +352,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
           view={cv.view}
           connector={cv.connector}
           liveModelFor={liveModelFor}
-          phase={cv.phase}
+          activeNode={activeNode}
           isLive={cv.isLive}
         />
       )}

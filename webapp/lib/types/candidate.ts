@@ -36,14 +36,18 @@ export interface CandidateRow {
   theta_se: number | null;
   // The composite-fitness CI whisker (served, never recomputed): the difficulty-adjusted
   // θ-implied accuracy band where the ruler is warm + the scorer is plain accuracy, else the
-  // raw normal-CLT mean CI. `null` for the in-flight round (stamped at round close, with `theta`).
+  // raw normal-CLT mean CI. Present on an IN-FLIGHT row too — it is stamped off the
+  // candidate's own rows the moment it finishes scoring, not at round close.
   compositeCiLo: number | null;
   compositeCiHi: number | null;
+  // Which of the two the band above is, served rather than re-derived — both scales coexist
+  // inside one round, so a chart-wide guess picks the wrong bar for some of them.
+  ciScale: "composite" | "accuracy" | null;
   // The floor this candidate was JUDGED against — the origin restricted to the samples
   // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
   // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
-  // the promotion gate used. `null` for the in-flight round (stamped at round close) and
-  // for candidates outside the election fit — nothing matched them.
+  // the promotion gate used. `null` for candidates outside the election fit — nothing
+  // matched them.
   matchedOriginAccuracy: number | null;
   matchedOriginComposite: number | null;
   evaluators: Record<string, number>;

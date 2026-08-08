@@ -35,6 +35,7 @@ function node(
     cumulative_theta: null,
     evaluators: {},
     composite_ci_lo: null,
+    ci_scale: null,
     composite_ci_hi: null,
     scored_samples: null,
     expected_samples: null,

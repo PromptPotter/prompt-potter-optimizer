@@ -28,7 +28,11 @@ from promptpotter.domain.results_health import (
     compute_round_health,
     evidence_starved_node,
 )
-from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
+from promptpotter.domain.run_records import (
+    LedgerAbility,
+    PhaseRecord,
+    ResumeCheckpointRecord,
+)
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful
 
@@ -93,20 +97,17 @@ async def escalate_or_stop(
 def _round_close_facts(round_result: RoundResult) -> dict[str, Any]:
     """What the CLOSE knows and no candidate could — the adopted individual and each row's θ / CI.
     **Keyed by LABEL** (`C{round}.{idx}`): a lineage id is re-minted on resume, so an id join drops it."""
-    abilities: dict[str, dict[str, float]] = {}
+    abilities: dict[str, LedgerAbility] = {}
     for cs in round_result.candidate_scores:
-        vals = {
-            key: value
-            for key, value in (
-                ("theta", cs.theta),
-                ("theta_se", cs.theta_se),
-                ("composite_ci_lo", cs.composite_ci_lo),
-                ("composite_ci_hi", cs.composite_ci_hi),
-            )
-            if value is not None
-        }
-        if vals:
-            abilities[cs.label] = vals
+        ability = LedgerAbility(
+            theta=cs.theta,
+            theta_se=cs.theta_se,
+            composite_ci_lo=cs.composite_ci_lo,
+            composite_ci_hi=cs.composite_ci_hi,
+            ci_scale=cs.ci_scale,
+        )
+        if ability != LedgerAbility():
+            abilities[cs.label] = ability
     winner_label = next(
         (
             cs.label

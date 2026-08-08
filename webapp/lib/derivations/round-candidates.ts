@@ -18,13 +18,15 @@
 // Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate round labelled
 // "C0", and flows through the same history loop as every other round.
 
-import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
-import {
-  liveL1Candidates,
-  roundOf,
-  type DashboardSnapshot,
-} from "@/lib/poll";
-import type { CandidateRow, RoundCandidates, RoundSummary } from "@/lib/types";
+import { liveCandidateId } from "@/lib/candidate-label";
+import { liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
+import type { DashboardCandidate, RoundSummaryCandidate } from "@/lib/api/types";
+import type {
+  CandidateRow,
+  CandidateSource,
+  RoundCandidates,
+  RoundSummary,
+} from "@/lib/types";
 
 // A `rounds[]` row is chartable/selectable only if it carries scored candidates.
 // When a round closes mid-L2/L3 — no `l1_score` ever fired — the round-display
@@ -70,83 +72,74 @@ export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> 
 // the round into the summary, the in-flight projection drops out of
 // this list at the same tick. Both surfaces apply this rule the same
 // way because they both ride this list.
+// ONE mapping, both halves. A live row and a closed row are the same served shape
+// (`DashboardCandidate`), so there is nothing left to merge — the live arm used to hardcode
+// `theta`/`compositeCi*`/`matchedOrigin*` to null on the claim that all of them are "stamped at
+// round close", which is false for the CI: `l1/population.py` stamps it the moment a candidate
+// finishes scoring, so every in-flight bar was served a whisker and then told it had none.
+//
+// `candidateId` is the caller's, because the two halves live in DIFFERENT identity spaces and
+// that is the one thing they may not share — see the two call sites below.
+function rowOf(
+  c: DashboardCandidate,
+  round: number,
+  idx: number,
+  candidateId: string,
+  source: CandidateSource,
+): CandidateRow {
+  return {
+    key: `R${round}.${idx}`,
+    round,
+    idx,
+    candidate_id: candidateId,
+    // Served, never recomposed: `candidate_label` is the projection's own and display sites
+    // read it verbatim.
+    label: c.label,
+    accuracy: c.accuracy,
+    composite: c.composite_fitness,
+    theta: c.theta,
+    theta_se: c.theta_se,
+    compositeCiLo: c.composite_ci_lo,
+    compositeCiHi: c.composite_ci_hi,
+    ciScale: c.ci_scale,
+    matchedOriginAccuracy: c.matched_origin_accuracy,
+    matchedOriginComposite: c.matched_origin_composite,
+    evaluators: c.evaluators,
+    // Only a CLOSED row carries a crown; a live one has held no election yet.
+    is_winner: (c as Partial<RoundSummaryCandidate>).is_winner ?? false,
+    n_samples: c.scored_samples,
+    n_expected: c.expected_samples,
+    cached_samples: c.cached_samples,
+    source,
+  };
+}
+
 export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] {
   const out: CandidateRow[] = [];
 
   for (const r of sortedRounds(dash)) {
     // Skip empty historical entries (L2/L3-terminal rounds) — they carry no
     // fitness data and `closedRoundNumbers` already excludes them, so the
-    // in-flight L1_SCORE branch below isn't suppressed for that round number.
+    // in-flight branch below isn't suppressed for that round number.
     if (!roundHasCandidates(r)) continue;
-    r.candidates.forEach((c, i) => {
-      out.push({
-        key: `R${r.round}.${i}`,
-        round: r.round,
-        idx: i,
-        // Never empty: a round summary that hasn't stamped an id falls back to
-        // the positional one, the same rule the lineage applies. Without this the
-        // spine and the tree keyed differently for the same candidate, and every
-        // surface that routes selection by `candidate_id` had to guard for "".
-        candidate_id: c.candidate_id || liveCandidateId(r.round, i),
-        label: candidateLabel(r.round, i),
-        accuracy: c.accuracy,
-        composite: c.composite_fitness,
-        theta: c.theta,
-        theta_se: c.theta_se,
-        compositeCiLo: c.composite_ci_lo,
-        compositeCiHi: c.composite_ci_hi,
-        matchedOriginAccuracy: c.matched_origin_accuracy,
-        matchedOriginComposite: c.matched_origin_composite,
-        evaluators: c.evaluators,
-        is_winner: c.is_winner,
-        n_samples: c.scored_samples,
-        n_expected: c.expected_samples,
-        cached_samples: c.cached_samples,
-        source: "history",
-      });
-    });
+    // A closed row keys on its LINEAGE id — the tree's identity space, which selection and the
+    // round file both join on. Positional only where the summary never stamped one, the same
+    // rule the lineage applies; without it every surface routing selection had to guard for "".
+    r.candidates.forEach((c, i) =>
+      out.push(rowOf(c, r.round, i, c.candidate_id || liveCandidateId(r.round, i), "history")),
+    );
   }
 
   const liveRound = roundOf(dash);
   if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
-    for (const c of liveL1Candidates(dash)) {
-      const i = Number(c.idx);
-      if (!Number.isFinite(i) || i < 0) continue;
-      const evaluators = c.stats?.evaluators ?? {};
-      // Served verbatim: the projection fills `accuracy` with the running
-      // hit-rate over scored-so-far samples until the final figure lands,
-      // so this is never null mid-scoring (no client recompute).
-      const accuracy =
-        typeof c.stats?.accuracy === "number" ? c.stats.accuracy : null;
-      const composite =
-        typeof c.stats?.composite_fitness === "number"
-          ? c.stats.composite_fitness
-          : null;
-      out.push({
-        key: `R${liveRound}.${i}`,
-        round: liveRound,
-        idx: i,
-        candidate_id: liveCandidateId(liveRound, i),
-        label: candidateLabel(liveRound, i),
-        accuracy,
-        composite,
-        // θ is an end-of-round election fit; the in-flight round has none yet.
-        theta: null,
-        theta_se: null,
-        // Composite CI and the matched-origin floor are stamped at the same round-close
-        // seam as θ — the in-flight round has none of them yet.
-        compositeCiLo: null,
-        compositeCiHi: null,
-        matchedOriginAccuracy: null,
-        matchedOriginComposite: null,
-        evaluators,
-        is_winner: false,
-        n_samples: c.samples?.length ?? null,
-        n_expected: null,
-        cached_samples: c.stats?.cached_samples ?? null,
-        source: "inflight",
-      });
-    }
+    // A live row keys POSITIONALLY, even once scoring stamps a real id on it. The two live
+    // readers — the sample tape (`liveCandidate`) and the inspector (`liveCandidateRow`) — join
+    // back through `liveCandidateId`, so a row wearing its lineage id resolves in neither and
+    // the tape and the inspector go blank for every candidate that finished before its round
+    // closed. Construction and match ride one rule or they ride none.
+    liveCandidates(dash).forEach((c, i) =>
+      out.push(rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight")),
+    );
   }
 
   return out;

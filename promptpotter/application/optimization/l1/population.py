@@ -146,6 +146,7 @@ def build_score_report(
     return ScoredCandidate(
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
+        ci_scale=None if ci_lo is None else "composite",
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

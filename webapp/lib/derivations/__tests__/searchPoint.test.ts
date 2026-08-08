@@ -8,7 +8,14 @@ import {
   observeOptions,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { dash, roundDoc, scored, summaryCandidate, summaryRound } from "@/lib/test-fixtures";
+import {
+  currentRound,
+  dash,
+  roundDoc,
+  scored,
+  summaryCandidate,
+  summaryRound,
+} from "@/lib/test-fixtures";
 
 type InputCandidate = {
   idx?: number;
@@ -18,7 +25,9 @@ type InputCandidate = {
 };
 
 const liveDash = (candidates: InputCandidate[]): DashboardSnapshot =>
-  dash({ current_round: { round: 1, nodes: { l1_score: { input: { candidates } } } } });
+  dash({
+    current_round: currentRound({ round: 1, nodes: { l1_score: { input: { candidates } } } }),
+  });
 
 describe("liveObserveConfig", () => {
   it("returns null with no live candidates", () => {

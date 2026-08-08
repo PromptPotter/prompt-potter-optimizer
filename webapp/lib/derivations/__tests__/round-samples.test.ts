@@ -23,6 +23,7 @@ function row(source: CandidateRow["source"]): CandidateRow {
     theta: null,
     theta_se: null,
     compositeCiLo: null,
+    ciScale: null,
     compositeCiHi: null,
     matchedOriginAccuracy: null,
     matchedOriginComposite: null,

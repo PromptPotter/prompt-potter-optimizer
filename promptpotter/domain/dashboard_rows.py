@@ -19,35 +19,47 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.verdict import OuterVerdict
 from promptpotter.domain.results import CalibrationModel, DegradationHealth
+from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["RoundSummary", "RoundSummaryCandidate"]
+__all__ = ["DashboardCandidate", "RoundSummary", "RoundSummaryCandidate"]
 
 
-class RoundSummaryCandidate(StrictModel):
-    """Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`."""
+class DashboardCandidate(StrictModel):
+    """One candidate as `dashboard.json` serves it, in ANY round state — the live rows under
+    `current_round.candidates` and the closed rows under `rounds[].candidates` are this shape,
+    so a reader takes a whole row rather than merging two shapes field by field.
+
+    The optionals are the facts a candidate genuinely lacks until it finishes;
+    `RoundSummaryCandidate` re-declares required exactly what closing guarantees."""
 
     model_config = ConfigDict(frozen=True)
 
-    candidate_id: str
+    # Canonical `C{round}.{n}` — composed at mint, so it exists before any measurement.
     label: str
-    accuracy: float
-    composite_fitness: float
-    scored_samples: int
-    expected_samples: int
-    cached_samples: int
-    is_winner: bool
+    # Minted with the searchpoint but only carried on the score report, so a seeded row
+    # that has not reached `candidate_scored` has no id to serve yet.
+    candidate_id: str | None = None
+    accuracy: float | None = None
+    composite_fitness: float | None = None
+    scored_samples: int = 0
+    cached_samples: int = 0
+    # Unknown until the first sample announces the walk's length.
+    expected_samples: int | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""
     partial_reason: str = ""  # "" | "skip" — see ScoredCandidate.partial_reason
     # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
-    # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit.
+    # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit,
+    # which includes every live row: the fit is round-scoped and needs two arms.
     theta: float | None = None
     theta_se: float | None = None
-    # Composite-fitness CI (`ScoredCandidate.composite_ci_lo/hi`) — always present for any
-    # candidate with ≥1 scored sample; the whisker the chart draws around `composite_fitness`.
+    # Composite-fitness CI (`ScoredCandidate.composite_ci_lo/hi`) — the whisker the chart draws,
+    # stamped off the candidate's own rows when it finishes (`l1/population.py`), so it is
+    # present live and not only at round close. `ci_scale` names what it brackets.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = None
     # The floor this candidate was JUDGED against (`ScoredCandidate.matched_origin_*`): the
     # origin restricted to the samples this candidate actually measured. Served because
     # `accuracy` alone is unreadable under elimination — a PoBB-locked candidate ran 8 of 20,
@@ -56,6 +68,18 @@ class RoundSummaryCandidate(StrictModel):
     # candidate covered the origin's panel — a prefix rate is set by where PoBB stopped it.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+
+
+class RoundSummaryCandidate(DashboardCandidate):
+    """A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`.
+    Adds only what closing guarantees; the field list is inherited, so a field added to the base
+    flows to both halves and `_SUMMARY_INCLUDE` keeps picking it up."""
+
+    candidate_id: str
+    accuracy: float
+    composite_fitness: float
+    expected_samples: int
+    is_winner: bool
 
 
 class RoundSummary(StrictModel):
@@ -77,6 +101,11 @@ class RoundSummary(StrictModel):
     # configurations fabricates a number no individual scored. Mirrors
     # `RoundResult.cumulative_theta`.
     cumulative_theta: float | None = None
+    # No `cumulative_theta_se` beside it. The round-close handler used to push one in via
+    # `model_copy(update=…)`, which does not validate — the key landed outside `model_fields`
+    # and the serializer dropped it, so it was never on disk and nothing ever read it. The
+    # interval that IS read is per candidate (`theta_se`); the round-level SE stays on the
+    # ledger and the round document, which is where a reader for it would come from.
     # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
     calibration_model: CalibrationModel | None = None
     # The round's verdict and the evidence it rests on — the two bits that decide how long the

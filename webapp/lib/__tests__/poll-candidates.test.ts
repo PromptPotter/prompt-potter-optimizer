@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dash } from "@/lib/test-fixtures";
+import { currentRound, dash } from "@/lib/test-fixtures";
 import { liveInputCandidate, liveL1Candidates, type DashboardSnapshot } from "../poll";
 
 // Regression guard for the post-login render loop: the no-candidate path must
@@ -8,15 +8,17 @@ import { liveInputCandidate, liveL1Candidates, type DashboardSnapshot } from "..
 describe("liveL1Candidates", () => {
   it("returns the same reference on the no-candidate path", () => {
     expect(liveL1Candidates(null)).toBe(liveL1Candidates(null));
-    const noNodes = dash({ current_round: {} });
+    const noNodes = dash({ current_round: currentRound() });
     expect(liveL1Candidates(noNodes)).toBe(liveL1Candidates(null));
-    const noL1 = dash({ current_round: { nodes: {} } });
+    const noL1 = dash({ current_round: currentRound({ nodes: {} }) });
     expect(liveL1Candidates(noL1)).toBe(liveL1Candidates(null));
   });
 
   it("returns the candidates array when present", () => {
     const d = dash({
-      current_round: { nodes: { l1_score: { output: { candidates: [{ idx: 0 }] } } } },
+      current_round: currentRound({
+        nodes: { l1_score: { output: { candidates: [{ idx: 0 }] } } },
+      }),
     });
     expect(liveL1Candidates(d)).toHaveLength(1);
   });
