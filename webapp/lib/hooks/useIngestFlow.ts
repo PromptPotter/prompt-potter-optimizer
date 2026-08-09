@@ -22,6 +22,7 @@ import {
   type RaisedCommand,
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
+import type { RunSummary } from "@/lib/derivations";
 import type { OnMinted } from "@/components/ingest/types";
 
 // One durable chat message; the conversation renders from a list of these.
@@ -32,7 +33,13 @@ type ChatMsg =
   // A non-fatal degradation notice (the check-in model hiccuped + retried). Loud
   // but not an error — the draft still resolved, just thinly.
   | { id: string; kind: "warning"; text: string }
-  | { id: string; kind: "error"; text: string };
+  | { id: string; kind: "error"; text: string }
+  // A finished run, frozen. It holds captured VALUES (`RunSummary`) rather than a
+  // pointer into `dashboard.json`, because a `resume` re-animates that file — and
+  // `resume --from N` can rewrite the round files under it — so a pointer would
+  // quietly restate itself as the NEXT run. The live view of the same facts is the
+  // run card; this is what stays in the log once the card has moved on.
+  | { id: string; kind: "run"; summary: RunSummary };
 
 // Transient ingest-pipeline status, separate from the durable thread — it's
 // replaced (not appended) as the pick/drop → context → check-in → ready
@@ -107,6 +114,9 @@ export interface IngestFlow {
   saveAsNew: () => void;
   replaceExisting: () => void;
   cancelCollision: () => void;
+  // Freeze a finished run into the thread. Idempotent per cycle — a poll tick can
+  // observe the same stop twice, and the log must not grow a duplicate for it.
+  pushRunSummary: (summary: RunSummary) => void;
   // Clear the conversation back to idle (the modal calls this on open).
   reset: () => void;
 }
@@ -455,6 +465,16 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const cancelCollision = () => setPhase({ stage: "idle" });
 
+  // One frozen item per cycle. The caller fires this off a live→stopped edge, and
+  // an edge can be observed more than once (a re-mount, a soft unit switch back);
+  // the guard lives here, with the list it protects, rather than in the caller.
+  const pushRunSummary = (summary: RunSummary) =>
+    setMessages((m) =>
+      m.some((x) => x.kind === "run" && x.summary.cycleId === summary.cycleId)
+        ? m
+        : [...m, { id: uid(), kind: "run", summary }],
+    );
+
   const reset = () => {
     setInputText("");
     setMessages([]);
@@ -482,6 +502,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     saveAsNew,
     replaceExisting: () => void replaceExisting(),
     cancelCollision,
+    pushRunSummary,
     reset,
   };
 }

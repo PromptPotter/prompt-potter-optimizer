@@ -1,16 +1,23 @@
 "use client";
 // Dataset preview for the unit in view — the sample roster + per-sample
-// measurement history that back the hard-samples table. One fetch chain per
-// (campaignId, cycleId) UNIT loads BOTH scope slices (campaign-pooled +
-// cross-campaign dataset) into one unit-stamped state object; the scope toggle
-// is a pure in-memory pick between the two already-loaded slices — no re-fetch,
-// no cross-scope borrow, so the toggle can never show one scope's data while
-// pointed at the other. A unit switch shows the prior unit's slice marked
-// `isStale` until the new fetch lands (never blanks); a failed dataset fetch
-// surfaces honestly via `error` rather than silently showing stale data.
+// measurement history that back the hard-samples table.
+//
+// **One scope is fetched at a time: the one in view.** Each (unit, scope) pair is
+// fetched once and kept, so flipping the toggle back is still a pure in-memory pick
+// and no slice is ever borrowed across scopes. What changed is that the OTHER
+// scope's two reads no longer gate the first paint: the panel used to await all four
+// `limit=1000` requests in one `Promise.all` before any state landed, so opening a
+// campaign meant staring at an empty roster for as long as the SLOWEST of four reads
+// — most of it spent on the cross-campaign archive, which the operator had not asked
+// to see. The default scope now paints on its own two reads.
+//
+// A unit switch shows the prior unit's slice marked `isStale` until the new fetch
+// lands (never blanks); a failed read surfaces honestly via `error` rather than
+// silently reading as an empty roster.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  failureKind,
   fetchDatasetPreview,
   fetchMeasurementSeries,
   type DatasetItem,
@@ -41,22 +48,23 @@ interface ScopeSlice {
   totals: SeriesTotals | null;
 }
 
+// One scope's outcome. `slice` null with no `error` means the read is still in
+// flight; the three states (loading / failed / empty) are distinguishable by
+// construction, because collapsing them is what let a slow read render as "this
+// dataset has no samples".
+interface ScopeState {
+  slice: ScopeSlice | null;
+  error: string | null;
+  splitTest: number | null;
+}
+
 interface DatasetPreviewState extends ScopeSlice {
   splitTest: number | null;
   isStale: boolean;
-  // Honest failure signal — set when the dataset-scope fetch (the spine) threw
-  // for the unit in view. Consumers MUST render it: an empty slice and a failed
-  // read are different facts, and the heatmap's own guard cannot tell them apart
-  // from `items` alone.
-  error: string | null;
-}
-
-interface Loaded {
-  // Unit stamp the slices were fetched for; null until the first load lands.
-  key: string | null;
-  splitTest: number | null;
-  campaign: ScopeSlice;
-  dataset: ScopeSlice;
+  // Honest failure signal — set when the read for the SCOPE IN VIEW failed for the
+  // unit in view. Consumers MUST render it: an empty slice and a failed read are
+  // different facts, and the heatmap's own guard cannot tell them apart from
+  // `items` alone.
   error: string | null;
 }
 
@@ -108,6 +116,23 @@ function sliceFrom(
   };
 }
 
+// `${unitKey}\x1f${scope}` — one entry per slice actually fetched.
+type SliceKey = string;
+
+// Keep only the unit in view. A roster is up to 1000 rows plus its series, so a
+// session that browses ten campaigns would otherwise hold ten of them alive for no
+// reader. Applied inside the writes rather than as its own effect — pruning is free
+// there, and an extra render to throw data away is a poor trade.
+function keepUnit(
+  slices: Record<SliceKey, ScopeState>,
+  unitKey: string,
+): Record<SliceKey, ScopeState> {
+  const prefix = `${unitKey}\x1f`;
+  const out: Record<SliceKey, ScopeState> = {};
+  for (const [k, v] of Object.entries(slices)) if (k.startsWith(prefix)) out[k] = v;
+  return out;
+}
+
 export function useDatasetPreview(
   path: CyclePath | null,
   datasetName: string | null,
@@ -122,79 +147,95 @@ export function useDatasetPreview(
   const rootCycleId = root?.cycleId ?? null;
   const descend = path ? encodeDescend(path) : "";
   const unitKey = path ? encodeCyclePath(path) : null;
+  const sliceKey: SliceKey | null = unitKey ? `${unitKey}\x1f${scope}` : null;
 
-  const [loaded, setLoaded] = useState<Loaded>({
-    key: null,
-    splitTest: null,
-    campaign: EMPTY_SLICE,
-    dataset: EMPTY_SLICE,
-    error: null,
-  });
+  const [slices, setSlices] = useState<Record<SliceKey, ScopeState>>({});
+  // Slices already fetched or in flight. A ref, not state: it must not re-run the
+  // effect that writes it, and re-fetching a slice already held would defeat the
+  // point of keeping them.
+  const started = useRef<Set<SliceKey>>(new Set());
 
   useEffect(() => {
-    if (!unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
+    if (!sliceKey || !unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
+    // Forget attempts for units no longer in view, so navigating back re-fetches
+    // rather than waiting on a "done" mark for data that has since been pruned.
+    const prefix = `${unitKey}\x1f`;
+    for (const k of [...started.current]) if (!k.startsWith(prefix)) started.current.delete(k);
+    if (started.current.has(sliceKey)) return;
+    started.current.add(sliceKey);
     const name = datasetName;
     const cmp = rootCampaignId;
     const cyc = rootCycleId;
+    const key = sliceKey;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
       try {
-        // Both scopes load together. The dataset preview is the spine — a real
-        // failure throws into the catch below (honest `error`). The campaign
-        // slice + both series are floored to null: a fresh campaign legitimately
-        // has no campaign-scope artifact yet (honest empty, never borrowed).
-        const [dsPreview, dsSeries, cmpPreview, cmpSeries] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, "dataset", cmp, cyc, descend),
-          fetchMeasurementSeries(name, 1000, ac.signal, "dataset", cmp, cyc, descend).catch(
-            () => null,
-          ),
-          fetchDatasetPreview(name, 1000, ac.signal, "campaign", cmp, cyc, descend).catch(
-            () => null,
-          ),
-          fetchMeasurementSeries(name, 1000, ac.signal, "campaign", cmp, cyc, descend).catch(
+        // The roster is the spine — its failure IS this scope's failure. The series
+        // is best-effort: it decorates a roster rather than being one, so a roster
+        // that arrived still renders with an honest "no measurements" column.
+        const [preview, series] = await Promise.all([
+          fetchDatasetPreview(name, 1000, ac.signal, scope, cmp, cyc, descend),
+          fetchMeasurementSeries(name, 1000, ac.signal, scope, cmp, cyc, descend).catch(
             () => null,
           ),
         ]);
         if (cancelled) return;
-        setLoaded({
-          key: unitKey,
-          splitTest: dsPreview.split_test,
-          dataset: sliceFrom(dsPreview.items, dsSeries),
-          campaign: cmpPreview ? sliceFrom(cmpPreview.items, cmpSeries) : EMPTY_SLICE,
-          error: null,
-        });
+        setSlices((prev) => ({
+          ...keepUnit(prev, unitKey),
+          [key]: { slice: sliceFrom(preview.items, series), error: null, splitTest: preview.split_test },
+        }));
       } catch (e) {
-        if (cancelled || ac.signal.aborted) return;
-        setLoaded({
-          key: unitKey,
-          splitTest: null,
-          campaign: EMPTY_SLICE,
-          dataset: EMPTY_SLICE,
-          error: e instanceof Error ? e.message : String(e),
-        });
+        if (cancelled || ac.signal.aborted) {
+          // Never leave an aborted attempt marked as done — the next mount of this
+          // same slice must be free to try again.
+          started.current.delete(key);
+          return;
+        }
+        // A scope whose artifact does not exist yet answers 404, and that is an
+        // honest EMPTY, not a failure: a campaign legitimately has no pooled slice
+        // before its first round closes. Every other failure is recorded.
+        const gone = failureKind(e) === "gone";
+        setSlices((prev) => ({
+          ...keepUnit(prev, unitKey),
+          [key]: {
+            slice: gone ? EMPTY_SLICE : null,
+            error: gone ? null : e instanceof Error ? e.message : String(e),
+            splitTest: null,
+          },
+        }));
       }
     })();
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [unitKey, rootCampaignId, rootCycleId, descend, datasetName]);
+  }, [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope]);
 
-  if (!unitKey) return EMPTY;
-  // First load for this session — show a loading affordance, not blank chrome.
-  if (loaded.key === null) return { ...EMPTY, isStale: true };
+  if (!sliceKey) return EMPTY;
+  const state = slices[sliceKey];
 
-  // Pure pick AFTER the unit check: the returned slice is always the requested
-  // scope's slice for whatever unit `loaded` holds — fresh or stale-pending-new
-  // — so it is structurally impossible to show campaign data while scope is
-  // dataset.
-  const fresh = loaded.key === unitKey;
-  const slice = scope === "campaign" ? loaded.campaign : loaded.dataset;
+  // Still in flight for the requested (unit, scope). Fall back to ANY slice already
+  // held for this unit — the other scope's, if it is loaded — marked stale, so a
+  // toggle flip shows the neighbouring numbers greyed rather than blanking the
+  // panel. Nothing is borrowed silently: `isStale` is the caller's signal that what
+  // is on screen does not yet answer for the scope they asked for.
+  if (!state || (!state.slice && !state.error)) {
+    const sibling = unitKey
+      ? Object.entries(slices).find(([k, v]) => k.startsWith(`${unitKey}\x1f`) && v.slice)?.[1]
+      : undefined;
+    return {
+      ...(sibling?.slice ?? EMPTY_SLICE),
+      splitTest: sibling?.splitTest ?? null,
+      isStale: true,
+      error: null,
+    };
+  }
+
   return {
-    splitTest: loaded.splitTest,
-    ...slice,
-    isStale: !fresh,
-    error: fresh ? loaded.error : null,
+    ...(state.slice ?? EMPTY_SLICE),
+    splitTest: state.splitTest,
+    isStale: false,
+    error: state.error,
   };
 }

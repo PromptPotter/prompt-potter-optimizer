@@ -5,10 +5,23 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, NotRequired, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
+
+# THE anchor for what a `composite_ci_lo/hi` pair brackets — every site that writes those bounds
+# writes this beside them, and no site re-derives it.
+#
+# A normal-CLT interval over per-cell mean COMPOSITE, until a warm-ruler election rewrites it to
+# the θ-implied ACCURACY band (`l1/score/winner.py`). That rewrite is gated three ways, so both
+# scales coexist inside one round and the bounds alone are ambiguous: the chart's re-derivation
+# ("composite if that series is drawn, else accuracy") drew composite-scale intervals against
+# accuracy bars for every eliminated or cold-ruler arm.
+#
+# Lives here rather than beside `CalibrationModel` in `results.py` because `run_records.py`
+# carries it too and `results` already imports THAT — this module is the leaf both reach.
+CiScale = Literal["composite", "accuracy"]
 
 
 class PipelineData(TypedDict, total=False):
@@ -31,6 +44,19 @@ class PipelineData(TypedDict, total=False):
     llm_provider: str
     pipeline_params: dict[str, Any]
     diagnostics: dict[str, Any]
+    # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
+    # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
+    reasoning_trace: str
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. ``_se`` is the
+    # cell's own within-cell precision (`domain/l4/proxies.py`).
+    mean_round_delta: float
+    mean_round_delta_se: float
+    # Read defensively beside the top-level twins (`_absorb_sample_scored`, `RoundBuffer`):
+    # no writer in this repo sets them here, but a backend that did must not be silently
+    # dropped by ``ledger_sample_view``.
+    error: str | None
+    input_tokens: int
+    output_tokens: int
 
 
 class QueryMeasurement(TypedDict):
@@ -52,6 +78,109 @@ class QueryMeasurement(TypedDict):
     # plain human message (no ``[TAG]`` prefix). ``None``/absent ⇒ clean measurement.
     error_category: NotRequired[ErrorCategory | None]
     pipeline_data: PipelineData | None
+    # ---- Stamped after measurement, by the scorer and the walk -------------------
+    # Where the ground truth landed in the terminal ranking, and how many candidates it
+    # ranked against — computed once at scoring time (``find_gt_rank``); the MISS tag reads
+    # the pair and must never re-derive it.
+    ground_truth_rank: NotRequired[int | None]
+    n_candidates: NotRequired[int]
+    input_tokens: NotRequired[int]
+    output_tokens: NotRequired[int]
+    # The candidate's composite over samples-so-far, attached for the ledger path only
+    # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
+    _running: NotRequired[dict[str, Any]]
+    # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
+    # HIT/MISS line (``views/live/sample.py``) and nothing else reads them, so they are the
+    # ladder's only report: a dropped flag makes a re-measurement look like a plain score.
+    retry_of_deprecated_cache: NotRequired[bool]
+    retry_of_degraded: NotRequired[bool]
+    rerun_comparison: NotRequired[dict[str, Any]]
+    samplescan_resolved: NotRequired[bool]
+    switched_out: NotRequired[bool]
+    config_fundamental_skip: NotRequired[bool]
+    persistently_degraded: NotRequired[bool]
+    degraded_observed: NotRequired[bool]
+    degraded_obs_count: NotRequired[int]
+    degraded_obs_threshold: NotRequired[int]
+
+
+# The ledger's per-sample view: the UNION of what its two subscribers render — the terminal
+# tape (`views/live/sample.py::fmt_query_result` + `classify_result`) and the dashboard
+# (`live_dashboard/view.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
+# chat's `sampleScoredCandidate`). A superset of both, so the ledger holds exactly what the
+# operator was shown and there is one definition to keep in sync instead of two.
+#
+# What it drops is on disk twice already, from the same objects and never from this record:
+# the MeasurementArchive row keyed (dataset_name, node_configs, sample_id), and
+# `rounds/round_NNNN.json::results[]` + `::all_candidate_results{}`. The reasoning trace and
+# the resolved params are the bulk of it, and the panels that cite them
+# (`dispatch/injections/panels.py`) read the in-memory `InjectionBundle.trajectory_results`,
+# never a ledger record.
+_LEDGER_SAMPLE_KEYS: frozenset[str] = frozenset(
+    {
+        "sample_id",
+        "query",
+        "ground_truth",
+        "predicted",
+        "fitness",
+        "cached",
+        "error",
+        "error_category",
+        "ground_truth_rank",
+        "n_candidates",
+        "input_tokens",
+        "output_tokens",
+        "_running",
+        "retry_of_deprecated_cache",
+        "retry_of_degraded",
+        "rerun_comparison",
+        "samplescan_resolved",
+        "switched_out",
+        "config_fundamental_skip",
+        "persistently_degraded",
+        "degraded_observed",
+        "degraded_obs_count",
+        "degraded_obs_threshold",
+    }
+)
+_LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
+    {
+        "total_time",
+        "terminated_at",
+        "step_timings",
+        "step_tokens",
+        "diagnostics",
+        "error",
+        "input_tokens",
+        "output_tokens",
+        "mean_round_delta",
+    }
+)
+
+# A key named here but not declared above is dropped from every ledger record and nothing
+# says so — the reader keeps working on the default. Fail at import instead.
+_DECLARED_SAMPLE_KEYS: frozenset[str] = frozenset(QueryMeasurement.__annotations__)
+_DECLARED_PIPELINE_KEYS: frozenset[str] = frozenset(PipelineData.__annotations__)
+assert _LEDGER_SAMPLE_KEYS.issubset(_DECLARED_SAMPLE_KEYS), (
+    f"ledger keep-set names undeclared QueryMeasurement keys: "
+    f"{sorted(_LEDGER_SAMPLE_KEYS - _DECLARED_SAMPLE_KEYS)}"
+)
+assert _LEDGER_PIPELINE_KEYS.issubset(_DECLARED_PIPELINE_KEYS), (
+    f"ledger keep-set names undeclared PipelineData keys: "
+    f"{sorted(_LEDGER_PIPELINE_KEYS - _DECLARED_PIPELINE_KEYS)}"
+)
+
+
+def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
+    """NEW dicts, never a pop: the argument is the same object that becomes the archive row,
+    ``RoundResult.results``, ``all_candidate_results`` and ``trajectory_results``."""
+    out: dict[str, Any] = {k: v for k, v in result.items() if k in _LEDGER_SAMPLE_KEYS}
+    if "pipeline_data" in result:
+        pd = result["pipeline_data"]
+        out["pipeline_data"] = (
+            None if pd is None else {k: v for k, v in pd.items() if k in _LEDGER_PIPELINE_KEYS}
+        )
+    return cast("QueryMeasurement", out)
 
 
 Scorer = Callable[[dict[str, Any]], float]
@@ -118,5 +247,6 @@ __all__ = [
     "enumerable_truth_labels",
     "is_answer_collapsed",
     "is_hit",
+    "ledger_sample_view",
     "modal_answer_share",
 ]

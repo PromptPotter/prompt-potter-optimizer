@@ -92,7 +92,6 @@ logs/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/potter-run/
-!.claude/skills/potter-debt-sweep/
 !.claude/hooks/
 .claude/hooks/doc_drift_ratio.py
 tools

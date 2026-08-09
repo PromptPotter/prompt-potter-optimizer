@@ -5,7 +5,6 @@ import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { activeNodeId } from "@/components/workflow";
 import { headlineStats, fitnessTrend } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
 import { Hearts } from "@/components/ui";
@@ -92,7 +91,7 @@ export const TopStrip = memo(function TopStrip() {
   // active node is the scorer — the finer position than the round alone.
   // `dash.candidate` is "C3.2/4" and stale between rounds; gate on scoring.
   const scoringCand =
-    activeNodeId(dash?.in_flight?.node ?? null, dash?.state) === "l1_score"
+    dash?.current_round.active_node === "l1_score"
       ? String(dash?.candidate || "").split("/")[0]
       : "";
   const qm = parseProgress((dash as { query?: string } | null)?.query);

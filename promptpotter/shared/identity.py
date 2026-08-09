@@ -128,7 +128,6 @@ __all__ = [
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
-    "PROMPTPOTTER_ADMIN_ENV",
     "SCORING_SAMPLE_LOOKAHEAD_CAP",
     "IdentityContext",
     "capabilities_from_tiers",

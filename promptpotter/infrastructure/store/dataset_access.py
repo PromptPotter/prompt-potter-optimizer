@@ -153,9 +153,7 @@ def _read_n_samples(stores: Stores, name: str) -> int:
 
 __all__ = [
     "DatasetAccessError",
-    "DatasetRef",
     "dataset_pipeline_path",
-    "dataset_task_context_path",
     "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",

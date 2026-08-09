@@ -11,7 +11,7 @@ from promptpotter.config.settings import (
     POBB_DEFAULT_EPSILON,
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
@@ -477,6 +477,16 @@ class CampaignConfig(StrictModel):
         "shows θ (a logit, jargon) — defaults to `accuracy` so θ is never forced on "
         "an operator who didn't ask for it. Rides the `composite_fitness_formula` "
         "serve path to `dashboard.json::headline_metric`; never on `OptSearchPoint`.",
+    )
+    hard_sample_order: Annotated[HardSampleOrder, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+        "info_gain",
+        description="Which key ranks the hard-sample leaderboard — the heatmap, the table "
+        "and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the "
+        "queue mechanism's acquisition score (`pick_value`: decision-information gain + δ "
+        "learning gain), contested-at-the-leader samples first; `difficulty` sorts by the "
+        "Rasch ruler δ_s alone, hardest first. DISPLAY config: it picks the order the human "
+        "READS and never what the engine scores, which is `build_round_order` and reaches no "
+        "knob. Client-overridable per session, like `headline_metric`.",
     )
     # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
     dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(

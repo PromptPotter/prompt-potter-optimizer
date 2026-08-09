@@ -136,7 +136,7 @@ def render_round_stats(
             get_ranked_items,
             ranked_item_keys_from_schema,
         )
-        from promptpotter.application.scoring.metrics import find_rank
+        from promptpotter.application.scoring.diagnostics import find_rank
 
         ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
         results = round_result.results

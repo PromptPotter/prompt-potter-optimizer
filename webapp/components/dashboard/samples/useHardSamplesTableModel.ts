@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useState, type PointerEvent } from "react";
 import { type DatasetItem, type SampleSeries } from "@/lib/api";
 import { useStableContent } from "@/lib/stable";
-import { compareHardSamples } from "./hard-sample-order";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import {
   autoWidthFor,
@@ -150,18 +149,14 @@ export function useHardSamplesTableModel({
     return w;
   }, [items, columns, stablePerSample, servedSeries, ordCols.length]);
 
-  // Live-sort ("Auto-sort"): the shared hard-sample ranking (`compareHardSamples`) —
-  // the same comparator the heatmap uses, so the two surfaces cannot disagree.
+  // Live-sort ("Auto-sort") and no-sort resolve to the SAME array, because both mean
+  // "the order the server sent": `/preview` returns `items` in `hard_sample_rank` order
+  // under the campaign's `hard_sample_order`, and `items` is only ever filtered here,
+  // never rearranged. An ordering is a score, so taking it IS the implementation.
+  // `liveSortActive` still leads, so it keeps overriding a picked column.
   const liveSortActive = persisted.syncLive;
   const sortedIds = useMemo<number[]>(() => {
-    const measuredIn = (it: DatasetItem): boolean =>
-      (stablePerSample?.get(it.sample_id)?.length ?? 0) > 0;
-    if (liveSortActive) {
-      return [...items]
-        .sort((a, b) => compareHardSamples(a, b, measuredIn))
-        .map((it) => it.sample_id);
-    }
-    if (!sortBy) return items.map((it) => it.sample_id);
+    if (liveSortActive || !sortBy) return items.map((it) => it.sample_id);
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {

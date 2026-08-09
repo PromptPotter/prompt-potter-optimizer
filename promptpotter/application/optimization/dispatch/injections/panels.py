@@ -29,14 +29,14 @@ from promptpotter.application.optimization.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.scoring.evaluators import compute_accuracy
-from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.opt_search_point import (
+from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
     candidate_idea,
     flatten_sp_summary,
     same_idea,
 )
+from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit

@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass
 
 __all__ = [
-    "SHORT_NAMES",
     "inline_short_formula_values",
     "render_composite_fitness_block",
     "render_composite_fitness_oneliner",

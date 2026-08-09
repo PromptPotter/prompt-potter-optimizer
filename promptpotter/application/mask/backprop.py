@@ -139,4 +139,4 @@ def select_rewind_round(
     return best[1]
 
 
-__all__ = ["NodeStats", "accumulate_node_stats", "select_rewind_round"]
+__all__ = ["accumulate_node_stats", "select_rewind_round"]

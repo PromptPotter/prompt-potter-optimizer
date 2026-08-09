@@ -17,7 +17,8 @@ from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import rf_dedup_key
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import (
     RoundParent,
     RoundResult,
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Cycle", "CycleRoundState"]
+__all__ = ["Cycle"]
 
 
 def _origin_round(

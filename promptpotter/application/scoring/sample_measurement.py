@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 import httpx
 
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
-from promptpotter.application.scoring.metrics import find_rank
+from promptpotter.application.scoring.diagnostics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
@@ -109,12 +109,7 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = [
-    "compare_rerun",
-    "execute_stale_data_protocol",
-    "find_gt_rank",
-    "measure_sample",
-]
+__all__ = ["execute_stale_data_protocol", "measure_sample"]
 
 # Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
 # ``reasoning_trace`` = the task model's chain-of-thought (head-capped at the

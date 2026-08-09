@@ -247,5 +247,4 @@ __all__ = [
     "extract_parsed_json",
     "parse_response_content",
     "try_groq_json_validate_repair",
-    "try_parse_json",
 ]

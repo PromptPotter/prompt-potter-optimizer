@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NoiseFloorError", "NoiseFloorOutcome", "measure_noise_floor"]
+__all__ = ["NoiseFloorError", "measure_noise_floor"]
 
 
 class NoiseFloorError(Exception):

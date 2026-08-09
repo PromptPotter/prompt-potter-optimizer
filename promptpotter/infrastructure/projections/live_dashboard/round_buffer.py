@@ -16,7 +16,7 @@ class RoundBuffer:
     p_best_top: list[dict[str, Any]] = field(default_factory=list)
 
     def reset(self, round_num: int) -> None:
-        """L1_GENERATE:enter clears the candidate buffer; historical rounds[] is untouched."""
+        """A new round number clears the candidate buffer; historical rounds[] is untouched."""
         self.round_num = round_num
         self.candidates = {}
         self.p_best_top = []
@@ -73,6 +73,9 @@ class RoundBuffer:
         running = result.get("_running")
         if isinstance(running, dict):
             self.slot(ci, ct)["running"] = running
+        # The walk's length — a live row's denominator, known nowhere else until the score
+        # report lands.
+        self.slot(ci, ct)["expected_samples"] = qt
         self.slot(ci, ct)["samples"].append(
             {
                 "qi": qi,

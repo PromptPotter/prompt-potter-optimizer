@@ -25,6 +25,11 @@ from promptpotter.application.optimizer_prompt_ranking import (
     RankedOptimizerPrompt,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import (
+    DashboardCandidate,
+    RoundSummary,
+    RoundSummaryCandidate,
+)
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVariance, OuterVerdict
@@ -41,8 +46,6 @@ from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
     RoundResult,
-    RoundSummary,
-    RoundSummaryCandidate,
     ScoreboardRow,
     ScoredCandidate,
     SpendBucket,
@@ -51,10 +54,12 @@ from promptpotter.domain.results import (
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,
+    CurrentRound,
     DashboardError,
     InFlightCall,
     LiveDashboardState,
     LoopWarning,
+    PobbBlock,
     RunLimits,
 )
 from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
@@ -69,29 +74,64 @@ from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
     CycleListEntry,
     CyclesResponse,
+    MachineHolder,
+    MachineStatusResponse,
     SpawnedBy,
+)
+from promptpotter.presentation.api.routers.auth import (
+    ActivityBucket,
+    ActivityResponse,
+    ConnectedAccount,
+    MeResponse,
+    QuotaStatus,
+    UserSettings,
+)
+from promptpotter.presentation.api.routers.backends import (
+    BackendHealthResponse,
+    BackendResponse,
 )
 from promptpotter.presentation.api.routers.campaigns.files import (
     FileContentResponse,
     FileEntry,
     FilesResponse,
 )
-from promptpotter.presentation.api.routers.campaigns.registry import (
+from promptpotter.presentation.api.routers.campaigns.manifests import (
+    CampaignDetailResponse,
     CampaignListResponse,
     CampaignSummary,
+    ConfigCoupling,
+    ConfigEstimandGroup,
+    ConfigKnob,
+    ConfigMapResponse,
+    MechanismGroup,
+    MechanismSchemaResponse,
+    MechanismToggle,
 )
-from promptpotter.presentation.api.routers.datasets import (
-    DatasetItem,
+from promptpotter.presentation.api.routers.campaigns.storage import (
+    CampaignStorageResponse,
+    DatasetStorageEntry,
+    DatasetStorageResponse,
+    WorkspaceStorageEntry,
+    WorkspaceStorageResponse,
+)
+from promptpotter.presentation.api.routers.datasets.index import (
+    DatasetIndexEntry,
+    DatasetIndexResponse,
     DatasetPipelineResponse,
+)
+from promptpotter.presentation.api.routers.datasets.leaderboard import (
+    DatasetItem,
     DatasetPreviewResponse,
     MeasurementDot,
     MeasurementSeriesResponse,
     SampleSeries,
 )
+from promptpotter.presentation.api.routers.origins import OriginEntry, OriginListResponse
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
+    DashboardCandidate,
     RoundSummaryCandidate,
     DegradationHealth,
     OuterCellEffect,
@@ -123,6 +163,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RunLimits,
     InFlightCall,
     BackfillLogEntry,
+    PobbBlock,
+    CurrentRound,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
@@ -140,7 +182,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CyclesResponse,
     # --- commands middleware ---
     CommandAcceptedBody,
-    # --- campaigns/registry router ---
+    # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
     # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---
@@ -162,6 +204,41 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RayResponse,
     # --- verify router ---
     DiagnosticRunListResponse,
+    # --- auth router: the account modal (Profile / Security / Activity / Preferences).
+    # Hand-mirrored in `reads.ts` until now, which is how `MeResponse` grew `capabilities`
+    # and `terms_*` in two places at once. ---
+    ConnectedAccount,
+    MeResponse,
+    QuotaStatus,
+    UserSettings,
+    ActivityBucket,
+    ActivityResponse,
+    # --- backends + machine status ---
+    BackendResponse,
+    BackendHealthResponse,
+    MachineHolder,
+    MachineStatusResponse,
+    # --- dataset + origin registries (the "New campaign" pickers) ---
+    DatasetIndexEntry,
+    DatasetIndexResponse,
+    OriginEntry,
+    OriginListResponse,
+    # --- storage rollups. The webapp had a `StorageLeaves` mixin the server does not have;
+    # generating these flat deletes it rather than mirroring a shape nothing declares. ---
+    CampaignStorageResponse,
+    WorkspaceStorageEntry,
+    WorkspaceStorageResponse,
+    DatasetStorageEntry,
+    DatasetStorageResponse,
+    # --- campaign manifest detail + the two self-describing schemas the panels render ---
+    CampaignDetailResponse,
+    MechanismToggle,
+    MechanismGroup,
+    MechanismSchemaResponse,
+    ConfigKnob,
+    ConfigEstimandGroup,
+    ConfigCoupling,
+    ConfigMapResponse,
 ]
 
 _OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"

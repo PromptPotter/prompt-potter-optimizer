@@ -13,9 +13,7 @@ from promptpotter.application.optimization.escalation.firing import escalate_l2
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
-from promptpotter.application.optimization.validators.l1_strict import (
-    DROPPED_MANDATORY_PLACEHOLDER,
-)
+from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.output import (
     write_hard_samples_artifacts,
     write_log_md,
@@ -30,7 +28,11 @@ from promptpotter.domain.results_health import (
     compute_round_health,
     evidence_starved_node,
 )
-from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
+from promptpotter.domain.run_records import (
+    LedgerAbility,
+    PhaseRecord,
+    ResumeCheckpointRecord,
+)
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful
 
@@ -95,20 +97,17 @@ async def escalate_or_stop(
 def _round_close_facts(round_result: RoundResult) -> dict[str, Any]:
     """What the CLOSE knows and no candidate could — the adopted individual and each row's θ / CI.
     **Keyed by LABEL** (`C{round}.{idx}`): a lineage id is re-minted on resume, so an id join drops it."""
-    abilities: dict[str, dict[str, float]] = {}
+    abilities: dict[str, LedgerAbility] = {}
     for cs in round_result.candidate_scores:
-        vals = {
-            key: value
-            for key, value in (
-                ("theta", cs.theta),
-                ("theta_se", cs.theta_se),
-                ("composite_ci_lo", cs.composite_ci_lo),
-                ("composite_ci_hi", cs.composite_ci_hi),
-            )
-            if value is not None
-        }
-        if vals:
-            abilities[cs.label] = vals
+        ability = LedgerAbility(
+            theta=cs.theta,
+            theta_se=cs.theta_se,
+            composite_ci_lo=cs.composite_ci_lo,
+            composite_ci_hi=cs.composite_ci_hi,
+            ci_scale=cs.ci_scale,
+        )
+        if ability != LedgerAbility():
+            abilities[cs.label] = ability
     winner_label = next(
         (
             cs.label
@@ -127,11 +126,25 @@ def persist_round(
     session: Session,
 ) -> None:
     """The ledger emit is unconditional — every completed round lands on the ledger."""
+    # Two destinations, two rules — collapsing them is what made the round document lie.
+    # LEDGER: everything pending goes out here, which is its chronological place (each record
+    # carries its own ``round``, and a decision made after round N closed happened before
+    # round N+1 did). DOCUMENT: only the decisions this round made. `to_dict()` drops `round`,
+    # so a foreign record folded into `decisions` is indistinguishable from a native one — and
+    # `replay_decisions` re-derives every REPLAYED kind in that list against THIS round's
+    # measurements. Draining the whole buffer filed 42 `round_winner` and 76 `elimination_cut`
+    # records under a round that did not make them, so resume's divergence seam was comparing
+    # one round's decision to another round's data, silently, in both directions.
+    # The ledger is the SoT and the document a projection of it: a record stamped for an
+    # EARLIER round has missed its file, and `restamp::refile_round_decisions` rebuilds every
+    # document from the stamps rather than this seam growing a back-reach into a closed file.
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
-        round_result.decisions.extend(d.to_dict() for d in flushed)
+        round_result.decisions.extend(
+            d.to_dict() for d in flushed if d.round is None or d.round == round_num
+        )
 
     if cycle.axes is not None:
         round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
@@ -179,6 +192,25 @@ def persist_round(
 
     if _rr := session.state.audit_projection:
         _rr.flush()
+
+
+def flush_pending_decisions(cycle: Cycle, session: Session) -> int:
+    """Teardown's half of ``persist_round``'s drain — the ledger only, since no round is closing.
+
+    Escalation fires AFTER the round it belongs to has already persisted, so its decision waits
+    for the next ``persist_round``. A cycle that stops right there — max_rounds, a terminate
+    proposal, a spend halt, Ctrl+C — had no next round, and the record died in memory: 8 of the
+    89 L2 fires on disk have no decision beside them. Nothing raised; the run simply forgot it
+    had escalated, which on resume is a re-spent budget.
+    """
+    if not cycle.pending_decisions or (ledger := session.state.ledger) is None:
+        return 0
+    pending = list(cycle.pending_decisions)
+    cycle.pending_decisions.clear()
+    with graceful("Decision flush failed"):
+        for d in pending:
+            ledger.append(d)
+    return len(pending)
 
 
 def count_positive_yield_axes(cycle: Cycle) -> int | None:
@@ -272,9 +304,9 @@ async def post_round(
 
 __all__ = [
     "close_round",
-    "count_positive_yield_axes",
     "emit_origin_round",
     "escalate_or_stop",
+    "flush_pending_decisions",
     "persist_round",
     "post_round",
 ]

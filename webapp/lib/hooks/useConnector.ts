@@ -41,8 +41,8 @@ import {
   fetchBackendHealth,
   fetchBackends,
   fetchDatasetPipeline,
-  type BackendHealth,
-  type BackendInfo,
+  type BackendHealthResponse,
+  type BackendResponse,
   type NodeConfigParam,
   type NodeOutputSchema,
 } from "@/lib/api";
@@ -77,7 +77,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
   // Poll health only with a confirmed session; a 401 re-probes /auth/me so
   // the loop halts when the session dies instead of storming (useAuthGate).
   const { authed, onAuthError } = useAuthGate();
-  const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const [backends, setBackends] = useState<BackendResponse[]>([]);
   const [view, setView] = useState<PipelineView | null>(null);
   // The dataset the resolved fields below were fetched FOR, plus whether that
   // fetch failed. Stamping the key (rather than resetting state in the effect)
@@ -202,7 +202,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
   // GET /status; the connector node shows the result as a dot + footer line.
   // Separate from the 2 s dashboard poll — this is "is the dependency up", not
   // "is the optimizer scoring". Drop stale health when the backend changes.
-  const [health, setHealth] = useState<BackendHealth | null>(null);
+  const [health, setHealth] = useState<BackendHealthResponse | null>(null);
   const [prevActiveId, setPrevActiveId] = useState(activeId);
   if (activeId !== prevActiveId) {
     setPrevActiveId(activeId);
@@ -245,7 +245,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     // "termnorm" rows. Collapse to one row per (backend_type, base_url); active
     // first so it owns its endpoint and never re-appears under "Other backends".
     // (Upstream fix: stop the per-dataset registration so this is a no-op.)
-    const distinct: BackendInfo[] = [];
+    const distinct: BackendResponse[] = [];
     const seenEndpoints = new Set<string>();
     for (const b of active ? [active, ...backends.filter((b) => b !== active)] : backends) {
       const key = `${b.backend_type}|${b.base_url}`;

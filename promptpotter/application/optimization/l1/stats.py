@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from promptpotter.application.optimization.validators.l1_behavior import CheckResult
+from promptpotter.application.optimization.validators.behavior_base import CheckResult
 from promptpotter.domain.results import RoundResult
 
 __all__ = ["HEADLINE_ACC", "L1Stats", "compute_l1_stats", "first_round_at_threshold"]

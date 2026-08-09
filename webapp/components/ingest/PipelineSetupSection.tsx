@@ -7,7 +7,7 @@ import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
-import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
+import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { searchPoint } from "@/lib/derivations";
 
 // The pipeline block in "Set up campaign" — the SAME rendering the Chat tab uses

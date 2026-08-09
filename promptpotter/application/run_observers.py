@@ -4,16 +4,14 @@ wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, 
 from __future__ import annotations
 
 from contextvars import Token
-from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.origin import (
-    build_campaign_emitter,
-)
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
@@ -34,25 +32,49 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live.display import LiveDisplay
 
-__all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
+__all__ = [
+    "QUERY_PREVIEW_CHARS",
+    "ForkInfo",
+    "RunCallbacks",
+    "RunObservers",
+    "build_campaign_emitter",
+    "build_run_observers",
+]
 
 
-# Keys in ``PhaseEvent.data`` that carry live runtime references the JSON
-# serializer can't walk, or reconstructable bulk no reader consumes off disk:
-# ``env`` (the ``Session`` — BackendStore + LangfuseLogger) and ``state`` (the
-# live ``Cycle``, which reaches the same handles via its ledger + scoring
-# wiring); and ``dataset`` (the full resolved sample list — 400 query/
-# ground_truth pairs the INIT enter/exit records would otherwise embed twice,
-# ~870 KB each). View derivation in ``RunCallbacks.on_phase`` consumes them
-# before they're stripped (``_init_enter`` reads ``env``/``config``/``dataset``,
-# keeping only ``dataset_size=len(dataset)`` on the typed view), and the two
-# ledger subscribers that read origin state at INIT:exit (LiveDashboardView,
-# LiveDisplay) take it off ``payload['view']`` instead — so nothing reads these
-# off the persisted/streamed record. The dataset's canonical home is
-# ``datasets/{slug}/`` + the langfuse mirror; the ledger needs no copy. Without
-# stripping ``state`` the SSE projection's ``model_dump(mode="json")`` raises on
-# the BackendStore.
-_DATA_KEYS_RUNTIME_ONLY = frozenset({"env", "state", "dataset"})
+# What ``current_query_payload`` shows the operator (``LiveStateCard``). The reader used to
+# slice this off a full query it was handed; the cap belongs at the writer, where the record
+# is decided.
+QUERY_PREVIEW_CHARS = 120
+
+
+def build_campaign_emitter(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    origin_accuracy: float,
+    resumed_from_round: int | None = None,
+    recorder: AuditTrailView | None = None,
+    seed_from_cycle_id: str | None = None,
+    langfuse_trace_url: str | None = None,
+) -> LiveDashboardView | None:
+    """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
+    cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
+    when the session carries no cycle to write into — the type says so now; it used to say ``Any``."""
+    opt = campaign_config.optimization
+    return LiveDashboardView.for_session(
+        session.hop,
+        tenant_root=session.tenant_root,
+        session_id=session.session_id,
+        l1_patience=opt.l1_patience,
+        n_variants=opt.n_variants,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        headline_metric=campaign_config.headline_metric,
+        langfuse_trace_url=langfuse_trace_url,
+        resumed_from_round=resumed_from_round,
+        recorder=recorder,
+        seed_from_cycle_id=seed_from_cycle_id,
+    )
 
 
 @dataclass
@@ -71,22 +93,17 @@ class RunCallbacks:
 
     def on_phase(self, event: Any) -> None:
         view = from_phase_event(event, self._phase_ctx)
-        # View derivation has already consumed any live runtime references
-        # carried in ``event.data`` (the most opaque one is ``env=session``
-        # which holds the BackendStore + LangfuseLogger handles those classes
-        # can't serialize). Strip them before the record lands on the ledger so
-        # the on-disk dump stays clean JSON (the SSE tail re-reads it verbatim).
-        # The typed ``view`` rides the in-memory subscribers (display reads it
-        # directly); Pydantic serializes it to its wire dict on persist.
-        # ``payload["data"]`` is only consumed live, in-memory, where the caller
-        # still holds the originals.
-        safe_data = {k: v for k, v in event.data.items() if k not in _DATA_KEYS_RUNTIME_ONLY}
+        # ``data`` rides the in-memory-only field, so the on-disk dump stays clean JSON
+        # (the SSE tail re-reads it verbatim) without a key filter deciding which of the
+        # caller's handles serialize. The typed ``view`` is the record; it is capped, and
+        # every disk re-reader takes phase state from it.
         self._emit(
             PhaseRecord(
                 phase=str(event.phase),
                 event=str(event.event),
                 round=event.round,
-                payload={"view": view, "data": safe_data},
+                data=event.data,
+                payload={"view": view},
             )
         )
 
@@ -115,7 +132,7 @@ class RunCallbacks:
                     },
                     "l1_stall_count": l1_stall_count,
                     "hearts": hearts,
-                    "phase_ctx": asdict(self._phase_ctx),
+                    "phase_ctx": self._phase_ctx.ledger_anchors(),
                 },
             )
         )
@@ -175,7 +192,7 @@ class RunCallbacks:
             "candidate_scored",
             idx,
             total,
-            {"scores": scores, "phase_ctx": asdict(self._phase_ctx)},
+            {"scores": scores, "phase_ctx": self._phase_ctx.ledger_anchors()},
         )
 
     def on_sample_started(
@@ -189,13 +206,15 @@ class RunCallbacks:
         sample_lookahead: int = 1,
     ) -> None:
         """``sample_lookahead`` is what the walk held in flight as it launched this one — what the loop
-        did, not what the operator's flag asked for."""
+        did, not what the operator's flag asked for. ``query_preview`` is capped HERE: its sole reader
+        showed the first 120 chars, so the rest was never a record of anything — the whole query is a
+        dataset fact, on disk at ``datasets/{slug}/`` and in every measurement row."""
         self._snapshot(
             "sample_started",
             ci,
             ct,
             {
-                "query_text": query_text,
+                "query_preview": query_text[:QUERY_PREVIEW_CHARS],
                 "sample_id": int(sample_id),
                 "sample_lookahead": int(sample_lookahead),
             },
@@ -204,7 +223,14 @@ class RunCallbacks:
         )
 
     def on_sample_scored(self, ci: int, ct: int, result: dict[str, Any], qi: int, qt: int) -> None:
-        self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
+        self._snapshot(
+            "sample_scored",
+            ci,
+            ct,
+            {"result": ledger_sample_view(cast("QueryMeasurement", result))},
+            sample_idx=qi,
+            sample_total=qt,
+        )
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: PoBBSnapshot) -> None:
         """Per-sample PoBB snapshot — archive-only, not divergence-gated. ``snapshot`` stays TYPED: an
@@ -368,6 +394,16 @@ def build_run_observers(
         )
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
+
+    # `for_session` answers `None` on an incomplete address — the two halves the guard above
+    # already covers, plus `tenant_root` / `session_id`. Binding that None to the ledger would
+    # raise here anyway; saying which field is empty costs one line and names the cause.
+    if dashboard is None:
+        raise RuntimeError(
+            "build_run_observers: LiveDashboardView.for_session returned None — the session "
+            f"address is incomplete (tenant_root={session.tenant_root!r}, "
+            f"session_id={session.session_id!r}, hop={session.hop})"
+        )
 
     # Profile A — the outbound SSE highway is served by tailing the on-disk
     # ledger (``CycleLedgerTail``), cross-process, so there's nothing to register

@@ -22,7 +22,7 @@ PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate, on
 
 | Channel | Path | Format |
 |---|---|---|
-| Live dashboard | `dashboard.json::current_round.nodes.candidates[].p_best` (+ `_delta`/`_history`/`_n_samples`) + `current_round.p_best_top` | scalar floats |
+| Live dashboard | `dashboard.json::current_round.pobb` — `{current_id, n_samples, leader_prob, posterior_width, top}` | scalar floats + a top-5 list |
 | CLI / notebook | stderr | `p_best q14: *c042* 44.0%▲ c017 28.4%▼ …` |
 | Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final % |

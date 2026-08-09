@@ -5,7 +5,7 @@
 //   - live per-LLM-node observations (`dashboard.json::current_round.nodes`)
 //
 // `BackendConnection` (promptpotter/domain/backend.py) is the mother
-// object on the Python side; `BackendInfo` is its wire shape. The match
+// object on the Python side; `BackendResponse` is its wire shape. The match
 // from dataset's `backend_name` → registered backend by `name` happens
 // in `lib/hooks/useConnector.ts` (one place, one comment), so no
 // component is doing case-sensitive string lookups in its JSX.
@@ -19,7 +19,7 @@
 // true up/down. `isLive` (live per-node observations from the run) is a separate
 // signal: whether the optimizer is actively scoring through this connector.
 
-import type { BackendHealth, BackendInfo, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type { BackendHealthResponse, BackendResponse, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
 // How the `GET /datasets/{name}/pipeline` read went. A null `view` alone cannot
@@ -36,8 +36,8 @@ export interface ConnectorView {
   // Why `view` is what it is. Pairs with `view`; never infer state from `view`
   // being null.
   pipelineStatus: PipelineStatus;
-  active: BackendInfo | null;
-  others: BackendInfo[];
+  active: BackendResponse | null;
+  others: BackendResponse[];
   baseUrl: string | null;
   isTls: boolean | null;
   currentNodes: Record<string, NodeDataLike>;
@@ -49,7 +49,7 @@ export interface ConnectorView {
   phase: string | null;
   // Connector reachability from the slow `/backends/{id}/health` probe. Null
   // until the first probe lands (or when no backend is resolved).
-  health: BackendHealth | null;
+  health: BackendHealthResponse | null;
   // The FULL operator-editable config surface per node (model/temperature/
   // thinking/max_tokens/provider) the steer + read-only node-detail panels
   // render, from `GET /datasets/{name}/pipeline`. Null until the dataset overlay

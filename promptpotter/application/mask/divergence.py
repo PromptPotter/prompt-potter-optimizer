@@ -117,4 +117,4 @@ def _mark_subtree_divergent(
         _mark_subtree_divergent(child, children, divergent)
 
 
-__all__ = ["Divergence", "DivergenceResult", "Verdict", "VerdictOutcome", "find_divergences"]
+__all__ = ["Divergence", "Verdict", "VerdictOutcome", "find_divergences"]

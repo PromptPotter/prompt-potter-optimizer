@@ -13,11 +13,7 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import (
-    ScoredCandidate,
-    is_leader_eligible,
-    merge_known_outcomes,
-)
+from promptpotter.domain.results import ScoredCandidate, is_leader_eligible, merge_known_outcomes
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores

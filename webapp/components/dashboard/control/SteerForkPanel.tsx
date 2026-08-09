@@ -26,8 +26,8 @@ import {
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchCampaignDetail } from "@/lib/api";
 import type { SelectedCandidate } from "@/lib/types";
-import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
-import { NodeConfigEditor } from "./NodeConfigEditor";
+import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
+import { NodeConfigEditor } from "@/components/shell/node-surface/NodeConfigEditor";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The one operator-steered fork flow (decision H): the operator has selected a

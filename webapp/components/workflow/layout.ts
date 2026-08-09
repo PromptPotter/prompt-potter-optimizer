@@ -76,22 +76,8 @@ export const EDGES: Record<string, EdgeGeometry> = {
                                 label: "plan", labelXY: [244, 100] },
 };
 
-// The single authoritative "which optimizer node is live right now" id — the
-// one signal every surface (canvas pulse, RemoteBar, TopStrip, node detail)
-// reads. The in-flight optimizer LLM call names its node directly
-// (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`), so
-// every LLM-call node lights up reliably — including critique and the L2/L3
-// escalation nodes that the old `dash.state` enum never reached (no writer ever
-// emitted `state="l1_critique"`). Scoring fires no optimizer LLM call, so the
-// scoring states map to `l1_score`; the pre-scoring origin state → `checkin`.
-export function activeNodeId(
-  inFlightNode: string | null | undefined,
-  state: string | null | undefined,
-): string | null {
-  if (inFlightNode) return inFlightNode;
-  const s = state ? String(state).toLowerCase() : "";
-  if (s === "scoring" || s === "between_samples" || s === "between_candidates") return "l1_score";
-  // Origin scoring folds into the merged checkin node (pre-scoring window only).
-  if (s === "origin") return "checkin";
-  return null;
-}
+// "Which optimizer node is live right now" is SERVED — `dash.current_round.active_node`
+// (`live_dashboard/view.py::_active_node`), over a map that is TOTAL across the state
+// vocabulary. Derived here it covered three states, and every other one resolved to "nothing
+// running": the canvas went dark between two optimizer calls and stayed dark for the whole
+// `l2_context` reasoning call. Do not re-derive it.

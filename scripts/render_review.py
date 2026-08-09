@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.output import render_review_md
+from promptpotter.application.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 

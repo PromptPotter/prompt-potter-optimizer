@@ -23,50 +23,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra stats --extra dev --frozen
 
-      - name: Lint
-        run: uv run ruff check promptpotter/ tests/
-
-      - name: Format check
-        run: uv run ruff format --check promptpotter/ tests/
-
-      - name: Dependency check
-        run: uv run deptry .
-
-      - name: Type check
-        run: uv run mypy promptpotter/
-
-      # Fix by moving the shared piece into application/ — presentation imports
-      # upward. The allowlist is CLI-seam debt; shrink it to zero.
-      - name: Layering guard — application must not import presentation
-        run: |
-          ! grep -rn "from promptpotter.presentation\|import promptpotter.presentation" promptpotter/application/ --include=*.py \
-            | grep -vE "presentation\.(views\.live\.display import LiveDisplay|cli\.session import (SessionCtx|load_session))"
-
-      # Both surfaces are generated from Pydantic models. Ungated, a drifted
-      # model ships a stale schema the webapp typechecks against and the LLM is
-      # asked to fill.
-      - name: Types contract (Pydantic → TS)
-        run: |
-          uv run python scripts/build_ts_types.py
-          git diff --exit-code webapp/lib/api/types.generated.ts
-
-      - name: Schema contract (Pydantic → optimizer resolved_schemas)
-        run: |
-          uv run python scripts/build_optimizer_schemas.py
-          git diff --exit-code promptpotter/assets/optimizer/resolved_schemas.json
-
-      # The SERVED surface. `m12-api-openapi.yaml` is hand-written and schema-first
-      # (it declares command kinds before they are wired), so it cannot also describe
-      # what runs — and it did not: 35 served endpoints, the whole /auth surface among
-      # them, appeared in no document at all. The declared/wired partition it DOES own
-      # is pinned separately by test_integrity.py.
-      - name: API contract (FastAPI → served openapi)
-        run: |
-          uv run python scripts/build_openapi.py
-          git diff --exit-code docs/specs/openapi.generated.json
-
-      - name: Tests
-        run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
+      # One step, and deliberately: `scripts/gate.py` is the single declaration of
+      # what this repo checks, so the desk and CI cannot drift apart. It also runs
+      # every check even after one fails — as named steps these masked each other,
+      # and each hidden failure cost another push to discover.
+      - name: Gate
+        run: uv run python scripts/gate.py --py
 
   # The wheel is a shape we ship and never run. In a checkout every path function takes
   # its checkout branch, so `assets/benchmarks/` and `assets/webapp/` — the trees the
@@ -111,10 +73,6 @@ jobs:
   webapp:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: webapp
-
     steps:
       - uses: actions/checkout@v5
 
@@ -126,30 +84,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: webapp
 
-      - name: Lint
-        run: npm run lint
-
-      # `next build` does not hard-fail on every type error, so this is what
-      # makes tsconfig.json's strict mode enforced.
-      - name: Type check
-        run: npx tsc --noEmit
-
-      # Reader-side derivations against frozen cycle fixtures — see
-      # docs/developer/cycle-fixtures.md.
-      - name: Tests
-        run: npm run test
-
-      # Two surfaces re-deriving the candidate list is what produced the
-      # lineage/fitness alignment bug. New consumers go through
-      # useRoundCandidates() / lib/derivations/round-candidates.ts; the three
-      # named components are migration debt, each owing its own derivation.
-      - name: Anti-rot — no liveL1Candidates outside the spine
-        run: |
-          ! grep -RnlE 'liveL1Candidates' components/ lib/ app/ \
-            | grep -vE '__tests__/|FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx|lib/poll\.tsx|lib/derivations/round-candidates\.ts'
-
-      # DEPLOY_BUILD=1 validates the shipped artifact: React Compiler pass +
-      # source maps. Bare `npm run build` is the local preview path and skips both.
-      - name: Build
-        run: npm run build:deploy
+      # Same one list as the `check` job — the webapp half of it. Runs from the
+      # repo root, and needs no uv: these checks drive node, so the interpreter
+      # they are launched from cannot change their answer.
+      - name: Gate
+        run: python3 scripts/gate.py --web

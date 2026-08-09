@@ -328,7 +328,6 @@ def closed_label_set(
 
 
 __all__ = [
-    "MAX_ENUMERATED_LABELS",
     "MAX_SAMPLES",
     "IngestError",
     "Table",

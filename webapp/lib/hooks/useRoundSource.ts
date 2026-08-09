@@ -23,20 +23,16 @@ interface UseRoundSourceState extends UseRoundFileState {
   isLive: boolean;
 }
 
-// A round is live only while it is the in-flight round AND has not yet
-// closed into `dash.rounds[]`. The round counter advances at scoring/close,
-// so `current_round.round` lingers on an already-closed round number between
-// a round closing and the next round scoring (and after an interrupt during
-// next-round prep). Equality alone would then misroute a closed round to the
-// in-flight projection — which by then holds the *next* round's partial prep,
-// not the closed round's data. The `closed` check is the half topology can't
-// see. NOTE this asks a DIFFERENT question than `round-axis`/the candidate
-// spine (which gate on `closedRoundNumbers` — closed *with fitness data*):
-// here "closed" = "the round file is on disk", and the round file is written
-// at every round boundary, including an empty L2/L3-terminal round. So this
-// stays an unfiltered presence check over `dash.rounds[]` — an empty closed
-// round is still historical (read its file, not live `dash`).
-export function isLiveRound(dash: DashboardSnapshot | null, round: number | null): boolean {
+// Does a round FILE exist for this round yet — the one question this module asks, and the
+// reason it is not plain equality against `current_round.round`: `rounds/round_NNNN.json` is
+// written at round close, so a closed round has a file to read even while the live block still
+// names it. An unfiltered presence check over `dash.rounds[]` on purpose — "closed" here means
+// "on disk", and the round file is written at every boundary including an empty
+// L2/L3-terminal round, which `closedRoundNumbers` (closed *with fitness data*) excludes.
+//
+// Private: `useRoundNodes` used to pick the AUDIT twin with it, a different question wearing
+// this answer. That resolver selects on `current_round.round` now.
+function isLiveRound(dash: DashboardSnapshot | null, round: number | null): boolean {
   const closed = (dash?.rounds ?? []).some((r) => r.round === round);
   return round != null && round === roundOf(dash) && !closed;
 }

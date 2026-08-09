@@ -642,11 +642,11 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     And `description` is free only because no parser reads it — a field NAME is the contract,
     so an invented field must be dropped before the wire, never grafted on.
     """
-    from promptpotter.application.optimization.validators.l1_strict import (
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
         build_l1_response_schema,
-        validate_overrides,
     )
-    from promptpotter.domain.opt_search_point import fold_schema_descriptions
+    from promptpotter.application.optimization.validators.l1_strict import validate_overrides
+    from promptpotter.domain.pipeline_overlay import fold_schema_descriptions
 
     schema = _pipeline_schema("justlogic-d234")
     node = schema.get_node("llm_only")
@@ -705,10 +705,10 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     the candidate's fitness is attributed to an axis that does not exist. Same set, two
     readers: a graft on one side alone is either an unhonoured edit or an unguarded one.
     """
-    from promptpotter.application.optimization.validators.l1_strict import (
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
         build_l1_response_schema,
-        validate_overrides,
     )
+    from promptpotter.application.optimization.validators.l1_strict import validate_overrides
 
     schema = _pipeline_schema("promptpotter-self")
     emitted = build_l1_response_schema(schema, citable_fields=())["properties"]["variants"][
@@ -811,16 +811,16 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     stay off: if the old key still validated, a rename the model ignored would look applied.
     """
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+        effective_l1_field_names,
+    )
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimization.dispatch.schemas import (
         L1GenerateOutput,
         build_l1_response_model,
-    )
-    from promptpotter.application.optimization.validators.l1_strict import (
-        build_l1_response_schema,
-        effective_l1_field_names,
     )
     from promptpotter.application.runner.entry import _apply_config_overrides
     from promptpotter.domain.run_records import ConfigOverrides
@@ -1392,13 +1392,8 @@ def test_repeat_marker_reads_the_idea_not_the_field_it_was_written_into() -> Non
     to one field and still missed the cross-field repeat — the marker fires, reads plausibly,
     and means the opposite of what it says.
     """
-    from promptpotter.domain.opt_search_point import (
-        IDEA_MATCH_MARK,
-        same_idea,
-    )
-    from promptpotter.domain.opt_search_point import (
-        idea_fingerprint as _idea_fingerprint,
-    )
+    from promptpotter.domain.candidate_diff import IDEA_MATCH_MARK, same_idea
+    from promptpotter.domain.candidate_diff import idea_fingerprint as _idea_fingerprint
 
     def _same_idea(a: frozenset[str], b: frozenset[str]) -> bool:
         return same_idea(a, b, threshold=IDEA_MATCH_MARK)
@@ -1748,8 +1743,8 @@ def test_claude_md_claims_resolve() -> None:
        stops the card becoming a second owner of the rule it indexes: the only content it
        may carry is a string that also exists as a heading.
     4. No banned token. A `file.py:120` reference rots on the next edit to that file and
-       cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo has
-       never had (`potter-debt-sweep/SKILL.md` says so itself).
+       cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo does
+       not have.
 
     (4) runs over **every tracked `docs/**/*.md` and `docs/**/*.yaml`**, not just the
     CLAUDE.md tree, because both its bans govern all docs rather than the contract-file

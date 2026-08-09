@@ -109,9 +109,4 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     )
 
 
-__all__ = [
-    "AuthoredDataset",
-    "load_dataset_campaign_config",
-    "read_authored_dataset",
-    "read_campaign_config_file",
-]
+__all__ = ["load_dataset_campaign_config", "read_authored_dataset", "read_campaign_config_file"]

@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.validators.l1_strict import INVARIANT_REASONS
-from promptpotter.domain.opt_search_point import node_config_items
+from promptpotter.domain.escalation_signals import INVARIANT_REASONS
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.rendering import display_fitness, round_winner_key
 
 if TYPE_CHECKING:
@@ -143,12 +143,6 @@ def _node_bottom(width: int = _NW) -> str:
 
 def _node_line(text: str) -> str:
     return f"│  {text}"
-
-
-def _node_lines(text: str) -> list[str]:
-    """``_node_line`` for a possibly-multi-line value — prefix EACH physical line, or an embedded newline
-    escapes the box and breaks the frame in both the terminal and ``latest.log``."""
-    return [_node_line(line) for line in text.split("\n")]
 
 
 def _node_block(label: str, *lines: str, label_right: str = "") -> str:

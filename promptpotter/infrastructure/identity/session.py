@@ -115,4 +115,4 @@ class OIDCSessionStore:
         return self._dir / f"{session_id}.json"
 
 
-__all__ = ["DEFAULT_SESSION_TTL_S", "OIDCSessionStore", "SessionData"]
+__all__ = ["OIDCSessionStore", "SessionData"]

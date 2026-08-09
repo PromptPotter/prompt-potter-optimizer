@@ -68,8 +68,10 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   `application/runner/inner/spawn.py::run_inner_cycle` (running a whole inner
   campaign is heavy orchestration — it belongs in `application/runner`, not the
   connector). That runner calls `run_optimization` in its **own `asyncio.Task`**
-  (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,
-  `_ABORT_CHECK` — isolate per task, not per call; the child gets a COPY, which is
+  (the three per-task ContextVars — `_CYCLE_LEDGER` + `_CURRENT_ROUND`
+  (`infrastructure/llm/telemetry.py`) and `_ABORT_CHECK`
+  (`infrastructure/llm/rate_limit.py` — two files, not one) — isolate per task,
+  not per call; the child gets a COPY, which is
   how `_ABORT_CHECK` carries the outer's pause into the inner run) under **sandboxed stores in a
   flat per-cycle registry `<workspace>/.inner/<key>/`**
   (`init_services(store=…)`; no active-pointer / capacity-1 collision). It is

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VerifyError", "VerifyOutcome", "verify_candidate"]
+__all__ = ["VerifyError", "verify_candidate"]
 
 
 class VerifyError(Exception):

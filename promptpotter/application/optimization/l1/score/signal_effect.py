@@ -227,4 +227,4 @@ def decode_signal_effect(
     )
 
 
-__all__ = ["CandidateOutcome", "SignalEffect", "decode_signal_effect"]
+__all__ = ["CandidateOutcome", "decode_signal_effect"]

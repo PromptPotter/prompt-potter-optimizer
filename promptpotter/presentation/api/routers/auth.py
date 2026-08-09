@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import UTC, datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Path, Query, Request
@@ -105,11 +105,19 @@ class ActivityBucket(StrictModel):
     series_requests: dict[str, int] = Field(default_factory=dict)
 
 
+# The two closed sets the activity read is parameterized by. Declared HERE, on the response
+# model, because the server owns them: they were a query-pattern regex plus a dict's keys, so
+# the only NAMED version of either lived in the browser and could drift without a gate.
+# `_WINDOW_SECONDS` below is keyed by `ActivityWindow` and is what makes the set closed.
+ActivityWindow = Literal["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]
+ActivityGroupBy = Literal["model", "api_key"]
+
+
 class ActivityResponse(StrictModel):
     """Time-bucketed spend / requests / tokens over the requested window."""
 
-    window: str
-    group_by: str  # "model" | "api_key"
+    window: ActivityWindow
+    group_by: ActivityGroupBy
     since: float
     until: float
     buckets: list[ActivityBucket]

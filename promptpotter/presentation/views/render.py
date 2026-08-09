@@ -3,8 +3,6 @@ live in ``promptpotter.application.views.render``; import those from there."""
 
 from __future__ import annotations
 
-import json
-
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -20,7 +18,7 @@ from promptpotter.application.views.view_models import (
     RoundStartView,
     SpDiffView,
 )
-from promptpotter.domain.opt_search_point import group_diff_keys
+from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.rendering import round_winner_key
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -32,7 +30,6 @@ from promptpotter.presentation.views.display import (
     _fmt_delta,
     _node_block,
     _node_line,
-    _node_lines,
     _round_rule,
     _scoreboard,
     fmt_pvalue,
@@ -261,18 +258,14 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     if v.changes_description:
         out.append(f"    {v.changes_description}")
 
-    if v.l2_prompt:
-        out.append(f"\n  {CYAN}--- L2 PROMPT (sent to LLM) ---{RESET}")
-        out.extend(f"  {CYAN}│{RESET} {line}" for line in v.l2_prompt.split("\n"))
-        out.append(f"  {CYAN}--- END PROMPT ---{RESET}")
-
-    if v.l2_response_json is not None:
-        out.append(f"\n  {CYAN}--- L2 RESPONSE (raw JSON) ---{RESET}")
-        out.extend(
-            f"  {CYAN}│{RESET} {line}"
-            for line in json.dumps(v.l2_response_json, indent=2).split("\n")[:40]
-        )
-        out.append(f"  {CYAN}--- END RESPONSE ---{RESET}")
+    # Address the I/O, never re-print it — and address its CANONICAL home. The audit twin
+    # assembles the whole call human-readably and uncapped; this record carries no copy of it,
+    # so a dump here had nothing local to quote and the old `[:40]` on the response amputated
+    # what it did quote. `AuditTrailView` owns deep LLM I/O; this line points at it.
+    out.append(
+        f"  {CYAN}L2 call{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
+        f"::nodes.l2_context (prompt · response · usage){RESET}"
+    )
     return "\n".join(out)
 
 
@@ -379,27 +372,34 @@ def render_sp_diff(view: SpDiffView) -> str:
         return "\n".join(warning_lines) if warning_lines else ""
 
     lookup: dict[str, str] = {}
-    legend: list[tuple[str, str]] = []
+    # code → (byte length, the flat keys it appears under, the column labels carrying it). Keyed
+    # by VALUE like the codes are, so one origin prompt shared by Start/Parent/candidates stays a
+    # single row instead of one per column.
+    legend: dict[str, tuple[int, set[str], list[str]]] = {}
     code_idx = 0
 
-    def _get_code(val: str) -> str:
+    def _get_code(val: str, key: str, column: str) -> str:
         nonlocal code_idx
-        if val in lookup:
-            return lookup[val]
-        code = chr(ord("a") + code_idx)
-        code_idx += 1
-        lookup[val] = f"[{code}]"
-        legend.append((f"[{code}]", val))
-        return f"[{code}]"
+        code = lookup.get(val)
+        if code is None:
+            code = f"[{chr(ord('a') + code_idx)}]"
+            code_idx += 1
+            lookup[val] = code
+            legend[code] = (len(val), set(), [])
+        _, keys, cols = legend[code]
+        keys.add(key)
+        if column not in cols:
+            cols.append(column)
+        return code
 
-    def _cell(val: str | None, prior: str | None) -> str:
+    def _cell(val: str | None, prior: str | None, key: str, column: str) -> str:
         if val is None:
             return _SP_DIFF_ABSENT
         if val == prior:
             return _SP_DIFF_UNCHANGED
         if len(val) <= _SP_DIFF_VAL_INLINE_MAX:
             return val
-        return _get_code(val)
+        return _get_code(val, key, column)
 
     max_key = max(len(k) for k in diff_keys)
 
@@ -419,7 +419,7 @@ def render_sp_diff(view: SpDiffView) -> str:
                     prior = start_val
                 else:
                     prior = parent_val
-                cells.append(_cell(v, prior))
+                cells.append(_cell(v, prior, k, columns[ci][0]))
             rows.append((k, cells))
         rendered_groups.append((node_name, rows))
 
@@ -444,8 +444,8 @@ def render_sp_diff(view: SpDiffView) -> str:
     for node_name, rows in rendered_groups:
         # Prompt-field rows carry node_name "" (group_diff_keys' catch-all); label
         # them "prompt" so a prompt mutation reads as one in the live diff instead
-        # of as unlabeled rows mixed with node.param tweaks. Full new text follows
-        # in the Values: legend.
+        # of as unlabeled rows mixed with node.param tweaks. The Values: legend below
+        # sizes and addresses each elided value; the text itself is in the round file.
         if len(rendered_groups) > 1:
             sep_name = node_name or "prompt"
             sep = f"{'─── ' + sep_name + ' ':─<{max_key + 2}}"
@@ -455,12 +455,26 @@ def render_sp_diff(view: SpDiffView) -> str:
             out.append(_node_line(row))
 
     if legend:
+        # Address each value, never re-print it. `candidate_scores[].prompt_fields` already holds
+        # the full text in queryable form, and re-dumping it here cost the Start and Parent columns
+        # once per round for the life of the run — while the [a]/[b] indirection stripped the very
+        # key→value association the JSON keeps. So: what changed, how big, and on which columns.
+        rf = f"round_{round_num:04d}.json" if round_num is not None else "the round file"
         out.append(_node_line(""))
-        out.append(_node_line(f"{CYAN}Values:{RESET}"))
-        for code, full in legend:
-            # full may be a multi-line prompt-field value — prefix every physical line so an
-            # embedded newline doesn't break the box (console + logs/latest.log).
-            out.extend(_node_lines(f"  {code} {full}"))
+        out.append(
+            _node_line(
+                f"{CYAN}Values{RESET} {DIM}— full text in {rf}"
+                f"::candidate_scores[].prompt_fields / .pipeline_params, joined on label{RESET}"
+            )
+        )
+        key_w = max(len(" ".join(sorted(keys))) for _, keys, _ in legend.values())
+        for code, (n_bytes, keys, cols) in legend.items():
+            names = " ".join(sorted(keys))
+            out.append(
+                _node_line(
+                    f"  {code} {names:<{key_w}}  {n_bytes:>7,} B  {DIM}{' '.join(cols)}{RESET}"
+                )
+            )
 
     return "\n".join(out)
 

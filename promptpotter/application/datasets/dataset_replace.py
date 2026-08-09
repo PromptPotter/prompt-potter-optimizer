@@ -115,9 +115,4 @@ def _complete_marker(path: Path, result: ReplaceResult) -> None:
     write_json(path, data)
 
 
-__all__ = [
-    "NothingToReplaceError",
-    "ReplaceResult",
-    "recover_pending_replacements",
-    "version_and_repoint",
-]
+__all__ = ["NothingToReplaceError", "recover_pending_replacements", "version_and_repoint"]

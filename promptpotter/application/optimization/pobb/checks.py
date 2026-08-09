@@ -12,7 +12,7 @@ from promptpotter.application.optimization.pobb.classification import (
     extract_warning_types,
     is_deprecated,
 )
-from promptpotter.application.scoring.metrics import elimination_p_best
+from promptpotter.application.scoring.selection import elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.rendering import classify_result

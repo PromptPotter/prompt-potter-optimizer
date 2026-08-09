@@ -16,8 +16,10 @@ from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     ForkDirection,
     ForkTrigger,
+    LedgerAbility,
     LedgerCandidate,
 )
+from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -124,6 +126,12 @@ class LineageNode(StrictModel):
     )
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = Field(
+        default=None,
+        description="Which bar the band above brackets — the composite one or the accuracy "
+        "one. Served with the bounds; both scales coexist within a round, so a client that "
+        "re-derives it picks the wrong bar for every eliminated or cold-ruler candidate.",
+    )
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -144,6 +152,18 @@ class LineageNode(StrictModel):
         description="This candidate's fitness under the request's `score:` lens, re-scored "
         "server-side from its stored evaluator namespace. Null without a lens, or when the "
         "namespace can't satisfy the formula.",
+    )
+    composite_rank: int | None = Field(
+        default=None,
+        description="1-based position by `composite_fitness` descending among THIS node's "
+        "siblings — the bars one chart draws. Null where the value is. An ordering is a "
+        "score, so it is served rather than sorted client-side; the rank-shift read-out "
+        "against `lens_rank` is then a comparison of two served numbers.",
+    )
+    lens_rank: int | None = Field(
+        default=None,
+        description="The same sibling ordering under `lens_value`. Null without a lens. Read "
+        "against `composite_rank` to see which candidates the alternative formula moves.",
     )
     sample_set_accuracy: float | None = Field(
         default=None,
@@ -317,6 +337,7 @@ class _CloseFacts(NamedTuple):
     cumulative_theta: float | None
     composite_ci_lo: float | None
     composite_ci_hi: float | None
+    ci_scale: CiScale | None
 
 
 def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _CloseFacts]:
@@ -330,16 +351,17 @@ def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
             continue
         # A HELD round adopted the incumbent, which is not among these — so nobody is crowned.
         won = cand.label == close.winner_label
-        ability = close.abilities.get(cand.label, {})
+        ability = close.abilities.get(cand.label) or LedgerAbility()
         out[cand.candidate_id] = _CloseFacts(
             is_winner=won,
-            theta=ability.get("theta"),
-            theta_se=ability.get("theta_se"),
+            theta=ability.theta,
+            theta_se=ability.theta_se,
             # The frontier belongs to the spine: only the adopted candidate advanced it.
             cumulative_theta=close.cumulative_theta if won else None,
             # Only where the warm ruler implied a band; else the candidate's own whisker stands.
-            composite_ci_lo=ability.get("composite_ci_lo"),
-            composite_ci_hi=ability.get("composite_ci_hi"),
+            composite_ci_lo=ability.composite_ci_lo,
+            composite_ci_hi=ability.composite_ci_hi,
+            ci_scale=ability.ci_scale,
         )
     return out
 
@@ -628,6 +650,7 @@ _NO_CLOSE = _CloseFacts(
     cumulative_theta=None,
     composite_ci_lo=None,
     composite_ci_hi=None,
+    ci_scale=None,
 )
 
 
@@ -641,12 +664,13 @@ def _candidate_node(
 ) -> LineageNode:
     """One candidate as the tree serves it — ledger identity plus its round-CLOSE facts, two
     appends to one ledger that identity joins (:func:`_close_facts`)."""
-    # Its OWN whisker unless a warm-ruler election implied a tighter band. Both bounds move
-    # together: read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it.
-    ci_lo, ci_hi = (
-        (close.composite_ci_lo, close.composite_ci_hi)
+    # Its OWN whisker unless a warm-ruler election implied a tighter band. All THREE move
+    # together — read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it,
+    # and a scale left behind labels the new band with the old band's units.
+    ci_lo, ci_hi, ci_scale = (
+        (close.composite_ci_lo, close.composite_ci_hi, close.ci_scale)
         if close.composite_ci_lo is not None
-        else (cand.composite_ci_lo, cand.composite_ci_hi)
+        else (cand.composite_ci_lo, cand.composite_ci_hi, cand.ci_scale)
     )
     return LineageNode(
         kind="candidate",
@@ -663,6 +687,7 @@ def _candidate_node(
         evaluators=cand.evaluators,
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
+        ci_scale=ci_scale,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,
@@ -674,6 +699,28 @@ def _candidate_node(
         superseded_by=retired_by,
         children=children,
     )
+
+
+def rank_by_composite(kids: list[LineageNode]) -> list[LineageNode]:
+    """Stamp `composite_rank` across one course's candidate children — the bars one chart
+    draws. Served because an ordering IS a score: a client sorting its own re-answers the
+    question under its guess at the formula. Courses take none — a course is not a round and
+    holds no election. Ties break on id so N bars read 1..N."""
+    scored = {
+        k.id: k.composite_fitness
+        for k in kids
+        if k.kind == "candidate" and k.composite_fitness is not None
+    }
+    if not scored:
+        return kids
+    position = {
+        cid: i + 1
+        for i, (cid, _) in enumerate(sorted(scored.items(), key=lambda kv: (-kv[1], kv[0])))
+    }
+    return [
+        k.model_copy(update={"composite_rank": position.get(k.id)}) if k.kind == "candidate" else k
+        for k in kids
+    ]
 
 
 def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
@@ -707,23 +754,25 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
         grafts.setdefault(cut_from, []).extend(contribution.replayed_runs)
         retired |= _retired_by(fork, candidates, contribution.reach)
 
-    kids = _fold_contributions(
-        [
-            _candidate_node(
-                cand,
-                close=closed.get(cand.candidate_id, _NO_CLOSE),
-                children=[
-                    _build(c.store, c.path, depth=depth - 1, reads=reads)
-                    for c in buckets.get(cand.candidate_id, [])
-                    if depth > 0
-                ]
-                + grafts.get(cand.candidate_id, []),
-                retired_by=retired.get(cand.candidate_id),
-                hops=hops,
-            )
-            for cand in candidates
-        ],
-        contributions,
+    kids = rank_by_composite(
+        _fold_contributions(
+            [
+                _candidate_node(
+                    cand,
+                    close=closed.get(cand.candidate_id, _NO_CLOSE),
+                    children=[
+                        _build(c.store, c.path, depth=depth - 1, reads=reads)
+                        for c in buckets.get(cand.candidate_id, [])
+                        if depth > 0
+                    ]
+                    + grafts.get(cand.candidate_id, []),
+                    retired_by=retired.get(cand.candidate_id),
+                    hops=hops,
+                )
+                for cand in candidates
+            ],
+            contributions,
+        )
     )
 
     scalars = _course_scalars(stores, leaf, index, reads)

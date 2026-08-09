@@ -12,7 +12,6 @@ from typing import Any
 
 __all__ = [
     "MAX_INSTRUMENT_DEPTH",
-    "InstrumentMode",
     "MeasuredCandidate",
     "MeasurementRole",
     "enter_instrument_mode",

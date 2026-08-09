@@ -262,7 +262,6 @@ __all__ = [
     "PreparedCheckinRun",
     "create_checkin_campaign",
     "load_checkin_draft",
-    "load_checkin_for_start",
     "prepare_checkin_run",
     "save_checkin_draft",
     "start_checkin_campaign",

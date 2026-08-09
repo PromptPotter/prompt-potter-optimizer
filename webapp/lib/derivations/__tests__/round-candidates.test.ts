@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { loadCycleFixture } from "@/lib/test-utils/fixtures";
+import { currentRound, dash as dashboard, liveRow } from "@/lib/test-fixtures";
 import {
   closedRoundNumbers,
   groupByRound,
   roundCandidates,
 } from "../round-candidates";
 import { availableRounds } from "../round-axis";
+import { liveCandidateId } from "@/lib/candidate-label";
+import { liveCandidateRow } from "@/lib/poll";
 
 describe("roundCandidates — l2_terminal fixture", () => {
   // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit
@@ -102,5 +105,57 @@ describe("roundCandidates — l2_terminal fixture", () => {
     // Same total as the flat spine — pure regrouping, no rows added or dropped.
     const grouped = [...byRound.values()].reduce((n, b) => n + b.length, 0);
     expect(grouped).toBe(rows.length);
+  });
+});
+
+// The in-flight branch, which the fixture above has none of. A live row is the same served
+// shape as a closed one, so every field carries through — the arm used to hardcode `theta`,
+// `compositeCi*` and `matchedOrigin*` to null as "stamped at round close", which the CI is not.
+describe("roundCandidates — the in-flight round", () => {
+  const live = dashboard({
+    current_round: currentRound({
+      round: 2,
+      candidates: [
+        liveRow({
+          label: "C2.1",
+          // A FINISHED live row: scoring has landed, so the score report's lineage id is on it
+          // — the state in which the two live readers' positional join used to break.
+          candidate_id: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03",
+          accuracy: 0.6,
+          composite_fitness: 0.55,
+          composite_ci_lo: 0.41,
+          composite_ci_hi: 0.69,
+          ci_scale: "composite",
+          scored_samples: 8,
+          expected_samples: 20,
+        }),
+      ],
+    }),
+  });
+  const row = roundCandidates(live).find((r) => r.source === "inflight");
+
+  it("carries the whisker and its scale off the same row as the bar", () => {
+    expect(row?.accuracy).toBe(0.6);
+    expect(row?.compositeCiLo).toBe(0.41);
+    expect(row?.compositeCiHi).toBe(0.69);
+    expect(row?.ciScale).toBe("composite");
+  });
+
+  // The id both live readers join back on. A served lineage id here resolves in NEITHER
+  // `liveCandidate` (the sample tape) nor `liveCandidateRow` (the inspector), so both go blank
+  // for any candidate that finished scoring before its round closed.
+  it("keys positionally even once scoring stamps a lineage id on the row", () => {
+    expect(row?.candidate_id).toBe(liveCandidateId(2, 0));
+    expect(liveCandidateRow(live, 2, row!.candidate_id)).not.toBeNull();
+  });
+
+  it("holds no crown — the election is a round-scoped fit that has not run", () => {
+    expect(row?.is_winner).toBe(false);
+    expect(row?.theta).toBeNull();
+  });
+
+  it("reports the partial panel it has measured so far", () => {
+    expect(row?.n_samples).toBe(8);
+    expect(row?.n_expected).toBe(20);
   });
 });

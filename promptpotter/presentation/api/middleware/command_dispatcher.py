@@ -16,7 +16,7 @@ from pydantic import ConfigDict, Field, ValidationError
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
+from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog

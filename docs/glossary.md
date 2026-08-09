@@ -19,7 +19,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   is asked to return. `domain/pipeline_schema.py::NodeOutputSchema`, edited at
   `datasets/{name}/pipeline.yaml::nodes.{node}.config.output_schema`. (2) the
   **optimizer's own** response schema: what `l1_generate` returns, built by
-  `validators/l1_strict.py::build_l1_response_schema`. The L4 levers named
+  `dispatch/l1_wire_schema.py::build_l1_response_schema`. The L4 levers named
   `output_schema_*` act on (2). Sense (1) is where a "describe the fields" axis
   belongs; building it against (2) is the mistake this section was written for.
 - **`seed`** — three senses. (1) **`CycleSeed`** — the chosen starting point a
@@ -258,7 +258,11 @@ The persisted world is a four-entity containment hierarchy
 - **Fitness / composite** — the scorer expression compiled from
   `campaign.yaml::scoring.per_sample` and `per_round`. Each measurement
   carries `{scorer_id: {score, hit, formula}}`. Rescored on every load.
-  `application/scoring/search_point_scorer.py`.
+  Computed by `application/scoring/metrics.py::compute_composite_fitness`;
+  reached through the gateway `application/scoring/search_point_scorer.py`.
+  **The gateway is not the computer** — a change to how the number is
+  *derived* lands in `metrics.py`; the gateway only guarantees that every
+  scoring call passes through one door.
 - **metric / basis** — the cell any fitness number occupies: *metric* ∈ {accuracy,
   composite, ability θ} × *basis* ∈ {subset, matched, cumulative}. A cross-product,
   not redundancy — a candidate has a subset AND a matched AND a cumulative value at
@@ -350,10 +354,20 @@ The persisted world is a four-entity containment hierarchy
   `pick_score.per_sample` on the hard-samples artifact: the
   pick-value for a fresh mutation of the seed, ability
   prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
-  population-mean anchor 0). Consumed by the webapp dataset table.
+  population-mean anchor 0). The key behind `hard_sample_rank` under
+  the default `hard_sample_order`.
   The artifact's `pick_score.sample_order` is `build_round_order`
   seeded by the best candidate — the order the engine will actually
   execute next round.
+- **hard_sample_rank** — the served 1-based position of a sample on the
+  hard-sample leaderboard (`DatasetItem`), ranked under the campaign's
+  `hard_sample_order` — `info_gain` (the pick_score snapshot, default)
+  or `difficulty` (δ_s). Rows measured in the requested scope rank
+  first; the rest trail by sample_id. **THE ordering** — the heatmap,
+  the table and the `log.md` leaderboard all read it and none derives
+  one, because an ordering is a score. Distinct from the two orders
+  above: neither the engine's execution order nor the Rasch matrix's
+  δ column axis is this. `routers/datasets/leaderboard.py::_resolve_leaderboard_page`.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the shared round order.
 - **prediction (terminal ranking)** — the per-sample `predicted` is the

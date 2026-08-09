@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.injections.registry import (
@@ -13,9 +11,14 @@ from promptpotter.application.optimization.dispatch.injections.registry import (
     STALL_EXPLORATION,
     citable_fields,
 )
+from promptpotter.application.optimization.validators.behavior_base import (
+    CheckFn,
+    CheckResult,
+    ValidatorContext,
+)
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.candidate_diff import variant_prose_written
 from promptpotter.domain.l1_layout import coerce_l1_layout
-from promptpotter.domain.opt_search_point import variant_prose_written
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 # Rounds before this one keep param-scope locked so prompt-field exploration
@@ -26,8 +29,6 @@ PARAM_UNLOCK_ROUND = 3
 
 __all__ = [
     "CHECK_REGISTRY",
-    "CheckResult",
-    "ValidatorContext",
     "extract_l1_variants",
     "run_all_checks",
 ]
@@ -44,35 +45,6 @@ def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]
     if isinstance(response, dict):
         return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
     return []
-
-
-@dataclass(frozen=True)
-class CheckResult:
-    check_id: str
-    passed: bool
-    evidence: str
-
-
-@dataclass(frozen=True)
-class ValidatorContext:
-    """``exploration_budget`` gates the ``stall_exploration`` escape hatch; ``None`` means the
-    wiring layer could not determine it, and those citations then fail open."""
-
-    round_num: int
-    prior_rounds: list[dict[str, Any]] = field(default_factory=list)
-    opt_sp: dict[str, Any] = field(default_factory=dict)
-    context_object: list[str] = field(default_factory=list)
-    exploration_budget: str | None = None
-    # Axes the round-start AxisIndex flagged as ``peaked``. Used by
-    # ``evidence_grounding_present`` to reject variants that cite
-    # ``axis_memory`` to justify mutating a peaked axis without naming a
-    # rebut (the critique naming that axis, or exploration_budget=wide).
-    # Populated by ``output.py::_compute_behavior_per_round`` from each round's
-    # ``axis_memory_peaked`` field, stashed by ``persist_round``.
-    peaked_axes: frozenset[str] = field(default_factory=frozenset)
-
-
-CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 
 # --- helpers ---------------------------------------------------------------

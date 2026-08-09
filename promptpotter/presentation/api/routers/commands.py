@@ -197,7 +197,7 @@ class _EditDraftPatch(StrictModel):
     # {"max_rounds": 8}) or several, and a nested `mechanisms` replaces wholesale.
     optimization_overrides: dict[str, Any] | None = None
     # The origin's target library. Set from the operator's upload or derived from one
-    # of the draft's own columns (`routers/datasets.py`); both ride this patch.
+    # of the draft's own columns (`routers/datasets/ingest.py`); both ride this patch.
     candidate_library: list[str] | None = Field(default=None, min_length=1)
     # The origin's sanctioned model allow-list (ticked in the check-in pipeline setup).
     # Replaces the draft's set wholesale — the checklist sends the full ticked list; an

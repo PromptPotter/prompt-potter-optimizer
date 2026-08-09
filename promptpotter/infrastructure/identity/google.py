@@ -107,4 +107,4 @@ class GoogleProviderClient:
         )
 
 
-__all__ = ["GOOGLE_ISSUER", "GoogleProviderClient", "GoogleTokenExchangeError", "ProviderIdentity"]
+__all__ = ["GoogleProviderClient", "GoogleTokenExchangeError", "ProviderIdentity"]

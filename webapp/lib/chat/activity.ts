@@ -27,6 +27,28 @@
 import { candidateLabel } from "@/lib/candidate-label";
 import { fmtPct0 } from "@/lib/format";
 
+// THE SCORING ORDER, and the only channel that carries it.
+//
+// `sample_order_preview` is emitted once per candidate start (`l1/score/loop.py`)
+// with the shared order the scorer will walk. It is deliberately NOT an activity
+// item — nothing happened — but it is the sole source for "which sample comes next",
+// because `LiveDashboardView` does not persist it: `dashboard.json` carries the
+// sample being scored RIGHT NOW (`current_sample_id`) and, on closed rounds, the
+// order after the fact (`RoundSummary.selection`). The forward view exists only
+// here, on the stream the chat already subscribes to.
+//
+// A DECLARED order, not a promise: PoBB can stop a candidate early, so the tail may
+// never be reached. Surfaces reading it must say "next" and not "will".
+export function sampleOrderFrom(env: ProjectionEnvelope): number[] | null {
+  if (env.kind !== "snapshot") return null;
+  const p = env.payload;
+  if (str(p.event) !== "sample_order_preview") return null;
+  const raw = asRec(p.payload).sample_order ?? p.sample_order;
+  if (!Array.isArray(raw)) return null;
+  const order = raw.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  return order.length > 0 ? order : null;
+}
+
 // One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
 // `payload` is the underlying record's `model_dump` (so a record's own nested
 // `payload` field is reached at `envelope.payload.payload`); for stream_snapshot
@@ -123,18 +145,20 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
   const cr = asRec(payload.current_round);
   const crRound = num(cr.round);
   if (crRound != null && crRound >= 0) {
+    // Planned candidates come from the l1_score node INPUT — the seed half, the only place a
+    // candidate appears before it has a number. The numbers come from the served row.
     const l1 = asRec(asRec(cr.nodes).l1_score);
     const inputs = Array.isArray(asRec(l1.input).candidates) ? asRec(l1.input).candidates : [];
-    const outputs = Array.isArray(asRec(l1.output).candidates) ? asRec(l1.output).candidates : [];
-    const statByLabel = new Map<string, Record<string, unknown>>();
-    for (const c of outputs as unknown[]) {
+    const rows = Array.isArray(cr.candidates) ? (cr.candidates as unknown[]) : [];
+    const rowByLabel = new Map<string, Record<string, unknown>>();
+    for (const c of rows) {
       const label = str(asRec(c).label);
-      if (label) statByLabel.set(label, asRec(asRec(c).stats));
+      if (label) rowByLabel.set(label, asRec(c));
     }
     (inputs as unknown[]).forEach((c, i) => {
       const label = str(asRec(c).label) ?? candidateLabel(crRound, i);
-      const stats = statByLabel.get(label);
-      out.push(candidateItem(label, stats ? fitPct(stats) : undefined));
+      const row = rowByLabel.get(label);
+      out.push(candidateItem(label, row ? fitPct(row) : undefined));
     });
   }
 
@@ -206,6 +230,8 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
         return { id, kind: "progress", icon: "·", label: n ? `scoring ${i ?? 0}/${n}` : "scoring", tone: "muted" };
       }
       // p_best_update / sample_order_preview / pobb_backfill — curated-out diagnostics.
+      // `sample_order_preview` is not an ITEM (nothing happened), but it does carry
+      // state no other channel does — see `sampleOrderFrom` below.
       return null;
     }
     case "phase": {

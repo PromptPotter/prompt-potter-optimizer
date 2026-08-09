@@ -120,7 +120,6 @@ __all__ = [
     "decode_descend",
     "get_backend_or_404",
     "get_cycle_dir_or_404",
-    "get_job_registry",
     "resolve_identity",
     "warming_payload",
 ]

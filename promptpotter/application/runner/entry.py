@@ -33,12 +33,13 @@ from promptpotter.application.run_observers import (
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
+from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
+from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.results import CycleResult, RoundResult, SpendRollup
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -523,6 +524,11 @@ async def _run_single_cycle(
         )
 
     finished_at = utcnow_iso()
+    # Before the result is built: a decision made after the last round closed has no next
+    # `persist_round` to carry it, and every stop reason lands here. `None` is the
+    # crashed-before-the-loop path, which recorded nothing to flush.
+    if cycle is not None:
+        flush_pending_decisions(cycle, session)
     cycle_result = _build_cycle_result(
         cycle,
         origin,

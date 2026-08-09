@@ -74,6 +74,5 @@ __all__ = [
     "L3_OUTPUT_VALIDATORS",
     "L3_PLAN_LENGTH_FLOOR",
     "L3_PLAN_VERBATIM_REPEAT",
-    "PLAN_LENGTH_FLOOR_CHARS",
     "run_l3_output_validators",
 ]

@@ -56,7 +56,13 @@ fi
 # Re-stamping is the sanctioned remedy and it belongs to deploying, not to
 # remembering: report-only failures (unreadable file, no workspace yet) must not
 # abort an otherwise-good deploy, so its exit code is advisory.
-say "data: re-stamp configs onto the synced schema"
+# The same verb re-projects each finished cycle's ledger onto the synced record
+# shape — which is why it rewrites far more than configs, and why the line below
+# says "data" rather than "configs". It is not housekeeping: a record shape that
+# moved a field takes `resume` with it until the ledger carrying that field is
+# migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
+# leaves that cycle's ledger untouched and picks it up on the next one.
+say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
 if ! ( cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi

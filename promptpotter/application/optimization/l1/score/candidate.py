@@ -222,4 +222,4 @@ async def score_one_candidate(
     )
 
 
-__all__ = ["CandidateRunResult", "score_one_candidate"]
+__all__ = ["score_one_candidate"]

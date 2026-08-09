@@ -24,8 +24,6 @@ __all__ = [
     "KNOBS",
     "Coupling",
     "DiffScope",
-    "KnobDecl",
-    "KnobState",
     "check_couplings",
     "classify_config_diff",
     "resolve_knob_states",

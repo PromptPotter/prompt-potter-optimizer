@@ -143,10 +143,4 @@ def remove_email(path: Path, email: str, *, actor: str, audit_path: Path) -> lis
     return current
 
 
-__all__ = [
-    "AllowlistDecision",
-    "add_email",
-    "check_allowlist",
-    "list_emails",
-    "remove_email",
-]
+__all__ = ["add_email", "check_allowlist", "list_emails", "remove_email"]

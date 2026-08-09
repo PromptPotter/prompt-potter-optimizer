@@ -5,12 +5,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.dashboard_rows import DashboardCandidate
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import is_hit
+from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
     from promptpotter.infrastructure.projections.live_state import LiveStateCore
 
@@ -70,29 +71,82 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
+def _served(cand: dict[str, Any]) -> dict[str, Any]:
+    """The candidate's own numbers, best available. Mid-scoring the final ``scores`` are empty, so the scorer's running
+    fitness stands in — the same shape, ridden out per sample on ``_running`` — and ``scores`` wins the moment it lands."""
+    return cand.get("scores") or cand.get("running") or {}
+
+
+def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
+    """This round's candidates in the SAME shape a closed round serves (``rounds[].candidates``), so a reader takes a
+    whole row from one half instead of filling one in from the other per field.
+
+    ``scores`` is the verbatim ``ScoredCandidate.model_dump()`` from ``candidate_scored``, and the composite CI is
+    stamped there rather than at round close (``l1/population.py``), so a finished candidate carries its whisker
+    mid-round. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1`` arithmetic exists."""
+    rows: list[DashboardCandidate] = []
+    for idx in sorted(buffer.candidates.keys()):
+        cand = buffer.candidates[idx]
+        served = _served(cand)
+        samples = cand.get("samples") or []
+        cached = served.get("cached_samples")
+        # Never null mid-scoring: the running fitness carries accuracy; the partial mean over
+        # samples-so-far is the safety net before it lands.
+        accuracy = served.get("accuracy")
+        rows.append(
+            DashboardCandidate(
+                label=candidate_label(buffer.round_num, idx),
+                candidate_id=served.get("candidate_id"),
+                accuracy=accuracy if accuracy is not None else _partial_mean_fitness(samples),
+                composite_fitness=served.get("composite_fitness"),
+                scored_samples=int(served.get("scored_samples") or len(samples)),
+                cached_samples=int(
+                    cached if cached is not None else sum(1 for s in samples if s.get("cached"))
+                ),
+                expected_samples=cand.get("expected_samples"),
+                evaluators=dict(served.get("evaluators") or {}),
+                changes_description=(
+                    cand.get("changes_description") or served.get("changes_description") or ""
+                ),
+                partial_reason=served.get("partial_reason") or "",
+                # Absent until the round's election fit runs — it needs two arms.
+                theta=served.get("theta"),
+                theta_se=served.get("theta_se"),
+                composite_ci_lo=served.get("composite_ci_lo"),
+                composite_ci_hi=served.get("composite_ci_hi"),
+                ci_scale=served.get("ci_scale"),
+                matched_origin_accuracy=served.get("matched_origin_accuracy"),
+                matched_origin_composite=served.get("matched_origin_composite"),
+            )
+        )
+    return rows
+
+
 def build_l1_score_block(
     buffer: RoundBuffer,
-    active_formula: str | None,
     short_formula_template: str | None,
-    round_result: RoundResult | None = None,
+    *,
+    live: bool,
 ) -> dict[str, Any]:
-    """Project current candidates to the dashboard's l1_score shape. ``label`` is canonical — display sites read it verbatim,
-    and no ``idx + 1`` arithmetic exists anywhere."""
-    live = round_result is None
-    candidates = buffer.candidates
-    round_num = buffer.round_num
+    """The l1_score NODE block — what the node was handed and what it emitted, nothing else.
+
+    The candidate VALUES left this block for ``current_round.candidates`` (:func:`build_candidate_rows`). What stays is
+    node I/O the webapp reads (the sample tape, the seed-able input half) plus two facts only the FOLDER-UI reader has —
+    the value-inlined formula and the self-healing state — which no closed round has a twin for. ``live`` picks the tape
+    shape: compact parsed lines for the dashboard (``webapp/lib/sample-line.ts`` regexes them), full dicts for the audit
+    twin."""
     input_candidates: list[dict[str, Any]] = []
     output_candidates: list[dict[str, Any]] = []
-    for idx in sorted(candidates.keys()):
-        cand = candidates[idx]
-        scores = cand.get("scores") or {}
-        label = candidate_label(round_num, idx)
+    for idx in sorted(buffer.candidates.keys()):
+        cand = buffer.candidates[idx]
+        served = _served(cand)
+        label = candidate_label(buffer.round_num, idx)
         input_candidates.append(
             {
                 "idx": idx,
                 "label": label,
                 "changes_description": (
-                    cand.get("changes_description") or scores.get("changes_description") or ""
+                    cand.get("changes_description") or served.get("changes_description") or ""
                 ),
                 "pp_override": cand.get("pp_override"),
                 # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
@@ -104,42 +158,19 @@ def build_l1_score_block(
                 "resolved_pipeline_params": cand.get("resolved_pipeline_params"),
             }
         )
-        # Mid-scoring the final ``scores`` are empty; fall back to the scorer's
-        # running fitness (same shape, ridden out per sample on ``_running``) so
-        # composite / accuracy / hits / total are LIVE and converge to the final.
-        # ``scores`` wins the moment the candidate completes.
-        served = scores or cand.get("running") or {}
-        cand_evaluators = dict(served.get("evaluators") or {})
         samples = cand.get("samples") or []
-        served_accuracy = served.get("accuracy")
-        stats: dict[str, Any] = {
-            # Never null mid-scoring: the running fitness carries accuracy; the
-            # partial mean over samples-so-far is the safety net before it lands.
-            "accuracy": served_accuracy
-            if served_accuracy is not None
-            else _partial_mean_fitness(samples),
-            "composite_fitness": served.get("composite_fitness"),
-            "composite_fitness_formula": active_formula,
-            # Per-candidate value-inlined short formula. The legend for short
-            # codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) lives in
-            # ``docs/operations/improvement-tracking.md``.
-            "composite_fitness_formula_short": inline_short_formula_values(
-                short_formula_template, cand_evaluators
-            ),
-            "hits": served.get("hits"),
-            "total": served.get("total"),
-            # The report wins once it lands; until then the buffer holds every scored row.
-            "cached_samples": served.get("cached_samples")
-            if served.get("cached_samples") is not None
-            else sum(1 for s in samples if s.get("cached")),
-            "invalid": served.get("invalid", False),
-            "validation_failures": served.get("validation_failures") or [],
-        }
         output_candidates.append(
             {
                 "idx": idx,
                 "label": label,
-                "stats": stats,
+                # Per-candidate value-inlined short formula. The legend for short
+                # codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) lives in
+                # ``docs/operations/improvement-tracking.md``.
+                "composite_fitness_formula_short": inline_short_formula_values(
+                    short_formula_template, dict(served.get("evaluators") or {})
+                ),
+                "invalid": served.get("invalid", False),
+                "validation_failures": served.get("validation_failures") or [],
                 "samples": [fmt_sample_line(s) for s in samples] if live else list(samples),
             }
         )
@@ -149,27 +180,26 @@ def build_l1_score_block(
     }
 
 
-def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> dict[str, Any]:
+def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> PobbBlock:
     """Round-wide PoBB telemetry. ``leader_prob`` is the best standing among CANDIDATES — never a max over one snapshot's
     dict, whose other entries are that same candidate's odds against each prior."""
     if not core.current_p_best_id:
-        return {
-            "current_id": "",
-            "n_samples": 0,
-            "leader_prob": 0.0,
-            "posterior_width": 1.0,
-            "top": [],
-        }
+        return PobbBlock()
     leader_prob = max(
         [float(row["p_best"]) for row in p_best_top] or list(core.round_p_best.values()) or [0.0]
     )
-    return {
-        "current_id": core.current_p_best_id,
-        "n_samples": core.current_p_best_n,
-        "leader_prob": float(leader_prob),
-        "posterior_width": float(1.0 - leader_prob),
-        "top": list(p_best_top),
-    }
+    return PobbBlock(
+        current_id=core.current_p_best_id,
+        n_samples=core.current_p_best_n,
+        leader_prob=float(leader_prob),
+        posterior_width=float(1.0 - leader_prob),
+        top=list(p_best_top),
+    )
 
 
-__all__ = ["build_l1_score_block", "build_pobb_block", "fmt_sample_line"]
+__all__ = [
+    "build_candidate_rows",
+    "build_l1_score_block",
+    "build_pobb_block",
+    "fmt_sample_line",
+]

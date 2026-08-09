@@ -175,7 +175,10 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
+    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2
+    # state from ``record_l2_fired``) — carried onto ``L2RefineExitView``, the persisted half.
+    # No prompt/response: the call is already this ledger's `l2_context` LLMCallRecord and the
+    # audit twin's `nodes.l2_context`, so a third copy on the phase record is duplication.
     payload: dict[str, Any] = {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
@@ -185,8 +188,6 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_sp.lineage.changes_description or "",
         "axis_targeted": result.axis_targeted,
-        "l2_prompt": result.debug_prompt,
-        "l2_response": result.debug_response,
     }
     if result.fork_proposal is not None:
         payload["fork_proposal"] = result.fork_proposal.model_dump()
@@ -256,7 +257,8 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l3_*_at_entry`` read by ``EscalationFSM.fold`` on resume; ``record_l3_fired`` resets L2 state to these.
+    # ``l3_*_at_entry`` read by ``EscalationFSM.fold`` on resume (carried onto ``PlanExitView``,
+    # the persisted half); ``record_l3_fired`` resets L2 state to these.
     payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AbReport", "ab_replay_cycle"]
+__all__ = ["ab_replay_cycle"]
 
 
 @dataclass(frozen=True)

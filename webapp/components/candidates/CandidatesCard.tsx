@@ -26,8 +26,8 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { IconMore, IconTree } from "./toolbar-icons";
-import { liveL1Candidates, type LiveCandidate } from "@/lib/poll";
-import type { RoundSummary } from "@/lib/api/types";
+import { liveCandidates } from "@/lib/poll";
+import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { WhatIfGrid } from "./WhatIfGrid";
@@ -55,7 +55,6 @@ import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/terms";
-import { activeNodeId } from "@/components/workflow";
 import { cx } from "@/lib/cx";
 import type { CandidateView } from "@/lib/types";
 
@@ -157,10 +156,7 @@ export function CandidatesCard() {
   // downstream Set chain (realApplicable→viewApplicable→inActive) only
   // rebuilds when `dash` actually changes, so the seed + prune guards below
   // converge instead of looping setState every render.
-  const inflightCandidates: LiveCandidate[] = useMemo(
-    () => liveL1Candidates(dash),
-    [dash],
-  );
+  const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
 
   // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
   // of truth for historical bars. The projection accumulates these at
@@ -203,7 +199,7 @@ export function CandidatesCard() {
   const realApplicable = useMemo(() => {
     const set = new Set<string>();
     for (const c of inflightCandidates) {
-      for (const k of Object.keys(c.stats?.evaluators ?? {})) set.add(k);
+      for (const k of Object.keys(c.evaluators)) set.add(k);
     }
     for (const h of history) {
       for (const c of h.candidates) {
@@ -222,18 +218,13 @@ export function CandidatesCard() {
     return set;
   }, [isPrestaging, realApplicable, meta]);
 
-  // The realized composite formula in effect — top-level when present, else the
-  // first candidate's. Drives both `inActive` (which evaluators it references) and
-  // the what-if weight seed (their coefficients).
-  const compositeFormula = useMemo(() => {
-    const top = (dash as { composite_fitness_formula?: string | null } | null)
-      ?.composite_fitness_formula;
-    if (top) return top;
-    for (const c of inflightCandidates) {
-      if (c.stats?.composite_fitness_formula) return c.stats.composite_fitness_formula;
-    }
-    return null;
-  }, [dash, inflightCandidates]);
+  // The realized composite formula in effect. Drives both `inActive` (which evaluators it
+  // references) and the what-if weight seed (their coefficients). One field: the per-candidate
+  // copy this used to fall back to was the SAME string, stamped onto every row of every round
+  // from this very value — a second channel carrying one fact, and it is gone from the wire.
+  const compositeFormula =
+    (dash as { composite_fitness_formula?: string | null } | null)?.composite_fitness_formula ??
+    null;
 
   const inActive = useMemo(() => {
     let parsed: Set<string> | null = compositeFormula
@@ -242,7 +233,7 @@ export function CandidatesCard() {
     if (parsed == null) {
       parsed = new Set<string>();
       for (const c of inflightCandidates) {
-        for (const k of Object.keys(c.stats?.evaluators ?? {})) parsed.add(k);
+        for (const k of Object.keys(c.evaluators)) parsed.add(k);
       }
     }
     // Drop phantom tokens (`min`, `weight`, …) parsed from formula arithmetic so the assembly-memo equality short-circuit is honest.
@@ -395,11 +386,14 @@ export function CandidatesCard() {
       // A course shows what it reached, else what it started from. A cut that broke before
       // measuring anything has no number and must render blank, never as its origin's.
       const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
-      const live = isCourse ? undefined : inflightByLabel.get(n.label);
+      // ALL-OR-NOTHING, never per field: a candidate the tree has not measured takes its WHOLE
+      // row from `current_round`, one it has takes the tree's. Mixing them is what put a bar
+      // and its whisker on two different polling clocks.
+      const live = isCourse || own != null ? undefined : inflightByLabel.get(n.label);
       // Slice mode reads the SERVED scorer-faithful value. Election aggregates can't be
       // re-sliced per sample, so they are suppressed rather than shown on a different basis
       // than the bar beside them.
-      const accuracy = sliced ? n.sample_set_accuracy : (own ?? live?.stats?.accuracy ?? null);
+      const accuracy = sliced ? n.sample_set_accuracy : (own ?? live?.accuracy ?? null);
       const label = isCourse ? (n.task ? panelCellLabel(n.task) : n.dataset_name) : n.label;
       return {
         key: nodeKeyOf(n),
@@ -408,11 +402,13 @@ export function CandidatesCard() {
         candidate_id: n.id,
         label,
         accuracy,
-        composite: sliced || isCourse ? null : n.composite_fitness,
-        theta: sliced ? null : n.theta,
-        theta_se: sliced ? null : n.theta_se,
-        compositeCiLo: sliced ? null : n.composite_ci_lo,
-        compositeCiHi: sliced ? null : n.composite_ci_hi,
+        composite: sliced || isCourse ? null : (n.composite_fitness ?? live?.composite_fitness ?? null),
+        theta: sliced ? null : (n.theta ?? live?.theta ?? null),
+        theta_se: sliced ? null : (n.theta_se ?? live?.theta_se ?? null),
+        // From the same row as the bar above it, whichever row that was.
+        compositeCiLo: sliced ? null : (n.composite_ci_lo ?? live?.composite_ci_lo ?? null),
+        compositeCiHi: sliced ? null : (n.composite_ci_hi ?? live?.composite_ci_hi ?? null),
+        ciScale: sliced ? null : (n.ci_scale ?? live?.ci_scale ?? null),
         // The tree serves identity + the round-close facts it is given; the matched-origin
         // floor is not among them, and it belongs to `dashboard.json::rounds[]` (which is
         // where the inspector reads it). Null rather than a second derivation of it here.
@@ -420,13 +416,17 @@ export function CandidatesCard() {
         matchedOriginComposite: null,
         evaluators: n.evaluators,
         is_winner: n.is_winner,
-        n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.stats?.total ?? null),
-        n_expected: sliced ? (sampleSet?.length ?? null) : n.expected_samples,
-        cached_samples: sliced
-          ? null
-          : (n.cached_samples ?? live?.stats?.cached_samples ?? null),
-        source: live && own == null ? "inflight" : "history",
+        n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.scored_samples ?? null),
+        n_expected: sliced
+          ? (sampleSet?.length ?? null)
+          : (n.expected_samples ?? live?.expected_samples ?? null),
+        cached_samples: sliced ? null : (n.cached_samples ?? live?.cached_samples ?? null),
+        source: live ? "inflight" : "history",
         whatif: sliced ? null : n.lens_value,
+        // Ranks follow their values exactly: suppressed on the same two conditions, or a
+        // bar would carry a position in an ordering whose number it is not showing.
+        compositeRank: sliced || isCourse ? null : n.composite_rank,
+        whatifRank: sliced ? null : n.lens_rank,
         started: accuracy != null,
         // A course is not a round and holds no election of its own.
         roundOpen: !isCourse && !closed.has(n.round ?? 0),
@@ -545,12 +545,12 @@ export function CandidatesCard() {
   // never pulses, and a between-rounds stale `candidate` doesn't either.
   const inFlightIndex = useMemo(() => {
     if (!isLive) return null;
-    if (activeNodeId(dash?.in_flight?.node ?? null, dash?.state) !== "l1_score") return null;
+    if (dash?.current_round.active_node !== "l1_score") return null;
     const lbl = String(dash?.candidate || "").split("/")[0];
     if (!lbl) return null;
     const idx = views.findIndex((v) => v.label === lbl);
     return idx >= 0 ? idx : null;
-  }, [isLive, dash?.in_flight, dash?.state, dash?.candidate, views]);
+  }, [isLive, dash?.current_round.active_node, dash?.candidate, views]);
 
   const lensActive = lens !== "" && !whatifActive;
 

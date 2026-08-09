@@ -6,15 +6,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
-from promptpotter.domain.results import (
-    RoundResult,
-    RoundSummary,
-    RoundSummaryCandidate,
-    is_electable,
-    is_round_winner,
-)
+from promptpotter.domain.results import RoundResult, is_electable, is_round_winner
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 

@@ -13,16 +13,12 @@ from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
     l1_generate,
 )
-from promptpotter.application.optimization.validators.l1_strict import (
+from promptpotter.application.optimization.validators.l1_invariants import (
     L1YieldStats,
     detect_invariants,
 )
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
-from promptpotter.domain.results import (
-    CandidateProposal,
-    candidate_label,
-    round_document_digest,
-)
+from promptpotter.domain.results import CandidateProposal, candidate_label, round_document_digest
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
 
 # Module-level alias for test monkeypatching.

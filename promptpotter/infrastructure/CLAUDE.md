@@ -10,7 +10,7 @@ or talks to a network without going through one of these seams.
 Forks via `CycleEventLog.inherit_from(parent, offset)` — an IN-PROCESS binding
 that writes nothing, so a later reader sees a fork's ledger begin at its own
 first append. Anything a fork must answer for ITSELF is appended to it: a
-repair's corrected rounds reach the branch via `resume.py::_rebank_on_branch`,
+repair's corrected rounds reach the branch via `repair.py::_rebank_on_branch`,
 because a round file written with no ingress behind it is invisible to every
 scan and readers silently fall back to the parent. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
@@ -26,13 +26,54 @@ canonical ledger, no process global, no sink-installation indirection. **Which
 shape a new surface takes, and the full add-a-surface recipe** — owned by
 [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
+**The ledger is a CHRONOLOGY, and a payload earns its place only by needing one.** It answers
+which round, which candidate, in what order, against which rival — nothing else can. So the test
+for a field is not "is it useful?" but *is the ordering what makes it findable?* A value the
+archive holds keyed `(dataset_name, node_configs, sample_id)`, or that `rounds/round_NNNN.json`
+carries per candidate, is already addressable without it. Two shapes are declared, not optional:
+the projection at the writer (`RunCallbacks` → `domain/scoring.py::ledger_sample_view`,
+`ViewContext.ledger_anchors`) keeps a record to the union of what its subscribers RENDER, and a
+field that is live-only rides `Field(exclude=True)` (`PhaseRecord.data`, `.live_round_result`) so
+nothing decides per-key at the seam what serializes. Measured before the rule existed: one L2
+prompt stored three times, twice in the same file, and 37 of 39 MB of `pipeline_data` was the
+archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
+
+**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold`
+read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume
+rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros.
+They are fields on `L2RefineExitView` / `PlanExitView` now. When a shape moves like that,
+`application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across:
+it CALLS the writer's projections rather than restating them, preserves the line count (the line
+index IS `sequence`), tmp + `os.replace` (`append` is not crash-atomic), and skips any cycle with
+a live producer.
+
 **Newtype-guarded projections** under `projections/`:
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
-| `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
-| `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+| `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
+| `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+
+**`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round`
+was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to
+answer the two questions its only consumer asks — so the webapp inferred both, each by joining
+facts written on different ledger events. Four rules follow, each a field or a filter rather than
+a convention:
+
+- **`active_node` is served**, over a `_STATE_TO_NODE` map that is TOTAL over `DashboardState`
+  with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing
+  is running", which is a lie for every state it omits.
+- **`current_round.round` is `state.round`, always** — so a reader selects this block over the
+  audit twin by equality. There is deliberately no `live` flag beside it.
+- **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is
+  most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
+  `round`: presence in the served map is the client's whole definition of "this node has fired".
+- **A live candidate is the same shape as a closed one** (`DashboardCandidate`,
+  `domain/dashboard_rows.py`), and `composite_ci_lo/hi` carries its `ci_scale`. Two shapes for one
+  entity force the client to merge them field by field, which put a bar and its error whisker on
+  two different polls. Every value is present at `candidate_scored` — the projection simply was
+  not copying them.
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
@@ -121,10 +162,18 @@ Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
 no-drift gate #4 — never an independent field). Composite over ten focused
-leaf stores: `backends` (`BackendStore`), `tenant_datasets`, `sessions`,
-`campaigns` (`store/campaign_store/`), `checkin` (`CheckinDraftStore`),
-`sweeps`, `archive` (`MeasurementArchive`), `optimizer_calls`
-(`OptimizerCallCache`), `diagnostic_runs`, `users`. Shared I/O in
+leaf stores — **the attribute, then the class, then the file**, because the
+attribute is what a call site shows you and the file is what you have to open:
+`backends` → `BackendStore` (`store/backend_store.py`), `tenant_datasets` →
+`TenantDatasetStore` (`store/tenant_dataset_store.py`), `sessions` →
+`SessionStore` (`store/session_store.py`), `campaigns` → `CampaignStore`
+(`store/campaign_store/store.py`), `checkin` → `CheckinDraftStore`
+(`store/checkin_draft_store.py`), `sweeps` → `SweepStore`
+(`store/sweep_store.py`), `archive` → `MeasurementArchive`
+(`store/measurement_archive.py`), `optimizer_calls` → `OptimizerCallCache`
+(`store/stores.py`, defined inline), `diagnostic_runs` → `DiagnosticRunStore`
+(`store/diagnostic_run_store.py`), `users` → `UserStore`
+(`store/user_store.py`). Shared I/O in
 `store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
 code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
 measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
@@ -184,7 +233,9 @@ not raw `str`/`Path` — as does `CycleHop`, which every per-cycle
 `CampaignStore` method takes in place of a `(campaign_id, cycle_id)`
 pair (both `str`, so a swapped call read as "no data" rather than
 raising). Build it from the carrier that owns both, never by re-pairing. `archive/` is cross-cycle/cross-tenant;
-`MeasurementArchive` is the DB core.
+`MeasurementArchive` (`store/measurement_archive.py`) is the DB core, and
+`store/archive_views.py` is its single-writer facade — a write that does not
+go through that facade is the bug.
 
 `CampaignStore` (`store/campaign_store/store.py`) exposes
 `write_cycle_seed`/`read_cycle_seed`, which append/scan the **read-once** cycle

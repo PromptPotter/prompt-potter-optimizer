@@ -226,8 +226,24 @@ class _Overlay:
                         )
         self.dimmed: frozenset[tuple[str, str, int]] = frozenset(dimmed)
 
+    @staticmethod
+    def _rank_by_lens(kids: list[LineageNode]) -> list[LineageNode]:
+        """`lens_rank`'s half of the sibling ordering — the twin of `rank_by_composite`, which
+        stamps the un-lensed rank during the tree build. It cannot ride along there: the lens
+        is a property of the REQUEST, so its values only exist once the overlay has folded."""
+        scored = {k.id: v for k in kids if (v := k.lens_value) is not None}
+        if not scored:
+            return kids
+        # Ties break on id so N bars read 1..N — matching `rank_by_composite` exactly, or the
+        # two ranks would disagree about a tie and read as a rank-shift that never happened.
+        position = {
+            cid: i + 1
+            for i, (cid, _) in enumerate(sorted(scored.items(), key=lambda kv: (-kv[1], kv[0])))
+        }
+        return [k.model_copy(update={"lens_rank": position.get(k.id)}) for k in kids]
+
     def apply(self, node: LineageNode) -> LineageNode:
-        kids = [self.apply(k) for k in node.children]
+        kids = self._rank_by_lens([self.apply(k) for k in node.children])
         if node.kind != "candidate" or node.round is None or not node.path:
             return node.model_copy(update={"children": kids})
         hop = node.path[-1]

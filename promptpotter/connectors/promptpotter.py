@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.opt_search_point import node_config_items
+from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -193,4 +193,4 @@ CONNECTOR = Connector(
 )
 
 
-__all__ = ["CONNECTOR", "PromptPotterSession", "promptpotter_wire_adapter"]
+__all__ = ["CONNECTOR", "PromptPotterSession"]

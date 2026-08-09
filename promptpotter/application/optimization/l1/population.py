@@ -14,7 +14,8 @@ from promptpotter.application.optimization.validators.l1_strict import (
 )
 from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
@@ -138,13 +139,14 @@ def build_score_report(
     """Typed candidate score report. The composite CI is stamped HERE, off this candidate's own rows, so a finished candidate
     carries a whisker before its round ends; ``l1_score`` overrides it with the θ band on a warm ruler."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.scoring.metrics import composite_ci
+    from promptpotter.application.scoring.selection import composite_ci
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     ci_lo, ci_hi = composite_ci(query_results)
     return ScoredCandidate(
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
+        ci_scale=None if ci_lo is None else "composite",
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

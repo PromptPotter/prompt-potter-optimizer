@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from promptpotter.domain.results import HardSampleOrder
+
 # Graded shade, densest = best. A binary ▓/▒ split would re-impose the `fitness >= 1.0`
 # threshold this projection exists to avoid: on a graded scorer every cell sits strictly
 # inside (0,1), so a threshold renders the whole grid identically and the matrix carries
@@ -29,7 +31,12 @@ def render_hard_sample_heatmap(
     artifact: dict[str, Any],
     *,
     sample_query_lookup: dict[int, str] | None = None,
+    order: HardSampleOrder = "info_gain",
 ) -> str:
+    """*order* ranks the LEADERBOARD only — `CampaignConfig.hard_sample_order`, the same knob
+    the webapp panes read through the served rank. The GRID above it stays δ-sorted whatever
+    it says: that is a Rasch matrix, its column axis is difficulty by construction, and the
+    staircase only reads as one while difficulty runs monotonically across it."""
     if not artifact or not artifact.get("n_observations"):
         return ""
 
@@ -81,19 +88,32 @@ def render_hard_sample_heatmap(
         label = cid[: label_w - 1].ljust(label_w)
         lines.append(f"  {label} {theta_str}  {''.join(row_cells)}")
 
-    top_samples = sample_order[:10]
+    pick = {
+        int(k): float(v)
+        for k, v in ((artifact.get("pick_score") or {}).get("per_sample") or {}).items()
+    }
+    if order == "info_gain" and pick:
+        ranked = sorted(sample_order, key=lambda s: (-pick.get(s, 0.0), s))
+        key_map, title, key_label = pick, "Info-gain leaderboard", "info gain"
+    else:
+        # `sample_order` already IS δ-descending, on its own mean-miss tiebreak — re-sorting
+        # here on sample_id would quietly answer a slightly different question.
+        ranked = sample_order
+        key_map = {int(k): float(v) for k, v in delta.items()}
+        title, key_label = "Hardness leaderboard", "delta"
+
+    top_samples = ranked[:10]
     if top_samples:
         lookup = sample_query_lookup or {}
         lines.append("")
-        lines.append(f"  Hardness leaderboard (top {len(top_samples)})")
-        lines.append(f"    {'sample_id':>10s} {'delta':>8s} {'delta_se':>10s}  query")
-        lines.append(f"    {'-' * 10} {'-' * 8} {'-' * 10}  {'-' * 40}")
+        lines.append(f"  {title} (top {len(top_samples)})")
+        lines.append(f"    {'sample_id':>10s} {key_label:>10s} {'delta_se':>10s}  query")
+        lines.append(f"    {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * 40}")
         delta_se = rasch.get("delta_se") or {}
         for sid in top_samples:
-            d = float(delta.get(str(sid), 0.0))
             se = float(delta_se.get(str(sid), 0.0))
             query = (lookup.get(sid) or "")[:40]
-            lines.append(f"    {sid:>10d} {d:>+8.3f} {se:>10.3f}  {query}")
+            lines.append(f"    {sid:>10d} {key_map.get(sid, 0.0):>+10.3f} {se:>10.3f}  {query}")
 
     return "\n".join(lines)
 

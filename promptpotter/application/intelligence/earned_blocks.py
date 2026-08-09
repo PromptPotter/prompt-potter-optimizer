@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
-from promptpotter.domain.opt_search_point import candidate_delta
+from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.instrument import instrument_mode
@@ -16,13 +16,7 @@ from promptpotter.shared.instrument import instrument_mode
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = [
-    "OPEN_ANSWER_SPACE",
-    "EarnedBlock",
-    "answer_space_signature",
-    "earned_library_for",
-    "mine_earned_blocks",
-]
+__all__ = ["answer_space_signature", "earned_library_for", "mine_earned_blocks"]
 
 # The short, reusable framing fields — the only ones a block library should carry. The long
 # fields (instruction, problem_description) are task-specific detail, not transferable material.

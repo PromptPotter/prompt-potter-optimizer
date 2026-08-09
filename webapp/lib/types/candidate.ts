@@ -36,14 +36,18 @@ export interface CandidateRow {
   theta_se: number | null;
   // The composite-fitness CI whisker (served, never recomputed): the difficulty-adjusted
   // θ-implied accuracy band where the ruler is warm + the scorer is plain accuracy, else the
-  // raw normal-CLT mean CI. `null` for the in-flight round (stamped at round close, with `theta`).
+  // raw normal-CLT mean CI. Present on an IN-FLIGHT row too — it is stamped off the
+  // candidate's own rows the moment it finishes scoring, not at round close.
   compositeCiLo: number | null;
   compositeCiHi: number | null;
+  // Which of the two the band above is, served rather than re-derived — both scales coexist
+  // inside one round, so a chart-wide guess picks the wrong bar for some of them.
+  ciScale: "composite" | "accuracy" | null;
   // The floor this candidate was JUDGED against — the origin restricted to the samples
   // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
   // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
-  // the promotion gate used. `null` for the in-flight round (stamped at round close) and
-  // for candidates outside the election fit — nothing matched them.
+  // the promotion gate used. `null` for candidates outside the election fit — nothing
+  // matched them.
   matchedOriginAccuracy: number | null;
   matchedOriginComposite: number | null;
   evaluators: Record<string, number>;
@@ -71,6 +75,12 @@ export interface CandidateView extends CandidateRow {
   // never recomputed client-side. `null` when no `score:` lens is active or the
   // candidate is unscorable under it.
   whatif: number | null;
+  // Served 1-based sibling ranks by `composite` and by `whatif` (the node's own
+  // `composite_rank` / `lens_rank`). An ordering IS a score, so these come down the wire —
+  // the rank-shift read-out compares two served numbers rather than sorting its own bars.
+  // `null` wherever the underlying value is, and on a sliced or course bar.
+  compositeRank: number | null;
+  whatifRank: number | null;
   // Any sign of activity. `false` = the slot exists but nothing is scored yet,
   // which the chart must render as a BLANK, never as a 0.
   started: boolean;

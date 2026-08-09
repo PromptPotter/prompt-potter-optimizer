@@ -25,10 +25,7 @@ from promptpotter.application.views.view_models import (
     ViewContext,
     WarningEntry,
 )
-from promptpotter.domain.opt_search_point import (
-    build_candidate_flat,
-    flatten_sp_summary,
-)
+from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate
@@ -266,13 +263,16 @@ def _refine_enter(d: dict[str, Any], ctx: ViewContext) -> L2RefineEnterView:
 
 
 def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
+    l2_theta = d.get("l2_best_theta_at_entry")
     return L2RefineExitView(
         param_changes_count=d.get("param_changes_count", 0),
         l1_layout_changed=bool(d.get("l1_layout_changed", False)),
         axis_targeted=d.get("axis_targeted", ""),
         changes_description=d.get("changes_description", ""),
-        l2_prompt=d["l2_prompt"],
-        l2_response_json=d.get("l2_response"),
+        l2_round=int(d["l2_round"]),
+        l2_stall_count=int(d["l2_stall_count"]),
+        l2_best_composite_fitness_at_entry=float(d["l2_best_composite_fitness_at_entry"]),
+        l2_best_theta_at_entry=None if l2_theta is None else float(l2_theta),
     )
 
 
@@ -285,9 +285,14 @@ def _plan_enter(d: dict[str, Any], ctx: ViewContext) -> PlanEnterView:
 
 
 def _plan_exit(d: dict[str, Any], ctx: ViewContext) -> PlanExitView:
+    l3_theta = d.get("l3_best_theta_at_entry")
     return PlanExitView(
         new_plan_preview=truncate(d.get("new_plan_preview", "") or "", 55, "..."),
         changes_description=d.get("changes_description", ""),
+        l3_round=int(d["l3_round"]),
+        l3_stall_count=int(d["l3_stall_count"]),
+        l3_best_composite_fitness_at_entry=float(d["l3_best_composite_fitness_at_entry"]),
+        l3_best_theta_at_entry=None if l3_theta is None else float(l3_theta),
     )
 
 

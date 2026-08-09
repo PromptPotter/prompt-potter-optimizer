@@ -2,8 +2,8 @@ from promptpotter.presentation.api.routers.campaigns import (
     cycles,
     events,
     files,
+    manifests,
     ray,
-    registry,
     storage,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -13,7 +13,7 @@ __all__ = [
     "cycles",
     "events",
     "files",
+    "manifests",
     "ray",
-    "registry",
     "storage",
 ]

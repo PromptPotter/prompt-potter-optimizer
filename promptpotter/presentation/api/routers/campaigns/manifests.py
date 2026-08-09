@@ -1,4 +1,4 @@
-"""Campaign registry — real Campaign manifests, not cycles."""
+"""Real Campaign manifests, not the cycles under them."""
 
 from __future__ import annotations
 

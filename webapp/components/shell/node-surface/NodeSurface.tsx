@@ -2,9 +2,9 @@
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
-import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
-import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
-import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";
+import { PromptFieldsEditor } from "./PromptFieldsEditor";
+import { NodeConfigEditor } from "./NodeConfigEditor";
+import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
 
 // The one node surface: config → prompt → output, rendered as an inseparable
 // unit so config can never be gated away from its prompt. It renders exactly
@@ -37,6 +37,7 @@ export function NodeSurface({
   babysitEditable,
   readOnly,
   flat,
+  compact,
   onClose,
   onApply,
   onConfigChange,
@@ -61,6 +62,10 @@ export function NodeSurface({
   babysitEditable?: boolean;
   readOnly?: boolean;
   flat?: boolean;
+  // Half-width host (the chat run card): params at their default fold away, prompt
+  // boxes shorten, the output contract collapses. It changes what is IN VIEW, never
+  // what exists — every part stays one disclosure away.
+  compact?: boolean;
   onClose?: () => void;
   // Prompt edits + search-space config edits ride this DraftPatch. Values-mode
   // config edits ride `onConfigChange` (the flat fork overlay). Absent → that
@@ -96,6 +101,7 @@ export function NodeSurface({
         seedOverlay={configSeed}
         babysitEditable={babysitEditable}
         readOnly={configReadOnly}
+        compact={compact}
         onApply={onApply}
         onChange={onConfigChange}
       />
@@ -107,12 +113,20 @@ export function NodeSurface({
             value={point.origin_prompt_fields}
             flat
             readOnly={promptReadOnly}
+            compact={compact}
             onApply={promptReadOnly ? undefined : onApply}
           />
         </>
       ) : null}
 
-      <NodeOutputSchemaView schema={nodeOutput} />
+      {compact ? (
+        <details className="node-output-fold">
+          <summary>Output contract</summary>
+          <NodeOutputSchemaView schema={nodeOutput} />
+        </details>
+      ) : (
+        <NodeOutputSchemaView schema={nodeOutput} />
+      )}
     </>
   );
 

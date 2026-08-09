@@ -123,7 +123,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 - **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
 - **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
 - **`dataset.md`** — operator guide; free-form, not parsed.
-- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (or by web ingest at commit) and read free on every later run. See `application/optimization/task_context.py::load_or_build_task_context`.
+- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/optimization/task_context.py::decompose_prompt_fields`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
 
 ---
 
@@ -228,6 +228,7 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 
 - **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `INJECTIONS`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
+- **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.

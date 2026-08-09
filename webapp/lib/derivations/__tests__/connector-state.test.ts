@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { connectorReachability } from "../connector-state";
-import type { BackendHealth } from "@/lib/api";
+import type { BackendHealthResponse } from "@/lib/api";
 
-const health = (status: BackendHealth["status"]): BackendHealth => ({
+const health = (status: BackendHealthResponse["status"]): BackendHealthResponse => ({
   backend_id: "b1",
   base_url: "http://127.0.0.1:8000",
   status,

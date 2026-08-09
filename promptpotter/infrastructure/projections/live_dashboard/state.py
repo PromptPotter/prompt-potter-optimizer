@@ -8,18 +8,21 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, RoundSummary, SpendBucket, SpendRollup
+from promptpotter.domain.results import HeadlineMetric, SpendBucket, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "BackendWarning",
     "BackfillLogEntry",
+    "CurrentRound",
     "DashboardError",
     "InFlightCall",
     "LiveDashboardState",
     "LoopWarning",
+    "PobbBlock",
     "RunLimits",
     "SpendBucket",
     "SpendRollup",
@@ -100,6 +103,41 @@ class RunLimits(StrictModel):
     # from nearly-dead-of-seven, and in lives mode ``max_rounds`` is null, so the round
     # counter it replaces carried the only scale there was. ``None`` when lives is off.
     lives_cap: int | None = None
+
+
+class PobbBlock(StrictModel):
+    """``current_round.pobb`` — round-wide elimination telemetry, rebuilt every persist."""
+
+    current_id: str = ""
+    n_samples: int = 0
+    leader_prob: float = 0.0
+    posterior_width: float = 1.0
+    top: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CurrentRound(StrictModel):
+    """``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist.
+
+    There is deliberately **no** ``live`` flag here. "Is the run running" is ``run_phase``, one
+    field up and already server-owned; "is this the round I am looking at" is ``round`` below.
+    A third boolean spelling their conjunction as "has this round closed into ``rounds[]``" is
+    what blanked the optimizer canvas through the whole post-round escalation window, where the
+    round IS closed and ``l2_context`` is very much running."""
+
+    # ALWAYS ``state.round``, so a reader can select this block over the audit twin by plain
+    # equality — and the block stays the better source after close, since the escalation calls
+    # that fire next land here and never in the already-flushed twin.
+    round: int = 0
+    # Which optimizer node is working, over the FULL phase vocabulary. ``None`` only when
+    # nothing is running.
+    active_node: str | None = None
+    # This round's candidates, same shape as a closed round's — so a reader takes a whole row
+    # rather than merging two shapes field by field.
+    candidates: list[DashboardCandidate] = Field(default_factory=list)
+    # Per-node LLM I/O for THIS round, keyed by node id, mirroring ``round_NNNN.json::nodes``.
+    # Free-form payloads (``build_node_block``, shared with the audit twin).
+    nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    pobb: PobbBlock = Field(default_factory=PobbBlock)
 
 
 class LiveDashboardState(StrictModel):
@@ -219,8 +257,8 @@ class LiveDashboardState(StrictModel):
     # Paired-PoBB backfill audit — per-sample log capped at 256 entries.
     backfill_log: list[BackfillLogEntry] = Field(default_factory=list)
 
-    # Deep current-round node block (rebuilt every persist).
-    current_round: dict[str, Any] = Field(default_factory=dict)
+    # The round in flight (rebuilt every persist).
+    current_round: CurrentRound = Field(default_factory=CurrentRound)
 
     # Populated only when the runner crashed — operator-facing message +
     # exception class. Absent on normal stops; sole writer is
@@ -259,7 +297,7 @@ class LiveDashboardState(StrictModel):
             "stop_reason": None,
             "error": None,
             "in_flight": None,
-            "current_round": {},
+            "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,
         }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
-import { postPauseCycle } from "@/lib/api/mutations";
+import { postPauseCycle } from "@/lib/api/commands";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";

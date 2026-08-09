@@ -11,7 +11,7 @@ from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
-from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
+from promptpotter.application.scoring.diagnostics import extract_sample_diagnostics, find_rank
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import (

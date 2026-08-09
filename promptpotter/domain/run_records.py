@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -96,6 +97,14 @@ class PhaseRecord(StrictModel):
     # subscribers (LiveDashboardView, LiveDisplay) read this field; no disk
     # re-reader does. ``None`` on every record but ``round:display``.
     live_round_result: Any = Field(default=None, exclude=True, repr=False)
+    # In-memory-only carrier for ``PhaseEvent.data`` — the live handles and bulk a phase
+    # builder was called with. Same ``exclude=True`` rationale as the field above, and the
+    # same audit: NO disk re-reader consumes it. The three ledger subscribers that need
+    # phase state read the typed ``payload['view']``, which is capped and human-readable;
+    # ``LiveDisplay`` alone reads this, for the ``env``/``state`` handles a resume-rewind
+    # rebuild needs, and those exist only on the direct in-memory path anyway. Off disk it
+    # also stops carrying the resolved dataset and a candidate's full prompt twice.
+    data: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -441,10 +450,24 @@ class LedgerCandidate(StrictModel):
     expected_samples: int | None = None
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
     cached_samples: int | None = None
-    # The always-on whisker, over this candidate's own rows. A warm-ruler round OVERRIDES it
-    # at close with the tighter θ-implied band (`LedgerRoundClose.abilities`).
+    # The always-on whisker, over this candidate's own rows. A warm-ruler round overrides it at
+    # close with the θ-implied band (`LedgerRoundClose.abilities`), which is a different
+    # QUANTITY rather than a tighter reading of the same one — hence `ci_scale`.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = None
+
+
+class LedgerAbility(StrictModel):
+    """One candidate's round-CLOSE numbers, keyed by LABEL in :class:`LedgerRoundClose`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    theta: float | None = None
+    theta_se: float | None = None
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
+    ci_scale: CiScale | None = None
 
 
 class LedgerRoundClose(StrictModel):
@@ -457,7 +480,7 @@ class LedgerRoundClose(StrictModel):
     winner_label: str = ""
     cumulative_theta: float | None = None
     cumulative_theta_se: float | None = None
-    abilities: dict[str, dict[str, float]] = Field(default_factory=dict)
+    abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
 
 
 class CycleSeedRecord(StrictModel):

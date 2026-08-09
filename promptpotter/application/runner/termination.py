@@ -82,7 +82,6 @@ def panel_gate_tripped(holed_candidate_ids: list[str], mode: PanelGateMode) -> S
 __all__ = [
     "BudgetGate",
     "OriginGateMode",
-    "PanelGateMode",
     "backend_unreachable_tripped",
     "origin_gate_tripped",
     "panel_gate_tripped",

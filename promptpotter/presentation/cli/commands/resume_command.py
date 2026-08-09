@@ -247,7 +247,7 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
     from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
         mint_operator_fork,
     )
-    from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
+    from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
     from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 

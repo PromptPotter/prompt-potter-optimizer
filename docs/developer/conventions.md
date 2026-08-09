@@ -11,8 +11,7 @@ collects everything else.
   `List[str]`.
 - **`logging` module only** — no `print()` in `promptpotter/`. Setup via
   `promptpotter/config/logging.py`.
-- **Ruff line-length: 100.** Run `ruff check . && ruff format --check .` in
-  the CI chain.
+- **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a
   contract, lean on it.
@@ -114,7 +113,7 @@ collects everything else.
 
 ## Reasoning doctrine
 
-Four situational guardrails against recurring AI blind spots — unlike the
+Six situational guardrails against recurring AI blind spots — unlike the
 universal gates in root `CLAUDE.md` (see the top of this page), each fires
 only in the specific situation named before it.
 
@@ -155,3 +154,29 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe every entry point that could ask for it a legible surface in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it from where they actually work, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
 2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a new statistic, a new mode) reaches the operator *taught*: a plain-language explainer, riding an **existing** surfacing channel (the lens/formula seam, not a new toggle), and **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the metric they chose. Teach from **one corpus** that serves the operator and the next AI reader alike — don't fork the prose.
 </entry-point-parity>
+
+**When you are about to open a file you will WORK in, or run a search spanning more than three files → `<read-once>`:**
+
+<read-once>
+**The AI blind spot this guards against:** a narrow read *feels* frugal. It returns twenty lines instead of eight hundred, so it reads as the disciplined move — and the context window keeps every one of them, so twenty pokes cost twenty times. The AI optimizes the visible number (lines returned now) against the invisible one (lines resident for the rest of the session), and picks wrong every time. Measured across 133 session transcripts: **tool results are 83% of all content**, and **69% of the reading bill is RE-reading** — the same files, in the same session, a few lines at a time. On the ten hottest files, **265 of 276 reads were ranged**.
+
+1. **Read whole, once, when you expect four or more touches.** A ranged read averages ~600 tokens and a whole one ~2,600, so the break-even is between four and five pokes — and `store.py` was poked thirty times in one session, for six times what reading it once would have cost. Open it, read it, work from what you have. The exception is a file read for *reference* rather than for work — `tests/` (the suite is fixed at six files by [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md), so they grow unboundedly by charter) and the hand-authored contract YAMLs under `docs/specs/` — where you genuinely want one clause and will not return.
+2. **Never read file CONTENT through `sed` / `cat` / `head`.** An identical `Read` is deduplicated by the harness; shell output never is, so the same bytes are billed in full every time — and it *looks* cheaper because it prints fewer lines. Use the file tools; keep the shell for things that are not file content.
+3. **Delegate any search spanning more than three files.** A sub-agent reads in a window that is thrown away and hands back a conclusion; direct searching leaves every hit resident. This is measured, not stylistic: sub-agents were 3.3% of spend while direct `Grep` + shell `grep` was ten times that. Ask for the verdict and the paths, never the excerpts.
+4. **Make a command assert, not display.** Header scaffolding and unconditional dumps around a check are pure cost — print on failure, and let success be silent. Same rule as rule 3 in miniature: return the conclusion, not the evidence for it.
+
+**And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the row in [`concept-map.md`](concept-map.md) or [`../glossary.md`](../glossary.md) that should have answered it, in the same session, while you still know what you were looking for.
+</read-once>
+
+**When you reach for the shell, a sub-agent, or a wait → `<wall-clock>`:**
+
+<wall-clock>
+**The AI blind spot this guards against:** an AI prices its own loop in tokens, because tokens are the only cost it is ever shown. Seconds are invisible to it and are the only cost the operator actually watches — so it reaches for a shell pipeline where a file tool would do, sends sub-agents out one at a time, and waits by sleeping. Measured across the same corpus as <read-once>, over six days: **`Bash` spent 14.1 hours across 5,406 calls; `Read` + `Grep` + `Edit` + `Write` together spent 0.4 hours across 5,573.** Same order of work, thirty-five times the clock.
+
+1. **A shell call carries a fixed toll the file tools do not** — `Bash` runs a median 2.4s and a mean 9.4s against ~0.1–0.4s for the file tools. This is the same conclusion <read-once> rule 2 reaches from the token side, and the two agree: the shell is for things that are not file content. When you do need it, put the whole errand in ONE call rather than five.
+2. **Delegation is cheap in tokens and expensive in wall-clock.** A sub-agent is ~5 minutes. <read-once> rule 3 prices it at 3.3% of spend and is right about tokens, but **75 of 75 launches in that corpus went out alone**, so N searches cost N × 5 minutes when they could have cost one. Send them in a single message, or do the search yourself.
+3. **Never `sleep`-poll in a shell.** Two polling loops in one recorded session burned seven minutes producing nothing. Run the thing in the background and let the notification arrive; a wait implemented as a loop is a wait nobody can interrupt.
+4. **Iterate on the targeted check; run the gate once.** Gate commands were over half of all shell time. While editing, run the one tool — or the one test file — that owns what you touched; `scripts/gate.py` is the thing you run before you hand the work over, not between edits.
+
+**And be honest about the context effect rather than reaching for it.** Turn latency does rise with the window — a median 1.4s at 50k against 4.4s at 700k — but that is seconds, and it is the whole of it: shell latency measured flat across a session, so nothing is degrading. It does not justify a five-minute delegation to save twenty thousand tokens.
+</wall-clock>

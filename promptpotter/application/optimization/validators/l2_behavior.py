@@ -4,21 +4,15 @@ datasets. The registry is the SoT; a check for something ``extra="forbid"`` alre
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from typing import Any
 
-from promptpotter.application.optimization.validators.l1_behavior import (
+from promptpotter.application.optimization.validators.behavior_base import (
+    CheckFn,
     CheckResult,
     ValidatorContext,
 )
 
-__all__ = [
-    "L2_CHECK_REGISTRY",
-    "L2_RATIONALE_FLOOR_CHARS",
-    "extract_l2_output",
-    "l2_fired",
-    "run_all_l2_checks",
-]
+__all__ = ["run_all_l2_checks"]
 
 
 # An L2 rationale below this is a stub, not a diagnosis — mirrors the
@@ -27,8 +21,6 @@ L2_RATIONALE_FLOOR_CHARS = 40
 
 # A digit or a `#N` sample reference — the cheap evidence-anchor signal.
 _EVIDENCE_RE = re.compile(r"#\d+|\d")
-
-CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 
 def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:

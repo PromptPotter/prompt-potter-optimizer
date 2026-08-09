@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
+from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
 from promptpotter.application.output import (
     write_hard_samples_artifacts,
     write_log_md,

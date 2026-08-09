@@ -8,6 +8,7 @@ import { ChoiceField } from "@/components/forms/ChoiceField";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { PipelineSetupSection } from "./PipelineSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
@@ -82,6 +83,7 @@ export function IngestConversation({
   datasets,
   variant,
   liveSegment,
+  runCard,
 }: {
   flow: IngestFlow;
   // Only the modal supplies the entry lists: existing origins to reuse +
@@ -94,6 +96,11 @@ export function IngestConversation({
   // and showing content it also collapses the welcome illustration — the thread
   // must never render the placeholder over live activity.
   liveSegment?: ReactNode;
+  // The run card — LAST in the thread, which is what lets it pin to the bottom
+  // while the run is live. Kept a separate slot from `liveSegment`: that one is the
+  // append-only activity history, this one is a single always-current pane, and
+  // folding them would put the card's stickiness at the mercy of the feed's order.
+  runCard?: ReactNode;
 }) {
   const { phase, messages } = flow;
   const [dragging, setDragging] = useState(false);
@@ -105,7 +112,8 @@ export function IngestConversation({
     variant === "inline" &&
     messages.length === 0 &&
     phase.stage === "idle" &&
-    !liveSegment;
+    !liveSegment &&
+    !runCard;
 
   return (
     <div className={cx("ingest-conversation", `ingest-conversation--${variant}`)}>
@@ -136,6 +144,8 @@ export function IngestConversation({
             <div key={msg.id} className="chat-msg ai chat-msg-warn" role="status">
               {msg.text}
             </div>
+          ) : msg.kind === "run" ? (
+            <RunSummaryItem key={msg.id} summary={msg.summary} />
           ) : (
             <div key={msg.id} className="chat-msg ai chat-msg-error" role="alert">
               {msg.text}
@@ -171,6 +181,7 @@ export function IngestConversation({
         {/* The live cycle's curated activity + inline decisions — the same
             ordered thread, continued. */}
         {liveSegment}
+        {runCard}
       </div>
 
       <div
