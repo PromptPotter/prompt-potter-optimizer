@@ -1,4 +1,5 @@
 import { BRAND } from "@/lib/brand";
+import { PotterMark } from "@/components/brand/PotterMark";
 
 // Bare host for the CTA ("promptpotter.com"). Falls back to the raw string if
 // it isn't a parseable URL — the value is build-time config.
@@ -55,22 +56,7 @@ export function BrandShowcase() {
 
       <div className="ls-content">
         <div className="ls-eyebrow">
-          <svg className="ls-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M12 1.6 21.5 7v10L12 22.4 2.5 17V7z"
-              stroke="currentColor"
-              strokeWidth={1.4}
-              strokeLinejoin="round"
-            />
-            <path d="M12 6.8 8 14.8h8z" fill="currentColor" />
-            <path d="M8 16.9h8" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" />
-            <path
-              d="M3 12h3.4M17.6 12H21"
-              stroke="currentColor"
-              strokeWidth={1.4}
-              strokeLinecap="round"
-            />
-          </svg>
+          <PotterMark className="ls-mark" size={26} />
           <span>{title}</span>
         </div>
 

@@ -20,7 +20,10 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: BRAND.backgroundColor,
     theme_color: BRAND.themeColor,
     icons: [
-      { src: "/brand/potter-mark.svg", sizes: "any", type: "image/svg+xml" },
+      // Opaque, on brand paper — an installed-app icon is composited onto a
+      // surface we do not control, so a transparent mark would vanish on a
+      // dark launcher.
+      { src: "/brand/app-icon-pot-512.png", sizes: "512x512", type: "image/png" },
     ],
   };
 }

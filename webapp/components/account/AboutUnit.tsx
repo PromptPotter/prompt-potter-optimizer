@@ -12,6 +12,7 @@
 // until a signed credential lands — never a "verified" pill before then.
 
 import { useState } from "react";
+import { PotterMark } from "@/components/brand/PotterMark";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 import { fetchHealth } from "@/lib/api";
 import { useFetch } from "@/lib/hooks/useFetch";
@@ -251,24 +252,7 @@ function ProvenancePill({ verified }: { verified: boolean }) {
 }
 
 function Mark() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
-      <path
-        d="M12 1.6 21.5 7v10L12 22.4 2.5 17V7z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-      <path d="M12 6.8 8 14.8h8z" fill="currentColor" />
-      <path d="M8 16.9h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path
-        d="M3 12h3.4M17.6 12H21"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <PotterMark size={22} />;
 }
 
 function prettyHost(url: string): string {
