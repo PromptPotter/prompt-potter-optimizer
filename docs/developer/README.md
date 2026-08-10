@@ -61,7 +61,7 @@ round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_w
    {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE}
 ```
 
-Default rules in `escalation/rules.py`: `perfect_accuracy`, `l1_continue`, `l1_to_l2`; plus `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Quiet until AxisIndex is initialised (one round's evidence required).
+Default rules in `escalation/rules.py` (highest priority first): `perfect_accuracy` (100), `l1_generate_unusable` (70 — mandatory placeholder dropped or zero candidates parsed), `l1_evidence_starved` (65 — node failed across ~all of a round's samples), `l2_axis_yield_drought` (60 — L1 stalled ≥1 round AND AxisIndex shows no productive axes; quiet until AxisIndex initialises), `l1_continue` (50), `l1_to_l2` (10 — fall-through on patience exhaustion).
 
 Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
 
@@ -131,7 +131,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
-2. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
+2. [`l2-internals.md`](l2-internals.md) — trigger, inputs, layout + overrides edits.
 3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
