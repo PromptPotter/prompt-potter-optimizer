@@ -192,6 +192,7 @@
         "properties": {
           "axis_targeted": {
             "default": "",
+            "description": "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, a param for a quantitative one. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
             "maxLength": 30,
             "title": "Axis Targeted",
             "type": "string"
@@ -316,6 +317,7 @@
           },
           "rationale": {
             "default": "",
+            "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
             "maxLength": 400,
             "title": "Rationale",
             "type": "string"

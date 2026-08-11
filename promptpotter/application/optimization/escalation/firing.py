@@ -101,8 +101,12 @@ class LayerStrategy:
 
 
 def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
-    rationale = raw.rationale or "L2 refine_strategy transition"
-    changes: dict[str, Any] = {"changes_description": f"L2: {truncate(rationale, 80)}"}
+    # An absent reason is REPORTED, never replaced. The placeholder that stood here read as a
+    # sentence L2 had written, so the one surface carrying the fire forward said "refine_strategy
+    # transition" whether L2 had diagnosed anything or not — and the empty state survived only as a
+    # decimal in `review.md`'s l2_behavior_pass_rate, which is where it was eventually found.
+    rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
+    changes: dict[str, Any] = {"changes_description": f"L2: {rationale}"}
     if raw.l1_overrides:
         changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
 
@@ -206,7 +210,7 @@ L2 = LayerStrategy(
 
 def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
     new_plan = raw.plan or opt_sp.plan
-    rationale = raw.rationale or "L3 modify_plan transition"
+    rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
     failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
     if failures:
         logger.warning(
@@ -216,7 +220,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
         )
     return TransitionResult(
         opt_sp=opt_sp.mutate(
-            plan=new_plan, changes_description=f"L3: {truncate(rationale, 80)}", source="l3_plan"
+            plan=new_plan, changes_description=f"L3: {rationale}", source="l3_plan"
         ),
         l3_note=raw.note,
         l3_guard_breaches=failures,

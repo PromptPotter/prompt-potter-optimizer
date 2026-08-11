@@ -315,12 +315,13 @@ resolved_prompts:
       first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
       before a cluster is noise wearing a rationale.
     answer_format: |-
-      Return JSON; set only what you change.
+      Return JSON. Set only the LEVER you pull — but ALWAYS write both reason fields, on every
+      fire, including one that pulls no lever.
       {
-        "l1_layout": {"<slot>": ["<placeholder>", ...]},   // if set, all 5 mandatory placeholders must appear
+        "l1_layout": {"<slot>": ["<placeholder>", ...]},   // a per-SLOT edit: a slot you name replaces that slot's whole list, a slot you omit keeps what it has
         "l1_overrides": {...},
-        "axis_targeted": "<short>",   // the axis you routed the cluster to
-        "rationale": "1-2 sentences"
+        "axis_targeted": "<short>",   // ALWAYS — the axis you routed the cluster to
+        "rationale": "1-2 sentences"  // ALWAYS — the cluster you are attacking and the sample id / count / yield number behind it
       }
       L1 owns pipeline_params; your output is attention and exploration, never candidate values.
   l3_plan/1:
