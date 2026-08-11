@@ -18,9 +18,9 @@ export interface DashboardCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  is_winner: boolean;
 }
 
 /** A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`. */
@@ -39,7 +39,6 @@ export interface RoundSummaryCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
   is_winner: boolean;
@@ -226,7 +225,6 @@ export interface ScoredCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
 }
 
 /** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
@@ -350,7 +348,6 @@ export interface RoundResult {
   candidates_scored: number;
   electable_count: number;
   candidate_scores: ScoredCandidate[];
-  decisions: unknown[];
   evaluators: Record<string, number>;
   l1_yield: number;
   l1_parse_failure: string | null;
@@ -874,7 +871,7 @@ export interface LineageNode {
    * position on this course's timeline. JOIN ON THIS, never on
    * `candidate_id`, when matching a node against a per-cycle projection:
    * `dashboard.json` is per-cycle and speaks the minting course's private
-   * counter, while `candidate_id` is re-minted per run (see `_close_facts`),
+   * counter, while `candidate_id` is re-minted per run (see `_round_facts`),
    * so an id join silently misses. */
   course_label: string;
   /** THE address, root → leaf: the course this node belongs to. A candidate a fork
@@ -889,8 +886,19 @@ export interface LineageNode {
   /** Candidate: minted | measured — never 'winner' (that rides `is_winner`).
    * Course: the cycle status. */
   state: string;
-  /** Elected this round. False throughout a round that never CLOSED — election is
-   * stamped at close, so such a round has no winner to report. */
+  /** This candidate's ROUND has held its election. The complement `is_winner`
+   * cannot supply: a round that HELD crowned nobody, so every bar in it reads
+   * `is_winner: false` exactly as a round still scoring does — and only this
+   * says whether an uncrowned bar lost or has not been judged yet. False on a
+   * course, which is not a round, and on a round halted before it stood (a
+   * holed panel). */
+  election_held: boolean;
+  /** Elected this round. Stamped at the ELECTION, which is the last thing scoring
+   * does — so it lands a whole `l1_critique` call before the round closes,
+   * and a round still running its optimizer calls already reports its winner.
+   * False where no election has been held (still scoring, or halted on a
+   * holed panel) and on a round that held: those two are told apart by the
+   * election record, not by this flag. */
   is_winner: boolean;
   /** Difficulty-adjusted Rasch ability the election ranked on — what explains a
    * lower-accuracy winner. Null outside the round's election fit. */
@@ -901,11 +909,6 @@ export interface LineageNode {
   evaluators: Record<string, number>;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  /** Which bar the band above brackets — the composite one or the accuracy one.
-   * Served with the bounds; both scales coexist within a round, so a client
-   * that re-derives it picks the wrong bar for every eliminated or cold-ruler
-   * candidate. */
-  ci_scale: 'composite' | 'accuracy' | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather

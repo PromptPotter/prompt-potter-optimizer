@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.mask.backprop import select_rewind_round
-from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
@@ -461,9 +461,9 @@ def _stash_rebase_request(
     """Stash an L2/L3 ``fork_proposal`` as a ``Cycle.rebase_request``. **The layer decides WHETHER to
     rewind; UCB decides WHERE** — :func:`select_rewind_round` over the backpropagated lineage."""
     session = cycle.session
-    record = load_mask_record(session.store, session.campaign_id)
+    spine = load_lineage_spine(session.store, session.campaign_id)
     target_round = select_rewind_round(
-        record, cycle_id=session.state.cycle_id or "", current_round=round_num
+        spine, cycle_id=session.state.cycle_id or "", current_round=round_num
     )
     if target_round is None:
         # Nothing above the current node (round 0 of a root). A rewind to nowhere would

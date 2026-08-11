@@ -174,15 +174,21 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 
 def _mask_records(
     stores: Stores, tree: LineageNode, samples: frozenset[int] | None
-) -> dict[str, MaskRecord]:
-    """One ``MaskRecord`` per CAMPAIGN the tree spans — an inner run is its own campaign, so a single record at the root
-    leaves every inner candidate unmasked. Resolved from each course node's own ``path``, never a second walk."""
-    out: dict[str, MaskRecord] = {}
+) -> dict[tuple[CycleHop, ...], MaskRecord]:
+    """One ``MaskRecord`` per campaign the tree spans, keyed by the course's OWN PATH.
+
+    Keyed on ``campaign_id`` this served the wrong sandbox's numbers: an inner campaign id is
+    content-addressed on the CELL, not on who asked, so one id is minted into several sibling
+    ``.inner/`` sandboxes and the first visited won. ``cycle_id`` is no safer; the path is the
+    only address that separates them, which is what ``lineage_views`` already applies."""
+    out: dict[tuple[CycleHop, ...], MaskRecord] = {}
 
     def visit(node: LineageNode) -> None:
-        if node.kind == "course" and node.path and node.path[-1].campaign_id not in out:
-            leaf_store, leaf = resolve_cycle_path(stores, tuple(node.path))
-            out[leaf.campaign_id] = load_mask_record(leaf_store, leaf.campaign_id, samples)
+        if node.kind == "course" and node.path:
+            path = tuple(node.path)
+            if path not in out:
+                leaf_store, leaf = resolve_cycle_path(stores, path)
+                out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples)
         for kid in node.children:
             visit(kid)
 
@@ -196,7 +202,7 @@ class _Overlay:
 
     def __init__(
         self,
-        records: dict[str, MaskRecord],
+        records: dict[tuple[CycleHop, ...], MaskRecord],
         lens: str | None,
         sample_ids: frozenset[int] | None,
     ):
@@ -204,22 +210,19 @@ class _Overlay:
         self.diverged: dict[tuple[str, str, int], LineageDivergence] = {}
         self.subset: dict[tuple[str, str, str], tuple[float | None, int]] = {}
         dimmed: set[tuple[str, str, int]] = set()
-        for campaign_id, record in records.items():
+        for path, record in records.items():
+            campaign_id = path[-1].campaign_id
             result = find_divergences(record, verdict)
             for d in result.divergences:
                 self.diverged[(campaign_id, d.cycle_id, d.round)] = LineageDivergence(
                     alternative_candidate_id=d.alternative_candidate_id
                 )
-            # `node_key` is the mask's own `{cycle_id}::r{round}` key — consumed here and
-            # never served: the tree carries the fact on the node instead.
-            divergent = set(result.divergent)
+            dimmed.update((campaign_id, cid, rnd) for cid, rnd in result.divergent)
+            if not sample_ids:
+                continue
             for cyc in record.cycles:
-                for rnd in cyc.rounds:
-                    if f"{cyc.cycle_id}::r{rnd.round}" in divergent:
-                        dimmed.add((campaign_id, cyc.cycle_id, rnd.round))
-                    if not sample_ids:
-                        continue
-                    for cand in rnd.candidates:
+                for rnd_rec in cyc.rounds:
+                    for cand in rnd_rec.candidates:
                         self.subset[(campaign_id, cyc.cycle_id, cand.candidate_id)] = (
                             cand.accuracy if cand.n_scored > 0 else None,
                             cand.n_scored,

@@ -79,7 +79,7 @@ export interface ViewedLineage {
   // THE served genealogy, rooted at the viewed campaign's root course.
   tree: LineageNode | null;
   // The tree's address index (`indexLineage`), built once per served tree — the surfaces'
-  // per-render lookups ride this instead of re-walking with `nodeAt`/`candidatesAtPath`.
+  // per-render lookups ride this instead of re-walking with `candidatesAtPath`.
   index: LineageIndex;
   // The PRESET lens dropdown value: "" (off), "score:<formula>", or "abort:<variant>".
   // The What-If card overrides it as the master when open.

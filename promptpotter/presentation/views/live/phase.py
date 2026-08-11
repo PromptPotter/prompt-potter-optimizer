@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.rendering import display_fitness, round_winner_key
+from promptpotter.domain.rendering import display_fitness, display_rank_key
 from promptpotter.domain.results import is_round_winner
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -96,7 +96,7 @@ def render_round_stats(
             ),
             max(
                 round_result.candidate_scores,
-                key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
+                key=lambda s: display_rank_key(s.composite_fitness, s.accuracy),
             ),
         )
         accuracy = best.accuracy

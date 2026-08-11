@@ -19,6 +19,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     SnapshotRecord,
     TokenUsageRecord,
+    view_fields,
 )
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
@@ -453,6 +454,19 @@ class LiveDashboardView(DerivedView):
         # generate call. Historical `rounds[]` is untouched.
         if self._buffer.round_num != self.state.round:
             self._buffer.reset(self.state.round)
+        # AFTER the reset above, never before it: the crown is the one thing written here that
+        # belongs to the round the buffer is already holding, so stamping it earlier would let
+        # a round-boundary reset wipe it in the same handler.
+        #
+        # The election has ALREADY run — `elect_round_winner` is the last thing `l1_score`
+        # does, before the panel gate, before `l1_critique` and two optimizer calls before the
+        # round closes. Crowning at `round:display` instead is what made the badge land while
+        # `l2_context` was running, at a moment with no relation to the decision.
+        if record.phase == CampaignPhase.L1_SCORE and record.event == "exit":
+            # Read through the mapping form, not `getattr`: a ledger replay deserializes the
+            # view to a DICT, on which `getattr` returns the default and silently crowns nobody.
+            # `domain/run_records.py::view_fields` owns that rule for every reader.
+            self._buffer.mark_winner(str(view_fields(record).get("winner_candidate_id") or ""))
         self._flush_pending_persist()
 
     @staticmethod

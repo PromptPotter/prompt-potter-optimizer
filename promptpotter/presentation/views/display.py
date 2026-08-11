@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.rendering import display_fitness, round_winner_key
+from promptpotter.domain.rendering import display_fitness, display_rank_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -187,7 +187,7 @@ def _scoreboard(
 
     ranked = sorted(
         scored,
-        key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
+        key=lambda s: display_rank_key(s.composite_fitness, s.accuracy),
         reverse=True,
     )
     w = 78

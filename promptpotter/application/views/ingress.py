@@ -193,6 +193,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # actually promoted (whose accuracy is `winner_accuracy`), so the verdict
     # line / SCOREBOARD `*` would disagree with the dashboard.
     winner_label = str(d.get("winner_label") or "?")
+    winner_candidate_id = str(d.get("winner_candidate_id") or "")
     winner_total = int(d.get("winner_total", 0))
 
     w_acc = float(d["winner_accuracy"])
@@ -215,6 +216,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         origin_acc=origin_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
+        winner_candidate_id=winner_candidate_id,
         winner_accuracy=w_acc,
         winner_composite_fitness=d.get("winner_composite_fitness"),
         winner_evaluators=dict(d["winner_evaluators"]),

@@ -125,7 +125,6 @@ describe("roundCandidates — the in-flight round", () => {
           composite_fitness: 0.55,
           composite_ci_lo: 0.41,
           composite_ci_hi: 0.69,
-          ci_scale: "composite",
           scored_samples: 8,
           expected_samples: 20,
         }),
@@ -134,11 +133,10 @@ describe("roundCandidates — the in-flight round", () => {
   });
   const row = roundCandidates(live).find((r) => r.source === "inflight");
 
-  it("carries the whisker and its scale off the same row as the bar", () => {
+  it("carries the whisker off the same row as the bar", () => {
     expect(row?.accuracy).toBe(0.6);
     expect(row?.compositeCiLo).toBe(0.41);
     expect(row?.compositeCiHi).toBe(0.69);
-    expect(row?.ciScale).toBe("composite");
   });
 
   // The id both live readers join back on. A served lineage id here resolves in NEITHER

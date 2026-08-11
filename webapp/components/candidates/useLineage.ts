@@ -6,11 +6,10 @@
 // mask/lens counterfactual are owned by `LineageProvider` and read via
 // `useViewedLineage()` — the SINGLE source both this view and the bars render.
 //
-// **The structure is the served tree, and nothing else** — no source-by-cycle-role
-// merge. The tree rides the LEDGER, which mints a candidate the moment it exists, so
-// the in-flight round is already in it and there is nothing to stitch. The live
-// dashboard stays what it is: the per-sample VALUE overlay (`valueByKey`), painted at
-// render so a value tick never re-runs the layout memo.
+// **The structure is the served tree, and nothing else** — no source-by-cycle-role merge,
+// and since the dead live overlay went, no `dashboard.json` read at all. The tree rides the
+// LEDGER, which mints a candidate the moment it exists, so the in-flight round is already in
+// it and there is nothing to stitch.
 //
 // View state (which metric, which lanes are open) is NOT here — it belongs to the
 // card as a whole and lives in `candidates-store`, so the Sequence and Forest
@@ -21,18 +20,15 @@ import { postCleanupEmpty } from "@/lib/api";
 import type { LineageNode } from "@/lib/api";
 import {
   primaryMetric,
-  roundCandidates,
   candidatesOf,
   countDescendants,
   nodeKeyOf,
   type HeadlineMetric,
 } from "@/lib/derivations";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
-import type { CandidateRow } from "@/lib/types";
 import { setCandidatesState, useCandidatesState } from "./candidates-store";
 
 // Empty-stub cleanup — one campaign-wide modal mutation. Stubs accumulate
@@ -52,8 +48,8 @@ interface LineageCleanup {
 export interface Lineage {
   // THE served genealogy's root course, or null before the first read lands.
   tree: LineageNode | null;
-  // Per-candidate fitness, keyed by the candidate's ADDRESS (`nodeKeyOf`) — the live
-  // value overlay painted onto nodes. NOT part of the geometry (so a value tick never
+  // Per-candidate fitness, keyed by the candidate's ADDRESS (`nodeKeyOf`) — the value
+  // overlay painted onto nodes. NOT part of the geometry (so a value tick never
   // re-lays-out the tree). Carries the percent metric the operator selected;
   // θ rides `thetaByKey`. `undefined` for a node with no value yet.
   valueByKey: ReadonlyMap<string, number | null>;
@@ -104,21 +100,10 @@ export function useLineage({
   // Per-campaign view memory — seeds the expand state below, and records what the operator
   // changes here so the next visit opens the same way.
   const { viewFor, recordView } = useViewMemory();
-  // The in-view cycle's live dashboard — the same source the bars read, so the
-  // active cycle's node values can't disagree with them.
-  const { dash } = useDashboard();
   const { metrics, expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
   const metric = primaryMetric(metrics);
 
-  // The active (in-view) cycle's live candidate rows from dashboard.json —
-  // includes the in-flight round's per-sample value movement.
-  const liveRows = useMemo<CandidateRow[]>(
-    () => (cycleId && dash ? roundCandidates(dash) : []),
-    [cycleId, dash],
-  );
-
-  // The viewed course's address, and the prefix every live row's key is built from —
-  // `nodeKeyOf` is `{encoded path}|{id}`, and a live row's candidate sits on this path.
+  // The viewed course's address — what every lookup into the tree index is keyed by.
   const viewedKey = path ? encodeCyclePath(path) : "";
   // The viewed course's LANE key. Null before the tree lands, and null when the viewed
   // course is a FORK — a fork is not a node, its candidates ride the parent's lane.
@@ -199,12 +184,17 @@ export function useLineage({
     return m;
   }, [index, viewedKey]);
 
-  // Per-candidate percent-metric overlay, keyed by `nodeKeyOf`. The tree
-  // serves `composite_fitness` per candidate, so settled/sibling courses honor the
-  // composite selection on the SAME basis as the active cycle — one tree, one basis,
-  // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`) since it
-  // is a logit, not a percent. Deliberately NOT content-stabilized: it updates every
-  // poll, but only painted node text reads it.
+  // Per-candidate percent-metric overlay, keyed by `nodeKeyOf`. The tree serves
+  // `composite_fitness` per candidate, so settled/sibling courses honor the composite
+  // selection on the SAME basis as the active cycle — one tree, one basis, nothing
+  // recomputed client-side. θ is a separate overlay (`thetaByKey`) since it is a logit,
+  // not a percent.
+  //
+  // ONE SOURCE. A second pass used to overwrite the in-view course's entries from
+  // `dashboard.json` "so the in-flight round tracks the 2 s poll", and it could never have
+  // done that: a live row's id is POSITIONAL (`r{round}_{idx}`), while every key here is
+  // `nodeKeyOf` = `{path}|{minted id}`. The in-flight half matched no node at all, and the
+  // historical half rewrote the tree's own numbers with themselves.
   const usesComposite = metric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
@@ -214,24 +204,11 @@ export function useLineage({
     // a bar's height disagreed with the node text beneath it. One basis now: `accuracy`.
     for (const course of courses) {
       for (const cand of candidatesOf(course)) {
-        const value = usesComposite
-          ? cand.composite_fitness
-          : cand.accuracy ?? null;
-        m.set(nodeKeyOf(cand), value);
-      }
-    }
-    // The in-view course's values track the 2 s poll, so its in-flight round moves
-    // in step with the bars rather than waiting on the tree's revalidation.
-    if (cycleId && dash) {
-      for (const row of liveRows) {
-        const value = usesComposite
-          ? row.composite ?? null
-          : row.accuracy ?? null;
-        m.set(`${viewedKey}|${row.candidate_id}`, value);
+        m.set(nodeKeyOf(cand), usesComposite ? cand.composite_fitness : (cand.accuracy ?? null));
       }
     }
     return m;
-  }, [courses, cycleId, dash, liveRows, usesComposite, viewedKey]);
+  }, [courses, usesComposite]);
 
   // Parallel overlay carrying each candidate's difficulty-adjusted ability θ, same key shape
   // as `valueByKey`. Painted into the node tooltip so a θ-elected winner shown below a
@@ -242,11 +219,8 @@ export function useLineage({
     for (const course of courses) {
       for (const cand of candidatesOf(course)) m.set(nodeKeyOf(cand), cand.theta);
     }
-    if (cycleId && dash) {
-      for (const row of liveRows) m.set(`${viewedKey}|${row.candidate_id}`, row.theta);
-    }
     return m;
-  }, [courses, cycleId, dash, liveRows, viewedKey]);
+  }, [courses]);
 
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1). Own-path candidates, not a course lookup —

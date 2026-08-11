@@ -5,23 +5,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, cast
+from typing import Any, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
-
-# THE anchor for what a `composite_ci_lo/hi` pair brackets — every site that writes those bounds
-# writes this beside them, and no site re-derives it.
-#
-# A normal-CLT interval over per-cell mean COMPOSITE, until a warm-ruler election rewrites it to
-# the θ-implied ACCURACY band (`l1/score/winner.py`). That rewrite is gated three ways, so both
-# scales coexist inside one round and the bounds alone are ambiguous: the chart's re-derivation
-# ("composite if that series is drawn, else accuracy") drew composite-scale intervals against
-# accuracy bars for every eliminated or cold-ruler arm.
-#
-# Lives here rather than beside `CalibrationModel` in `results.py` because `run_records.py`
-# carries it too and `results` already imports THAT — this module is the leaf both reach.
-CiScale = Literal["composite", "accuracy"]
 
 
 class PipelineData(TypedDict, total=False):

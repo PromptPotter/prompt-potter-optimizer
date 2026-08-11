@@ -4,7 +4,6 @@ persistence ingress; bypassing this seam collapses the round's display AND its a
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
@@ -21,18 +20,14 @@ from promptpotter.application.output import (
 )
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.results import RoundResult, is_round_winner
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import (
     assemble_prior_healths,
     compute_node_failure_rates,
     compute_round_health,
     evidence_starved_node,
 )
-from promptpotter.domain.run_records import (
-    LedgerAbility,
-    PhaseRecord,
-    ResumeCheckpointRecord,
-)
+from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful
 
@@ -71,6 +66,10 @@ async def emit_origin_round(
                     cycle, round_result, round_num=0, ledger=session.state.ledger
                 )
 
+    # Round 0 elects too: it adopts C0. Emitted here rather than from `close_round`, which round
+    # 0 reaches TWICE — the second time carrying the warm ruler's θ — where a crown that never
+    # moves would simply be rewritten with itself.
+    cb.on_election(round_result)
     await close_round(cycle, round_result, 0, session, cb)
 
 
@@ -94,57 +93,23 @@ async def escalate_or_stop(
         raise StopLoop(stop)
 
 
-def _round_close_facts(round_result: RoundResult) -> dict[str, Any]:
-    """What the CLOSE knows and no candidate could — the adopted individual and each row's θ / CI.
-    **Keyed by LABEL** (`C{round}.{idx}`): a lineage id is re-minted on resume, so an id join drops it."""
-    abilities: dict[str, LedgerAbility] = {}
-    for cs in round_result.candidate_scores:
-        ability = LedgerAbility(
-            theta=cs.theta,
-            theta_se=cs.theta_se,
-            composite_ci_lo=cs.composite_ci_lo,
-            composite_ci_hi=cs.composite_ci_hi,
-            ci_scale=cs.ci_scale,
-        )
-        if ability != LedgerAbility():
-            abilities[cs.label] = ability
-    winner_label = next(
-        (
-            cs.label
-            for cs in round_result.candidate_scores
-            if is_round_winner(cs.candidate_id, round_result.winner_id)
-        ),
-        "",
-    )
-    return {"winner_label": winner_label, "abilities": abilities}
-
-
 def persist_round(
     cycle: Cycle,
     round_result: RoundResult,
-    round_num: int,
     session: Session,
+    cb: RunCallbacks,
 ) -> None:
     """The ledger emit is unconditional — every completed round lands on the ledger."""
-    # Two destinations, two rules — collapsing them is what made the round document lie.
-    # LEDGER: everything pending goes out here, which is its chronological place (each record
-    # carries its own ``round``, and a decision made after round N closed happened before
-    # round N+1 did). DOCUMENT: only the decisions this round made. `to_dict()` drops `round`,
-    # so a foreign record folded into `decisions` is indistinguishable from a native one — and
-    # `replay_decisions` re-derives every REPLAYED kind in that list against THIS round's
-    # measurements. Draining the whole buffer filed 42 `round_winner` and 76 `elimination_cut`
-    # records under a round that did not make them, so resume's divergence seam was comparing
-    # one round's decision to another round's data, silently, in both directions.
-    # The ledger is the SoT and the document a projection of it: a record stamped for an
-    # EARLIER round has missed its file, and `restamp::refile_round_decisions` rebuilds every
-    # document from the stamps rather than this seam growing a back-reach into a closed file.
+    # ONE destination. Every pending record goes to the ledger, which is its chronological
+    # place and the only home it needs: each carries its own ``round`` stamp, so the round that
+    # MADE a decision is a fact about the record rather than about when it happened to be
+    # flushed. The document used to carry a second copy assembled here, and a record stamped for
+    # a round whose file was already written reached no document at all — it was dropped from
+    # this drain and cleared from the buffer in the same breath.
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
-        round_result.decisions.extend(
-            d.to_dict() for d in flushed if d.round is None or d.round == round_num
-        )
 
     if cycle.axes is not None:
         round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
@@ -152,33 +117,7 @@ def persist_round(
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
             ledger.append(d)
-        ledger.append(
-            PhaseRecord(
-                phase="round",
-                event="complete",
-                round=round_num,
-                payload={
-                    "accuracy": round_result.accuracy,
-                    "composite_fitness": round_result.composite_fitness,
-                    "improved": round_result.improved,
-                    # Banked beside `improved` because the life bank needs both to replay a
-                    # round identically on resume (`EscalationFSM.fold`): `improved` says which
-                    # way to move the bank, this says whether to move it at all.
-                    "electable_count": round_result.electable_count,
-                    "label": round_result.label,
-                    # Everything the CLOSE knows and no candidate could: the frontier it
-                    # advanced, the individual it adopted, and the ability fit. All read off
-                    # the `RoundResult` being persisted, so one writer serves every round —
-                    # round 0 included, which holds no election but does have a C0 and a θ
-                    # from the ruler fit. Without this the only on-disk home of θ and the
-                    # crown was `dashboard.json`, and a served view had to open another
-                    # projection's output to find them.
-                    "cumulative_theta": round_result.cumulative_theta,
-                    "cumulative_theta_se": round_result.cumulative_theta_se,
-                    **_round_close_facts(round_result),
-                },
-            )
-        )
+        cb.on_round_close(round_result)
 
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
@@ -237,7 +176,7 @@ async def close_round(
         is_origin=round_num == 0,
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
-    persist_round(cycle, round_result, round_num, session)
+    persist_round(cycle, round_result, session, cb)
     if cycle.axes and session.store:
         cycle.axes.refresh(
             session.store,

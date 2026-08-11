@@ -70,10 +70,13 @@ a convention:
   most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
   `round`: presence in the served map is the client's whole definition of "this node has fired".
 - **A live candidate is the same shape as a closed one** (`DashboardCandidate`,
-  `domain/dashboard_rows.py`), and `composite_ci_lo/hi` carries its `ci_scale`. Two shapes for one
+  `domain/dashboard_rows.py`). Two shapes for one
   entity force the client to merge them field by field, which put a bar and its error whisker on
-  two different polls. Every value is present at `candidate_scored` — the projection simply was
-  not copying them.
+  two different polls. **Each field lands at the moment its FACT exists, and none of them is the
+  round close:** the value and its band at `candidate_scored`, the crown at `l1_score:exit`,
+  where the election has just run. (θ stays null on a live row — it needs the round's joint fit,
+  which is a different fact, not a late one.) A field held back to `round:display` surfaces
+  whenever the next node happens to finish, which is not a time the operator can read anything into.
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
@@ -90,6 +93,15 @@ Write target is the `CycleDir` newtype, and the read sites serve the viewed cycl
 file — no `root_cycle_id` collapse. Run-state rides `dashboard.json::run_phase`, declared
 by the runner: the old `/runstate` probe inferred "running" from freshness, which was the
 symptom that run-state had never been owned state.
+
+**Seeding from that file may not be able to fail the run.** `resolve_resume_state` is the one
+reader that turns `dashboard.json` back into state, and the model is `extra="forbid"` — so a file
+an earlier build wrote fails on the one field that has since moved. Uncaught, that took down the
+resume whose whole job was to not lose the cycle, and then took down `write_launch_stop` as it
+tried to stamp why. The prior state is dropped WHOLE and loudly, never salvaged field by field: a
+partial read is a compatibility shim, the ledger is the truth, and everything this file carries on
+top of it is re-derived forward. The SSE snapshot already answers the same question the same way —
+`dashboard_unreadable` is a served reason, not an exception.
 
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
@@ -145,6 +157,14 @@ erroring:
   row is the course as a stand-in and keeps its own provenance.
 - **Whichever cut moved the POINTER answers for run-state** — `supersede` and `equivalent`
   both do, `offshoot` alone leaves the parent running. Separate from what a cut retires.
+
+**A round fact lands on the record that OWNS it, and the split is not cosmetic.** The crown is
+stamped once, by `elect_round_winner`, and rides its own `ElectionRecord` — so the tree crowns a
+whole `l1_critique` call before the round closes, and `election_held` is what separates a round
+that HELD from one still scoring (`is_winner: false` reads identically for both). θ and the
+frontier are RESTAMPED when the ruler warms, so they stay on `round:complete`, which round 0
+reaches twice for exactly that reason. Move either half to the other record and nothing raises:
+round 0 silently reverts to its cold θ, or the served crown goes late again.
 
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut

@@ -34,7 +34,13 @@ from promptpotter.application.intelligence.exploration import (
 )
 from promptpotter.application.mask.backprop import accumulate_node_stats, select_rewind_round
 from promptpotter.application.mask.divergence import find_divergences
-from promptpotter.application.mask.record import MaskCandidate, MaskCycle, MaskRecord, MaskRound
+from promptpotter.application.mask.record import (
+    MaskCandidate,
+    MaskCycle,
+    MaskRecord,
+    MaskRound,
+    SpineCycle,
+)
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
@@ -484,7 +490,7 @@ def _mask_cand(cid: str, acc: float, **kw: object) -> MaskCandidate:
 def test_mask_scoring_divergence_self_consistency_and_eligibility():
     """The scoring mask's correctness backbone, in one record.
 
-    Realized election (``winner.py``): argmax round_winner_key over {origin-anchor}
+    Realized election (``winner.py``): argmax display_rank_key over {origin-anchor}
     ∪ *eligible* candidates. Round 1: origin C0=0.5, A=0.75 (winner), B=0.25, and an
     INELIGIBLE C=1.0 (escalation-aborted-style). Round 2: A carries to anchor, D=1.0
     wins.
@@ -522,14 +528,14 @@ def test_mask_scoring_divergence_self_consistency_and_eligibility():
     assert realized.divergent == []
 
     swapped = find_divergences(record, make_scoring_verdict("1 - accuracy"))
-    assert [(d.node_key, d.alternative_candidate_id) for d in swapped.divergences] == [
-        ("cyc::r1", "B")
+    assert [(d.cycle_id, d.round, d.alternative_candidate_id) for d in swapped.divergences] == [
+        ("cyc", 1, "B")
     ]
-    assert swapped.divergent == ["cyc::r2"]
+    assert swapped.divergent == [("cyc", 2)]
 
 
-def _theta_round(cycle_id: str, rnd: int, theta: float) -> MaskRound:
-    return MaskRound(cycle_id=cycle_id, round=rnd, cumulative_theta=theta)
+def _spine_cycle(cycle_id: str, rounds: list[tuple[int, float]], **kw: object) -> SpineCycle:
+    return SpineCycle(cycle_id=cycle_id, theta_by_round=dict(rounds), **kw)  # type: ignore[arg-type]
 
 
 def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
@@ -547,18 +553,12 @@ def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
     So r1 has 5 descendants-plus-self, and r0 has 6 — NOT 8, which is what counting the
     child's inherited r0/r1 copies would give.
     """
-    root = MaskCycle(
-        cycle_id="root",
-        rounds=[_theta_round("root", r, t) for r, t in [(0, 0.0), (1, 0.5), (2, 0.4), (3, 0.3)]],
+    root = _spine_cycle("root", [(0, 0.0), (1, 0.5), (2, 0.4), (3, 0.3)])
+    # r0/r1 are byte-copies of root's, carried forward by the mint.
+    fork = _spine_cycle(
+        "fork", [(0, 0.0), (1, 0.5), (2, 2.0), (3, 2.4)], parent_cycle_id="root", fork_from_round=2
     )
-    fork = MaskCycle(
-        cycle_id="fork",
-        parent_cycle_id="root",
-        fork_from_round=2,
-        # r0/r1 are byte-copies of root's, carried forward by the mint.
-        rounds=[_theta_round("fork", r, t) for r, t in [(0, 0.0), (1, 0.5), (2, 2.0), (3, 2.4)]],
-    )
-    stats = accumulate_node_stats(MaskRecord(cycles=[root, fork]))
+    stats = accumulate_node_stats([root, fork])
 
     # Only the child's OWN rounds are nodes; its inherited prefix is not re-counted.
     assert ("fork", 0) not in stats
@@ -583,16 +583,13 @@ def test_mcts_ucb_rewinds_to_the_ancestor_whose_subtree_paid_off():
     rewind target must be r1 — the ancestor whose subtree carries the ability — not the
     adjacent r2 that merely happens to be nearest.
     """
-    root = MaskCycle(
-        cycle_id="root",
-        rounds=[_theta_round("root", r, t) for r, t in [(0, 0.0), (1, 2.0), (2, 0.1), (3, 0.0)]],
-    )
-    record = MaskRecord(cycles=[root])
-    assert select_rewind_round(record, cycle_id="root", current_round=3) == 1
+    root = _spine_cycle("root", [(0, 0.0), (1, 2.0), (2, 0.1), (3, 0.0)])
+    spine = [root]
+    assert select_rewind_round(spine, cycle_id="root", current_round=3) == 1
 
     # Nothing above round 0 — the caller must NOT fork (a rewind to nowhere would mint a
     # duplicate cycle and burn a whole run).
-    assert select_rewind_round(record, cycle_id="root", current_round=0) is None
+    assert select_rewind_round(spine, cycle_id="root", current_round=0) is None
 
 
 def test_mask_abort_verdict_rides_the_same_fold():
@@ -613,15 +610,15 @@ def test_mask_abort_verdict_rides_the_same_fold():
     assert realized.divergences == [] and realized.divergent == []
 
     no_lockin = find_divergences(record, make_abort_verdict(frozenset({"lock_in"})))
-    assert [d.node_key for d in no_lockin.divergences] == ["cyc::r1"]
-    assert no_lockin.divergent == ["cyc::r2"]
+    assert [(d.cycle_id, d.round) for d in no_lockin.divergences] == [("cyc", 1)]
+    assert no_lockin.divergent == [("cyc", 2)]
 
     no_eps = find_divergences(record, make_abort_verdict(frozenset({"epsilon"})))
-    assert [d.node_key for d in no_eps.divergences] == ["cyc::r2"]
+    assert [(d.cycle_id, d.round) for d in no_eps.divergences] == [("cyc", 2)]
 
     no_abort = find_divergences(record, make_abort_verdict(frozenset({"epsilon", "lock_in"})))
-    assert [d.node_key for d in no_abort.divergences] == ["cyc::r1"]
-    assert no_abort.divergent == ["cyc::r2"]
+    assert [(d.cycle_id, d.round) for d in no_abort.divergences] == [("cyc", 1)]
+    assert no_abort.divergent == [("cyc", 2)]
 
 
 def _flip_spine(cycle_id: str, *, n_rounds: int = 3) -> list[MaskRound]:
@@ -690,17 +687,17 @@ def test_mask_fold_claims_a_forks_subtree_only_when_it_is_rooted_at_or_after():
     assert realized.divergences == [] and realized.divergent == []
 
     swapped = find_divergences(record, make_scoring_verdict("1 - accuracy"))
-    assert [(d.node_key, d.alternative_candidate_id) for d in swapped.divergences] == [
-        ("root::r1", "B"),
-        ("early::r1", "B"),  # rooted before ⇒ still analysed, and departs on its own
+    assert [(d.cycle_id, d.round, d.alternative_candidate_id) for d in swapped.divergences] == [
+        ("root", 1, "B"),
+        ("early", 1, "B"),  # rooted before ⇒ still analysed, and departs on its own
     ]
     assert swapped.divergent == [
-        "root::r2",
-        "early::r2",
-        "late::r0",  # claimed wholesale — note r0, which no verdict ever rules on
-        "late::r1",
-        "grand::r0",
-        "grand::r1",
+        ("root", 2),
+        ("early", 2),
+        ("late", 0),  # claimed wholesale — note r0, which no verdict ever rules on
+        ("late", 1),
+        ("grand", 0),
+        ("grand", 1),
     ]
 
 
@@ -3098,34 +3095,6 @@ def test_mean_ci_bounds_and_degenerate_n() -> None:
     assert abs(mean - sum(values) / len(values)) < 1e-9
     assert lo < mean < hi
     assert lo < hi
-
-
-def test_theta_accuracy_ci_warm_vs_cold_ruler() -> None:
-    """The θ-implied whisker (the difficulty-adjusted band the candidate panel draws where the
-    ruler is warm). A wrong band is silent — it mislabels a real ability gap as noise on the
-    surface the operator reads to decide adoption. Pin that it brackets the θ point, stays in
-    [0,1], and that a COLD/empty ruler returns None so the caller keeps the raw composite CI
-    rather than dressing a difficulty-blind round as difficulty-adjusted."""
-    from promptpotter.application.intelligence.exploration import (
-        ruler_expected_accuracy,
-        theta_accuracy_ci,
-    )
-
-    ruler = {1: -1.0, 2: 0.0, 3: 1.0, 4: 0.5, 5: -0.5, 6: 0.2}
-    band = theta_accuracy_ci(0.3, 0.4, ruler)
-    assert band is not None
-    lo, hi = band
-    mid = ruler_expected_accuracy(0.3, ruler)
-    assert mid is not None
-    assert 0.0 <= lo <= mid <= hi <= 1.0
-    # A smaller SE gives a tighter band (the whole point — more evidence, narrower whisker).
-    tight = theta_accuracy_ci(0.3, 0.1, ruler)
-    assert tight is not None
-    assert (tight[1] - tight[0]) < (hi - lo)
-    # Cold ruler / missing θ or SE → None: the caller keeps the raw composite CI.
-    assert theta_accuracy_ci(0.3, 0.4, {}) is None
-    assert theta_accuracy_ci(None, 0.4, ruler) is None
-    assert theta_accuracy_ci(0.3, None, ruler) is None
 
 
 # --- task_context framing is frozen ------------------------------------------------------

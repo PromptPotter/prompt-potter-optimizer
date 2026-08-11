@@ -34,15 +34,11 @@ export interface CandidateRow {
   // for candidates outside the round's election fit (eliminated / under the coverage floor).
   theta: number | null;
   theta_se: number | null;
-  // The composite-fitness CI whisker (served, never recomputed): the difficulty-adjusted
-  // θ-implied accuracy band where the ruler is warm + the scorer is plain accuracy, else the
-  // raw normal-CLT mean CI. Present on an IN-FLIGHT row too — it is stamped off the
-  // candidate's own rows the moment it finishes scoring, not at round close.
+  // The CI whisker (served, never recomputed): the normal-CLT mean interval over the
+  // candidate's own rows, stamped the moment it finishes scoring — so an IN-FLIGHT row carries
+  // it too, and it does not wait for round close. ONE band, one writer, every arm.
   compositeCiLo: number | null;
   compositeCiHi: number | null;
-  // Which of the two the band above is, served rather than re-derived — both scales coexist
-  // inside one round, so a chart-wide guess picks the wrong bar for some of them.
-  ciScale: "composite" | "accuracy" | null;
   // The floor this candidate was JUDGED against — the origin restricted to the samples
   // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
   // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
@@ -84,10 +80,12 @@ export interface CandidateView extends CandidateRow {
   // Any sign of activity. `false` = the slot exists but nothing is scored yet,
   // which the chart must render as a BLANK, never as a 0.
   started: boolean;
-  // This candidate's round has not closed, so no election has run. Without it an
-  // uncrowned bar reads as "lost" whether it lost or is still scoring — and the
-  // election is a round-scoped fit, so mid-round there is nothing to have lost to.
-  roundOpen: boolean;
+  // No election has run in this candidate's round YET, so an uncrowned bar has nothing to
+  // have lost to. Read off the crowns themselves — a round is undecided while NO bar in it
+  // carries one — not off whether the round has closed: `elect_round_winner` decides at the
+  // end of scoring, a whole `l1_critique` call earlier, so "still open" and "undecided" are
+  // two different facts and only this one may explain an absent crown.
+  electionPending: boolean;
   // Latest `verify` diagnostic run whose source label matches this candidate.
   diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
 }

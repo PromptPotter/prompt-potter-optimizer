@@ -47,7 +47,6 @@ __all__ = [
     "ruler_entry",
     "ruler_expected_accuracy",
     "select_round_subset",
-    "theta_accuracy_ci",
     "theta_lift_over_origin",
 ]
 
@@ -80,27 +79,6 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
         return None
     etas = np.array([a * (theta - d) for d, a in (ruler_entry(v) for v in delta_scale.values())])
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
-
-
-def theta_accuracy_ci(
-    theta: float | None,
-    theta_se: float | None,
-    delta_scale: Ruler | None,
-    *,
-    alpha: float = 0.05,
-) -> tuple[float, float] | None:
-    """``ruler_expected_accuracy`` at ``θ ± z·θ_se``, monotone in θ so no sort is needed. ``None`` on a
-    COLD ruler — the caller keeps the raw composite CI rather than dressing it as difficulty-adjusted."""
-    if theta is None or theta_se is None or not delta_scale:
-        return None
-    from scipy.stats import norm
-
-    z = float(norm.ppf(1 - alpha / 2))
-    lo = ruler_expected_accuracy(theta - z * theta_se, delta_scale)
-    hi = ruler_expected_accuracy(theta + z * theta_se, delta_scale)
-    if lo is None or hi is None:
-        return None
-    return (lo, hi)
 
 
 def adopted_level_trajectory(

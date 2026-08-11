@@ -55,7 +55,6 @@ declare module "chart.js" {
     compositeCiWhisker?: {
       ciLo: (number | null)[];
       ciHi: (number | null)[];
-      scales: (string | null)[];
     };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
@@ -101,26 +100,25 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
 // show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
 // CI are skipped.
 //
-// WHICH bar it brackets is served per candidate (`ci_scale`) and resolved per index: the two
-// scales coexist within one round, since the election rewrites the band to the θ-implied
-// accuracy scale only for arms electable on a warm ruler. One guess for the whole chart —
-// "composite if that series is drawn, else accuracy" — bracketed accuracy bars with
-// composite-scale intervals as the common case, accuracy being the default-on metric.
+// ONE band per candidate, on the accuracy bar, always. There is no scale to resolve: a single
+// writer stamps it when the candidate finishes scoring. It used to be two estimators sharing
+// one field pair, discriminated by a served `ci_scale` and matched here against a dataset
+// label — so a band whose series was hidden drew nothing, silently, and since only arms an
+// election reached ever got relabelled, the whisker came and went by gating rather than by
+// evidence. Do not reintroduce a per-bar scale; make the one band mean one thing instead.
 const compositeCiWhiskerPlugin: Plugin<
   "bar",
-  { ciLo: (number | null)[]; ciHi: (number | null)[]; scales: (string | null)[] }
+  { ciLo: (number | null)[]; ciHi: (number | null)[] }
 > = {
   id: "compositeCiWhisker",
   afterDatasetsDraw(chart, _args, opts) {
     const ciLo = opts?.ciLo;
     const ciHi = opts?.ciHi;
-    const scales = opts?.scales;
     const yScale = chart.scales.y;
-    if (!ciLo || !ciHi || !scales || !yScale) return;
-    const metaFor = new Map<string, ReturnType<typeof chart.getDatasetMeta>>();
-    chart.data.datasets.forEach((ds, di) => {
-      if (typeof ds.label === "string") metaFor.set(ds.label, chart.getDatasetMeta(di));
-    });
+    if (!ciLo || !ciHi || !yScale) return;
+    const meta = chart.data.datasets.findIndex((ds) => ds.label === "accuracy");
+    if (meta < 0) return;
+    const bars = chart.getDatasetMeta(meta);
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
@@ -129,21 +127,15 @@ const compositeCiWhiskerPlugin: Plugin<
     for (let i = 0; i < ciLo.length; i++) {
       const lo = ciLo[i];
       const hi = ciHi[i];
-      const scale = scales[i];
-      if (lo == null || hi == null || !scale) continue;
-      // The bar this band belongs on is hidden — draw nothing rather than hang it on a
-      // neighbour measuring something else.
-      const meta = metaFor.get(scale);
-      if (!meta) continue;
-      const el = meta.data[i] as
+      if (lo == null || hi == null) continue;
+      const el = bars.data[i] as
         | { getProps?: (p: string[], final: boolean) => Record<string, number> }
         | undefined;
       const x = el?.getProps?.(["x"], true)?.x;
       if (typeof x !== "number") continue;
-      // Both band sources are bounded to [0,1] by the server — the composite CI is clipped
-      // to its support in `scoring/metrics.py::composite_ci`, and the θ band is a mean of
-      // sigmoids — so the pixel always lands inside the fixed axis. This used to clamp to
-      // the plot area, compensating here for an interval that claimed negative accuracy.
+      // Bounded to [0,1] by the server (`scoring/selection.py::composite_ci` clips to its
+      // support), so the pixel always lands inside the fixed axis. This used to clamp to the
+      // plot area, compensating here for an interval that claimed negative accuracy.
       const yLo = yScale.getPixelForValue(lo);
       const yHi = yScale.getPixelForValue(hi);
       ctx.beginPath();
@@ -648,14 +640,14 @@ export const FitnessChart = memo(function FitnessChart({
             const ciLo = views[idx]?.compositeCiLo;
             const ciHi = views[idx]?.compositeCiHi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
-              lines.push(`composite 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
+              lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
             // Say why there is no crown and no θ, rather than leaving the absence to be
-            // read as a loss. The election is a round-scoped fit over every arm, so it
-            // cannot exist until the round closes — an uncrowned bar in an open round has
-            // nothing yet to have lost to.
-            if (views[idx]?.roundOpen) {
-              lines.push("round still open — no election yet");
+            // read as a loss: an arm in a round nothing has won yet has nothing to have
+            // lost to. Keyed on the ELECTION, not on the round close — those are two
+            // moments, and after the first one the absence really does mean "lost".
+            if (views[idx]?.electionPending) {
+              lines.push("no election yet — nothing crowned in this round");
             }
             return lines.join("\n");
           },
@@ -667,8 +659,6 @@ export const FitnessChart = memo(function FitnessChart({
       compositeCiWhisker: {
         ciLo: views.map((v) => v.compositeCiLo),
         ciHi: views.map((v) => v.compositeCiHi),
-        // Per candidate: the two scales coexist inside one round.
-        scales: views.map((v) => v.ciScale),
       },
       xBridge: { onGeometry },
     },

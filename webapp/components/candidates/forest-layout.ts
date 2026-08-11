@@ -247,8 +247,8 @@ function bandLeftX(l: LaneLayout): number {
   return LEFT_PAD + l.baseCol * COL_W;
 }
 
-// One placed node. Named for what it builds — `nodeAt` in `lineage-candidates.ts` is
-// THE address lookup, and two different things must not wear one name.
+// One placed node — named for what it BUILDS, never for what it looks up. Addressing lives
+// in `lineage-candidates.ts`, and two different things must not wear one name.
 function placedNode(
   laneKey: string,
   l: LaneLayout,

@@ -15,8 +15,8 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
-from promptpotter.domain.scoring import CiScale, is_answer_collapsed
+from promptpotter.domain.run_records import ErrorRecord
+from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
@@ -188,9 +188,6 @@ class ScoredCandidate(StrictModel):
     # (fit-restricted). No composite point estimate should stand alone.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-    # WHICH quantity the band above brackets — stamped by whichever site last set the bounds,
-    # never re-derived downstream. See `domain/scoring.py::CiScale`.
-    ci_scale: CiScale | None = None
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -235,10 +232,10 @@ def merge_known_outcomes(
 
 
 # ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
-# ``candidate_scores`` dump beside it in the same file (no θ / composite_ci): scoreboard =
-# the display table, candidate_scores = the complete record. The mutation text rides
-# ``changes_description`` (its real name) — the dashboard's ``label`` (the C{r}.{i} id) is a
-# different field, so the two never collide.
+# ``candidate_scores`` dump beside it in the same file (no θ): scoreboard = the display table,
+# candidate_scores = the complete record. The mutation text rides ``changes_description`` (its
+# real name) — the dashboard's ``label`` (the C{r}.{i} id) is a different field, so the two
+# never collide.
 _SCOREBOARD_INCLUDE: set[str] = {
     "candidate_id",
     "changes_description",
@@ -389,8 +386,6 @@ class RoundResult(StrictModel):
     # failure to L2 on their own signals.
     electable_count: int = 0
     candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
-    # ResumeCheckpoint records consumed by the divergence-replay walker.
-    decisions: list[DecisionRecord] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # L1 yield + failure counts; defaults assume "all valid" for replay paths bypassing the detector.
     # STORED, not derived: `l1_yield` is an INPUT to scoring, not a summary of it. It reaches
@@ -479,11 +474,11 @@ class RoundResult(StrictModel):
         Derived, never stored: it cannot drift from `candidate_scores` the way a
         hand-built twin could.
         """
-        from promptpotter.domain.rendering import round_winner_key
+        from promptpotter.domain.rendering import display_rank_key
 
         ranked = sorted(
             self.candidate_scores,
-            key=lambda c: round_winner_key(c.composite_fitness, c.accuracy),
+            key=lambda c: display_rank_key(c.composite_fitness, c.accuracy),
             reverse=True,
         )
         return [

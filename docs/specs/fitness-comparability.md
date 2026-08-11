@@ -59,8 +59,15 @@ by an accumulation step. It is already computed (`cumulative_theta` rides every 
 every banked cycle, with `calibration_model` stamped beside it), already the gate, already the
 election's rank key. The jargon objection that kept θ off the text surfaces is answered without a
 new mechanism: `ruler_expected_accuracy(θ, δ_ruler)` re-projects the ability onto the ruler's one
-fixed reference set, giving a percentage that is still subset-invariant. It already ships — it is
-what `theta_accuracy_ci` draws the candidate whisker from.
+fixed reference set, giving a percentage that is still subset-invariant. It already ships.
+
+**The candidate WHISKER is not this and never should have been.** A θ-implied band existed
+briefly beside the per-candidate CLT interval, sharing its field pair and discriminated by a
+served scale. It could only be computed for arms the election reached — electable, warm ruler,
+fitted — so one chart drew two different quantities as one band, and the whisker came and went
+by election gating rather than by evidence. The display band is now the CLT interval over the
+candidate's own rows, for every arm, from one writer. θ stays visible as `θ ± θ_se`, which is
+the honest place for a difficulty-adjusted reading.
 
 **The alternative — an accumulated paired-vs-origin accuracy over the union of shared samples — is
 refused, on a measurement.** That union is not a neutral sample of the dataset: `build_round_order`

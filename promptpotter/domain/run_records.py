@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import enum
-from typing import Annotated, Any, Literal, TypedDict
+from dataclasses import asdict, is_dataclass
+from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -18,7 +18,7 @@ __all__ = [
     "CycleRecord",
     "CycleSeed",
     "CycleSeedRecord",
-    "DecisionRecord",
+    "ElectionRecord",
     "ErrorRecord",
     "ForkSpec",
     "ForkTrigger",
@@ -35,6 +35,7 @@ __all__ = [
     "RoundWarningRecord",
     "SnapshotRecord",
     "TokenUsageRecord",
+    "view_fields",
 ]
 
 
@@ -46,16 +47,6 @@ class ResumeCheckpointKind(enum.StrEnum):
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
     FORK_CUT = "fork_cut"
-
-
-class DecisionRecord(TypedDict):
-    """The serialized projection of :meth:`ResumeCheckpointRecord.to_dict`, read by the
-    divergence-replay walker; ``kind`` is the enum VALUE so a round file needs no optimization layer."""
-
-    kind: str
-    inputs_ref: dict[str, Any]
-    outcome: Any
-    data: dict[str, Any]
 
 
 class ResumeCheckpointRecord(StrictModel):
@@ -70,14 +61,6 @@ class ResumeCheckpointRecord(StrictModel):
     data: dict[str, Any] = Field(default_factory=dict)
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
-
-    def to_dict(self) -> DecisionRecord:
-        return {
-            "kind": self.kind.value,
-            "inputs_ref": dict(self.inputs_ref),
-            "outcome": self.outcome,
-            "data": dict(self.data),
-        }
 
 
 class PhaseRecord(StrictModel):
@@ -106,6 +89,20 @@ class PhaseRecord(StrictModel):
     # also stops carrying the resolved dataset and a candidate's full prompt twice.
     data: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
+
+
+def view_fields(record: PhaseRecord) -> dict[str, Any]:
+    """``payload["view"]`` as a mapping, and the ONLY sanctioned way to read one.
+
+    A ledger replay deserializes the view to a dict while the live in-process path still holds
+    the frozen dataclass, so `getattr` works on one and silently returns the default on the
+    other — reporting a fact that is present as absent. Lives beside `PhaseRecord` because it
+    is a pure accessor on it, and because both an `application/` reader and an
+    `infrastructure/` projection need it; owning it in either would invert a layer."""
+    view = record.payload.get("view")
+    if is_dataclass(view) and not isinstance(view, type):
+        return asdict(view)
+    return view if isinstance(view, dict) else {}
 
 
 class SnapshotRecord(StrictModel):
@@ -450,12 +447,9 @@ class LedgerCandidate(StrictModel):
     expected_samples: int | None = None
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
     cached_samples: int | None = None
-    # The always-on whisker, over this candidate's own rows. A warm-ruler round overrides it at
-    # close with the θ-implied band (`LedgerRoundClose.abilities`), which is a different
-    # QUANTITY rather than a tighter reading of the same one — hence `ci_scale`.
+    # THE whisker, over this candidate's own rows — one band, one writer, no override.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-    ci_scale: CiScale | None = None
 
 
 class LedgerAbility(StrictModel):
@@ -465,22 +459,34 @@ class LedgerAbility(StrictModel):
 
     theta: float | None = None
     theta_se: float | None = None
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
-    ci_scale: CiScale | None = None
 
 
 class LedgerRoundClose(StrictModel):
-    """The facts no candidate can know alone. ``winner_label`` and the ``abilities`` keys are
-    POSITIONAL identity, never ``candidate_id`` — a resume re-mints a candidate under a fresh uuid."""
+    """The fit facts, RE-READ on every close — which is what lets round 0's second close carry the
+    warm ruler's θ (``runner/loop.py``). The crown is on :class:`ElectionRecord` instead, because it
+    never moves. ``abilities`` keys are POSITIONAL: a resume re-mints a candidate under a fresh uuid."""
 
     model_config = ConfigDict(frozen=True)
 
     round: int
-    winner_label: str = ""
     cumulative_theta: float | None = None
     cumulative_theta_se: float | None = None
     abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
+
+
+class ElectionRecord(StrictModel):
+    """Who the round CROWNED, at its own coordinate: ``elect_round_winner`` is the last thing
+    ``l1_score`` does, so the crown exists a whole ``l1_critique`` call before the close it used
+    to ride. Nothing else joins it — the rest of what the election stamps is per-candidate and
+    already addressable in ``rounds/round_NNNN.json``, so it earns no chronology. A LABEL (a
+    resume re-mints ids); empty = the round HELD, and round 0 crowns the ``C0`` it adopted."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["election"] = "election"
+    round: int
+    winner_label: str = ""
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class CycleSeedRecord(StrictModel):
@@ -501,6 +507,7 @@ CycleRecord = Annotated[
     | CommandAckRecord
     | CommandRecord
     | CycleSeedRecord
+    | ElectionRecord
     | ErrorRecord
     | LLMCallProgressRecord
     | LLMCallRecord

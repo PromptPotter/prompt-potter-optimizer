@@ -811,7 +811,51 @@ class CampaignStore:
                 if n < before_round:
                     shutil.copyfile(p, dst / p.name)
                     n_copied += 1
+        self._copy_parent_decisions(parent, child, before_round=before_round)
         return n_copied
+
+    @staticmethod
+    def _decision_line(line: str) -> dict[str, Any] | None:
+        """One ledger line as a dict, or ``None`` if it is torn — a partial trailing write is
+        normal on an append-only file and must not fail the mint."""
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        return rec if isinstance(rec, dict) else None
+
+    def _copy_parent_decisions(
+        self, parent: CycleHop, child: CycleHop, *, before_round: int
+    ) -> int:
+        """Append the parent's ``decision`` records for the LIFTED rounds onto the fork's ledger.
+
+        A fork answers for itself: every ``scan_ledger_*`` reads the physical file, deliberately,
+        so a record only the parent holds is invisible to the branch — the same rule that makes a
+        repair re-bank its corrected rounds. Resume replays the lifted rounds to find where the
+        branch departs, and it reads their decisions from here; without the copy that check sees
+        an empty list and passes every inherited round silently.
+
+        Only decisions: the rest of the prefix is the parent's own history and copying it would
+        duplicate a ledger that already measured 56% duplication once."""
+        src = CycleLayout(self.cycle_dir(parent)).ledger
+        if not src.is_file():
+            return 0
+        lifted = [
+            line
+            for line in src.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+            and (rec := self._decision_line(line)) is not None
+            and rec.get("record_type") == "decision"
+            and isinstance(rec.get("round"), int)
+            and rec["round"] < before_round
+        ]
+        if not lifted:
+            return 0
+        dst = CycleLayout(self.cycle_dir(child)).ledger
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with dst.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lifted) + "\n")
+        return len(lifted)
 
     # ------------------------------------------------------------------
     # Round + candidate detail-file CRUD under a cycle dir

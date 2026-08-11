@@ -25,26 +25,21 @@ export function roundSizes(
   return sizes;
 }
 
-// What a crown means here — or why there isn't one yet.
+// What a crown means here.
 //
 //   elected     — won over rivals. The only state the θ-election copy may claim.
 //   uncontested — crowned with nobody to beat (round 0, or any single-arm round).
-//   open        — the round has not closed, so no election has RUN. Distinct from
-//                 `none`, and the distinction is the point: the election is a
-//                 round-scoped fit that cannot exist mid-round, so a candidate
-//                 still scoring is not a candidate that lost.
-//   none        — the round closed and this candidate was not the one adopted.
-export type CrownState = "elected" | "uncontested" | "open" | "none";
+//   none        — no crown. WHY there is none — nothing elected yet vs elected and it
+//                 wasn't this one — is `CandidateView.electionPending`, read off whether
+//                 any bar in the round carries a crown. It is not a fourth state here:
+//                 this predicate sees one candidate and cannot answer a round-level
+//                 question, and a `roundClosed` parameter pretending otherwise sat unused
+//                 behind its only caller.
+export type CrownState = "elected" | "uncontested" | "none";
 
 // `candidatesInRound` is that round's arm count — from `roundSizes` when walking a
 // timeline, or the round's own candidate array when you already hold one round.
-// `roundClosed` defaults true for the callers that only ever hold closed rounds.
-export function crownState(
-  isWinner: boolean,
-  candidatesInRound: number,
-  roundClosed = true,
-): CrownState {
-  if (!roundClosed) return "open";
+export function crownState(isWinner: boolean, candidatesInRound: number): CrownState {
   if (!isWinner) return "none";
   return candidatesInRound > 1 ? "elected" : "uncontested";
 }

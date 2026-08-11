@@ -3,7 +3,10 @@ reconciliation lives here as a free function so the classmethod stays a thin ass
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from promptpotter.domain.results import best_round_by_measured_accuracy
 from promptpotter.infrastructure.projections.live_dashboard.state import LiveDashboardState
@@ -11,6 +14,8 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 __all__ = ["resolve_resume_state"]
+
+logger = logging.getLogger(__name__)
 
 
 def _max_round_on_disk(rounds_dir: Path) -> int:
@@ -35,7 +40,19 @@ def resolve_resume_state(
     if not isinstance(raw, dict):
         return None
 
-    prior = LiveDashboardState.model_validate(raw)
+    try:
+        prior = LiveDashboardState.model_validate(raw)
+    except ValidationError:
+        # A PROJECTION may not kill the run it seeds. This model is `extra="forbid"`, so a
+        # dashboard written by an earlier build fails here on the one field that moved — and
+        # uncaught, that error propagated out of `for_session` and took down the resume whose
+        # whole job was to not lose the cycle. The LEDGER is the truth and it is untouched;
+        # everything this file adds on top (the spend rollup, the counters, the trajectory) is
+        # re-derived forward from the next record. Dropped whole and loudly rather than salvaged
+        # field by field — a partial read is a compatibility shim, and there is nothing here to
+        # be compatible with.
+        logger.exception("unreadable dashboard.json at %s — resuming without its state", seed_dir)
+        return None
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]

@@ -148,6 +148,16 @@ async def execute_round(
         "exit",
         round=round_num,
         winner_label=round_result.label,
+        # The elected id, beside the prose label. `winner_label` is `changes_description`, which
+        # is optional and which two candidates can share, so it cannot identify a row — and the
+        # dashboard needs to crown one HERE, at the election, rather than wait for the round to
+        # close two optimizer calls later.
+        #
+        # On a HELD round this is NOT empty: `winner_id` reads `prompt_fields.lineage.id`, and a
+        # held round's prompt_fields are the RETAINED INCUMBENT's (measured non-empty on 73 of
+        # 73 held rounds). Nobody is crowned because that id belongs to no candidate of this
+        # round, so the match fails — the emptiness is in the MATCH, never in the id.
+        winner_candidate_id=round_result.winner_id,
         winner_accuracy=round_result.accuracy,
         winner_composite_fitness=round_result.composite_fitness,
         winner_evaluators=dict(round_result.evaluators),
@@ -224,6 +234,13 @@ async def execute_round(
         )
         declare_run_phase(session, RunPhase.PAUSED)
         raise StopLoop(StopReason.PAUSED)
+
+    # The election, banked. AFTER the panel gate on purpose: a round halted on a holed panel is
+    # unwound and re-run, so crowning it would put a winner on the timeline for a round that
+    # never stood. Still a whole `l1_critique` call before the close, which is the point — the
+    # crown and the matched-origin floor both exist HERE, and rode the close only because that
+    # was the record that happened to have a payload.
+    callbacks.on_election(round_result)
 
     # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
     rounds_history = [*cycle.rounds, round_result]

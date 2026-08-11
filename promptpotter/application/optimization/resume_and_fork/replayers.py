@@ -44,9 +44,14 @@ class ReplayMismatch(NamedTuple):
 
 class ReplayContext(NamedTuple):
     """One round's measurements + the origin, all rescored — a replayer re-derives from its own round and
-    nothing else, so a decision needing the cycle's HISTORY is ``ARCHIVAL``, never ``REPLAYED``."""
+    nothing else, so a decision needing the cycle's HISTORY is ``ARCHIVAL``, never ``REPLAYED``.
+
+    ``decisions`` arrives from the LEDGER (``scan_ledger_decisions``), which is where a decision is
+    written and stamped with the round that made it. The round document used to carry a second copy,
+    assembled from whatever was pending when it happened to be written."""
 
     round_data: RoundResult
+    decisions: list[dict[str, Any]]
     origin_results: list[dict[str, Any]]
     delta_scale: dict[int, RulerEntry] | None
 
@@ -56,7 +61,7 @@ Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     round_data = ctx.round_data
-    for rec in round_data.decisions:
+    for rec in ctx.decisions:
         try:
             kind = ResumeCheckpointKind(rec["kind"])
         except ValueError:
@@ -90,11 +95,13 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
 
 def _replay_context(
     round_data: RoundResult,
+    decisions: list[dict[str, Any]] | None,
     origin_results: list[dict[str, Any]] | None,
     delta_scale: dict[int, RulerEntry] | None,
 ) -> ReplayContext:
     return ReplayContext(
         round_data=round_data,
+        decisions=list(decisions or []),
         origin_results=list(origin_results or []),
         delta_scale=delta_scale,
     )
@@ -102,22 +109,24 @@ def _replay_context(
 
 def replay_decisions(
     round_data: RoundResult,
+    decisions: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> ReplayMismatch | None:
-    """Walk ``round_data.decisions`` in order; return the FIRST mismatch (resume's halt seam)."""
-    ctx = _replay_context(round_data, origin_results, delta_scale)
+    """Walk this round's ledger decisions in order; return the FIRST mismatch (resume's halt seam)."""
+    ctx = _replay_context(round_data, decisions, origin_results, delta_scale)
     return next(_iter_mismatches(ctx), None)
 
 
 def replay_all_mismatches(
     round_data: RoundResult,
+    decisions: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> list[ReplayMismatch]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round diff, where
     ``replay_decisions`` short-circuits at the first."""
-    ctx = _replay_context(round_data, origin_results, delta_scale)
+    ctx = _replay_context(round_data, decisions, origin_results, delta_scale)
     return list(_iter_mismatches(ctx))
 
 

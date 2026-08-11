@@ -8,13 +8,20 @@ from collections.abc import Mapping
 from promptpotter.application.mask.divergence import Verdict, VerdictOutcome
 from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.rendering import round_winner_key
+from promptpotter.domain.rendering import display_rank_key
 from promptpotter.domain.scoring import RoundScorer
 
 
 def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
-    """The scoring verdict for a swapped criterion. The eligible filter and the election key are the realized ones verbatim
-    — only the formula changes — so feeding the REALIZING criterion reproduces ``is_winner`` exactly."""
+    """The scoring verdict for a swapped criterion: **re-ranks the RECORD, it does not re-run the
+    election.** The eligible filter is the realized one (``is_electable``); the ordering is
+    ``display_rank_key`` over the masked aggregate, where the election ranks Rasch θ-lift over the
+    anchor behind a coverage floor.
+
+    That gap is not closable here: θ under another formula must be re-fit from per-sample grades
+    against a re-calibrated δ ruler — ``ab_replay``'s substrate (``with_replay=True`` plus an
+    archive read), not a cheaper version of it. So a divergence means "under this formula the
+    crowned candidate is no longer the best-scoring one", where ``ab`` answers if the RUN moved."""
 
     def _key(evaluators: Mapping[str, float], accuracy: float) -> tuple[float, float] | None:
         # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
@@ -26,7 +33,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
         # and the realized formula only names evaluators that WERE stored, so feeding it
         # never trips this — self-consistency is untouched.
         value = value_with_mask_applied(evaluators, criterion)
-        return None if value is None else round_winner_key(value, accuracy)
+        return None if value is None else display_rank_key(value, accuracy)
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         # Origin round 0 holds no election; and without the anchor we cannot

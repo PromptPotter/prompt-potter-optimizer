@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.exploration import theta_accuracy_ci
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -237,16 +236,14 @@ async def l1_score(
             continue
         cs_idx = cs_by_id[cid]
         cs = candidate_scores[cs_idx]
-        theta_se_c = abilities.theta_se[cid]
-        theta_update: dict[str, Any] = {"theta": theta_c, "theta_se": theta_se_c}
-        # Show the difficulty-adjusted ability band (what the election ranks on) as the whisker
-        # only where it brackets the bar's quantity: warm ruler AND composite == accuracy.
-        if abs(cs.composite_fitness - cs.accuracy) < 1e-9:
-            band = theta_accuracy_ci(theta_c, theta_se_c, cycle.delta_scale)
-            if band is not None:
-                theta_update["composite_ci_lo"], theta_update["composite_ci_hi"] = band
-                theta_update["ci_scale"] = "accuracy"
-        candidate_scores[cs_idx] = cs.model_copy(update=theta_update)
+        # θ and its SE only. The whisker is NOT rewritten here: a second estimator writing the
+        # same bounds made the band mean different things on different bars of one chart, and
+        # it landed only on arms this loop reaches — electable, warm ruler, fitted — so the
+        # whisker appeared and vanished by election gating rather than by evidence. One band,
+        # stamped once per candidate at `candidate_scored`, is the whole mechanism now.
+        candidate_scores[cs_idx] = cs.model_copy(
+            update={"theta": theta_c, "theta_se": abilities.theta_se[cid]}
+        )
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,

@@ -10,34 +10,86 @@ from promptpotter.application.mask.record import (
     MaskCycle,
     MaskRecord,
     MaskRound,
+    SpineCycle,
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import ScoredCandidate, is_leader_eligible, merge_known_outcomes
+from promptpotter.domain.results import ScoredCandidate, is_electable, merge_known_outcomes
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_decisions,
+    scan_ledger_elections,
+    scan_ledger_round_closes,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 
 
-def _mask_eligible(sc: ScoredCandidate) -> bool:
-    """Recorded election eligibility for mask re-selection, plus a guard against candidates whose composite was
-    force-zeroed POST-formula: a re-score over their stored evaluators cannot reproduce that zeroing."""
-    return is_leader_eligible(sc) and not sc.invalid and not sc.validation_failures
+def _cycle_edge(index: dict[str, Any]) -> tuple[str | None, int | None]:
+    """``(parent_cycle_id, fork_from_round)`` off a cycle manifest — read by both loaders below,
+    so it is spelled once rather than in whichever of them was written first."""
+    fork = index.get("fork")
+    from_round = fork.get("from_round") if isinstance(fork, dict) else None
+    return (
+        index.get("parent_cycle_id") or None,
+        from_round if isinstance(from_round, int) else None,
+    )
 
 
-def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> list[MaskCandidate]:
-    winners = {
-        c["candidate_id"]
-        for c in round_file.get("scoreboard", [])
-        if isinstance(c, dict) and c.get("is_winner") and c.get("candidate_id")
-    }
+def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
+    """The campaign's rounds and edges, folded from each cycle's LEDGER — no round file opened.
+    It used to take a whole `MaskRecord`: every manifest and every round document of every cycle,
+    rebuilt to recover four scalars per round, while a layer waited to fork."""
+    cycles: list[SpineCycle] = []
+    for entry in stores.campaigns.enumerate_cycles():
+        if entry["campaign_id"] != campaign_id:
+            continue
+        cid = entry["cycle_id"]
+        cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
+        index = read_json_tolerant(CycleLayout(cdir).manifest)
+        if not isinstance(index, dict):
+            continue
+        parent, from_round = _cycle_edge(index)
+        closes = scan_ledger_round_closes(CycleLayout(cdir).ledger)
+        cycles.append(
+            SpineCycle(
+                cycle_id=cid,
+                parent_cycle_id=parent,
+                fork_from_round=from_round,
+                # A round that never CLOSED contributes no ability, and inventing 0.0 for it
+                # would hand UCB a real-looking datum for a simulation that never finished.
+                theta_by_round={
+                    rnd: close.cumulative_theta
+                    for rnd, close in closes.items()
+                    if close.cumulative_theta is not None
+                },
+            )
+        )
+    return cycles
+
+
+def _mask_eligible(sc: ScoredCandidate, rows: list[dict[str, Any]]) -> bool:
+    """The election's OWN admission rule, plus a guard against candidates whose composite was
+    force-zeroed POST-formula: a re-score over their stored evaluators cannot reproduce that.
+
+    ``is_electable``, not ``is_leader_eligible`` — its docstring names this exact caller and
+    says why: the weaker test "lets a collapsed arm top a round that refused to crown it", so a
+    lens fed the realizing criterion could report a divergence the run would never have made."""
+    return is_electable(sc, rows) and not sc.invalid and not sc.validation_failures
+
+
+def _candidates(
+    round_file: dict[str, Any], samples: frozenset[int] | None, winner_label: str
+) -> list[MaskCandidate]:
     # The per-sample rows already on disk. The row-derivable evaluator subset
     # (accuracy, output_compactness, latency_norm, …) is recomputed from these and
     # merged over the stored snapshot — present on every record regardless of when it
     # was written. A sample-set mask filters the rows to the selected subset first, so
     # those same evaluators (accuracy especially) re-score on the subset and a What-If
     # formula reshapes the election there.
-    all_rows = round_file["all_candidate_results"]
+    # `.get`, not a subscript: this walk is tolerant by contract, and the subscript raised
+    # `KeyError` on a document missing the key.
+    all_rows = round_file.get("all_candidate_results") or {}
     out: list[MaskCandidate] = []
     for cs in round_file.get("candidate_scores", []):
         if not isinstance(cs, dict) or not cs.get("candidate_id"):
@@ -50,7 +102,7 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
                 # Never ran any selected sample → unscorable on this set. Empty
                 # evaluators make the verdict + winner-threading skip it uniformly,
                 # exactly like a candidate with no stored values.
-                out.append(_mask_candidate(sc, {}, 0.0, 0, winners))
+                out.append(_mask_candidate(sc, {}, 0.0, 0, rows, winner_label))
                 continue
         evaluators = dict(sc.evaluators)
         accuracy = sc.accuracy
@@ -60,7 +112,7 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
         if evaluators and rows:
             evaluators.update(materialize_row_derivable(rows))
             accuracy = evaluators["accuracy"]
-        out.append(_mask_candidate(sc, evaluators, accuracy, len(rows), winners))
+        out.append(_mask_candidate(sc, evaluators, accuracy, len(rows), rows, winner_label))
     return out
 
 
@@ -69,15 +121,19 @@ def _mask_candidate(
     evaluators: dict[str, float],
     accuracy: float,
     n_scored: int,
-    winners: set[str],
+    rows: list[dict[str, Any]],
+    winner_label: str,
 ) -> MaskCandidate:
+    """The crown comes off the ledger's ELECTION record, joined on ``label`` — never re-derived
+    from the document's own ``scoreboard[]`` on ``candidate_id``, a key the tree refuses because a
+    resume re-mints it. A held round crowns nobody: its ``winner_label`` is empty."""
     return MaskCandidate(
         candidate_id=sc.candidate_id,
         evaluators=evaluators,
         accuracy=accuracy,
         n_scored=n_scored,
-        is_winner=sc.candidate_id in winners,
-        is_eligible=_mask_eligible(sc),
+        is_winner=bool(winner_label) and sc.label == winner_label,
+        is_eligible=_mask_eligible(sc, rows),
         abort=_abort_contributor(sc),
     )
 
@@ -101,21 +157,24 @@ def load_mask_record(
     loader, which raises on a document the current models cannot parse; a lens needs neither."""
     entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
-    # Pass 1: read each cycle's round files (keyed by round number) + tree edges.
+    # Pass 1: each cycle's round files + tree edges + the crowns its LEDGER recorded. The rows
+    # come from the document because nothing else holds them; the election does not.
     files: dict[str, dict[int, dict[str, Any]]] = {}
     edges: dict[str, tuple[str | None, int | None]] = {}
+    crowns: dict[str, dict[int, str]] = {}
+    decisions: dict[str, dict[int, list[dict[str, Any]]]] = {}
     for e in entries:
         cid = e["cycle_id"]
         cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
         index = read_json_tolerant(CycleLayout(cdir).manifest)
         if not isinstance(index, dict):
             continue
-        fork = index.get("fork")
-        from_round = fork.get("from_round") if isinstance(fork, dict) else None
-        edges[cid] = (
-            index.get("parent_cycle_id") or None,
-            from_round if isinstance(from_round, int) else None,
-        )
+        edges[cid] = _cycle_edge(index)
+        decisions[cid] = scan_ledger_decisions(CycleLayout(cdir).ledger) if with_replay else {}
+        crowns[cid] = {
+            rnd: election.winner_label
+            for rnd, election in scan_ledger_elections(CycleLayout(cdir).ledger).items()
+        }
         by_round: dict[int, dict[str, Any]] = {}
         for r in index.get("rounds") or []:
             rn = r.get("round") if isinstance(r, dict) else None
@@ -164,8 +223,7 @@ def load_mask_record(
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
-            candidates = _candidates(round_file, samples)
-            theta = round_file.get("cumulative_theta")
+            candidates = _candidates(round_file, samples, crowns.get(cid, {}).get(rn, ""))
             rounds.append(
                 MaskRound(
                     cycle_id=cid,
@@ -173,7 +231,6 @@ def load_mask_record(
                     candidates=candidates,
                     anchor_evaluators=carried[0],
                     anchor_accuracy=carried[1],
-                    cumulative_theta=float(theta) if isinstance(theta, int | float) else 0.0,
                     # Through the store's typed read, not a second ``model_validate`` here:
                     # that one is the sole typed read of a round document, and it RAISES on a
                     # file the current models cannot parse. Correct for a replay, which
@@ -181,6 +238,7 @@ def load_mask_record(
                     # tolerant, so a scoring or abort lens still serves a drifted cycle.
                     round_data=stores.campaigns.load_round_file(hop, rn) if with_replay else None,
                     known_outcomes=pool if with_replay else [],
+                    decisions=decisions.get(cid, {}).get(rn, []),
                 )
             )
             winner = next((c for c in candidates if c.is_winner and c.evaluators), None)
@@ -198,4 +256,4 @@ def load_mask_record(
     return MaskRecord(cycles=cycles)
 
 
-__all__ = ["load_mask_record"]
+__all__ = ["load_lineage_spine", "load_mask_record"]

@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.results import is_round_winner
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 
@@ -104,6 +105,20 @@ class RoundBuffer:
         """Store the score report verbatim — single source of truth shared with
         ``round_result.candidate_scores`` (same dict instance)."""
         self.slot(idx, total)["scores"] = scores
+
+    def mark_winner(self, winner_candidate_id: str) -> None:
+        """Crown the elected candidate, at the ELECTION rather than at round close. Matched on
+        ``candidate_id``: slot order is the launch order, not the election's. Every other slot
+        is re-stamped ``False`` in the same pass, so a re-fire cannot leave a stale crown beside
+        the new one.
+
+        A HELD round crowns nobody because the id it carries is the RETAINED INCUMBENT's, which
+        belongs to no slot of this round — NOT because that id is empty, which it is not. The
+        no-crown case therefore rests on the match failing, which is exactly why this keys on
+        identity: a positional or prose match could accidentally succeed."""
+        for entry in self.candidates.values():
+            cid = str((entry.get("scores") or {}).get("candidate_id") or "")
+            entry["is_winner"] = is_round_winner(cid, winner_candidate_id)
 
     def update_p_best(
         self,

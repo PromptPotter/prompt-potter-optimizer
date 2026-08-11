@@ -47,9 +47,11 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
     theta_se: null,
     composite_ci_lo: null,
     composite_ci_hi: null,
-    ci_scale: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
+    // A live row carries the crown too — the election lands at the end of scoring, not at
+    // round close — so the default is "nothing crowned yet", never "this one lost".
+    is_winner: false,
     ...over,
   };
 }
@@ -83,7 +85,6 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     theta_se: null,
     composite_ci_lo: null,
     composite_ci_hi: null,
-    ci_scale: null,
     ...over,
   };
 }
@@ -114,7 +115,6 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     all_candidate_results: {},
     candidates_scored: 0,
     candidate_scores: [],
-    decisions: [],
     evaluators: {},
     l1_yield: 1,
     l1_n_no_op: 0,
@@ -209,7 +209,6 @@ export function summaryCandidate(
     theta_se: null,
     composite_ci_lo: null,
     composite_ci_hi: null,
-    ci_scale: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
     ...over,

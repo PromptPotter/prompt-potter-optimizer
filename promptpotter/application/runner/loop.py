@@ -158,7 +158,7 @@ async def run_round_loop(
             ruler_was_cold = not cycle.delta_scale
             cycle.absorb_round(round_result, round_num)
             if ruler_was_cold and cycle.delta_scale:
-                persist_round(cycle, cycle.origin_round, 0, session)
+                persist_round(cycle, cycle.origin_round, session, cb)
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)

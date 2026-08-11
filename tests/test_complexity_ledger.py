@@ -140,7 +140,11 @@ LEDGER_BASELINE = {
     # `pipeline_schema`, `search_point`, `connector`), a node's output (`rendering`,
     # `validators`), a dataset row (`sample`). Retirable: `results`, `results_health`,
     # `l4.verdict`, `measurement_provenance` — rows of PP's OWN on-disk shapes, taken as bags.
-    "domain_any_maps": 76,
+    # 76 -> 77 (2026-08-11): `view_fields` moved from `escalation/state.py` into `domain/`,
+    # beside the `PhaseRecord` it reads. Its `dict[str, Any]` return came with it — a MOVE, not
+    # a new map: an `infrastructure/` projection needed the same accessor, and owning it in
+    # `application/` would have inverted a layer to reach it.
+    "domain_any_maps": 77,
     # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
     # bloat source. What the current number buys, newest first:
@@ -259,7 +263,66 @@ LEDGER_BASELINE = {
     # `dict[str, Any]` in an otherwise strict model, which is what let it go so long without
     # answering either question; `LedgerAbility` is the same move on `LedgerRoundClose`, whose
     # `abilities` had to be typed rather than widened to `Any` to carry one extra field.
-    "param_decls": 4106,
+    # 4106 -> 4103 (2026-08-11): the whisker collapse. `theta_accuracy_ci` and the θ-band
+    # override are GONE — one estimator writes the band now, at `candidate_scored`, for every
+    # scored arm. The second one could only be computed for arms an election reached, so it
+    # made a chart draw two quantities as one band and made the whisker come and go by gating
+    # rather than by evidence; `ci_scale` existed only to tell the two apart, and went with
+    # them (77 references across 25 files). `RoundBuffer.mark_winner` is the one addition.
+    # 4103 -> 4105 (2026-08-11): `_ledger_bands` + `restamp_candidate_bands`, the whisker
+    # restamp. Paid to CLOSE a divergence rather than to add a surface: the band had two
+    # writers, so the ledger and the round document held different numbers for one candidate
+    # on 204 of 448 coordinates. `_iter_cycle_ledgers` costs nothing here and subtracts three
+    # copies of the same workspace walk.
+    # 4105 -> 4109 (2026-08-11): `SpineCycle` (4 fields) + `load_lineage_spine`, against
+    # `MaskRound.cumulative_theta` and `Divergence.node_key` deleted. A deliberate raise that
+    # buys a much larger subtraction: the rewind decision used to rebuild the whole campaign —
+    # every manifest and every round document of every cycle — to recover four scalars per
+    # round, on the escalation path, while a layer waited to fork. Every one of them is a
+    # round-CLOSE fact the ledger already stamps, verified equal on 219 of 219 rounds on disk.
+    # 4109 -> 4111 (2026-08-11): `rows` threaded into the mask's eligibility test so it can ask
+    # `is_electable` — the election's OWN admission rule — instead of the weaker
+    # `is_leader_eligible`, which `is_electable`'s docstring says "lets a collapsed arm top a
+    # round that refused to crown it". Two params for the difference between a lens that
+    # reproduces the election and one that reports a divergence the run never made.
+    # 4111 -> 4109 (2026-08-11): `restamp_candidate_bands` + `_ledger_bands` DELETED. A repair
+    # verb is only worth its surface while the writer that needs repairing still exists; the
+    # band's second writer went with the whisker collapse, and the documents it had already
+    # skewed went with the store wipe. Locked down so it cannot drift back.
+    # 4109 -> 4115 (2026-08-11): decisions get ONE home. `RoundResult.decisions`, the
+    # `DecisionRecord` TypedDict and `ResumeCheckpointRecord.to_dict` are gone — the document
+    # copy was their only consumer — and the drain that filled it goes with them. What is added
+    # is smaller than what it replaces but is still an add: `scan_ledger_decisions`, the fork's
+    # `_copy_parent_decisions` + its `_decision_line` parser, and the `decisions` argument the
+    # replay now takes explicitly. The copy is what a fork must answer for ITSELF: every ledger
+    # scan reads the physical file, so a record only the parent holds is invisible to the branch.
+    # 4115 -> 4117 (2026-08-11): the ELECTION gets a record at its own coordinate — `on_election`
+    # writes it, `scan_ledger_elections` reads it, and that pair is the whole raise. It buys two
+    # facts that had no honest home: the crown, which rode `round:complete` and so was served a
+    # whole `l1_critique` call after `elect_round_winner` decided it, and `matched_origin_*`,
+    # which is stamped AFTER `candidate_scored` and therefore read null on 481 of 481 candidate
+    # snapshots. θ deliberately does NOT move with them — it is RESTAMPED when the ruler warms,
+    # which is what round 0's second close exists to deliver, so it stays on the record that
+    # replays. What this unblocks is a deletion: with both served, the browser's per-bar
+    # live-vs-tree choice collapses to "the tree, unless it has no measurement yet".
+    # 4117 -> 4118 (2026-08-11): the CLOSE record moves onto the writer seam it always belonged
+    # to. `RunCallbacks.on_round_close` replaces the raw `PhaseRecord` `persist_round` was
+    # building inline, so `_rebank_on_branch` can bank a repaired round the same way a live round
+    # is banked instead of spelling the payload a second time. Net one param: the method costs
+    # two, `persist_round` gains `cb` and loses `round_num` (which was always `round_result.round`
+    # — two spellings of one coordinate, and the record now reads the one on the result).
+    "param_decls": 4118,
+    # 4 -> 7 -> 4 (2026-08-11, same day, and the round trip IS the lesson). The three were
+    # made lax mid-arc under a real rule — a model read back out of an append-only ledger or a
+    # projection FILE punishes a removed field SILENTLY (`scan_ledger_round_closes` skips the
+    # record, `resolve_resume_state` does not catch at all). What changed is not the mechanism
+    # but the POLICY behind it: cycle state is now disposable, wiped rather than migrated, so
+    # tolerating a stale key buys nothing and costs the loud failure that says "wipe". Strict
+    # fails at the read with the field name; lax deleted a round's crown and said nothing.
+    # The 4 survivors are structural, never historical, and each says so on itself: the backend
+    # owns `PipelineNode`'s sub-vocabulary; `RoundResult` round-trips its own computed fields;
+    # `Sample` carries whatever columns the operator's CSV had; `ScoredCandidate` guards a PAID
+    # measurement, which `restamp.py::_SURFACES` names as deliberately outside the table.
     "models_lax": 4,
     # New (2026-08-06). Docstrings were 19.6% of the package's lines — 13282 of them against
     # 43418 lines of actual code — while `conventions.md` § Code style had carried a length
@@ -356,9 +419,74 @@ LEDGER_BASELINE = {
     # and why re-deriving one as "has this round closed" blanks the canvas through the whole
     # post-round escalation window. The first draft of this arc was 3648 — the difference is
     # provenance prose that belonged in the commit body, and the same two stories written out
-    # ten times each across the diff. One anchor per rule (`domain/scoring.py::CiScale`), a
-    # pointer everywhere else.
-    "docstring_lines": 3627,
+    # ten times each across the diff. One anchor per rule, a pointer everywhere else.
+    #
+    # 3627 -> 3637 (2026-08-11): two docstrings from the whisker/crown collapse, against
+    # `theta_accuracy_ci`'s which went with the function. `mark_winner` carries the rule whose
+    # absence produced the bug — the election is the END OF SCORING, so a crown published at
+    # round close surfaces whenever an unrelated node happens to finish. `LedgerAbility` carries
+    # the one that nearly caused a worse one: dropping a field from a STRICT ledger model
+    # deletes history silently, because the scan skips a record it cannot validate.
+    # `DashboardCandidate` carries the same rule for the projection half — its reader does not
+    # catch, so the same deletion made every older cycle unresumable.
+    # `view_fields`'s own docstring landed here with the move, and it is the rule a `getattr`
+    # on a replayed record silently breaks.
+    #
+    # 3653 -> 3671 (2026-08-11): the whisker restamp (18). Two-gate survivors only.
+    # `restamp_candidate_bands` states what the walk cannot: the band had TWO writers, so the
+    # ledger snapshot and the round document hold different numbers for one candidate on 204 of
+    # 448 coordinates, and nothing reconciles them — the tree reads one, a drill-in reads the
+    # other. It also states why `scoreboard` is rewritten beside `candidate_scores` (same pair,
+    # re-served through `_SCOREBOARD_INCLUDE`; leaving it moves the disagreement one key over)
+    # and why an unmatched row is REPORTED rather than nulled. `_ledger_bands` names the one
+    # writer. `_iter_cycle_ledgers` records the depth-limited glob that made an earlier census
+    # read 25 round files where the store holds 218 — the reason the walk is written once.
+    #
+    # 3671 -> 3685 (2026-08-11): the mask's spine fold (14). Two-gate survivors: `SpineCycle`
+    # states why a second, smaller shape exists beside `MaskCycle` (the rewind reads only
+    # round-CLOSE facts, so it opens no round document); `_mask_candidate` states that the crown
+    # is READ from the ledger and joined on `label`, never re-derived from the document's
+    # `scoreboard[]` on `candidate_id` — the key the tree refuses because a resume re-mints it;
+    # `_mask_records` states the identity bug it fixes, which no reading of a dict key recovers
+    # (an inner campaign id is content-addressed on the CELL, so one id lives in several
+    # sandboxes and the first visited won — 7 of 40 here, 17 records served the wrong numbers).
+    #
+    # 3685 -> 3696 (2026-08-11): the two verdict predicates (11). Both are CORRECTIONS of prose
+    # that was false, which is the costliest kind: `make_scoring_verdict` claimed feeding the
+    # realizing criterion "reproduces is_winner exactly" while ranking on a point estimate the
+    # election does not use, and `_mask_eligible` claimed to carry the recorded election filter
+    # while asking a weaker question. A reader who believes either stops looking.
+    #
+    # 3696 -> 3681 (2026-08-11): the band restamp's prose went with the verb it documented (15).
+    #
+    # 3681 -> 3669 (2026-08-11): the three lax-model justifications (12), deleted with the
+    # laxness they argued for. Each cited a count of files that no longer exist — the exact
+    # shape that turns a docstring into a false bug report.
+    #
+    # 3669 -> 3678 (2026-08-11): decisions' one home (9). `scan_ledger_decisions` carries the
+    # rule its body cannot — it keys on the round STAMP and never on ledger position, because
+    # round 0 closes twice and the next close after a round-1 decision reads 0, which misfiled
+    # 118 records. `_copy_parent_decisions` states why a fork copies them at all, and why only
+    # decisions: the rest of the prefix is the parent's own history, and a ledger that already
+    # measured 56% duplication does not need it twice.
+    #
+    # 3678 -> 3693 (2026-08-11): the election record (15). Every survivor states the SPLIT and why
+    # it is not arbitrary — the crown is stamped ONCE and goes to the election; θ is RESTAMPED when
+    # the ruler warms and stays on the close, which is the whole reason round 0 closes twice. Move
+    # either half to the other record and nothing raises: round 0 quietly reverts to its cold θ, or
+    # a served crown goes late again by an `l1_critique` call. `scan_ledger_elections` carries the
+    # one its signature cannot — an absent entry means the round never elected, a different fact
+    # from a round that elected and held. The record carries the crown and NOTHING else: the rest
+    # of what the election stamps is per-candidate and already addressable in the round document,
+    # so by this package's own test it earns no chronology.
+    #
+    # 3693 -> 3697 (2026-08-11): a repaired round enters through the whole ingress (4).
+    # `on_round_close` states the half of the split that lives on it — every term RE-READ per
+    # close, which is what lets round 0's second one carry the warm ruler's θ — and
+    # `_rebank_on_branch` now says that a round banked without its close is a round every ledger
+    # scan goes blind to. The rewind-admissibility sentence was cut from both: that rule is
+    # `infrastructure/CLAUDE.md`'s, and a second copy is what drifts.
+    "docstring_lines": 3697,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

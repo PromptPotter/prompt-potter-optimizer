@@ -19,7 +19,6 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.verdict import OuterVerdict
 from promptpotter.domain.results import CalibrationModel, DegradationHealth
-from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["DashboardCandidate", "RoundSummary", "RoundSummaryCandidate"]
@@ -56,10 +55,11 @@ class DashboardCandidate(StrictModel):
     theta_se: float | None = None
     # Composite-fitness CI (`ScoredCandidate.composite_ci_lo/hi`) — the whisker the chart draws,
     # stamped off the candidate's own rows when it finishes (`l1/population.py`), so it is
-    # present live and not only at round close. `ci_scale` names what it brackets.
+    # present live and not only at round close. ONE band per candidate, from that one writer: a
+    # second estimator overriding it for the arms an election happened to reach is what made the
+    # whisker come and go by gating rather than by evidence.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-    ci_scale: CiScale | None = None
     # The floor this candidate was JUDGED against (`ScoredCandidate.matched_origin_*`): the
     # origin restricted to the samples this candidate actually measured. Served because
     # `accuracy` alone is unreadable under elimination — a PoBB-locked candidate ran 8 of 20,
@@ -68,11 +68,17 @@ class DashboardCandidate(StrictModel):
     # candidate covered the origin's panel — a prefix rate is set by where PoBB stopped it.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+    # The round's elected winner. On the BASE, because the election is not a closing act:
+    # `elect_round_winner` runs at the end of SCORING, before `l1_critique` and two LLM calls
+    # before the round closes, and the live row is the only surface that can say so at that
+    # moment. `False` until that election lands, and on every row of a round that held none —
+    # never a claim that this candidate lost, only that nothing has crowned it yet.
+    is_winner: bool = False
 
 
 class RoundSummaryCandidate(DashboardCandidate):
     """A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`.
-    Adds only what closing guarantees; the field list is inherited, so a field added to the base
+    Narrows to what closing guarantees; the field list is inherited, so a field added to the base
     flows to both halves and `_SUMMARY_INCLUDE` keeps picking it up."""
 
     candidate_id: str

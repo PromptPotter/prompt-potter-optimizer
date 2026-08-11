@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
+from promptpotter.application.mask.record import SpineCycle
 from promptpotter.config.settings import UCB_EXPLORATION_C
 
 NodeKey = tuple[str, int]
@@ -24,47 +24,43 @@ class NodeStats:
     value_sum: float
 
     @property
-    def node_key(self) -> str:
-        """Matches ``MaskRound.node_key`` + the frontend tree node id."""
-        return f"{self.cycle_id}::r{self.round}"
-
-    @property
     def q(self) -> float:
         """Mean subtree value. ``visits`` is >= 1 for every node the fold emits."""
         return self.value_sum / self.visits
 
 
-def _canonical_rounds(cycle: MaskCycle) -> list[MaskRound]:
+def _canonical_rounds(cycle: SpineCycle) -> list[int]:
     """A cycle's OWN rounds — the inherited prefix belongs to the parent, not here."""
     cut = cycle.fork_from_round
+    rounds = sorted(cycle.theta_by_round)
     if cycle.parent_cycle_id is None or cut is None:
-        return list(cycle.rounds)
-    return [r for r in cycle.rounds if r.round >= cut]
+        return rounds
+    return [r for r in rounds if r >= cut]
 
 
-def _parent_of(cycle: MaskCycle, rnd: MaskRound, first_round: int) -> NodeKey | None:
+def _parent_of(cycle: SpineCycle, rnd: int, first_round: int) -> NodeKey | None:
     """The tree edge above *rnd*: the prior round on this spine, else the branch-point."""
-    if rnd.round > first_round:
-        return (cycle.cycle_id, rnd.round - 1)
+    if rnd > first_round:
+        return (cycle.cycle_id, rnd - 1)
     cut = cycle.fork_from_round
     if cycle.parent_cycle_id is None or cut is None or cut <= 0:
         return None  # a root, or a fork-at-offset-0 sibling: nothing above it
     return (cycle.parent_cycle_id, cut - 1)
 
 
-def accumulate_node_stats(record: MaskRecord) -> dict[NodeKey, NodeStats]:
+def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
     """Backpropagate every round's θ up to its ancestors; each round is one simulation. An ancestor's statistics answer
     "what did re-expanding from here yield, everywhere it was tried?" — which no per-cycle counter can."""
     parents: dict[NodeKey, NodeKey | None] = {}
     own: dict[NodeKey, float] = {}
-    for cycle in record.cycles:
+    for cycle in spine:
         rounds = _canonical_rounds(cycle)
         if not rounds:
             continue
-        first = min(r.round for r in rounds)
+        first = rounds[0]
         for rnd in rounds:
-            key = (cycle.cycle_id, rnd.round)
-            own[key] = rnd.cumulative_theta
+            key = (cycle.cycle_id, rnd)
+            own[key] = cycle.theta_by_round[rnd]
             parents[key] = _parent_of(cycle, rnd, first)
 
     stats = {k: NodeStats(k[0], k[1], visits=1, value_sum=v) for k, v in own.items()}
@@ -83,9 +79,11 @@ def accumulate_node_stats(record: MaskRecord) -> dict[NodeKey, NodeStats]:
     return stats
 
 
-def _ancestors(stats: dict[NodeKey, NodeStats], record: MaskRecord, node: NodeKey) -> list[NodeKey]:
+def _ancestors(
+    stats: dict[NodeKey, NodeStats], spine: list[SpineCycle], node: NodeKey
+) -> list[NodeKey]:
     """*node*'s strict ancestors, nearest first — the rewind targets on offer."""
-    by_cycle = {c.cycle_id: c for c in record.cycles}
+    by_cycle = {c.cycle_id: c for c in spine}
     out: list[NodeKey] = []
     cur: NodeKey | None = node
     seen: set[NodeKey] = set()
@@ -95,28 +93,25 @@ def _ancestors(stats: dict[NodeKey, NodeStats], record: MaskRecord, node: NodeKe
         if cycle is None:
             break
         rounds = _canonical_rounds(cycle)
-        if not rounds:
+        if not rounds or cur[1] not in rounds:
             break
-        rnd = next((r for r in rounds if r.round == cur[1]), None)
-        if rnd is None:
-            break
-        cur = _parent_of(cycle, rnd, min(r.round for r in rounds))
+        cur = _parent_of(cycle, cur[1], rounds[0])
         if cur is not None and cur in stats:
             out.append(cur)
     return out
 
 
 def select_rewind_round(
-    record: MaskRecord,
+    spine: list[SpineCycle],
     *,
     cycle_id: str,
     current_round: int,
 ) -> int | None:
     """The UCB1 pick: which ancestor round to re-expand from. The ABSOLUTE round number is valid in the current cycle's coordinates,
     since a fork carries the parent's rounds under their original numbers. ``None`` ⇒ the caller must not fork."""
-    stats = accumulate_node_stats(record)
+    stats = accumulate_node_stats(spine)
     node: NodeKey = (cycle_id, current_round)
-    candidates = [a for a in _ancestors(stats, record, node) if a[1] < current_round]
+    candidates = [a for a in _ancestors(stats, spine, node) if a[1] < current_round]
     if not candidates:
         return None
 
@@ -131,7 +126,7 @@ def select_rewind_round(
         child = stats[key]
         q = (child.q - lo) / span if span > 0 else 0.0
         parent_visits = max(stats[key].visits, 1)
-        for other in _ancestors(stats, record, key)[:1]:
+        for other in _ancestors(stats, spine, key)[:1]:
             parent_visits = stats[other].visits
         return q + UCB_EXPLORATION_C * math.sqrt(math.log(max(parent_visits, 2)) / child.visits)
 

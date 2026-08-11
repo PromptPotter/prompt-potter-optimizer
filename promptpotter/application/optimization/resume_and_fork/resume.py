@@ -25,6 +25,10 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_decisions,
+)
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import ResumeDivergenceError
 
 if TYPE_CHECKING:
@@ -150,6 +154,10 @@ async def resume_with_divergence_check(
     if correction is not None:
         return correction
 
+    # Read the decisions once, from the cycle's OWN ledger — a fork carries the lifted rounds'
+    # records because the mint copies them, the same reason it copies their round files.
+    ledger_decisions = scan_ledger_decisions(CycleLayout(campaign_store.cycle_dir(hop)).ledger)
+
     if not skip_divergence_check:
         # Both ABOVE the config short-circuit, deliberately: optimizer prompts and layouts are
         # not KNOBS, so `DiffScope.NONE` says nothing about them; and a stale generation is the
@@ -227,7 +235,10 @@ async def resume_with_divergence_check(
             # A different OPTIMIZER produced it, or its OUTCOME no longer re-derives. One
             # `ReplayMismatch`, one exit. Both come from outside this resume.
             div = optimizer_mismatches.get(t.round) or replay_decisions(
-                t, origin_results=origin_results_rescored, delta_scale=cycle.delta_scale
+                t,
+                ledger_decisions.get(t.round),
+                origin_results=origin_results_rescored,
+                delta_scale=cycle.delta_scale,
             )
             if div is not None:
                 return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)
