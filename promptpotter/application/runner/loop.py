@@ -141,6 +141,11 @@ async def run_round_loop(
             # `post_round` fold it in themselves via `EscalationFSM.would_exhaust_lives`.
             is_final_round = clean_rounds + 1 >= max_rounds
 
+            # Sampled BEFORE the round is scored, because the warm now happens inside scoring
+            # (`warm_ruler_if_cold`, ahead of the election that needs it). Read after
+            # `execute_round` this is already False on the round that warmed, and round 0 keeps
+            # its cold θ on disk forever — the exact silence the re-persist below exists to break.
+            ruler_was_cold = not cycle.delta_scale
             round_result = await execute_round(
                 cycle,
                 round_num,
@@ -150,12 +155,11 @@ async def run_round_loop(
                 skip_critique=sweep,
                 is_final_round=is_final_round,
             )
-            # A cold ruler warms inside `absorb_round`, and the warm fit gives round 0 the θ
-            # it could not have had at its own close. Round 0's document was written back
-            # then, so without this the origin's ability lives only in memory: the file and
-            # the ledger keep the cold value, and every non-live reader shows a θ-less C0
-            # beside candidates that have one.
-            ruler_was_cold = not cycle.delta_scale
+            # A cold ruler warms during the round, and the warm fit gives round 0 the θ it could
+            # not have had at its own close. Round 0's document was written back then, so without
+            # this the origin's ability lives only in memory: the file and the ledger keep the
+            # cold value, and every non-live reader shows a θ-less C0 beside candidates that
+            # have one.
             cycle.absorb_round(round_result, round_num)
             if ruler_was_cold and cycle.delta_scale:
                 persist_round(cycle, cycle.origin_round, session, cb)

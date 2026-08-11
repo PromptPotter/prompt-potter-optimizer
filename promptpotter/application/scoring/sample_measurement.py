@@ -14,6 +14,7 @@ import httpx
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.diagnostics import find_rank
 from promptpotter.config.settings import NO_RESULT
+from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, is_hit
@@ -123,10 +124,10 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "pipeline_params",
         "diagnostics",
         "reasoning_trace",
-        # L4: the outer sample's own within-cell precision (`domain/l4/proxies.py`). It rides
+        # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
         # here rather than as a declared observation because the panel reads it and the scoring
         # formula must not — see the emit site in `runner/inner/spawn.py`.
-        "mean_round_delta_se",
+        ADOPTED_LEVEL_SE_KEY,
     }
 )
 

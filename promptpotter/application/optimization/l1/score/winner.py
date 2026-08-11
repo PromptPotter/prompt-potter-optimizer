@@ -211,6 +211,12 @@ async def l1_score(
             continue
         electable.append(ind.lineage.id)
 
+    # This round's candidates are already banked grade-A (``score_search_point`` archives each as
+    # it finishes), so the ruler's ≥2-arm floor is satisfiable NOW — and the election below is the
+    # thing that needs it. Attempting only after ``absorb_round`` left every election running on a
+    # cold ruler, and at L4's two-round budget no later round existed to spend a warm one on.
+    # No-op once warm, and still flat when the pool holds one arm.
+    cycle.warm_ruler_if_cold()
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
     winner_id, abilities = elect_round_winner(

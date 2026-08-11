@@ -108,15 +108,20 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
     return {cell: sum(v) / len(v) for cell, v in acc.items()}
 
 
-def cell_measurand(rows: list[dict[str, Any]], key: str) -> dict[str, tuple[float, float]]:
-    """``{cell: (measurand, its within-cell SE)}`` on the measurand's OWN scale. ``key`` is passed
-    in, not imported: ``domain.results`` imports this module, so reading it here closes a cycle."""
+def cell_measurand(
+    rows: list[dict[str, Any]], key: str, se_key: str
+) -> dict[str, tuple[float, float]]:
+    """``{cell: (measurand, this ARM's own SE)}`` on the measurand's OWN scale. Keys are passed
+    in, not imported: ``domain.results`` imports this module, so reading them here closes a cycle."""
+    # `se_key` is separate rather than `f"{key}_se"`: the SE names a DIFFERENT quantity — the
+    # arm's half of a paired difference, shared origin excluded — and a derived name asserted
+    # they were the same thing (`proxies.py::mean_adopted_level_se`).
     acc: dict[str, list[tuple[float, float]]] = {}
     for r in rows:
         cell, pd = r.get("query"), r.get("pipeline_data")
         if not isinstance(cell, str) or not isinstance(pd, dict):
             continue
-        val, se = pd.get(key), pd.get(f"{key}_se")
+        val, se = pd.get(key), pd.get(se_key)
         if isinstance(val, int | float) and isinstance(se, int | float):
             acc.setdefault(cell, []).append((float(val), float(se)))
     return {
@@ -138,7 +143,9 @@ def _variance_split(
     # Sample SD (n-1): the mean is estimated from these same points.
     observed = (sum((d - mean) ** 2 for d in diffs) / (len(diffs) - 1)) ** 0.5
     # The two arms are separate inner campaigns on the same cell, so their errors add in
-    # quadrature. This is the diff's error, not one arm's — halving it would understate.
+    # quadrature. This is the diff's error, not one arm's — halving it would understate. It is
+    # only correct because each input is the arm's OWN half: the shared origin level is excluded
+    # upstream (`proxies.py::mean_adopted_level_se`), so nothing common is added twice here.
     estimation = (sum(variant[c][1] ** 2 + origin[c][1] ** 2 for c in cells) / len(cells)) ** 0.5
     share = 1.0 if observed <= 0.0 else min(1.0, (estimation / observed) ** 2)
     return OuterVariance(
@@ -165,6 +172,7 @@ def compute_outer_verdict(
     origin_rows: list[dict[str, Any]],
     *,
     measurand_key: str = "",
+    se_key: str = "",
 ) -> OuterVerdict | None:
     """Pairs against the CACHED round-0 origin (round 0 is never re-measured); ``None`` when there
     are no origin cells or no readable arm. Takes the origin ROWS: the law needs two readings."""
@@ -224,11 +232,11 @@ def compute_outer_verdict(
         ),
         variance=(
             _variance_split(
-                cell_measurand(variant_rows, measurand_key),
-                cell_measurand(origin_rows, measurand_key),
+                cell_measurand(variant_rows, measurand_key, se_key),
+                cell_measurand(origin_rows, measurand_key, se_key),
                 shared,
             )
-            if measurand_key
+            if measurand_key and se_key
             else None
         ),
     )

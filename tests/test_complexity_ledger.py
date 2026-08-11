@@ -311,7 +311,17 @@ LEDGER_BASELINE = {
     # is banked instead of spelling the payload a second time. Net one param: the method costs
     # two, `persist_round` gains `cb` and loses `round_num` (which was always `round_result.round`
     # — two spellings of one coordinate, and the record now reads the one on the result).
-    "param_decls": 4118,
+    # 4118 -> 4119 (2026-08-11), net of +2 and -1.
+    # +2: `se_key` on `cell_measurand` + `compute_outer_verdict`. The SE beside an L4 measurand
+    # names a DIFFERENT quantity from the measurand — the arm's own half of a paired difference,
+    # shared origin excluded — so its key cannot be derived as `f"{measurand_key}_se"`. That
+    # derivation was the assertion that made the origin's error get counted twice, which drove the
+    # claimed noise above the spread it belongs to. Folding the two into one tuple would hold the
+    # count flat and hide which key is which.
+    # -1: `session` on `_calibrate_delta_ruler`, declared and never referenced, threaded through
+    # three call sites. Deleting it leaves the function pure over its inputs, which is what let the
+    # ≥2-arm identifiability rule finally be pinned by a test.
+    "param_decls": 4119,
     # 4 -> 7 -> 4 (2026-08-11, same day, and the round trip IS the lesson). The three were
     # made lax mid-arc under a real rule — a model read back out of an append-only ledger or a
     # projection FILE punishes a removed field SILENTLY (`scan_ledger_round_closes` skips the

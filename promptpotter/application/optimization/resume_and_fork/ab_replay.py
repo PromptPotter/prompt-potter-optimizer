@@ -175,7 +175,6 @@ def ab_replay_cycle(
         else ""
     )
     delta_scale, _, _ = _calibrate_delta_ruler(
-        session,
         origin_results,
         n_min,
         enable_2pl=enable_2pl,

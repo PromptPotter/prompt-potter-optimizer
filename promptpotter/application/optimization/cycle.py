@@ -124,7 +124,6 @@ def _assert_overlay_preserved(
 
 
 def _calibrate_delta_ruler(
-    session: Session,
     origin_results: list[dict[str, Any]] | None,
     n_min: int,
     *,
@@ -343,7 +342,6 @@ class Cycle:
             origin_sp_hash=origin_sp_hash,
         )
         delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
-            session,
             origin_results,
             config.optimization.elimination_n_min,
             enable_2pl=config.optimization.enable_2pl_graduation,
@@ -487,9 +485,16 @@ class Cycle:
         tr.current_accuracy = last_rr.accuracy
         tr.current_composite_fitness = last_rr.composite_fitness
 
-    def _maybe_warm_ruler(self) -> None:
+    def warm_ruler_if_cold(self) -> None:
         """The first fit clearing the warmth floor is adopted and never re-fit, so every warm round
-        shares one ruler. Fires after a round closed — its candidates are already banked grade-A."""
+        shares one ruler. Attempted BEFORE the round's election and again once it closed."""
+        # Two attempt points, because one was a round too late. The ≥2-arm floor is satisfied the
+        # moment the round's own candidates are banked — `score_search_point` archives each as it
+        # finishes, so they are grade-A and in the pool BEFORE `elect_round_winner` runs. Trying
+        # only after `absorb_round` meant the election that needed the ruler always ran on a cold
+        # one, and at L4's `max_rounds: 2` there was no later round to spend the warm ruler on:
+        # per-candidate θ could never be stamped from the outer loop's own data at all.
+        # This relaxes the TIMING, never the rule — a one-arm pool still stays flat below.
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -497,7 +502,6 @@ class Cycle:
         if self.delta_scale:
             return
         delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
-            self.session,
             self.origin_round.results,
             self.config.optimization.elimination_n_min,
             enable_2pl=self.config.optimization.enable_2pl_graduation,
@@ -564,7 +568,7 @@ class Cycle:
                 self.opt_sp.memory.wounds.runtime_failures.append(rf)
 
         self.rounds.append(rr)
-        self._maybe_warm_ruler()
+        self.warm_ruler_if_cold()
         # Advance the incumbent to the elected winner. The winner OSP already carries
         # its own lineage (parent = this incumbent), so identity — not just the six
         # prompt strings — moves forward, and next round's candidates descend from the

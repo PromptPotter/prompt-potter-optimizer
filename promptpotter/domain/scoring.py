@@ -34,10 +34,11 @@ class PipelineData(TypedDict, total=False):
     # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
     # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
     reasoning_trace: str
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. ``_se`` is the
-    # cell's own within-cell precision (`domain/l4/proxies.py`).
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. The SE beside it
+    # is this arm's OWN half of a paired cell difference — the shared origin level is excluded
+    # because it cancels in that difference (`domain/l4/proxies.py`).
     mean_round_delta: float
-    mean_round_delta_se: float
+    mean_adopted_level_se: float
     # Read defensively beside the top-level twins (`_absorb_sample_scored`, `RoundBuffer`):
     # no writer in this repo sets them here, but a backend that did must not be silently
     # dropped by ``ledger_sample_view``.

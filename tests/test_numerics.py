@@ -987,7 +987,7 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     from promptpotter.domain.l4.proxies import (
         OUTER_PROXY_KEYS,
         compute_outer_proxies,
-        mean_round_delta_se,
+        mean_adopted_level_se,
     )
 
     px = compute_outer_proxies(
@@ -1041,15 +1041,31 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     unpadded = cycle_result(
         [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=2, **se_kw
     )
-    assert mean_round_delta_se(padded) == pytest.approx(mean_round_delta_se(unpadded))
-    # mean(0.30, 0.40) against the origin's own 0.20, in quadrature — never sigma/sqrt(n), which
-    # would divide correlated, NESTED frontier fits as if they were independent draws.
-    assert mean_round_delta_se(padded) == pytest.approx((0.35**2 + 0.20**2) ** 0.5)
-    assert mean_round_delta_se(padded) > 0.35 / 2
+    assert mean_adopted_level_se(padded) == pytest.approx(mean_adopted_level_se(unpadded))
+    # mean(0.30, 0.40) and NOTHING ELSE — never sigma/sqrt(n), which would divide correlated,
+    # NESTED frontier fits as if they were independent draws.
+    assert mean_adopted_level_se(padded) == pytest.approx(0.35)
+    assert mean_adopted_level_se(padded) > 0.35 / 2
+
+    # SILENT wrong-number: the origin's own SE must NOT be in here. Every arm on a cell replays
+    # the same round-0 rows, so `origin_level` is ONE measurement shared by both sides of
+    # `variant - origin` and cancels exactly. Folding it in counted it twice, and on the banked
+    # corpus that made the claimed noise 2.4x the total spread it is a component of — a ratio
+    # that is impossible rather than merely large, and it read out as "100% noise" after clamping.
+    assert mean_adopted_level_se(padded) != pytest.approx((0.35**2 + 0.20**2) ** 0.5)
+    # ...so the cell's own SE cannot depend on whether the origin was ever fit.
+    no_origin_se = cycle_result(
+        [0.30, 0.60],
+        0.30,
+        [round_result(i) for i in (1, 2)],
+        round_budget=4,
+        round_adopted_level_ses=[0.30, 0.40],
+    )
+    assert mean_adopted_level_se(no_origin_se) == pytest.approx(0.35)
 
     # No SE at all yields None — the same answer as "this cell was never fit". A fabricated 0.0
     # reads as an infinitely sharp cell and would dominate every weighting it entered.
-    assert mean_round_delta_se(cycle_result([0.30], 0.30, [round_result(1)])) is None
+    assert mean_adopted_level_se(cycle_result([0.30], 0.30, [round_result(1)])) is None
 
     assert compute_outer_proxies(quit_early).mean_round_delta == pytest.approx(0.225)
     assert compute_outer_proxies(ran_out).mean_round_delta == pytest.approx(0.225)
@@ -3182,20 +3198,52 @@ def test_headline_best_is_always_a_number_something_measured():
     assert best_round_by_measured_accuracy([]) == (0.0, None)
 
 
+def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
+    # SILENT wrong-scale: with ONE ability the likelihood cannot separate "this item is hard" from
+    # "this arm missed it", so δ collapses into a two-valued restatement of that arm's own hit
+    # pattern — and every later θ in the cycle becomes a restatement of whether round 0 happened
+    # to get the sample right. It is not an error; it is a plausible ruler that reads backwards.
+    # It cost two campaigns: rounds carrying +14.3pp at p<0.05 were stamped `improved=False`.
+    # The warm attempt now also runs BEFORE the round's election (`warm_ruler_if_cold`), which
+    # relaxes the TIMING only — this is what pins the rule itself as untouched.
+    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
+
+    n_min = 4
+    arm_a = [Observation("a", sid, 1.0 if sid % 3 else 0.0) for sid in range(8)]
+
+    # Eight distinct samples clears any sample floor on its own — the arm count is the binding
+    # condition, and a fresh campaign hands this function exactly this shape.
+    flat, _, model = _calibrate_delta_ruler(None, n_min, enable_2pl=False, archive_obs=arm_a)
+    assert flat == {} and model is None
+
+    arm_b = [Observation("b", sid, 1.0 if sid < 5 else 0.0) for sid in range(8)]
+    warm, _, warm_model = _calibrate_delta_ruler(
+        None, n_min, enable_2pl=False, archive_obs=arm_a + arm_b
+    )
+    assert warm and warm_model == "1PL"
+
+
 def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
     # The panel's `se` is computed from the spread of the per-cell diffs and nothing else, so it
     # cannot distinguish two opposite problems: cells that each measured themselves badly, versus
     # cells that genuinely disagree. They take opposite levers — sharpen the instrument, or widen
     # the panel/candidates — and the operator picks from this number. SILENT: every wrong value
     # here is a plausible-looking fraction that sends the next spend at the wrong problem.
+    from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY
     from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
+
+    # The on-disk key, pinned as a literal: it is a wire contract between the emit site, the
+    # infra-key allow-list and the reader, and a rename that moved only the constant would
+    # silently stop the panel finding any SE at all — which reads as "no cells", not as an error.
+    assert ADOPTED_LEVEL_SE_KEY == "mean_adopted_level_se"
 
     def rows(cells: dict[str, tuple[float, float]]) -> list[dict]:
         return [
             {
                 "query": c,
                 "fitness": (v + 1.0) / 3.0,
-                "pipeline_data": {"mean_round_delta": v, "mean_round_delta_se": se},
+                "pipeline_data": {"mean_round_delta": v, "mean_adopted_level_se": se},
             }
             for c, (v, se) in cells.items()
         ]
@@ -3212,7 +3260,11 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
 
     def split(variant: dict, origin: dict):
         v = compute_outer_verdict(
-            {"v1": rows(variant)}, cand, rows(origin), measurand_key="mean_round_delta"
+            {"v1": rows(variant)},
+            cand,
+            rows(origin),
+            measurand_key="mean_round_delta",
+            se_key=ADOPTED_LEVEL_SE_KEY,
         )
         assert v is not None
         return v.variance
@@ -3246,6 +3298,7 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
         cand,
         [{"query": "a", "fitness": 0.3, "pipeline_data": {"mean_round_delta": 0.0}}],
         measurand_key="mean_round_delta",
+        se_key=ADOPTED_LEVEL_SE_KEY,
     )
     assert bare is not None and bare.variance is None
 

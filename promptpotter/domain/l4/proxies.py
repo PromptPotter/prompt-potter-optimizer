@@ -36,6 +36,14 @@ class OuterSampleProxies(StrictModel):
 # The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
+# The `pipeline_data` key carrying `mean_adopted_level_se`. ONE spelling: the emit site
+# (`runner/inner/spawn.py`), the infra-key allow-list that keeps it off the scoring formula
+# (`scoring/sample_measurement.py`) and the reader (`domain/l4/verdict.py::cell_measurand`, via
+# its caller) must agree, and three string literals is how they stop agreeing. Deliberately NOT
+# derived as f"{OUTER_PROXY_KEYS[0]}_se" — it is the SE of the arm's own adopted level, not of
+# the delta, and a derived name would re-assert the identity this fix removes.
+ADOPTED_LEVEL_SE_KEY = "mean_adopted_level_se"
+
 
 def held_levels(result: CycleResult) -> list[float]:
     """ONE denominator for every cell on a panel: dividing by the series length instead makes the
@@ -47,16 +55,21 @@ def held_levels(result: CycleResult) -> list[float]:
     return levels + [levels[-1]] * (n - len(levels))
 
 
-def mean_round_delta_se(result: CycleResult) -> float | None:
-    """A PRECISION, never a penalty: no ``mean - λ·se`` haircut, never an election rank key. Mean
-    of the SEs, not ``σ/√n`` — the levels NEST, so dividing by n would manufacture power."""
+def mean_adopted_level_se(result: CycleResult) -> float | None:
+    """This arm's OWN half of a paired cell difference: two of these in quadrature give the
+    difference's error. A PRECISION, never a penalty — no ``mean - λ·se``, never a rank key."""
     ses = result.round_adopted_level_ses
-    if not ses or result.origin_level_se is None:
+    if not ses:
         return None
+    # `origin_level` is deliberately absent. Every arm on a cell replays the same round-0 rows, so
+    # it is ONE shared measurement that cancels in `variant - origin`; folding it into each side
+    # counted it twice in a quantity it vanishes from, and made the claimed noise 2.4x the spread
+    # it is a component of — impossible rather than merely large, and it clamped to "100% noise".
+    #
     # The DISTINCT levels — the padding `held_levels` adds carries no measurement, so it must not
     # enter the average as if it did. A 2-of-4-round cell contributes the precision of 2 rounds.
-    within = sum(ses) / len(ses)
-    return float((within**2 + result.origin_level_se**2) ** 0.5)
+    # Mean of the SEs, not `σ/√n`: the levels NEST, so dividing by n would manufacture power.
+    return float(sum(ses) / len(ses))
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
@@ -126,12 +139,13 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
 
 
 __all__ = [
+    "ADOPTED_LEVEL_SE_KEY",
     "OUTER_PROXY_KEYS",
     "InnerCycleUnscoreableError",
     "OuterSampleProxies",
     "compute_outer_proxies",
     "floor_reason",
     "held_levels",
-    "mean_round_delta_se",
+    "mean_adopted_level_se",
     "no_evidence_reason",
 ]

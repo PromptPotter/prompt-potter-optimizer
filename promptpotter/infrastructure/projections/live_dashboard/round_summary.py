@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
-from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
+from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
 from promptpotter.domain.results import RoundResult, is_electable, is_round_winner
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -90,6 +90,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
             ],
             origin_rows,
             measurand_key=OUTER_PROXY_KEYS[0] if OUTER_PROXY_KEYS else "",
+            se_key=ADOPTED_LEVEL_SE_KEY,
         )
     )
     return RoundSummary(

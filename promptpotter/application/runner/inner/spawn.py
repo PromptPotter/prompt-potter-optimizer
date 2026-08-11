@@ -22,12 +22,13 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.seed_screen import class_floor, draw_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
+    ADOPTED_LEVEL_SE_KEY,
     OUTER_PROXY_KEYS,
     InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
     held_levels,
-    mean_round_delta_se,
+    mean_adopted_level_se,
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
@@ -843,13 +844,15 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # REASONING in the outer sample_transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),
         **proxies.model_dump(),
-        # The cell's own precision on the scalar above, so the panel can tell estimation noise
+        # This arm's OWN half of a paired cell difference, so the panel can tell estimation noise
         # from between-cell heterogeneity instead of inferring both from one spread of six
-        # numbers. An INFRA key, deliberately not an `OuterSampleProxies` field: those are
-        # derived into `OUTER_PROXY_KEYS` and reach the scoring formula's namespace, and a
-        # standard error inside the formula is one keystroke from the `mean - λ·se` haircut the
-        # spec forbids. Precision travels beside the measurement; it never grades it.
-        "mean_round_delta_se": mean_round_delta_se(result),
+        # numbers. It excludes `origin_level`, which is one measurement both arms replay and so
+        # cancels in the difference — see `mean_adopted_level_se`. An INFRA key, deliberately not
+        # an `OuterSampleProxies` field: those are derived into `OUTER_PROXY_KEYS` and reach the
+        # scoring formula's namespace, and a standard error inside the formula is one keystroke
+        # from the `mean - λ·se` haircut the spec forbids. Precision travels beside the
+        # measurement; it never grades it.
+        ADOPTED_LEVEL_SE_KEY: mean_adopted_level_se(result),
         # terminated_at is the archive's reuse contract: a named node means "the
         # sample's outcome depends on config only UP TO that node", and prefix-
         # matched rows replay when they terminated inside the trusted prefix
