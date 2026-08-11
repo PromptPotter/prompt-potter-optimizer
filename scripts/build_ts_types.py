@@ -32,7 +32,7 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
-from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVariance, OuterVerdict
+from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     FewShotExample,
@@ -134,9 +134,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DashboardCandidate,
     RoundSummaryCandidate,
     DegradationHealth,
-    OuterCellEffect,
-    OuterVariance,
-    OuterVerdict,
+    PanelPrecision,
     RoundSummary,
     DiagnosticRunRecord,
     # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`;

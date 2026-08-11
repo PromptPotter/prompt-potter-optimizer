@@ -175,6 +175,22 @@ class ScoredCandidate(StrictModel):
     # — which is what the inner narrative told the outer optimizer, on every eliminated arm.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+    # The BLOCKED lift over that floor and its interval: the mean per-cell ``(candidate − origin)``
+    # difference across the cells both measured, Student-t bracketed
+    # (``scoring/selection.py::matched_origin_lift``). Same scale as ``composite_ci_*`` below and
+    # sharper than it on the same rows, because pairing removes the cell-to-cell variation in the
+    # origin instead of carrying it as noise — which is the whole reason a seed-paired panel is
+    # worth its cost. ``None`` below two shared cells; an interval from one pair is a fiction.
+    #
+    # This is the one interval that answers "did it beat the origin, or did the panel just
+    # wobble". It reads at EVERY level: inner cells are samples, outer cells are whole inner
+    # campaigns, and the arithmetic does not care which. An L4-only reimplementation of it in
+    # composite-fitness units used to live in ``domain/l4/verdict.py``, keyed on the query text
+    # rather than ``sample_id`` and grading an errored row as absent rather than 0.0 — a second
+    # opinion that could disagree with the election it sat beside, and did.
+    matched_origin_lift: float | None = None
+    matched_origin_lift_ci_lo: float | None = None
+    matched_origin_lift_ci_hi: float | None = None
     # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — the
     # subset-invariant metric the winner election ranks by (`elect_round_winner`), stamped from
     # that single fit. Distinct from subset-relative `accuracy`: it discounts for *which* samples
@@ -344,6 +360,14 @@ class RoundResult(StrictModel):
     # candidate that beat the origin by its entire accuracy.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+    # The winner's blocked lift over that floor and its interval, copied from its
+    # ``ScoredCandidate`` — the round-level mirror of the pair above, so a reader of the round
+    # (the CLI header, the L4 narrative) can say whether the margin it is about to print is one
+    # the round could actually resolve. ``None`` on a round that crowned nobody: there is no
+    # winner to have lifted, and the parent's lift over itself is not a measurement.
+    matched_origin_lift: float | None = None
+    matched_origin_lift_ci_lo: float | None = None
+    matched_origin_lift_ci_hi: float | None = None
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
     # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a
     # drifting per-round subset can't inflate the outer fitness signal.

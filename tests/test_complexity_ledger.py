@@ -62,7 +62,12 @@ LEDGER_BASELINE = {
     # already owns that name a layer up). And `routers/datasets/` as four — `_router`, `index`,
     # `ingest`, `leaderboard` — the `routers/campaigns/` pattern, for the same reason: one
     # resource carrying several unrelated concerns.
-    "modules": 316,
+    # 316 -> 315 (2026-08-11): `domain/l4/verdict.py` deleted. It reported a second opinion on the
+    # L4 round — its own pairing rule, its own scale, its own 3-way decision — and nothing branched
+    # on any of it. The engine's own interval now covers it at every level
+    # (`ScoredCandidate.matched_origin_lift*`); what only L4 can measure moved into `l4/proxies.py`
+    # beside the measurand it reads.
+    "modules": 315,
     #
     # 47 -> 48 (2026-08-08): `routers/datasets/__init__.py`. A router package cannot avoid one —
     # the submodules' decorators must run before the populated router is re-exported.
@@ -139,12 +144,15 @@ LEDGER_BASELINE = {
     # A high FLOOR. Honest: the pipeline overlay (`opt_search_point`, `pipeline_parsing`,
     # `pipeline_schema`, `search_point`, `connector`), a node's output (`rendering`,
     # `validators`), a dataset row (`sample`). Retirable: `results`, `results_health`,
-    # `l4.verdict`, `measurement_provenance` — rows of PP's OWN on-disk shapes, taken as bags.
+    # `measurement_provenance` — rows of PP's OWN on-disk shapes, taken as bags.
     # 76 -> 77 (2026-08-11): `view_fields` moved from `escalation/state.py` into `domain/`,
     # beside the `PhaseRecord` it reads. Its `dict[str, Any]` return came with it — a MOVE, not
     # a new map: an `infrastructure/` projection needed the same accessor, and owning it in
     # `application/` would have inverted a layer to reach it.
-    "domain_any_maps": 77,
+    # 77 -> 76 (2026-08-11): `cell_fitness` was the last `dict[str, Any]` walk in `domain/l4/`.
+    # Its one surviving caller ranks the corpus, where a cell's identity is its query text rather
+    # than a per-campaign `sample_id`, so it lives there now as a private helper that says so.
+    "domain_any_maps": 76,
     # Moves on 2026-08-06 collapsed to their standing state; `git log -p` is the history
     # layer, and a running tally here is the sweep-log shape the backlog doc names as the old
     # bloat source. What the current number buys, newest first:
@@ -321,7 +329,13 @@ LEDGER_BASELINE = {
     # -1: `session` on `_calibrate_delta_ruler`, declared and never referenced, threaded through
     # three call sites. Deleting it leaves the function pure over its inputs, which is what let the
     # ≥2-arm identifiability rule finally be pinned by a test.
-    "param_decls": 4119,
+    # 4119 -> 4115 (2026-08-11): the outer-verdict path came out whole — `compute_outer_verdict`
+    # (6), `_variance_split` (3), `_pick_variant` (1) and `cell_measurand`'s two key params,
+    # against the engine-side replacements plus `_warn_if_not_separable` (2). The key params are
+    # worth naming: naming BOTH keys at the call site (`cell_values(rows, key)`) is what actually
+    # fixes the double-count above, so the key came back as an honest parameter rather than as a
+    # second reader — the wrapper that hid it cost more surface than the parameter it saved.
+    "param_decls": 4115,
     # 4 -> 7 -> 4 (2026-08-11, same day, and the round trip IS the lesson). The three were
     # made lax mid-arc under a real rule — a model read back out of an append-only ledger or a
     # projection FILE punishes a removed field SILENTLY (`scan_ledger_round_closes` skips the
@@ -496,7 +510,12 @@ LEDGER_BASELINE = {
     # `_rebank_on_branch` now says that a round banked without its close is a round every ledger
     # scan goes blind to. The rewind-admissibility sentence was cut from both: that rule is
     # `infrastructure/CLAUDE.md`'s, and a second copy is what drifts.
-    "docstring_lines": 3697,
+    #
+    # 3697 -> 3689 (2026-08-11): the deleted verdict module's seven docstrings, minus what the
+    # replacements plus the not-separable warning cost. The new prose went to comments, not
+    # docstrings — the sweep's own ≤2-line rule applied to the pass that wrote it, which is the
+    # only way that rule stays true.
+    "docstring_lines": 3689,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

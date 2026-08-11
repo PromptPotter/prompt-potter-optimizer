@@ -20,6 +20,9 @@ export interface DashboardCandidate {
   composite_ci_hi: number | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -41,6 +44,9 @@ export interface RoundSummaryCandidate {
   composite_ci_hi: number | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -63,37 +69,11 @@ export interface DegradationHealth {
   suggested_action: string | null;
 }
 
-/** One cell's paired (variant − origin) composite difference. */
-export interface OuterCellEffect {
-  cell: string;
-  variant_fitness: number;
-  origin_fitness: number;
-  diff: number;
-}
-
-/** Where the panel's spread comes from — estimation noise, or real between-cell difference. */
-export interface OuterVariance {
+/** How sharply each cell was measured, against how far apart the cells landed — the two bars */
+export interface PanelPrecision {
   estimation_sd: number;
   observed_sd: number;
-  estimation_share: number;
   n_cells: number;
-}
-
-/** The pooled blocked-paired verdict for a round's target variant. */
-export interface OuterVerdict {
-  variant_id: string;
-  variant_label: string;
-  per_cell: OuterCellEffect[];
-  effect: number;
-  se: number;
-  ci_lo: number;
-  ci_hi: number;
-  n_cells: number;
-  decision: string;
-  mde_remaining: number;
-  variant_is_winner: boolean;
-  variance: OuterVariance | null;
-  cells_dropped: string[];
 }
 
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
@@ -108,7 +88,7 @@ export interface RoundSummary {
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
-  outer_verdict: OuterVerdict | null;
+  panel_precision: PanelPrecision | null;
 }
 
 /** One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor`` */
@@ -221,6 +201,9 @@ export interface ScoredCandidate {
   degradation_context: unknown;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
   composite_ci_lo: number | null;
@@ -337,6 +320,9 @@ export interface RoundResult {
   escalation_signal: unknown | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   cumulative_theta: number | null;
   cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;

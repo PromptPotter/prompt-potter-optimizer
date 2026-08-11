@@ -3224,14 +3224,14 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
     assert warm and warm_model == "1PL"
 
 
-def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
-    # The panel's `se` is computed from the spread of the per-cell diffs and nothing else, so it
-    # cannot distinguish two opposite problems: cells that each measured themselves badly, versus
-    # cells that genuinely disagree. They take opposite levers — sharpen the instrument, or widen
-    # the panel/candidates — and the operator picks from this number. SILENT: every wrong value
-    # here is a plausible-looking fraction that sends the next spend at the wrong problem.
-    from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY
-    from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
+def test_panel_precision_names_the_lever_the_panel_needs() -> None:
+    # A candidate's `matched_origin_lift` interval is computed from the spread of the per-cell
+    # diffs and nothing else, so it cannot distinguish two opposite problems: cells that each
+    # measured themselves badly, versus cells that genuinely disagree. They take opposite levers —
+    # sharpen the instrument, or widen the panel/candidates — and the operator picks from these two
+    # numbers. SILENT: every wrong value here is a plausible-looking bar that sends the next spend
+    # at the wrong problem.
+    from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, panel_precision
 
     # The on-disk key, pinned as a literal: it is a wire contract between the emit site, the
     # infra-key allow-list and the reader, and a rename that moved only the constant would
@@ -3248,39 +3248,26 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
             for c, (v, se) in cells.items()
         ]
 
-    cand = [
-        CandidateInfo(
-            candidate_id="v1",
-            label="C1.1",
-            changes_description="x",
-            composite_fitness=0.5,
-            is_winner=True,
-        )
-    ]
-
-    def split(variant: dict, origin: dict):
-        v = compute_outer_verdict(
-            {"v1": rows(variant)},
-            cand,
-            rows(origin),
-            measurand_key="mean_round_delta",
-            se_key=ADOPTED_LEVEL_SE_KEY,
-        )
-        assert v is not None
-        return v.variance
-
-    flat_origin = dict.fromkeys("abc", (0.0, 0.02))
+    flat_origin = rows(dict.fromkeys("abc", (0.0, 0.02)))
 
     # Cells that AGREE (diffs .50/.52/.48) but each measured itself poorly: the panel is reading
-    # its own noise, and buying more cells like these buys nothing. Share saturates at 1.
-    noisy = split({"a": (0.50, 0.40), "b": (0.52, 0.40), "c": (0.48, 0.40)}, flat_origin)
-    assert noisy is not None and noisy.estimation_share == 1.0
+    # its own noise, and buying more cells like these buys nothing.
+    noisy = panel_precision(
+        rows({"a": (0.50, 0.40), "b": (0.52, 0.40), "c": (0.48, 0.40)}), flat_origin
+    )
+    assert noisy is not None
+    # Claimed noise EXCEEDS the total spread it is a component of — impossible, and that
+    # impossibility IS the finding. The retired `estimation_share` divided these and clamped with
+    # `min(1.0, …)`, rendering a raw 5.55 as a tidy "100% measurement noise". Serving both bars
+    # unreduced is what makes the contradiction visible instead of plausible.
     assert noisy.estimation_sd > noisy.observed_sd
 
     # Cells that genuinely DIFFER (.10/.90/.50) while each is measured sharply: the spread is
     # signal about where this optimizer prompt works, not instrument noise.
-    real = split({"a": (0.10, 0.02), "b": (0.90, 0.02), "c": (0.50, 0.02)}, flat_origin)
-    assert real is not None and real.estimation_share < 0.05
+    real = panel_precision(
+        rows({"a": (0.10, 0.02), "b": (0.90, 0.02), "c": (0.50, 0.02)}), flat_origin
+    )
+    assert real is not None and real.estimation_sd < real.observed_sd / 10
     assert real.observed_sd == pytest.approx(0.4)  # SAMPLE sd (n-1), not the population one
 
     # BOTH ARMS' errors enter, in quadrature. The variant and the origin are separate inner
@@ -3291,47 +3278,97 @@ def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
 
     # One shared cell has no spread to decompose: None, never a fabricated 0.0 (which reads as
     # "all signal" and would argue for spending on more cells at the exact moment it cannot know).
-    assert split({"a": (0.5, 0.02)}, {"a": (0.0, 0.02)}) is None
+    assert panel_precision(rows({"a": (0.5, 0.02)}), rows({"a": (0.0, 0.02)})) is None
     # A cell whose rows carry no SE is dropped rather than guessed at.
-    bare = compute_outer_verdict(
-        {"v1": [{"query": "a", "fitness": 0.5, "pipeline_data": {"mean_round_delta": 0.5}}]},
-        cand,
-        [{"query": "a", "fitness": 0.3, "pipeline_data": {"mean_round_delta": 0.0}}],
-        measurand_key="mean_round_delta",
-        se_key=ADOPTED_LEVEL_SE_KEY,
+    assert (
+        panel_precision(
+            [{"query": "a", "fitness": 0.5, "pipeline_data": {"mean_round_delta": 0.5}}],
+            [{"query": "a", "fitness": 0.3, "pipeline_data": {"mean_round_delta": 0.0}}],
+        )
+        is None
     )
-    assert bare is not None and bare.variance is None
 
+
+def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
+    # The one degradation with NO other channel: the round measured cleanly, crowned a winner, and
+    # every number on every surface reads exactly as it would on a decisive round. Nothing failed,
+    # so no rail fires; the operator reads a margin that the panel cannot support. SILENT by
+    # construction, which is why the warning is the whole mechanism.
+    from promptpotter.application.optimization.l1.score import winner as winner_mod
+    from tests.factories import scored_candidate
+
+    fired: list[dict] = []
+    monkeypatch.setattr(winner_mod, "emit_round_warning", lambda **kw: fired.append(kw))
+
+    def arm(cid: str, lo: float, hi: float):
+        return scored_candidate(cid, accuracy=0.5).model_copy(
+            update={
+                "matched_origin_lift": (lo + hi) / 2,
+                "matched_origin_lift_ci_lo": lo,
+                "matched_origin_lift_ci_hi": hi,
+            }
+        )
+
+    # Every arm straddles 0 — nothing here separates from the origin.
+    winner_mod._warn_if_not_separable(2, [arm("a", -0.05, 0.21), arm("b", -0.30, 0.10)])
+    assert len(fired) == 1
+    assert fired[0]["kind"] == "round_not_separable"
+    # The message must carry the BEST case, not the count alone: "two arms were inconclusive" and
+    # "the best of them could not clear +0.21" ask for different next moves.
+    assert fired[0]["detail"] == {"arms": 2, "best_ci_hi": 0.21}
+
+    # ONE arm clearing 0 is enough — the round resolved something, and warning anyway would train
+    # the operator to ignore the kind.
+    fired.clear()
+    winner_mod._warn_if_not_separable(2, [arm("a", -0.05, 0.21), arm("b", 0.04, 0.30)])
+    assert not fired
+
+    # No arm carries an interval (below two shared cells — a one-cell panel, every round). There
+    # is nothing to be inconclusive ABOUT, and firing here would be noise on every single round.
+    winner_mod._warn_if_not_separable(2, [scored_candidate("a", accuracy=0.5)])
+    assert not fired
+
+
+def test_matched_origin_lift_drops_the_cell_that_measured_nothing() -> None:
     # An ERRORED cell measured nothing, and here "nothing" is not a low score: outer fitness
-    # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the
-    # inner loop maximally DOWN. SILENT: the row looks like any other, the verdict still
-    # prints, and the arm is convicted on a cell that never ran.
-    errored = compute_outer_verdict(
+    # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the inner
+    # loop maximally DOWN. The ELECTION grades it 0.0 on purpose (`_mean_fitness_by_cell` is
+    # un-predicated so the overlap guard works); a published interval must not, because it is drawn
+    # beside a point estimate and has to bracket that estimate's own population — the rule
+    # `composite_ci` already follows on the same row. SILENT: the row looks like any other, the
+    # interval still prints, and the arm is convicted on a cell that never ran.
+    from promptpotter.application.scoring.selection import matched_origin_lift
+
+    clean = [{"query": q, "sample_id": i, "fitness": 0.9} for i, q in enumerate("abc")]
+    origin = [{"query": q, "sample_id": i, "fitness": 0.5} for i, q in enumerate("abc")]
+    errored = [
+        *clean,
         {
-            "v1": [
-                {"query": "a", "fitness": 0.9},
-                {"query": "b", "fitness": 0.0, "error_category": "UNKNOWN", "predicted": "ERROR"},
-            ]
+            "query": "d",
+            "sample_id": 3,
+            "fitness": 0.0,
+            "error_category": "UNKNOWN",
+            "predicted": "ERROR",
         },
-        cand,
-        [{"query": "a", "fitness": 0.5}, {"query": "b", "fitness": 0.5}],
-    )
-    assert errored is not None
-    assert [c.cell for c in errored.per_cell] == ["a"] and errored.n_cells == 1
-    # And the loss is REPORTED: the panel is a census, so a narrowed comparison that says
-    # nothing about which cells it lost is indistinguishable from a genuinely small panel.
-    assert errored.cells_dropped == ["b"]
-    assert errored.effect == pytest.approx(0.4)  # not dragged toward the floor by cell b
+    ]
+
+    lift = matched_origin_lift(errored, [*origin, {"query": "d", "sample_id": 3, "fitness": 0.5}])
+    assert lift is not None
+    assert lift[0] == pytest.approx(0.4)  # not dragged toward the floor by cell d
+    assert lift[1] < lift[0] < lift[2]
+
+    # Below two shared cells there is no spread, so no interval — reported as absence rather than
+    # as the `_normal_posterior` n=1 fallback, which invents an SE of 0.5 out of one reading.
+    assert matched_origin_lift(clean[:1], origin[:1]) is None
 
 
-def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
-    # A round that crowns nobody still gets a verdict, on its best arm — and `max(fitness)`
-    # reaches for exactly the arms that FAKE a score: a degradation abort scoring a partial
-    # subset, and a constant answerer scoring the drawn subset's label mix. The election already
-    # refuses both (`electable`); the verdict must refuse the same set or it convicts an arm the
-    # round would not crown. SILENT: the served verdict names a subject, carries a CI, and
-    # renders identically to one about a readable arm.
-    from promptpotter.domain.l4.verdict import compute_outer_verdict
+def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
+    # The precision read is taken off ONE arm — the winner, else the best-scoring one — and
+    # `max(fitness)` reaches for exactly the arms that FAKE a score: a degradation abort scoring a
+    # partial subset, and a constant answerer scoring the drawn subset's label mix. The election
+    # already refuses both (`electable`); the projection must refuse the same set or the round's
+    # instrument reading comes from a cell set the round would not crown on. SILENT: the served
+    # number renders identically whichever arm supplied it.
     from promptpotter.domain.results import is_electable
     from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
         build_round_summary,
@@ -3340,7 +3377,7 @@ def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
 
     truths = (("a", "T"), ("b", "F"), ("c", "T"), ("d", "F"))
 
-    def cells(fitness: float, *, constant: bool) -> list[dict[str, object]]:
+    def cells(fitness: float, *, constant: bool, se: float) -> list[dict[str, object]]:
         # Truth VARIES, and there are more cells than labels — `is_answer_collapsed`
         # self-normalizes below that, since one row per label cannot tell a constant answer
         # from a correct one.
@@ -3351,12 +3388,26 @@ def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
                 "fitness": fitness,
                 "ground_truth": gt,
                 "predicted": "T" if constant else gt,
+                "pipeline_data": {"mean_round_delta": fitness, "mean_adopted_level_se": se},
             }
             for i, (q, gt) in enumerate(truths)
         ]
 
-    origin = [{"query": q, "fitness": 0.4} for q, _ in truths]
-    measured = {"hot": cells(0.9, constant=True), "cool": cells(0.5, constant=False)}
+    origin = [
+        {
+            "query": q,
+            "sample_id": i,
+            "fitness": 0.4,
+            "pipeline_data": {"mean_round_delta": 0.4, "mean_adopted_level_se": 0.01},
+        }
+        for i, (q, _) in enumerate(truths)
+    ]
+    # The arms are separated by their PRECISION, not their score, so the assertion below can only
+    # pass if the projection read the honest arm's cells.
+    measured = {
+        "hot": cells(0.9, constant=True, se=0.30),
+        "cool": cells(0.5, constant=False, se=0.05),
+    }
     hot = scored_candidate("hot", accuracy=0.9)
     cool = scored_candidate("cool", accuracy=0.5)
 
@@ -3366,20 +3417,22 @@ def test_outer_verdict_subject_is_an_arm_the_round_could_read() -> None:
     assert not is_electable(hot, [])  # an arm with no rows has nothing to read
     assert is_electable(cool, measured["cool"])
 
-    # And through the projection that feeds the verdict: the collapsed arm outscores the honest
-    # one, so an unfiltered `max` names "hot". The round could only read "cool".
-    rr = round_result(1, candidates_scored=0).model_copy(
-        update={
-            "candidates_scored": 2,
-            "candidate_scores": [hot, cool],
-            "all_candidate_results": measured,
-        }
-    )
-    summary = build_round_summary(rr, origin)
-    assert summary.outer_verdict is not None
-    assert summary.outer_verdict.variant_id == "cool"
-    assert summary.outer_verdict.effect == pytest.approx(0.1)
+    # And through the projection: the collapsed arm outscores the honest one, so an unfiltered
+    # `max` names "hot". The round could only read "cool".
+    def summarize(*scores):
+        rr = round_result(1, candidates_scored=0).model_copy(
+            update={
+                "candidates_scored": len(scores),
+                "candidate_scores": list(scores),
+                "all_candidate_results": {s.candidate_id: measured[s.candidate_id] for s in scores},
+            }
+        )
+        return build_round_summary(rr, origin)
 
-    # Every arm refused — the round measured nothing it can attribute, so there is no subject.
-    # Reported as absence, never as the least-bad conviction.
-    assert compute_outer_verdict(measured, [], origin) is None
+    precision = summarize(hot, cool).panel_precision
+    assert precision is not None
+    assert precision.estimation_sd == pytest.approx((0.05**2 + 0.01**2) ** 0.5)
+
+    # Every arm refused — the round measured nothing it can attribute, so there is no instrument
+    # reading. Reported as absence, never off the least-bad arm.
+    assert summarize(hot).panel_precision is None

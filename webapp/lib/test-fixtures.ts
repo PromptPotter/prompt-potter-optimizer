@@ -49,6 +49,9 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
     composite_ci_hi: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
+    matched_origin_lift: null,
+    matched_origin_lift_ci_lo: null,
+    matched_origin_lift_ci_hi: null,
     // A live row carries the crown too — the election lands at the end of scoring, not at
     // round close — so the default is "nothing crowned yet", never "this one lost".
     is_winner: false,
@@ -81,6 +84,9 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     degradation_context: {},
     matched_origin_accuracy: null,
     matched_origin_composite: null,
+    matched_origin_lift: null,
+    matched_origin_lift_ci_lo: null,
+    matched_origin_lift_ci_hi: null,
     theta: null,
     theta_se: null,
     composite_ci_lo: null,
@@ -105,6 +111,9 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     escalation_signal: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
+    matched_origin_lift: null,
+    matched_origin_lift_ci_lo: null,
+    matched_origin_lift_ci_hi: null,
     cumulative_theta: null,
     cumulative_theta_se: null,
     calibration_model: null,
@@ -211,6 +220,9 @@ export function summaryCandidate(
     composite_ci_hi: null,
     matched_origin_accuracy: null,
     matched_origin_composite: null,
+    matched_origin_lift: null,
+    matched_origin_lift_ci_lo: null,
+    matched_origin_lift_ci_hi: null,
     ...over,
   };
 }
@@ -227,7 +239,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     candidates: [],
     selection: [],
     health: null,
-    outer_verdict: null,
+    panel_precision: null,
     ...over,
   };
 }

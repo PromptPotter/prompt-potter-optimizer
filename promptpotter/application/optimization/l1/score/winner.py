@@ -21,16 +21,22 @@ from promptpotter.application.optimization.validators.l1_invariants import L1Yie
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.metrics import _compute_accuracy, matched_origin_stats
-from promptpotter.application.scoring.selection import elect_round_winner, paired_fitness
+from promptpotter.application.scoring.selection import (
+    elect_round_winner,
+    matched_origin_lift,
+    paired_fitness,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
+    ScoredCandidate,
     is_electable,
     is_leader_eligible,
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
@@ -42,6 +48,32 @@ if TYPE_CHECKING:
 # ``improvement_threshold`` into θ-logits (``delta_ok``). Caps how large the logit
 # threshold grows near the accuracy extremes (p→0 or 1), where p(1−p)→0 would blow it up.
 _GATE_SLOPE_FLOOR = 0.05
+
+
+def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> None:
+    """The round measured cleanly and resolved nothing — the one degradation that is SILENT on
+    every other channel, because a winner was still crowned and every number still reads."""
+    # Deliberately not a decision. The winner is the best of what the round saw and stands; what
+    # this says is that the reader may not treat the margin as a result. Suppressed when no arm
+    # carries an interval at all: below two shared cells there is nothing to be inconclusive
+    # ABOUT, and a warning on every round of a one-cell panel is noise, not a finding.
+    bracketed = [c for c in electable if c.matched_origin_lift_ci_lo is not None]
+    if not bracketed or any(
+        (c.matched_origin_lift_ci_lo or 0.0) > 0.0 or (c.matched_origin_lift_ci_hi or 0.0) < 0.0
+        for c in bracketed
+    ):
+        return
+    widest = max(bracketed, key=lambda c: c.matched_origin_lift_ci_hi or 0.0)
+    emit_round_warning(
+        kind="round_not_separable",
+        message=(
+            f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
+            f"has a lift interval spanning 0 (best reaches {widest.matched_origin_lift_ci_hi:+.3f} "
+            "at its upper bound). A winner was still elected — read it as the best of what this "
+            "round saw, not as a measured improvement over the origin"
+        ),
+        detail={"arms": len(bracketed), "best_ci_hi": widest.matched_origin_lift_ci_hi},
+    )
 
 
 async def l1_score(
@@ -159,6 +191,9 @@ async def l1_score(
     best_scores: dict[str, float] = dict(parent.report.evaluators)
     best_matched_origin_acc: float | None = parent.report.accuracy
     best_matched_origin_composite: float | None = parent.report.composite_fitness
+    # Not seeded from the parent like its two neighbours: the parent's lift over ITSELF is 0 by
+    # construction, and a round that crowned nobody publishing "+0.000" reads as a measured tie.
+    best_lift: tuple[float | None, float | None, float | None] = (None, None, None)
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. Candidates share ONE round order but
     # elimination truncates them at different depths, so each ends up measured on a different
@@ -192,14 +227,23 @@ async def l1_score(
             round_scorer=session.scoring.round_scorer,
         )
         matched_by_id[ind.lineage.id] = matched
+        # The floor and the INTERVAL on the lift over it are stamped together — a point estimate
+        # published without its error bar is what let a six-cell panel read as a verdict.
+        # Unconditional on ``matched``: that gate asks whether the candidate covered the origin's
+        # WHOLE panel, while the lift is defined on the cells both reached, so a PoBB-truncated
+        # arm still gets an honest (wider) interval instead of nothing.
+        lift = matched_origin_lift(cand_results, cast("list[QueryMeasurement]", parent.results))
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
                 "matched_origin_accuracy": matched["accuracy"] if matched else None,
                 "matched_origin_composite": matched["composite_fitness"] if matched else None,
+                "matched_origin_lift": lift[0] if lift else None,
+                "matched_origin_lift_ci_lo": lift[1] if lift else None,
+                "matched_origin_lift_ci_hi": lift[2] if lift else None,
             }
         )
-        # `is_electable` is the admission rule, spelled once in the domain so the election, the
-        # ruler and the outer verdict cannot drift apart on it. Its collapse clause is why an
+        # `is_electable` is the admission rule, spelled once in the domain so the election and the
+        # ruler cannot drift apart on it. Its collapse clause is why an
         # arm can be scored here and still not enter: a candidate answering ONE label to every
         # sample carries no measurement of ability, its accuracy is decided by how much of that
         # label the drawn subset happens to contain, and fitting θ to that artifact dragged one
@@ -250,6 +294,7 @@ async def l1_score(
         candidate_scores[cs_idx] = cs.model_copy(
             update={"theta": theta_c, "theta_se": abilities.theta_se[cid]}
         )
+    _warn_if_not_separable(round_num, [candidate_scores[cs_by_id[cid]] for cid in electable])
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,
@@ -275,6 +320,11 @@ async def l1_score(
         best_scores = dict(winner_cs.evaluators)
         best_matched_origin_acc = matched["accuracy"] if matched else None
         best_matched_origin_composite = matched["composite_fitness"] if matched else None
+        best_lift = (
+            winner_cs.matched_origin_lift,
+            winner_cs.matched_origin_lift_ci_lo,
+            winner_cs.matched_origin_lift_ci_hi,
+        )
 
     base = _compute_accuracy(best_results)
     # The headline sample count rides the winner's ScoredCandidate row, so the round header
@@ -368,6 +418,9 @@ async def l1_score(
         origin_accuracy=best_origin_accuracy,
         matched_origin_accuracy=best_matched_origin_acc,
         matched_origin_composite=best_matched_origin_composite,
+        matched_origin_lift=best_lift[0],
+        matched_origin_lift_ci_lo=best_lift[1],
+        matched_origin_lift_ci_hi=best_lift[2],
         prompt_fields={
             **best_opt_sp.prompt_field_dict(),
             "lineage": best_opt_sp.lineage.model_dump(),

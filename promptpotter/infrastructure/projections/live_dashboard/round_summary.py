@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
-from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
-from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
+from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.results import RoundResult, is_electable, is_round_winner
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -17,12 +16,12 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 # minus the derived ``is_winner``. Deriving from ``model_fields`` keeps the copy set in
 # lockstep with the model definition (add a field there, it flows here automatically).
 _SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner"}
-_CANDIDATE_INFO_INCLUDE = set(CandidateInfo.model_fields) - {"is_winner"}
 
 
 def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
-    """The round-0 per-cell ROWS — the control every later outer verdict pairs against, and the sole reader of that file for it. Rows, not a
-    pre-extracted fitness map: the verdict takes two different readings of them."""
+    """The round-0 per-cell ROWS — the control the L4 panel's precision read pairs against, and
+    the sole reader of that file for it. Round 0 is never re-measured, so the cached rows ARE the
+    control; and rows rather than a pre-extracted map, because the read wants two fields off each."""
     doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
     if not isinstance(doc, dict):
         return []
@@ -57,6 +56,27 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
     return out
 
 
+def _panel_precision(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> PanelPrecision | None:
+    """Read off ONE arm — the round's winner, else its best-scoring electable one."""
+    # Every arm ran the same cells, so any measures the same instrument; picking the arm the reader
+    # is already looking at keeps the precision attached to the interval it explains. `is_electable`
+    # is the election's own admission rule, so a collapsed arm cannot supply the round's reading.
+    if rr.round == 0:
+        return None
+    electable = [
+        c
+        for c in rr.candidate_scores
+        if is_electable(c, rr.all_candidate_results.get(c.candidate_id, []))
+    ]
+    if not electable:
+        return None
+    subject = next(
+        (c for c in electable if is_round_winner(c.candidate_id, rr.winner_id)),
+        max(electable, key=lambda c: c.composite_fitness),
+    )
+    return panel_precision(rr.all_candidate_results.get(subject.candidate_id, []), origin_rows)
+
+
 def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
     """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_winner`` flag. ``health`` is
     COPIED from ``rr.health``: the projection renders the served verdict and never recomputes it."""
@@ -73,26 +93,6 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         for c in rr.candidate_scores
     ]
     selection = _measurement_order(rr.all_candidate_results)
-    verdict = (
-        None
-        if rr.round == 0
-        else compute_outer_verdict(
-            rr.all_candidate_results,
-            # Only arms the round could read reach the verdict — the same admission rule the
-            # election used, applied at the one place holding both the candidate and its rows.
-            [
-                CandidateInfo(
-                    **c.model_dump(include=_CANDIDATE_INFO_INCLUDE),
-                    is_winner=is_round_winner(c.candidate_id, rr.winner_id),
-                )
-                for c in rr.candidate_scores
-                if is_electable(c, rr.all_candidate_results.get(c.candidate_id, []))
-            ],
-            origin_rows,
-            measurand_key=OUTER_PROXY_KEYS[0] if OUTER_PROXY_KEYS else "",
-            se_key=ADOPTED_LEVEL_SE_KEY,
-        )
-    )
     return RoundSummary(
         round=rr.round,
         accuracy=float(rr.accuracy),
@@ -104,7 +104,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         candidates=candidates,
         selection=selection,
         health=rr.health,
-        outer_verdict=verdict,
+        panel_precision=_panel_precision(rr, origin_rows),
     )
 
 

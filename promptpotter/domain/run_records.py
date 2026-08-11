@@ -264,6 +264,11 @@ RoundWarningKind = Literal[
     "injection_budget_overrun",
     "layer_parse_failure",
     "optimizer_deadline_retry",
+    # The odd one out, deliberately: nothing failed and nothing was recovered from. The round
+    # measured cleanly and still resolved nothing — no arm's blocked lift over the origin excluded
+    # 0. It looks identical to a decisive round on every other channel, and THAT silence is what
+    # this kind exists to break. See `l1/score/winner.py` for the emit.
+    "round_not_separable",
 ]
 
 

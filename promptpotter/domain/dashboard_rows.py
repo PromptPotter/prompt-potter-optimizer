@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.l4.verdict import OuterVerdict
+from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import CalibrationModel, DegradationHealth
 from promptpotter.domain.strict_model import StrictModel
 
@@ -68,6 +68,15 @@ class DashboardCandidate(StrictModel):
     # candidate covered the origin's panel — a prefix rate is set by where PoBB stopped it.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+    # The blocked lift over that floor and its interval (`ScoredCandidate.matched_origin_lift*`) —
+    # the one number that says whether this candidate beat the origin or the panel merely wobbled,
+    # and the ONE the L4 outer level reads too. Same scale as `composite_ci_*` above; sharper on
+    # the same rows, because pairing cancels the origin's cell-to-cell variation instead of
+    # carrying it. `None` below two shared cells — which at a one-cell panel is every round, and
+    # is the honest reading rather than a missing feature.
+    matched_origin_lift: float | None = None
+    matched_origin_lift_ci_lo: float | None = None
+    matched_origin_lift_ci_hi: float | None = None
     # The round's elected winner. On the BASE, because the election is not a closing act:
     # `elect_round_winner` runs at the end of SCORING, before `l1_critique` and two LLM calls
     # before the round closes, and the live row is the only surface that can say so at that
@@ -131,7 +140,9 @@ class RoundSummary(StrictModel):
     # ``None`` only when the round measured zero samples. Webapp/CLI render it;
     # never recompute (R-36).
     health: DegradationHealth | None = None
-    # Blocked, paired L4 outer verdict: the target variant's pooled (variant − noop)
-    # effect across the panel's cells + a 3-way decision. ``None`` on any non-L4 round
-    # (no no-op probe to pair against). Webapp/CLI render it; never recompute.
-    outer_verdict: OuterVerdict | None = None
+    # How sharply the L4 panel's cells were measured against how far apart they landed — the
+    # monitoring read that says which lever the round's spread calls for. ``None`` on any non-L4
+    # round: an ordinary sample is graded, so it carries no error bar to decompose. The VERDICT
+    # is not here; it rides `candidates[].matched_origin_lift*` like every other level's.
+    # Webapp/CLI render it; never recompute.
+    panel_precision: PanelPrecision | None = None
