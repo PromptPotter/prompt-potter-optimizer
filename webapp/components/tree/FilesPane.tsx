@@ -3,7 +3,6 @@ import { useState } from "react";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { StorageCakes } from "./StorageCakes";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
@@ -13,16 +12,14 @@ interface Props {
 
 function RawJsonCard({ dash }: { dash: DashboardSnapshot | null }) {
   return (
-    <RotatePrompt surfaceName="The raw JSON view">
-      <div className="card raw-card">
-        <details>
-          <summary>Raw dashboard.json</summary>
-          <pre>
-            {dash ? JSON.stringify(dash, null, 2) : "Waiting for first poll…"}
-          </pre>
-        </details>
-      </div>
-    </RotatePrompt>
+    <div className="card raw-card">
+      <details>
+        <summary>Raw dashboard.json</summary>
+        <pre>
+          {dash ? JSON.stringify(dash, null, 2) : "Waiting for first poll…"}
+        </pre>
+      </details>
+    </div>
   );
 }
 

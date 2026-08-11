@@ -6,7 +6,7 @@ import { ConnectorInspector } from "./ConnectorInspector";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
-import { liveObserveConfig } from "@/lib/derivations";
+import { isSelfOptimization, liveObserveConfig } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 
 // The backend target LLM is being called exactly while the OPTIMIZER's scoring node is active.
@@ -194,24 +194,49 @@ function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
 function MultiNodeStrip({
   view,
   connector,
-  liveModelFor,
   activeNode,
   isLive,
+  schema,
+  selfOpt,
 }: {
   view: PipelineView;
   connector: string | null;
-  liveModelFor: LiveModelFor;
   activeNode: string | null;
   isLive: boolean;
+  schema: Record<string, NodeConfigParam[]> | null;
+  selfOpt: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const interior = interiorNodes(view);
   const CELL_W = 72;
+  const CELL_W_OPEN = 132;
+  // How narrow a sibling may be squashed. Not 0: a cell still has to show its
+  // dot and take a tap, so when the floor binds the bonus shrinks instead — a
+  // long pipeline expands less, rather than losing cells.
+  const CELL_W_MIN = 20;
   const CELL_H = 70;
   const RADIUS = 7;
   const cy = 14;
-  const totalW = Math.max(CELL_W * interior.length, CELL_W);
-  const cxFor = (i: number) => (i + 0.5) * CELL_W;
+  const isSel = (id: string) => selected?.scope === "target" && selected.id === id;
+
+  // Per-cell widths, then cumulative offsets. The bonus the open cell takes is
+  // capped by what the siblings can actually give without falling under
+  // CELL_W_MIN, and they give exactly it — so the total is invariant at
+  // `length * CELL_W` and expanding never pushes the tail out of the frame.
+  const others = Math.max(interior.length - 1, 0);
+  const givable = others * (CELL_W - CELL_W_MIN);
+  const bonus = interior.some((n) => isSel(n.id))
+    ? Math.min(CELL_W_OPEN - CELL_W, givable)
+    : 0;
+  const shrink = others > 0 ? bonus / others : 0;
+  const widths = interior.map((n) => (isSel(n.id) ? CELL_W + bonus : CELL_W - shrink));
+  const offsets: number[] = [];
+  widths.reduce((acc, w, i) => {
+    offsets[i] = acc;
+    return acc + w;
+  }, 0);
+  const totalW = interior.length * CELL_W;
+  const cxFor = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
 
   // Ribbon between adjacent interior dots. Cubic Bézier with control
   // points pulled toward the midpoint vertically so the curve has a soft
@@ -228,14 +253,28 @@ function MultiNodeStrip({
   const labelLines = (label: string) =>
     label.includes("_") ? label.split("_") : [label];
 
+  // Same rule the optimizer canvas uses: light the node whose id IS the served
+  // `active_node`. That resolves for a self-optimizing campaign, whose target
+  // pipeline IS the optimizer's own nodes; for any other backend it names
+  // nothing, which is the truth — `active_node` speaks for the optimizer, and
+  // which BACKEND node is mid-call is not served at all. So the whole-chip pulse
+  // is the fallback for exactly that case, never a second signal beside it.
+  const namedHere = isLive && interior.some((n) => n.id === activeNode);
+  const calling = isLive && activeNode === BACKEND_SCORING_NODE && !namedHere;
+
   return (
-    <div className="wf-hero-node llm wf-hero-node-multi">
+    <div className={cx("wf-hero-node", "llm", "wf-hero-node-multi", calling && "active")}>
       {connector && <div className="wf-hero-multi-tag">{connector}</div>}
+      <div className="wf-hero-multi-rail">
+      {/* width:100% so the whole pipeline SCALES into the frame. The min-width is
+          the floor where that stops being honest: below ~44px a cell is neither
+          readable nor tappable, so past that many nodes the rail scrolls. */}
       <svg
         viewBox={`0 0 ${totalW} ${CELL_H}`}
         preserveAspectRatio="xMidYMid meet"
         width="100%"
         height={CELL_H}
+        style={{ minWidth: `${interior.length * 44}px` }}
         role="img"
         aria-label="Pipeline graph"
         className="wf-hero-multi-svg"
@@ -245,20 +284,41 @@ function MultiNodeStrip({
         ))}
         {interior.map((n, i) => {
           const isSelected = selected?.scope === "target" && selected.id === n.id;
-          const isLlm = n.kind === "llm";
-          const active = isLlm && isLive && activeNode === BACKEND_SCORING_NODE;
-          // Same rest/active reading as SingleNodeChip — an LLM node at rest is
-          // "idle", not blank. Only LLM nodes get the sub-line: a tool node has no
-          // model, so "idle" there would imply a call that never happens.
-          const model = isLlm ? (active ? (liveModelFor(n.id) ?? "running") : "idle") : null;
+          const isActive = isLive && activeNode === n.id;
           const cxPos = cxFor(i);
           const dotCls = cx(
             "node",
             `kind-${n.kind || "tool"}`,
             isSelected && "selected",
-            active && "active",
+            isActive && "active",
           );
-          const parts = labelLines(n.label);
+          // Three shapes, distinguished by what the optimizer vs the operator may do:
+          //   dot         — the optimizer moves it (some param is tunable)
+          //   OPEN lock   — the optimizer will not, but the operator can; doing it
+          //                 on a live cycle stamps `human_intervened` (grade C)
+          //   CLOSED lock — nothing to change; the node carries no params at all
+          // A null schema is UNKNOWN (demo / not yet loaded) and keeps the dot —
+          // it must not read as locked.
+          // Fourth shape, and it exists because `params.length === 0` conflated two
+          // facts. On a self-optimizing campaign the scoring node RUNS the backend —
+          // a whole inner pipeline, configured in `inner_tasks.yaml` and absent from
+          // this wire — so it is neither tunable here nor genuinely paramless. A
+          // closed padlock said "nothing to change" about the one node that holds
+          // everything. It draws as a FRAME instead and claims no lock either way.
+          const nested = selfOpt && n.id === BACKEND_SCORING_NODE;
+          const params = schema?.[n.id];
+          const tunable = params != null && params.some((p) => p.optimizer_tunable);
+          const paramless = params != null && params.length === 0;
+          const lock: "open" | "closed" | null =
+            nested || params == null || tunable ? null : paramless ? "closed" : "open";
+          // Wrapped short form while narrow; the widened cell has room for the
+          // whole id on one line, which is the "more info" the expansion buys.
+          const parts = isSelected ? [n.label] : labelLines(n.label);
+          const cellW = widths[i] ?? CELL_W;
+          // A squashed sibling drops its label rather than letting centred text
+          // spill into its neighbours. The dot still marks the node, `<title>` and
+          // aria-label still name it, and opening it brings the label back.
+          const showLabel = cellW >= 44;
           return (
             <g
               key={n.id}
@@ -276,28 +336,60 @@ function MultiNodeStrip({
                 }
               }}
             >
-              <circle className={dotCls} cx={0} cy={cy} r={RADIUS} />
-              <text className="node-label" x={0} y={cy + 16} textAnchor="middle">
-                {parts.map((p, j) => (
-                  <tspan key={j} x={0} dy={j === 0 ? 0 : 11}>
-                    {p}
-                  </tspan>
-                ))}
-              </text>
-              {model && (
-                <text
-                  className="node-sub"
-                  x={0}
-                  y={cy + 16 + parts.length * 11 + 2}
-                  textAnchor="middle"
+              {/* Full-cell hit target — the dot is r=7 with the label below it, so
+                  the gap between them is otherwise dead to a finger. Same reason
+                  WorkflowCanvas backs its nodes with a transparent rect. */}
+              <rect x={-cellW / 2} y={0} width={cellW} height={CELL_H} fill="transparent" />
+              <title>
+                {nested ? `${n.label} — runs the inner backend pipeline` : n.label}
+              </title>
+              {nested ? (
+                <g
+                  className={cx("node-nest", isSelected && "selected", isActive && "active")}
+                  transform={`translate(0 ${cy})`}
                 >
-                  {model}
+                  <rect className="frame" x={-8} y={-6} width={16} height={12} rx={2.5} />
+                  <rect className="inner" x={-4.5} y={-2.5} width={9} height={5} rx={1.5} />
+                </g>
+              ) : lock ? (
+                <g
+                  className={cx(
+                    "node-lock",
+                    `is-${lock}`,
+                    isSelected && "selected",
+                    isActive && "active",
+                  )}
+                  transform={`translate(0 ${cy})`}
+                >
+                  {/* Open = the right leg never meets the body, which is the only
+                      shape difference legible at this size. */}
+                  <path
+                    className="shackle"
+                    d={
+                      lock === "closed"
+                        ? "M-2.6,-1.6 v-2.2 a2.6,2.6 0 0 1 5.2,0 v2.2"
+                        : "M-2.6,-1.6 v-2.2 a2.6,2.6 0 0 1 5.2,0"
+                    }
+                  />
+                  <rect className="body" x={-4.6} y={-1.6} width={9.2} height={7.4} rx={1.4} />
+                </g>
+              ) : (
+                <circle className={dotCls} cx={0} cy={cy} r={RADIUS} />
+              )}
+              {showLabel && (
+                <text className="node-label" x={0} y={cy + 16} textAnchor="middle">
+                  {parts.map((p, j) => (
+                    <tspan key={j} x={0} dy={j === 0 ? 0 : 11}>
+                      {p}
+                    </tspan>
+                  ))}
                 </text>
               )}
             </g>
           );
         })}
       </svg>
+      </div>
     </div>
   );
 }
@@ -351,9 +443,10 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         <MultiNodeStrip
           view={cv.view}
           connector={cv.connector}
-          liveModelFor={liveModelFor}
           activeNode={activeNode}
           isLive={cv.isLive}
+          schema={cv.nodeConfigSchema}
+          selfOpt={isSelfOptimization(cv.backendType)}
         />
       )}
       <div className="wf-hero-arrow" />

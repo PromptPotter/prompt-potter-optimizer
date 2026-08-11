@@ -3,8 +3,8 @@
    caller reaches for. Reads design tokens — theme-agnostic. */
 
 .btn {
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: var(--space-6) var(--space-14);
+  font-size:var(--text-base);
   line-height: 1.4;
   border-radius: 6px;
   border: 1px solid var(--color-border);

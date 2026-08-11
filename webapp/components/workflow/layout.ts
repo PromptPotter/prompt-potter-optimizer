@@ -34,15 +34,29 @@ export interface NodePoint {
 // arrow leaving the right edge (labelled from the output node's own
 // label, "Best SP"), not as a dot. A node id absent from this map is
 // skipped by WorkflowCanvas, so the wire data can still carry `output`.
+// The two escalation nodes label ABOVE their dot. Both escalate edges
+// terminate on the BOTTOM edge of these dots (`M288,109 L286,51`), which is
+// exactly where a default label band sits — so the arrowhead was drawn
+// through the text and "l3_plan" read as "l3 an". Nothing sits above the top
+// row, so the band moves there rather than the edges being re-routed.
+const LABEL_ABOVE = -(DOT_R + 17);
+
 export const LAYOUT: Record<string, NodePoint> = {
   input:       { cx:  52, cy:  40 },
-  l2_context:  { cx: 210, cy:  40 },
-  l3_plan:     { cx: 286, cy:  40 },
+  l2_context:  { cx: 210, cy:  40, labelDy: LABEL_ABOVE },
+  l3_plan:     { cx: 286, cy:  40, labelDy: LABEL_ABOVE },
   checkin:     { cx:  52, cy: 120 },
   l1_generate: { cx: 132, cy: 120 },
   l1_score:    { cx: 210, cy: 120 },
   l1_critique: { cx: 286, cy: 120 },
 };
+
+// Ids that carry no LAYOUT entry ON PURPOSE. `output` is drawn as the terminal
+// arrow leaving the right edge, not as a dot. Anything else missing from LAYOUT
+// is DRIFT — the served optimizer view gained a node this hand-drawn geometry
+// does not know about — and WorkflowCanvas renders those in a stray row rather
+// than dropping them, so the divergence is visible instead of silent.
+export const INTENTIONALLY_UNPLACED: ReadonlySet<string> = new Set(["output"]);
 
 export type EdgeKind = "forward" | "loop" | "directive" | "escalate";
 

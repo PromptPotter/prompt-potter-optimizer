@@ -70,6 +70,13 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
         return "cache"
     if node.runs_llm:
         return "llm"
+    # `measurement` is a member of the served kind vocabulary — the optimizer's own
+    # view uses it for `l1_score` and the client labels it "system step" — but this
+    # deriver could not emit it, so a dataset declaring `type: measurement` was
+    # silently downgraded to "tool". A vocabulary the producer cannot produce is a
+    # vocabulary that lies.
+    if node.wire_type == "measurement":
+        return "measurement"
     if node.wire_type == "retriever":
         return "retriever"
     if node.wire_type == "tool":

@@ -32,9 +32,13 @@
   /* ── Responsive tokens (mobile-first foundation) ─────────────────
      Content-driven breakpoints — derived from the points where existing
      desktop layouts already break (commit b1f35923 chose 640/380; the
-     dashboard's container queries break at 760/780/880/960). Five tiers
+     dashboard's container queries break at 760/780/880/960). Three tiers
      plus an orientation-rotation threshold for dense visualisations
      that cannot meaningfully fit portrait phone.
+
+     There is no --bp-lg / --bp-xl. Both were declared, used by no @media
+     rule, and --bp-xl was a second name for --dash-wide-max, which is
+     the one the dashboard spine actually reads.
 
      Note: CSS @media queries cannot read CSS custom properties (per
      spec — media queries resolve before custom-property substitution).
@@ -45,8 +49,6 @@
   --bp-sm:640px;          /* large phone */
   --bp-rotate:768px;      /* below this, portrait dense surfaces show rotate prompt */
   --bp-md:880px;          /* small tablet / landscape phone */
-  --bp-lg:1024px;         /* small laptop — matches existing dash-narrow-max-adjacent break */
-  --bp-xl:1400px;         /* full desktop — matches existing dash-wide-max */
 
   /* Touch-target floor — Apple HIG 44pt, Material 48dp, WCAG 2.5.8 AA
      24px (with adequate spacing). Design to the strictest applicable.
@@ -62,10 +64,45 @@
   --safe-bottom:env(safe-area-inset-bottom,0px);
   --safe-left:env(safe-area-inset-left,0px);
 
-  /* Fluid type base. ≥16px floor is load-bearing: iOS Safari auto-zooms
-     on input focus when the input font-size is <16px. The clamp keeps
-     dense desktop legibility while preventing that zoom on phones. */
-  --font-size-base:clamp(14px,calc(13px + 0.25vw),16px);
+  /* ── Type scale ──────────────────────────────────────────────────
+     The single vocabulary for every font-size in the app. Dense tiers are
+     static — 11–16px reads the same on a phone and a desktop, and `xs` is
+     the floor, so 8/9/10 fold up into it. Only the two display tiers are
+     fluid: a 32px hero eats a 375px screen.
+
+     Text inputs do NOT read this scale — iOS focus-zoom is a constraint, so
+     they set their own 16px floor in responsive.css. */
+  --text-xs:11px;
+  --text-sm:12px;
+  --text-base:13px;
+  --text-md:14px;
+  --text-lg:15px;
+  --text-xl:16px;
+  --text-2xl:18px;
+  --text-3xl:clamp(18px,calc(16.5px + 0.4vw),22px);
+  --text-4xl:clamp(22px,calc(20.5px + 0.4vw),26px);
+
+  /* ── Space scale ─────────────────────────────────────────────────
+     Padding / gap / margin. Named by their DESKTOP value — every step lands
+     on exactly its old pixel at >=1400px, so the wide view is unchanged —
+     and every step from 10 up is fluid, contracting to roughly two-thirds by
+     375px. That is the whole mobile fix: card padding, grid gaps and section
+     rhythm shrink together instead of each surface growing an @media rule.
+
+     Nothing below 4px is on the scale. 1/2/3px are hairlines and tile-grid
+     gutters, not rhythm — folding them into a shared step widened the 1px
+     gutter in the mini heat-maps, whose fixed 4px tile IS the design. */
+  --space-4:4px;
+  --space-6:6px;
+  --space-8:8px;
+  --space-10:clamp(8px,calc(7.27px + 0.195vw),10px);
+  --space-12:clamp(9px,calc(7.9px + 0.293vw),12px);
+  --space-14:clamp(10px,calc(8.54px + 0.39vw),14px);
+  --space-16:clamp(11px,calc(9.17px + 0.488vw),16px);
+  --space-18:clamp(12px,calc(9.8px + 0.585vw),18px);
+  --space-24:clamp(14px,calc(10.34px + 0.976vw),24px);
+  --space-40:clamp(18px,calc(9.95px + 2.146vw),40px);
+  --space-72:clamp(24px,calc(6.44px + 4.683vw),72px);
 
   /* Dynamic viewport height. `dvh` follows iOS Safari's address-bar
      resize without layout shift; `vh` fallback declared first so old

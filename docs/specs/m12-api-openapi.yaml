@@ -3478,7 +3478,10 @@ components:
           description: |
             Every param each node carries, keyed by node id — COMPLETE, because
             clients sum `optimizer_tunable` across it to answer "is this node
-            optimizer-locked". Each param's `kind` names the surface that owns it:
+            optimizer-locked". An EMPTY list is a different answer from "has
+            params, none tunable" — the node carries nothing to change at all —
+            and `[].every()` collapses the two, so test length before the sum.
+            Each param's `kind` names the surface that owns it:
             the five widget kinds (`model`/`enum`/`number`/`bool`/`string`) are
             config-editor rows; `prompt` (a PromptTemplate decomposition field) and
             `nested` (object/array) are listed but carry no widget, and a `prompt`

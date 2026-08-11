@@ -3,7 +3,7 @@
 .bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   flex-wrap: nowrap;
   min-width: 0;
 }

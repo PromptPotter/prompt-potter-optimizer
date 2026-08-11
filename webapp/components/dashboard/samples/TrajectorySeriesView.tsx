@@ -232,7 +232,7 @@ function SeriesHoverPopup({
         pointerEvents: "none",
       }}
     >
-      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", marginBottom: 6 }}>
         R{hover.round} · order at sample #{hover.sampleId} (step {hover.position}/{hover.total})
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -250,7 +250,7 @@ function SeriesHoverPopup({
           </span>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 6 }}>
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", marginTop: 6 }}>
         {order.computed.length} computed · {order.planned.length} planned —{" "}
         {isLoaded ? "loaded in fitness ✓" : `click to compare fitness on ${seedSet.length} samples`}
       </div>
@@ -262,7 +262,7 @@ function Legend() {
   const swatch = (style: CSSProperties, label: string) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <span style={{ ...style, width: 12, height: 12, fontSize: 0 }} />
-      <span style={{ fontSize: 10, color: "var(--color-text-tertiary)", fontFamily: "var(--font-mono)" }}>{label}</span>
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", fontFamily: "var(--font-mono)" }}>{label}</span>
     </span>
   );
   return (

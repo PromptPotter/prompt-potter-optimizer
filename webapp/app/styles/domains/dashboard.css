@@ -1,5 +1,5 @@
 
-.content{flex:1;overflow-y:auto;padding:20px;container-type:inline-size;container-name:content}
+.content{flex:1;overflow-y:auto;padding:var(--space-18);container-type:inline-size;container-name:content}
 #content-dashboard{padding-top:0}
 
 /* Dashboard spine — the single width tier (980px) wrapping the header +
@@ -21,7 +21,7 @@
    sits AFTER the unconditional transform so the cascade resolves
    correctly at equal specificity. */
 @media (max-width:880px){
-  .content{padding:12px}
+  .content{padding:var(--space-12)}
   .dash-spine-narrow{transform:none}
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
@@ -31,8 +31,8 @@
    blocking (server gone / crash) in danger tone + a weak blink; `warn` =
    producer went silent in warn tone, no blink. The blink is decoration —
    colour + icon + text carry the state, and reduced-motion neutralises it. */
-.critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:12px;
-  padding:11px 18px;border-bottom:1px solid transparent;font-size:14px}
+.critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:var(--space-12);
+  padding:var(--space-10) var(--space-18);border-bottom:1px solid transparent;font-size:var(--text-md)}
 .critical-alert.critical{background:var(--color-danger-bg);border-bottom-color:var(--color-danger-border);
   color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger);animation:critical-pulse 1.4s ease-in-out infinite}
 .critical-alert.warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
@@ -41,13 +41,13 @@
    neutral chrome + the accent rule: no danger/warn palette, no pulse. */
 .critical-alert.info{background:var(--color-background-secondary);border-bottom-color:var(--color-border);
   color:var(--color-text-primary);box-shadow:inset 4px 0 0 var(--color-accent)}
-.critical-alert-icon{font-size:15px;line-height:1;flex-shrink:0}
-.critical-alert-body{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0;flex:1}
+.critical-alert-icon{font-size:var(--text-lg);line-height:1;flex-shrink:0}
+.critical-alert-body{display:flex;align-items:baseline;gap:var(--space-10);flex-wrap:wrap;min-width:0;flex:1}
 .critical-alert-title{font-weight:700;letter-spacing:.01em;color:currentColor}
-.critical-alert-detail{font-size:12px;color:var(--color-text-secondary);font-weight:400;
+.critical-alert-detail{font-size:var(--text-sm);color:var(--color-text-secondary);font-weight:400;
   overflow:hidden;text-overflow:ellipsis;min-width:0}
-.critical-alert-jump{font-family:inherit;font-size:12px;color:currentColor;background:var(--color-background-primary);
-  border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px 10px;cursor:pointer;flex-shrink:0}
+.critical-alert-jump{font-family:inherit;font-size:var(--text-sm);color:currentColor;background:var(--color-background-primary);
+  border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px var(--space-10);cursor:pointer;flex-shrink:0}
 .critical-alert-jump:hover{background:var(--color-background-hover)}
 .critical-alert-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* Stop is the destructive primary action on a critical banner — solid danger fill
@@ -64,26 +64,26 @@
   background:var(--color-danger-bg);
   border:1px solid var(--color-danger-border);
   border-radius:4px;
-  padding:10px 14px;
+  padding:var(--space-10) var(--space-14);
   margin-bottom:12px;
   color:var(--color-text-primary);
-  font-size:12px;
+  font-size:var(--text-sm);
 }
 .run-error-banner-head{
-  display:flex;gap:10px;align-items:baseline;
-  font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  display:flex;gap:var(--space-10);align-items:baseline;
+  font-size:var(--text-xs);letter-spacing:.08em;text-transform:uppercase;
   color:var(--color-danger);font-weight:700;margin-bottom:4px;
 }
 .run-error-banner-stop{color:var(--color-text-tertiary);font-weight:500;letter-spacing:0;text-transform:none}
 .run-error-banner-msg{margin:0;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word}
-.run-error-banner-list{margin:6px 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:11px}
+.run-error-banner-list{margin:var(--space-6) 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:var(--text-xs)}
 .run-error-banner-list li{margin:2px 0}
 /* Warn tone for the same banner — non-fatal optimizer-loop degradations. */
 .run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
 
 /* Hero zone — title block + KPIs in one row, progress bars beneath them. */
-.dash-hero{display:flex;flex-direction:column;gap:14px}
+.dash-hero{display:flex;flex-direction:column;gap:var(--space-14)}
 .dash-hero .page-header{margin-bottom:0}
 
 /* Dashboard lanes — three collapsible sections that taxonomize the
@@ -91,12 +91,12 @@
    VERDICT (has it improved?) / WHY (drill down). Open/closed state
    persists in localStorage via the Lane component. */
 .dash-lane{margin:0 auto var(--dash-zone-gap);max-width:var(--dash-wide-max)}
-.dash-lane-head{display:flex;align-items:baseline;gap:10px;width:100%;padding:6px 12px;background:transparent;border:0;border-bottom:0.5px solid var(--color-border);cursor:pointer;color:inherit;text-align:left;font:inherit}
+.dash-lane-head{display:flex;align-items:baseline;gap:var(--space-10);width:100%;padding:var(--space-6) var(--space-12);background:transparent;border:0;border-bottom:0.5px solid var(--color-border);cursor:pointer;color:inherit;text-align:left;font:inherit}
 .dash-lane-head:hover{background:var(--color-background-secondary)}
-.dash-lane-caret{color:var(--color-text-tertiary);font-size:12px;width:14px;flex:none}
-.dash-lane-title{margin:0;font-size:13px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
-.dash-lane-subtitle{color:var(--color-text-tertiary);font-size:12px;font-weight:400}
-.dash-lane-body{display:flex;flex-direction:column;gap:12px;padding-top:14px}
+.dash-lane-caret{color:var(--color-text-tertiary);font-size:var(--text-sm);width:14px;flex:none}
+.dash-lane-title{margin:0;font-size:var(--text-base);font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
+.dash-lane-subtitle{color:var(--color-text-tertiary);font-size:var(--text-sm);font-weight:400}
+.dash-lane-body{display:flex;flex-direction:column;gap:var(--space-12);padding-top:14px}
 .dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
 
 /* The Now row — Optimizer first, then Candidates. Both cards size to their own
@@ -104,7 +104,7 @@
    footprint and sits beside the optimizer, but the moment it needs the full band
    (Forest, or What-If opening its second column) its 100% basis can't share the
    line and it drops to the next row. Nothing here has to know which view is on. */
-.dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:18px;width:100%}
+.dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-18);width:100%}
 .dash-now-row > *{margin-bottom:0}
 /* The candidates card centres itself when alone (margin:auto); in the row that
    would shove it off the optimizer, so pin it left and let it take the slack. */
@@ -118,7 +118,7 @@
 /* Per-searchpoint sample stream — the round-wide Samples table sliced to the
    selected candidate. Reuses the `.rsv-*` row styling; scrolls on its own so a
    long round doesn't push the composite/hits summary out of view. */
-.inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);font-family:var(--font-mono);font-size:12px;line-height:1.5}
+.inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5}
 .inspector-samples .rsv-rows{max-height:clamp(200px,32vh,420px);overflow-y:auto}
 
 /* Phone (≤640px): the chart frame shrinks so the dashboard reads in portrait
@@ -130,14 +130,14 @@
 /* Eval charts inside LiveStateCard — stacked vertically because the
    narrow spine doesn't have width for the prior side-by-side layout.
    Same Trend + Score Frequency cards from the dropped Verdict lane. */
-.lsc-charts{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
 
 /* Quiet per-round degraded notices under the trend — amber, never loud (the
    critical grade owns the cross-tab banner). Webapp twin of the CLI yellow line. */
-.trend-degraded{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
-.trend-degraded-row{display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.4;min-width:0}
-.trend-degraded-dot{color:var(--color-warn);flex:none;font-size:9px}
+.trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.trend-degraded-row{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--text-xs);line-height:1.4;min-width:0}
+.trend-degraded-dot{color:var(--color-warn);flex:none;font-size:var(--text-xs)}
 .trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
 .trend-degraded-detail{color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -146,48 +146,48 @@
    sticky headers; click the header to anchor lineage + fitness on
    that candidate. */
 .round-samples-view{margin-bottom:14px}
-.round-back-live{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;font-size:11px;padding:2px 8px;border-radius:10px}
+.round-back-live{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;font-size:var(--text-xs);padding:2px var(--space-8);border-radius:10px}
 .round-back-live:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
-.rsv-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 4px 8px}
-.rsv-cand-select{background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;font-size:12px;padding:4px 8px;cursor:pointer;max-width:320px}
-.rsv-count{margin-left:auto;color:var(--color-text-tertiary);font-size:11px;font-family:var(--font-mono)}
-.rsv-groups{max-height:clamp(280px,46vh,640px);overflow-y:auto;font-family:var(--font-mono);font-size:12px;line-height:1.5;padding:4px 0}
+.rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
+.rsv-cand-select{background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;font-size:var(--text-sm);padding:var(--space-4) var(--space-8);cursor:pointer;max-width:320px}
+.rsv-count{margin-left:auto;color:var(--color-text-tertiary);font-size:var(--text-xs);font-family:var(--font-mono)}
+.rsv-groups{max-height:clamp(280px,46vh,640px);overflow-y:auto;font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5;padding:var(--space-4) 0}
 .rsv-group{margin-bottom:8px}
 .rsv-group.selected{outline:1px solid var(--color-selection);border-radius:4px}
-.rsv-group-head{position:sticky;top:0;z-index:1;background:var(--color-background-tertiary);display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:0;border-bottom:0.5px solid var(--color-border);font-size:11px;width:100%;cursor:pointer;color:inherit;font-family:inherit}
+.rsv-group-head{position:sticky;top:0;z-index:1;background:var(--color-background-tertiary);display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) var(--space-8);border:0;border-bottom:0.5px solid var(--color-border);font-size:var(--text-xs);width:100%;cursor:pointer;color:inherit;font-family:inherit}
 .rsv-group-head:hover{background:var(--color-background-hover)}
 .rsv-cand-label{color:var(--color-text-primary);font-weight:600}
-.rsv-tally{display:inline-flex;gap:8px;font-weight:500}
+.rsv-tally{display:inline-flex;gap:var(--space-8);font-weight:500}
 .rsv-tally-score{color:var(--color-text-secondary)}
-.rsv-empty-row{padding:4px 8px;color:var(--color-text-tertiary)}
+.rsv-empty-row{padding:var(--space-4) var(--space-8);color:var(--color-text-tertiary)}
 .rsv-rows{display:flex;flex-direction:column}
-.rsv-row{padding:2px 8px;display:block;border-bottom:0.5px dotted transparent}
-.rsv-row > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:8px}
+.rsv-row{padding:2px var(--space-8);display:block;border-bottom:0.5px dotted transparent}
+.rsv-row > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:var(--space-8)}
 .rsv-row > summary::-webkit-details-marker{display:none}
 .rsv-row > summary:hover{background:var(--color-background-hover)}
 .rsv-row[open]{border-bottom-color:var(--color-border);padding-bottom:8px}
-.rsv-row-raw{padding:2px 8px;color:var(--color-text-secondary)}
+.rsv-row-raw{padding:2px var(--space-8);color:var(--color-text-secondary)}
 .rsv-row .idx{color:var(--color-text-tertiary);flex:0 0 auto}
 .rsv-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
 .rsv-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}
-.rsv-row .rsv-cached{color:var(--color-text-tertiary);flex:0 0 auto;font-size:11px;white-space:nowrap}
+.rsv-row .rsv-cached{color:var(--color-text-tertiary);flex:0 0 auto;font-size:var(--text-xs);white-space:nowrap}
 .rsv-row .body{color:var(--color-text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rsv-detail{padding:6px 8px 4px 96px;display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:12px}
+.rsv-detail{padding:var(--space-6) var(--space-8) var(--space-4) var(--space-72);display:grid;grid-template-columns:minmax(0,max-content) 1fr;gap:var(--space-4) var(--space-12);font-size:var(--text-sm)}
 .rsv-detail .kv-label{color:var(--color-text-tertiary)}
 
 /* An L4 panel cell — a whole inner campaign, not a scored row. It borrows
    `.rsv-row`'s spacing so the two modes sit at the same rhythm, then overrides the
    parts that only make sense for a scored line (a cell has no HIT/MISS body). */
-.pcr-row{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;
+.pcr-row{display:flex;align-items:baseline;gap:var(--space-8);width:100%;text-align:left;
   background:none;border:0;border-bottom:0.5px dotted transparent;font:inherit;cursor:pointer}
 .pcr-row:hover{background:var(--color-background-hover)}
 .pcr-absent{cursor:default;color:var(--color-text-tertiary)}
-.pcr-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;
+.pcr-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:var(--space-6);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pcr-meta{flex:0 0 auto;display:flex;align-items:baseline;gap:8px;
+.pcr-meta{flex:0 0 auto;display:flex;align-items:baseline;gap:var(--space-8);
   font-variant-numeric:tabular-nums}
-.pcr-status{color:var(--color-text-secondary);font-size:11px}
-.pcr-note{flex:0 0 auto;font-size:11px;font-style:italic}
+.pcr-status{color:var(--color-text-secondary);font-size:var(--text-xs)}
+.pcr-note{flex:0 0 auto;font-size:var(--text-xs);font-style:italic}
 
 /* Hero / progress fluidity — collapses the KPI trio under the title block on
    narrow viewports without leaving the cells overlapping. */
@@ -195,49 +195,49 @@
   .dash-hero .page-header{flex-direction:column;align-items:flex-start}
 }
 
-.page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}
-.breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
+.page-header{display:flex;align-items:center;margin-bottom:0;gap:var(--space-18);flex-wrap:wrap}
+.breadcrumb{font-size:var(--text-base);color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
 
 /* Mechanisms panel — read-only view of the campaign's pluggable orchestration
    toggles (campaign.json::optimization.mechanisms). One CardFrame per group;
    each row pairs the toggle label with an ON/OFF badge (state = colour + text,
    never colour alone). "•" on the badge marks a non-default value. */
-.mech-empty{margin:0;padding:8px 4px;font-size:12px;color:var(--color-text-tertiary)}
-.mech-groups{display:flex;flex-direction:column;gap:12px}
-.mech-card-title{font-size:13px;font-weight:600}
-.mech-group-desc{margin:0 0 10px;font-size:12px;line-height:1.5;color:var(--color-text-tertiary)}
-.mech-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.mech-empty{margin:0;padding:var(--space-8) var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.mech-groups{display:flex;flex-direction:column;gap:var(--space-12)}
+.mech-card-title{font-size:var(--text-base);font-weight:600}
+.mech-group-desc{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-tertiary)}
+.mech-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-10)}
 .mech-row{border-top:0.5px solid var(--color-border);padding-top:10px}
 .mech-row:first-child{border-top:0;padding-top:0}
-.mech-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.mech-row-label{font-size:13px;font-weight:500;color:var(--color-text-primary)}
-.mech-row-desc{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}
+.mech-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-12)}
+.mech-row-label{font-size:var(--text-base);font-weight:500;color:var(--color-text-primary)}
+.mech-row-desc{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
 
 /* Config map — couplings (what clashes) + knob provenance grouped by estimand.
    Active clashes carry a severity badge (colour + word, never colour alone);
    the source layer is a badge too (campaign/required/constant) or a muted
    "default" so what the operator changed reads at a glance. */
-.cmap{display:flex;flex-direction:column;gap:12px}
-.cmap-summary{margin:0 0 10px;font-size:12px;line-height:1.6;color:var(--color-text-secondary)}
+.cmap{display:flex;flex-direction:column;gap:var(--space-12)}
+.cmap-summary{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.6;color:var(--color-text-secondary)}
 .cmap-summary[data-collision="true"]{color:var(--color-text-primary)}
-.cmap-clear{margin:0;font-size:12px;color:var(--color-text-tertiary)}
-.cmap-couplings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.cmap-clear{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.cmap-couplings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-10)}
 .cmap-coupling{border-top:0.5px solid var(--color-border);padding-top:10px}
 .cmap-coupling:first-child{border-top:0;padding-top:0}
 .cmap-coupling[data-active="true"]{padding-left:8px;border-left:2px solid var(--color-border)}
-.cmap-coupling-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.cmap-coupling-knobs{font-size:12px;font-weight:600;font-family:var(--font-mono);color:var(--color-text-primary)}
-.cmap-coupling-relation{margin:4px 0 0;font-size:12px;line-height:1.55;color:var(--color-text-secondary)}
-.cmap-coupling-consequence{margin:4px 0 0;font-size:12px;line-height:1.55;color:var(--color-text-primary)}
-.cmap-estimands{display:flex;flex-direction:column;gap:14px}
-.cmap-estimand-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
-.cmap-estimand-name{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
-.cmap-estimand-doc{font-size:11px;line-height:1.5;color:var(--color-text-tertiary)}
-.cmap-knobs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
-.cmap-knob{display:flex;align-items:baseline;gap:10px;font-size:12px}
+.cmap-coupling-head{display:flex;align-items:baseline;gap:var(--space-8);flex-wrap:wrap}
+.cmap-coupling-knobs{font-size:var(--text-sm);font-weight:600;font-family:var(--font-mono);color:var(--color-text-primary)}
+.cmap-coupling-relation{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-secondary)}
+.cmap-coupling-consequence{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-primary)}
+.cmap-estimands{display:flex;flex-direction:column;gap:var(--space-14)}
+.cmap-estimand-head{display:flex;align-items:baseline;gap:var(--space-8);flex-wrap:wrap;margin-bottom:6px}
+.cmap-estimand-name{font-size:var(--text-sm);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
+.cmap-estimand-doc{font-size:var(--text-xs);line-height:1.5;color:var(--color-text-tertiary)}
+.cmap-knobs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-4)}
+.cmap-knob{display:flex;align-items:baseline;gap:var(--space-10);font-size:var(--text-sm)}
 .cmap-knob-label{flex:1 1 auto;font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
 .cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
-.cmap-knob-source-default{font-size:11px;color:var(--color-text-tertiary)}
+.cmap-knob-source-default{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 
 /* ── The TIME-RAY ────────────────────────────────────────────────────────────
    The chronology strip above the optimizer. Full-bleed by construction: it is
@@ -253,13 +253,13 @@
 .dash-time-ray{display:flex;align-items:stretch;gap:0;margin-bottom:var(--dash-zone-gap);
   border:0.5px solid var(--color-border);border-radius:10px;
   background:var(--color-background-secondary);overflow:hidden}
-.dash-time-ray-track{flex:1;min-width:0;display:flex;align-items:center;gap:6px;
-  padding:8px 10px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:thin}
+.dash-time-ray-track{flex:1;min-width:0;display:flex;align-items:center;gap:var(--space-6);
+  padding:var(--space-8) var(--space-10);overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:thin}
 .dash-time-ray-slot{display:inline-flex;scroll-snap-align:end}
-.dash-time-ray-step{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;
-  max-width:180px;padding:4px 9px;border-radius:12px;cursor:pointer;
+.dash-time-ray-step{display:inline-flex;align-items:center;gap:var(--space-4);flex-shrink:0;
+  max-width:180px;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
   background:var(--color-background-primary);border:0.5px solid var(--color-border);
-  color:var(--color-text-secondary);font-family:inherit;font-size:11px;
+  color:var(--color-text-secondary);font-family:inherit;font-size:var(--text-xs);
   transition:color .12s,border-color .12s}
 .dash-time-ray-step:hover{color:var(--color-accent);border-color:var(--color-accent)}
 .dash-time-ray-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
@@ -274,21 +274,27 @@
 /* A SILENCE. Non-interactive on purpose — it is a fact about the gaps between
    events, not an event, so it takes no tab stop on the way to the next step. */
 .dash-time-ray-gap{flex-shrink:0;padding:0 2px;color:var(--color-text-tertiary);
-  font-size:10px;letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
-.dash-time-ray-more{flex-shrink:0;padding:4px 8px;border-radius:12px;cursor:pointer;
+  font-size:var(--text-xs);letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dash-time-ray-more{flex-shrink:0;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
   background:transparent;border:0.5px dashed var(--color-border);
-  color:var(--color-text-tertiary);font-family:inherit;font-size:11px}
+  color:var(--color-text-tertiary);font-family:inherit;font-size:var(--text-xs)}
 .dash-time-ray-more:hover{color:var(--color-accent);border-color:var(--color-accent)}
-.dash-time-ray-empty{padding:4px 6px;color:var(--color-text-tertiary);font-size:11px}
+.dash-time-ray-empty{padding:var(--space-4) var(--space-6);color:var(--color-text-tertiary);font-size:var(--text-xs)}
 /* The head cap — where the ray points NOW. Sticky at the right edge because the
    newest event is the one you came to read; the track scrolls under it. */
-.dash-time-ray-head{position:sticky;right:0;flex-shrink:0;display:inline-flex;align-items:baseline;
-  gap:7px;padding:8px 14px;border-left:0.5px solid var(--color-border);
+/* max-width + min-width:0 are load-bearing, not tidying. The detail string is
+   free text; with flex-shrink:0 and no cap the head demanded 747px, and the
+   ray's own `overflow:hidden` swallowed 382px of it at 375px wide — no
+   scrollbar, no ellipsis, nothing on screen to say the text was cut. It
+   truncates visibly now instead of disappearing quietly. */
+.dash-time-ray-head{position:sticky;right:0;flex-shrink:0;max-width:60%;min-width:0;display:inline-flex;align-items:baseline;
+  gap:var(--space-6);padding:var(--space-8) var(--space-14);border-left:0.5px solid var(--color-border);
   background:var(--color-background-tertiary);color:var(--color-text-primary);
-  font-family:inherit;font-size:11px;text-align:left}
+  font-family:inherit;font-size:var(--text-xs);text-align:left}
+.dash-time-ray-head-label{flex:0 0 auto}
 button.dash-time-ray-head{cursor:pointer}
 .dash-time-ray-head-label{font-weight:700;letter-spacing:0.03em;text-transform:uppercase}
-.dash-time-ray-head-detail{color:var(--color-text-secondary)}
+.dash-time-ray-head-detail{color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dash-time-ray-head.phase-running{box-shadow:inset 3px 0 0 var(--color-success)}
 .dash-time-ray-head.phase-gate{box-shadow:inset 3px 0 0 var(--color-accent)}
 .dash-time-ray-head.phase-paused{box-shadow:inset 3px 0 0 var(--color-warn)}

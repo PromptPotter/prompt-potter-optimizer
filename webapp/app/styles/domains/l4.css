@@ -4,9 +4,9 @@
    whitelabeled end-users (they never run a self-optimizing campaign). */
 
 .l4-lede {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-12);
   color: var(--color-text-secondary);
-  font-size: 0.82rem;
+  font-size:var(--text-base);
   line-height: 1.5;
   max-width: 78ch;
 }
@@ -16,19 +16,19 @@
 
 .l4-subtle {
   color: var(--color-text-tertiary);
-  font-size: 0.78rem;
+  font-size:var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .l4-empty {
   color: var(--color-text-tertiary);
-  font-size: 0.85rem;
+  font-size:var(--text-base);
 }
 .l4-empty code,
 .l4-lede code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  padding: 1px 4px;
+  padding: 1px var(--space-4);
   border-radius: 4px;
   background: var(--color-background-tint-strong);
 }
@@ -40,22 +40,22 @@
 .l4-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size:var(--text-base);
   font-variant-numeric: tabular-nums;
 }
 .l4-table th {
   text-align: left;
   font-weight: 600;
   color: var(--color-text-tertiary);
-  font-size: 0.72rem;
+  font-size:var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 4px 10px;
+  padding: var(--space-4) var(--space-10);
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
 .l4-table td {
-  padding: 7px 10px;
+  padding: var(--space-6) var(--space-10);
   border-bottom: 1px solid var(--color-border);
   vertical-align: baseline;
 }
@@ -66,7 +66,7 @@
 .l4-state {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   white-space: nowrap;
 }
 .l4-state code {
@@ -83,7 +83,7 @@
 .l4-effect-ci {
   color: var(--color-text-tertiary);
   margin-left: 8px;
-  font-size: 0.76rem;
+  font-size:var(--text-sm);
 }
 .l4-eff-pos .l4-effect-mean {
   color: var(--color-success);
@@ -121,15 +121,15 @@
 .ov-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.78rem;
+  gap: var(--space-10);
+  font-size:var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 .ov-cell-label {
   flex: 0 0 12ch;
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size:var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

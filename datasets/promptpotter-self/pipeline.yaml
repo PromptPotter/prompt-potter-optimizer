@@ -43,6 +43,16 @@ nodes:
       observation_name: l1_generate
       observation_mappings: []
       langfuse_type: generation
+  l1_score:
+    type: measurement
+    runtime: in_process
+    node_role: ''
+    description: >-
+      Scores the inner candidates l1_generate produced. Declared so the pipeline reads as the chain it
+      actually runs; it carries no prompt and no tunable param, so the optimizer cannot move it and the
+      surface draws it locked. Adding it left every other node's tunable set byte-identical, which is
+      why it does not re-key banked measurements.
+    config: {}
   l1_critique:
     type: optimizer_prompt
     runtime: in_process
@@ -106,6 +116,7 @@ nodes:
 pipelines:
   default:
     - l1_generate
+    - l1_score
     - l1_critique
     - l2_context
     - l3_plan

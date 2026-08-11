@@ -79,10 +79,10 @@ export function SampleTrajectory({ rounds }: Props) {
 
   return (
     <CardFrame
-      title={<span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>Sample trajectory</span>}
+      title={<span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>Sample trajectory</span>}
       actions={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontFamily: "var(--font-mono)" }}>
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", fontFamily: "var(--font-mono)" }}>
             {OBJECTIVE_LABEL}
           </span>
           <ViewToggle view={view} onChange={setView} />
@@ -127,7 +127,7 @@ function ViewToggle({ view, onChange }: { view: ViewKind; onChange: (v: ViewKind
         onClick={() => onChange(kind)}
         style={{
           padding: "2px 10px",
-          fontSize: 11,
+          fontSize: "var(--text-xs)",
           fontFamily: "var(--font-mono)",
           border: "0.5px solid var(--color-border)",
           borderRadius: 2,
@@ -170,7 +170,7 @@ function DeltaView({ sorted }: { sorted: SortedRounds }) {
         if (drops.length === 0 && adds.length === 0) {
           return (
             <Row key={r.round} label={`R${r.round}`}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--color-text-tertiary)", lineHeight: "26px" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", lineHeight: "26px" }}>
                 (no change)
               </span>
             </Row>

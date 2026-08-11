@@ -98,7 +98,7 @@ export function LiveStateCard() {
       headingTag="h2"
       title="2ndary-relevant-info"
       actions={
-        <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", fontWeight: 400 }}>
           all dashboard.json fields
         </span>
       }
@@ -167,7 +167,7 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
       <div className="var-label" style={{ marginTop: 14 }}>
         Paired-PoBB backfill (last {log.length})
       </div>
-      <div className="payload-block" style={{ fontSize: 11, lineHeight: 1.5 }}>
+      <div className="payload-block" style={{ fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
         {log.slice().reverse().map((e, i) => {
           const { round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
           return (
@@ -199,7 +199,7 @@ function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
   return (
     <>
       <div className="var-label" style={{ marginTop: 14 }}>Recent backend retries (last {warnings.length})</div>
-      <div className="payload-block" style={{ fontSize: 11, lineHeight: 1.5 }}>
+      <div className="payload-block" style={{ fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
         {warnings.slice().reverse().map((w, i) => {
           const ts = fmtClock(w.ts);
           const code = w.status_code != null ? ` HTTP ${w.status_code}` : "";

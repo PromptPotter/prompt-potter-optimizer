@@ -1,58 +1,78 @@
 /* Chat / New-Job pane — wf-hero pipeline, chat panel, settings card.
    Lifted from vanilla webapp/index.html (chat-content section). */
-.chat-content{padding:0 0 20px;display:flex;flex-direction:column}
+.chat-content{padding:0 0 var(--space-18);display:flex;flex-direction:column}
 /* The job-bar is nested inside `.wf-hero` as the anchor's header band — negative
    margins pull it to the hero's outer edge so it reads as one block with the
    pipeline below it, not a separate strip stacked above. */
-.chat-job-bar{margin:-24px -16px 16px;padding:10px 16px;border-bottom:1px solid var(--color-border)}
+.chat-job-bar{margin:-24px -16px 16px;padding:var(--space-10) var(--space-16);border-bottom:1px solid var(--color-border)}
 /* Wrapping flex row: grid icon + picker, then the content-sized toggle. When
    they can't share a line the toggle wraps below, left-aligned. Chips ride
    normal flow (no absolute centring) so the wrap is plain flex. */
-.chat-job-head{display:flex;align-items:center;flex-wrap:wrap;gap:10px;width:100%}
-.chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;flex:0 1 auto;min-width:0;text-align:left;min-height:44px}
+.chat-job-head{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-10);width:100%}
+.chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:flex;align-items:center;gap:var(--space-10);padding:var(--space-6) var(--space-12);border-radius:8px;font-size:var(--text-base);font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;flex:0 1 auto;min-width:0;text-align:left;min-height:44px}
 .chat-job-head .grid{flex:0 0 auto;color:var(--color-text-tertiary)}
-.chat-job-toggle .chip-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.chat-job-toggle .chip{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border:1px solid var(--color-border);border-radius:999px;font-size:14px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);flex-shrink:0;font-family:var(--font-mono);line-height:1.3}
-.chat-job-toggle .chip-lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;font-family:inherit}
-.chat-job-toggle .chip strong{color:var(--color-text-primary);font-weight:600;font-size:14px}
+.chat-job-toggle .chip-row{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap}
+.chat-job-toggle .chip{display:inline-flex;align-items:center;gap:var(--space-6);padding:var(--space-4) var(--space-14);border:1px solid var(--color-border);border-radius:999px;font-size:var(--text-md);font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);flex-shrink:0;font-family:var(--font-mono);line-height:1.3}
+.chat-job-toggle .chip-lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600;font-family:inherit}
+.chat-job-toggle .chip strong{color:var(--color-text-primary);font-weight:600;font-size:var(--text-md)}
 .chat-job-toggle .chip-origin{color:var(--color-text-tertiary);font-weight:500}
 .chat-job-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-border)}
 .chat-job-toggle .chev{transition:transform .15s;flex-shrink:0;margin-left:auto}
 .chat-job-toggle[aria-expanded="true"]{background:var(--color-background-primary);color:var(--color-text-primary);border-color:var(--color-border)}
 .chat-job-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
-.chat-job-dropdown{margin-top:8px;background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:6px 14px 12px;display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:0 18px;align-items:start}
-.chat-job-dropdown .job-section{padding:8px 0 4px}
+.chat-job-dropdown{margin-top:8px;background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-6) var(--space-14) var(--space-12);display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:0 var(--space-18);align-items:start}
+.chat-job-dropdown .job-section{padding:var(--space-8) 0 var(--space-4)}
 /* What-if cell is its own inline-size container so the fitness card reflows on
    the cell width (candidates.css `@container whatif`), not the viewport, and the
    `1fr` track can shrink freely. */
-.chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border);padding-left:18px;min-width:0;container:whatif / inline-size}
+.chat-job-dropdown .job-whatif{padding:var(--space-8) 0 var(--space-4);border-left:1px solid var(--color-border);padding-left:18px;min-width:0;container:whatif / inline-size}
 /* Collapse to one column on the chat pane's own width (the `content` container
    from dashboard.css), not the viewport. */
 @container content (max-width:760px){.chat-job-dropdown{grid-template-columns:1fr}.chat-job-dropdown .job-whatif{border-left:none;padding-left:0;border-top:1px solid var(--color-border);padding-top:12px}}
-.chat-job-dropdown .section-title{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:700;padding:4px 0 6px;border-bottom:1px solid var(--color-border);margin-bottom:4px}
-.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:origin;gap:14px;padding:6px 0;border-bottom:1px solid var(--color-border)}
+.chat-job-dropdown .section-title{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.08em;font-size:var(--text-xs);font-weight:700;padding:var(--space-4) 0 var(--space-6);border-bottom:1px solid var(--color-border);margin-bottom:4px}
+.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:origin;gap:var(--space-14);padding:var(--space-6) 0;border-bottom:1px solid var(--color-border)}
 .chat-job-dropdown .row:last-child{border-bottom:none}
-.chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;flex-shrink:0}
-.chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:12px;text-align:right;word-break:break-all}
+.chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600;flex-shrink:0}
+.chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--text-sm);text-align:right;word-break:break-all}
 /* Finishing-criteria control (change-spend-budget). Sits in the dropdown's
    left column under Identity/Spend; write-only mid-flight cap edit. */
-.spend-control{display:flex;flex-direction:column;gap:6px;padding-top:4px}
+.spend-control{display:flex;flex-direction:column;gap:var(--space-6);padding-top:4px}
 .spend-control-used{color:var(--color-text-tertiary);font-weight:400}
-.spend-control-edit{display:flex;align-items:center;gap:6px}
-.spend-control-prefix{color:var(--color-text-tertiary);font-size:12px}
-.spend-control-edit input{flex:1;min-width:0;padding:6px 8px;border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
-.spend-control-set{padding:6px 12px;border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent);font-size:12px;font-weight:500;cursor:pointer;flex-shrink:0}
+.spend-control-edit{display:flex;align-items:center;gap:var(--space-6)}
+.spend-control-prefix{color:var(--color-text-tertiary);font-size:var(--text-sm)}
+.spend-control-edit input{flex:1;min-width:0;padding:var(--space-6) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
+.spend-control-set{padding:var(--space-6) var(--space-12);border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent);font-size:var(--text-sm);font-weight:500;cursor:pointer;flex-shrink:0}
 .spend-control-set:disabled{opacity:0.5;cursor:not-allowed}
-.spend-control-hint{color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
-.spend-control-note{color:var(--color-success);font-size:11px}
+.spend-control-hint{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
+.spend-control-note{color:var(--color-success);font-size:var(--text-xs)}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
-.wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
-.wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
-.wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
+/* One frame over the pipeline: the Input→backend→Output hero, plus the per-node
+   chip list which is collapsed by default (it restates the hero's node names, so
+   it is worth space only when the operator wants to open a node). The square
+   toggle sits on the frame edge rather than in the hero, because it governs the
+   frame's second half, not the hero. */
+.pipeline-frame{position:relative;max-width:980px;margin:0 auto;width:100%;border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);background:var(--color-background-primary)}
+.pipeline-frame > .wf-hero{max-width:none}
+.pipeline-mechanics-toggle{
+  position:absolute;top:var(--space-8);right:var(--space-8);
+  display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;padding:0;
+  border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);
+  background:var(--color-background-secondary);color:var(--color-text-tertiary);
+  cursor:pointer;transition:color .12s,border-color .12s,background .12s
+}
+.pipeline-mechanics-toggle:hover{color:var(--color-accent);border-color:var(--color-accent)}
+.pipeline-mechanics-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.pipeline-frame.mechanics-open .pipeline-mechanics-toggle{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-tint-active)}
+#pipeline-mechanics{padding:0 var(--space-16) var(--space-14)}
+
+.wf-hero{position:relative;padding:var(--space-24) var(--space-16) var(--space-40);max-width:980px;margin:0 auto;width:100%}
+.wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-18) 0 var(--space-8)}
+.wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wf-hero-node .text-col{display:flex;flex-direction:column;gap:2px;min-width:0}
 .wf-hero-node.llm{
-  flex-direction:column;align-items:stretch;gap:4px;
+  flex-direction:column;align-items:stretch;gap:var(--space-4);
   background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.18) 0%,rgba(var(--color-accent-rgb),0.05) 100%);
   border:1px solid var(--color-accent);
   box-shadow:0 0 28px var(--color-accent-glow),inset 0 1px 0 rgba(255,255,255,0.05);
@@ -60,11 +80,11 @@
   -webkit-backdrop-filter:blur(10px);
   min-width:200px
 }
-.wf-hero-node.llm .head{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:10px}
+.wf-hero-node.llm .head{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:var(--space-10)}
 .wf-hero-node.llm .ico{color:var(--color-accent)}
-.wf-hero-node .lbl{font-size:14px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
-.wf-hero-node.llm .lbl{font-size:22px;color:var(--color-text-primary);letter-spacing:.06em}
-.wf-hero-node .val{font-size:14px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.wf-hero-node .lbl{font-size:var(--text-md);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
+.wf-hero-node.llm .lbl{font-size:var(--text-3xl);color:var(--color-text-primary);letter-spacing:.06em}
+.wf-hero-node .val{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .wf-hero-node-toggle{cursor:pointer;font:inherit;color:inherit;text-align:left;transition:border-color .15s,box-shadow .15s,background .15s}
 .wf-hero-node-toggle:hover{border-color:var(--color-accent)}
 .wf-hero-node-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow)}
@@ -109,76 +129,126 @@
   position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);
   min-width:240px;max-width:300px;
   background:var(--color-background-primary);border:1px solid var(--color-border);
-  border-radius:8px;padding:10px 12px;
+  border-radius:8px;padding:var(--space-10) var(--space-12);
   box-shadow:0 8px 24px rgba(0,0,0,.18);
   opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:4
 }
 .connector:hover .connector-pop,.connector:focus-within .connector-pop{opacity:1;pointer-events:auto}
-.connector-pop-head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-primary);margin-bottom:6px}
+.connector-pop-head{display:flex;align-items:center;gap:var(--space-6);font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:6px}
 .connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-tertiary);flex-shrink:0}
 .connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
 .connector.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
 .connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connector-pop-head .kind{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
-.connector-pop-head .state{font-size:11px;color:var(--color-text-tertiary);flex-shrink:0}
-.connector-pop-url{font-size:10px;color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connector-pop-sec{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:8px}
-.connector-pop-sec .sec-chip{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.connector-pop-head .kind{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
+.connector-pop-head .state{font-size:var(--text-xs);color:var(--color-text-tertiary);flex-shrink:0}
+.connector-pop-url{font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-pop-sec{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:8px}
+.connector-pop-sec .sec-chip{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
 .connector-pop-sec .sec-chip.ok{color:var(--color-success);background:rgba(var(--color-success-rgb),.12)}
 .connector-pop-sec .sec-chip.warn{color:var(--color-warn);background:var(--color-warn-bg)}
-.connector-pop-sec .sec-doc{margin-left:auto;font-size:10px;color:var(--color-accent);text-decoration:none}
+.connector-pop-sec .sec-doc{margin-left:auto;font-size:var(--text-xs);color:var(--color-accent);text-decoration:none}
 .connector-pop-sec .sec-doc:hover{text-decoration:underline}
-.connector-pop-nodes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:11px}
-.connector-pop-nodes li{display:flex;align-items:center;gap:6px;color:var(--color-text-secondary)}
-.connector-pop-nodes .kind{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.connector-pop-nodes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-4);font-size:var(--text-xs)}
+.connector-pop-nodes li{display:flex;align-items:center;gap:var(--space-6);color:var(--color-text-secondary)}
+.connector-pop-nodes .kind{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
 .connector-pop-nodes .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connector-pop-nodes .model{font-size:10px;color:var(--color-accent);font-family:var(--font-mono)}
+.connector-pop-nodes .model{font-size:var(--text-xs);color:var(--color-accent);font-family:var(--font-mono)}
 .connector-pop-nodes .empty{font-style:italic;color:var(--color-text-tertiary)}
 .connector-pop-switch{margin-top:8px;padding-top:8px;border-top:1px solid var(--color-border)}
-.connector-pop-switch .head{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:4px}
+.connector-pop-switch .head{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:4px}
 .connector-pop-switch ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 .connector-pop-switch .alt{
   appearance:none;border:1px solid var(--color-border);background:transparent;
-  width:100%;display:flex;align-items:center;gap:6px;
-  padding:5px 8px;border-radius:6px;
-  font-size:11px;color:var(--color-text-secondary);
+  width:100%;display:flex;align-items:center;gap:var(--space-6);
+  padding:var(--space-4) var(--space-8);border-radius:6px;
+  font-size:var(--text-xs);color:var(--color-text-secondary);
   cursor:not-allowed;opacity:.7
 }
 .connector-pop-switch .alt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
-.connector-pop-switch .alt-type{font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
-.connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border);font-size:10px;color:var(--color-text-tertiary);font-style:italic;text-align:center}
+.connector-pop-switch .alt-type{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border);font-size:var(--text-xs);color:var(--color-text-tertiary);font-style:italic;text-align:center}
 /* Multi-node connector hero — reuses .wf-hero-node.llm chip frame for one
    shared visual surface across 1-node and N-node datasets. Just slightly
    wider/taller so the dot row fits, with smaller dots + label-wrap on
    underscore so cells stay compact. */
 .wf-hero-node.llm.wf-hero-node-multi{
   flex-direction:column;align-items:stretch;gap:0;
-  padding:10px 18px 8px;
+  padding:var(--space-10) var(--space-18) var(--space-8);
   min-width:280px;max-width:560px;
   width:auto
 }
-.wf-hero-multi-svg{display:block;width:100%;height:70px}
+/* The 280px floor above is a desktop fact — it is what makes the dot row fit.
+   On a 375px phone it consumes the entire row, leaving the Input/Output flanks
+   to shrink below their own centred labels, which then spill past the frame.
+   The inner SVG is width:100% and scales, so the floor simply goes. This lives
+   here, beside the rule it overrides, because domains/ load AFTER foundation/ —
+   the same override in responsive.css loses the cascade at equal specificity. */
+@media (max-width:640px){
+  .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
+}
+/* The rail. The strip carries its own intrinsic width now (72px per node, 132
+   for the expanded one), so this is what scrolls when a pipeline outgrows the
+   chip — at every width, not as a phone special case: twelve nodes crowd a
+   1440px screen too, just later. */
+.wf-hero-multi-rail{max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
+.wf-hero-multi-svg{display:block;height:70px}
+/* The cells reflow when one expands; without this the whole strip jumps. */
+.wf-hero-multi-node{transition:transform .18s ease}
+@media (prefers-reduced-motion:reduce){
+  .wf-hero-multi-rail{scroll-behavior:auto}
+  .wf-hero-multi-node{transition:none}
+}
 .wf-hero-multi-svg .edge{stroke:var(--color-accent);stroke-opacity:.55;stroke-width:1.5;fill:none;filter:drop-shadow(0 0 3px var(--color-accent-glow))}
 .wf-hero-multi-node{cursor:pointer;outline:none}
 .wf-hero-multi-node:focus-visible .node{filter:drop-shadow(0 0 6px var(--color-accent-glow))}
 .wf-hero-multi-node .node{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 4px var(--color-accent-glow));transition:transform .15s,filter .15s}
 .wf-hero-multi-node:hover .node{transform-box:fill-box;transform-origin:center;transform:scale(1.18)}
 .wf-hero-multi-node .node.selected{filter:drop-shadow(0 0 7px var(--color-accent-glow)) drop-shadow(0 0 11px var(--color-accent-glow))}
-/* Active backend LLM node — success fill + pulse, reusing the canvas keyframe. */
+/* Padlock instead of a dot. CLOSED = the node carries no params at all, so there
+   is nothing to change. OPEN = the optimizer will not move it, but the operator
+   can — and doing that on a live cycle stamps `human_intervened`, which forces
+   the run's provenance to grade C. Both read quieter than a dot on purpose:
+   they are the parts of the pipeline the search is not working on. */
+/* Running node — success fill + the canvas's own pulse keyframe, so the hero and
+   the optimizer canvas say "this one is executing" in one visual language. */
 .wf-hero-multi-node .node.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
+.wf-hero-multi-node .node-lock .body{fill:var(--color-text-tertiary)}
+.wf-hero-multi-node .node-lock .shackle{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.5;stroke-linecap:round}
+.wf-hero-multi-node .node-lock.is-open .body,
+.wf-hero-multi-node .node-lock.is-open .shackle{opacity:.75}
+.wf-hero-multi-node .node-lock.selected .body{fill:var(--color-accent)}
+.wf-hero-multi-node .node-lock.selected .shackle{stroke:var(--color-accent)}
+.wf-hero-multi-node:hover .node-lock .body{fill:var(--color-text-secondary)}
+.wf-hero-multi-node:hover .node-lock .shackle{stroke:var(--color-text-secondary)}
+/* Last, so RUNNING outranks selected and hover on the lock exactly as it does on
+   the dot — a node that is executing says so no matter what else is true of it. */
+.wf-hero-multi-node .node-lock.active .body{fill:var(--color-success)}
+.wf-hero-multi-node .node-lock.active .shackle{stroke:var(--color-success)}
+.wf-hero-multi-node .node-lock.active{animation:pulse-active 1.6s ease-in-out infinite}
+/* Container glyph — a frame with something in it. Not a lock in either state:
+   the node's knobs are real, they just live in another cycle. */
+.wf-hero-multi-node .node-nest .frame{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.4}
+.wf-hero-multi-node .node-nest .inner{fill:var(--color-text-tertiary);opacity:.7}
+.wf-hero-multi-node .node-nest.selected .frame{stroke:var(--color-accent)}
+.wf-hero-multi-node .node-nest.selected .inner{fill:var(--color-accent)}
+.wf-hero-multi-node:hover .node-nest .frame{stroke:var(--color-text-secondary)}
+.wf-hero-multi-node:hover .node-nest .inner{fill:var(--color-text-secondary)}
+/* Last, so running outranks selected/hover — same order as the dot and lock. */
+.wf-hero-multi-node .node-nest.active .frame{stroke:var(--color-success)}
+.wf-hero-multi-node .node-nest.active .inner{fill:var(--color-success)}
+.wf-hero-multi-node .node-nest.active{animation:pulse-active 1.6s ease-in-out infinite}
 .wf-hero-multi-node .node.kind-tool{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-retriever{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-cache{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}
-.wf-hero-multi-node .node-label{font-size:10px;font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
-.wf-hero-multi-node .node-sub{font-size:9px;fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
-.wf-hero-multi-tag{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
-.chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0;padding:0 20px}
+.wf-hero-multi-node .node-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
+.wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
+.chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:var(--space-24);justify-content:center;flex:1;min-height:0;padding:0 var(--space-18)}
 @media (max-width:980px){.chat-grid{grid-template-columns:1fr}}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:620px;min-width:0}
-.chat-panel-header{padding:14px 18px;border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between}
-.chat-panel-title{font-size:15px;font-weight:500;color:var(--color-text-primary)}
-.chat-messages{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
-.chat-msg{max-width:75%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5}
+.chat-panel-header{padding:var(--space-14) var(--space-18);border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between}
+.chat-panel-title{font-size:var(--text-lg);font-weight:500;color:var(--color-text-primary)}
+.chat-messages{flex:1;overflow-y:auto;padding:var(--space-18);display:flex;flex-direction:column;gap:var(--space-12)}
+.chat-msg{max-width:75%;padding:var(--space-10) var(--space-14);border-radius:14px;font-size:var(--text-md);line-height:1.5}
 .chat-msg.user{
   align-self:flex-end;
   background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.16) 0%,rgba(var(--color-accent-rgb),0.06) 100%);
@@ -190,31 +260,31 @@
   -webkit-backdrop-filter:blur(8px)
 }
 .chat-msg.ai{align-self:flex-start;background:var(--color-background-secondary);border:1px solid var(--color-border);color:var(--color-text-primary);border-bottom-left-radius:4px}
-.chat-input-row{padding:14px 18px;display:flex;gap:8px;align-items:flex-end}
+.chat-input-row{padding:var(--space-14) var(--space-18);display:flex;gap:var(--space-8);align-items:flex-end}
 .chat-attach{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:0;width:40px;height:40px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .chat-attach:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
 .chat-attach:disabled{opacity:.55;cursor:not-allowed}
-.chat-input{flex:1;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;padding:10px 12px;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none;transition:border-color .15s}
+.chat-input{flex:1;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;padding:var(--space-10) var(--space-12);font-family:var(--font-sans);font-size:var(--text-md);color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none;transition:border-color .15s}
 .chat-input:focus{border-color:var(--color-accent)}
 .chat-input:disabled{opacity:.55;cursor:not-allowed}
-.chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+.chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-10) var(--space-18);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-send:disabled{opacity:.55;cursor:not-allowed}
 /* Touch-pointer overrides on chat surface — fires on touch tablets at
    desktop widths (the existing 640px band only kicks below 640). */
 @media (pointer:coarse){
-  .chat-input{font-size:16px;min-height:44px}
+  .chat-input{font-size:var(--text-xl);min-height:44px}
   .chat-attach,.chat-send{min-height:44px}
 }
-.chat-msg.user-file{padding:7px}
+.chat-msg.user-file{padding:var(--space-6)}
 .chat-msg.user-file .file-chip{
-  display:flex;align-items:center;gap:8px;
-  padding:4px 10px;border-radius:8px;
+  display:flex;align-items:center;gap:var(--space-8);
+  padding:var(--space-4) var(--space-10);border-radius:8px;
   background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.10) 0%,rgba(var(--color-accent-rgb),0.02) 100%);
   border:1px solid rgba(var(--color-accent-rgb),0.22);
   backdrop-filter:blur(6px);
   -webkit-backdrop-filter:blur(6px);
-  font-size:13px;color:var(--color-text-primary);font-family:var(--font-mono)
+  font-size:var(--text-base);color:var(--color-text-primary);font-family:var(--font-mono)
 }
 .chat-msg.user-file .file-chip svg{color:var(--color-text-primary);flex-shrink:0}
 .chat-msg.user-file .file-chip .name{font-weight:500}
@@ -222,19 +292,19 @@
 /* Drag-over affordance while a file hovers the input row (chat dataset drop). */
 .chat-input-row.is-dragover{outline:2px dashed var(--color-accent);outline-offset:-4px;border-radius:8px;background:var(--color-background-hover)}
 /* "Set up campaign" CTA the check-in surfaces once a dropped file resolves. */
-.chat-cta-btn{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+.chat-cta-btn{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-8) var(--space-16);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-cta-btn:hover{background:var(--color-accent-strong);color:#fff}
 .chat-cta-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .chat-cta-btn.secondary{background:transparent;color:var(--color-accent);border:1px solid var(--color-accent)}
 .chat-cta-btn.secondary:hover{background:var(--color-background-hover);color:var(--color-accent)}
 /* Name-collision choice card (use existing / save as new / replace / cancel). */
-.chat-msg.chat-collision{display:flex;flex-direction:column;gap:10px}
-.chat-collision-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chat-msg.chat-collision{display:flex;flex-direction:column;gap:var(--space-10)}
+.chat-collision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8);align-items:center}
 /* "Replace" is data-safe (old data archived as a version) but supersedes, so it
    reads as the cautionary third choice — outlined + muted, not a primary CTA. */
 .chat-cta-btn.chat-collision-replace{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border)}
 .chat-cta-btn.chat-collision-replace:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.chat-collision-cancel{background:none;border:0;color:var(--color-text-tertiary);font-size:13px;cursor:pointer;padding:6px 4px}
+.chat-collision-cancel{background:none;border:0;color:var(--color-text-tertiary);font-size:var(--text-base);cursor:pointer;padding:var(--space-6) var(--space-4)}
 .chat-collision-cancel:hover{color:var(--color-text-secondary)}
 .chat-collision-cancel:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
 /* Friendly error bubble for a rejected drop (unsupported / hardened / bad parse). */
@@ -248,58 +318,58 @@
    (`--modal`). It flexes to fill its parent so `.chat-messages` scrolls. */
 .ingest-conversation{display:flex;flex-direction:column;flex:1;min-height:0}
 .ingest-conversation--modal{flex:1 1 auto;min-height:0}
-.ingest-conversation--modal .chat-input-row{padding:14px 18px 18px}
+.ingest-conversation--modal .chat-input-row{padding:var(--space-14) var(--space-18) var(--space-18)}
 /* The entry list + setup blocks are containers, not chat bubbles — full width,
    no bubble chrome (the controls inside provide their own). */
 .chat-msg.ingest-picklist,.chat-msg.ingest-ready{max-width:100%;width:100%;align-self:stretch;background:none;border:0;padding:0}
-.ingest-picklist{display:flex;flex-direction:column;gap:12px}
-.ingest-picklist-group{display:flex;flex-direction:column;gap:6px}
-.ingest-picklist-head{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.ingest-picklist{display:flex;flex-direction:column;gap:var(--space-12)}
+.ingest-picklist-group{display:flex;flex-direction:column;gap:var(--space-6)}
+.ingest-picklist-head{font-size:var(--text-sm);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
 .ingest-picklist-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 /* Cap each menu to 8 rows (row ≈ 33px + 3px gap); scroll beyond. */
 .ingest-picklist-scroll{max-height:284px;overflow-y:auto;padding-right:4px}
-.ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:7px 12px;font-size:14px;color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
+.ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-12);font-size:var(--text-md);color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
 .ingest-pick-btn:hover:not(:disabled){background:var(--color-background-hover);border-color:var(--color-accent)}
 .ingest-pick-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .ingest-pick-btn:disabled{opacity:.55;cursor:not-allowed}
-.ingest-pick-meta{flex-shrink:0;font-size:12px;color:var(--color-text-tertiary)}
-.ingest-ready{display:flex;flex-direction:column;gap:12px}
-.ingest-gaps{display:flex;flex-direction:column;gap:12px}
+.ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.ingest-ready{display:flex;flex-direction:column;gap:var(--space-12)}
+.ingest-gaps{display:flex;flex-direction:column;gap:var(--space-12)}
 /* Degraded check-in banner in the ready panel — the resolver turn hiccuped, so
    the draft landed in review (not auto-minted) with a re-run affordance. */
-.ingest-degraded{display:flex;flex-direction:column;gap:8px;align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5}
+.ingest-degraded{display:flex;flex-direction:column;gap:var(--space-8);align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:var(--space-10) var(--space-12);font-size:var(--text-base);line-height:1.5}
 .ingest-degraded p{margin:0}
 /* The server gate's open fields — what still blocks Start, one hint per line.
    Accent-tinted so it reads as the actionable "fix these" list, not chat copy. */
-.ingest-gap-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
-.ingest-gap{padding:8px 10px;font-size:12px;line-height:1.45;color:var(--color-text-secondary);background:var(--color-background-tint);border-left:2px solid var(--color-accent);border-radius:4px}
+.ingest-gap-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--space-6)}
+.ingest-gap{padding:var(--space-8) var(--space-10);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-secondary);background:var(--color-background-tint);border-left:2px solid var(--color-accent);border-radius:4px}
 .ingest-ready .chat-cta-btn{align-self:flex-start}
 /* Pipeline dependencies — the active pipeline's required inputs. An unfulfilled
    one draws the accent border (drop the missing input here); a fulfilled one
    reads muted-confirmed. */
-.ingest-dependencies{display:flex;flex-direction:column;gap:8px}
-.ingest-dependency{border:1px solid var(--color-accent);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:rgba(var(--color-accent-rgb),0.04)}
+.ingest-dependencies{display:flex;flex-direction:column;gap:var(--space-8)}
+.ingest-dependency{border:1px solid var(--color-accent);border-radius:8px;padding:var(--space-10) var(--space-12);display:flex;flex-direction:column;gap:var(--space-6);background:rgba(var(--color-accent-rgb),0.04)}
 .ingest-dependency.is-fulfilled{border-color:var(--color-border);background:var(--color-background-secondary)}
-.ingest-dependency-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.ingest-dependency-title{font-weight:600;font-size:14px;color:var(--color-text-primary)}
-.ingest-dependency-status{flex-shrink:0;font-size:12px;font-weight:600}
+.ingest-dependency-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-12)}
+.ingest-dependency-title{font-weight:600;font-size:var(--text-md);color:var(--color-text-primary)}
+.ingest-dependency-status{flex-shrink:0;font-size:var(--text-sm);font-weight:600}
 .ingest-dependency-status.missing{color:var(--color-accent)}
 .ingest-dependency-status.ok{color:var(--color-text-tertiary)}
-.ingest-dependency-hint{font-size:13px;color:var(--color-text-secondary);margin:0;line-height:1.45}
-.ingest-dependency-actions{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
-.ingest-dependency-build{display:flex;align-items:flex-end;gap:8px}
-.ingest-dependency-build-label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--color-text-tertiary);font-weight:600}
-.ingest-dependency-select{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 8px;font-size:13px;color:var(--color-text-primary);min-width:140px}
+.ingest-dependency-hint{font-size:var(--text-base);color:var(--color-text-secondary);margin:0;line-height:1.45}
+.ingest-dependency-actions{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-10)}
+.ingest-dependency-build{display:flex;align-items:flex-end;gap:var(--space-8)}
+.ingest-dependency-build-label{display:flex;flex-direction:column;gap:var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary);font-weight:600}
+.ingest-dependency-select{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-8);font-size:var(--text-base);color:var(--color-text-primary);min-width:140px}
 .ingest-dependency-select:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .ingest-dependency .chat-cta-btn{align-self:flex-end}
-.chat-settings{display:flex;flex-direction:column;gap:14px;min-height:0}
-.chat-settings-card{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:18px}
+.chat-settings{display:flex;flex-direction:column;gap:var(--space-14);min-height:0}
+.chat-settings-card{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-18)}
 .chat-settings-card.optimize{border-color:var(--color-accent);box-shadow:0 0 15px var(--color-accent-glow)}
-.chat-settings-title{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:10px;font-weight:600}
-.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}
-.row-separator{height:0;border-top:1px solid var(--color-border);margin:10px 0 14px}
+.chat-settings-title{font-size:var(--text-sm);letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:10px;font-weight:600}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);padding:var(--space-8) 0}
+.row-separator{height:0;border-top:1px solid var(--color-border);margin:var(--space-10) 0 var(--space-14)}
 .toggle-row.wand-row{
-  position:relative;border:1px solid var(--color-accent);border-radius:10px;padding:10px 12px;
+  position:relative;border:1px solid var(--color-accent);border-radius:10px;padding:var(--space-10) var(--space-12);
   margin:0 -12px;
   background:radial-gradient(circle at center,rgba(var(--color-accent-rgb),0.10) 0%,rgba(var(--color-accent-rgb),0.02) 70%,transparent 100%);
   box-shadow:0 0 14px rgba(var(--color-accent-rgb),0.40),inset 0 0 8px rgba(var(--color-accent-rgb),0.15);
@@ -328,11 +398,11 @@
   0%,100%{box-shadow:0 0 14px rgba(var(--color-accent-rgb),0.40),inset 0 0 8px rgba(var(--color-accent-rgb),0.20)}
   50%{box-shadow:0 0 22px rgba(var(--color-accent-rgb),0.65),inset 0 0 12px rgba(var(--color-accent-rgb),0.30)}
 }
-.toggle-row .row-text{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.toggle-row .row-text{display:flex;align-items:center;gap:var(--space-10);min-width:0;flex:1}
 .toggle-row .row-icon{flex-shrink:0;color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;width:20px;height:20px}
 .toggle-row .row-body{min-width:0}
-.toggle-row .name{font-size:14px;color:var(--color-text-primary);font-weight:500}
-.toggle-row .desc{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+.toggle-row .name{font-size:var(--text-md);color:var(--color-text-primary);font-weight:500}
+.toggle-row .desc{font-size:var(--text-sm);color:var(--color-text-secondary);margin-top:2px}
 .toggle{width:34px;height:20px;background:var(--color-border);border-radius:999px;position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;border:0;padding:0}
 .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--color-text-secondary);transition:left .15s,background .15s}
 .toggle.on{background:var(--color-accent)}
@@ -340,22 +410,22 @@
 .toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
 /* Coming-soon marker on locked feature rows — muted, not accent, so it reads
    "later" rather than "new" (frontend-surface-contract.md § I3). */
-.soon-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-border);color:var(--color-text-tertiary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
+.soon-tag{display:inline-block;font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;padding:1px var(--space-6);border-radius:4px;background:var(--color-border);color:var(--color-text-tertiary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
 
 /* ── Live segment — the curated activity tail + inline decisions ───────────────
    The chat's layer over the cycle event stream. Activity rows are compact
    log-style lines (icon + label + detail), tone is a hint layered on the
    always-present icon/label (never colour alone). The decision card is the
    in-thread merge surface (origin gate). */
-.chat-live{display:flex;flex-direction:column;gap:6px}
-.chat-activity{display:flex;align-items:baseline;gap:8px;font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--color-text-secondary)}
+.chat-live{display:flex;flex-direction:column;gap:var(--space-6)}
+.chat-activity{display:flex;align-items:baseline;gap:var(--space-8);font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
 .chat-activity-icon{flex-shrink:0;width:1.1em;text-align:center;color:var(--color-text-tertiary)}
 .chat-activity-label{color:var(--color-text-primary)}
 .chat-activity-detail{color:var(--color-text-tertiary)}
 .chat-activity.tone-good .chat-activity-icon{color:var(--color-success)}
 .chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
 .chat-activity.tone-bad .chat-activity-icon{color:var(--color-danger)}
-.chat-activity.kind-round{font-family:inherit;font-size:13px}
+.chat-activity.kind-round{font-family:inherit;font-size:var(--text-base)}
 .chat-activity.kind-round .chat-activity-label{font-weight:600}
 .chat-activity.kind-warning .chat-activity-label,.chat-activity.kind-error .chat-activity-label{color:var(--color-danger)}
 .chat-activity.kind-merge .chat-activity-label{color:var(--color-accent)}
@@ -363,22 +433,22 @@
 
 /* Inline decision card — the origin-gate HITL surface, folded in from the
    removed OriginGateModal. Buttons fire existing /commands verbs. */
-.chat-msg.chat-decision{border:1px solid var(--color-accent);box-shadow:0 0 14px var(--color-accent-glow);display:flex;flex-direction:column;gap:10px;max-width:100%;width:100%;align-self:stretch}
-.chat-decision-title{font-weight:600;font-size:14px;color:var(--color-text-primary)}
-.chat-decision-lead{margin:0;font-size:13px;line-height:1.5;color:var(--color-text-secondary)}
-.chat-decision-verdict{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:13px}
+.chat-msg.chat-decision{border:1px solid var(--color-accent);box-shadow:0 0 14px var(--color-accent-glow);display:flex;flex-direction:column;gap:var(--space-10);max-width:100%;width:100%;align-self:stretch}
+.chat-decision-title{font-weight:600;font-size:var(--text-md);color:var(--color-text-primary)}
+.chat-decision-lead{margin:0;font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary)}
+.chat-decision-verdict{display:grid;grid-template-columns:auto 1fr;gap:var(--space-6) var(--space-16);margin:0;font-size:var(--text-base)}
 .chat-decision-verdict>div{display:contents}
 .chat-decision-verdict dt{color:var(--color-text-secondary)}
 .chat-decision-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text-primary)}
-.chat-decision-reasons{margin:0;padding-left:18px;font-size:12px;color:var(--color-text-secondary);line-height:1.5}
-.chat-decision-actions{display:flex;flex-wrap:wrap;gap:8px}
-.chat-decision-btn{padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}
+.chat-decision-reasons{margin:0;padding-left:18px;font-size:var(--text-sm);color:var(--color-text-secondary);line-height:1.5}
+.chat-decision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8)}
+.chat-decision-btn{padding:var(--space-6) var(--space-14);border-radius:6px;font-size:var(--text-base);font-weight:500;cursor:pointer;border:1px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}
 .chat-decision-btn:hover:not(:disabled){border-color:var(--color-accent)}
 .chat-decision-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .chat-decision-btn:disabled{opacity:.55;cursor:not-allowed}
 .chat-decision-btn.btn-primary{border-color:var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent)}
 .chat-decision-btn.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger)}
-.chat-decision-err{margin:0;font-size:12px;color:var(--color-danger)}
+.chat-decision-err{margin:0;font-size:var(--text-sm);color:var(--color-danger)}
 
 /* ── The run card ─────────────────────────────────────────────────
    THREE boxes, not one compartment: stats and config side by side, the
@@ -399,12 +469,12 @@
    lines in a chat thread, and three of them used to go to headings that named
    what the content already showed. `flex-wrap` stacks them again when the
    thread is too narrow to hold both — no breakpoint of its own. */
-.run-card{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;width:100%;align-self:stretch}
+.run-card{display:flex;flex-direction:row;flex-wrap:wrap;gap:var(--space-8);width:100%;align-self:stretch}
 .run-card.is-live{position:sticky;bottom:0;z-index:2;max-height:min(48vh,460px);overflow:auto;padding-top:6px}
 /* The SECONDARY surface, not the primary one: `.chat-panel` is primary, so a
    primary box was a card the reader could not see the edges of. This is the
    same surface the thread's own AI messages sit on. */
-.run-box{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+.run-box{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:var(--space-6);padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
 .run-card.is-live .run-box{border-color:rgba(var(--color-accent-rgb),0.45)}
 /* Opening a disclosure takes the whole row back. Half a card is the right size
    for a summary and the wrong size for a prompt or a 400-row table, and the
@@ -412,51 +482,51 @@
 .run-box:has(.run-diff[open]),.run-box:has(.hsp-full){flex-basis:100%}
 /* The head is ONE row and stays one — the picker and the copy button hold their
    width, the numbers give theirs up first. */
-.run-box-head{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-height:20px}
+.run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:nowrap;min-height:20px}
 .run-box-head>*{flex:0 0 auto}
-.run-box-note{margin:0;font-size:12px;color:var(--color-text-tertiary)}
+.run-box-note{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
 
 /* The headline — cost, lift, and the accuracy pair, on one line. `spent` sits
    in the same row as the figure so the box needs no label above it. */
-.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:5px;flex-wrap:nowrap;min-width:0;overflow:hidden;font-size:11.5px;color:var(--color-text-secondary)}
-.run-headline strong{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--color-text-primary)}
-.run-headline-unit{font-size:11px;color:var(--color-text-tertiary)}
+.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;overflow:hidden;font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-headline strong{font-family:var(--font-mono);font-size:var(--text-md);font-weight:600;color:var(--color-text-primary)}
+.run-headline-unit{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .run-headline-sep{color:var(--color-border)}
 .run-headline-lift,.run-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
 .run-headline-was{color:var(--color-text-tertiary)}
 /* The cut-short panel size. Quietest weight the card has — a stopped arm is the
    normal outcome of elimination, so a badge for it would shout on most rounds. */
-.run-headline-cut{font-size:10.5px;color:var(--color-text-tertiary)}
+.run-headline-cut{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 /* Hover/focus targets advertise themselves with a dotted rule, NOT `cursor:help`
    — the OS arrow-with-question-mark reads as an error state, and the native
    `title` delay it came with made the card look broken before it appeared. */
 .run-headline-acc,.run-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
 .run-headline-acc:focus-visible,.run-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
 .run-lift-card{max-width:280px}
-.run-lift-theta{margin:0 0 3px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary)}
-.run-lift-note{margin:0;font-size:11.5px;line-height:1.45;color:var(--color-text-tertiary)}
+.run-lift-theta{margin:0 0 3px;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
+.run-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-tertiary)}
 .run-lift-note+.run-lift-note{margin-top:4px}
 
 /* Config — the summary line IS the summary: which fields moved, named. The
    full node surface is the disclosure body. */
 .run-diff>summary{cursor:pointer;display:flex;flex-direction:column;gap:2px;list-style:revert}
 .run-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
-.run-diff-label{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary)}
+.run-diff-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 /* The change summary: one group per dict, the glyph as its key. Flat, it ran
    `changed: A · B · C · llm_only.output_schema` — every node name repeated in
    front of every param, on a line already the widest in the box. */
-.run-diff-changes{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;line-height:1.45;color:var(--color-text-primary)}
-.run-diff-group{display:flex;align-items:baseline;gap:4px;min-width:0}
-.run-diff-key{flex:0 0 auto;font-size:10px;color:var(--color-text-tertiary)}
-.run-diff-node{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary)}
-.run-diff-verdict{font-size:11.5px;line-height:1.4;color:var(--color-text-tertiary)}
+.run-diff-changes{display:flex;flex-wrap:wrap;gap:3px var(--space-10);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-primary)}
+.run-diff-group{display:flex;align-items:baseline;gap:var(--space-4);min-width:0}
+.run-diff-key{flex:0 0 auto;font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.run-diff-node{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.run-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
 .run-diff[open]>summary{margin-bottom:6px}
 
 /* Flipped rows — which samples changed hands, BY ID. Direction reads from
    the label ("now right" / "now wrong"), never from colour alone. ONE row that
    wraps, not a stack: the four segments are one partition, and stacked they read
    as four independent claims. */
-.run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 5px;font-size:11.5px;line-height:1.6}
+.run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6}
 .run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-tertiary)}
 .run-flip-sep{color:var(--color-border)}
 .run-flip-line{margin:0;color:var(--color-text-secondary)}
@@ -467,8 +537,8 @@
    wider than every other line in the box; here they cost nothing until asked
    for, and carry the evidence `title` could only whisper. */
 .run-flip-card{max-width:340px;max-height:280px;overflow:hidden}
-.run-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:11px}
-.run-flip-list li{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.run-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--text-xs)}
+.run-flip-list li{display:flex;align-items:baseline;gap:var(--space-6);white-space:nowrap}
 .run-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}
 .run-flip-was{font-family:var(--font-mono);color:var(--color-text-tertiary);text-decoration:line-through}
 .run-flip-now{font-family:var(--font-mono);color:var(--color-text-primary)}
@@ -480,21 +550,21 @@
    columns instead of three stacked blocks is what keeps the whole box three
    lines tall; `flex-wrap` folds the spread underneath on a narrow thread, so
    this needs no breakpoint of its own. */
-.hsp{display:flex;flex-direction:column;gap:4px}
-.hsp-note{margin:0;font-size:12px;color:var(--color-text-tertiary)}
-.hsp-walk{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+.hsp{display:flex;flex-direction:column;gap:var(--space-4)}
+.hsp-note{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.hsp-walk{display:flex;align-items:stretch;gap:var(--space-10);flex-wrap:wrap}
 
 /* The gutter IS the axis: ▲ past, ▼ future, and the hairline between them says
    the three rows are a window sliding along something longer. */
 .hsp-nav{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:1px}
 .hsp-nav-line{flex:1 1 auto;width:1px;background:var(--color-border);min-height:4px}
-.hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:9px;line-height:1;color:var(--color-text-tertiary);cursor:pointer}
+.hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-text-tertiary);cursor:pointer}
 .hsp-nav-btn:hover:not(:disabled){color:var(--color-accent)}
 .hsp-nav-btn:disabled{opacity:.28;cursor:default}
 .hsp-nav-btn:focus-visible,.hsp-nav-home:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 /* Back to the head of the walk — present only while the window is parked away
    from it, so it never reads as a control with nothing to do. */
-.hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:8px;line-height:1;color:var(--color-accent);cursor:pointer}
+.hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-accent);cursor:pointer}
 
 /* REAL rows: one bordered block, banded, with a rule between each. Three
    floating lines read as a fragment of a paragraph; this reads as a table. */
@@ -502,7 +572,7 @@
 /* ONE line per row, always. No query text lives here — a JustLogic row is 1,500
    characters of premises, and printing it rebuilds the wall this box replaces. The
    text is on `title`; the full table is one click below. */
-.hsp-row{display:flex;align-items:baseline;gap:8px;padding:1px 6px;font-size:11.5px;min-width:0;line-height:1.7;white-space:nowrap}
+.hsp-row{display:flex;align-items:baseline;gap:var(--space-8);padding:1px var(--space-6);font-size:var(--text-xs);min-width:0;line-height:1.7;white-space:nowrap}
 .hsp-row+.hsp-row{border-top:1px solid var(--color-border)}
 .hsp-row:nth-child(even){background:var(--color-background-tint)}
 .hsp-row.is-now{background:rgba(var(--color-accent-rgb),0.10)}
@@ -513,34 +583,34 @@
 /* Colour by the SAME bucket the stacked counts use, so the column beside these
    rows reads as their legend. It rides the rate, which states the fact in
    words either way — never colour alone. */
-.hsp-rate{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);flex:0 0 auto}
+.hsp-rate{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);flex:0 0 auto}
 .hsp-rate.is-never{color:var(--color-danger)}
 .hsp-rate.is-partly{color:var(--color-warn)}
 .hsp-rate.is-always{color:var(--color-success)}
 /* The state label, and it carries the row's meaning — the marks are decoration
    over it, never the only carrier (no colour-alone state). */
-.hsp-tag{margin-left:auto;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);flex:0 0 auto}
+.hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);flex:0 0 auto}
 .hsp-row.is-now .hsp-tag{color:var(--color-accent)}
 
 /* The spread summarises the roster, so it IS the control that opens the roster
    — a separate "show all" line said the same thing and cost a row. Its own box
    beside the rows: same three lines, a different question, so a shared frame
    would have read as three more rows. */
-.hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px 8px;border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);font:inherit;text-align:left;cursor:pointer}
+.hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);font:inherit;text-align:left;cursor:pointer}
 .hsp-spread:hover{border-color:var(--color-accent)}
 .hsp-spread:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-.hsp-b{display:flex;align-items:baseline;gap:5px;font-size:11px;line-height:1.7;color:var(--color-text-tertiary)}
+.hsp-b{display:flex;align-items:baseline;gap:var(--space-4);font-size:var(--text-xs);line-height:1.7;color:var(--color-text-tertiary)}
 .hsp-b strong{font-family:var(--font-mono);color:var(--color-text-primary)}
 .hsp-dot{width:6px;height:6px;border-radius:50%;align-self:center;flex:0 0 auto}
 .hsp-b.is-never .hsp-dot{background:var(--color-danger)}
 .hsp-b.is-partly .hsp-dot{background:var(--color-warn)}
 .hsp-b.is-always .hsp-dot{background:var(--color-success)}
-.hsp-of{font-size:11px;color:var(--color-text-tertiary)}
+.hsp-of{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .hsp-full{margin-top:4px}
 
 /* The frozen item — a finished run, left in the log. Deliberately plain:
    it is a message, not a pane, and nothing in it can update. */
-.chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:4px}
-.run-summary-title{font-size:12.5px;font-weight:600;color:var(--color-text-primary)}
-.run-summary-line{font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-secondary)}
-.run-summary-changes{margin:0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}
+.chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}
+.run-summary-title{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
+.run-summary-line{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-summary-changes{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

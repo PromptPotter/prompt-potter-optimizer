@@ -9,10 +9,10 @@
 .bnode {
   position: relative;
   max-width: 560px;
-  margin: 14px auto 0;
+  margin: var(--space-14) auto 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* The observe searchpoint selector (origin/live/historical) — sits ABOVE the
@@ -20,13 +20,13 @@
    column. It selects WHICH spec the box shows; it is not part of the spec. */
 .observe-toggle {
   max-width: 560px;
-  margin: 14px auto 0;
+  margin: var(--space-14) auto 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 .observe-toggle-label {
-  font-size: 11px;
+  font-size:var(--text-xs);
   color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -37,8 +37,8 @@
 .bnode-kind {
   display: inline-block;
   margin-right: 6px;
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px var(--space-6);
+  font-size:var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border: 0.5px solid var(--color-border);
@@ -47,8 +47,8 @@
   vertical-align: middle;
 }
 .bnode-role {
-  margin: 0 0 4px;
-  font-size: 12px;
+  margin: 0 0 var(--space-4);
+  font-size:var(--text-sm);
   color: var(--color-text-tertiary);
 }
 
@@ -58,17 +58,17 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   list-style: none;
-  margin: 8px auto 0;
+  margin: var(--space-8) auto 0;
   padding: 0;
   max-width: 560px;
-  font-size: 12px;
+  font-size:var(--text-sm);
 }
 .pipeline-node-list li {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 .pipeline-node-list button {
   font: inherit;
@@ -76,7 +76,7 @@
   background: none;
   border: 0.5px solid var(--color-border);
   border-radius: var(--border-radius-sm);
-  padding: 2px 8px;
+  padding: 2px var(--space-8);
   color: inherit;
 }
 .pipeline-node-list button[aria-pressed="true"] {
@@ -88,19 +88,19 @@
 /* Lock glyph on a collapsed node toggle — mirrors the search-space config editor
    lock state shown when the node is expanded. Small, leading the label. */
 .pipeline-node-list .pnl-lock {
-  font-size: 10px;
+  font-size:var(--text-xs);
   line-height: 1;
   margin-right: 2px;
 }
 
 /* Close affordance grouped with the sub-note at the right of the reused
    `.setup-preview-head` (title left, sub + × right). */
-.setup-preview-side { display: inline-flex; align-items: center; gap: 8px; }
+.setup-preview-side { display: inline-flex; align-items: center; gap: var(--space-8); }
 .bnode-close {
   background: none;
   border: 0;
   color: var(--color-text-tertiary);
-  font-size: 18px;
+  font-size:var(--text-2xl);
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
