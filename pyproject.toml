@@ -45,7 +45,12 @@ stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
 ]
 benchmarks = [
-    "datasets>=2.14.0", # why kept: HuggingFace BBEH loader (M11 benchmark track)
+    # why kept: HuggingFace loader for the public benchmark banks (BBEH / GSM8K / AIME /
+    # JustLogic). OPT-IN ONLY, and deliberately absent from `all`: it drags a large transitive
+    # surface (pyarrow, fsspec, aiohttp, huggingface-hub) from a vendor whose attack surface is
+    # not ours to audit, and nothing on the default path imports it — the four call sites are
+    # lazy, and a fetched bank is cached to `benchmark-rows/` so a run only needs it ONCE.
+    "datasets>=2.14.0",
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
@@ -59,10 +64,12 @@ anthropic = [
     "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
 ]
 all = [
+    # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
+    # what a developer installs by default, so anything listed becomes attack surface nobody
+    # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
     "jupyterlab>=4.0",
     "ipython>=8.0",
     "scipy>=1.12.0",
-    "datasets>=2.14.0",
     "langfuse>=2.0.0",
     "mlflow>=3.1.0",
     "anthropic>=0.18.0",
@@ -254,6 +261,10 @@ DEP002 = [
     "mypy",
     "deptry",
     "types-PyYAML",      # stub-only package: consumed by mypy, never imported
+    # Reached only through `importlib.import_module` (`datasets/loaders.py::hf_load_dataset`),
+    # which a static scan cannot see — the indirection is load-bearing, because a literal
+    # `from datasets import …` resolves to this repo's own top-level `datasets/` directory.
+    "datasets",
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).

@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-`[all]` bundles every optional feature (Jupyter, benchmarks, observability, Excel loaders, etc.). For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+`[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
@@ -76,6 +76,7 @@ pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace dataset
 pip install -e ".[observability]"  # Langfuse cloud tracing
 pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
 pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
-pip install -e ".[all]"            # Everything except [dev]
-pip install -e ".[all,dev]"        # Everything — recommended for contributors
+pip install -e ".[all]"            # Every extra except [dev] and [benchmarks]
+pip install -e ".[all,dev]"        # Recommended for contributors
+pip install -e ".[all,dev,benchmarks]"  # …plus the opt-in public-bank loader
 ```

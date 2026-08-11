@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 import random
 import re
+import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
@@ -20,6 +23,40 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
+
+
+def hf_load_dataset() -> Any:
+    # HuggingFace `load_dataset`, imported past this repo's OWN top-level `datasets/`.
+    # That directory has no `__init__.py`, so it is a NAMESPACE package — and `python -m
+    # promptpotter` puts the cwd on `sys.path[0]`, which is the documented way to run this. From
+    # the repo root it therefore beats the installed library and every loader below dies on
+    # `cannot import name 'load_dataset' from 'datasets' (unknown location)`. A warm store hides
+    # it, because rows are already cached under `benchmark-rows/`; a FRESH CLONE hits it on its
+    # first fetch. Renaming the data directory is the other fix and costs far more — it is a
+    # first-class layout named in `datasets/CLAUDE.md` and in every dataset path.
+    #
+    # Without this the shadow also SWALLOWS the honest error: a missing library raises
+    # `ImportError: cannot import name` rather than `ModuleNotFoundError`, so the friendly
+    # install hint below never fires and the caller sees a namespace riddle instead. `datasets`
+    # is opt-in (`.[benchmarks]`, deliberately not in `all`), so absent is the NORMAL case.
+    shadow = sys.modules.get("datasets")
+    if shadow is not None and getattr(shadow, "__file__", None) is None:
+        del sys.modules["datasets"]
+    saved = list(sys.path)
+    try:
+        sys.path[:] = [
+            p
+            for p in saved
+            if not (d := Path(p or ".") / "datasets").is_dir() or (d / "__init__.py").is_file()
+        ]
+        return importlib.import_module("datasets").load_dataset
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "The 'datasets' library is required for this benchmark. "
+            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
+        ) from None
+    finally:
+        sys.path[:] = saved
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
@@ -39,13 +76,7 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
 
 def load_gsm8k(split: str = "train") -> list[Sample]:
     """Load GSM8K from HuggingFace. Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``."""
-    try:
-        from datasets import load_dataset
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "The 'datasets' library is required for GSM8K. "
-            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
-        ) from None
+    load_dataset = hf_load_dataset()
 
     ds = load_dataset("openai/gsm8k", "main", split=split)
     samples: list[Sample] = []
@@ -60,13 +91,7 @@ def load_gsm8k(split: str = "train") -> list[Sample]:
 
 def load_aime_2025() -> list[Sample]:
     """Load AIME 2025 from HuggingFace. Requires ``datasets``: ``pip install -e ".[benchmarks]"``."""
-    try:
-        from datasets import load_dataset
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "The 'datasets' library is required for AIME 2025. "
-            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
-        ) from None
+    load_dataset = hf_load_dataset()
 
     ds = load_dataset("MathArena/aime_2025", split="train")
     samples: list[Sample] = [
@@ -83,13 +108,7 @@ def load_aime_2025() -> list[Sample]:
 
 def load_bbeh() -> list[Sample]:
     """Load BBEH mini (460 examples, 23 tasks). No native per-sample id — assigned sequentially after flattening; per-task metadata dropped."""
-    try:
-        from datasets import load_dataset
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "The 'datasets' library is required for BBEH. "
-            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
-        ) from None
+    load_dataset = hf_load_dataset()
 
     ds = load_dataset("BBEH/bbeh", split="train")
     samples: list[Sample] = []
@@ -136,13 +155,7 @@ def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
 def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sample]:
     if split not in ("train", "test"):
         raise ValueError(f"JustLogic split must be 'train' or 'test', got {split!r}")
-    try:
-        from datasets import load_dataset
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "The 'datasets' library is required for JustLogic. "
-            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
-        ) from None
+    load_dataset = hf_load_dataset()
     from collections import defaultdict
 
     ds = load_dataset("michaelchenkj/JustLogic", split="train")
