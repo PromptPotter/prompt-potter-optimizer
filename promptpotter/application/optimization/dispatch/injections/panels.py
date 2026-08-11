@@ -37,6 +37,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
+from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
@@ -361,11 +362,17 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
-def _proxy_lift(r: dict[str, Any]) -> float | None:
-    """The L4 discriminator: only the ``promptpotter`` connector stamps it. A zero-lift seed — the
-    one an edit most needs to see — arrives as int 0, so accept any real number but not bool."""
-    d = (r.get("pipeline_data") or {}).get("mean_round_delta")
-    return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+# A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —
+# the two-sided ~95% bound, and the same bar `round_not_separable` applies one level up, so this
+# panel cannot rank a cell as beaten that the loop itself would refuse to call separable.
+_CELL_SEPARATION_SIGMAS = 2.0
+
+
+def _pd_number(r: dict[str, Any], key: str) -> float | None:
+    """A real number off ``pipeline_data``. A zero-lift seed — the one an edit most needs to see —
+    arrives as int 0, so accept any real number but not bool."""
+    v = (r.get("pipeline_data") or {}).get(key)
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
 
 
 def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
@@ -374,9 +381,25 @@ def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
     return [
         (lift, r)
         for r in b.trajectory_results
-        if (lift := _proxy_lift(r)) is not None
+        if (lift := _pd_number(r, OUTER_PROXY_KEYS[0])) is not None
         and (r.get("pipeline_data") or {}).get("reasoning_trace")
     ]
+
+
+def _paired_cell(
+    lift: float, r: dict[str, Any], origin: dict[str, Any] | None
+) -> tuple[float, float | None]:
+    """This cell's ``(candidate − origin)`` difference and the error bar on it."""
+    # No bar when either arm went unpriced — a FLOORED cell adopts no levels to have an SE over,
+    # and it is the one cell whose badness is not in question, so it ranks on its value alone.
+    base = _pd_number(origin, OUTER_PROXY_KEYS[0]) if origin else None
+    if origin is None or base is None:
+        return (lift, None)
+    se, base_se = _pd_number(r, ADOPTED_LEVEL_SE_KEY), _pd_number(origin, ADOPTED_LEVEL_SE_KEY)
+    # Quadrature, correct for the reason `panel_precision` gives: each arm carries its OWN half,
+    # the shared origin LEVEL already cancelled by the subtraction beside it.
+    bar = (se**2 + base_se**2) ** 0.5 if se is not None and base_se is not None else None
+    return (lift - base, bar)
 
 
 @signal(
@@ -388,37 +411,47 @@ def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
     citable=True,
 )
 def _r_inner_narratives(b: InjectionBundle) -> str:
-    """Each cell's delta is shown BESIDE the origin's own delta on that seed — alone it is mostly
-    the seed. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
-    origin_lift = {
-        sid: lift
-        for r in b.origin_per_sample
-        if (sid := r.get("sample_id")) is not None and (lift := _proxy_lift(r)) is not None
-    }
+    """Each cell as its PAIRED difference from the origin on the same seed, ranked worst-CONFIDENT
+    first. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
+    # The rank decides which cells spend their FULL narrative here, so a rank read off the point
+    # estimate alone spent the budget on whichever cell noise put first: the measured panel held
+    # `0.000 ±0.336` and `+0.257 ±0.393`, gaps narrower than either bar. Ranking on the upper bound
+    # keeps a wide cell out of the lead, and when nothing clears its own bar NO cell earns the
+    # 4x trace cap — there is no evidence to amplify, and the header says so instead of pretending.
+    origin = {sid: r for r in b.origin_per_sample if (sid := r.get("sample_id")) is not None}
     scored = _inner_narrated(b)
     if not scored:
         return ""
-    scored.sort(key=lambda t: t[0])
+    # `upper` — how bad the cell is AFTER its own uncertainty — is computed once and carried, so
+    # the rank key and the separation test cannot come apart.
+    cells = []
+    for lift, r in scored:
+        d, bar = _paired_cell(lift, r, origin.get(r.get("sample_id")))
+        cells.append((d + _CELL_SEPARATION_SIGMAS * (bar or 0.0), d, bar, r))
+    cells.sort(key=lambda c: c[0])
+    n_worse = sum(1 for c in cells if c[0] < 0.0)
     header = (
-        f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest first — each is "
-        "one outer sample. D is that inner run's lift; `origin` is what the SAME seed scored "
-        "under the unedited optimizer prompts, so a low D beside a low origin is a hard seed, not "
-        "your edit. Equal values mean the incumbent on that seed still IS the origin. The "
-        "weakest carry their full story; ground every candidate in a specific observation):"
+        f"INNER RUN NARRATIVES ({len(cells)} inner campaigns this round, one per outer sample. "
+        "Each number is that seed's lift MINUS what the same seed scored under the unedited "
+        "optimizer prompts, so the seed's own difficulty is already subtracted; ± is the error "
+        "bar on that difference)"
+    ) + (
+        f". The first {n_worse} are worse than the origin by more than their own error bar — those "
+        "are the ones with something to learn from; ground every candidate in a specific "
+        "observation from one of them:"
+        if n_worse
+        else ". NOT ONE cell separates from the origin beyond its own error bar, so their ORDER "
+        "here carries no information — do not ground an edit in a cell's rank. Read the "
+        "narratives for what the inner loop actually did:"
     )
+    full_cells = min(n_worse, INNER_NARRATIVE_FULL_CELLS)
     sections = [header]
-    for i, (delta, r) in enumerate(scored):
-        pd = r.get("pipeline_data") or {}
+    for i, (_upper, d, bar, r) in enumerate(cells):
         label = str(r.get("query") or r.get("sample_id") or "inner")[:80]
-        base = origin_lift.get(r.get("sample_id"))
-        mark = f"D{delta:+.3f}" + (f" origin{base:+.3f}" if base is not None else "")
-        trace = str(pd.get("reasoning_trace") or "")
-        body = (
-            _head_at_line(trace, INNER_NARRATIVE_CAP)
-            if i < INNER_NARRATIVE_FULL_CELLS
-            else _head_at_line(trace, INNER_NARRATIVE_SUMMARY_CAP)
-        )
-        sections.append(fence_untrusted(f"[{label}] {mark}\n{body}"))
+        mark = f"{d:+.3f}" + (f" ±{bar:.3f}" if bar is not None else " (unpriced)")
+        trace = str((r.get("pipeline_data") or {}).get("reasoning_trace") or "")
+        cap = INNER_NARRATIVE_CAP if i < full_cells else INNER_NARRATIVE_SUMMARY_CAP
+        sections.append(fence_untrusted(f"[{label}] {mark}\n{_head_at_line(trace, cap)}"))
     return "\n\n".join(sections)
 
 

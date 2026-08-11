@@ -335,7 +335,12 @@ LEDGER_BASELINE = {
     # worth naming: naming BOTH keys at the call site (`cell_values(rows, key)`) is what actually
     # fixes the double-count above, so the key came back as an honest parameter rather than as a
     # second reader — the wrapper that hid it cost more surface than the parameter it saved.
-    "param_decls": 4115,
+    # 4115 -> 4119 (2026-08-11): `inner_narratives` stops teaching L1 from a noise ordering.
+    # `_proxy_lift` (1) becomes `_pd_number` (2) — it spelled `mean_round_delta` as a literal, a
+    # FOURTH copy of a key `l4/proxies.py` says has one — plus `_paired_cell` (3), which turns two
+    # numbers the prompt asked the model to subtract into the one difference it actually wanted,
+    # and the error bar that says whether the difference is real.
+    "param_decls": 4119,
     # 4 -> 7 -> 4 (2026-08-11, same day, and the round trip IS the lesson). The three were
     # made lax mid-arc under a real rule — a model read back out of an append-only ledger or a
     # projection FILE punishes a removed field SILENTLY (`scan_ledger_round_closes` skips the
@@ -515,7 +520,10 @@ LEDGER_BASELINE = {
     # replacements plus the not-separable warning cost. The new prose went to comments, not
     # docstrings — the sweep's own ≤2-line rule applied to the pass that wrote it, which is the
     # only way that rule stays true.
-    "docstring_lines": 3689,
+    #
+    # 3689 -> 3690 (2026-08-11): one line, on `_paired_cell` — the panel's rank key now decides
+    # which cells spend the 4x trace cap, so what it returns had to be sayable in a sentence.
+    "docstring_lines": 3690,
     "prompt_string_fields": 6,
     "injections": 25,
     "escalation_rules": 6,

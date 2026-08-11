@@ -3329,6 +3329,97 @@ def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
     assert not fired
 
 
+def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
+    # This panel's ORDER decides which inner campaigns spend the 4x narrative cap in the outer
+    # `l1_generate` prompt, and the prompt tells the model to ground its next candidate in one of
+    # them. Ranked on the point estimate alone that order is a coin flip — the measured panel held
+    # `0.000 ±0.336` beside `+0.257 ±0.393`, gaps narrower than either bar — and the prompt asserts
+    # it is real. SILENT in every direction: the prompt renders, the round scores, the campaign
+    # completes, and the only symptom is an optimizer that learns nothing over many paid rounds.
+    from promptpotter.application.optimization.dispatch.bundle import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDiagnostics,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.injections.panels import (
+        _r_inner_narratives,
+    )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+
+    # Long enough that the summary cap (160) truncates and the full cap (1150) does not — the
+    # difference between the two IS the budget this panel spends, so it must be visible here.
+    trace = "\n".join(
+        f"round {i}: the inner loop tried a thing and it did not land" for i in range(12)
+    )
+
+    def cell(sid: int, delta: float, se: float | None) -> dict:
+        pd: dict = {"mean_round_delta": delta, "reasoning_trace": trace}
+        if se is not None:
+            pd["mean_adopted_level_se"] = se
+        return {"sample_id": sid, "query": f"seed-{sid}", "pipeline_data": pd}
+
+    def render(rows: list[dict], origin: list[dict]) -> str:
+        return _r_inner_narratives(
+            InjectionBundle(
+                opt_sp=OptSearchPoint(),
+                pipeline_schema=None,
+                cycle_slice=CycleSlice(
+                    round_num=1,
+                    current_accuracy=0.5,
+                    best_accuracy=0.5,
+                    best_round=0,
+                    l1_stall_count=0,
+                    l2_round=0,
+                    l2_stall_count=0,
+                    l3_round=0,
+                    l3_stall_count=0,
+                    exploration_budget="tight",
+                ),
+                digest=RoundDigest(
+                    diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None
+                ),
+                axes=None,
+                origin_per_sample=origin,
+                trajectory_results=rows,
+            )
+        )
+
+    origin = [cell(1, 0.0, 0.02), cell(2, 0.0, 0.02), cell(3, 0.0, 0.02)]
+
+    # Seed 1 is the worst POINT (-0.90) and knows nothing (±0.80); seed 2 is milder (-0.30) and
+    # measured sharply. Only seed 2 is confidently below the origin, so it must lead — and the
+    # panel must not hand seed 1 the full narrative on the strength of a number it cannot support.
+    out = render([cell(1, -0.90, 0.80), cell(2, -0.30, 0.05), cell(3, 0.10, 0.05)], origin)
+    assert out.index("seed-2") < out.index("seed-1"), "a wide cell must not lead a tight one"
+    assert "The first 1 are worse than the origin" in out
+    # Exactly the ONE separated cell buys the full narrative; the rest are summarised.
+    assert out.count("[…truncated]") == 2
+
+    # The subtraction is SERVED, not asked for: the prompt used to print the candidate's lift
+    # beside the origin's and explain how to difference them, which is arithmetic the model had to
+    # get right before the evidence meant anything.
+    # ±0.054 = sqrt(0.05² + 0.02²) — BOTH arms' halves in quadrature, not the candidate's alone.
+    assert "-0.300 ±0.054" in out and "+0.100 ±0.054" in out
+
+    # Nothing separates ⇒ the order carries no information, and the panel says so instead of
+    # ranking anyway. No cell earns the full trace cap: there is no evidence to amplify.
+    flat = render([cell(1, 0.00, 0.34), cell(2, 0.26, 0.39), cell(3, 0.10, 0.35)], origin)
+    assert "NOT ONE cell separates" in flat
+    assert "worse than the origin" not in flat
+    # And NO cell buys the 4x trace cap — spending it here amplifies whichever cell noise ranked
+    # first, which is the whole defect. This is the token half of the fix; without it the panel
+    # still hands the model a coin-flip exemplar, just with an honest header above it.
+    assert flat.count("[…truncated]") == 3
+
+    # A FLOORED cell adopts no levels, so it carries no SE — and it is the one cell whose badness
+    # is not in question. It ranks on its value alone and leads, rather than being dropped for
+    # lacking a bar.
+    floored = render([cell(1, -1.00, None), cell(2, 0.10, 0.05)], origin)
+    assert floored.index("seed-1") < floored.index("seed-2")
+    assert "-1.000 (unpriced)" in floored
+
+
 def test_matched_origin_lift_drops_the_cell_that_measured_nothing() -> None:
     # An ERRORED cell measured nothing, and here "nothing" is not a low score: outer fitness
     # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the inner
