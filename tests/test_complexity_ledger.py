@@ -19,7 +19,7 @@ LEDGER_BASELINE = {
     "domain_any_maps": 77,
     "models_lax": 4,
     "prompt_string_fields": 6,
-    "injections": 25,
+    "injections": 26,
     "escalation_rules": 6,
     "claude_md": 7,
 }

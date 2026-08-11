@@ -192,6 +192,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "rare_hit_samples",
                 "critique",
                 "l1_overrides",
+                "l1_layout",
                 "task_context",
                 "l1_signal_catalogue",
                 "rebase_capability",
@@ -219,7 +220,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "archive_top_runs",
                 "rare_hit_samples",
                 "critique",
+                # Both levers' CURRENT state, side by side — an edit needs to read what it lands on,
+                # and only one of the two ever did.
                 "l1_overrides",
+                "l1_layout",
                 "l1_signal_catalogue",
                 "rebase_capability",
                 "terminate_capability",
@@ -300,12 +304,17 @@ def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
     bare ``dict[str, list[str]]``, which states neither half, and L2 answered the silence by inventing
     a shape: one fire keyed the map by slot with a ``<slot>_block`` value apiece, the next keyed it by
     SIGNAL with invented sub-selectors. ``validate_l1_layout`` rejected both, as it must — but it is
-    the backstop, and a vocabulary the emitter is never shown is not a vocabulary."""
+    the backstop, and a vocabulary the emitter is never shown is not a vocabulary.
+
+    The edit granularity below is the WHOLE contract, so both seams must mean it identically — one
+    sentence describing two different rules is worse than the silence it replaced."""
     return {
         "type": "object",
         "description": (
             "Which evidence panels fill each prompt slot. The keys below are the only addressable "
-            "slots and the enum the only signals this node may be given; omit a slot to leave it."
+            "slots and the enum the only signals this node may be given. Editing is per SLOT: a slot "
+            "you name replaces that slot's whole list, so carry over what you still want there; a "
+            "slot you omit keeps what it has, and `[]` empties one."
         ),
         "properties": {
             slot: {"type": "array", "items": {"type": "string", "enum": sorted(spec.possible)}}
@@ -315,23 +324,30 @@ def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
     }
 
 
-def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Coerce to an ``L1Layout``, or ``None`` for BOTH "no edit asked" (``{}``, the sanctioned
+def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
+    """Coerce an EDIT onto ``base``, or ``None`` for BOTH "no edit asked" (``{}``, the sanctioned
     omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the two off the
     raw input; this returns no outcome of its own, because a coercer that judged would be a second
     validator. It once claimed the validator surfaced the malformed case — which returning ``None``
-    is precisely what prevents, since the caller then skips validation altogether."""
+    is precisely what prevents, since the caller then skips validation altogether.
+
+    PARTIAL per-slot replacement — the semantics ``resolve_node_layout`` already gives L4's ``layout``
+    param, and now the only ones. The two seams ran OPPOSITE rules while sharing the one
+    ``layout_json_schema`` sentence, which stated L4's: an omitted slot was kept there and EMPTIED
+    here. So L2 wrote the slots it meant to change, omitted the rest expecting them kept, and lost
+    them. All 13 banked edits dropped 7-8 floor signals that way — ``mutation_memory`` on every one,
+    the panel whose absence is what lets round 4 re-propose round 1's measured failure."""
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None
-    sanitised: dict[str, list[str]] = {}
+    update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
         vals = raw_layout.get(slot)
         if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-            sanitised[slot] = list(vals)
-    if not sanitised:
+            update[slot] = list(vals)
+    if not update:
         return None
     try:
-        return L1Layout(**sanitised)
+        return base.model_copy(update=update, deep=True)
     except Exception:
         return None
 

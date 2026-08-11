@@ -106,7 +106,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     if raw.l1_overrides:
         changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
 
-    proposed_layout = coerce_l1_layout(raw.l1_layout)
+    proposed_layout = coerce_l1_layout(raw.l1_layout, base=opt_sp.memory.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
@@ -278,7 +278,7 @@ L3 = LayerStrategy(
 def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
     """Stamp a fork payload's L1-surface deltas on the OSP — the same shape L2 writes."""
     if payload.l1_layout is not None:
-        layout = coerce_l1_layout(payload.l1_layout)
+        layout = coerce_l1_layout(payload.l1_layout, base=opt_sp.memory.l1_layout)
         if layout is None:
             raise ValueError(
                 f"Fork payload l1_layout is unparseable: {payload.l1_layout!r}. "

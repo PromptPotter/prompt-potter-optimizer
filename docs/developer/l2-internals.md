@@ -41,7 +41,7 @@ All fields are optional. Missing fields leave the corresponding OSP state untouc
 `_parse_l2` (`escalation/firing.py`) constructs a `TransitionResult`:
 
 - `axis_targeted`: prose naming the axis this fire routed the failure cluster to — its evidence anchor, read by `l2_evidence_anchored`. Deliberately **not** a steering surface: L1 reads its axes from `axis_memory`, which is derived from measurement.
-- `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.memory.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.memory.wounds.l2_guard_breaches`.
+- `l1_layout`: **a per-slot EDIT, not a replacement layout** — `coerce_l1_layout(raw, base=opt_sp.memory.l1_layout)` applies the named slots and keeps the rest, the same rule `resolve_node_layout` gives L4's `layout` param. The two seams ran opposite rules while sharing one schema sentence, so L2 changed the slots it meant to and silently lost every signal it had not restated; `mutation_memory` went that way on all 13 banked edits, which is how a round-4 candidate re-proposes round 1's measured failure with nothing to object. Then validated against `validate_l1_layout(prior=opt_sp.memory.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.memory.wounds.l2_guard_breaches`.
 - `l1_overrides`: merged onto a `mutate()`-derived child OSP. Two known knobs today: `n_variants` (in-prompt directive to L1 via `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt).
 
 ## How L2 steers L1

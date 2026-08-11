@@ -127,12 +127,15 @@ def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
     and the signal enum now ride ``l1_layout``'s own schema (``layout_json_schema``), which states
     them AND is enforced where the provider honours it, so re-listing them here is a second copy of
     the half that is already covered. What no JSON Schema can express is a constraint ACROSS the four
-    arrays — that is this panel's whole job now, and the prompt's "all 5 mandatory placeholders"
-    could never resolve without it: a count is not a vocabulary."""
+    arrays — that is this panel's whole job now, and naming a COUNT of mandatory placeholders could
+    never resolve without it: a count is not a vocabulary. The constraint binds the MERGED layout,
+    which is what ``validate_l1_layout`` is handed — so it is a rule about what an edit may take
+    AWAY, and stating it as one an edit must satisfy by itself is what asked L2 to restate a layout
+    it was not changing."""
     mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory)
     return (
         "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "
         "enum; pick from there and invent nothing.\n"
-        "  The one rule it cannot state: each of these must appear under SOME slot, or the whole "
-        f"edit rolls back —\n    {', '.join(mandatory)}"
+        "  The one rule it cannot state: after your edit is applied, each of these must still sit "
+        f"under SOME slot, or the whole edit rolls back —\n    {', '.join(mandatory)}"
     )

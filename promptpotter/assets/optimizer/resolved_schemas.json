@@ -198,7 +198,7 @@
           },
           "l1_layout": {
             "additionalProperties": false,
-            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given; omit a slot to leave it.",
+            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given. Editing is per SLOT: a slot you name replaces that slot's whole list, so carry over what you still want there; a slot you omit keeps what it has, and `[]` empties one.",
             "properties": {
               "persona": {
                 "items": {
