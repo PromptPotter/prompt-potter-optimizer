@@ -20,22 +20,43 @@
         "additionalProperties": false,
         "properties": {
           "campaign_id": {
-            "description": "Active campaign id (pinned by the webapp)",
-            "title": "Campaign Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active campaign id (pinned by the webapp); null when no session is active.",
+            "title": "Campaign Id"
           },
           "cycle_id": {
-            "description": "Active cycle id within the campaign",
-            "title": "Cycle Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active cycle id within the campaign; null when no session is active.",
+            "title": "Cycle Id"
           },
           "session_id": {
-            "description": "Active session id",
-            "title": "Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active session id; null when no session is active.",
+            "title": "Session Id"
           },
           "tenant_id": {
-            "description": "Tenant the active session belongs to",
+            "description": "Tenant the pointer belongs to — the caller's own, always known",
             "title": "Tenant Id",
             "type": "string"
           }
@@ -5651,7 +5672,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "Return the caller-tenant's active-session pointer; 404 when none exists.\n\nPointers are per-tenant on disk; the API never reads another tenant's\nstate. Unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
+        "description": "The caller-tenant's active-session pointer, null-valued while nothing runs.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
         "operationId": "get_active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

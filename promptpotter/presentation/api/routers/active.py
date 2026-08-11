@@ -23,34 +23,42 @@ from promptpotter.presentation.api.deps import (
     StoresDep,
     decode_descend,
 )
-from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
 
 
 class ActiveSessionResponse(StrictModel):
-    tenant_id: str = Field(description="Tenant the active session belongs to")
-    session_id: str = Field(description="Active session id")
-    campaign_id: str = Field(description="Active campaign id (pinned by the webapp)")
-    cycle_id: str = Field(description="Active cycle id within the campaign")
+    tenant_id: str = Field(
+        description="Tenant the pointer belongs to — the caller's own, always known"
+    )
+    session_id: str | None = Field(description="Active session id; null when no session is active.")
+    campaign_id: str | None = Field(
+        description="Active campaign id (pinned by the webapp); null when no session is active."
+    )
+    cycle_id: str | None = Field(
+        description="Active cycle id within the campaign; null when no session is active."
+    )
 
 
 @active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
 def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
-    """Return the caller-tenant's active-session pointer; 404 when none exists.
+    """The caller-tenant's active-session pointer, null-valued while nothing runs.
 
-    Pointers are per-tenant on disk; the API never reads another tenant's
-    state. Unauthed callers are rejected by ``resolve_identity`` before
+    **"No active session" is a STEADY STATE, not a missing resource** — nothing has
+    been launched yet, or the workspace was cleared — so it answers 200 with null ids
+    exactly as :class:`CyclesResponse` does, and this route has no 404. The webapp
+    polls it every 2 s from boot, and a 404 here is wrong twice over: it minted a
+    warning per tick for the whole idle life of the server, and 404 is the client's
+    ``gone`` classification, which means "stop, this address is dead". Pointers are
+    per-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before
     ``StoresDep`` resolves.
     """
     session_id, campaign_id, cycle_id = read_active_pointer(stores.base_dir)
-    if not session_id:
-        raise NotFoundError("No active session")
     return ActiveSessionResponse(
         tenant_id=stores.tenant_id,
-        session_id=session_id,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
+        session_id=session_id or None,
+        campaign_id=campaign_id or None,
+        cycle_id=cycle_id or None,
     )
 
 

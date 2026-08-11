@@ -1908,6 +1908,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /sessions/active:
+    get:
+      operationId: getActiveSession
+      summary: The caller-tenant's active-session pointer.
+      description: |
+        The three ids naming what is running for this tenant, read off
+        `.workspace/active_session.json`. The webapp polls it on the live 2 s beat
+        so a CLI-minted cycle is followed promptly.
+
+        **There is no 404 on this route, deliberately.** "No active session" is a
+        steady state — nothing launched yet, or the workspace was cleared — so it
+        answers 200 with null ids, like `/cycles` does with
+        `active_campaign_id`/`active_cycle_id`. A 404 would classify as `gone` on the
+        client ("stop, this address is dead") and, on a route polled every 2 s from
+        boot, would log a warning per tick for the whole idle life of the server.
+      tags: [Sessions]
+      responses:
+        '200':
+          description: The active pointer; ids null when no session is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveSessionResponse'
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /machine-status:
     get:
       operationId: getMachineStatus
@@ -3498,6 +3527,27 @@ components:
           type: string
           maxLength: 4000
           description: The operator's turn. Omitted or empty on an unprompted turn.
+
+    ActiveSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, session_id, campaign_id, cycle_id]
+      description: |
+        What is running for this tenant. All three ids are null together while no
+        session is active — that state is served on a 200, never a 404.
+      properties:
+        tenant_id:
+          type: string
+          description: Tenant the pointer belongs to — the caller's own, always known.
+        session_id:
+          type: [string, 'null']
+          description: Active session id; null when no session is active.
+        campaign_id:
+          type: [string, 'null']
+          description: Active campaign id (pinned by the webapp); null when no session is active.
+        cycle_id:
+          type: [string, 'null']
+          description: Active cycle id within the campaign; null when no session is active.
 
     MachineHolder:
       type: object

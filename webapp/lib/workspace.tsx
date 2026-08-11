@@ -33,7 +33,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  ApiError,
   fetchActive,
   fetchCampaigns,
   fetchCycles,
@@ -282,17 +281,10 @@ export function WorkspaceProvider({
         // A 401 means the session died — re-probe /auth/me so the gate flips
         // unauthed and the loop stops instead of storming.
         onAuthError(err);
-        // A 404 is the "no active session" steady state (nothing running yet, or
-        // the workspace was just cleared) — a valid empty answer, NOT a reachable-
-        // ness failure. Clear the pointer and leave activeError null so it never
-        // masquerades as "Server unreachable" (AppShell's netDown reads this).
-        if (err instanceof ApiError && err.status === 404) {
-          setSessionId(null);
-          setActiveCycleId(null);
-          setActiveCampaignId(null);
-          setActiveError(null);
-          return;
-        }
+        // "No active session" is not an error and never reaches here: the route
+        // serves it as null ids on a 200 (`active.py::get_active_session`), so the
+        // success path below clears the pointer. Anything caught here is a real
+        // reachability failure and belongs in activeError.
         setActiveError((err as Error)?.message ?? "active session unavailable");
         return;
       }

@@ -612,14 +612,14 @@ export interface DatasetPipelineResponse {
 }
 
 export interface ActiveSessionResponse {
-  /** Tenant the active session belongs to */
+  /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
-  /** Active session id */
-  session_id: string;
-  /** Active campaign id (pinned by the webapp) */
-  campaign_id: string;
-  /** Active cycle id within the campaign */
-  cycle_id: string;
+  /** Active session id; null when no session is active. */
+  session_id: string | null;
+  /** Active campaign id (pinned by the webapp); null when no session is active. */
+  campaign_id: string | null;
+  /** Active cycle id within the campaign; null when no session is active. */
+  cycle_id: string | null;
 }
 
 /** The outer work-item an L4 inner cycle was spawned to measure. */
