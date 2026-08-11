@@ -15,30 +15,27 @@ collects everything else.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a
   contract, lean on it.
-- **Comments default to none.** Only non-obvious *why*. Never explain *what*
-  the code does — the names already do that.
-- **A docstring never restates the code as semantic text.** Two gates, both
-  must pass or it gets **deleted, not shortened**. (1) *Non-local* — cover the
-  docstring and read the name, signature, types, body, rest of file: is the
-  fact still missing, such that a reader would have to open **other files** to
-  learn it? Local dies, and that is the large majority — what it does,
-  `Args:`/`Returns:`, what it raises when the `raise` is right there. (2)
-  *Unowned* — a rule binding a **set** of symbols is layer documentation by
-  definition: route it to the layer's CLAUDE.md or `docs/` and delete the
-  docstring. What survives is the fact whose evidence lives in another
-  subsystem, compressed to **≤2 lines**, present tense. **An `__init__.py` gets
-  none at all** — the path already names the namespace, the module map is one
-  `ls`, and [`concept-map.md`](concept-map.md) is the single orientation index.
-  A `#` comment is for a non-obvious *why* **inside** the body, aimed at the
-  next editor — never a deleted docstring in a different costume.
+- **Prose in the source — docstring or `#` alike — never restates the code as
+  semantic text.** Two gates, both must pass or it gets **deleted, not
+  shortened**, and there is no route from a failed docstring to a surviving
+  comment. (1) *Non-local* — cover the prose and read the name, signature,
+  types, body, rest of file: is the fact still missing, such that a reader
+  would have to open **other files** to learn it? Local dies, and that is the
+  large majority — what the next line does, `Args:`/`Returns:`, what it raises
+  when the `raise` is right there. (2) *Unowned* — a rule binding a **set** of
+  symbols is layer documentation by definition: route it to the layer's
+  CLAUDE.md or `docs/` and delete it here. What survives is the fact whose
+  evidence lives in another subsystem, compressed to **≤2 lines**, present
+  tense — a prohibition, a trap, a sentinel's absence semantics, a tiebreak, a
+  security asymmetry. **An `__init__.py` gets none at all** — the path already
+  names the namespace, the module map is one `ls`, and
+  [`concept-map.md`](concept-map.md) is the single orientation index. A `#` is
+  for a non-obvious *why* **inside** a body, aimed at the next editor.
   **Past tense is a smell** — "used to", "its predecessor", a date, a
-  percentage, a run id: how the code got that way is git's job (commit body,
-  `CHANGELOG.md`). Enforced by the `docstring_lines` ledger row
-  (`promptpotter/diagnostics.py`), which counts the prose MASS, not the
-  violators — so a compliant docstring nobody needed costs exactly as much as
-  an essay growing back, and both cost a baseline edit and a written reason.
-- **Three carve-outs are product surfaces with their own budget**, not
-  documentation, because a generator reads them: `EXPORTED_MODELS` docstrings
+  percentage, a run id, an `A -> B` tally: how the code got that way is git's
+  job (commit body, `CHANGELOG.md`).
+- **Three carve-outs are product surfaces**, not documentation, because a
+  generator reads them: `EXPORTED_MODELS` docstrings
   (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`; only a
   CLASS docstring's line 1 ships, so it must be a complete sentence, while a
   `@computed_field` property ships WHOLE), FastAPI route docstrings, and the
@@ -140,7 +137,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 <surface-ledger>
 **The AI blind spot this guards against:** told to "simplify", an AI reaches for *additive-but-safe* moves — extract a helper, fold two copies into a `shared/` util, split a big file — each of which adds a module + an import line per call site, so the **total grows** while every commit says "refactor". The genuinely shrinking moves (delete a mechanism, re-inline a single-use module, drop a dead knob) are riskier, so they get skipped. Four rules counter the drift:
 
-1. **Lower the ledger.** Run `python -m promptpotter.diagnostics`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason there. `tests/test_complexity_ledger.py` is where that reason lands; its log of prior raises is the precedent. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
+1. **Lower the ledger.** Run `python -m promptpotter.diagnostics`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason in the COMMIT BODY — `git log -p tests/test_complexity_ledger.py` is the precedent, and the baseline file itself carries numbers only. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
 2. **Subtract a concept, don't relocate one.** Every simplification commit removes ≥1 *named* thing (module, class, public symbol, config field, code path). Moving code between files counts as zero.
 3. **Extraction threshold.** Default: a shared helper earns its place at **≥3 call sites**, or when it removes a concept; at ≤2 callers inline is usually right. A default, not a bar — extract below it when the shared thing is an invariant callers must not diverge from, and say that's why. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
 4. **Lock the wins** — enforced, not advised. The ratchet asserts EQUALITY, so a deletion that lowers a dimension goes red until you lower the baseline in the same commit. Asserting only `<=` re-pins on raises alone: an unrecorded drop becomes silent headroom for the next raise, the baselines drift loose from the package they claim to measure, and the pass that earned the win has no number to show for it. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.

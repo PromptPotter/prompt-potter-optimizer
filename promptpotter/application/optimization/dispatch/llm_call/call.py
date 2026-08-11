@@ -68,20 +68,14 @@ class LLMCallContext:
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
 
-# A single logical optimizer call may fire ONE schema-repair retry inside
-# chat() — a full second round-trip the client appends on schema-noncompliant
-# output (openai_compat.py, ~2x latency; capped at one). OPTIMIZER_CALL_DEADLINE_S
-# is the per-round-trip ceiling; the logical-call wall budgets for both so a
-# healthy-but-slow reasoning model that needs a repair doesn't false-halt (the
-# bug: initial ~150s + repair ~150s = ~300s tripped a flat 180s ceiling even
-# though neither round-trip hung).
+# One logical call may fire ONE schema-repair retry inside `chat()`. `OPTIMIZER_CALL_DEADLINE_S`
+# is the per-round-trip ceiling, so the logical-call wall must budget BOTH or a healthy-but-slow
+# reasoning model that needs a repair false-halts with neither round-trip having hung.
 _MAX_ROUND_TRIPS_PER_CALL = 2
 
-# Head-cap on the model's own thinking channel before it rides the ledger. A
-# reasoning model can emit tens of KB per call and this lands in every round file;
-# the head is where the approach is stated, so a cap keeps the audit twin readable
-# without losing the part an operator reads. Matches TermNorm's reasoning_trace_cap
-# so both thinking channels truncate alike. ANALYTICAL ONLY — see
+# Head-cap on the thinking channel before it rides the ledger: a reasoning model can emit tens
+# of KB per call into every round file, and the head is where the approach is stated. Matches
+# TermNorm's `reasoning_trace_cap` so both channels truncate alike. ANALYTICAL ONLY — see
 # ``LLMResponse.reasoning``: nothing may branch on this value.
 _REASONING_LEDGER_CAP = 4000
 
@@ -160,21 +154,17 @@ async def llm_call(
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
-    # Specimen model — the outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint.
-    # A SINGLE model the outer carrier node set, fanned onto every inner node (`resolve_node_override`
-    # returns it for all). Beats the node's file config, stays UNDER the instrument clamp below
-    # (which pins only temperature+seed, so no collision). `None` on every normal call → no-op;
-    # `hash_call` already keys on `merged["model"]`, so the swap gets its own cache key + searchpoint
-    # identity for free.
+    # The outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint: ONE model the
+    # outer carrier node set, fanned onto every inner node. Beats the node's file config, stays
+    # UNDER the instrument clamp below, which pins only temperature+seed. `hash_call` already
+    # keys on `merged["model"]`, so the swap gets its own cache key for free.
     if node and (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model
         if specimen.provider:
             merged["provider"] = specimen.provider
-    # Per-run tunable clamp (L4 inner-cycle determinism), applied LAST so it beats
-    # both the node's file config and any per-call override — notably `l1_generate`'s
-    # `temperature=creativity`, the dominant run-to-run noise source. Bound only inside
-    # an inner asyncio task (`shared.instrument.enter_instrument_mode`); `None` on every
-    # normal call, so this is a no-op outside L4 inner campaigns.
+    # The inner-cycle determinism clamp, applied LAST so it beats both the node's file config
+    # and any per-call override — notably `l1_generate`'s `temperature=creativity`, the
+    # dominant run-to-run noise source. Bound only inside an inner asyncio task.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])
@@ -195,19 +185,14 @@ async def llm_call(
 
     _t0 = time.monotonic()
 
-    # ``call_id`` pairs the LLMCallStartRecord (appended before the SDK call,
-    # so the operator/AI can read "currently calling X for Ys" off
-    # dashboard.json::in_flight even mid-call) with the eventual
-    # LLMCallRecord. Empty string when no ledger is bound (call-site tests,
-    # one-shot tools).
+    # Pairs the LLMCallStartRecord — appended BEFORE the SDK call, so `in_flight` is readable
+    # mid-call — with the eventual LLMCallRecord. Empty when no ledger is bound.
     call_id = uuid.uuid4().hex if context.ledger is not None else ""
 
     if cached_payload is not None:
         response = LLMResponse.model_validate(cached_payload)
-        # ``response.parsed`` was dumped to a dict by ``model_dump()`` at save
-        # time; ``LLMResponse.parsed`` is typed ``Any``, so model_validate
-        # doesn't re-instantiate it as a BaseModel. Re-validate against the
-        # known response_model so consumers can use attribute access.
+        # ``parsed`` is typed ``Any``, so `model_validate` leaves the saved dict a dict.
+        # Re-validate against the known model so consumers keep attribute access.
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
@@ -226,13 +211,9 @@ async def llm_call(
                     prompt_chars=prompt_chars,
                 )
             )
-        # Pre-call info line — surfaces what we're waiting on so the operator
-        # can distinguish "in-flight LLM call" from "frozen process" without
-        # opening dashboard.json. Routes through Python logging to the terminal.
-        # An oversized prompt logs at warn level so it stands out the same way
-        # the CLI marker turns yellow.
-        # The node's own ceiling, not one line across all of them. Crossing it means a
-        # bound at some item's PRODUCTION site failed — the fix is there, never here.
+        # Lets the operator tell an in-flight call from a frozen process without opening
+        # dashboard.json. The node's OWN ceiling, not one line across all of them: crossing it
+        # means a bound at some item's PRODUCTION site failed, and the fix is there.
         budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(node or "")
         oversize = budget is not None and prompt_chars > budget
         log = logger.warning if oversize else logger.info
@@ -243,11 +224,8 @@ async def llm_call(
             prompt_chars,
             f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
         )
-        # Heartbeat task — appends LLMCallProgressRecord every
-        # HEARTBEAT_INTERVAL_S so the CLI display + webapp dashboard
-        # show a live elapsed counter while the SDK call blocks for
-        # 30-200s. Cancelled on completion (any path) by the finally
-        # block below; short calls under HEARTBEAT_INTERVAL_S never tick.
+        # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
+        # Cancelled on every path by the `finally` below.
         heartbeat_task: asyncio.Task[None] | None = None
         if context.ledger is not None:
             heartbeat_task = asyncio.create_task(
@@ -259,8 +237,8 @@ async def llm_call(
                     start_monotonic=_t0,
                 )
             )
-        # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
-        # if missing or attempts run out, surface the SDK exception unchanged.
+        # Bounded honor-Retry-After loop: if the header is missing or attempts run out, the SDK
+        # exception surfaces unchanged.
         try:
             for attempt in range(MAX_429_ATTEMPTS):
                 try:
@@ -299,11 +277,10 @@ async def llm_call(
                     )
                     await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
         except OptimizerPromptParseError as parse_err:
-            # A call that failed to parse was billed exactly like one that parsed. Meter it
-            # here — the raise happens upstream of the success path's usage block, so this is
-            # the ONLY metering point on the parse-failure path. Without it the two round-trips
-            # of every empty/malformed response are invisible to the ledger, to
-            # `dashboard.json::spend`, and to the `spend_budget_usd` gate meant to bound the run.
+            # A call that failed to parse was billed exactly like one that parsed, and the
+            # raise happens upstream of the success path's usage block — so this is the ONLY
+            # metering point on this path, and without it every malformed response is invisible
+            # to the ledger, the dashboard and the spend gate alike.
             logger.error(
                 "%s: optimizer call failed to parse — %s",
                 node or "llm_call",
@@ -321,9 +298,8 @@ async def llm_call(
             )
             raise
         finally:
-            # Cancel the heartbeat whether the call succeeded or raised —
-            # an in-flight task would otherwise survive the function exit
-            # and keep appending progress records against a closed call.
+            # Whether the call succeeded or raised — an in-flight task would otherwise survive
+            # the function exit and keep appending against a closed call.
             if heartbeat_task is not None:
                 heartbeat_task.cancel()
                 try:
@@ -331,9 +307,8 @@ async def llm_call(
                 except asyncio.CancelledError:
                     pass
                 except Exception:
-                    # The cancel above is expected; anything else means the
-                    # heartbeat hit a real fault (e.g. a failed ledger append)
-                    # that would otherwise vanish on this teardown path.
+                    # The cancel is expected; anything else is a real fault (a failed ledger
+                    # append) that would otherwise vanish on this teardown path.
                     logger.warning(
                         "heartbeat task for %s raised on teardown",
                         node or "llm_call",
@@ -342,16 +317,11 @@ async def llm_call(
 
         duration_s = round(time.monotonic() - _t0, 2)
 
-    # THE metering point: both branches above converge here, so a round-trip that returns is
-    # metered by arriving rather than by each branch remembering to. The one path that skips it
-    # is the parse failure, which raises and meters itself — it never reaches this line.
-    #
-    # A cache hit is metered too, flagged: it spends nothing, but the search still MADE the call
-    # and the cached payload carries the tokens it cost, so incurred cost stays invariant to our
-    # cache history — without it the L4 origin arm, always the warmest, reads as free. `cached`
-    # is the same expression the ledger payload below stamps, so the two cannot disagree.
-    # OpenRouter reports `usage.cost`/`total_cost` already in USD; other providers leave it
-    # empty and the spend projection rate-tables the tokens.
+    # THE metering point: both branches converge here, so a round-trip is metered by ARRIVING
+    # rather than by each branch remembering to. Only the parse failure skips it, and it meters
+    # itself before raising. A cache hit is metered too, flagged — it spends nothing, but the
+    # search still MADE the call, so incurred cost stays invariant to our cache history and the
+    # always-warmest L4 origin arm does not read as free.
     cost_raw = response.usage.get("cost") or response.usage.get("total_cost")
     emit_token_usage(
         node=node or "llm_call",
@@ -366,19 +336,14 @@ async def llm_call(
         cached=cached_payload is not None,
     )
 
-    # Meter first, THEN store — the provider has already billed this call, so nothing that
-    # can fail belongs between the response and its record. `cache.save` writes a file, and
-    # with it above the emit a disk error lost the row for a call we paid for: no ledger
-    # entry, no dashboard increment, no contribution to the budget gate, and the loss is
-    # silent because a missing record reads exactly like a call that never happened.
-    #
-    # Never cache a response that carries no payload. A provider returning empty content
-    # (`finish_reason: stop`, 2 completion tokens, schema repair exhausted) is a TRANSIENT
-    # failure; storing it converts that flake into a PERMANENT one, because the key is the
-    # prompt hash and every later call replays the emptiness. The caller then sees a
-    # zero-candidate round forever and reads it as provider flakiness. Harmless while the
-    # cache was per-sandbox and thrown away with the run; load-bearing now that it is
-    # tenant-global (`Stores.shared_root`). A hit has nothing to store — it came FROM here.
+    # Meter FIRST, then store: the provider has already billed this call, so nothing that can
+    # fail belongs between the response and its record. `cache.save` writes a file, and a disk
+    # error above the emit loses the row silently — a missing record reads exactly like a call
+    # that never happened.
+    # Never cache a response carrying no payload. Empty content is a TRANSIENT provider
+    # failure, and storing it makes it PERMANENT: the key is the prompt hash, so every later
+    # call replays the emptiness and the caller sees a zero-candidate round forever. The cache
+    # is tenant-global, so this outlives the run that hit it.
     usable = bool(response.content.strip()) or response.parsed is not None
     if cached_payload is None and context.cache is not None and cache_key is not None and usable:
         context.cache.save(cache_key, response.model_dump())
@@ -395,16 +360,12 @@ async def llm_call(
             "usage": response.usage,
             "model": response.model,
             "duration_s": duration_s,
-            # Non-zero ⇒ the parsed JSON only landed after an extra
-            # round-trip; surfaces L1-prompt parse quality in the audit
-            # trail and feeds the per-cycle schema-repair roll-up in
-            # ``review.md``.
+            # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
+            # read on prompt parse quality, rolled up per cycle in ``review.md``.
             "schema_repair_attempts": response.schema_repair_attempts,
         }
-        # The model's own thinking, carried to the audit twin + the operator's node
-        # detail. Omitted when empty so a non-reasoning model's block stays clean.
-        # It is EVIDENCE FOR A HUMAN, never an input to the loop — nothing downstream
-        # reads this key, and nothing may start (see ``LLMResponse.reasoning``).
+        # EVIDENCE FOR A HUMAN, never an input to the loop: nothing downstream reads this key
+        # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
         if response.reasoning:
             payload["reasoning"] = response.reasoning[:_REASONING_LEDGER_CAP]
         if cached_payload is not None:

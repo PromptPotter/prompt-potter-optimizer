@@ -59,14 +59,9 @@ from promptpotter.shared.errors import ResumeDivergenceError
 
 logger = logging.getLogger(__name__)
 
-# Cap on auto-rebases per CLI invocation. L2/L3 emitting fork_proposal
-# every fire would otherwise spiral; after this many in-process rebases
-# we exit with the last cycle's stop_reason and let the operator
-# re-invoke ``resume`` if they want to keep going.
-#
-# PER LEVEL, not per run: an L4 inner campaign gets its own budget of 10, so it multiplies the
-# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (runner/inner/spawn.py) bounds. The
-# product is finite, and that deadline is what makes it so — sizing either one means reading both.
+# Cap on auto-rebases per CLI invocation, so L2/L3 emitting `fork_proposal` every fire cannot
+# spiral. PER LEVEL, not per run: an inner campaign gets its own budget, multiplying the
+# wall-time envelope `OUTER_SAMPLE_WALL_S_PER_ROUND` bounds — size either one by reading both.
 MAX_AUTO_REBASES = 10
 
 
@@ -81,9 +76,8 @@ class RunMode:
     diag: bool = False
     halt_at_accuracy: float | None = None
     resume_from_round_override: int | None = None
-    # Manual `step-round`: advance exactly this many rounds in place then halt at the
-    # round boundary (StopReason.MAX_ROUNDS), overriding the configured ceiling — the
-    # `campaign.step` verb for a delegate that cannot fire an autonomous run.
+    # Manual `step-round`: advance exactly this many rounds then halt at the round boundary,
+    # overriding the configured ceiling — for a delegate that cannot fire an autonomous run.
     stop_after_rounds: int | None = None
 
 
@@ -187,25 +181,20 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     layout = CycleLayout(cycle_dir)
     skip_flag = layout.skip_flag
     own_pause = layout.pause_flag.is_file
-    # An inner cycle is an INSTRUMENT of the cycle that spawned it, so it must not outlive a
-    # stop request on its owner. It runs in a child asyncio task and gets its own sandbox dir
-    # — whose pause flag nobody writes — so on its own it would run to completion while the
-    # outer sat "pausing". Since the child task inherits a copy of the outer's context, the
-    # outer's predicate is readable here: compose rather than overwrite. On L4 that is the
-    # difference between a pause landing in seconds and one waiting out a whole inner campaign.
-    # Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
+    # An inner cycle is an INSTRUMENT of its spawner and must not outlive a stop request on it.
+    # It gets its own sandbox dir, whose pause flag nobody writes, so alone it would run to
+    # completion while the outer sat "pausing" — COMPOSE the inherited predicate, never
+    # overwrite it. Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
     inherited = get_abort_check()
     session.pause_check = own_pause if inherited is None else lambda: own_pause() or inherited()
-    # Let a pause break a long rate-limit countdown mid-wait — the one blocking seam that
-    # otherwise ignores the pause channel. Same predicate, bound into the per-task ContextVar
-    # the wait polls (and the copy a nested cycle will inherit).
+    # Also bound into the ContextVar the rate-limit countdown polls — the one blocking seam
+    # that otherwise ignores the pause channel.
     set_abort_check(session.pause_check)
-    # Skip is one-shot: poll the flag, then the loop deletes it the instant it fires so
-    # exactly one searchpoint is cut.
+    # One-shot: the loop deletes the flag the instant it fires, so exactly one searchpoint is cut.
     session.skip_check = skip_flag.is_file
     session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
-    # Deliberately NOT composed with the inherited outer predicate the way `pause_check` is above:
-    # a stop must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
+    # Deliberately NOT composed with the inherited predicate the way `pause_check` is: a stop
+    # must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
     # multiply concurrency at every nested level at once.
     sample_lookahead_flag = layout.sample_lookahead_flag
     session.sample_lookahead_check = sample_lookahead_flag.is_file
@@ -223,32 +212,23 @@ async def _prepare_run(
 ) -> _PreparedRun:
     cb = observers.callbacks
 
-    # A fresh launch supersedes any prior run-control intent: drop a consumed
-    # pause flag left on this cycle's `.runtime/` by an earlier paused run, else
-    # a stale pause.flag pauses this very resume on its first poll (a paused
-    # cycle could never be resumed). Then bind the hooks, so the origin pass below
-    # is pausable like every other phase.
+    # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
+    # this very resume on its first poll, so a paused cycle could never be resumed. Binding
+    # after it makes the origin pass below pausable like every other phase.
     if session.state.cycle_id:
         launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
         clear_run_control_flags(launch_cycle_dir)
         _bind_run_controls(session, launch_cycle_dir)
 
-    # Cycle seed: the chosen searchpoint, declared at mint, riding the ledger as a
-    # `CycleSeedRecord` (read-once-at-init, keyed by the known cycle_id). It re-homes the
-    # origin (`origin_prompt_fields`) and layers its `pipeline_overlay` ON TOP of the dataset
-    # overlay (seed > dataset > backend). Read HERE — the single runner seam every launch path
-    # funnels through — never threaded through each launcher.
+    # Read HERE — the single runner seam every launch path funnels through — never threaded
+    # through each launcher. Precedence is seed > dataset > backend.
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
-        # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
-        # the shared merge keeps the non-dict ``steps`` guard intact.
         session.pipeline_params = apply_node_overlay(
             session.pipeline_params or {}, seed.pipeline_overlay, session.pipeline_schema
         )
     if seed is not None:
-        # Reconcile the seed's config delta (run limits + search/selection policy)
-        # onto a fresh config snapshot — the loop starts at round 1 and stops
-        # after the reconciled max_rounds. Reassign before any downstream call.
+        # Onto a FRESH config snapshot, reassigned before any downstream call.
         campaign_config, spend_budget_usd = _apply_config_overrides(
             campaign_config, spend_budget_usd, seed.config_overrides
         )
@@ -258,11 +238,9 @@ async def _prepare_run(
             )
             and session.state.cycle_id
         ):
-            # A seed overlay steering the model OUTSIDE the origin's `allowed_models`
-            # (empty = nothing sanctioned) is the ADR-0005 babysit act. Stamp the cycle
-            # index here — the mint seam could not (the index is created at init) —
-            # and flag the session so every run it scores grades non-clean. A steer to a
-            # SANCTIONED model reaches this seam but is clean: no stamp, no taint.
+            # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
+            # ADR-0005 babysit act. Stamped here because the mint seam could not — the index is
+            # created at init. A steer to a SANCTIONED model reaches this seam and is clean.
             session.store.campaigns.mark_human_intervened(
                 session.hop,
                 kind="disallowed_model_override",
@@ -271,14 +249,11 @@ async def _prepare_run(
             session.human_intervened = True
 
     if origin is None:
-        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like any
-        # other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns (token
-        # records, the L4 heartbeat, an inner cycle's provenance stamp). Leave it to
-        # `run_round_loop` alone and every origin measurement is stamped `None`.
+        # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
+        # for everything the origin pass spawns, or every origin measurement stamps `None`.
         cb.set_round(0)
-        # Establish C0 through the single origin seam: a no-edit operator fork inherits
-        # its branch-point candidate's recorded accuracy (skipping the re-score, which
-        # would re-roll under a nondeterministic backend); everything else scores it.
+        # The single origin seam. A no-edit operator fork inherits its branch-point candidate's
+        # recorded accuracy rather than re-rolling it under a nondeterministic backend.
         origin = await establish_campaign_origin(
             session,
             dataset,
@@ -319,14 +294,6 @@ def _build_cycle_result(
     """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback. Both
     ``winner_*`` read ``best_sp``, since ``cycle.opt_sp`` is overwritten every round."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    # The L4 outer proxy's single-scale inner-search signal: origin level + the ability of the
-    # incumbent each round ADOPTED, every one a θ in logits on the cycle's fixed δ ruler — the
-    # only subset-invariant estimator. What the search delivers is what it crowns; the arms it
-    # discarded are the price of finding that, and pricing them as damage made the metric
-    # negative for exactly the generators that explore (``adopted_level_trajectory``). An origin
-    # with no ability on that ruler (every row errored) is a floor nobody measured: it yields
-    # `None`, and the cycle is excluded as an outer sample rather than differenced against an
-    # invented floor.
     from promptpotter.application.intelligence.exploration import adopted_level_trajectory
 
     # Round 0 is the reference the whole result is differenced against, carried beside it as
@@ -397,7 +364,6 @@ async def _run_single_cycle(
     cb = observers.callbacks
     pre_loop_cycle_id = session.state.cycle_id
 
-    # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
     try:
@@ -429,8 +395,8 @@ async def _run_single_cycle(
             and pre_loop_cycle_id != session.state.cycle_id
         )
         if forked and pre_loop_cycle_id:
-            # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
-            # fired on the parent callbacks and won't re-fire (else RoundStartView reads zeros on every forked round).
+            # Carry phase_ctx across the rebuild: INIT.enter fired on the parent callbacks and
+            # will not re-fire, so without it RoundStartView reads zeros on every forked round.
             parent_phase_ctx = observers.callbacks._phase_ctx
             observers = build_run_observers(
                 session=session,
@@ -444,14 +410,9 @@ async def _run_single_cycle(
             observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
 
-        # The BudgetGate's spent-probes read LiveDashboardView's clean
-        # accessors (spend_total_used_usd / spend_total_tokens): the dashboard
-        # is the sole owner of the spend rollup, so the gate goes through the
-        # projection that already accumulates the records — not a parallel
-        # reader. `observers` is bound in the builder so the rebase loop's
-        # next-iteration rebuild can't leave it reading a stale ref. The cap
-        # probes re-read `.runtime/spend_cap.json` each tick so the
-        # `change-spend-budget` command can move a ceiling mid-flight.
+        # The gate probes go through the dashboard, which already owns the spend rollup, rather
+        # than a parallel reader; `observers` is bound in the builder so the rebase loop's
+        # rebuild cannot leave it on a stale ref.
         cycle_dir_for_probe = (
             session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
         )
@@ -466,8 +427,8 @@ async def _run_single_cycle(
             else campaign_config.optimization.spend_budget_usd,
             token_cap=campaign_config.optimization.token_budget,
         )
-        # Same gate, two cadences — the round boundary and the per-sample checkpoint. Bound as
-        # the one object so a ceiling moved mid-flight moves both, and both name one reason.
+        # Same gate, two cadences — the round boundary and the per-sample checkpoint — bound as
+        # ONE object, so a ceiling moved mid-flight moves both and both name one reason.
         session.budget_tripped = budget_gate.tripped if budget_gate is not None else None
         stop_reason, cycle_error = await run_round_loop(
             cycle,
@@ -486,18 +447,11 @@ async def _run_single_cycle(
         stop_reason = StopReason.PAUSED
         cycle_error = None
     except asyncio.CancelledError as exc:
-        # A cancellation still finalizes — the cycle's own state must land on disk exactly as a
-        # pause does, or a cancelled inner campaign leaves a dashboard reading `running`
-        # forever. But it must also REACH the canceller, so it is re-raised past the finalize
-        # below; answering a cancellation with a return is what made the L4 sample deadline
-        # unenforceable (see `scoring/query_loop.py`).
-        #
-        # Where a terminal Ctrl+C lands (`asyncio.Runner` cancels the main task on the first
-        # SIGINT) and where an L4 inner campaign cancelled by its outer sample deadline lands.
-        # `run_round_loop` catches only KeyboardInterrupt, which is the pause flag's. The
-        # `paused` DECLARATION that keeps the reaper off it is made once, at the finalize seam
-        # every paused exit reaches, rather than here. The cycle is named because an L4 run
-        # re-enters this function in-process, logging the line once per nesting level.
+        # Where a terminal Ctrl+C lands (`asyncio.Runner` cancels the main task first) and
+        # where an inner campaign cancelled by its outer sample deadline lands. It still
+        # finalizes — the cycle's state must reach disk exactly as a pause does — but it must
+        # ALSO reach the canceller, so it is re-raised past the finalize below: answering a
+        # cancellation with a return is what made the L4 sample deadline unenforceable.
         cancel_exc = exc
         logger.warning(
             "Optimization cancelled (%s); finalizing as paused (resumable).",
@@ -525,8 +479,7 @@ async def _run_single_cycle(
 
     finished_at = utcnow_iso()
     # Before the result is built: a decision made after the last round closed has no next
-    # `persist_round` to carry it, and every stop reason lands here. `None` is the
-    # crashed-before-the-loop path, which recorded nothing to flush.
+    # `persist_round` to carry it, and every stop reason lands here.
     if cycle is not None:
         flush_pending_decisions(cycle, session)
     cycle_result = _build_cycle_result(
@@ -537,17 +490,15 @@ async def _run_single_cycle(
         cycle_error=cycle_error,
         started_at=started_at,
         finished_at=finished_at,
-        # In-memory, not the debounced ``dashboard.json``: at finalize (before ``drain_all``)
-        # the live rollup is complete, and the L4 outer loop rolls this up onto its own
-        # backend-cost channel.
+        # In-memory, not the debounced ``dashboard.json``: at finalize the live rollup is
+        # already complete.
         spend=observers.dashboard.state.spend,
     )
     langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
-    # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
-    # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs. Ahead of the
-    # re-raise below, because a cancellation is one of those interrupts.
+    # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
+    # because a cancellation is one of the interrupts that produces one.
     forked_in_this_run = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
@@ -559,7 +510,6 @@ async def _run_single_cycle(
         )
 
     if cancel_exc is not None:
-        # Everything above has landed on disk; now let the cancellation finish travelling.
         # The caught instance, not a fresh class — it carries the reason its raise site named.
         raise cancel_exc
 
@@ -584,8 +534,8 @@ def _mint_and_rebase_fork(
             prep.campaign_config, prep.spend_budget_usd, rebase_req.config_overrides
         )
         prep = replace(prep, campaign_config=campaign_config, spend_budget_usd=spend_budget_usd)
-        # No `origin_prompt_fields`: a rebase replays its origin from the parent's
-        # round, so it has no C0 provenance to stamp (`origin_source` stays empty).
+        # No `origin_prompt_fields`: a rebase replays its origin from the parent's round, so it
+        # has no C0 provenance to stamp.
         seed = CycleSeed(config_overrides=rebase_req.config_overrides)
     new_cycle_id = _mint_fork(
         campaign_store=session.store.campaigns,
@@ -641,17 +591,12 @@ async def run_optimization(
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     mode = mode or RunMode()
     started_at = utcnow_iso()
-    # Publish this cycle as the spawn context for any L4 recursion: a child that
-    # uses the ``promptpotter`` connector reads it to root its sandbox at
-    # ``<workspace>/.inner/<key>/`` + find the inner benchmark. Unconditional (the
-    # runner can't know a child will recurse) + re-entrant (each level publishes
-    # its own); a no-op until the cycle_id is set.
+    # Unconditional (the runner cannot know a child will recurse) and re-entrant (each level
+    # publishes its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session, campaign_config)
-    # Select this cycle's optimizer prompt set (L4: outer = `meta`, inner =
-    # default). Bound through the same per-node override channel the inner runner
-    # uses — task-isolated, so an outer binding and the inner (mutation)
-    # bindings of the cycles it spawns never collide. Empty set → no-op (every
-    # normal cycle), and must NOT clear an inner runner's already-bound mutations.
+    # Bound through the same per-node override channel the inner runner uses — task-isolated,
+    # so an outer binding and the inner mutations of the cycles it spawns never collide. An
+    # empty set is a no-op and must NOT clear an inner runner's already-bound mutations.
     if campaign_config.optimization.optimizer_set:
         from promptpotter.application.optimization.dispatch.llm_call.prompts import (
             load_optimizer_set_overrides,
@@ -671,20 +616,14 @@ async def run_optimization(
             spend_budget_usd=spend_budget_usd,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest —
-        # origin scoring on the L4 panel runs for hours. An interrupt escaping here declares
-        # no phase and drains nothing, so `dashboard.json` keeps `run_phase: "running"` and
-        # every non-live reader reports a dead run as healthy. PAUSED is not terminal, so the
-        # cycle stays resumable and `resume` replays the banked seeds at no cost.
+        # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest. An
+        # interrupt escaping here declares no phase and drains nothing, so `dashboard.json`
+        # keeps `run_phase: "running"` and every non-live reader reports a dead run as healthy.
         declare_run_phase(session, RunPhase.PAUSED)
         observers.drain_all()
         raise
-    # Rebase loop: run one cycle to completion; if it finalized REBASED with a
-    # stashed request (and we're under the cap), mint the fork and run the next
-    # cycle on it. Every other stop reason — or the cap / a missing cycle_id —
-    # returns the finalized result. The single-cycle body and the fork mint are
-    # the two helpers above; this stays a thin driver so the loop control isn't
-    # tangled with init/round/finalize.
+    # Run one cycle to completion; if it finalized REBASED with a stashed request under the
+    # cap, mint the fork and run the next cycle on it. Every other stop reason returns.
     rebase_count = 0
     while True:
         outcome = await _run_single_cycle(
@@ -736,48 +675,33 @@ def _finalize_run(
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
     """
     stop_reason = cycle_result.stop_reason
-    # Read off the canonical table, never re-derived here. The private or-chain this replaces
-    # listed four reasons and had no exhaustiveness check, so it silently missed the two the
-    # budget gate raises from INSIDE the per-sample loop — a spend/token halt wrote its partial
-    # round to disk with no `interrupted` marker at all (`domain/phases.py::StopReasonInfo`).
+    # Read off the canonical table, never re-derived here: a private or-chain has no
+    # exhaustiveness check, and silently missed the two reasons the budget gate raises from
+    # INSIDE the per-sample loop, writing a partial round with no `interrupted` marker.
     info = STOP_REASON_INFO[StopReason(stop_reason)]
     is_paused = info.outcome is StopOutcome.PAUSED
     halted_mid_round = info.halts_mid_round
     has_traceback = info.has_traceback
     emitter = observers.dashboard
     if is_paused:
-        # DECLARE the pause here, at the one point every paused exit converges on, rather
-        # than trusting each raise site to have done it. Skipping the terminal writes below
-        # leaves `derive_run_phase` with only two ways to read `paused`: the `pause.flag`, or
-        # a declaration. An operator `pause` sets the flag — but Ctrl+C inside the round loop
-        # and an `asyncio.CancelledError` (the L4 sample deadline cancelling its inner
-        # campaign) set neither, so the derivation fell through to freshness, returned
-        # DETACHED, and the reaper — whose guard reads exactly this declaration
-        # (`CampaignStore.mark_producer_vanished`) — had nothing to refuse on. Two abandoned
-        # inner cycles were stamped `producer_vanished` 15 minutes after their owner
-        # deliberately cancelled them, sending the operator hunting a dead process that had
-        # never existed. Idempotent at the projection, so the checkpoints that already
-        # declared it pay nothing.
+        # DECLARE the pause at the one point every paused exit converges on, rather than
+        # trusting each raise site. Skipping the terminal writes below leaves `derive_run_phase`
+        # only two ways to read `paused` — the flag or a declaration — and Ctrl+C inside the
+        # round loop sets neither, so it falls through to freshness, returns DETACHED, and the
+        # reaper stamps `producer_vanished` on a cycle its owner deliberately cancelled.
+        # Idempotent at the projection, so a checkpoint that already declared it pays nothing.
         declare_run_phase(session, RunPhase.PAUSED)
-    # A pause is an operator interrupt that exits the worker but leaves the cycle ACTIVE and
-    # resumable — NOT terminal. Skip every terminal-marking write (mark_finished /
-    # mark_stopped) so index.json keeps no `finished_at` and derive_run_phase keeps reading
-    # the PAUSED just declared. The partial round is still drained (below) so the operator
-    # sees where it paused.
+    # A pause leaves the cycle ACTIVE and resumable, so every terminal-marking write is skipped
+    # and `index.json` keeps no `finished_at` for `derive_run_phase` to read past the PAUSED
+    # just declared. The partial round is still drained below.
     if session.state.cycle_id and not is_paused:
-        # Active round at teardown — surfaces on `interrupted_round` so the operator sees which
-        # round is partial without diffing the on-disk tree (works for crash too; traceback is the
-        # discriminator).
         interrupted_round = int(observers.callbacks._current_round) if halted_mid_round else None
-        # Active exception is gone from sys.exc_info() by now — the except clause stashed the
-        # formatted traceback on session.state.crash_traceback before returning.
+        # The active exception is gone from `sys.exc_info()` by now; the except clause stashed
+        # the formatted traceback before returning.
         crash_traceback = session.state.crash_traceback if has_traceback else None
-        # index.json::status is the precise terminal reason — "active" until now, then the raw
-        # StopReason value (no lossy collapse to "completed"). Operator-facing label + outcome
-        # derive from the single STOP_REASON_INFO table; never re-encoded per surface.
+        # The precise terminal reason, with no lossy collapse to "completed" — the
+        # operator-facing label and outcome derive from STOP_REASON_INFO, never per surface.
         cycle_status = str(stop_reason)
-        # index.json::final — the terminal-summary namespace; review.md + the variant
-        # leaderboard read it for the frozen verdict.
         from promptpotter.application.optimization.dispatch.llm_call.prompts import (
             compute_optimizer_prompt_hashes,
         )
@@ -792,25 +716,19 @@ def _finalize_run(
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            # The ORIGIN's composite, on the origin's own samples — never
-            # `rounds[0].matched_origin_composite`, which is round 1's winner's matched floor
-            # on a different sample basis.
+            # On the origin's OWN samples — never `rounds[0].matched_origin_composite`, which
+            # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
-            # The formula EVERY number above was computed under. `log.md` has always read
-            # this key (`output.py::LogMdView.formula`) and nothing had ever written it, so
-            # every artifact this project has produced said "(formula unavailable)" about a
-            # cycle whose formula the live dashboard was displaying at the same moment.
-            # Same `resolve_round_formula` the dashboard calls — one resolution, three readers.
+            # The formula EVERY number above was computed under, resolved by the same call the
+            # dashboard makes: one resolution, three readers.
             "scorer_round_formula": resolve_round_formula(
                 session.scoring.scorer_round_formula, session.pipeline_schema
             )[0],
             "mode": "sweep" if sweep else "full",
-            # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
-            # (writers.py) fetches these from `final`. Basis: the COMPOSITE-fitness high-water
-            # SP (cycle.tracking) — the engine's adoption objective — which may name a
-            # different round than the index's top-level `best_accuracy`/`best_round`
-            # (`_apply_best`, cumulative-accuracy argmax). "How good did it get" reads the
-            # top-level fields; there is deliberately no accuracy scalar duplicated here.
+            # Basis: the COMPOSITE-fitness high-water SP — the engine's adoption objective —
+            # which may name a different round than the index's top-level
+            # `best_accuracy`/`best_round`. "How good did it get" reads those top-level fields,
+            # so there is deliberately no accuracy scalar duplicated here.
             "winner_prompt_fields": cycle_result.winner_prompt_fields,
             "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }
@@ -823,11 +741,8 @@ def _finalize_run(
             crash_traceback=crash_traceback,
             final=final_block,
         )
-    # Drain AFTER mark_stopped so dashboard.json's stopped state is in place before audit settles.
-    # `_halted_mid_round` threads `"interrupted": true` into partial round_NNNN.json — true
-    # for both Ctrl+C and uncaught-exception teardowns. The operator-facing
-    # ``dashboard.json::error`` block is owned by ``_handle_error_record`` (sole
-    # writer) and was already populated at the ``emit_error_record`` site.
+    # Drain AFTER mark_stopped, so dashboard.json's stopped state is in place before the audit
+    # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file.
     if emitter is not None and not is_paused:
         emitter.mark_stopped(str(stop_reason or ""))
     observers.audit._halted_mid_round = halted_mid_round

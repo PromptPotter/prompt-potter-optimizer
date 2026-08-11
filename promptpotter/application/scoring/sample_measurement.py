@@ -28,10 +28,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Stale-data recovery ladder
-# ---------------------------------------------------------------------------
-
 STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "samplescan", "sampleswitch")
 """Step order for handling a degraded cached query. ``execute_stale_data_protocol``
 walks this in order; first step that returns a non-degraded result wins."""
@@ -43,20 +39,14 @@ SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
 """Historical degradation rate at which sampleswitch short-circuits to the
 cached deprecated answer instead of re-evaluating."""
 
-# ---------------------------------------------------------------------------
-# Prompt template interpolation
-# ---------------------------------------------------------------------------
-
-# TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way
-# to the backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s
-# in the OPTIMIZER's optimizer prompts. Same syntax, two populations, two regexes (the
-# other is `dispatch/facade.py`); adding a signal for an L1/L2/L3 prompt goes
-# there, never here.
+# TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way to the
+# backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s in the
+# OPTIMIZER's prompts. Same syntax, two populations, two regexes (the other is
+# `dispatch/facade.py`); a signal for an L1/L2/L3 prompt goes there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
-# Fields that must never be interpolated into prompts (answer leakage). It listed `hit` and
-# `score` — one deleted, the other renamed — and so had stopped naming the field that actually
-# carries how well a row was answered.
+# Never interpolated into a prompt — answer leakage. Keep it naming the field that carries
+# how well a row was answered, which has been renamed under it before.
 _EXCLUDED_FIELDS: frozenset[str] = frozenset(
     {
         "ground_truth",
@@ -112,9 +102,9 @@ def interpolate_pipeline_params(
 
 __all__ = ["execute_stale_data_protocol", "measure_sample"]
 
-# Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
-# ``reasoning_trace`` = the task model's chain-of-thought (head-capped at the
-# backend); the critique tier reads it to diagnose WHERE a deduction broke.
+# Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
+# ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
+# critique tier reads it to diagnose WHERE a deduction broke.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {
         "step_timings",
@@ -202,9 +192,8 @@ def _compute_step_tokens(
                     "output": int(entry.get("output", 0)),
                     "estimated": False,
                 }
-                # Forward per-node cost/model when the backend surfaced them
-                # (provider returned USD; upstream model id) — the dashboard
-                # prefers these over its bundled rate table.
+                # The dashboard prefers a backend-surfaced cost/model over its bundled rate
+                # table.
                 cost = entry.get("cost_usd")
                 if isinstance(cost, (int, float)):
                     seeded["cost_usd"] = float(cost)
@@ -214,17 +203,15 @@ def _compute_step_tokens(
                 )
                 if model is not None:
                     seeded["model"] = model
-                # The provider is NOT taken from the wire even when the backend reports
-                # one: the overlay is what actually routed the call, and TermNorm's own
-                # `spend.backend.model` is known to answer a provider slug where a model
-                # is expected. Whoever we configured is whoever billed us.
+                # NOT taken from the wire even when the backend reports one: the overlay is
+                # what actually routed the call, and whoever we configured is whoever billed
+                # us. TermNorm's `spend.backend.model` answers a provider slug here.
                 provider = _configured(node_name, "provider")
                 if provider is not None:
                     seeded["provider"] = provider
-                # Forward the raw response shape so ``classify_result`` can
-                # distinguish a truncation (``finish_reason=length``) from a
-                # genuinely empty response. Dropping these collapses every
-                # empty terminal onto the fatal ``empty_response`` arm.
+                # ``classify_result`` needs the raw shape to tell a truncation
+                # (``finish_reason=length``) from a genuinely empty response; dropping these
+                # collapses every empty terminal onto the fatal ``empty_response`` arm.
                 fr = entry.get("finish_reason")
                 if isinstance(fr, str):
                     seeded["finish_reason"] = fr
@@ -350,10 +337,8 @@ async def measure_sample(
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
 
         def _emit_backend_warning(payload: dict[str, Any]) -> None:
-            # Emit a typed ledger record so the dashboard projection bumps its
-            # backend-retry counter and recent-warnings list, and the audit
-            # archive records what the operator was waiting on. The retry
-            # itself is unchanged — this is pure visibility.
+            # Pure visibility — the retry itself is unchanged. The dashboard projection bumps
+            # its backend-retry counter off this record.
             ledger = session.state.ledger
             if ledger is None:
                 return
@@ -390,9 +375,8 @@ async def measure_sample(
                 query, pipeline_params=wire_params, on_warning=_emit_backend_warning
             )
         finally:
-            # Cancel the heartbeat whether the query succeeded or raised —
-            # an in-flight task would otherwise survive and keep appending
-            # progress records against a closed call.
+            # Cancel whether the query succeeded or raised — an in-flight task survives and
+            # keeps appending progress records against a closed call.
             if heartbeat_task is not None:
                 heartbeat_task.cancel()
                 try:
@@ -406,10 +390,9 @@ async def measure_sample(
                     )
         data = resp.get("data", {})
 
-        # The prediction is the head of the TERMINAL ranker's output — candidate_ranking
-        # when token_matching is terminal, final_ranking when an llm_ranking/llm_only node
-        # is — read through the schema, not a hardcoded key. extract_item_label is
-        # shape-agnostic (dict {candidate}, (name, score) tuple, or bare string).
+        # The head of the TERMINAL ranker's output, read through the schema rather than a
+        # hardcoded key: candidate_ranking when token_matching is terminal, final_ranking when
+        # an llm_ranking/llm_only node is.
         from promptpotter.application.optimization.pobb.classification import (
             terminal_ranking,
         )
@@ -425,9 +408,8 @@ async def measure_sample(
             )
         gt_rank = find_rank(ranked, ground_truth)
 
-        # Project wire response → pipeline_data. `result_ranking` is the canonical derived
-        # terminal ranking the scorer + find_gt_rank read; the raw per-node observation keys
-        # (candidate_ranking / final_ranking) are copied below for their per-node diagnostics.
+        # `result_ranking` is the canonical derived terminal ranking the scorer + find_gt_rank
+        # read; the raw per-node observation keys are copied below for their own diagnostics.
         pd: dict[str, Any] = {"result_ranking": ranked}
         for key in pipeline_schema.observation_keys | _INFRA_KEYS:
             val = data.get(key)
@@ -445,9 +427,8 @@ async def measure_sample(
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
             pd["step_tokens"] = step_tokens
-            # measure_sample only reaches here for fresh backend calls (cache hits
-            # return early and meter themselves from the archived row), so this
-            # never double-counts.
+            # Only fresh backend calls reach here — a cache hit returns early and meters
+            # itself off the archived row — so this never double-counts.
             emit_step_token_usage(step_tokens, data.get("step_timings") or {}, cached=False)
 
         result: dict[str, Any] = {
@@ -462,7 +443,6 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
-        # Populate per-sample evaluator values.
         from promptpotter.application.scoring.evaluators import materialize_sample_values
 
         sample_evaluators = materialize_sample_values(pipeline_schema, result)  # type: ignore[arg-type]
@@ -491,11 +471,6 @@ async def measure_sample(
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
         return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)
-
-
-# ---------------------------------------------------------------------------
-# Stale data protocol — degradation rerun / samplescan / sampleswitch
-# ---------------------------------------------------------------------------
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:
@@ -537,12 +512,10 @@ def _rerun_would_repeat_token_budget_failure(
     larger: the ladder exists for TRANSIENT failures, and a config-fundamental one will not recover."""
     from promptpotter.domain.rendering import classify_result
 
-    # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is read
-    # from the cached result itself, so the infra-code / token lookups key on the SAME
-    # node classify_result stamped. The trailing `or "llm_only"` IS a literal coupling
-    # to the single-node sentinel — it fires when the row carries no `terminated_at`.
-    # "llm_only" names ONE thing — the single-node pipeline sentinel. Folding it into a
-    # declared constant is an open design call, not an absence of coupling.
+    # The terminal LLM node is read off the cached result itself, so the infra-code / token
+    # lookups key on the SAME node classify_result stamped. The trailing `or "llm_only"` is a
+    # literal coupling to the single-node sentinel, fired when the row carries no
+    # `terminated_at` — folding it into a declared constant is an open design call.
     node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"
     cl = classify_result(cached_result)
     budget_exhausted = (
@@ -562,9 +535,8 @@ def _rerun_would_repeat_token_budget_failure(
 
     rerun_max_tokens = ((rerun_pipeline_params or {}).get(node) or {}).get("max_tokens")
     if rerun_max_tokens is None:
-        # No explicit override in the rerun — runs at backend default which
-        # could be larger or smaller than the cached cap. Conservative: don't
-        # skip; let the rerun run and see.
+        # No override, so the rerun takes a backend default that may be larger or smaller
+        # than the cached cap. Conservative: let it run.
         return False
 
     return int(rerun_max_tokens) <= cached_completion

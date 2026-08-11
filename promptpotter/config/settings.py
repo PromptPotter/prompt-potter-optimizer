@@ -22,12 +22,9 @@ def _app_version() -> str:
 
 APP_VERSION: str = _app_version()
 
-# Current legal-terms version the consent gate requires. Date-stamped: bumping it
-# (when the Terms / Privacy text on the marketing site materially changes)
-# re-prompts every user for fresh consent — the accepted version no longer
-# matches. The accepted version + a server-stamped timestamp are the provable
-# record persisted per-user in ``user.json`` (``User.terms_accepted``). Keep in
-# sync with the version stamped on the marketing site's /terms + /privacy.
+# The version the consent gate requires. Bumping it re-prompts every user, since the version
+# recorded in ``user.json`` no longer matches. Keep in sync with the marketing site's
+# /terms + /privacy.
 TERMS_VERSION: str = "2026-06-21"
 
 # Defaults for backend connection (not env-driven — override via CLI args)
@@ -59,13 +56,9 @@ ANSWER_SPACE_CAP: int = 10
 # task_context sub-fields that L1 may emit alongside prompt/node overrides.
 TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
 
-# JSON-schema types for universal LLM-call params + the PromptTemplate scheme.
-# Used by the pipeline parser to populate ``PipelineNode.param_types`` without
-# requiring every dataset overlay to spell them out. Dataset overlays may add
-# backend-specific param types (e.g. ``threshold: integer`` on TermNorm's
-# fuzzy_matching node) via the node's ``optimizer.param_types`` block; those
-# override these defaults. Inference from ``node.config`` Python types is the
-# last-resort fallback after both.
+# Populates ``PipelineNode.param_types`` so a dataset overlay need not spell these out. An
+# overlay may add backend-specific types via the node's ``optimizer.param_types`` block, which
+# overrides these; inference from ``node.config`` Python types is the last-resort fallback.
 WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     # Universal LLM-call params — same shape across every provider.
     "temperature": "number",
@@ -87,29 +80,18 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 }
 
 
-# Optimizer-call reliability + size visibility.
-#
-# OPTIMIZER_CALL_DEADLINE_S — wall-clock ceiling on a single optimizer LLM
-# round-trip. ``llm_call`` wraps each logical call in ``asyncio.timeout`` sized
-# for the worst case (initial round-trip + one schema-repair retry — the client
-# fires a full second call on schema-noncompliant output, ~2x latency; see
-# ``_MAX_ROUND_TRIPS_PER_CALL``). The provider SDK's own timeout is a per-read-gap
-# timeout, not a total one: a reasoning model streaming a large output slowly
-# never trips it and the call can hang indefinitely. Healthy round-trips run
-# 8-40s; a slow reasoning model on a heavy l2/l3 prompt runs ~150s, and a repair
-# pushes the logical call to ~300s — so the per-call wall must budget BOTH
-# round-trips or a healthy-but-slow call false-halts. One transient timeout is
+# Wall-clock ceiling on one optimizer round-trip. The provider SDK's own timeout is a
+# per-read-gap timeout, not a total one, so a reasoning model streaming slowly never trips it
+# and the call hangs indefinitely. Sized for the worst case — the initial round-trip PLUS one
+# schema-repair retry — or a healthy-but-slow call false-halts. One transient timeout is
 # retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-# OPTIMIZER_PROMPT_BUDGET_CHARS — per-node ceiling on a COMPOSED optimizer prompt. It
-# ALARMS; it never cuts. Length is bounded where each item is PRODUCED (`docs/architecture.md`
-# §0, Dispatch hub), so a prompt over its node's ceiling is the report that one of those
-# bounds failed — cutting here could only choose which half the model sees. It replaces a
-# single 8000-char line shared across every node: measured over 262 calls, ``prompt_chars``
-# ran 9312-16617 on l1_generate and 8551-11941 on l2_context, so one number fired on 100% of
-# calls and taught nothing. Sized at each node's measured maximum plus ~13%. `l3_plan` has
-# never fired and takes l2_context's; `checkin` runs around the loop and never composes here.
+# Per-node ceiling on a COMPOSED optimizer prompt. It ALARMS; it never cuts — length is bounded
+# where each item is PRODUCED, so a prompt over its ceiling is the report that one of those
+# bounds failed, and cutting here could only choose which half the model sees. Per node rather
+# than one shared number, which fires on every call and teaches nothing. `l3_plan` has never
+# fired and takes l2_context's; `checkin` runs around the loop and never composes here.
 OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
     "l1_generate": 19_000,
     "l1_critique": 14_500,
@@ -117,39 +99,26 @@ OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
     "l3_plan": 12_000,
 }
 
-# PoBB elimination — default posterior-of-being-best threshold ε. A
-# candidate stops when its P(best) drops below ε. The runtime value is
-# ``CampaignConfig.pobb_epsilon``; this is the single default every entry
-# point (the config Field, PoBBConfig, the CLI)
-# references so the number can't drift. 0.15 = abort a candidate once its
-# P(reaching par with the current best) falls below 15% — empirically the
-# most aggressive threshold before false-cuts of true winners climb (≈2% at
-# 0.15 vs ≈9% at 0.20, measured on the archived round corpus).
+# PoBB elimination — a candidate stops when its P(best) drops below ε. The runtime value is
+# ``CampaignConfig.pobb_epsilon``; this is the single default every entry point references so
+# the number cannot drift. Set at the most aggressive threshold before false-cuts of true
+# winners climb, measured on the archived round corpus.
 POBB_DEFAULT_EPSILON: float = 0.15
 
-# Origin (C0) eval breadth — how many bank samples the origin is scored on when
-# nothing declares otherwise. The single default BOTH loops reference:
-# ``CampaignConfig.sp_budget_origin`` (any campaign, inner or standalone) and
-# ``InnerBenchmarkConfig.n_samples_origin`` (the L4 panel's inner cells), so the
-# outer recursion and the inner instrument cannot drift onto different rulers.
-#
-# Deliberately ABOVE the ``sp_budget_ttest`` default (20): origin breadth is the
-# one breadth that is nearly free. θ_origin is the term every candidate delta
-# subtracts, so its variance lands in EVERY comparison — and its rows are
-# content-addressed cache, replayed into every candidate arm, fork and resume, so
-# the samples are paid for once per config. Candidate breadth is paid per
-# candidate, per round, and widening it would also widen every θ-LCB comparison
-# basis for no shared-cache payback. 40 is the value the L4 panel has run on
-# (``datasets/promptpotter-self/inner_tasks.yaml``); a bank smaller than this
-# scores the whole bank, which is the right answer there, not an error.
+# How many bank samples the origin is scored on when nothing declares otherwise. The single
+# default BOTH loops reference — ``CampaignConfig.sp_budget_origin`` and
+# ``InnerBenchmarkConfig.n_samples_origin`` — so the outer recursion and the inner instrument
+# cannot drift onto different rulers. Deliberately ABOVE the ``sp_budget_ttest`` default:
+# θ_origin is the term every candidate delta subtracts, so its variance lands in EVERY
+# comparison, and its rows are content-addressed cache paid for once per config. Candidate
+# breadth is paid per candidate per round for no shared-cache payback. A bank smaller than this
+# scores whole, which is the right answer there rather than an error.
 DEFAULT_ORIGIN_BUDGET: int = 40
 
-# UCB1 exploration weight for the lineage rewind pick
-# (``application/mask/backprop.py::select_rewind_round``). sqrt(2) is UCB1's
-# regret-optimal constant for rewards in [0, 1] — which the θ values are
-# min-max normalized into, so the constant means what the literature says it
-# means. Deliberately NOT a campaign knob: one rewind costs a whole cycle, so
-# this is a property of the search, not a per-run dial.
+# UCB1 exploration weight for the lineage rewind pick. sqrt(2) is UCB1's regret-optimal constant
+# for rewards in [0, 1], which the θ values are min-max normalized into, so it means what the
+# literature says. Deliberately NOT a campaign knob: one rewind costs a whole cycle, so this is
+# a property of the search rather than a per-run dial.
 UCB_EXPLORATION_C: float = math.sqrt(2)
 
 
@@ -157,31 +126,23 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
 
-    # Display identity — the name a fork paints on the terminal and API surfaces.
-    # `deploy-linux/deploy.config`'s brand block is the ONE declaration a fork
-    # edits: `brand-env.sh` mirrors it into `.env` for these, and exports the
-    # `NEXT_PUBLIC_*` twins for the webapp build (`webapp/lib/brand.ts`). The
-    # package, the CLI verb and the state dir are NOT brand — renaming those is a
-    # different tier, and `docs/developer/whitelabel.md` says what it costs.
+    # Display identity. `deploy-linux/deploy.config`'s brand block is the ONE declaration a
+    # fork edits; `brand-env.sh` mirrors it here and into the webapp's `NEXT_PUBLIC_*` twins.
+    # The package, the CLI verb and the state dir are NOT brand — that is a different tier.
     BRAND_SHORT_NAME: str = "PromptPotter"
     BRAND_SERVICE_NAME: str = "PromptPotter Optimizer"
     BRAND_DOCS_URL: str = "https://github.com/PromptPotter/prompt-potter-optimizer"
 
-    # CORS - comma-separated allowlist, parsed via property. Empty by default:
-    # the webapp is same-origin (mounted at `/`) and the `npm run dev` proxy is
-    # same-origin too, so cross-origin access is opt-in. A cross-origin API
-    # client must set ALLOWED_ORIGINS explicitly — never `*`, since the app
-    # serves credentialed requests (`allow_credentials=True` in main.py).
+    # Comma-separated CORS allowlist. Empty by default because the webapp is same-origin, so
+    # cross-origin access is opt-in — and never `*`, since the app serves credentialed requests.
     ALLOWED_ORIGINS: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
-    # LLM provider keys. The optimizer's provider + model are install-global,
-    # configured per node in ``promptpotter/assets/optimizer/pipeline.yaml`` and read at
-    # ``llm_call`` — there is no env-var provider/model default. (Target/scoring
-    # model is per-dataset, in the pipeline overlay.)
+    # Keys only. The optimizer's provider + model are per node in
+    # ``promptpotter/assets/optimizer/pipeline.yaml``; there is no env-var default for either.
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""
@@ -193,11 +154,9 @@ class Settings(BaseSettings):
     # 8000 tokens/min for gpt-oss-120b): RATE_LIMITS='{"groq": [5, 8000]}'
     RATE_LIMITS: dict[str, list[int | None]] = {}
 
-    # The TermNorm backend's bearer token — TermNorm's credential, nobody else's.
-    # Read ONLY by the termnorm connector's ``auth_token`` hook, so it can only ever
-    # ride a request to TermNorm; a second remote backend declares its own or gets no
-    # auth header. TermNorm gates it behind its own ``TERMNORM_REQUIRE_AUTH`` flag
-    # (see backend-api/config/middleware.py), so unset is the normal local posture.
+    # TermNorm's credential, nobody else's: read ONLY by the termnorm connector's
+    # ``auth_token`` hook, so a second remote backend declares its own or gets no auth header.
+    # TermNorm gates it behind its own flag, so unset is the normal local posture.
     TERMNORM_TOKEN: str = ""
 
     # Langfuse Observability (cloud.langfuse.com)
@@ -206,28 +165,20 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
 
-    # Security posture. When True, binary/Office uploads (.xlsx) are rejected at
-    # ingest rather than parsed — xlsx is a macro / zip-bomb / XXE vector. Default
-    # parses Excel; operators hardening a deployment set HARDENED_MODE=true. The
-    # hook for future upload-surface hardening, matching the zero-trust posture in
-    # docs/operations/secure-hosting.md.
+    # When True, binary/Office uploads are rejected at ingest rather than parsed — xlsx is a
+    # macro / zip-bomb / XXE vector. The hook for upload-surface hardening generally.
     HARDENED_MODE: bool = False
 
-    # Run-admission capacity — how many campaigns the server admits at once
-    # (JobRegistry.reserve). 1 = strictly sequential (today's single-process
-    # `--workers 1` reality); a new launch while a run is in flight gets 409
-    # `machine_busy`. This is the concurrent-serving lever, but DO NOT raise it
-    # above 1 until BYO per-user keys (Lane A2) + a per-tenant RateLimiter land —
+    # How many campaigns the server admits at once; 1 = strictly sequential, and a launch
+    # while a run is in flight gets 409 `machine_busy`. This is the concurrent-serving lever,
+    # but DO NOT raise it above 1 until BYO per-user keys and a per-tenant RateLimiter land —
     # N parallel runs on the shared key/rate-bucket would cross-bill and throttle.
-    # See docs/specs/roadmap.md § Run admission + concurrent serving.
     MACHINE_RUN_CAPACITY: int = 1
 
     # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
 
-    # MLflow experiment tracking (opt-in; off by default). When enabled,
-    # FileSink writes per-round MLflow runs to ``archive/mlruns/`` via the
-    # MLflow Python SDK.
+    # Opt-in: FileSink writes per-round MLflow runs to ``archive/mlruns/``.
     MLFLOW_ENABLED: bool = False
 
     # Resolved, never CWD-relative — see ``config/paths.py::env_file_path``.

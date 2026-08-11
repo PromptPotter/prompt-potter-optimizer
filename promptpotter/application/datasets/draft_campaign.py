@@ -84,74 +84,49 @@ class DraftCampaign:
     pipeline_overlay: dict[str, Any]
     created_at: str
     updated_at: str
-    # Uploaded column headers + the input/target column mapping. The mapping
-    # is resolved on the draft (auto-confirmed for literal `query` /
-    # `ground_truth` headers; operator-confirmed otherwise) and gated at mint
-    # — ingest no longer requires literally-named columns.
+    # Auto-confirmed for literal `query` / `ground_truth` headers, operator-confirmed
+    # otherwise, and gated at mint — ingest does not require literally-named columns.
     headers: tuple[str, ...] = ()
     column_query: str = ""
     column_ground_truth: str = ""
-    # Per-column closed label set, computed ONCE over the full upload at ingest
-    # (``closed_label_set`` in ``csv_ingest``) and keyed by header name — only
-    # columns that read as a fixed taxonomy carry an entry. The target column's
-    # entry is the campaign's *answer space* (see :meth:`answer_space`); the
-    # origin gate uses it to require the labels be enumerated in the prompt, and
-    # the check-in proposer is handed it so it stops collapsing the taxonomy to
-    # "(e.g., X)". Empty for an open-ended target (numeric/free-text, where
-    # distinct ≈ n_rows).
+    # Computed ONCE over the full upload at ingest (``csv_ingest::closed_label_set``), keyed
+    # by header — only columns reading as a fixed taxonomy carry an entry. The target
+    # column's entry is the campaign's *answer space* (:meth:`answer_space`). Empty for an
+    # open-ended target, where distinct ≈ n_rows.
     column_label_sets: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # Per-field origin-readiness provenance, keyed by dotted field name
-    # (`column.query`, `column.ground_truth`, `task_description`). The
-    # deterministic checklist gates on it; no field reaches mint while UNSET or
-    # PROPOSED. Only the three genuinely-stated fields carry an entry — config
-    # is not gated.
+    # Keyed by dotted field name (`column.query`, `column.ground_truth`,
+    # `task_description`) — the three genuinely-stated fields; config is not gated. No
+    # field reaches mint while UNSET or PROPOSED.
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    # The campaign's origin prompt — a ``PromptTemplate.prompt_field_dict()``
-    # shape (the six string fields + optional ``few_shot_examples``). This is the
-    # origin OSP's prompt fields: seeded by the check-in node's decomposition half
-    # (``CheckinOutput`` carries it), or from an authored dataset's prompt on the
-    # ``draft_from_dataset`` path; operator-editable before commit, and written
-    # verbatim to ``prompts/default.yaml`` at mint. Empty until the check-in fills it.
+    # ``PromptTemplate.prompt_field_dict()`` shape. Seeded by the check-in node's
+    # decomposition half or an authored dataset's prompt, operator-editable before commit,
+    # written verbatim to ``prompts/default.yaml`` at mint.
     origin_prompt_fields: dict[str, Any] = field(default_factory=dict)
-    # The check-in's decomposition half also authors the decomposed task context —
-    # the 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
-    # layer (L1/L1_CRITIQUE/L2/L3) reads via the ``task_context`` injection. It
-    # rides the draft to commit, lands in ``{slug}/task_context.yaml``, and the run reads it
-    # instead of paying a second LLM call to re-decompose at run-start. Empty until check-in.
+    # The check-in's other decomposition half — the 7-field domain framing every optimizer
+    # layer reads via the ``task_context`` injection. Lands in ``{slug}/task_context.yaml``,
+    # so the run does not pay a second LLM call to re-decompose at start.
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
-    # The chosen active pipeline (``pipeline.yaml::pipelines.default``) — e.g. the
-    # full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``. Empty =
-    # fall back to the connector's ``default_pipeline``. Carried so reusing an
-    # existing dataset PRESERVES its pipeline through display + commit instead of
-    # silently resetting to the connector default (the llm_only-on-reuse bug).
+    # ``pipeline.yaml::pipelines.default``; empty falls back to the connector's
+    # ``default_pipeline``. Carried so reusing a dataset PRESERVES its pipeline through
+    # display + commit instead of resetting to the connector default.
     pipeline_steps: list[str] = field(default_factory=list)
-    # The campaign-config knobs, as one :class:`OptimizationOverrides`-shaped dict
-    # (``max_rounds`` / ``mechanisms``). Seeded with the stock defaults,
-    # operator-editable in the new-campaign form, and materialized into the
-    # committed ``campaign.json::optimization``. One object so a new knob is one
-    # field on :class:`OptimizationOverrides`, not a fresh thread through every surface.
+    # One :class:`OptimizationOverrides`-shaped dict, materialized into the committed
+    # ``campaign.json::optimization`` — so a new knob is one field there, not a fresh
+    # thread through every surface.
     optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
-    # The target library a ``candidate_source`` pipeline ranks each query against —
-    # the "4th required input" the operator drops in the ingest UI when a node type
-    # raises the dependency (see ``PipelineDependency``). Empty until dropped; on
-    # commit it materializes to ``{slug}/candidate_library.txt`` and the run unions
-    # it into the session's term index. NOT gated at the readiness checklist — a
-    # surfaced-and-droppable dependency, not a hard mint block (the answers already
-    # in the data are a degenerate-but-runnable pool).
+    # The target library a ``candidate_source`` pipeline ranks each query against, dropped in
+    # the ingest UI when a node type raises the dependency (``PipelineDependency``);
+    # materializes to ``{slug}/candidate_library.txt`` and unions into the session's term
+    # index. NOT gated — the answers already in the data are a degenerate-but-runnable pool.
     candidate_library: tuple[str, ...] = ()
-    # The origin's sanctioned inner-optimizer model set (`CampaignConfig.allowed_models`).
-    # Ticked in the check-in pipeline setup; materializes into `campaign.json::config.
-    # allowed_models` (top-level, a CampaignConfig field — NOT under `optimization`).
+    # `CampaignConfig.allowed_models` — the allow-list a human fork may steer the inner model
+    # to without a babysit warning. Top-level on CampaignConfig, NOT under `optimization`.
     # Empty = nothing sanctioned = restrictive default (any human model steer taints).
-    # The allow-list a human fork may steer the inner model to without a babysit warning.
     allowed_models: tuple[str, ...] = ()
-    # Set when this draft was opened by reusing a prior origin (the picker's
-    # "Reuse an origin" path) — the chosen origin's content id. When non-empty,
-    # ``prepare_checkin_run`` passes ``origin_prompt_fields`` as the
-    # ``origin_override`` seed, so C0 resolves via the ``seed`` branch and stamps
-    # the ``campaign_origin`` lineage ("minted from a chosen prior origin"). Empty
-    # for a fresh upload / plain dataset open (lineage stays ``origin``).
+    # The chosen origin's content id when this draft reused a prior origin. Non-empty routes
+    # ``prepare_checkin_run`` through the ``origin_override`` seed, so C0 resolves via the
+    # ``seed`` branch and stamps the ``campaign_origin`` lineage.
     reused_origin_id: str = ""
 
     def to_wire(self) -> dict[str, Any]:
@@ -160,10 +135,8 @@ class DraftCampaign:
         return {
             "draft_id": self.draft_id,
             "slug": self.slug,
-            # Project to the declared wire contract ({query, ground_truth}) using
-            # the resolved column mapping. The internal rows stay keyed by raw
-            # header names (the resolver reads those as sample_rows); only the
-            # wire boundary normalizes. Blank until the columns are confirmed.
+            # Only the wire boundary normalizes to {query, ground_truth} — the internal rows
+            # stay keyed by raw header names, which is what the resolver reads as sample_rows.
             "sample_preview": [
                 {
                     "query": row.get(self.column_query, ""),
@@ -184,11 +157,9 @@ class DraftCampaign:
                 field_name: prov.value for field_name, prov in self.field_provenance.items()
             },
             "origin_prompt_fields": dict(self.origin_prompt_fields),
-            # Count, not the full list — a library can run to tens of thousands of
-            # entries; the UI needs only "is it fulfilled, and how big". The
-            # per-dependency ``fulfilled`` flag rides ``optimizer_locks``' sibling
-            # ``dependencies`` block (added at the wire boundary, which has the
-            # connector's node types).
+            # Count, not the list — a library runs to tens of thousands of entries and the UI
+            # needs only "is it fulfilled, and how big". The per-dependency ``fulfilled`` flag
+            # rides ``optimizer_locks``' sibling ``dependencies`` block.
             "candidate_library_size": len(self.candidate_library),
             "allowed_models": list(self.allowed_models),
             "created_at": self.created_at,
@@ -379,12 +350,10 @@ def _mint_draft_id() -> str:
     return f"d_{uuid.uuid4().hex[:16]}"
 
 
-# A draft built from an existing on-disk dataset (demo / benchmark / owned tenant
-# dataset) records ``source_file = "dataset:{slug}"`` in ``draft_from_dataset``;
-# a fresh CSV upload records the raw filename. The prefix is therefore the
-# "derived-from-existing vs new-upload" discriminator the commit path branches on
-# — no separate flag field. A derived draft mints against its canonical dataset
-# instead of cloning a new ``datasets/{slug}/`` folder.
+# ``source_file`` carries `dataset:{slug}` for a draft built off an existing on-disk dataset
+# and the raw filename for a fresh upload, so this prefix IS the discriminator commit branches
+# on — no separate flag. A derived draft mints against its canonical dataset rather than
+# cloning a new ``datasets/{slug}/``.
 _DERIVED_PREFIX = "dataset:"
 
 

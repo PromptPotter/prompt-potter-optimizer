@@ -23,26 +23,21 @@ class OuterSampleProxies(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # The ±4 rail is a PLAUSIBILITY bound, not a structural one. This was a difference of two
-    # probabilities and so bounded in (−1,1) by construction; it is now a difference of two
-    # abilities in LOGITS, where ±1 is a value a strongly-regressing inner cycle really can
-    # exceed — and `extra="forbid"` + `Field` would then raise mid-run and kill the outer sample
-    # rather than record the regression. ±4 spans well past the ruler's own reach, so it never
-    # binds on live data while still stopping a runaway fit at the scoring clamp. A mean over
-    # the adopted levels is a convex combination of them, so it cannot leave the range the
-    # endpoint could reach and the rail is unchanged by the switch.
+    # A PLAUSIBILITY bound, not a structural one: a difference of two abilities in LOGITS is
+    # unbounded, and ±1 is a value a strongly-regressing inner cycle really can exceed — where
+    # the raise would kill the outer sample rather than record the regression. ±4 spans well
+    # past the ruler's own reach, so it never binds on live data while still stopping a runaway
+    # fit at the scoring clamp.
     mean_round_delta: float = Field(ge=-4.0, le=4.0)
 
 
 # The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
-# The `pipeline_data` key carrying `mean_adopted_level_se`. ONE spelling: the emit site
-# (`runner/inner/spawn.py`), the infra-key allow-list that keeps it off the scoring formula
-# (`scoring/sample_measurement.py`) and `panel_precision` below must agree, and three string
-# literals is how they stop agreeing. Deliberately NOT derived as f"{OUTER_PROXY_KEYS[0]}_se" —
-# it is the SE of the arm's own adopted level, not of the delta, and a derived name would
-# re-assert the identity this fix removes.
+# ONE spelling of the `pipeline_data` key, shared by the emit site (`runner/inner/spawn.py`),
+# the infra-key allow-list keeping it off the scoring formula, and `panel_precision` below.
+# Deliberately NOT derived as f"{OUTER_PROXY_KEYS[0]}_se": it is the SE of the arm's own
+# adopted level, not of the delta, and a derived name would assert an identity that is false.
 ADOPTED_LEVEL_SE_KEY = "mean_adopted_level_se"
 
 
@@ -62,14 +57,13 @@ def mean_adopted_level_se(result: CycleResult) -> float | None:
     ses = result.round_adopted_level_ses
     if not ses:
         return None
-    # `origin_level` is deliberately absent. Every arm on a cell replays the same round-0 rows, so
-    # it is ONE shared measurement that cancels in `variant - origin`; folding it into each side
-    # counted it twice in a quantity it vanishes from, and made the claimed noise 2.4x the spread
-    # it is a component of — impossible rather than merely large, and it clamped to "100% noise".
+    # `origin_level` is deliberately absent: every arm on a cell replays the same round-0 rows,
+    # so it is ONE shared measurement that cancels in `variant - origin`, and folding it into
+    # each side counts it twice in a quantity it vanishes from.
     #
-    # The DISTINCT levels — the padding `held_levels` adds carries no measurement, so it must not
-    # enter the average as if it did. A 2-of-4-round cell contributes the precision of 2 rounds.
-    # Mean of the SEs, not `σ/√n`: the levels NEST, so dividing by n would manufacture power.
+    # Over the DISTINCT levels — `held_levels`' padding carries no measurement, so a 2-of-4-round
+    # cell contributes the precision of 2 rounds. Mean of the SEs, not `σ/√n`: the levels NEST,
+    # so dividing by n would manufacture power.
     return float(sum(ses) / len(ses))
 
 
@@ -130,9 +124,8 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
-    # unbounded quantities — plausibly within a couple of logits, structurally within none. The
-    # field's +/-4 rail is what states that (see `OuterSampleProxies`). The only divisor is the
-    # round budget the mean is taken over; nothing normalizes for difficulty.
+    # unbounded quantities. The only divisor is the round budget the mean is taken over;
+    # nothing normalizes for difficulty.
     levels = held_levels(result)
     return OuterSampleProxies(
         mean_round_delta=sum(levels) / len(levels) - result.origin_level,
@@ -146,35 +139,31 @@ class PanelPrecision(StrictModel):
     # THE SEED-PANEL LAYER, and the one thing L4 legitimately measures that the shared engine
     # cannot: an ordinary sample is graded so it carries no error bar, while an outer cell is a
     # whole inner campaign whose level was ESTIMATED. Everything else the outer level reports is
-    # the engine's own (`ScoredCandidate.matched_origin_lift*`).
-    #
-    # In the measurand's own units — θ logits — never fitness. A cell's precision cannot cross the
-    # scoring formula, which is user-editable in `campaign.yaml::scoring` and needs no derivative
-    # to exist. Those two scales inside ONE object is what let the retired outer verdict publish an
-    # effect and a variance that could not be compared to each other.
+    # the engine's own (`ScoredCandidate.matched_origin_lift*`). In the measurand's own units —
+    # θ logits — never fitness: a cell's precision cannot cross the user-editable scoring
+    # formula, and two scales inside one object publish an effect and a variance that cannot be
+    # compared to each other.
     model_config = ConfigDict(frozen=True)
 
     # sqrt(mean over cells of (se_variant² + se_origin²)) — the spread the panel would show if
-    # every cell were measuring the SAME true value and differed only by measurement error. The
-    # two arms are separate inner campaigns on one cell, so their errors add in quadrature; this
-    # is the DIFFERENCE's error, not one arm's. Correct only because each input is that arm's own
-    # half, the shared origin level excluded upstream (`mean_adopted_level_se`).
+    # every cell measured the SAME true value and differed only by measurement error. The two
+    # arms are separate inner campaigns on one cell, so their errors add in quadrature: this is
+    # the DIFFERENCE's error, not one arm's, and it is correct only because each input is that
+    # arm's own half with the shared origin level excluded upstream.
     estimation_sd: float
     # Sample SD (n−1) of the per-cell paired diffs. Contains `estimation_sd` plus any real spread.
     observed_sd: float
     n_cells: int
-    # No ratio of the two is served. It was, as `estimation_share`, and `min(1.0, …)` presented a
-    # raw 5.55 — noise claiming to be 2.4x the total spread it is a component of — as a tidy
-    # "100% measurement noise". The impossible value WAS the finding, and the clamp ate it. Two
-    # SDs are directly legible and cannot round an impossibility into a plausible headline.
+    # No RATIO of the two is served: a clamped share rounds an impossible value — noise claiming
+    # to exceed the total spread it is a component of — into a tidy "100% measurement noise",
+    # eating the finding. Two SDs are directly legible.
 
 
 def cell_values(rows: list[dict[str, Any]], key: str) -> dict[str, float]:
     """``{cell: mean of `key` over that cell's rows}``, keyed by QUERY — the cell identity that
     survives across campaigns, where a per-campaign ``sample_id`` names a different cell."""
-    # `key` is one of this module's two constants, named at the call site. That is not the plumbing
-    # the origin double-count came from: the bug was DERIVING one key from the other
-    # (`f"{key}_se"`), which asserted the SE belonged to the measurand. Naming both is the fix.
+    # `key` is one of this module's two constants, NAMED at the call site — never derived one
+    # from the other (`f"{key}_se"`), which would assert the SE belongs to the measurand.
     acc: dict[str, list[float]] = {}
     for r in rows:
         cell, pd = r.get("query"), r.get("pipeline_data")
@@ -188,11 +177,10 @@ def panel_precision(
 ) -> PanelPrecision | None:
     """``None`` below two cells both arms measured AND both priced — one cell has no spread to
     decompose, and a fabricated 0.0 would read as a perfect instrument."""
-    # Level and SE are two reads, not one tuple. A FLOORED cell — every round lost its candidates
-    # to an empty optimizer response — carries a real `mean_round_delta` of -1.0 and no adopted
-    # levels to have an SE over. Bundling them would make the SE optional, and then the corpus
-    # ranking, which wants only the level, would filter on a field it never asked about — dropping
-    # exactly the cells that record the worst optimizer prompts, upward-biasing it in silence.
+    # Level and SE are two reads, not one tuple. A FLOORED cell carries a real `mean_round_delta`
+    # of -1.0 and no adopted levels to have an SE over, so bundling them makes the SE optional —
+    # and the corpus ranking, which wants only the level, then filters on a field it never asked
+    # about, dropping exactly the cells that record the worst optimizer prompts.
     level, se = OUTER_PROXY_KEYS[0], ADOPTED_LEVEL_SE_KEY
     v_level, o_level = cell_values(variant_rows, level), cell_values(origin_rows, level)
     v_se, o_se = cell_values(variant_rows, se), cell_values(origin_rows, se)

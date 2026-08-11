@@ -80,9 +80,8 @@ def _r_evidence_health(b: InjectionBundle) -> str:
         for node, rate in ranked[:NODE_FAILURE_RENDER_CAP]
     ]
     body = "PIPELINE NODE FAILURES (round-level):\n" + "\n".join(lines)
-    # The typed predicate, not a second comparison against the same constant — the health
-    # grade, the L2 router and `terminate_capability` all ask this one function, so the panel
-    # cannot say STARVED on a round the router calls healthy, or stay silent on one it doesn't.
+    # The typed predicate, never a second comparison against the same constant: the health
+    # grade, the L2 router and `terminate_capability` all ask this one function.
     if starved := evidence_starved_node(rates):
         worst_rate = rates[starved]
         body += (
@@ -158,11 +157,10 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
     if d.n_valid:
         rb = d.rank_buckets
-        # Renders only where ranking DISCRIMINATED — some ground truth landed below r=1. With
-        # every rank at 1-or-absent the buckets are the hit/miss split wearing ranking
-        # vocabulary, which L2 already has. That is the common case, not the edge: `llm_only`
-        # maps its one output onto `final_ranking`, so the schema-level "has a ranker?" test
-        # reads True on a width-1 list and the 0s only steer L2 toward "fix the ranker".
+        # Renders only where ranking DISCRIMINATED — some ground truth below r=1. With every
+        # rank at 1-or-absent the buckets are the hit/miss split wearing ranking vocabulary,
+        # and that is the COMMON case: `llm_only` maps its one output onto `final_ranking`, so
+        # the schema-level "has a ranker?" test reads True on a width-1 list.
         discriminated = any(rb.get(k, 0) for k in ("2-5", "6-10", "11-20"))
         if discriminated:
             rank_line = (
@@ -212,8 +210,8 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
-# Order keys surface to the LLM — effect-driven items first (rankings, top values, exhausted) so
-# attention lands on what to mutate; sample-side findings second; narrative tail last.
+# Effect-driven items first so attention lands on what to mutate; sample-side findings second;
+# narrative tail last.
 _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "axis_rankings",
     "top_values",
@@ -324,9 +322,8 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
 @signal(
     "sample_transcripts",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for TRANSCRIPT_RENDER_CAP=3 typical transcripts (~2.6-3k each on
-    # justlogic); worst case (~3.8k each) degrades by section-drop of the whole
-    # 3rd transcript — today's behavior, never a severed fence.
+    # Sized for TRANSCRIPT_RENDER_CAP typical transcripts; a worst-case overrun degrades by
+    # section-dropping the whole last transcript, never by severing a fence.
     char_cap=10000,
     citable=True,
 )
@@ -396,8 +393,8 @@ def _paired_cell(
     if origin is None or base is None:
         return (lift, None)
     se, base_se = _pd_number(r, ADOPTED_LEVEL_SE_KEY), _pd_number(origin, ADOPTED_LEVEL_SE_KEY)
-    # Quadrature, correct for the reason `panel_precision` gives: each arm carries its OWN half,
-    # the shared origin LEVEL already cancelled by the subtraction beside it.
+    # Quadrature, for the reason `panel_precision` gives: each arm carries its OWN half, the
+    # shared origin LEVEL already cancelled by the subtraction beside it.
     bar = (se**2 + base_se**2) ** 0.5 if se is not None and base_se is not None else None
     return (lift - base, bar)
 
@@ -405,19 +402,19 @@ def _paired_cell(
 @signal(
     "inner_narratives",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative
-    # now, so a per-section overrun is a safety rail rather than an expected drop.
+    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative, so
+    # a per-section overrun is a safety rail rather than an expected drop.
     char_cap=13000,
     citable=True,
 )
 def _r_inner_narratives(b: InjectionBundle) -> str:
     """Each cell as its PAIRED difference from the origin on the same seed, ranked worst-CONFIDENT
     first. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
-    # The rank decides which cells spend their FULL narrative here, so a rank read off the point
-    # estimate alone spent the budget on whichever cell noise put first: the measured panel held
-    # `0.000 ±0.336` and `+0.257 ±0.393`, gaps narrower than either bar. Ranking on the upper bound
-    # keeps a wide cell out of the lead, and when nothing clears its own bar NO cell earns the
-    # 4x trace cap — there is no evidence to amplify, and the header says so instead of pretending.
+    # The rank decides which cells spend their FULL narrative, so a rank read off the point
+    # estimate alone spends the budget on whichever cell noise put first — the measured gaps are
+    # routinely narrower than either bar. Ranking on the upper bound keeps a wide cell out of
+    # the lead, and when nothing clears its own bar NO cell earns the wide trace cap: there is
+    # no evidence to amplify, and the header says so instead of pretending.
     origin = {sid: r for r in b.origin_per_sample if (sid := r.get("sample_id")) is not None}
     scored = _inner_narrated(b)
     if not scored:
@@ -495,10 +492,9 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
 
     top_label, top_n = truth.most_common(1)[0]
     constant = top_n / n
-    # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable
-    # to the constant-answer floor beside it. Counting `fitness >= 1.0` instead made
-    # this line read "You score 0.00" on every graded scorer, so the panel told the
-    # generator a constant answer beat it while the run was in fact climbing.
+    # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable to the
+    # constant-answer floor beside it. A `fitness >= 1.0` count reads 0.00 on every graded
+    # scorer, telling the generator a constant answer beat it while the run is climbing.
     scored = compute_accuracy(results=cast("list[QueryMeasurement]", rows))
     if scored is None:
         return ""  # nothing scoreable — no score to compare the floor against
@@ -538,9 +534,9 @@ def _r_failing_samples(b: InjectionBundle) -> str:
     rows = _misses(b)
     errored = _errored(b)
     if not rows:
-        # Silence here would leave the generator with no account of the round at all, so the
-        # panel reports the non-measurement in its own voice (unfenced — it is a directive
-        # about PromptPotter's state, not dataset content the fence tells L1 to distrust).
+        # Silence would leave the generator with no account of the round, so the panel reports
+        # the non-measurement in its own voice — unfenced, being a statement about
+        # PromptPotter's state rather than dataset content the fence tells L1 to distrust.
         if not errored:
             return ""
         return (
@@ -605,9 +601,8 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
     if cand.total == 0:
-        # Zero samples means zero evidence, and `accuracy` defaults to 0.0 — so an unmeasured
-        # candidate is byte-identical to one that got everything wrong, and must never be
-        # quoted as an outcome. Same rule `matched_origin_accuracy` states one level up.
+        # `accuracy` defaults to 0.0, so an unmeasured candidate is byte-identical to one that
+        # got everything wrong and must never be quoted as an outcome.
         return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
@@ -627,15 +622,14 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     """ONE compact line per prior candidate, so every retained round fits and the record stays
     COMPLETE — recognition, not reproduction. A candidate that changed nothing is not an attempt."""
     prior = list(b.prior_rounds)
-    # Attempts per round, oldest first. Built for EVERY prior round before the retained
-    # window is taken, because a round's row count is not knowable from the round: C0 and
-    # a no-op variant both carry a candidate that changed nothing. Windowing on rounds
-    # that merely HAVE candidates spends a retained slot rendering nothing.
+    # Oldest first, and built for EVERY prior round BEFORE the retained window is taken: a
+    # round's row count is not knowable from the round (C0 and a no-op variant both carry a
+    # candidate that changed nothing), so windowing on rounds that merely HAVE candidates
+    # spends a retained slot rendering nothing.
     by_round: list[tuple[int, list[tuple[str, frozenset[str]]]]] = []
     for i, rr in enumerate(prior):
         parent = rr.prompt_fields
-        # The candidates' parent params = the PRIOR round's resolved pipeline_params
-        # (the winner / retained incumbent this round mutated from).
+        # The PRIOR round's resolved params — the incumbent this round mutated from.
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
         attempts: list[tuple[str, frozenset[str]]] = []
         for cand in rr.candidate_scores:
@@ -643,10 +637,9 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
             if not changed:
                 continue
             mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed]
-            # `total == 0` is checked BEFORE the paired quote, not inside `_candidate_fate`'s
-            # fallback: a never-measured candidate can still carry a `matched_origin_accuracy`
-            # (the origin was scored even though the candidate was not), which would otherwise
-            # take the branch above and render a fully-formed comparison out of nothing.
+            # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can
+            # still carry a `matched_origin_accuracy` (the origin was scored even though the
+            # candidate was not), and would otherwise render a comparison out of nothing.
             scored = (
                 f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%}"
                 if cand.total and cand.matched_origin_accuracy is not None
@@ -665,10 +658,9 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     if not by_round:
         return ""
     lines: list[str] = []
-    # (round, fingerprint) per rendered row, oldest first — the pool each later row is
-    # matched against. First match wins, so a marker always points at the EARLIEST occurrence
-    # and a long repeat chain keeps naming one round rather than the previous link. Matched
-    # only within the window, so a marker never names a round the panel does not show.
+    # (round, fingerprint) per rendered row, oldest first — the pool each later row is matched
+    # against. First match wins, so a marker points at the EARLIEST occurrence rather than the
+    # previous link. Matched only within the window, so it never names a round the panel hides.
     seen: list[tuple[int, frozenset[str]]] = []
     for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]:
         for body, fp in attempts:

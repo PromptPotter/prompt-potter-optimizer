@@ -71,22 +71,15 @@ class PhaseRecord(StrictModel):
     event: str
     round: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    # In-memory-only carrier for the live ``RoundResult`` on ``round:display``
-    # records. ``exclude=True`` keeps it off the persisted/streamed JSON — the
-    # disk copy keeps only the lean ``payload['round_result']`` scalars (round,
-    # accuracy, composite_fitness) the SSE→webapp chat reads. The fat per-sample
-    # / per-candidate arrays already live in ``round_NNNN.json`` +
-    # ``dashboard.json::rounds[]``; the ledger needs no third copy. Live
-    # subscribers (LiveDashboardView, LiveDisplay) read this field; no disk
-    # re-reader does. ``None`` on every record but ``round:display``.
+    # In-memory-only carrier for the live ``RoundResult`` on ``round:display`` records;
+    # ``None`` on every other. ``exclude=True`` keeps it off the persisted/streamed JSON,
+    # where the fat arrays already live in ``round_NNNN.json`` + ``dashboard.json::rounds[]``
+    # and only live subscribers read this. No disk re-reader consumes it.
     live_round_result: Any = Field(default=None, exclude=True, repr=False)
-    # In-memory-only carrier for ``PhaseEvent.data`` — the live handles and bulk a phase
-    # builder was called with. Same ``exclude=True`` rationale as the field above, and the
-    # same audit: NO disk re-reader consumes it. The three ledger subscribers that need
-    # phase state read the typed ``payload['view']``, which is capped and human-readable;
-    # ``LiveDisplay`` alone reads this, for the ``env``/``state`` handles a resume-rewind
-    # rebuild needs, and those exist only on the direct in-memory path anyway. Off disk it
-    # also stops carrying the resolved dataset and a candidate's full prompt twice.
+    # ``PhaseEvent.data`` — the live handles and bulk a phase builder was called with. Same
+    # ``exclude=True`` rationale and the same audit: no disk re-reader consumes it. Ledger
+    # subscribers read the typed, capped ``payload['view']``; ``LiveDisplay`` alone reads this
+    # for the ``env``/``state`` handles a resume-rewind rebuild needs.
     data: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -142,11 +135,9 @@ class TokenUsageRecord(StrictModel):
     non-reasoning model and for a provider that reports no breakdown, which is why it
     cannot be read as "this call did not think".
 
-    It is here rather than beside the cost because the question it answers is *latency*,
-    not money: an optimizer node whose answer is capped at ~1300 characters was measured
-    billing 4790 completion tokens for 1044 of them, so ~94% of that call — and of its
-    108 seconds — bought reasoning. The wire reported it on every call and only the
-    parse-FAILURE path kept it, so the share was legible exactly when it was useless."""
+    It sits here rather than beside the cost because the question it answers is *latency*,
+    not money: most of an optimizer call's wall clock is the hidden trace, and only this
+    field makes that share legible on a SUCCEEDING call."""
     duration_s: float = 0.0
     cost_usd: float | None = None
     cached: bool = False
@@ -264,10 +255,9 @@ RoundWarningKind = Literal[
     "injection_budget_overrun",
     "layer_parse_failure",
     "optimizer_deadline_retry",
-    # The odd one out, deliberately: nothing failed and nothing was recovered from. The round
-    # measured cleanly and still resolved nothing — no arm's blocked lift over the origin excluded
-    # 0. It looks identical to a decisive round on every other channel, and THAT silence is what
-    # this kind exists to break. See `l1/score/winner.py` for the emit.
+    # The odd one out, deliberately: nothing failed. The round measured cleanly and still
+    # resolved nothing — no arm's blocked lift over the origin excluded 0 — which looks
+    # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.
     "round_not_separable",
 ]
 
@@ -320,27 +310,22 @@ class ForkDirection(enum.StrEnum):
     EQUIVALENT = "equivalent"
     """BOTH sides continue, identically — the cut changed nothing any reader saw.
 
-    A correction has to cut before it writes, so the version it replaces survives; but
-    whether the replacement matters is only knowable afterwards. When it turns out nothing
-    downstream read a different word, the branch is not a dead end and drawing it as one
-    invites pruning a line that is perfectly good. It is the same line twice, and both
-    carry the same content forward. Measured, so it is the one direction a trigger cannot
-    imply — it rides ``ForkSpec.direction``."""
+    A correction cuts before it writes, so the version it replaces survives; whether the
+    replacement matters is only knowable afterwards, and drawing an unchanged branch as a
+    dead end invites pruning a line that is perfectly good. Measured, so it is the one
+    direction a trigger cannot imply — it rides ``ForkSpec.direction``."""
 
 
-# Derived from the trigger, never stored: every fork already on disk answers this from the
-# trigger it recorded, so there is nothing to migrate and no second field to fall out of
-# step. Exhaustiveness is checked at import (below) for the same reason
-# ``RESUME_CHECKPOINT_GATING`` is — a new trigger must not land without an answer.
+# Derived from the trigger, never stored: every fork on disk answers this from the trigger it
+# recorded, so there is nothing to migrate and no second field to fall out of step.
+# Exhaustiveness is checked at import below — a new trigger must not land without an answer.
 FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
-    # The operator is exploring beside a line that keeps its meaning: a sweep arm, a
-    # diagnostic probe, a steered what-if. Nothing about the parent is invalidated.
+    # Exploring beside a line that keeps its meaning; nothing about the parent is invalidated.
     ForkTrigger.OPERATOR_SWEEP: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
-    # Each of these retargets the active pointer and abandons the tail it cut from — a
-    # rewind by hand, a layer's rebase, or a resume finding the record no longer holds.
-    # The parent keeps that tail as the record of what ran; the run is elsewhere now.
+    # Each retargets the active pointer and abandons the tail it cut from. The parent keeps
+    # that tail as the record of what ran; the run is elsewhere now.
     ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
     ForkTrigger.L2_REBASE: ForkDirection.SUPERSEDE,
     ForkTrigger.L3_REBASE: ForkDirection.SUPERSEDE,
@@ -525,10 +510,9 @@ CycleRecord = Annotated[
 ]
 
 
-# The `issued_by` value an operator fork carries when the client sent no
-# identity. One SoT for both the stamp site (`mint_operator_fork`) and the
-# lineage suppression that turns it into a *no* "edited by" badge — they must
-# agree on the literal or the badge silently breaks.
+# The `issued_by` an operator fork carries when the client sent no identity. One SoT for the
+# stamp site (`mint_operator_fork`) and the lineage suppression that turns it into a *no*
+# "edited by" badge — they must agree on the literal or the badge silently breaks.
 UNATTRIBUTED_OPERATOR = "operator"
 
 
@@ -544,12 +528,9 @@ class ForkSpec(StrictModel):
     from_candidate_id: str | None = None
     l1_layout: dict[str, list[str]] | None = None
     seed: CycleSeed | None = None
-    # The MEASURED direction, when the cut had to be taken before its consequence was
-    # known. Only a correction needs it: it cuts first so the version it replaces survives,
-    # then finds out whether the replacement reached anything. `None` ⇒ the trigger implies
-    # the direction (`FORK_DIRECTION`), which is every other cut. An override, not a
-    # fallback — a measured answer outranks a derived default, and only one of them exists
-    # at a time.
+    # The MEASURED direction, for a cut taken before its consequence was known — only a
+    # correction needs it. `None` ⇒ the trigger implies the direction (`FORK_DIRECTION`),
+    # which is every other cut. An override, not a fallback: only one exists at a time.
     direction: ForkDirection | None = None
 
 

@@ -62,12 +62,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Transition types — one L2/L3 fire's output + the static per-layer spec this
-# module fills. Provider/model/temperature are sourced from the layer's
-# optimizer node config (``promptpotter/assets/optimizer/pipeline.yaml``) inside
-# ``llm_call``, not held here.
-# ---------------------------------------------------------------------------
+# Provider/model/temperature are sourced from the layer's optimizer node config
+# (``promptpotter/assets/optimizer/pipeline.yaml``) inside ``llm_call``, never held here.
 
 
 @dataclass
@@ -87,7 +83,6 @@ class TransitionResult:
     debug_response: dict[str, Any] | None = None
 
 
-# Per-layer callable slots carried on ``LayerStrategy``.
 ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
 ApplyFn = Callable[["Cycle", TransitionResult, int], None]
 PayloadFn = Callable[["Cycle"], dict[str, Any]]
@@ -103,14 +98,6 @@ class LayerStrategy:
     apply: ApplyFn
     enter_payload_fn: PayloadFn
     exit_payload_fn: ExitFn
-
-
-# ---------------------------------------------------------------------------
-# L2 — parse + apply + enter/exit payloads + strategy constant.
-# L2 steers what L1 LOOKS AT (l1_layout) and how hard it explores (l1_overrides).
-# It does not rewrite the operator's framing — see domain/search_point.py::FRAMING_FIELDS.
-# No pipeline_params deltas — those belong to L1.
-# ---------------------------------------------------------------------------
 
 
 def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
@@ -175,10 +162,9 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2
-    # state from ``record_l2_fired``) — carried onto ``L2RefineExitView``, the persisted half.
-    # No prompt/response: the call is already this ledger's `l2_context` LLMCallRecord and the
-    # audit twin's `nodes.l2_context`, so a third copy on the phase record is duplication.
+    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
+    # ``L2RefineExitView`` — the persisted half. No prompt/response: the call is already this
+    # ledger's `l2_context` LLMCallRecord and the audit twin's `nodes.l2_context`.
     payload: dict[str, Any] = {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
@@ -207,13 +193,6 @@ L2 = LayerStrategy(
 )
 
 
-# ---------------------------------------------------------------------------
-# L3 — parse + apply + enter/exit payloads + strategy constant.
-# L3 rewrites ``plan`` (strategic frame). Optional ``note`` is the sticky L3→L2 pointer
-# (survives L2 fires, replaced wholesale on each L3 fire). No ``pipeline_params`` deltas.
-# ---------------------------------------------------------------------------
-
-
 def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
     new_plan = raw.plan or opt_sp.plan
     rationale = raw.rationale or "L3 modify_plan transition"
@@ -238,8 +217,8 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    # Order matters: ``_run_transition``'s ``copy_memory_to`` carried prior l3_note onto the new OSP;
-    # overwrite with L3's output (may be ``""``) — the "cleared only when L3 fires again" contract.
+    # Order matters: ``copy_memory_to`` carried the prior l3_note onto the new OSP, and this
+    # overwrite (possibly with ``""``) is the "cleared only when L3 fires again" contract.
     cycle.opt_sp.memory.wounds.l3_note = result.l3_note
     cycle.opt_sp.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
@@ -257,8 +236,8 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l3_*_at_entry`` read by ``EscalationFSM.fold`` on resume (carried onto ``PlanExitView``,
-    # the persisted half); ``record_l3_fired`` resets L2 state to these.
+    # ``l3_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
+    # ``PlanExitView``; ``record_l3_fired`` resets L2 state to these.
     payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,
@@ -285,11 +264,6 @@ L3 = LayerStrategy(
 )
 
 
-# ---------------------------------------------------------------------------
-# Fork payload — applies operator/LLM-issued OSP deltas at fork mint time.
-# ---------------------------------------------------------------------------
-
-
 def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
     """Stamp a fork payload's L1-surface deltas on the OSP — the same shape L2 writes."""
     if payload.l1_layout is not None:
@@ -307,11 +281,6 @@ def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> N
             ids = sorted({o.validator_id for o in result.outcomes})
             raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
         opt_sp.memory.l1_layout = layout
-
-
-# ---------------------------------------------------------------------------
-# Cascade — escalate_l2 walks the L2/L3 patience ladder + wound-4 force-L3.
-# ---------------------------------------------------------------------------
 
 
 async def _run_transition(
@@ -358,12 +327,10 @@ async def _run_transition(
             )
             result = transition.parse(raw, cycle.opt_sp, prompt)
         except OptimizerPromptParseError as parse_err:
-            # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Left
-            # unhandled this kills the whole cycle — and under L4 that voids an entire outer
-            # sample, so one flaky provider response is scored as "this optimizer prompt is bad".
-            # `l1_generate` has always survived the same failure (`l1/generate.py`); L2/L3
-            # simply never got the same treatment. Prior `task_context`/`plan` stays adopted
-            # (identical to a soft-reject), the round is a stall, and the loop continues.
+            # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
+            # it kills the cycle — and under L4 that voids a whole outer sample, scoring one
+            # flaky provider response as "this optimizer prompt is bad". Prior
+            # `task_context`/`plan` stays adopted, the round is a stall, the loop continues.
             logger.error(
                 "%s: optimizer prompt parse failure — refinement discarded, prior framing kept. [%s]",
                 transition.template_name,
@@ -393,9 +360,8 @@ async def _run_transition(
             )
             return
 
-    # Same adoption seam as an L1 win: identity advances (new_opt carries a fresh
-    # lineage, parent = the outgoing incumbent) and the persistent memory carries
-    # forward. The frame surfaces L2/L3 own (l1_layout / plan) are then
+    # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
+    # incumbent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
     # installed by `transition.apply` below, so no `advanced` overlay is passed here.
     new_opt = result.opt_sp
     cycle.adopt(new_opt, advanced={})
@@ -420,15 +386,13 @@ async def _run_transition(
         **transition.exit_payload_fn(cycle, result),
     )
 
-    # Terminate outranks rebase: an unrecoverable-fault judgment ("stop") is more final
-    # than a rewind ("try again from earlier"). Both ride the same post-apply seam as
-    # fork_proposal, so the layer's normal output is fully adopted and the exit-phase event
-    # (which carries ``terminate_proposal`` to the ledger) is emitted before the raise. Reuses
-    # the existing HALTED-class StopReason.ABORT — no new stop reason, no sidecar (R-48/R-09).
+    # Terminate outranks rebase: "stop" is more final than "try again from earlier". Both ride
+    # this post-apply seam, so the layer's normal output is adopted and the exit-phase event
+    # (which carries the proposal to the ledger) is emitted before the raise.
     if result.terminate_proposal is not None:
         if not cycle.config.optimization.terminate_capability:
-            # Same shape as the fork gate below: off ⇒ the prompt carried no
-            # terminate guidance, and a volunteered field must not ABORT the run.
+            # Same shape as the fork gate below: off ⇒ the prompt carried no terminate
+            # guidance, and a volunteered field must not ABORT the run.
             logger.warning(
                 "%s emitted terminate_proposal while terminate_capability is off — ignored",
                 transition.layer_id,
@@ -443,10 +407,9 @@ async def _run_transition(
 
     if result.fork_proposal is not None:
         if not cycle.config.optimization.rebase_capability:
-            # The capability is OFF, so the prompt carried no fork guidance — but a
-            # model can still volunteer the field. Without this the gate would be
-            # prompt-side only: a no-rebase ablation run could silently fork anyway,
-            # and its whole point is that it cannot.
+            # A model can volunteer the field even though the prompt carried no fork guidance.
+            # Without this the gate is prompt-side only, and a no-rebase ablation — whose
+            # whole point is that it cannot fork — silently forks anyway.
             logger.warning(
                 "%s emitted fork_proposal while rebase_capability is off — ignored",
                 transition.layer_id,
@@ -466,9 +429,8 @@ def _stash_rebase_request(
         spine, cycle_id=session.state.cycle_id or "", current_round=round_num
     )
     if target_round is None:
-        # Nothing above the current node (round 0 of a root). A rewind to nowhere would
-        # mint a duplicate of this cycle and burn a whole run, so decline the fork and
-        # let the loop stop on its own terms.
+        # Nothing above the current node (round 0 of a root). A rewind to nowhere mints a
+        # duplicate of this cycle and burns a whole run, so decline and let the loop stop.
         logger.warning(
             "%s emitted fork_proposal at round %d but no ancestor is available to rewind to — ignored",
             layer_id,
@@ -564,12 +526,10 @@ async def escalate_l2(
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
-        # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
-        # so resume reproduces without a separate decision record.
-        # Every breach reaching here is a HARD l1_layout failure (mandatory placeholder
-        # missing, unknown name, dup within slot) — a real signal that L2 is thrashing inside
-        # the plan. No soft-reject exception: with the framing frozen, a stale task_context
-        # repeat is unrepresentable, so there is no inert breach to except.
+        # Wound 4: post-L2 validator failure → L3 force-trigger, deterministic from L2 output
+        # so resume reproduces it without a decision record. Every breach reaching here is a
+        # HARD l1_layout failure — a real signal that L2 is thrashing inside the plan — so
+        # there is no inert breach to except.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
         if breaches:
             logger.warning(

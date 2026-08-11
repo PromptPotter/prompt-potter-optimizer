@@ -1,17 +1,13 @@
 """What `dashboard.json` SERVES, as opposed to what a round MEASURED.
 
-`RoundResult` is the measurement — 62 modules import it. These two shapes are read by exactly
-one package, `infrastructure/projections/live_dashboard/`, and exist to be a narrower, frozen
-projection of it for the browser. Keeping them beside the measurement made a display field look
-like a measurement field, which is the confusion `webapp/CLAUDE.md` § Scoring authority exists
-to prevent.
+`RoundResult` is the measurement; these shapes are a narrower frozen projection of it for the
+browser, read by exactly one package (`infrastructure/projections/live_dashboard/`). Living
+beside the measurement made a display field look like a measurement field — the confusion
+`webapp/CLAUDE.md` § Scoring authority exists to prevent. Named `dashboard_rows` and not
+`round_summary` because the projection that BUILDS these already owns that name.
 
-Named `dashboard_rows` and not `round_summary`: the projection that BUILDS these already owns
-that name (`live_dashboard/round_summary.py`), and two files a layer apart under one noun is
-the collision root `CLAUDE.md` § STOP names.
-
-`DegradationHealth` deliberately stays in `results.py` — `RoundResult.health` is typed on it,
-so moving it here would invert this module's one-way import."""
+`DegradationHealth` stays in `results.py` — `RoundResult.health` is typed on it, so moving it
+here would invert this module's one-way import."""
 
 from __future__ import annotations
 
@@ -53,35 +49,31 @@ class DashboardCandidate(StrictModel):
     # which includes every live row: the fit is round-scoped and needs two arms.
     theta: float | None = None
     theta_se: float | None = None
-    # Composite-fitness CI (`ScoredCandidate.composite_ci_lo/hi`) — the whisker the chart draws,
-    # stamped off the candidate's own rows when it finishes (`l1/population.py`), so it is
-    # present live and not only at round close. ONE band per candidate, from that one writer: a
-    # second estimator overriding it for the arms an election happened to reach is what made the
-    # whisker come and go by gating rather than by evidence.
+    # The whisker the chart draws (`ScoredCandidate.composite_ci_lo/hi`), stamped off the
+    # candidate's own rows when it finishes (`l1/population.py`) so it is present live and not
+    # only at round close. ONE band per candidate from that one writer: a second estimator
+    # overriding it makes the whisker come and go by gating rather than by evidence.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
     # The floor this candidate was JUDGED against (`ScoredCandidate.matched_origin_*`): the
-    # origin restricted to the samples this candidate actually measured. Served because
-    # `accuracy` alone is unreadable under elimination — a PoBB-locked candidate ran 8 of 20,
-    # so what it beat is NOT the origin's full-set rate, and the terminal has always printed
-    # "was 42%" beside the verdict while the webapp printed the verdict alone. `None` unless the
-    # candidate covered the origin's panel — a prefix rate is set by where PoBB stopped it.
+    # origin restricted to the samples it actually measured. Served because `accuracy` alone is
+    # unreadable under elimination — a PoBB-locked candidate beat something that is NOT the
+    # origin's full-set rate. `None` unless the candidate covered the origin's panel, since a
+    # prefix rate is set by where PoBB stopped it.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
-    # The blocked lift over that floor and its interval (`ScoredCandidate.matched_origin_lift*`) —
-    # the one number that says whether this candidate beat the origin or the panel merely wobbled,
-    # and the ONE the L4 outer level reads too. Same scale as `composite_ci_*` above; sharper on
-    # the same rows, because pairing cancels the origin's cell-to-cell variation instead of
-    # carrying it. `None` below two shared cells — which at a one-cell panel is every round, and
-    # is the honest reading rather than a missing feature.
+    # The blocked lift over that floor and its interval — the one number saying whether this
+    # candidate beat the origin or the panel merely wobbled, and the one the L4 outer level
+    # reads. Same scale as `composite_ci_*`, sharper on the same rows because pairing cancels
+    # the origin's cell-to-cell variation. `None` below two shared cells, which at a one-cell
+    # panel is every round and is the honest reading rather than a missing feature.
     matched_origin_lift: float | None = None
     matched_origin_lift_ci_lo: float | None = None
     matched_origin_lift_ci_hi: float | None = None
-    # The round's elected winner. On the BASE, because the election is not a closing act:
-    # `elect_round_winner` runs at the end of SCORING, before `l1_critique` and two LLM calls
-    # before the round closes, and the live row is the only surface that can say so at that
-    # moment. `False` until that election lands, and on every row of a round that held none —
-    # never a claim that this candidate lost, only that nothing has crowned it yet.
+    # On the BASE, because the election is not a closing act: `elect_round_winner` runs at the
+    # end of SCORING, two LLM calls before the round closes, and the live row is the only
+    # surface that can say so then. `False` until it lands, and on every row of a round that
+    # held none — never a claim that this candidate lost.
     is_winner: bool = False
 
 
@@ -106,43 +98,35 @@ class RoundSummary(StrictModel):
     round: int
     accuracy: float
     composite_fitness: float
-    # The cross-round-comparable series: ability on the cycle's fixed δ ruler, which is
-    # subset-invariant. `accuracy`/`composite_fitness` above are subset-relative — under
-    # `per_round_resubset` they swing round-to-round on a fresh 6–16 sample draw, which reads
-    # as a false "great start → decay". The trend/sparkline plot THIS series so progress is
-    # honest; the per-round measured number stays on `candidates[]` (badged with its count).
-    #
-    # Never add a `cumulative_accuracy` beside it: a mean over rows from DIFFERENT
-    # configurations fabricates a number no individual scored. Mirrors
-    # `RoundResult.cumulative_theta`.
+    # The cross-round-comparable series: ability on the cycle's fixed δ ruler, subset-invariant
+    # where `accuracy`/`composite_fitness` above are subset-relative — under
+    # `per_round_resubset` those swing on each fresh draw, reading as a false
+    # "great start → decay". The trend/sparkline plot THIS series; the per-round measured
+    # number stays on `candidates[]`, badged with its count. Never add a `cumulative_accuracy`
+    # beside it: a mean over rows from DIFFERENT configurations fabricates a number no
+    # individual scored. Mirrors `RoundResult.cumulative_theta`.
     cumulative_theta: float | None = None
-    # No `cumulative_theta_se` beside it. The round-close handler used to push one in via
-    # `model_copy(update=…)`, which does not validate — the key landed outside `model_fields`
-    # and the serializer dropped it, so it was never on disk and nothing ever read it. The
-    # interval that IS read is per candidate (`theta_se`); the round-level SE stays on the
-    # ledger and the round document, which is where a reader for it would come from.
+    # And no `cumulative_theta_se` beside it: the interval that IS read is per candidate
+    # (`theta_se`), and the round-level SE stays on the ledger and the round document, which is
+    # where a reader for it would come from.
     # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
     calibration_model: CalibrationModel | None = None
     # The round's verdict and the evidence it rests on — the two bits that decide how long the
-    # cycle lives, so they are the two an operator most needs to see. `improved` moves the stall
-    # counter and the life bank; `electable_count` decides whether the bank moves AT ALL, since a
-    # round no candidate reached measured nothing about the search (`EscalationFSM._bank_round`).
-    # Both were engine-only, which is why a campaign could visibly climb while its bank drained
-    # and the dashboard showed neither number. Round 0 holds no election, so both stay unset there.
+    # cycle lives. `improved` moves the stall counter and the life bank; `electable_count`
+    # decides whether the bank moves AT ALL, since a round no candidate reached measured
+    # nothing about the search (`EscalationFSM._bank_round`). Both engine-only would let a
+    # campaign visibly climb while its bank drained. Round 0 holds no election ⇒ both unset.
     improved: bool | None = None
     electable_count: int | None = None
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
-    # Per-round selection from the adaptive queue mechanism — sample ids
-    # in measurement order (longest candidate sequence carries the full
-    # series since PoBB truncates losers, not the queue mechanism itself).
+    # Sample ids in measurement order; the longest candidate sequence carries the full series,
+    # since PoBB truncates losers rather than the queue mechanism itself.
     selection: list[int] = Field(default_factory=list)
-    # PP-computed (round-close) degradation verdict for this round (origin included).
-    # ``None`` only when the round measured zero samples. Webapp/CLI render it;
-    # never recompute (R-36).
+    # Round-close degradation verdict, origin included. ``None`` only when the round measured
+    # zero samples. Webapp/CLI render it; never recompute.
     health: DegradationHealth | None = None
     # How sharply the L4 panel's cells were measured against how far apart they landed — the
-    # monitoring read that says which lever the round's spread calls for. ``None`` on any non-L4
-    # round: an ordinary sample is graded, so it carries no error bar to decompose. The VERDICT
-    # is not here; it rides `candidates[].matched_origin_lift*` like every other level's.
-    # Webapp/CLI render it; never recompute.
+    # monitoring read saying which lever the round's spread calls for. ``None`` on any non-L4
+    # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
+    # not here; it rides `candidates[].matched_origin_lift*` like every other level's.
     panel_precision: PanelPrecision | None = None

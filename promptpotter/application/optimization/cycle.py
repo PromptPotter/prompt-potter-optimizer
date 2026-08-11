@@ -7,9 +7,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-# Leaf import (not the package surface): EscalationFSM is the foundational
-# state type Cycle holds; importing it via escalation/__init__ would load the
-# firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
+# Leaf import, never the package surface: `escalation/__init__` loads the firing driver, which
+# depends back on Cycle.
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -82,17 +81,14 @@ def _origin_round(
         candidates_scored=1,
         candidate_scores=[row],
         deprecated=deprecated,
-        # Round 0's frontier θ is the origin's θ — the subset-invariant peer of the round's
-        # own `accuracy`, so the trend line starts on the θ scale too, and the one place θ
-        # is read from.
+        # Round 0's frontier θ IS the origin's, so the trend line starts on the θ scale too.
         cumulative_theta=theta[0] if theta is not None else None,
         cumulative_theta_se=theta[1] if theta is not None else None,
         calibration_model=calibration_model,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
-        # C0's measurement is optimizer-independent, but its critique is not — and this is
-        # where a cycle's first stamp has to land, or a campaign paused before round 1 has
-        # nothing on disk that names the optimizer it started under.
+        # C0's measurement is optimizer-independent but its critique is not, and a campaign
+        # paused before round 1 would otherwise hold nothing naming the optimizer it ran under.
         optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
     )
 
@@ -147,31 +143,21 @@ def _calibrate_delta_ruler(
         for r in origin_results or []
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
-    # ``archive_obs`` already carries the origin under ``ORIGIN_ABILITY_ID`` (the caller passes
-    # its sp_hash) whenever the archive has banked it. ``origin_obs`` is still the guaranteed,
-    # freshest source — an L4 inner cycle that cache-replays its origin banked that run INSIDE
-    # its own evidence epoch, so the archive read cannot see it — and it wins the cells both hold.
+    # ``origin_obs`` wins the cells both hold: an inner cycle that cache-replays its origin
+    # banked that run INSIDE its own evidence epoch, where the archive read cannot see it.
     obs = dedup_observations(archive_obs, origin_obs)
     if not obs:
         return {}, None, None
     # Two warmth conditions, both knowable without fitting — below either the ruler stays flat
-    # and the fit would be discarded unread, so skip it entirely rather than pay a
-    # 1PL + 2PL + 5-fold-CV storm per round to throw the result away.
-    #
+    # and the fit would be discarded unread, so skip the 1PL + 2PL + CV storm entirely.
     # DISTINCT SAMPLES ≥ n_min: both fits key δ on ``sorted({o.sample_id})``.
-    #
-    # DISTINCT ARMS ≥ 2: δ is only identified against a second ability. One arm and the
-    # likelihood has nothing to separate — the anchor pins θ, and δ becomes that arm's own
-    # hit pattern shrunk to two values, one for what it passed and one for what it failed.
-    # Adopting that as THE ruler makes every later θ in the cycle a restatement of whether
-    # round 0 happened to get the sample right, on a scale where the origin sits at exactly
-    # 0.000 by construction. It is what a fresh campaign always hands this function: 40 origin
-    # rows from one candidate clears any sample floor on its own, so the L4 inner cycles were
-    # locking a two-valued ruler at ``Cycle.start`` and then judging eight rounds of promotion
-    # against it (`justlogic-d234`, 2026-07-27 — two rounds carrying +14.3pp at p<0.05 were
-    # stamped `improved=False` on it, and both campaigns died of the lives that cost them).
-    # One arm therefore stays FLAT and re-attempts next round, by which time the round's own
-    # candidates are banked grade-A and the fit has arms to compare.
+    # DISTINCT ARMS ≥ 2: δ is identified only against a second ability. With one arm the anchor
+    # pins θ and δ collapses to that arm's own hit pattern in two values, so every later θ in
+    # the cycle restates whether round 0 happened to get the sample right, on a scale where the
+    # origin sits at 0.000 by construction. That is exactly what a fresh campaign hands this
+    # function, since 40 origin rows from one candidate clear any sample floor alone. One arm
+    # therefore stays FLAT and re-attempts next round, once the round's own candidates are
+    # banked grade-A and the fit has arms to compare.
     ruler: dict[int, RulerEntry] = {}
     model: CalibrationModel | None = None
     if len({o.sample_id for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
@@ -181,12 +167,11 @@ def _calibrate_delta_ruler(
             ruler, model = post.ruler(), fitted
             if model == "2PL":
                 logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
-    # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES — the whole point of this line.
-    # Never hand back the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch``
-    # re-anchors ``mean(θ)==0`` and re-estimates σ_θ per call, so its scale is set by whichever
-    # arms were in the pool, and the L4 law then differences two abilities from two estimators
-    # — a BIAS channel, which does not average out over a panel.
-    # ``obs``, not ``origin_obs``: the deduped set carries every origin row the archive holds too.
+    # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES. Never hand back the JOINT fit's
+    # ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors ``mean(θ)==0`` per call, so
+    # its scale is set by whichever arms were in the pool and the L4 law then differences two
+    # estimators — a BIAS channel, which does not average out over a panel.
+    # ``obs``, not ``origin_obs``: the deduped set carries the archive's origin rows too.
     origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
     return ruler, fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID), model
 
@@ -234,8 +219,8 @@ def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) 
             exclude_cycle_id=session.state.cycle_id,
         )
     except Exception:
-        # Surface, don't swallow: on failure L1 never sees configs sibling forks
-        # already proved to fail — a real optimization-quality regression, not noise.
+        # Surface, don't swallow: on failure L1 never sees configs sibling forks already proved
+        # to fail, which is an optimization-quality regression rather than noise.
         logger.warning("sibling runtime_failures inheritance skipped", exc_info=True)
         return
     if failures:
@@ -260,12 +245,9 @@ class CycleRoundState:
     best_composite_fitness: float = 0.0
     best_round: int = 0
     best_sp: JobSearchPoint | None = None
-    # Running-max ability θ of the cumulative frontier on the fixed ruler — the
-    # θ-space peer of ``best_composite_fitness``, the comparator the L2/L3 stall
-    # ladder reads (slice 2). Seeded from ``origin_theta``, re-maxed each round
-    # in ``absorb_round``. None for a cold-started cycle → the ladder falls back
-    # to ``best_composite_fitness``. Like c0_ok, a near-no-op while the scoring
-    # set is fixed (per_round_resubset OFF) — θ and accuracy then move together.
+    # Running-max ability θ of the cumulative frontier on the fixed ruler — the θ-space peer of
+    # ``best_composite_fitness`` the L2/L3 stall ladder reads. None on a cold-started cycle, and
+    # the ladder falls back to ``best_composite_fitness``.
     best_theta: float | None = None
 
 
@@ -274,36 +256,30 @@ class Cycle:
     session: Session
     config: CampaignConfig
 
-    # The whole trajectory, 0-indexed: ``rounds[0]`` IS the origin's measurement.
-    # ``start`` builds it before the loop opens, so it is never absent.
+    # 0-indexed: ``rounds[0]`` IS the origin's measurement, built by ``start`` before the loop
+    # opens, so it is never absent.
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     axes: AxisIndex | None = None
-    # Earned prompt-block library for this cycle's task shape — `{field: (block, ...)}` of short
-    # reusable field values that earned credible lift on a run with the SAME answer-space
-    # signature. Mined once at `start` (the walk is cross-campaign); the `guidance` block
-    # catalogue renders from it, silent when empty. Never the static seed set.
+    # Reusable field values that earned credible lift on a run with the SAME answer-space
+    # signature, mined once at `start` (the walk is cross-campaign). The `guidance` catalogue
+    # renders from it, silent when empty; never the static seed set.
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     archive_observations: list[Observation] = field(default_factory=list)
-    # The origin's searchpoint identity (``prompt_fields_id`` = ``sp_hash``), captured at
-    # ``start`` because ``opt_sp`` advances on ``adopt``. The δ fit renames the archive
-    # candidate carrying it to ``ORIGIN_ABILITY_ID``, so the origin is ONE candidate with one θ
-    # instead of one per round subset it was ever re-scored against.
+    # Captured at ``start`` because ``opt_sp`` advances on ``adopt``. The δ fit renames the
+    # archive candidate carrying it to ``ORIGIN_ABILITY_ID``, so the origin is ONE candidate
+    # with one θ rather than one per round subset it was re-scored against.
     origin_sp_hash: str = ""
-    # The cycle's δ ruler (sample_id → difficulty), from the grade-A archive + origin
-    # (slice 2). Calibrated at start; a cold start (empty) re-warms from round data and
-    # LOCKS on the first warm fit (``_maybe_warm_ruler``), then held constant — so every
-    # cross-round θ readout (``c0_ok``, the stall ladder) lands on one scale via
-    # ``fit_theta_given_delta``. Empty {} = still cold → gates degenerate to θ==logit-accuracy.
+    # sample_id → difficulty, calibrated at start and LOCKED on the first warm fit, so every
+    # cross-round θ readout lands on one scale. Empty = still cold, and the gates degenerate to
+    # θ == logit-accuracy.
     delta_scale: dict[int, RulerEntry] | None = None
-    # Which model the ruler above was fitted under, for the operator's readout. None while
-    # the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one would lie.
+    # None while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one lies.
     calibration_model: CalibrationModel | None = None
-    # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
-    # into _mint_fork + observer rebuild + loop re-entry on the new fork.
+    # Stashed by L2/L3 rebase emission; `runner.entry` resolves it post-finalize.
     rebase_request: RebaseRequest | None = None
 
     @classmethod
@@ -321,7 +297,8 @@ class Cycle:
         composite or evaluator namespace."""
         origin_accuracy = origin_report.accuracy
         opt_sp = _build_initial_opt_sp(resolved_origin)
-        # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
+        # `session.pipeline_params` carries the dataset overlay; `schema.to_pipeline_params()`
+        # is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,
             schema=schema,
@@ -332,9 +309,8 @@ class Cycle:
             build_archive_observations,
         )
 
-        # ONE archive walk, both consumers. The ruler and the intelligence layer asked for
-        # the same observations at the same moment and each loaded them — a full fold plus
-        # a detail read per grade-A run, done twice.
+        # ONE archive walk, both consumers: the ruler and the intelligence layer ask for the
+        # same observations at the same moment.
         origin_sp_hash = sp.sp_hash(schema)
         archive_obs = build_archive_observations(
             session.store,
@@ -352,9 +328,8 @@ class Cycle:
             earned_library_for,
         )
 
-        # Mine the earned block library for THIS task's answer-space shape, once — the
-        # `guidance` catalogue renders it instead of the static seed set, silent when no block
-        # earned credible lift on a matching shape (the dispatch-first "signal or silence" rule).
+        # Silent when no block earned credible lift on a matching shape — the dispatch-first
+        # "signal or silence" rule.
         earned_blocks = earned_library_for(
             session.store,
             answer_space_signature(r.get("ground_truth") for r in (origin_results or [])),
@@ -424,33 +399,28 @@ class Cycle:
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
             priors, key=lambda rr: rr.round
         )
-        # The seed round: the last L1 round, or round 0 when the list carries only the origin.
-        # Never return early there on the grounds that ``start`` seeded tracking — true on a
-        # FIRST call only. Re-seeding is what makes replaying rounds 0..k for ascending k
-        # reconstruct each state instead of decorating the previous one.
+        # Never return early on the grounds that ``start`` seeded tracking — true on a FIRST
+        # call only. Re-seeding is what makes replaying rounds 0..k for ascending k reconstruct
+        # each state instead of decorating the previous one.
         last_rr = self.rounds[-1]
         if last_rr.opt_sp is None or last_rr.pipeline_params is None:
             raise ValueError(
                 f"round {last_rr.round} closed without an opt_sp / pipeline_params — "
                 "the round file cannot seed a resume."
             )
-        # Deep copy: the cycle mutates its working OSP (wounds, memory), and the round
-        # is a record of what ran, not a scratchpad.
+        # Deep copy: the cycle mutates its working OSP, and the round is a record of what ran.
         self.opt_sp = last_rr.opt_sp.model_copy(deep=True)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, last_rr.prompt_fields.get(f, ""))
-        # The winner's OWN resolved params — not the origin's. Reading them off the round
-        # is only possible because the round file records them; while it didn't, resume
-        # reverted every config axis L1 had won back to the origin floor.
+        # The winner's OWN resolved params, off the round file — without them resume reverts
+        # every config axis L1 won back to the origin floor.
         tr.current_sp = self.opt_sp.to_job_search_point(
             base_pipeline_params=last_rr.pipeline_params, schema=schema
         )
-        # best_round = high-water-mark over what each round actually MEASURED, walked from
-        # round 0 (the origin floor) forward. It is the round NUMBER, which is now also its
-        # index. Each round's own scalars — never a score over `acc_cum`, whose rows come
-        # from different configurations (see `domain/results.py::merge_known_outcomes`); the pool is rebuilt
-        # here only to reseed `current_results` and `best_theta` below.
-        # Re-seed the mark from the origin floor first — see the re-runnable note above.
+        # A high-water mark over what each round MEASURED, walked from the origin floor forward
+        # on each round's own scalars — never a score over `acc_cum`, whose rows come from
+        # different configurations. That pool is rebuilt here only to reseed `current_results`
+        # and `best_theta`.
         origin_rr = self.rounds[0]
         tr.best_composite_fitness = origin_rr.composite_fitness
         tr.best_accuracy = origin_rr.accuracy
@@ -466,17 +436,16 @@ class Cycle:
                 tr.best_composite_fitness = rr.composite_fitness
                 tr.best_accuracy = rr.accuracy
                 tr.best_round = rr.round
-                # Build best_sp from THIS round's prompts, not self.opt_sp (pinned to the last
-                # prior above) — else a resumed best≠last cycle pairs best params with last text.
+                # From THIS round's prompts, not `self.opt_sp` (pinned to the last prior above),
+                # or a resumed best≠last cycle pairs best params with last text.
                 best_opt_sp = self.opt_sp.model_copy(
                     update={f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
                 )
                 tr.best_sp = best_opt_sp.to_job_search_point(
                     base_pipeline_params=rr.pipeline_params, schema=schema
                 )
-            # best_theta is a running max over the same cumulative frontier as
-            # best_composite — re-maxed here so a resumed cycle reconstructs exactly
-            # what fresh absorb_round held (seeded from origin_theta by Cycle.start).
+            # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
+            # `absorb_round` held.
             cum = _cumulative_theta(acc_cum, self.delta_scale)
             if cum is not None and (tr.best_theta is None or cum[0] > tr.best_theta):
                 tr.best_theta = cum[0]
@@ -488,12 +457,9 @@ class Cycle:
     def warm_ruler_if_cold(self) -> None:
         """The first fit clearing the warmth floor is adopted and never re-fit, so every warm round
         shares one ruler. Attempted BEFORE the round's election and again once it closed."""
-        # Two attempt points, because one was a round too late. The ≥2-arm floor is satisfied the
-        # moment the round's own candidates are banked — `score_search_point` archives each as it
-        # finishes, so they are grade-A and in the pool BEFORE `elect_round_winner` runs. Trying
-        # only after `absorb_round` meant the election that needed the ruler always ran on a cold
-        # one, and at L4's `max_rounds: 2` there was no later round to spend the warm ruler on:
-        # per-candidate θ could never be stamped from the outer loop's own data at all.
+        # Two attempt points: the ≥2-arm floor is satisfied the moment the round's own
+        # candidates are banked, which is BEFORE `elect_round_winner` runs, and trying only
+        # after `absorb_round` leaves the election that needs the ruler always on a cold one.
         # This relaxes the TIMING, never the rule — a one-arm pool still stays flat below.
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
@@ -514,8 +480,8 @@ class Cycle:
         if delta_scale:  # warmed — lock the ruler + re-read every θ already taken on it
             self.delta_scale = delta_scale
             self.calibration_model = calibration_model
-            # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit
-            # must move both, or the round file reports the origin at two abilities.
+            # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit must
+            # move both, or the round file reports the origin at two abilities.
             o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
             self.origin_round.cumulative_theta = o_theta
             self.origin_round.cumulative_theta_se = o_se
@@ -523,12 +489,10 @@ class Cycle:
                 c.model_copy(update={"theta": o_theta, "theta_se": o_se})
                 for c in self.origin_round.candidate_scores
             ]
-            # …and every L1 round that already closed, same argument one line up. A round that
-            # closed on a flat ruler had its θ fit at δ≡0 — logit-accuracy on its own subset, a
-            # DIFFERENT scale from every later round. Left unrestamped they sit side by side in
-            # ``round_adopted_levels`` and the L4 law averages the mixture. This walk restamps
-            # the ROUND's frontier θ only; ``l1_score`` stamps no candidate θ on a cold ruler,
-            # so there is no cold value left to contradict the warm stamp.
+            # …and every L1 round that already closed: a round that closed on a flat ruler had
+            # its θ fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
+            # ``round_adopted_levels`` for the L4 law to average. The ROUND's frontier θ only —
+            # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
             frontier: list[dict[str, Any]] = []
             for rr in self.rounds:
                 frontier = merge_known_outcomes(frontier, list(rr.results))
@@ -569,14 +533,9 @@ class Cycle:
 
         self.rounds.append(rr)
         self.warm_ruler_if_cold()
-        # Advance the incumbent to the elected winner. The winner OSP already carries
-        # its own lineage (parent = this incumbent), so identity — not just the six
-        # prompt strings — moves forward, and next round's candidates descend from the
-        # winner. A HELD round returns the incumbent itself as the "winner" (origin.opt_sp),
-        # so the lineage ids match and nothing is adopted: the incumbent is unchanged and
-        # mints no node. The winner's task_context (an L1 child can win on a framing
-        # override, its 3rd mutation slot) rides along; wounds + l1_layout carry from the
-        # outgoing incumbent — all through the single `adopt` seam.
+        # The winner OSP carries its own lineage, so IDENTITY moves forward rather than just
+        # the six prompt strings. A HELD round returns the incumbent itself, so the lineage ids
+        # match, nothing is adopted and no node is minted.
         winner_opt_sp = rr.opt_sp
         if winner_opt_sp is not None and winner_opt_sp.lineage.id != self.opt_sp.lineage.id:
             self.adopt(winner_opt_sp, advanced={"task_context": winner_opt_sp.memory.task_context})
@@ -586,10 +545,9 @@ class Cycle:
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         tr.current_results = merge_known_outcomes(tr.current_results, list(rr.results))
-        # "Current" is what the incumbent SCORED — its own measurement on its own samples,
-        # never an accuracy over the mixed-provenance pool above (see `domain/results.py::merge_known_outcomes`).
-        # On a held round `rr` already carries the incumbent's re-score for this round's
-        # subset (`rescore_parent`), so this stays a real measurement either way.
+        # "Current" is what the incumbent SCORED, never an accuracy over the mixed-provenance
+        # pool above. On a held round `rr` already carries the incumbent's re-score for this
+        # round's subset, so this stays a real measurement either way.
         tr.current_accuracy, tr.current_composite_fitness = rr.accuracy, rr.composite_fitness
         if tr.current_composite_fitness > tr.best_composite_fitness:
             tr.best_composite_fitness = tr.current_composite_fitness

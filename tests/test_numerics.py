@@ -5,13 +5,6 @@ registry + composite fitness, the Rasch (IRT) fit + decision-information sample
 picker, the Bayesian Posterior-of-Being-Best gate, and the L1/L2/L3 output
 validators that score a proposal's conformance. Every assertion is wrong-reveal
 — it fails when the formula is wrong, not when a wrapper is renamed.
-
-Sections (Pass A — scorers, evaluators, IRT):
-  1. Scorer matcher formulas (one parametrized family).
-  2. ``compile_scorer`` — AST allowlist + known-formula compile.
-  3. Evaluator registry + composite fitness + matched-origin subset.
-  4. Rasch fit + decision-information round subset.
-  5. Measurement rerun short-circuit + refusal classification.
 """
 
 from __future__ import annotations
@@ -74,13 +67,9 @@ from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.statistics import mean_ci
 from tests.factories import cycle_result, lost_round, round_result
 
-# ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
-# ===========================================================================
-# Each per-dataset matcher is a small pure function; the cases that matter are
-# the format edges (last-marker-wins, bad-marker fallback, cross-format numeric
-# equivalence, case-insensitivity, no-signal → 0/None). Collapsed from five
-# per-function tests into one table keyed by ``(fn, args, expected)``.
+# The cases that matter are the format edges: last-marker-wins, bad-marker fallback,
+# cross-format numeric equivalence, case-insensitivity, no-signal → 0/None.
 
 
 @pytest.mark.parametrize(
@@ -119,9 +108,7 @@ def test_matcher_formula(fn, args, expected):
     assert fn(*args) == expected
 
 
-# ===========================================================================
 # 2. ``compile_scorer`` — AST allowlist + known-formula compile
-# ===========================================================================
 
 
 def _result_min(predicted: str, ground_truth: str) -> dict:
@@ -264,9 +251,7 @@ def test_compile_scorer_accepts_known_formulas() -> None:
         assert compile_scorer(f) is not None
 
 
-# ===========================================================================
 # 3. Evaluator registry + composite fitness + matched-origin subset
-# ===========================================================================
 
 
 def _eval_result(
@@ -751,9 +736,7 @@ def test_prompt_compactness_penalizes_verbose_prompt():
     assert compute_prompt_compactness(opt_sp=None) is None
 
 
-# ===========================================================================
 # 4. Rasch fit + decision-information round subset
-# ===========================================================================
 
 
 def _synth_observations(
@@ -1455,9 +1438,7 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     assert _distinct_valid_cells(repeated) == 2
 
 
-# ===========================================================================
 # 5. Measurement rerun short-circuit + refusal classification
-# ===========================================================================
 
 
 def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
@@ -1638,18 +1619,7 @@ def test_content_empty_on_a_result_that_answered_is_not_an_empty_response() -> N
         assert f"llm_only:{code}" in thought.infra_codes
 
 
-# ===========================================================================
 # Pass B — proposal validators, PoBB posterior, round diagnostics, queue math
-# ===========================================================================
-# Sections:
-#   6. L1 invariant detectors (no-op / duplicate / forbidden-axis).
-#   7. L2 output validators (fire + quiet).
-#   8. L3 output validators.
-#   9. L1 layout validators (one parametrized hard-failure family).
-#  10. PoBB posterior gate + leader eligibility.
-#  11. L2 behaviour conformance.
-#  12. compute_round_diagnostics — pure analysis over scoring data.
-#  13. Adaptive-queue Bayesian math (θ posterior, decision-info, pick-score).
 
 scipy = pytest.importorskip("scipy")  # transitively required by the PoBB math
 
@@ -1692,9 +1662,7 @@ from promptpotter.domain.search_point import (  # noqa: E402
     TaskDecomposition,
 )
 
-# ===========================================================================
 # 6. L1 invariant detectors
-# ===========================================================================
 
 
 def _parent() -> OptSearchPoint:
@@ -1977,9 +1945,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     ]
 
 
-# ===========================================================================
 # 7. L2 output validators (fire + quiet)
-# ===========================================================================
 
 
 def _opt_sp(**kwargs) -> OptSearchPoint:
@@ -2050,9 +2016,7 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
     assert out is None
 
 
-# ===========================================================================
 # 8. L3 output validators
-# ===========================================================================
 
 
 def test_plan_length_floor_fires_on_short_plan():
@@ -2121,9 +2085,7 @@ def test_run_l3_output_validators_aggregates():
     assert "l3_plan_verbatim_repeat" in ids
 
 
-# ===========================================================================
 # 9. L1 layout validators — one parametrized hard-failure family
-# ===========================================================================
 
 
 @pytest.mark.parametrize(
@@ -2189,9 +2151,7 @@ def test_resolve_node_layout_l4_edit_and_guard_rail():
         set_optimizer_prompt_overrides(None)
 
 
-# ===========================================================================
 # 10. PoBB posterior gate + leader eligibility
-# ===========================================================================
 
 
 def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> list[dict]:
@@ -2825,9 +2785,7 @@ def test_degradation_health_none_when_unmeasured():
     )
 
 
-# ===========================================================================
 # 11. L2 behaviour conformance
-# ===========================================================================
 
 
 def test_l2_behavior_checks_score_conformant_vs_stub_fires():
@@ -2868,9 +2826,7 @@ def test_l2_behavior_checks_score_conformant_vs_stub_fires():
     assert run_all_l2_checks({"nodes": {"l1_generate": {}}}, ctx) == []
 
 
-# ===========================================================================
 # 12. compute_round_diagnostics — pure analysis over scoring data
-# ===========================================================================
 
 from promptpotter.application.optimization.round_analysis import (  # noqa: E402
     compute_round_diagnostics,
@@ -2924,9 +2880,7 @@ def test_diag_trajectory_classification_picks_up_plateau():
     assert diag.trajectory in {"plateau", "ceiling"}
 
 
-# ===========================================================================
 # 13. Adaptive-queue Bayesian math (θ posterior, decision-info, pick-score)
-# ===========================================================================
 
 
 def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:

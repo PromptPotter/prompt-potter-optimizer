@@ -81,10 +81,9 @@ def _materialize_cached(
     scorer_formula: str | None,
 ) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
-    # Deliberately BINARY, on the archived vs rescored verdict rather than on the graded
-    # fitness: a float comparison fires on every formula tweak, per sample, and this
-    # warning is calibrated for a specific known-benign cause (the bold-wrapper strip).
-    # ``fitness is None`` is the never-scored case — distinct from a scored 0.0.
+    # Deliberately BINARY, on the archived vs rescored verdict rather than the graded fitness:
+    # a float comparison fires per sample on every formula tweak, and this warning is calibrated
+    # for one known-benign cause. ``fitness is None`` is never-scored, distinct from a 0.0.
     archived_fitness = item.get("fitness")
     r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
@@ -141,27 +140,21 @@ class QueryLoopState:
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
     scorer_formula: str | None
-    # Queries whose prior-cache entry was a deprecated sample — value is the
-    # cached entry itself so display can show the original DEPR row before
-    # the retry row is rendered.
+    # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
-    # Persist the results-so-far after each fresh measurement, and return the candidate's
-    # running fitness over them. Cache hits do not call this — the next fresh sample's save
-    # sweeps their rows up. It fires BEFORE the error-abort return and before
-    # ``on_sample_pre_check`` (which can re-enter the gateway and be Ctrl+C'd), so it must
-    # stay its own call site. The promise: a sample is on disk iff it was ABSORBED — a discarded
-    # look-ahead acquisition is paid for and deliberately not here.
+    # Persists results-so-far after each fresh measurement and returns the running fitness over
+    # them. It fires BEFORE the error-abort return and before ``on_sample_pre_check``, which can
+    # re-enter the gateway and be Ctrl+C'd, so it must stay its own call site. The promise: a
+    # sample is on disk iff it was ABSORBED — a discarded look-ahead acquisition is paid for and
+    # deliberately not here.
     persist_fresh: Callable[[list[QueryMeasurement]], dict[str, Any]]
-    # The in-flight candidate's running fitness over results-so-far (same shape
-    # as the final scores). Computed per scored sample and ridden out on the
-    # sample snapshot (``result["_running"]``) so the live dashboard + chat show
-    # a candidate fitness that moves in real time instead of sitting at 0.
-    # A fresh sample reads it off ``persist_fresh``'s return instead of folding twice.
+    # Ridden out on the sample snapshot so the live surfaces show a candidate fitness that moves
+    # in real time instead of sitting at 0. A fresh sample reads it off ``persist_fresh``'s
+    # return rather than folding twice.
     running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]]
-    # Async hook fired after each sample lands, before degradation checks
-    # read prior coverage. The candidate loop uses it to catch PoBB priors
-    # up on the just-measured sample so paired comparison sees full coverage
-    # without an upfront full-dataset wall.
+    # Fired after each sample lands, before degradation checks read prior coverage: the
+    # candidate loop catches PoBB priors up on the just-measured sample, so paired comparison
+    # sees full coverage without an upfront full-dataset wall.
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None
 
 
@@ -286,9 +279,8 @@ async def _absorb(
     """The only writer of ``state``, persister of a row, and decider. Runs in walk order however
     many were acquired in parallel — what keeps the record independent of the look-ahead depth."""
     if not acq.fresh:
-        # Meter the replayed call — but only if it STAYED a replay. The stale-data protocol
-        # may have re-measured this sample for real, and that path already emitted its
-        # own fresh records; metering here too would double-count it.
+        # Only if it STAYED a replay: the stale-data protocol may have re-measured for real,
+        # and that path already emitted its own fresh records.
         if acq.result.get("cached"):
             _emit_cached_step_tokens(acq.result)
     elif acq.deprecated_display is not None and ctx.on_sample_scored is not None:
@@ -325,9 +317,8 @@ async def run_query_loop(
     deprecated_samples: dict[int, QueryMeasurement],
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int], None] | None,
-    # ``on_sample_scored`` is required (no default) so every call site
-    # declares its per-sample visibility intent. See ``score_search_point``
-    # docstring for the bug class this guards.
+    # ``on_sample_scored`` takes no default, so every call site declares its per-sample
+    # visibility intent — see ``score_search_point`` for the bug class that guards.
     degradation_checks: list[StopRule] | None,
     candidate_idx: int,
     n_total_candidates: int,
@@ -399,12 +390,9 @@ async def run_query_loop(
             # Checkpoints poll once per LAUNCH, and the depth is re-read here so arming binds
             # on the next sample rather than the next candidate.
             while submitted < n and len(window) < _sample_lookahead_depth(session):
-                # Operator skip checkpoint — checked first so a one-shot skip never
-                # falls through to the sticky pause path. Cut the remaining samples of
-                # THIS searchpoint, consume the flag (so only this one is cut), and
-                # return a partial; the gateway accepts it as a normal partial score
-                # and the cycle continues to the next candidate. Not a pause: no
-                # PAUSED phase, no cycle exit.
+                # Checked FIRST, so a one-shot skip never falls through to the sticky pause
+                # path. It cuts this searchpoint's remaining samples and consumes the flag, and
+                # the gateway takes the partial — no PAUSED phase, no cycle exit.
                 if session.skip_check and session.skip_check():
                     if session.skip_consume:
                         session.skip_consume()
@@ -414,21 +402,17 @@ async def run_query_loop(
                         n,
                     )
                     return QueryLoopResult(state.results, completed=False, stop_reason="skip")
-                # Mid-searchpoint pause checkpoint. Sits between samples — every
-                # ABSORBED result is on disk (persist_fresh ran per fresh sample), so pausing
-                # here exits cleanly with the accumulated datapoints saved. The cycle stays
-                # resumable and `resume` continues into the remaining samples.
+                # Between samples, where every ABSORBED result is already on disk, so this
+                # exits cleanly and `resume` continues into the remaining samples.
                 if pause_requested(session):
                     logger.debug("Pause after query %d/%d.", len(state.results), n)
                     declare_run_phase(session, RunPhase.PAUSED)
                     return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
-                # Budget checkpoint, same cadence. The round-boundary gate could not fire until the
-                # round closed, so a run overshot its ceiling by up to one full round of scoring —
-                # and for an L4 outer round every sample is an entire inner CAMPAIGN. `StopLoop` is
-                # the existing mid-round stop channel (caught once at the top of `run_round_loop`)
-                # and carries the gate's own reason; unwinding via the `graceful` path instead would
-                # have relabelled a budget halt as an operator PAUSE. Absorbed samples are on
-                # disk (`persist_fresh` ran per fresh sample), so the cycle stays resumable.
+                # Same cadence, because the round-boundary gate cannot fire until the round
+                # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
+                # `StopLoop` is the existing mid-round stop channel and carries the gate's own
+                # reason; unwinding via `graceful` would relabel a budget halt as an operator
+                # PAUSE.
                 if (
                     session.budget_tripped is not None
                     and (stop := session.budget_tripped()) is not None
@@ -459,8 +443,8 @@ async def run_query_loop(
                     escalation_signal=outcome.escalation,
                 )
             if outcome.abort_reason:
-                # The failed sample is already in `scored_ids`, so the complement is the untouched
-                # tail — a discarded look-ahead acquisition included, since it is still owed a row.
+                # The failed sample is already in `scored_ids`, so the complement is the
+                # untouched tail — a discarded look-ahead acquisition included, still owed a row.
                 remaining = _remaining_ids()
                 logger.warning(
                     "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
@@ -481,10 +465,10 @@ async def run_query_loop(
         logger.warning("Query loop force-interrupted at query %d/%d.", len(state.results), n)
         return QueryLoopResult(state.results, completed=False, stop_reason="force")
     finally:
-        # A slot still in flight is DISCARDED, never appended or persisted: recording it would make
+        # A slot still in flight is DISCARDED, never appended or persisted: recording it makes
         # the run's rows depend on the in-flight depth, which forces a `human_intervened` stamp.
-        # Do not salvage it. Not awaited either — an `await` here can swallow a CancelledError
-        # aimed at this coroutine, which the note below forbids.
+        # Not awaited either — an `await` here can swallow a CancelledError aimed at this
+        # coroutine, which the note below forbids.
         if window:
             logger.info(
                 "Discarding %d look-ahead acquisition(s) after query %d/%d.",
@@ -495,15 +479,11 @@ async def run_query_loop(
             for slot in window:
                 slot.task.cancel()
             window.clear()
-    # ``asyncio.CancelledError`` is deliberately NOT caught beside it. The two arrive from
-    # opposite directions: a KeyboardInterrupt is the operator asking to stop, a
-    # CancelledError is this program's own machinery stopping us — a deadline, a supervisor,
-    # an aborted parent. Answering a cancellation with a normal return tells the canceller it
-    # succeeded when the work is still running, which is how the L4 sample wall clock became
-    # unenforceable: ``asyncio.timeout`` cancels the awaiting task and raises TimeoutError only
-    # if a CancelledError comes back, so an inner campaign that swallowed it here returned a
-    # value, the deadline raised nothing, and the guard's own error message was unreachable.
-    # Samples already measured are on disk (``persist_fresh`` runs per fresh sample), so
-    # propagating loses no measurement.
+    # ``asyncio.CancelledError`` is deliberately NOT caught beside the KeyboardInterrupt above.
+    # The two arrive from opposite directions — one is the operator asking to stop, the other
+    # is this program's own machinery stopping us. Answering a cancellation with a normal
+    # return tells the canceller it succeeded while the work runs on, which is how the L4
+    # sample wall clock became unenforceable: ``asyncio.timeout`` raises TimeoutError only if a
+    # CancelledError comes back. Measured samples are on disk, so propagating loses nothing.
 
     return QueryLoopResult(state.results)

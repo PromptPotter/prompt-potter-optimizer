@@ -55,8 +55,8 @@ logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
-# Routing groups derived from the dispatcher's kind Literals (the SoT) — never
-# re-authored here, so a new kind reaches the router the moment it joins its Literal.
+# Derived from the dispatcher's kind Literals (the SoT), never re-authored here — so a new
+# kind reaches the router the moment it joins its Literal.
 _LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
 _WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset(get_args(WorkspaceBackendKind))
@@ -181,34 +181,28 @@ class _EditDraftPatch(StrictModel):
     scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
     raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
-    # The active pipeline step list (e.g. ["llm_only"] vs the full
-    # cache_lookup→…→token_matching). The setup-panel mode toggle writes it;
-    # commit's `_build_origin_pipeline_json` + `derive_optimizer_locks` read it.
+    # Written by the setup-panel mode toggle; read by commit's
+    # `_build_origin_pipeline_json` + `derive_optimizer_locks`.
     pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
-    # Operator edits to the campaign's origin prompt (PromptTemplate field
-    # shape: the six string fields + optional few_shot_examples). Replaces the
-    # draft's origin_prompt_fields wholesale — the editor sends the full object.
+    # Replaces the draft's fields wholesale — the editor sends the full PromptTemplate object.
     origin_prompt_fields: dict[str, Any] | None = None
-    # The campaign-config knobs (max_rounds / mechanisms) as one
-    # object. Shallow-merged onto the draft's current overrides then validated
-    # against OptimizationOverrides — so the editor can send one knob (e.g.
-    # {"max_rounds": 8}) or several, and a nested `mechanisms` replaces wholesale.
+    # Shallow-merged onto the draft's current overrides then validated against
+    # OptimizationOverrides, so the editor can send one knob or several; a nested
+    # `mechanisms` replaces wholesale.
     optimization_overrides: dict[str, Any] | None = None
-    # The origin's target library. Set from the operator's upload or derived from one
-    # of the draft's own columns (`routers/datasets/ingest.py`); both ride this patch.
+    # From the operator's upload or derived from one of the draft's own columns
+    # (`routers/datasets/ingest.py`); both ride this patch.
     candidate_library: list[str] | None = Field(default=None, min_length=1)
-    # The origin's sanctioned model allow-list (ticked in the check-in pipeline setup).
-    # Replaces the draft's set wholesale — the checklist sends the full ticked list; an
-    # empty list clears it (restrictive default). Not gated (config, like the connector).
+    # Replaces the draft's set wholesale — the checklist sends the full ticked list, and an
+    # empty list clears it (restrictive default). Not gated, like the connector.
     allowed_models: list[str] | None = None
 
 
-# Every field the origin resolver may propose must be settable by this command —
-# that correspondence is what lets a finding be rendered as a clickable
-# `edit-draft-campaign` without the model ever naming a command. Fails at import,
-# not at the operator's click.
+# Every field the origin resolver may propose must be settable here — that correspondence is
+# what renders a finding as a clickable `edit-draft-campaign` without the model ever naming a
+# command. Fails at import, not at the operator's click.
 if not set(FINDING_PATCH_KEYS.values()) <= set(_EditDraftPatch.model_fields):
     raise RuntimeError(
         "resolver proposes fields edit-draft-campaign cannot patch: "
@@ -290,26 +284,22 @@ async def dispatch_draft_patch(
         if patch_val is not None:
             changes[draft_attr] = patch_val
 
-    # Campaign-config knobs: shallow-merge the patched keys onto the draft's
-    # current overrides (so one knob can change without resetting the rest), then
-    # validate the result against OptimizationOverrides (rejects unknown keys /
-    # out-of-range max_rounds / malformed mechanisms) and store the dumped shape.
+    # Shallow-merge so one knob can change without resetting the rest, then validate the
+    # result (rejects unknown keys / out-of-range max_rounds / malformed mechanisms).
     if patch.optimization_overrides is not None:
         merged = {**draft.optimization_overrides, **patch.optimization_overrides}
         changes["optimization_overrides"] = OptimizationOverrides.model_validate(merged).model_dump(
             mode="json"
         )
 
-    # The task framing IS gated — an operator edit CONFIRMS it, which is what
-    # opens the origin-readiness gate for a field the resolver left PROPOSED or
-    # that started UNSET. The checklist field-id stays `task_description`.
+    # The task framing IS gated — an operator edit CONFIRMS it, which is what opens the
+    # origin-readiness gate for a field left PROPOSED or UNSET.
     if patch.raw_task_description is not None:
         changes["raw_task_description"] = patch.raw_task_description
         provenance["task_description"] = Provenance.CONFIRMED
 
-    # Column mapping confirms the input/target headers — each must be a member
-    # of the uploaded headers (422 otherwise), and confirming flips the
-    # field's provenance so the origin-readiness gate opens.
+    # Each column must be a member of the uploaded headers (422 otherwise); confirming flips
+    # its provenance so the origin-readiness gate opens.
     for label, col in (
         ("column_query", patch.column_query),
         ("column_ground_truth", patch.column_ground_truth),
@@ -397,9 +387,8 @@ async def resolve_origin(
         except PotterError:
             raise
         except Exception as exc:
-            # A PotterError so the dispatcher's mapping seam emits a `rejected` ack
-            # and re-raises as 502, rather than the generic 409 the bare-Exception
-            # arm produces.
+            # A PotterError, so the dispatcher's mapping seam emits a `rejected` ack and
+            # re-raises as 502 rather than the generic 409 the bare-Exception arm produces.
             logger.exception("resolve-origin turn failed for draft %s", draft_id)
             raise ServiceUnavailableError(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
@@ -407,8 +396,8 @@ async def resolve_origin(
         return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
 
     def _on_replay() -> dict[str, Any]:
-        # `cache.json::resolution` is byte-identical to the block the live turn
-        # returns, so a deduped retry never re-spends the LLM call.
+        # `cache.json::resolution` is byte-identical to the live turn's block, so a deduped
+        # retry never re-spends the LLM call.
         bank = stores.checkin.load_bank(draft_id) or {}
         return {
             "resolution": bank.get("resolution") or {},
@@ -466,21 +455,17 @@ async def start_checkin(
                 campaign_id=campaign_id,
             )
         except OriginIncompleteError:
-            # The deterministic origin-readiness checklist still has gaps — the
-            # check-in is preserved (lifecycle stays ``checkin``); the operator
-            # resolves them (edit-draft-campaign) and retries. The exception already
-            # carries code=origin_incomplete + details.gaps; refresh the breadcrumb.
+            # Lifecycle stays ``checkin`` so the operator can resolve the gaps and retry; the
+            # exception already carries code=origin_incomplete + details.gaps.
             save_checkin_draft(stores, draft)
             raise
         except BackendUnreachableError as exc:
-            # Preflight ran before any irreversible write → the check-in is preserved;
-            # the operator can fix the backend and retry without re-authoring. Augment
-            # the exception's own backend_type/url details with the campaign id.
+            # Preflight ran before any irreversible write, so the check-in survives and the
+            # operator retries without re-authoring.
             exc.details["campaign_id"] = campaign_id
             raise
-        # LaunchError (not-owned / not-in-check-in / rare slug-collision-at-Start) is a
-        # PayloadInvalidError → the central PotterError handler maps it to 422 with its
-        # own message; no per-case arm here.
+        # LaunchError is a PayloadInvalidError — the central PotterError handler maps it to
+        # 422 with its own message, so no per-case arm here.
         return {"campaign_id": campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
 
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
@@ -521,9 +506,8 @@ async def replace_dataset(
         raise ConflictError(
             str(exc), code="nothing_to_replace", details={"slug": exc.slug}
         ) from exc
-    # Echo the subject, nothing more: the migration's counts + the versioned slug are
-    # recorded by `version_and_repoint` itself (its log line + the on-disk marker), and
-    # no caller ever read them off the wire.
+    # Echo the subject, nothing more — `version_and_repoint` records the counts + the
+    # versioned slug itself, and no caller reads them off the wire.
     return {"slug": result.slug}
 
 
@@ -595,9 +579,8 @@ async def post_command(
         )
         return lifecycle_outcome.accepted
 
-    # Cycle-scoped — fork / stop / delete / cleanup-empty / pause / resume /
-    # change-spend-budget. The kind-specific payload fields ride `extras`;
-    # the dispatcher's `_build_cycle_applier` reads them per kind.
+    # Cycle-scoped. The kind-specific payload fields ride `extras`; the dispatcher's
+    # `_build_cycle_applier` reads them per kind.
     cycle_id = _require_string(payload, "cycle_id", max_len=128)
     extras: dict[str, Any] = {}
     if kind == "fork-cycle":
@@ -606,17 +589,14 @@ async def post_command(
             raise PayloadInvalidError("payload.round must be a non-negative integer.")
         extras["round"] = round_raw
         extras["candidate_id"] = _optional_string(payload, "candidate_id", max_len=128)
-        # Operator-steered seed (edited searchpoint + reconciled limit overrides)
-        # + the editor's identity. The seed is required — every operator fork is
-        # `operator_steered`. The dispatcher validates it into a typed `CycleSeed`
-        # (wire schema: m12-api-openapi.yaml::OperatorForkOverride).
+        # Required — every operator fork is `operator_steered`. The dispatcher validates it
+        # into a typed `CycleSeed` (wire schema: m12-api-openapi.yaml::OperatorForkOverride).
         extras["seed"] = payload.get("seed")
         extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
     elif kind in ("change-spend-budget", "origin-gate-decision", "set-sample-lookahead"):
         # Passed through, NOT validated here: `_build_cycle_applier` validates every
-        # cycle-scoped kind's extras, and it is the seam the CLI reaches too. A second
-        # spelling here re-derived the same rules and disagreed with them — it rejected
-        # a negative max_usd that the dispatcher's `(usd < 0) and (tok < 0)` let through.
+        # cycle-scoped kind's extras and is the seam the CLI reaches too. A second spelling
+        # here re-derives the same rules and disagrees with them.
         extras.update(
             {
                 k: payload[k]
