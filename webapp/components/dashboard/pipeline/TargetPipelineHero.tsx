@@ -15,39 +15,6 @@ import { cx } from "@/lib/cx";
 // here). During the optimizer phases that node is inactive and the backend sits idle.
 const BACKEND_SCORING_NODE = "l1_score";
 
-// The node's static origin model from the dataset overlay (the `model` param in
-// the node-config schema) — the fallback when no live searchpoint is resolved.
-// The live `current_round.nodes` map only ever carries OPTIMIZER node calls,
-// never the backend target, so the running model comes from the in-flight
-// candidate's served `resolved_pipeline_params` (see `liveModelResolver`).
-function configuredModel(
-  nodeId: string,
-  nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
-): string | null {
-  const m = nodeConfigSchema?.[nodeId]?.find((p) => p.key === "model")?.value;
-  return typeof m === "string" && m ? m : null;
-}
-
-// Per-node model the chip shows when the backend is live: the in-flight
-// candidate's server-resolved model, falling back to the static origin model.
-// One resolver, built once in the hero and threaded to both chip layouts so
-// 1-node and N-node datasets read the same source.
-type LiveModelFor = (nodeId: string) => string | null;
-
-function liveModelResolver(
-  liveCfg: { config: Record<string, unknown> } | null,
-  nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
-): LiveModelFor {
-  return (nodeId) => {
-    const nodeCfg = liveCfg?.config[nodeId];
-    const m =
-      nodeCfg && typeof nodeCfg === "object"
-        ? (nodeCfg as Record<string, unknown>).model
-        : null;
-    return typeof m === "string" && m ? m : configuredModel(nodeId, nodeConfigSchema);
-  };
-}
-
 interface Props {
   samplesOpen: boolean;
   onToggle: () => void;
@@ -115,45 +82,6 @@ function interiorNodes(view: PipelineView): PipelineViewNode[] {
   return view.nodes.filter((n) => n.kind !== "io");
 }
 
-// Single-node case: keep the original glassmorphic LLM chip. The label text
-// stays "LLM" verbatim — even though the node id might be `llm_only`, the
-// chip is a brand surface, not a dump of the wire identifier. Shows "idle" at
-// rest; when the run is live AND the backend is actually being called (scoring/
-// origin) it shows the configured model + an active pulse. Clickable — selects
-// the node so BackendNodeDetail opens (same SelectionContext.node axis the
-// multi-node strip writes).
-function SingleNodeChip({
-  node,
-  liveModelFor,
-  activeNode,
-  isLive,
-}: {
-  node: PipelineViewNode;
-  liveModelFor: LiveModelFor;
-  activeNode: string | null;
-  isLive: boolean;
-}) {
-  const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const active = isLive && activeNode === BACKEND_SCORING_NODE;
-  const model = active ? (liveModelFor(node.id) ?? "running") : "idle";
-  const isSelected = selected?.scope === "target" && selected.id === node.id;
-  return (
-    <button
-      type="button"
-      className={cx("wf-hero-node", "llm", isSelected && "selected", active && "active")}
-      aria-pressed={isSelected}
-      aria-label={`Node: ${node.label}`}
-      onClick={() => setSelected(isSelected ? null : { id: node.id, scope: "target" })}
-    >
-      <div className="head">
-        <div className="ico">{LLM_ICON}</div>
-        <div className="lbl">LLM</div>
-      </div>
-      <div className="val">{model}</div>
-    </button>
-  );
-}
-
 // No pipeline view to draw. NOT a real node: we must not fabricate a single "LLM"
 // chip here (it would misrepresent a failed/loading fetch — or a real 5-node
 // pipeline — as a genuine single-LLM pipeline). Neutral, non-clickable, no model.
@@ -186,12 +114,12 @@ function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
   );
 }
 
-// Multi-node strip: dots + outside labels + ribbon edges. Wrapped in the
-// same glassmorphic `.wf-hero-node.llm` frame the single-LLM case uses,
-// just wider, so 1-node and N-node datasets share one visual surface.
-// Labels wrap on underscores (one `<tspan>` per part) to keep cell width
-// compact for ids like `cache_lookup`.
-function MultiNodeStrip({
+// THE box: a glassmorphic frame tagged with what it is, holding the nodes inside
+// it. One box at every size — a second component for the single-node case drew
+// the same frame and hardcoded the label "LLM" over the node's real name. Labels
+// wrap on underscores (one `<tspan>` per part) to keep cell width compact for
+// ids like `cache_lookup`.
+function PipelineBox({
   view,
   connector,
   activeNode,
@@ -207,6 +135,7 @@ function MultiNodeStrip({
   selfOpt: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
+  const { dash } = useDashboard();
   const interior = interiorNodes(view);
   const CELL_W = 72;
   const CELL_W_OPEN = 132;
@@ -261,6 +190,46 @@ function MultiNodeStrip({
   // is the fallback for exactly that case, never a second signal beside it.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
   const calling = isLive && activeNode === BACKEND_SCORING_NODE && !namedHere;
+
+  // ONE node is not a graph. The box's tag already names the pipeline, so a strip
+  // of one dot draws a shape that isn't there — show the node itself, and the
+  // model it resolves to, which is the only fact a single-node backend has to
+  // give. Same box, same selection axis; just no graph inside it.
+  const sole = interior.length === 1 ? interior[0] : undefined;
+  // The in-flight candidate's server-resolved model, falling back to the dataset
+  // overlay's static one. `current_round.nodes` carries only OPTIMIZER calls,
+  // never the backend target, so the running model comes off the searchpoint.
+  const liveCfg = sole ? liveObserveConfig(dash)?.config[sole.id] : null;
+  const liveModel =
+    liveCfg && typeof liveCfg === "object"
+      ? (liveCfg as Record<string, unknown>).model
+      : null;
+  const staticModel = sole ? schema?.[sole.id]?.find((p) => p.key === "model")?.value : null;
+  const soleModel =
+    typeof liveModel === "string" && liveModel
+      ? liveModel
+      : typeof staticModel === "string" && staticModel
+        ? staticModel
+        : null;
+  if (sole) {
+    const isSelected = isSel(sole.id);
+    return (
+      <button
+        type="button"
+        className={cx("wf-hero-node", "llm", isSelected && "selected", calling && "active")}
+        aria-pressed={isSelected}
+        aria-label={`Node: ${sole.label}`}
+        onClick={() => setSelected(isSelected ? null : { id: sole.id, scope: "target" })}
+      >
+        {connector && <div className="wf-hero-multi-tag">{connector}</div>}
+        <div className="head">
+          <div className="ico">{LLM_ICON}</div>
+          <div className="lbl">{sole.label}</div>
+        </div>
+        <div className="val">{calling ? (soleModel ?? "running") : "idle"}</div>
+      </button>
+    );
+  }
 
   return (
     <div className={cx("wf-hero-node", "llm", "wf-hero-node-multi", calling && "active")}>
@@ -399,12 +368,6 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const { dash } = useDashboard();
   const activeNode = dash?.current_round.active_node ?? null;
   const interior = cv.view ? interiorNodes(cv.view) : [];
-  const soleNode = interior.length === 1 ? interior[0] : undefined;
-  // The running searchpoint's resolved model when live; static origin otherwise.
-  const liveModelFor = liveModelResolver(
-    cv.isLive ? liveObserveConfig(dash) : null,
-    cv.nodeConfigSchema,
-  );
 
   return (
     <div className="wf-hero-flow">
@@ -430,17 +393,11 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         // read that still yields no interior nodes is a real empty pipeline, which
         // reads as "none" — the same thing an unbound campaign has.
         <PipelinePlaceholder status={cv.pipelineStatus === "ok" ? "unbound" : cv.pipelineStatus} />
-      ) : soleNode ? (
-        // A genuine single-node pipeline (first-class since the is_single_node
-        // refactor) — render its REAL node, not a synthesized "LLM" stand-in.
-        <SingleNodeChip
-          node={soleNode}
-          liveModelFor={liveModelFor}
-          activeNode={activeNode}
-          isLive={cv.isLive}
-        />
       ) : (
-        <MultiNodeStrip
+        // One box at every size. A single-node pipeline is a strip of one — it
+        // used to get its own chip that hardcoded the label "LLM", which was a
+        // second surface saying a less true thing (the node has a real name).
+        <PipelineBox
           view={cv.view}
           connector={cv.connector}
           activeNode={activeNode}
