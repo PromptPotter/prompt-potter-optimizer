@@ -7,8 +7,17 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    WithJsonSchema,
+    create_model,
+    model_validator,
+)
 
+from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -265,11 +274,18 @@ class L2ContextOutput(OptimizerResponseModel):
 
     # Sized off 70 live fires (output 582 median / 2187 max; `rationale` peaked at 745,
     # `axis_targeted` at 14), so a normal call is untouched. `l1_layout` needs no char bound —
-    # its vocabulary is the placeholder registry, which `validate_l1_layout` already enforces.
+    # its vocabulary is the placeholder registry, which the schema now DECLARES instead of leaving
+    # `validate_l1_layout` to discover it was ignored. Enforcing a vocabulary is not stating one.
     axis_targeted: Annotated[str, BeforeValidator(_truncate_marked(30))] = Field(
         default="", max_length=30
     )
-    l1_layout: dict[str, list[str]] = Field(default_factory=dict)
+    # PARSED as a plain dict on purpose. Typing the slots would make one off-enum signal fail the
+    # whole model, taking `axis_targeted`, `rationale` and both control proposals down with the
+    # layout edit — and the breach must still reach L2's next fire as a `ValidatorOutcome`, which
+    # is a thing only `validate_l1_layout` can emit. The schema teaches; the validator judges.
+    l1_layout: Annotated[
+        dict[str, list[str]], WithJsonSchema(layout_json_schema(NODE_LAYOUTS["l1_generate"]))
+    ] = Field(default_factory=dict)
     l1_overrides: Annotated[dict[str, Any], BeforeValidator(_keep_known_keys(L1_OVERRIDE_KEYS))] = (
         Field(
             default_factory=dict,

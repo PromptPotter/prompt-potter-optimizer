@@ -613,7 +613,8 @@ the PR description.
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
   injections**
   (`application/optimization/dispatch/injections/catalogues.py`) — the
-  discoverability scaffolding: the menu L2 reads to write `l1_layout`,
+  discoverability scaffolding: the cross-slot rule L2 reads to write
+  `l1_layout` (its vocabulary is on that field's own schema),
   the param menu L1 reads, and the reusable prompt-field blocks L1
   recombines (the one channel handing L1 prompt MATERIAL rather than
   statistics about material), the surface the pre-flight gate's

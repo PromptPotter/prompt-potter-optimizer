@@ -293,9 +293,34 @@ for _node, _spec in NODE_LAYOUTS.items():
 del _node, _spec, _floor_ph
 
 
+def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
+    """The wire shape of a layout edit against ``spec``: the slots are the only legal keys and
+    ``possible`` the only legal values. ONE builder for BOTH seams that offer the edit — L4's per-node
+    ``layout`` param and L2's ``l1_layout`` — because only L4's was ever built this way. L2's rode a
+    bare ``dict[str, list[str]]``, which states neither half, and L2 answered the silence by inventing
+    a shape: one fire keyed the map by slot with a ``<slot>_block`` value apiece, the next keyed it by
+    SIGNAL with invented sub-selectors. ``validate_l1_layout`` rejected both, as it must — but it is
+    the backstop, and a vocabulary the emitter is never shown is not a vocabulary."""
+    return {
+        "type": "object",
+        "description": (
+            "Which evidence panels fill each prompt slot. The keys below are the only addressable "
+            "slots and the enum the only signals this node may be given; omit a slot to leave it."
+        ),
+        "properties": {
+            slot: {"type": "array", "items": {"type": "string", "enum": sorted(spec.possible)}}
+            for slot in L1_LAYOUT_SLOTS
+        },
+        "additionalProperties": False,
+    }
+
+
 def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Coerce to an ``L1Layout``. ``{}`` is the sanctioned omit-sentinel ("keep current"); malformed
-    non-empty input also returns ``None``, so the VALIDATOR and not this coercer surfaces the failure."""
+    """Coerce to an ``L1Layout``, or ``None`` for BOTH "no edit asked" (``{}``, the sanctioned
+    omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the two off the
+    raw input; this returns no outcome of its own, because a coercer that judged would be a second
+    validator. It once claimed the validator surfaced the malformed case — which returning ``None``
+    is precisely what prevents, since the caller then skips validation altogether."""
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None
     sanitised: dict[str, list[str]] = {}
@@ -390,5 +415,6 @@ __all__ = [
     "NodeLayoutSpec",
     "coerce_l1_layout",
     "default_l1_layout",
+    "layout_json_schema",
     "validate_l1_layout",
 ]

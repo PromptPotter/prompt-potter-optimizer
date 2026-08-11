@@ -203,7 +203,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 
 ### L2_CONTEXT / L3_PLAN-internal
 
-- ¹ **`l1_signal_catalogue`** ← sorted `L1_POSSIBLE` (`domain/l1_layout.py`) · menu L2_CONTEXT picks from when assembling L1_GENERATE's layout.
+- ¹ **`l1_signal_catalogue`** ← `NODE_LAYOUTS["l1_generate"].mandatory` (`domain/l1_layout.py`) · the one layout rule no JSON Schema can state — each mandatory signal must appear under SOME slot. The slots and the signal enum ride `l1_layout`'s own schema (`layout_json_schema`, one builder shared with L4's per-node `layout`), so this panel names neither.
 
 ### Caller extras — L1_GENERATE template scalars (`l1/generate.py`)
 

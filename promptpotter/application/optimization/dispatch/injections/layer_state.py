@@ -23,18 +23,24 @@ from promptpotter.domain.results_health import evidence_starved_node
 logger = logging.getLogger(__name__)
 
 
+_PLAN_HEADER = "PLAN:\n"
+
+
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`, same number).
-    # A rail above that could never fire; one below would re-cut a plan already declared legal.
-    char_cap=800,
+    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`) — plus this
+    # renderer's own header, which production never bounded. Compared against the header too, the
+    # rail re-cut a plan already declared legal by exactly the header's width: a full-length plan
+    # rendered 806 against 800 and lost its tail to `text[:cap] + "…"` — unmarked, so downstream it
+    # read as a complete strategy, which is what production's own `_truncate_marked` exists to stop.
+    char_cap=800 + len(_PLAN_HEADER),
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> str:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
     plan = b.opt_sp.plan
-    return f"PLAN:\n{plan}" if plan else ""
+    return f"{_PLAN_HEADER}{plan}" if plan else ""
 
 
 @signal(

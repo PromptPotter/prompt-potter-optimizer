@@ -118,6 +118,17 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         layout_outcomes = list(layout_result.outcomes)
         if layout_result.is_valid:
             accepted_layout = proposed_layout
+    elif raw.l1_layout:
+        # `{}` is "no layout edit"; a non-empty dict that coerces to nothing is L2 asking for one
+        # in a shape no slot can hold. Both reach here as None, and treating them alike is what let
+        # a signals-as-keys layout cost a whole fire in silence — no breach, so nothing reached the
+        # `guard_breaches` panel and L2's next fire read no evidence that its shape was the problem.
+        layout_outcomes = [
+            ValidatorOutcome(
+                validator_id="l1_layout_unparseable",
+                evidence={"keys": sorted(raw.l1_layout)},
+            )
+        ]
 
     failures = list(layout_outcomes)
     if failures:
