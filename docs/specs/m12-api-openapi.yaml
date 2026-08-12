@@ -1288,6 +1288,10 @@ paths:
         warming-fallback / atomic-read semantics at any depth (one server-side
         implementation, `serve_dashboard_response`). The leaf `dashboard.json`
         self-stamps its own ids, so the webapp's payload-identity guard is unchanged.
+        `run_phase` is DERIVED at read time (`derive_run_phase`) — the same answer
+        `/cycles` and `/tree` serve — overriding what the file declares, and
+        `Last-Modified` covers that derivation's inputs rather than this file's mtime
+        alone, since the phase turns `detached` on the clock with nothing written.
         The in-flight round's per-candidate searchpoints
         (`current_round.nodes.l1_score.input.candidates[]`) carry the
         `SearchpointCandidate` shape — the same shape a round file's
@@ -2297,12 +2301,14 @@ components:
           description: Column hint. Candidates only — rounds are not a tier.
         accuracy: { type: [number, "null"] }
         composite_fitness: { type: [number, "null"] }
-        state:
+        status:
           type: string
           description: |
             Candidate → `minted` | `measured`. Never `winner` (that rides `is_winner`):
             election is stamped at round close, so an unclosed round HAS no winner and this
-            tree declines to invent one. Course → the cycle status.
+            tree declines to invent one. Course → `index.json::status`, the same StopReason
+            value `/cycles` serves under this same name. Was `state`, which is what
+            `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis.
         is_winner:
           type: boolean
           description: |

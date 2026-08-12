@@ -82,7 +82,7 @@ async def stream_cycle_events(
     cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf))
     if not cycle_dir.exists():
         raise NotFoundError(f"Unknown cycle {leaf_campaign}/{leaf_cycle}.")
-    tail = CycleLedgerTail(cycle_dir, leaf_cycle)
+    tail = CycleLedgerTail(cycle_dir, leaf)
     # sep="\n": LF line endings (the contract's `data: <json>\n\n`; the default
     # is CRLF). X-Accel-Buffering: the one proxy-defeating header sse-starlette
     # does not set itself; Content-Type it sets, Cache-Control the no_store_on_api

@@ -2,11 +2,9 @@
 import { useState } from "react";
 import { postPauseCycle, postStartRun, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { phasePauseLabel } from "@/lib/run-phase";
+import { phasePauseLabel, runPhaseAction } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-
-type RunPhase = "running" | "paused" | "stopped";
 
 const PLAY_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
@@ -37,8 +35,10 @@ export function RunControlButton() {
   const { dash } = useDashboard();
   const { campaignId, cycleId } = useWorkspace();
   const runPhase = dash?.run_phase;
-  const phase: RunPhase =
-    runPhase === "paused" ? "paused" : runPhase === "running" ? "running" : "stopped";
+  // What this control may do, off the TOTAL phase→action map. It used to fold every
+  // phase that wasn't running/paused into "stopped" and offer Start — including a
+  // warming cycle, which has no phase yet and whose Start 409s `machine_busy`.
+  const action = runPhaseAction(runPhase);
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // True from the moment Pause is clicked until the run actually declares
@@ -57,21 +57,25 @@ export function RunControlButton() {
 
   if (!campaignId || !cycleId) return null;
 
-  // At the origin gate the run is alive but holding for a decision the chat
-  // thread owns (the inline gate decision card) — a play/pause toggle would
-  // misfire (start-run on a live cycle → machine_busy). Show a non-actionable
-  // status pointing at the chat instead.
-  if (runPhase === "gate") {
+  // Nothing this control can do from here — say which state it is, rather than
+  // offering a button that misfires. At the origin gate the run is alive but
+  // holding for a decision the chat thread owns; in check-in the ingest panel
+  // owns Start; with no phase at all the cycle is still warming.
+  if (action === "none") {
     return (
       <div className="run-ctl" role="group" aria-label="Run control">
         <span className="run-ctl-pausing" role="status">
-          At origin gate — decide in the chat.
+          {runPhase === "gate"
+            ? "At origin gate — decide in the chat."
+            : runPhase === "checkin"
+              ? "Still in check-in — start it from the setup panel."
+              : "Starting up…"}
         </span>
       </div>
     );
   }
 
-  const playing = phase === "running";
+  const playing = action === "pause";
 
   const act = async (fn: () => Promise<unknown>) => {
     setPending(true);
@@ -87,18 +91,18 @@ export function RunControlButton() {
   };
 
   const onPlayPause = () => {
-    if (phase === "running") {
+    if (action === "pause") {
       setPausing(true);
       return act(() => postPauseCycle(campaignId, cycleId));
     }
     // A paused cycle's worker has exited — resume relaunches it from the last
     // completed round (the same start-run path as a cold start), not an in-place
-    // unpause. Both "paused" and "stopped" therefore take the same branch.
+    // unpause. `resume` and `start` therefore take the same branch.
     return act(() => postStartRun(campaignId, cycleId, "resume"));
   };
 
   const label =
-    phase === "running" ? "Pause run" : phase === "paused" ? "Resume run" : "Start run";
+    action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run";
 
   return (
     <div className="run-ctl" role="group" aria-label="Run control">
@@ -109,16 +113,16 @@ export function RunControlButton() {
         disabled={pending}
         aria-label={label}
         title={
-          phase === "running"
+          action === "pause"
             ? "Pause at the next round boundary"
-            : phase === "paused"
+            : action === "resume"
               ? "Resume the paused run"
               : "Start / resume the run"
         }
       >
         {playing ? PAUSE_ICON : PLAY_ICON}
       </button>
-      {pausing && phase === "running" ? (
+      {pausing && action === "pause" ? (
         <span className="run-ctl-pausing" role="status" aria-live="polite">
           Finishing {phasePauseLabel(dash?.state)} — will pause after the current sample.
         </span>

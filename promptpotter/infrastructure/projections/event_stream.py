@@ -8,7 +8,10 @@ import logging
 from pathlib import Path
 from typing import Any, cast, get_args
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
+from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 
@@ -23,9 +26,10 @@ class CycleLedgerTail:
     """Incremental reader over one cycle's ledger, tracking a byte position alongside the line index it stamps as
     ``sequence``. The reads are synchronous file I/O — callers on an event loop use ``asyncio.to_thread``."""
 
-    def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
+    def __init__(self, cycle_dir: Path, hop: CycleHop) -> None:
         self._layout = CycleLayout(cycle_dir)
-        self._cycle_id = cycle_id
+        self._hop = hop
+        self._cycle_id = hop.cycle_id
         self._ledger_path = self._layout.ledger
         self._byte_pos = 0
         self._line_index = 0
@@ -68,15 +72,26 @@ class CycleLedgerTail:
     # ---- internals ----
 
     def _read_dashboard(self) -> dict[str, Any]:
+        """The snapshot body, with ``run_phase`` DERIVED rather than served as stored — the same
+        single authority the dashboard route serves, so the first chat frame and the first poll
+        cannot disagree about whether the run is alive."""
         dashboard = self._layout.dashboard
+        body: Any = None
+        reason = ""
         try:
             body = read_json_optional(dashboard)
         except json.JSONDecodeError:
             logger.warning("dashboard.json malformed at %s; warming_up snapshot", dashboard)
-            return {"warming_up": True, "reason": "dashboard_unreadable"}
+            reason = "dashboard_unreadable"
+        declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
+        run_phase = str(derive_run_phase(self._layout.cycle_dir, declared=declared))
         if isinstance(body, dict):
+            body["run_phase"] = run_phase
             return body
-        return {"warming_up": True}
+        warming = warming_payload(self._hop, run_phase=run_phase)
+        if reason:
+            warming["reason"] = reason
+        return warming
 
     def _seek_to_eof(self) -> int:
         """Count complete lines and park the byte cursor after the last one.

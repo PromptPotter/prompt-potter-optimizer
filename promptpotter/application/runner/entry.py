@@ -618,7 +618,8 @@ async def run_optimization(
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest. An
         # interrupt escaping here declares no phase and drains nothing, so `dashboard.json`
-        # keeps `run_phase: "running"` and every non-live reader reports a dead run as healthy.
+        # keeps `declared_phase: "running"` and every reader that trusts the declaration —
+        # `paused` is the one thing derivation cannot re-derive — reports a dead run as healthy.
         declare_run_phase(session, RunPhase.PAUSED)
         observers.drain_all()
         raise

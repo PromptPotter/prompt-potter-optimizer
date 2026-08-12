@@ -60,7 +60,11 @@ invariants:
                       stale affordance) and MUST NOT impersonate a run phase or unmount run controls
                       while the last-known server phase is in-flight. Every "running" surface — the
                       topbar jobs dock, the RemoteBar, workspace liveCycles — reads this one set AND
-                      one shared ordering (executing before suspended).
+                      one shared ordering (executing before suspended). A surface that RENDERS the
+                      phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
+                      testing `=== "running"` renders half the vocabulary as nothing, which is how
+                      a gate-held run — blocked on the operator, first in that ordering — read as
+                      an idle sidebar row.
                       COROLLARY (the time-ray). run_phase provably cannot express running vs
                       WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
                       states the rule, four callers), so a live cycle can never go stale and a
@@ -122,7 +126,9 @@ controls:
   - id: remote_bar
     do: Play/pause/skip remote for the VIEWED cycle; mounted iff its server run_phase is in-flight
         (I6). Client connection loss dims/labels it stale — it never unmounts while the last-known
-        server phase is in-flight.
+        server phase is in-flight. While the viewed path is DEEPER than one hop the controls are
+        inert and say why: the command highway addresses one CycleHop with no `descend`, so an
+        inner run cannot be commanded and firing anyway hit the outer cycle instead (I3).
     status: ok
   - id: remote_sample_lookahead_arm
     do: Arms sample look-ahead for the next round of scoring (2 samples in flight, ~half the

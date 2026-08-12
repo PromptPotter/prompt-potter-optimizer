@@ -263,7 +263,7 @@ class LiveDashboardView(DerivedView):
             sp_budget_ttest=0,
         )
         if interrupted:
-            state.run_phase = RunPhase.PAUSED
+            state.declared_phase = RunPhase.PAUSED
         else:
             state.error = DashboardError(
                 kind="launch_failed",
@@ -271,7 +271,7 @@ class LiveDashboardView(DerivedView):
                 stop_reason="launch_aborted",
             )
             state.stop_reason = f"{type(exc).__name__}: {exc}"
-            state.run_phase = RunPhase.TERMINAL
+            state.declared_phase = RunPhase.TERMINAL
             state.state = DashboardState.STOPPED
         state.state_since = utcnow_iso()
         write_json(CycleLayout(cycle_path).dashboard, state.model_dump(), default=str)
@@ -284,7 +284,7 @@ class LiveDashboardView(DerivedView):
 
     def mark_stopped(self, reason: str) -> None:
         self.state.stop_reason = reason
-        self.state.run_phase = RunPhase.TERMINAL
+        self.state.declared_phase = RunPhase.TERMINAL
         self._set_state(DashboardState.STOPPED)
         self._flush_pending_persist()
 
@@ -336,11 +336,12 @@ class LiveDashboardView(DerivedView):
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "control":
-            # The sole writer of `run_phase` short of the terminal `mark_stopped`. Flushing here
-            # bumps the mtime, so the 304-cached route serves the new phase immediately.
+            # The sole writer of `declared_phase` short of the terminal `mark_stopped` — and
+            # nothing here writes `run_phase`, which is wire-only and derived at the read.
+            # Flushing bumps the mtime, so the 304-cached route re-derives immediately.
             event_phase = RunPhase(record.event)
-            if self.state.run_phase not in (RunPhase.TERMINAL, event_phase):
-                self.state.run_phase = event_phase
+            if self.state.declared_phase not in (RunPhase.TERMINAL, event_phase):
+                self.state.declared_phase = event_phase
                 self._flush_pending_persist()
             return
 

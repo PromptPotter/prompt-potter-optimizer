@@ -19,21 +19,23 @@ the same stamp.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
+from fastapi import Request
 
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S, derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandbox_dir,
@@ -42,6 +44,8 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.presentation.api.routers.campaigns._conditional import http_date
+from promptpotter.presentation.api.routers.campaigns.cycles import serve_dashboard_response
 from promptpotter.shared import clock
 from promptpotter.shared.errors import ConflictError
 
@@ -61,16 +65,18 @@ def _mint(
     if paused:
         layout.pause_flag.touch()
     if dashboard:
-        write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
+        write_json(cycle_dir / "dashboard.json", {"declared_phase": "running"})
     return cycle_dir
 
 
 def _age(cycle_dir: Path, seconds_ago: float) -> None:
-    """Backdate every on-disk mtime `_is_dead` reads, so a short `dead_after_s`
-    in a test doesn't require an actual sleep."""
+    """Backdate this cycle's whole on-disk footprint, so a short `dead_after_s` in a test doesn't
+    require an actual sleep. The two DIRECTORIES are aged alongside the files because
+    `run_phase_validator_epoch` reads their mtimes too — leaving them at "now" would hand the
+    conditional-GET test a stamp that moved for a reason it isn't measuring."""
     stamp = time.time() - seconds_ago
-    for name in ("index.json", "dashboard.json"):
-        p = cycle_dir / name
+    layout = CycleLayout(cycle_dir)
+    for p in (cycle_dir / "index.json", cycle_dir / "dashboard.json", layout.runtime, cycle_dir):
         if p.exists():
             os.utime(p, (stamp, stamp))
 
@@ -112,7 +118,7 @@ def test_a_pause_that_set_no_flag_is_still_never_reaped(built_stores: Stores) ->
     had never crashed. The declaration is the whole difference and it must bind here, not
     just in the freshness read."""
     cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"run_phase": RunPhase.PAUSED.value})
+    write_json(cycle_dir / "dashboard.json", {"declared_phase": RunPhase.PAUSED.value})
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.PAUSED
@@ -164,6 +170,68 @@ def test_mark_producer_vanished_stamps_via_mark_finished_shape(built_stores: Sto
     assert "crash_traceback" not in data
 
 
+def test_every_surface_reports_one_run_phase_for_a_dead_producer(built_stores: Stores) -> None:
+    """A reap stamps ``index.json`` and nothing rewrites ``dashboard.json`` — its ``declared_phase``
+    has one writer, inside the runner's own process. So the file goes on declaring ``running``,
+    and the live surfaces that served it raw (the dashboard route, the SSE snapshot) went on saying
+    Running while ``/cycles`` and ``/tree``, which have always re-derived, said terminal.
+
+    Silent by construction: nothing raises, the operator reads the remote-control pill and hunts a
+    process that is not there. Asserted as AGREEMENT rather than against a chosen phase word, so it
+    keeps binding whichever value the derivation returns."""
+    cycle_dir = _mint(built_stores, dashboard=True)
+    _age(cycle_dir, seconds_ago=1000.0)
+    assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 1
+
+    stored = read_json_tolerant(cycle_dir / "dashboard.json")
+    assert isinstance(stored, dict)
+    entry = next(e for e in built_stores.campaigns.enumerate_cycles() if e["cycle_id"] == _CYCLE)
+    served = serve_dashboard_response(
+        Request({"type": "http", "method": "GET", "headers": []}),
+        built_stores.base_dir,
+        _CAMPAIGN,
+        _CYCLE,
+    )
+    body = json.loads(bytes(served.body))
+
+    assert body["run_phase"] == entry["run_phase"]
+    assert body["run_phase"] != stored["declared_phase"]
+
+
+def test_dead_producer_is_not_304d_at_the_phase_it_died_declaring(built_stores: Stores) -> None:
+    """The 304 half of the same harm, and the half nothing else can reach. A browser polling every
+    2 s holds the ``Last-Modified`` it got while the run was alive; the producer then dies, writing
+    NOTHING. Every file mtime therefore stands still while the phase turns ``detached`` on the
+    CLOCK — so a validator built from mtimes alone answers 304 forever and the operator watches a
+    dead cycle report Running for as long as the tab stays open.
+
+    Silent twice over: the 304 is a correct-looking response, and the body it suppresses is the one
+    carrying the correction. Asserted through the ROUTE rather than against
+    `run_phase_validator_epoch` directly, so it binds the behaviour and not today's plumbing."""
+    cycle_dir = _mint(built_stores, dashboard=True)
+    _age(cycle_dir, seconds_ago=RUN_FRESH_S * 10)
+    # Read AFTER aging: this is the stamp the last live poll actually banked, and nothing has
+    # written since. Taking it before would bank a future the producer never reached.
+    alive_at = (cycle_dir / "dashboard.json").stat().st_mtime
+
+    served = serve_dashboard_response(
+        Request(
+            {
+                "type": "http",
+                "method": "GET",
+                # What the client banked on its last poll, taken while the producer was writing.
+                "headers": [(b"if-modified-since", http_date(alive_at).encode())],
+            }
+        ),
+        built_stores.base_dir,
+        _CAMPAIGN,
+        _CYCLE,
+    )
+
+    assert served.status_code == 200, "a dead producer stayed cached at the phase it declared"
+    assert json.loads(bytes(served.body))["run_phase"] == RunPhase.DETACHED.value
+
+
 def test_sweep_dead_cycles_reaps_a_stale_cycle(built_stores: Stores) -> None:
     cycle_dir = _mint(built_stores, dashboard=True)
     _age(cycle_dir, seconds_ago=1000.0)
@@ -190,7 +258,7 @@ def test_sweep_dead_cycles_reaps_an_inner_sandbox_cycle(built_stores: Stores) ->
     inner_store = CampaignStore(WorkspaceDir(inner_tenant_dir))
     inner_store.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {})
     cycle_dir = inner_store.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
-    write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
+    write_json(cycle_dir / "dashboard.json", {"declared_phase": "running"})
     _age(cycle_dir, seconds_ago=1000.0)
 
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0)
@@ -209,7 +277,7 @@ def test_a_cycle_held_at_the_origin_gate_is_never_reaped(built_stores: Stores) -
     SECOND line: even from a stale tree (a machine sleep beat the heartbeat), a
     declared gate is not a dead producer."""
     cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"run_phase": "gate"})
+    write_json(cycle_dir / "dashboard.json", {"declared_phase": "gate"})
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
@@ -229,7 +297,7 @@ def test_a_live_gated_cycle_derives_gate_not_running(built_stores: Stores) -> No
     saw an ordinary `running` cycle. The one phase that requires the operator to act
     was the one phase the operator's dock could not show."""
     cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"run_phase": "gate"})
+    write_json(cycle_dir / "dashboard.json", {"declared_phase": "gate"})
     assert derive_run_phase(cycle_dir, is_terminal=False) is RunPhase.GATE
     # A gated cycle that actually died must still be reapable, not pinned at `gate`.
     _age(cycle_dir, seconds_ago=1000.0)
@@ -530,7 +598,7 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
         CycleHop(campaign_id=_CAMPAIGN, cycle_id=stub), {"parent_cycle_id": _CYCLE, "n_rounds": 0}
     )
     stub_dir = built_stores.campaigns.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=stub))
-    write_json(stub_dir / "dashboard.json", {"run_phase": "running"})
+    write_json(stub_dir / "dashboard.json", {"declared_phase": "running"})
     write_json(
         tenant_root / ".workspace" / "active_session.json",
         {"session_id": "s1", "campaign_id": _CAMPAIGN, "cycle_id": stub},
@@ -622,7 +690,7 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.DETACHED
 
     # A fresh dashboard write — what `build_campaign_emitter` does — closes it.
-    write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
+    write_json(cycle_dir / "dashboard.json", {"declared_phase": "running"})
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=60.0) is RunPhase.RUNNING
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=60.0) == 0
     still = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))

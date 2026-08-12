@@ -4,6 +4,7 @@ import { CANVAS_W, CANVAS_H, DOT_R, EDGES, INTENTIONALLY_UNPLACED, LAYOUT } from
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
+import { runPhaseLabel } from "@/lib/run-phase";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
@@ -116,6 +117,9 @@ export function WorkflowCanvas({ pipeline }: Props) {
   // the signal legible at a glance and under prefers-reduced-motion (no pulse).
   // Gated on `viewingLive`: on a historical round there is no live node to name.
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
+  // "idle" used to catch everything that wasn't live — a paused run, a run held at
+  // the origin gate and a dead producer all read the same word. Name the phase the
+  // server declares instead; only a genuinely phase-less payload falls through.
   const status = !dash
     ? "pending"
     : !viewingLive
@@ -124,7 +128,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
         ? activeLabel
           ? `live · ${activeLabel}`
           : "live"
-        : "idle";
+        : runPhaseLabel(dash.run_phase, dash.stop_reason);
 
   const markerColors: Record<string, string> = {
     arrh: colors.txt,

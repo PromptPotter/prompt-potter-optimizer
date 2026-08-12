@@ -89,6 +89,27 @@ export function isInFlight(runPhase: string | null | undefined): boolean {
   return isRunPhase(runPhase) && IN_FLIGHT[runPhase];
 }
 
+// What the play/pause control may DO from here. Total, and `none` is a real
+// answer twice over: at the gate the decision lives in the chat, and in check-in
+// the ingest panel owns Start. An absent phase is also `none` — a warming cycle
+// has no phase yet, and offering "Start run" there fired a 409 machine_busy.
+export type RunAction = "pause" | "resume" | "start" | "none";
+
+const PHASE_ACTION: Record<RunPhase, RunAction> = {
+  running: "pause",
+  paused: "resume",
+  // A dead producer and a finished cycle take the same branch: relaunch from the
+  // last completed round. There is no in-place unpause to distinguish them.
+  detached: "start",
+  terminal: "start",
+  gate: "none",
+  checkin: "none",
+};
+
+export function runPhaseAction(runPhase: string | null | undefined): RunAction {
+  return isRunPhase(runPhase) ? PHASE_ACTION[runPhase] : "none";
+}
+
 // Unknown / absent phases sort last.
 export function dockPriority(runPhase: string | null | undefined): number {
   return isRunPhase(runPhase) ? DOCK_PRIORITY[runPhase] : 3;

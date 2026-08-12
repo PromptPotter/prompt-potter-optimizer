@@ -9,6 +9,7 @@ import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { TERMS } from "@/lib/terms";
+import { isInFlight } from "@/lib/run-phase";
 import { headlineStats, isSelfOptimization, readSpend, runSummary } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
 import { Switch } from "@/components/ui";
@@ -177,7 +178,7 @@ export function ChatPane({
         cycleId={leafCycleId}
         activity={live.activity}
         progress={live.progress}
-        connected={live.connected}
+        listening={live.connected && isInFlight(dash?.run_phase)}
         decision={decision}
         hearts={dash?.hearts ?? null}
         livesCap={dash?.run_limits?.lives_cap ?? null}

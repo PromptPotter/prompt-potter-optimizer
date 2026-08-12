@@ -236,12 +236,13 @@ campaign artifacts. **Run-state is owned state, not a freshness
 guess.** The runner *declares* its control phase — `running` /
 `paused`, plus `terminal` at finalize — onto the ledger
 as a `control` `PhaseRecord`, and `LiveDashboardView` projects it to
-`dashboard.json::run_phase` (the `RunPhase` vocabulary,
-`domain/phases.py`). Every surface reads that one value; the only
-reader-side computation is `derive_run_phase`
-(`infrastructure/runtime_flags.py`), used by both the cycle list and
-the reaper's staleness check (`_is_dead` — no second "is it running?"
-derivation), which composes lifecycle (terminal, from
+`dashboard.json::declared_phase` (the `RunPhase` vocabulary,
+`domain/phases.py`). **That declaration is an INPUT, never the answer** —
+its only writer is the runner's own process, so a surface serving it raw
+still reads `running` after a kill, which is why the on-disk key is named
+for what it is and `run_phase` is wire-only. Every surface is served the ONE
+derivation `derive_run_phase` (`infrastructure/runtime_flags.py`), which
+composes lifecycle (terminal, from
 `index.json::finished_at`) with the control flags, the runner's own
 declaration (`paused` / `gate` — a Ctrl+C declares `paused` without ever
 writing a flag), and `dashboard.json` freshness (falling back to

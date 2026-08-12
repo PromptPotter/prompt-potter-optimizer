@@ -20,7 +20,7 @@ export function LiveSegment({
   cycleId,
   activity,
   progress,
-  connected,
+  listening,
   decision,
   hearts,
   livesCap,
@@ -29,7 +29,13 @@ export function LiveSegment({
   cycleId: string;
   activity: ActivityItem[];
   progress: ActivityItem | null;
-  connected: boolean;
+  /**
+   * Is there anything still to listen FOR — the SSE socket being open AND the server
+   * still calling the run in-flight. The socket alone is not the answer: it stays open
+   * against a finished cycle (the endpoint 404s only for an unknown one), so gating on
+   * it had the thread announcing it was listening to a run that had ended.
+   */
+  listening: boolean;
   decision: DecisionItem | null;
   /** Banked lives of the VIEWED cycle; `null` when it isn't in lives mode. */
   hearts?: number | null;
@@ -40,9 +46,9 @@ export function LiveSegment({
   const [err, setErr] = useState<string | null>(null);
 
   const empty = activity.length === 0 && !progress && !decision;
-  // Nothing to show and not even connected — leave the thread to the ingest
+  // Nothing to show and nothing still coming — leave the thread to the ingest
   // segment / welcome.
-  if (empty && !connected) return null;
+  if (empty && !listening) return null;
 
   // Fire an existing control command. The decision item clears on its own when
   // the poll observes `run_phase` leave `gate` (a rescore re-enters with a fresh
@@ -59,7 +65,7 @@ export function LiveSegment({
 
   return (
     <div className="chat-live">
-      {empty && connected ? (
+      {empty && listening ? (
         <div className="chat-activity tone-muted kind-progress" role="status" aria-live="polite">
           <span className="chat-activity-icon" aria-hidden="true">
             ·

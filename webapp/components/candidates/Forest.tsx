@@ -343,7 +343,7 @@ export function Forest({
                   {course.fork_direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {course.state ? ` · ${course.state}` : ""}
+                  {course.status ? ` · ${course.status}` : ""}
                   {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"

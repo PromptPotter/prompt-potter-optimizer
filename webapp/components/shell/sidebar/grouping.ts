@@ -17,6 +17,7 @@
 
 import type { CampaignSummary, CycleListEntry } from "@/lib/api";
 import { rootCycleId } from "@/lib/ids";
+import { dockPriority } from "@/lib/run-phase";
 
 // One run: the campaign manifest, its single root cycle, and every fork / diag /
 // sweep descending from it. A campaign mints exactly one root (`{dataset}__{rand6}`
@@ -28,6 +29,13 @@ import { rootCycleId } from "@/lib/ids";
 export interface RunGroup {
   campaign: CampaignSummary;
   root: CycleListEntry;
+  // The cycle that ANSWERS FOR THE CAMPAIGN — its run-state and the reason word
+  // beside it. Family-wide for the same reason `bestAccuracy` is: after a cut the
+  // line continues on a FORK, so the root's own entry describes a retirement while
+  // the cycle actually running is a sibling in this very list (webapp/CLAUDE.md §
+  // Display-data sources, "a cut that moved the line means the BRANCH answers").
+  // Usually the root; never assumed to be.
+  answering: CycleListEntry;
   // Most-recent updated_at across every cycle — sorts so the run being actively
   // worked on stays at the top.
   updatedAt: string;
@@ -61,6 +69,39 @@ function bestAccuracyOf(entries: CycleListEntry[]): number | null {
 const byUpdatedDesc = (a: CycleListEntry, b: CycleListEntry) =>
   a.updated_at < b.updated_at ? 1 : -1;
 
+// `index.json::status` once the line has LEFT a cycle — written by `mark_superseded`, and
+// only for a cut whose `FORK_DIRECTION` is supersede. It is the one thing on `/cycles` that
+// says a fork took over, so the sidebar follows the same rule the tree does rather than
+// guessing from liveness.
+const REBASED = "rebased_to_fork";
+
+// Most urgent first by the ONE shared dock ordering (`lib/run-phase.ts`), recency breaking a
+// tie. Orders served phases; derives no run-state.
+const byUrgencyThenRecency = (a: CycleListEntry, b: CycleListEntry) =>
+  dockPriority(a.run_phase) - dockPriority(b.run_phase) || byUpdatedDesc(a, b);
+
+// Which of a campaign's cycles speaks for it — usually the root, and the exception is a rule
+// rather than a preference. A cycle that has NOT been superseded answers for itself no matter
+// what hangs off it: an offshoot beside a live line changes nothing, which is exactly what
+// picking "whichever sibling looks busiest" got wrong. A cycle that HAS been superseded owns
+// only the tail it was cut from, so the answer is a child — and a rebase chains, so keep
+// following. `seen` bounds the walk: a parent pointer that loops would otherwise hang the
+// sidebar with nothing on screen to say why.
+function answeringCycle(root: CycleListEntry, branches: CycleListEntry[]): CycleListEntry {
+  let cur = root;
+  const seen = new Set<string>([cur.cycle_id]);
+  while (cur.status === REBASED) {
+    const kids = branches.filter((b) => b.parent_cycle_id === cur.cycle_id && !seen.has(b.cycle_id));
+    if (kids.length === 0) break;
+    // Several children under one superseded cycle is where the list runs out: it carries no
+    // `fork_direction` to tell the cut from an earlier offshoot. Ask the tree there.
+    const next = kids.reduce((best, c) => (byUrgencyThenRecency(c, best) < 0 ? c : best));
+    seen.add(next.cycle_id);
+    cur = next;
+  }
+  return cur;
+}
+
 // Build one store's runs. Campaigns are the real manifests from `GET /campaigns`;
 // cycles come from `/cycles`, split per campaign into its root
 // (`rootCycleId(id) === id`) and the siblings descending from it. A cycle whose
@@ -91,6 +132,7 @@ function groupRuns(
     runs.push({
       campaign,
       root,
+      answering: answeringCycle(root, branches),
       updatedAt: all.reduce(
         (m, c) => (c.updated_at > m ? c.updated_at : m),
         campaign.created_at,

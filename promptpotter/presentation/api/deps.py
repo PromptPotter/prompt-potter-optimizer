@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends, Request
 
@@ -75,17 +75,6 @@ def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, stores: Stores) -> Pat
     return cycle_dir
 
 
-def warming_payload(campaign_id: str, cycle_id: str) -> dict[str, Any]:
-    """The canonical ``warming_up`` dashboard shape, served at 200 and not 404 before a fresh campaign
-    flushes its first snapshot — so the webapp renders "initialising" instead of appearing offline."""
-    return {
-        "warming_up": True,
-        "campaign_id": campaign_id,
-        "cycle_id": cycle_id,
-        "phase_hint": "origin",
-    }
-
-
 def decode_descend(descend: str | None) -> CyclePath:
     """Parse a ``?descend=`` tail into a :data:`CyclePath`, mirroring the webapp's ``encodeDescend``. The
     wire CODEC and nothing more — component validation and the descent itself are ``descend_store``'s."""
@@ -121,5 +110,4 @@ __all__ = [
     "get_backend_or_404",
     "get_cycle_dir_or_404",
     "resolve_identity",
-    "warming_payload",
 ]

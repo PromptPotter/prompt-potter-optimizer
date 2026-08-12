@@ -20,6 +20,8 @@ import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
 import type { DashboardCandidate, LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
+import { bumpRevalidation } from "./revalidate";
+import { isInFlight } from "./run-phase";
 import { useWorkspace } from "./workspace";
 
 // `gone` is NOT a flavour of `offline`, and conflating them is the bug this
@@ -44,6 +46,10 @@ export interface WarmingSnapshot {
   campaign_id: string;
   cycle_id: string;
   phase_hint: string;
+  // Derived server-side like every other phase (`derive_run_phase`), and it is what
+  // separates "no snapshot YET" from "no snapshot EVER": a cycle whose producer died
+  // during init reads `detached`/`terminal` here while still having no dashboard.
+  run_phase: string;
 }
 
 function isWarming(d: unknown): d is WarmingSnapshot {
@@ -348,6 +354,12 @@ function useCycleStreamSource(
   // switch so a stale value from the prior unit can't suppress the
   // first real fetch of the new unit.
   const lastModifiedRef = useRef<string | null>(null);
+  // Last `run_phase` this poll observed for the unit. The same server-owned value
+  // also rides `/cycles` (10 s) and `/tree` (5 s), so without a nudge the dock, the
+  // sidebar and this stream sat up to 10 s apart on one transition — three surfaces
+  // showing three states because they were observed at unrelated cadences, not
+  // because they disagreed. Seeing it move here re-ticks the other two.
+  const lastPhaseRef = useRef<string | null>(null);
   // The viewed path, held in a ref so the tick reads it without re-subscribing;
   // set in the same unit-key guard below.
   const pathRef = useRef<CyclePath | null>(null);
@@ -370,6 +382,7 @@ function useCycleStreamSource(
     stampMismatchRef.current = 0;
     goneRef.current = 0;
     lastModifiedRef.current = null;
+    lastPhaseRef.current = null;
     // Identity changed — hard-reset every cycle-scoped field so the prior
     // unit's dash snapshot and `● Live` badge can't linger for a frame
     // while the first poll of the new unit is in flight.
@@ -444,13 +457,19 @@ function useCycleStreamSource(
       // until the first real snapshot lands.
       if (isWarming(resp.data)) {
         stampMismatchRef.current = 0;
+        // "Initialising" is only true while something is still working on it. The
+        // served phase is the one that knows: a producer that died before its first
+        // flush leaves a cycle with no dashboard forever, and this branch used to
+        // announce it as warming up for as long as the operator kept the tab open.
+        const stillComing = isInFlight((resp.data as WarmingSnapshot).run_phase);
         setState((prev) => ({
           ...prev,
           dash: null,
           status: "stale",
-          statusText: "Origin running",
-          statusHint:
-            "First snapshot lands when origin completes — campaign is initialising.",
+          statusText: stillComing ? "Origin running" : "No snapshot was ever written",
+          statusHint: stillComing
+            ? "First snapshot lands when origin completes — campaign is initialising."
+            : "The run stopped before its first snapshot. Nothing to show for this cycle.",
           termKey: "status_warming_up",
           error: null,
           isLive: false,
@@ -494,6 +513,13 @@ function useCycleStreamSource(
       }
       // A matching payload clears any prior mismatch streak.
       stampMismatchRef.current = 0;
+      if (dash.run_phase !== lastPhaseRef.current) {
+        const first = lastPhaseRef.current === null;
+        lastPhaseRef.current = dash.run_phase;
+        // Not on the first observation: that is this unit's opening read, not a
+        // transition, and bumping there would re-tick the workspace on every switch.
+        if (!first) bumpRevalidation();
+      }
       const ageS = wallclockAgeS(dash.wallclock_serialized_at);
       const bucket = ageBucket(ageS);
       setState((prev) => ({

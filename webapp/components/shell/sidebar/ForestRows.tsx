@@ -177,6 +177,14 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
       // The campaign row answers for its whole family: the winner often lives in a fork,
       // and `/cycles` already knows the max across it.
       bestAccuracy={run.bestAccuracy}
+      // Run-state for the campaign row comes from `/cycles`, ALWAYS — never from the
+      // tree node, which the row only has while it is expanded. A phase that appeared
+      // on expand was the tell: a running campaign showed no ● until you opened it,
+      // and reading whichever source happened to be in hand meant the collapsed and
+      // expanded rows could answer differently. `answering` follows the cut the same
+      // way the tree does, so this is one source rather than the better of two.
+      phase={run.answering.run_phase}
+      phaseReason={run.answering.status}
     />
   );
 }
@@ -195,6 +203,8 @@ function CourseRow({
   campaign,
   chrome,
   bestAccuracy,
+  phase,
+  phaseReason,
 }: {
   node: LineageNode | null;
   path: CyclePath;
@@ -206,6 +216,12 @@ function CourseRow({
   campaign?: CampaignSummary;
   chrome?: React.ReactNode;
   bestAccuracy?: number | null;
+  // This row's run-state and the reason word beside it, from the ONE surface that
+  // answers for this row: `/cycles` for a campaign's root row, the tree node for a
+  // nested course. The row is handed its phase rather than picking a source, which
+  // is what keeps a collapsed row and an expanded one saying the same thing.
+  phase: string | null | undefined;
+  phaseReason: string | null | undefined;
 }) {
   const addr = encodeCyclePath(path);
   const open = courseOpen(ctx, path);
@@ -230,15 +246,18 @@ function CourseRow({
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
-  // The ● pointer. `run_phase` is the ONE server-owned run-state (I6) and rides the node,
-  // so an inner run answers for itself — no second store read to ask "is it running?".
-  const live = node?.run_phase === "running";
+  // The ● pointer. `run_phase` is the ONE server-owned run-state (I6), handed in above.
+  // The ● means running and only running; every other phase reaches the row as the WORD
+  // beside it, through the total `runPhaseLabel` map — a marker that tested `=== "running"`
+  // and rendered nothing else left a run held AT THE ORIGIN GATE, blocked on the operator
+  // and top of the dock's priority, looking exactly like an idle row.
+  const live = phase === "running";
   const active =
     campaign?.campaign_id === ctx.activeCampaignId &&
     path[path.length - 1]?.cycleId === ctx.activeCycleId &&
-    node?.run_phase !== "checkin";
-  const statusLabel =
-    !live && node?.run_phase === "terminal" ? runPhaseLabel("terminal", node.state) : null;
+    phase !== "checkin";
+  // The word carries every non-running phase, so the marker is never colour alone.
+  const statusLabel = !live && phase ? runPhaseLabel(phase, phaseReason) : null;
 
   // The one-line "what is this row" copy, shown in the hover card (it used to be a
   // native `title=` that floated over the storage card).
@@ -503,7 +522,7 @@ function CandidateRow({
                     borrow the origin's — that would report a fitness nothing measured. */}
                 {cand.accuracy == null && cand.course_kind ? (
                   <span className="unit-library-status">
-                    {runPhaseLabel("terminal", cand.state)}
+                    {runPhaseLabel("terminal", cand.status)}
                   </span>
                 ) : (
                   fmtPct0(cand.accuracy)
@@ -523,6 +542,10 @@ function CandidateRow({
                 tree={tree}
                 ctx={ctx}
                 label={course.task ? panelCellLabel(course.task) : course.dataset_name}
+                // An inner run answers for ITSELF, off the node — `/cycles` lists
+                // top-level cycles only, so there is no second source to prefer here.
+                phase={course.run_phase}
+                phaseReason={course.status}
               />
             </li>
           ))}
