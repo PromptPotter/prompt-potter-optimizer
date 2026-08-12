@@ -187,7 +187,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
         "param_changes_count": len(result.opt_sp.memory.l1_overrides),
         "l1_layout_changed": result.l1_layout is not None,
-        "changes_description": result.opt_sp.lineage.changes_description or "",
+        "changes_description": result.opt_sp.lineage.changes_description,
         "axis_targeted": result.axis_targeted,
     }
     if result.fork_proposal is not None:
@@ -259,7 +259,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
         "new_plan_preview": str(result.opt_sp.plan)[:120],
-        "changes_description": result.opt_sp.lineage.changes_description or "",
+        "changes_description": result.opt_sp.lineage.changes_description,
     }
     if result.fork_proposal is not None:
         payload["fork_proposal"] = result.fork_proposal.model_dump()
@@ -390,7 +390,7 @@ async def _run_transition(
                 layer=transition.layer_id,
                 campaign_id=tracing_campaign_id,
                 round_num=round_num,
-                changes_description=result.opt_sp.lineage.changes_description or "",
+                changes_description=result.opt_sp.lineage.changes_description,
             )
     transition.apply(cycle, result, round_num)
     emit_phase(
