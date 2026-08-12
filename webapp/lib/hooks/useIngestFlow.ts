@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   IngestApiError,
   postDraftFromDataset,
@@ -84,6 +84,10 @@ export interface IngestFlow {
   inputText: string;
   setInputText: (v: string) => void;
   busy: boolean;
+  // A draft edit is in flight. NOT folded into `busy` and disables nothing:
+  // Start stays tappable ("Saving…") and `startFromReady` awaits the in-flight
+  // writes — disabling here eats the tap whose mousedown blurred the field.
+  saving: boolean;
   awaitingContext: boolean;
   // Drop or attach a tabular file → upload → readiness branch.
   onDatasetFile: (file: File) => void;
@@ -133,6 +137,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
   const [inputText, setInputText] = useState("");
   const [minting, setMinting] = useState(false);
+  // Counter, not a boolean: overlapping patches are the DESIGNED case (see
+  // `commitDraftUpdate`), so the first one to land must not clear the flag out
+  // from under a sibling. The ref holds the promises so `startFromReady` can
+  // await exactly what is in flight.
+  const [pendingPatches, setPendingPatches] = useState(0);
+  const pendingDraftWrites = useRef<Set<Promise<unknown>>>(new Set());
 
   const busy =
     phase.stage === "uploading" || phase.stage === "checkin" || minting;
@@ -186,9 +196,9 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     pushAi(recap);
     // Happy path: the check-in confirmed every gated field (columns + framing)
     // and asked nothing back — mint straight through, skipping the review
-    // surface. The server gate stays authoritative (it also checks answer-space
-    // and per-node model, which the client can't see from the wire), so a
-    // rejected auto-mint falls through to the review panel below rather than
+    // surface. The server gate stays authoritative (it also checks per-node
+    // models, which the client can't see from the wire), so a rejected
+    // auto-mint falls through to the review panel below rather than
     // dead-ending on the error. A DEGRADED turn never auto-mints — a thin
     // resolution must land in review so the operator re-runs or fixes it by hand.
     if (
@@ -236,7 +246,16 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   // error — it routes to the choice card. `slug` re-runs ingest under a chosen
   // name ("save as new"); `chipId` reuses the rendered file chip.
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
-    if (busy) return;
+    // A refused drop must SAY it was refused: `busy` covers the reopen fetch,
+    // and a silent return leaves the operator reading the PREVIOUS campaign's
+    // draft believing it is the file they just dropped.
+    if (busy) {
+      pushWarning(
+        `“${file.name}” wasn’t picked up — the previous step was still loading. ` +
+          `Nothing on screen is from this file; drop it again.`,
+      );
+      return;
+    }
     const id = chipId ?? uid();
     if (!chipId) {
       setMessages((m) => [...m, { id, kind: "user-file", name: file.name, rows: null }]);
@@ -373,14 +392,31 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     await runCheckin(updated);
   };
 
-  const applyPatch = async (patch: DraftPatch) => {
-    if (phase.stage !== "ready") return;
+  // THE seam for every write that mutates the ready draft — registering the
+  // promise is what lets `startFromReady` await whatever is in flight, so a
+  // mutator that posts on its own re-opens the mint-races-a-patch bug.
+  const mutateDraft = async (
+    send: () => Promise<DraftCampaignWire>,
+  ): Promise<DraftCampaignWire | null> => {
+    const write = send();
+    pendingDraftWrites.current.add(write);
+    setPendingPatches((n) => n + 1);
     try {
-      const updated = await postEditDraftCampaign(phase.draft.draft_id, patch);
+      const updated = await write;
       commitDraftUpdate(updated);
+      return updated;
     } catch (e) {
       pushError(e);
+      return null;
+    } finally {
+      pendingDraftWrites.current.delete(write);
+      setPendingPatches((n) => n - 1);
     }
+  };
+
+  const applyPatch = (patch: DraftPatch) => {
+    if (phase.stage !== "ready") return;
+    void mutateDraft(() => postEditDraftCampaign(phase.draft.draft_id, patch));
   };
 
   // Drop a candidate library onto the ready draft → the unfulfilled
@@ -389,25 +425,20 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   // the candidate pool the backend ranks against.
   const uploadCandidateLibrary = async (file: File) => {
     if (phase.stage !== "ready" || busy) return;
-    try {
-      const updated = await postUploadCandidateLibrary(phase.draft.draft_id, file);
-      pushAi(`Candidate library attached — ${updated.candidate_library_size} targets.`);
-      commitDraftUpdate(updated);
-    } catch (e) {
-      pushError(e);
-    }
+    const updated = await mutateDraft(() =>
+      postUploadCandidateLibrary(phase.draft.draft_id, file),
+    );
+    if (updated) pushAi(`Candidate library attached — ${updated.candidate_library_size} targets.`);
   };
 
   // Build the candidate library from one of the dataset's own columns (no file).
   const buildCandidateLibraryFromColumn = async (column: string) => {
     if (phase.stage !== "ready" || busy) return;
-    try {
-      const updated = await postBuildCandidateLibraryFromColumn(phase.draft.draft_id, column);
+    const updated = await mutateDraft(() =>
+      postBuildCandidateLibraryFromColumn(phase.draft.draft_id, column),
+    );
+    if (updated)
       pushAi(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
-      commitDraftUpdate(updated);
-    } catch (e) {
-      pushError(e);
-    }
   };
 
   // Recovery from a degraded turn: re-run the one check-in call on the current
@@ -422,6 +453,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     setMinting(true);
     try {
+      // The starting tap can be the gesture that blurred a field, so let every
+      // in-flight draft write settle before minting. A settled write enqueues
+      // nothing further, so the loop terminates.
+      while (pendingDraftWrites.current.size > 0) {
+        await Promise.allSettled([...pendingDraftWrites.current]);
+      }
       const r = await postStartCheckin(phase.draft.draft_id);
       pushAi("Campaign started.");
       setPhase({ stage: "idle" });
@@ -487,13 +524,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     inputText,
     setInputText,
     busy,
+    saving: pendingPatches > 0,
     awaitingContext,
     onDatasetFile: (file) => void ingestAndResolve(file),
     pickDataset,
     openOrigin: (entry) => void openOrigin(entry),
     reopenCheckin: (campaignId) => void reopenCheckin(campaignId),
     submitContext: () => void submitContext(),
-    applyPatch: (patch) => void applyPatch(patch),
+    applyPatch,
     uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
     buildCandidateLibraryFromColumn: (column) => void buildCandidateLibraryFromColumn(column),
     rerunCheckin,

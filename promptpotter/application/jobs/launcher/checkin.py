@@ -91,7 +91,7 @@ class PreparedCheckinRun:
     session_id: str
 
 
-def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[str, DraftCampaign]:
+def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
     """Load + gate a check-in for Start. An incomplete origin raises ``OriginIncompleteError`` → 422
     with the open gaps, leaving the campaign in check-in."""
     recover_pending_replacements(stores=stores)
@@ -106,7 +106,7 @@ def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[str, Draft
     if draft is None:
         raise LaunchError(f"campaign {campaign_id} has no check-in working state to start")
     _assert_origin_ready(draft)
-    return campaign.root_cycle_id, draft
+    return campaign.root_hop, draft
 
 
 async def prepare_checkin_run(
@@ -186,7 +186,7 @@ async def start_checkin_campaign(
 ) -> Any:
     """Transition (b), web tail — reserve the machine slot, then spawn the runner as a detached task.
     The CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs the loop inline."""
-    cycle_id, draft = load_checkin_for_start(stores, campaign_id)
+    hop, draft = load_checkin_for_start(stores, campaign_id)
 
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
@@ -198,8 +198,7 @@ async def start_checkin_campaign(
         job_registry.reserve(
             user_id=str(stores.identity.user_id),
             dataset_name=draft.slug,
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            hop=hop,
         )
     )
 
@@ -219,7 +218,7 @@ async def start_checkin_campaign(
 
         prepared = await prepare_checkin_run(
             stores,
-            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
+            hop=hop,
             draft=draft,
             make_session=make_session,
         )
@@ -235,7 +234,7 @@ async def start_checkin_campaign(
         )
         _record_launch_stop(
             stores=stores,
-            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
+            hop=hop,
             session_id="",
             exc=exc,
         )
@@ -254,7 +253,7 @@ async def start_checkin_campaign(
         name=f"job-{job.job_id}",
     )
     job_registry.attach_task(job.job_id, task)
-    logger.info("start-checkin: started %s/%s (job %s)", campaign_id, cycle_id, job.job_id)
+    logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
     return job
 
 

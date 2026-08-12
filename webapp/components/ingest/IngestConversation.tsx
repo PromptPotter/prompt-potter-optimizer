@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { cx } from "@/lib/cx";
@@ -259,9 +259,13 @@ export function IngestConversation({
 // origin the operator is about to evolve. Only the meta-optimizer knobs (which
 // model drives the search, run bounds) collapse into an optional expander.
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
+  const blockersId = useId();
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degraded } = flow.phase;
+  // `blocked` mirrors the server gate alone — adding `gaps.length` is a second
+  // definition whose divergent state is a dead Start with no explanation.
   const { complete: ready, gaps } = draft.readiness;
+  const blocked = !ready;
 
   return (
     <div className="chat-msg ai ingest-ready">
@@ -283,28 +287,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       ) : null}
 
       {!ready ? (
-        <div className="ingest-gaps">
-          <OriginCheckinPanel
-            draft={draft}
-            lastResolution={resolution}
-            raised={raised}
-            onApply={flow.applyPatch}
-          />
-          {/* The server gate's open fields, each with its operator-facing hint.
-              The resolver panel above only covers gaps it raised a question for
-              (answer_format / answer_space it can leave silently empty), so this
-              list is the honest "what still blocks Start" — resolved by editing
-              the prompt / mapping below until the gate clears. */}
-          {gaps.length > 0 ? (
-            <ul className="ingest-gap-list">
-              {gaps.map((g) => (
-                <li key={g.field} className="ingest-gap">
-                  {g.hint}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <OriginCheckinPanel
+          draft={draft}
+          lastResolution={resolution}
+          raised={raised}
+          onApply={flow.applyPatch}
+        />
       ) : null}
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
@@ -366,13 +354,36 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </div>
       </details>
 
+      {/* The server gate's open fields, rendered against the button they close —
+          a disabled button carries no tooltip on touch, so the reason must be
+          text on the page. */}
+      {blocked ? (
+        <ul className="ingest-gap-list" id={blockersId}>
+          {gaps.length > 0 ? (
+            gaps.map((g) => (
+              <li key={g.field} className="ingest-gap">
+                {g.hint}
+              </li>
+            ))
+          ) : (
+            <li className="ingest-gap">
+              The setup isn’t ready to start yet — the server reported no
+              specific field, so try re-running the check-in.
+            </li>
+          )}
+        </ul>
+      ) : null}
+
+      {/* `saving` never disables Start — `startFromReady` awaits the in-flight
+          edit, and disabling would eat the tap whose blur committed the field. */}
       <button
         type="button"
         className="chat-cta-btn"
-        disabled={!ready || flow.busy}
+        disabled={blocked || flow.busy}
+        aria-describedby={blocked ? blockersId : undefined}
         onClick={flow.startFromReady}
       >
-        {flow.busy ? "Starting…" : "Start campaign"}
+        {flow.busy ? "Starting…" : flow.saving ? "Saving…" : "Start campaign"}
       </button>
     </div>
   );
