@@ -639,7 +639,7 @@ the PR description.
   - **The origin arrives incomplete; check-in completes it and gates it.**
     The operator supplies what they have (a pipeline, some prompt fields);
     it is not a whole origin until the **required inputs** that pipeline
-    declares are resolved — query/target column map, answer space, dataset
+    declares are resolved — query/target column map, dataset
     binding, and any node-type-raised dependency like a `candidate_source`
     node's candidate library. Origin is therefore **per-pipeline**:
     different backends require different inputs. Once it clears both gates
@@ -661,17 +661,22 @@ the PR description.
     `scoring/formula/matchers.py::EXTRACTION_NOTES`, e.g. `exact_match` reads
     the last bolded span), and the 7-field `task_context`; a deterministic,
     no-LLM **readiness gate** (`origin_readiness.py`) *gates* — mint is
-    blocked until query + ground_truth + framing + answer-space are all
-    CONFIRMED. The check-in **nudges the operator** (the ingest UI surfaces
+    blocked until query + ground_truth + framing are CONFIRMED and every
+    active LLM node owns a model. The check-in **nudges the operator** (the ingest UI surfaces
     each open gap + unfulfilled pipeline dependency) until the spec is
     complete, then it's stored as the per-pipeline origin under
     `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate
     library) are dropped in place here and committed alongside the origin,
     not chased at init.
   - **Two gates, because completeness ≠ scoreability.** The readiness gate is
-    *static* — it proves the required fields are present (incl. a non-empty
-    `answer_format` whenever the scorer extracts a label, `_check_commit_format`),
-    not that the prompt actually scores. Extractability is empirical
+    *static* — it proves the required fields are present, not that the prompt
+    actually scores. **No individual prompt field is gated:** any of the six may
+    be blank because the optimizer evolves them, so only an entirely blank prompt
+    falls back to the task description — and a closed label set is appended to
+    `answer_format` deterministically whether or not the prose is blank, because
+    the optimizer prompts forbid the LLMs from re-typing labels on the promise
+    that the system supplies them (`DraftCampaign.committed_prompt_fields`).
+    Extractability is empirical
     (prompt × model × scorer matcher), so the second gate is the **round-0
     origin gate**: a floor that grades `critical` (e.g. all-`NO_RESULT`, a
     PP-owned health signal in `domain/results_health.py`) halts before L1

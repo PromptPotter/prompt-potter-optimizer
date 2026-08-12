@@ -87,8 +87,9 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
 # the ``shared`` extractors (``extract_last_bold`` / ``extract_gsm8k_number``) that
 # isolate the label). Fed to the
 # origin check-in resolver (``origin_resolve.build_origin_consultation``) so it
-# authors an ``answer_format`` the chosen scorer can actually read, and gated by
-# ``origin_readiness._check_commit_format``. Matchers that compare the raw text
+# authors an ``answer_format`` the chosen scorer can actually read — told, not
+# gated: an empty format is a legal origin the optimizer evolves, and round-0
+# health is what catches an unscoreable one. Matchers that compare the raw text
 # (no extraction step) carry no entry — the output IS the label.
 EXTRACTION_NOTES: dict[str, str] = {
     "exact_match": (

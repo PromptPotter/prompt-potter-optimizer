@@ -3443,8 +3443,8 @@ components:
           additionalProperties: false
           description: |
             Server-authoritative mint-gate verdict — the full `origin_readiness`
-            checklist (columns, task framing, answer space, answer format, node
-            models), recomputed on every draft response. The UI gates Start on
+            checklist (columns, task framing, node models; no individual prompt
+            field is gated), recomputed on every draft response. The UI gates Start on
             this and renders `gaps`; the client never re-derives the gate. Same
             shape the `422 origin_incomplete` error carries in `details.gaps`.
           properties:
