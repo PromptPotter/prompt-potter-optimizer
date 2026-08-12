@@ -109,26 +109,6 @@ def _count_domain_any_maps(py_files: list[Path]) -> int:
     return total
 
 
-def _count_param_decls(py_files: list[Path]) -> int:
-    """The one dimension that sees a value threaded N deep rather than riding a carrier: that
-    costs no module, no class, no config leaf and no ``Any``, so every other count reads flat."""
-    import ast
-
-    total = 0
-    for path in py_files:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            args = node.args
-            total += sum(
-                1
-                for a in args.posonlyargs + args.args + args.kwonlyargs
-                if a.arg not in ("self", "cls")
-            )
-    return total
-
-
 def _count_lax_models(py_files: list[Path]) -> int:
     """Models that do NOT end up ``extra="forbid"`` — Pydantic's default returns a valid-looking instance from a misspelled
     keyword. AST, not import: eager package init makes import order a hazard."""
@@ -199,22 +179,6 @@ def _is_reexport_shim(init_file: Path) -> bool:
     return has_all and has_import
 
 
-def _count_docstring_lines(py_files: list[Path]) -> int:
-    import ast
-
-    total = 0
-    for path in py_files:
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(
-                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-            ):
-                continue
-            doc = ast.get_docstring(node, clean=False)
-            if doc is not None:
-                total += len(doc.strip().splitlines())
-    return total
-
-
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application.knobs import KNOBS
     from promptpotter.application.optimization.dispatch.injections.registry import (
@@ -238,9 +202,7 @@ def compute_ledger() -> dict[str, int]:
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
         "any_params": _count_any_params(py_files),
         "domain_any_maps": _count_domain_any_maps(py_files),
-        "param_decls": _count_param_decls(py_files),
         "models_lax": _count_lax_models(py_files),
-        "docstring_lines": _count_docstring_lines(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),

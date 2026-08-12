@@ -10,9 +10,9 @@ from pydantic import ConfigDict, Field, field_serializer
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 
-# Cross-layer protocol fields L1 cannot operate without. Dropping any (esp. critique) fires
-# `l1_layout_missing_mandatory` — a guard breach that routes to L3 (replan) rather than letting
-# L2 starve L1 of failure context.
+# Cross-layer protocol fields L1 cannot operate without. Dropping any fires
+# `l1_layout_missing_mandatory`, which routes to L3 rather than letting L2 starve L1 of
+# failure context.
 L1_MANDATORY: frozenset[str] = frozenset(
     {"plan", "task_context", "rendered_prompt", "pipeline_param_catalogue", "critique"}
 )
@@ -89,50 +89,32 @@ class NodeLayoutSpec(StrictModel):
     @field_serializer("possible", "mandatory")
     def _sorted_names(self, names: frozenset[str]) -> list[str]:
         # Pydantic dumps a frozenset in ITERATION order, which for str is
-        # PYTHONHASHSEED-randomized — so an unsorted dump differs every process.
-        # `_identity_config` hashes this dump, so that made the L4 measurement
-        # identity non-deterministic and no cached origin could ever be reused.
+        # PYTHONHASHSEED-randomized. `_identity_config` hashes this dump, so an unsorted one
+        # makes the L4 measurement identity non-deterministic and no origin ever reusable.
         return sorted(names)
 
 
-# The per-node layout registry — L4's information-flow surface. Each optimizer node
-# owns its injection set here (was: `l1_generate` in `default_l1_layout()` Python +
-# every other node hardcoded as `{{tokens}}` in `promptpotter/assets/optimizer/pipeline.yaml`).
-# The dispatch hub fills every node from `NODE_LAYOUTS[node]` (floor ± editor edits),
-# so the set of signals reaching each optimizer prompt is one searched axis, not two
-# hand-tuned sources. `checkin` is excluded — it runs around the loop, not through
-# the injection path (§5 non-goal). Floor order == the prompt's prior `{{token}}`
-# order so the collapse stays rendering-identical.
+# The per-node layout registry — L4's information-flow surface. The dispatch hub fills every
+# node from here, so the set of signals reaching each optimizer prompt is ONE searched axis
+# rather than two hand-tuned sources. `checkin` is excluded: it runs around the loop.
 #
-# `mandatory` = the GUARD RAIL (L4 may never excise — the node's can't-function-without
-# inputs, deliberately minimal). `floor` = the good default a normal campaign runs on
-# UNCHANGED (these floors govern every campaign's inner prompts, not only L4 runs, and a
-# normal campaign has no outer loop to reconverge — so the floor is a good default, not
-# just not-terrible). `possible − mandatory` = L4's search space: it may excise a
-# non-mandatory floor signal or insert a possible-but-off-floor one, scored by the same
-# proxy as any other mutation. Only change vs. pre-slice-6 behavior: `l1_generate` regains
-# `origin_strengths` on its floor — the anti-regression rail `critique` (failure-focused)
-# does not carry (the layout-trim review's one restore).
+# `mandatory` = the GUARD RAIL L4 may never excise, deliberately minimal. `floor` = the good
+# default a normal campaign runs on UNCHANGED — these govern every campaign's inner prompts,
+# and a normal campaign has no outer loop to reconverge, so the floor must be good rather than
+# merely not-terrible. `possible − mandatory` = L4's search space, scored by the same proxy as
+# any other mutation.
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
-    # `task_context` sits in `task_intent` (LLM front-of-mind); `problem_description`
-    # carries the mandatory structural state, then the evidence: WHAT THE PIPELINE ANSWERS
-    # (`answer_distribution` — first, because it frames everything after it: a pipeline that
-    # has collapsed onto one label needs that break, not a better-argued instruction, and no
-    # other panel can say so), the DISTILLED failure signal (`critique`), the misses themselves
-    # (`failing_samples`, one line each, ordered by difficulty — the evidence sits beside its
-    # own compression, so the generator can check one against the other), the per-sample RAW
-    # narrative when the sample is itself an inner campaign (`inner_narratives` — the L4 outer
-    # generator's window into what each inner loop tried and where it stalled; silent off the
-    # recursion), what it has ALREADY tried (`mutation_memory` — without it, round 4 re-proposes
-    # round 1's measured failure and nothing objects) + L1's own `l1_wounds` + `escalation_panel`
-    # + `origin_strengths`.
-    # `sample_transcripts` (the RAW misses, three shown COMPLETE) stays OFF this
-    # floor: it is the same evidence at ~5x the bytes, and the generator reading it alongside
-    # the critique duplicated a ~10k-char payload every round. It stays in `L1_POSSIBLE` (and
-    # on `l1_critique`'s floor, the distiller's raw source), so L2 re-adds it on stall — when
-    # a reasoning-MECHANISM error needs the model's own trace, which no one-liner can carry —
-    # and L4 can search it back in. Raw `diagnostics` and the cross-run panels stay off the
-    # floor for the same reason; L2 adds them on stall via its layout edit, L4 optimises that.
+    # Order is load-bearing. `answer_distribution` leads because it frames everything after
+    # it: a pipeline collapsed onto one label needs that break, not a better-argued
+    # instruction, and no other panel can say so. Then the DISTILLED failure signal, then the
+    # misses themselves ordered by difficulty — the evidence beside its own compression, so
+    # the generator can check one against the other — then what it has ALREADY tried, without
+    # which round 4 re-proposes round 1's measured failure and nothing objects.
+    # `sample_transcripts` stays OFF this floor: the same evidence at several times the bytes,
+    # duplicating a large payload every round. It stays in `L1_POSSIBLE` and on
+    # `l1_critique`'s floor, so L2 re-adds it on stall — when a reasoning-MECHANISM error
+    # needs the model's own trace — and L4 can search it back in. Raw `diagnostics` and the
+    # cross-run panels are off the floor for the same reason.
     "l1_generate": NodeLayoutSpec(
         editor="l2",
         possible=L1_POSSIBLE,
@@ -155,19 +137,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # The distiller — the one node where a raw dump is justified (everything downstream
-    # reads its compression, so it must read the raw source); hence `diagnostics` is its
-    # sole mandatory. `sample_transcripts` carries the COMPLETE failing samples (full
-    # query + the model's own reasoning) — `diagnostics` alone shows truncated stems,
-    # which starved the critique into unverifiable steers. Optional search space adds
-    # the cross-run panels.
-    # WHICH raw source depends on the level, so both sit on the floor and each renders
-    # only where it means something: a miss selects `sample_transcripts`, and one level up
-    # a miss is a placeholder-label artifact the outer critique is told to ignore — there
-    # the raw source is `inner_narratives`, the same stories ordered by lift and paired
-    # against the origin's delta on that seed. A critique shown neither — and unable to be
-    # given one, if the panel is not even in this node's search space for L4 to add —
-    # prescribes steers the inner loops have already measured and lost.
+    # The distiller — the one node where a raw dump is justified, since everything downstream
+    # reads its compression. `diagnostics` alone shows truncated stems, which starves the
+    # critique into unverifiable steers.
+    # WHICH raw source depends on the level, so both sit on the floor and each renders only
+    # where it means something: a miss selects `sample_transcripts`, while one level up a miss
+    # is a placeholder-label artifact and the raw source is `inner_narratives`. A critique
+    # shown neither prescribes steers the inner loops have already measured and lost.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -195,16 +171,12 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # Framing layer — must see the distilled failure signal (`critique`), its own edit
-    # vocabulary (`l1_signal_catalogue`), and the raw round evidence (`diagnostics`).
-    # `task_context` is NOT one of them and is off the floor: L2 cannot write the framing
-    # (`L2ContextOutput` declares no such field — it is operator-authored and frozen for the
-    # run), so the mandatory rail here guarded a capability that does not exist, and what it
-    # guarded IN was 752-1298 chars of static text, identical on every fire of every round.
-    # It stays in `possible`, which turns it from a law into an axis L4 can search back in.
-    # The two layer-control directives (`rebase_capability` / `terminate_capability`) ride
-    # the layout — mandatory, so no L4 edit can sever the channel (the sanctioned
-    # off-switch stays the config bit, which renders them empty).
+    # Framing layer — must see the distilled failure signal, its own edit vocabulary and the
+    # raw round evidence. `task_context` is off the floor: L2 cannot write the framing, so a
+    # mandatory rail here would guard a capability that does not exist while admitting static
+    # text identical on every fire. It stays in `possible`, an axis L4 can search back in.
+    # The two layer-control directives are mandatory, so no L4 edit can sever the channel —
+    # the sanctioned off-switch stays the config bit, which renders them empty.
     "l2_context": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -220,6 +192,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "rare_hit_samples",
                 "critique",
                 "l1_overrides",
+                "l1_layout",
                 "task_context",
                 "l1_signal_catalogue",
                 "rebase_capability",
@@ -247,18 +220,19 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "archive_top_runs",
                 "rare_hit_samples",
                 "critique",
+                # Both levers' CURRENT state, side by side — an edit needs to read what it lands on,
+                # and only one of the two ever did.
                 "l1_overrides",
+                "l1_layout",
                 "l1_signal_catalogue",
                 "rebase_capability",
                 "terminate_capability",
             ],
         ),
     ),
-    # Strategic replan — must see the current `plan` it rewrites and the raw evidence
-    # (`diagnostics`). `task_context` is off the floor for the same reason as `l2_context`
-    # above: frozen, unwritable from here, and identical on every fire. The floor keeps
-    # `evidence_health` on its own merit — the round's per-node failure rates, which L3 needs
-    # to judge a fault unrecoverable; optional adds archive_top_runs.
+    # Strategic replan — must see the `plan` it rewrites and the raw evidence. `task_context`
+    # is off the floor for the same reason as `l2_context` above. `evidence_health` earns its
+    # place: the per-node failure rates L3 needs to judge a fault unrecoverable.
     "l3_plan": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -307,14 +281,10 @@ def default_l1_layout() -> L1Layout:
     return NODE_LAYOUTS["l1_generate"].floor.model_copy(deep=True)
 
 
-# Import-time exhaustiveness — the structural contract `validate_l1_layout` enforces
-# per edit, asserted once at module load so a drift in any node's spec fails at the
-# source (no standalone wiring test). The INJECTIONS-membership check (every possible
-# name resolves to a registered renderer) lives in the dispatch registry — domain must
-# not import application. Here, pure set-algebra per node:
-#   * every mandatory placeholder is a possible one,
-#   * the floor only references possible placeholders, and
-#   * the floor already satisfies the mandatory set.
+# Import-time exhaustiveness — the same structural contract `validate_l1_layout` enforces per
+# edit, asserted at module load so a drift in any node's spec fails at the source. The
+# INJECTIONS-membership half lives in the dispatch registry, because domain must not import
+# application; this half is pure set algebra.
 for _node, _spec in NODE_LAYOUTS.items():
     _floor_ph = set(_spec.floor.all_placeholders())
     assert _spec.mandatory <= _spec.possible, f"{_node}: mandatory ⊄ possible"
@@ -327,20 +297,57 @@ for _node, _spec in NODE_LAYOUTS.items():
 del _node, _spec, _floor_ph
 
 
-def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Coerce to an ``L1Layout``. ``{}`` is the sanctioned omit-sentinel ("keep current"); malformed
-    non-empty input also returns ``None``, so the VALIDATOR and not this coercer surfaces the failure."""
+def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
+    """The wire shape of a layout edit against ``spec``: the slots are the only legal keys and
+    ``possible`` the only legal values. ONE builder for BOTH seams that offer the edit — L4's per-node
+    ``layout`` param and L2's ``l1_layout`` — because only L4's was ever built this way. L2's rode a
+    bare ``dict[str, list[str]]``, which states neither half, and L2 answered the silence by inventing
+    a shape: one fire keyed the map by slot with a ``<slot>_block`` value apiece, the next keyed it by
+    SIGNAL with invented sub-selectors. ``validate_l1_layout`` rejected both, as it must — but it is
+    the backstop, and a vocabulary the emitter is never shown is not a vocabulary.
+
+    The edit granularity below is the WHOLE contract, so both seams must mean it identically — one
+    sentence describing two different rules is worse than the silence it replaced."""
+    return {
+        "type": "object",
+        "description": (
+            "Which evidence panels fill each prompt slot. The keys below are the only addressable "
+            "slots and the enum the only signals this node may be given. Editing is per SLOT: a slot "
+            "you name replaces that slot's whole list, so carry over what you still want there; a "
+            "slot you omit keeps what it has, and `[]` empties one."
+        ),
+        "properties": {
+            slot: {"type": "array", "items": {"type": "string", "enum": sorted(spec.possible)}}
+            for slot in L1_LAYOUT_SLOTS
+        },
+        "additionalProperties": False,
+    }
+
+
+def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
+    """Coerce an EDIT onto ``base``, or ``None`` for BOTH "no edit asked" (``{}``, the sanctioned
+    omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the two off the
+    raw input; this returns no outcome of its own, because a coercer that judged would be a second
+    validator. It once claimed the validator surfaced the malformed case — which returning ``None``
+    is precisely what prevents, since the caller then skips validation altogether.
+
+    PARTIAL per-slot replacement — the semantics ``resolve_node_layout`` already gives L4's ``layout``
+    param, and now the only ones. The two seams ran OPPOSITE rules while sharing the one
+    ``layout_json_schema`` sentence, which stated L4's: an omitted slot was kept there and EMPTIED
+    here. So L2 wrote the slots it meant to change, omitted the rest expecting them kept, and lost
+    them. All 13 banked edits dropped 7-8 floor signals that way — ``mutation_memory`` on every one,
+    the panel whose absence is what lets round 4 re-propose round 1's measured failure."""
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None
-    sanitised: dict[str, list[str]] = {}
+    update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
         vals = raw_layout.get(slot)
         if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-            sanitised[slot] = list(vals)
-    if not sanitised:
+            update[slot] = list(vals)
+    if not update:
         return None
     try:
-        return L1Layout(**sanitised)
+        return base.model_copy(update=update, deep=True)
     except Exception:
         return None
 
@@ -424,5 +431,6 @@ __all__ = [
     "NodeLayoutSpec",
     "coerce_l1_layout",
     "default_l1_layout",
+    "layout_json_schema",
     "validate_l1_layout",
 ]

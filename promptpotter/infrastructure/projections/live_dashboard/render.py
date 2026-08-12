@@ -114,9 +114,11 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 theta_se=served.get("theta_se"),
                 composite_ci_lo=served.get("composite_ci_lo"),
                 composite_ci_hi=served.get("composite_ci_hi"),
-                ci_scale=served.get("ci_scale"),
                 matched_origin_accuracy=served.get("matched_origin_accuracy"),
                 matched_origin_composite=served.get("matched_origin_composite"),
+                # Set at `l1_score:exit` by `RoundBuffer.mark_winner`, so the crown is live from
+                # the election rather than from the round close.
+                is_winner=bool(cand.get("is_winner")),
             )
         )
     return rows

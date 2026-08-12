@@ -10,13 +10,13 @@
 .whatif-tick{position:absolute;top:5px;left:5px;width:13px;height:13px;border-radius:3px;background:var(--color-background-secondary);border:1.5px solid var(--color-text-tertiary);transition:color .12s;display:flex;align-items:center;justify-content:center;color:transparent;line-height:1;overflow:visible}
 .whatif-tick svg{width:20px;height:20px;display:block;pointer-events:none;filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.55))}
 .whatif-sq.on .whatif-tick{color:var(--color-accent)}
-.whatif-dir{position:absolute;top:5px;right:7px;font-size:13px;color:var(--color-text-tertiary);font-weight:700;font-family:var(--font-mono);line-height:1}
+.whatif-dir{position:absolute;top:5px;right:7px;font-size:var(--text-base);color:var(--color-text-tertiary);font-weight:700;font-family:var(--font-mono);line-height:1}
 .whatif-dir.up,.whatif-dir.down{color:var(--color-accent)}
 .whatif-ico{color:var(--color-text-secondary);width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:5px}
 .whatif-ico svg{width:100%;height:100%}
 .whatif-sq.in-active .whatif-ico{color:var(--color-text-primary)}
-.whatif-name{font-size:11px;color:var(--color-text-primary);font-weight:500;line-height:1.2;word-break:break-word;font-family:var(--font-mono)}
-.whatif-summary{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:10px 12px;margin-top:14px;line-height:1.6}
+.whatif-name{font-size:var(--text-xs);color:var(--color-text-primary);font-weight:500;line-height:1.2;word-break:break-word;font-family:var(--font-mono)}
+.whatif-summary{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:var(--space-10) var(--space-12);margin-top:14px;line-height:1.6}
 .whatif-summary .rank-up{color:var(--color-accent);font-weight:700}
 .whatif-summary .rank-down{color:var(--color-text-secondary);font-weight:600}
 .whatif-summary .rank-flat{color:var(--color-text-tertiary)}

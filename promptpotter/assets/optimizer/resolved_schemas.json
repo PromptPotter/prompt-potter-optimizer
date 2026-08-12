@@ -192,16 +192,119 @@
         "properties": {
           "axis_targeted": {
             "default": "",
+            "description": "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, a param for a quantitative one. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
             "maxLength": 30,
             "title": "Axis Targeted",
             "type": "string"
           },
           "l1_layout": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
+            "additionalProperties": false,
+            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given. Editing is per SLOT: a slot you name replaces that slot's whole list, so carry over what you still want there; a slot you omit keeps what it has, and `[]` empties one.",
+            "properties": {
+              "persona": {
+                "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "archive_top_runs",
+                    "axis_memory",
+                    "critique",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "mutation_memory",
+                    "origin_strengths",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "prompt_block_catalogue",
+                    "rare_hit_samples",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
               },
-              "type": "array"
+              "task_intent": {
+                "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "archive_top_runs",
+                    "axis_memory",
+                    "critique",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "mutation_memory",
+                    "origin_strengths",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "prompt_block_catalogue",
+                    "rare_hit_samples",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "problem_description": {
+                "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "archive_top_runs",
+                    "axis_memory",
+                    "critique",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "mutation_memory",
+                    "origin_strengths",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "prompt_block_catalogue",
+                    "rare_hit_samples",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "thinking_style": {
+                "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "archive_top_runs",
+                    "axis_memory",
+                    "critique",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "mutation_memory",
+                    "origin_strengths",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "prompt_block_catalogue",
+                    "rare_hit_samples",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              }
             },
             "title": "L1 Layout",
             "type": "object"
@@ -214,6 +317,7 @@
           },
           "rationale": {
             "default": "",
+            "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
             "maxLength": 400,
             "title": "Rationale",
             "type": "string"

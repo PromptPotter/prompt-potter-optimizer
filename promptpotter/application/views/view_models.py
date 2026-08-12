@@ -208,6 +208,13 @@ class RoundCompleteView:
     # "was 0.0%" on any round whose payload lacked the key.
     matched_origin_accuracy: float | None
     matched_origin_composite: float | None = None
+    # The elected winner's lineage id — the identity `winner_label` cannot carry (prose, optional,
+    # shareable). It rides the VIEW rather than the emit kwargs because those live on
+    # `PhaseRecord.data`, which is `exclude=True` and so exists only in the emitting process:
+    # anything reading this record off disk (the SSE tail, a re-projection, an audit reader)
+    # would find the crown missing. Read it with `run_records.py::view_fields`, never `getattr`
+    # — off disk the view is a dict.
+    winner_candidate_id: str = ""
 
 
 @dataclass(frozen=True)

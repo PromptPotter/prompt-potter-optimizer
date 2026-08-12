@@ -613,7 +613,8 @@ the PR description.
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
   injections**
   (`application/optimization/dispatch/injections/catalogues.py`) — the
-  discoverability scaffolding: the menu L2 reads to write `l1_layout`,
+  discoverability scaffolding: the cross-slot rule L2 reads to write
+  `l1_layout` (its vocabulary is on that field's own schema),
   the param menu L1 reads, and the reusable prompt-field blocks L1
   recombines (the one channel handing L1 prompt MATERIAL rather than
   statistics about material), the surface the pre-flight gate's
@@ -731,8 +732,10 @@ the PR description.
   validation-failed candidate. `display_fitness` (`domain/rendering.py`)
   is the **one** canonical resolved value every display + ranking site
   reads — `composite_fitness` when present (the honest `0.0` is kept),
-  accuracy only on genuine `None`; `round_winner_key` is its
-  argmax-over-candidates form. Alternative formulas (what-if, the
+  accuracy only on genuine `None`; `display_rank_key` is its
+  argmax-over-candidates form, and **is not the election** — that is
+  `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces.
+  Alternative formulas (what-if, the
   `score:<formula>` lens, replay) never recompute in the consumer — they
   re-project from the stored evaluator namespace via
   `value_with_mask_applied` (`metrics.py`) and are **served** — every

@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { Badge, CardFrame } from "@/components/ui";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { fmtNum, fmtPct1 } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
 
@@ -58,7 +57,6 @@ export function RoundFileView({ doc, raw }: Props) {
   const originLabel = matched != null ? "matched origin" : "origin, full set";
 
   return (
-    <RotatePrompt surfaceName="The round file view">
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
@@ -152,14 +150,13 @@ export function RoundFileView({ doc, raw }: Props) {
       )}
 
       <details open={showRaw} onToggle={(e) => setShowRaw((e.target as HTMLDetailsElement).open)} style={{ margin: "8px 0" }}>
-        <summary style={{ cursor: "pointer", padding: "8px 0", color: "var(--color-text-secondary)", fontSize: 13 }}>
+        <summary style={{ cursor: "pointer", padding: "8px 0", color: "var(--color-text-secondary)", fontSize: "var(--text-base)" }}>
           Raw JSON ({raw.length.toLocaleString()} chars)
         </summary>
-        <pre style={{ fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)", background: "var(--color-background-secondary)", padding: 10, borderRadius: "var(--border-radius-md)", marginTop: 6 }}>
+        <pre style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", lineHeight: 1.5, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)", background: "var(--color-background-secondary)", padding: 10, borderRadius: "var(--border-radius-md)", marginTop: 6 }}>
           {raw}
         </pre>
       </details>
     </div>
-    </RotatePrompt>
   );
 }

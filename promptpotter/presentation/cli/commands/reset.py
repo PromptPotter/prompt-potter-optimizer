@@ -188,6 +188,6 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         human=(
             f"reset: dropped {len(dropped)} path(s).\n"
             "preserved: measurements/ (DB core) + archive/ (recycle bin + optimizer_calls + sweeps).\n"
-            "next: `python -m promptpotter optimize --config datasets/<name>/campaign.json`."
+            "next: `python -m promptpotter new <name>` (from datasets/<name>/)."
         ),
     )

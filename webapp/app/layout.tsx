@@ -14,10 +14,15 @@ const CARD_DESC =
 export const metadata: Metadata = {
   metadataBase: new URL(BRAND.url),
   title: "optimize, potter, learn",
-  // Emoji favicon as an inline SVG data-URI — no image asset to ship. Single
-  // quotes inside so the generated href="" stays valid.
+  // Browser-tab icon: the real mark (v3), replacing the 🏺 emoji data-URI
+  // placeholder. The mark is raster, so it cannot carry a prefers-color-scheme
+  // rule the way an SVG could — two cuts and a media query instead, because tab
+  // chrome may be light or dark and cannot pass a colour in.
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏺</text></svg>",
+    icon: [
+      { url: "/brand/tab-icon-pot-32.png", type: "image/png", media: "(prefers-color-scheme: light)" },
+      { url: "/brand/tab-icon-pot-32-dark.png", type: "image/png", media: "(prefers-color-scheme: dark)" },
+    ],
   },
   description: BRAND.description,
   applicationName: BRAND.shortName,

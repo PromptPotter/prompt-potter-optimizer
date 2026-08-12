@@ -20,22 +20,43 @@
         "additionalProperties": false,
         "properties": {
           "campaign_id": {
-            "description": "Active campaign id (pinned by the webapp)",
-            "title": "Campaign Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active campaign id (pinned by the webapp); null when no session is active.",
+            "title": "Campaign Id"
           },
           "cycle_id": {
-            "description": "Active cycle id within the campaign",
-            "title": "Cycle Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active cycle id within the campaign; null when no session is active.",
+            "title": "Cycle Id"
           },
           "session_id": {
-            "description": "Active session id",
-            "title": "Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active session id; null when no session is active.",
+            "title": "Session Id"
           },
           "tenant_id": {
-            "description": "Tenant the active session belongs to",
+            "description": "Tenant the pointer belongs to — the caller's own, always known",
             "title": "Tenant Id",
             "type": "string"
           }
@@ -1800,22 +1821,6 @@
             "title": "Children",
             "type": "array"
           },
-          "ci_scale": {
-            "anyOf": [
-              {
-                "enum": [
-                  "composite",
-                  "accuracy"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which bar the band above brackets — the composite one or the accuracy one. Served with the bounds; both scales coexist within a round, so a client that re-derives it picks the wrong bar for every eliminated or cold-ruler candidate.",
-            "title": "Ci Scale"
-          },
           "composite_ci_hi": {
             "anyOf": [
               {
@@ -1881,7 +1886,7 @@
             "title": "Course Kind"
           },
           "course_label": {
-            "description": "This candidate's label in the course that MINTED it. Equal to `label` for a candidate this course minted itself; a fork-contributed attempt keeps the fork's private `C{round}.{n}` here while `label` carries its renumbered position on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the minting course's private counter, while `candidate_id` is re-minted per run (see `_close_facts`), so an id join silently misses.",
+            "description": "This candidate's label in the course that MINTED it. Equal to `label` for a candidate this course minted itself; a fork-contributed attempt keeps the fork's private `C{round}.{n}` here while `label` carries its renumbered position on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the minting course's private counter, while `candidate_id` is re-minted per run (see `_round_facts`), so an id join silently misses.",
             "title": "Course Label",
             "type": "string"
           },
@@ -1917,6 +1922,12 @@
             "default": false,
             "description": "This node is inside the counterfactual subtree below a divergence — the client dims it.",
             "title": "Divergent",
+            "type": "boolean"
+          },
+          "election_held": {
+            "default": false,
+            "description": "This candidate's ROUND has held its election. The complement `is_winner` cannot supply: a round that HELD crowned nobody, so every bar in it reads `is_winner: false` exactly as a round still scoring does — and only this says whether an uncrowned bar lost or has not been judged yet. False on a course, which is not a round, and on a round halted before it stood (a holed panel).",
+            "title": "Election Held",
             "type": "boolean"
           },
           "evaluators": {
@@ -1967,7 +1978,7 @@
           },
           "is_winner": {
             "default": false,
-            "description": "Elected this round. False throughout a round that never CLOSED — election is stamped at close, so such a round has no winner to report.",
+            "description": "Elected this round. Stamped at the ELECTION, which is the last thing scoring does — so it lands a whole `l1_critique` call before the round closes, and a round still running its optimizer calls already reports its winner. False where no election has been held (still scoring, or halted on a holed panel) and on a round that held: those two are told apart by the election record, not by this flag.",
             "title": "Is Winner",
             "type": "boolean"
           },
@@ -5661,7 +5672,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "Return the caller-tenant's active-session pointer; 404 when none exists.\n\nPointers are per-tenant on disk; the API never reads another tenant's\nstate. Unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
+        "description": "The caller-tenant's active-session pointer, null-valued while nothing runs.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
         "operationId": "get_active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

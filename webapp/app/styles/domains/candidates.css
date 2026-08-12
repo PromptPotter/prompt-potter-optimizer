@@ -13,13 +13,13 @@
    a cladogram of cycles wants whatever room the campaign's forks need, and the
    viewport (family-tree.css) scrolls when that exceeds the band. */
 .forest-card{margin-bottom:14px;width:100%}
-.forest-close{background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
+.forest-close{background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:var(--text-xl);line-height:1;padding:0 var(--space-4)}
 .forest-close:hover{color:var(--color-text-primary)}
 /* The header is ONE row: the `Toolbar` primitive fills `.card-title` end to end.
    The shared card-title is a space-between row, which fought the toolbar's own
    spacer — so give it a plain block and let the toolbar own the layout. */
 .cand-card > .card-title{display:block;margin-bottom:10px}
-.cand-title{font-size:14px;font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
+.cand-title{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
 /* Run-bars mode: the title is the way back out — styled as the title it replaces. */
 .cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;
   color:var(--color-text-secondary)}
@@ -47,11 +47,11 @@
 .cand-tree-row > button{opacity:.5;transition:opacity .15s}
 .cand-tree-row > button:hover,.cand-tree-row > button[aria-pressed="true"]{opacity:1}
 .cand-tree-row > button svg{width:12px;height:12px}
-.cand-view-count{font-size:9px;font-weight:700;line-height:1;font-family:var(--font-mono)}
+.cand-view-count{font-size:var(--text-xs);font-weight:700;line-height:1;font-family:var(--font-mono)}
 /* Chart frame: fills the card's width so 5 → 25 bars all read; height stays
    compact. Chart.js handles the bar fan-out within its responsive options. */
 .fitness-chart-frame{position:relative;height:160px;width:100%;max-width:100%;margin:0 auto;min-width:0}
-.fitness-legend{display:flex;justify-content:center;gap:14px;font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
+.fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
 .fitness-legend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
@@ -83,13 +83,13 @@
 .cand-dendro-hit.selected .cand-dendro-dot{fill:var(--color-selection);stroke:var(--color-selection)}
 .cand-dendro-hit:focus-visible .cand-dendro-dot{stroke:var(--color-accent);filter:drop-shadow(0 0 5px var(--color-accent-glow))}
 .cand-dendro-fork{cursor:pointer;outline:none}
-.cand-dendro-fork-glyph{fill:var(--color-text-tertiary);font-size:11px;text-anchor:middle}
+.cand-dendro-fork-glyph{fill:var(--color-text-tertiary);font-size:var(--text-xs);text-anchor:middle}
 .cand-dendro-fork:hover .cand-dendro-fork-glyph,.cand-dendro-fork:focus-visible .cand-dendro-fork-glyph{fill:var(--color-accent)}
 /* Ability θ teach card — content revealed inside the card's ⋯ menu. Capped and
    indented to the menu's label gutter so it reads as the row's explanation, not
    as a stray paragraph. */
-.ability-help{max-width:260px;padding:2px 8px 6px 26px;font-size:11px;line-height:1.5;color:var(--color-text-secondary)}
-.ability-help p{margin:0 0 8px}
+.ability-help{max-width:260px;padding:2px var(--space-8) var(--space-6) var(--space-24);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
+.ability-help p{margin:0 0 var(--space-8)}
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
 .ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
@@ -116,7 +116,7 @@
    as a gap above it. (Pre-fix the chart dropped to the bottom-left.) */
 /* What-If adds a second column, so the compact Sequence cap has to lift — the
    bars stay at 432px inside it, so they don't shift when the panel opens. */
-.cand-card.whatif-open{max-width:100%;display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:18px;align-items:start}
+.cand-card.whatif-open{max-width:100%;display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:var(--space-18);align-items:start}
 .cand-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
 /* min-width:0 lets .fitness-body shrink once the stacked layout below makes
    it a flex item (flex default min-width:auto would pin it to the grid row). */
@@ -146,9 +146,9 @@
   .cand-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
 }
 .fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border)}
-.fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
-.whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
-.whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:11px;font-weight:900}
+.fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:var(--text-sm);padding:var(--space-16) 0;text-align:center}
+.whatif-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
+.whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:var(--text-xs);font-weight:900}
 .whatif-legend .swatch.optional{border-style:dashed}
 .whatif-legend .swatch.checked{color:var(--color-accent)}
 .whatif-legend .swatch.active{
@@ -158,16 +158,16 @@
 }
 /* Two rows of tiles visible: 2 × 126px tile + 1 × 10px gap + 2 × 6px wrap
    padding = 274px. The tile carries a toggle button + a weight thermometer. */
-.whatif-grid-wrap{overflow-y:auto;max-height:274px;padding:6px 4px 6px 0;margin-bottom:12px}
-.whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
+.whatif-grid-wrap{overflow-y:auto;max-height:274px;padding:var(--space-6) var(--space-4) var(--space-6) 0;margin-bottom:12px}
+.whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:var(--space-10)}
 .whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
 /* The toggle is the upper area (tick/dir/icon/name); the weight row sits below. */
-.whatif-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;width:100%;padding:13px 7px 4px;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
+.whatif-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;padding:var(--space-12) var(--space-6) var(--space-4);background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
 .whatif-sq-toggle:disabled{cursor:not-allowed}
-.whatif-weight{display:flex;align-items:center;gap:4px;width:100%;min-height:18px;padding:0 7px 8px}
+.whatif-weight{display:flex;align-items:center;gap:var(--space-4);width:100%;min-height:18px;padding:0 var(--space-6) var(--space-8)}
 .whatif-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
-.whatif-weight-val{font-size:9px;font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
+.whatif-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
 /* Phone (≤640px): lay every tile in ONE horizontally-scrolling row (the
    .wf-hero-flow pattern) instead of the two-row vertical-scroll grid —
    one swipe sweeps the whole evaluator set. Tiles drop to ~70% in both
@@ -175,16 +175,16 @@
    to match so the smaller tile stays legible. Overrides glass.css sizes
    here (never edits the glass file itself). */
 @media (max-width:640px){
-  .whatif-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:6px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .whatif-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:var(--space-6) 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .whatif-grid-wrap::-webkit-scrollbar{display:none}
-  .whatif-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:7px}
+  .whatif-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:var(--space-6)}
   .whatif-sq{width:70px;height:92px;padding:0;gap:0}
-  .whatif-sq-toggle{padding:9px 4px 3px;gap:3px}
-  .whatif-weight{min-height:14px;padding:0 4px 5px}
+  .whatif-sq-toggle{padding:var(--space-8) var(--space-4) 3px;gap:3px}
+  .whatif-weight{min-height:14px;padding:0 var(--space-4) var(--space-4)}
   .whatif-weight-val{display:none}
   .whatif-ico{width:19px;height:19px;margin-top:3px}
-  .whatif-name{font-size:9px;line-height:1.15}
+  .whatif-name{font-size:var(--text-xs);line-height:1.15}
   .whatif-tick{width:11px;height:11px;top:4px;left:4px}
   .whatif-tick svg{width:16px;height:16px}
-  .whatif-dir{font-size:11px;top:4px;right:5px}
+  .whatif-dir{font-size:var(--text-xs);top:4px;right:5px}
 }

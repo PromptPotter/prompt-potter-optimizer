@@ -3,8 +3,8 @@
    own controls; the accent on hover signals it's live. */
 
 .copy {
-  padding: 2px 6px;
-  font-size: 13px;
+  padding: 2px var(--space-6);
+  font-size:var(--text-base);
   line-height: 1;
   color: var(--color-text-secondary);
 }

@@ -109,13 +109,22 @@ class DispatchHub:
                 overrun,
                 dropped,
             )
+            # `_truncate_to_cap` has two modes and the operator reads them very differently:
+            # whole sections leave the tail, or — when the render is ONE section — it is sliced
+            # mid-text. Reporting the second as "0 section(s) dropped" beside "context didn't
+            # reach the LLM" states a loss and a no-loss in one sentence, and the reader believes
+            # the half that is easier to read.
+            lost = (
+                f"{dropped} whole section(s) left the tail"
+                if dropped
+                else "it is one section, so the tail was sliced mid-text"
+            )
             emit_round_warning(
                 kind="injection_budget_overrun",
                 severity="warning",
                 message=(
                     f"Optimizer prompt section {name!r} ran {overrun} chars over its "
-                    f"{cap}-char budget; {dropped} section(s) dropped to fit — some context "
-                    "didn't reach the LLM."
+                    f"{cap}-char budget — {lost}, and that much did not reach the LLM."
                 ),
                 detail={
                     "injection": name,

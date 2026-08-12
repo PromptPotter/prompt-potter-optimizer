@@ -68,7 +68,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
             alt = (
                 f" → would elect {d.alternative_candidate_id}" if d.alternative_candidate_id else ""
             )
-            lines.append(f"  {d.node_key}{alt}")
+            lines.append(f"  {d.cycle_id}::r{d.round}{alt}")
         lines.append(
             f"  ({report.n_mismatches} decision(s) re-derived differently up to those points; "
             "beyond them nothing was replayed, because it describes a history that would not "

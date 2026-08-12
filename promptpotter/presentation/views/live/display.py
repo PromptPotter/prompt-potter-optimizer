@@ -11,7 +11,7 @@ from promptpotter.application.views.view_models import AnyView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.rendering import round_winner_key
+from promptpotter.domain.rendering import display_rank_key
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
     LLMCallProgressRecord,
@@ -103,7 +103,7 @@ class LiveDisplay(DerivedView):
         self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
         # Last look-ahead depth printed; the tape carries transitions, not the value.
         self._sample_lookahead_depth = 1
-        # Live round-leader tracker, ordered by the shared `round_winner_key`
+        # Live round-leader tracker, ordered by the shared `display_rank_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
         self._round_best_key: tuple[float, float] | None = None
@@ -462,10 +462,10 @@ class LiveDisplay(DerivedView):
     def _fmt_round_leader(
         self, label: str, acc: float, origin_acc: float, composite: float | None
     ) -> str:
-        """Scoreboard one-liner, ordered by the shared ``round_winner_key`` so the live ★ cannot contradict the display ranking.
+        """Scoreboard one-liner, ordered by the shared ``display_rank_key`` so the live ★ cannot contradict the display ranking.
         Point-estimate only — the true θ-LCB election prints at round close."""
         delta_origin = acc - origin_acc
-        key = round_winner_key(composite, acc)
+        key = display_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key

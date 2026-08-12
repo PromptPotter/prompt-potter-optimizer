@@ -29,7 +29,6 @@ import { cx } from "@/lib/cx";
 import { CopyButton, HoverCard, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPreview";
-import { SelfOptSamplesPointer } from "@/components/dashboard/samples/SelfOptSamplesPointer";
 
 // The run card — what the operator came for, inside the thread rather than in the
 // chrome above it. TWO boxes on the chat's own background, not one shaded compartment,
@@ -109,10 +108,12 @@ export function RunCard({
         schema={cv.nodeConfigSchema}
         outputSchema={cv.nodeOutputSchema}
       />
-      <div className="run-box">
-        {isSelfOptimization(cv.backendType) ? (
-          <SelfOptSamplesPointer />
-        ) : (
+      {/* A pp-self outer cycle has no per-sample roster — its "samples" are inner
+          campaigns. It renders no box at all rather than a pointer at the inner
+          run: the sidebar row and the L4 panel rows already fire that same
+          `drillInto`, and the hero above already says the backend is PromptPotter. */}
+      {!isSelfOptimization(cv.backendType) && (
+        <div className="run-box">
           <HardSamplesPreview
             datasetName={datasetName}
             items={datasetItems}
@@ -127,8 +128,8 @@ export function RunCard({
             onScopeChange={onHardSamplesScopeChange}
             sampleOrder={sampleOrder}
           />
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

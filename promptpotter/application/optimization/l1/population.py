@@ -136,8 +136,8 @@ def build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
 ) -> ScoredCandidate:
-    """Typed candidate score report. The composite CI is stamped HERE, off this candidate's own rows, so a finished candidate
-    carries a whisker before its round ends; ``l1_score`` overrides it with the θ band on a warm ruler."""
+    """Typed candidate score report. The CI is stamped HERE, off this candidate's own rows, so a finished candidate carries
+    its whisker before its round ends — one writer, one band, no later override."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.scoring.selection import composite_ci
 
@@ -146,7 +146,6 @@ def build_score_report(
     return ScoredCandidate(
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
-        ci_scale=None if ci_lo is None else "composite",
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

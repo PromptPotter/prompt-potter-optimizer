@@ -37,7 +37,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
-  closedRoundNumbers,
   headlineMetricLabel,
   nodeKeyOf,
   panelCellLabel,
@@ -377,23 +376,33 @@ export function CandidatesCard() {
 
   const views = useMemo<CandidateView[]>(() => {
     const sliced = sampleSet != null && !barsAreCourses;
-    // Which rounds have CLOSED — the one signal that separates "not elected" from
-    // "no election has run yet". The election is a round-scoped fit, so a bar in an
-    // open round has nothing to have lost to, and must not read as though it did.
-    const closed = closedRoundNumbers(dash);
+    // ONE half per bar, ALL-OR-NOTHING, chosen once here: the tree, unless it has no
+    // measurement for this candidate yet. That single condition is the whole rule now — the
+    // ledger mints a candidate before it measures one, but only snapshots the score at
+    // completion, so a bar mid-scoring is the one thing the tree cannot answer.
+    //
+    // It used to also prefer the live half for the whole of an OPEN round, because the crown
+    // rode the round's CLOSE record while `elect_round_winner` decides at the end of SCORING —
+    // a whole `l1_critique` call earlier. The election has its own ledger record at its own
+    // coordinate now, so the tree crowns when the election does and that window is gone.
     return (viewedNode?.children ?? []).map<CandidateView>((n, i) => {
       const isCourse = n.kind === "course";
       // A course shows what it reached, else what it started from. A cut that broke before
       // measuring anything has no number and must render blank, never as its origin's.
       const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
-      // ALL-OR-NOTHING, never per field: a candidate the tree has not measured takes its WHOLE
-      // row from `current_round`, one it has takes the tree's. Mixing them is what put a bar
-      // and its whisker on two different polling clocks.
-      const live = isCourse || own != null ? undefined : inflightByLabel.get(n.label);
+      const live = isCourse ? undefined : inflightByLabel.get(n.label);
+      const useLive = live != null && own == null;
+      // The chosen half. Every measured number below reads off THIS, so a bar and its whisker
+      // can never come from two different polling clocks.
+      const m = useLive ? live : n;
       // Slice mode reads the SERVED scorer-faithful value. Election aggregates can't be
       // re-sliced per sample, so they are suppressed rather than shown on a different basis
       // than the bar beside them.
-      const accuracy = sliced ? n.sample_set_accuracy : (own ?? live?.accuracy ?? null);
+      const accuracy = sliced
+        ? n.sample_set_accuracy
+        : isCourse
+          ? (own ?? null)
+          : (m.accuracy ?? null);
       const label = isCourse ? (n.task ? panelCellLabel(n.task) : n.dataset_name) : n.label;
       return {
         key: nodeKeyOf(n),
@@ -402,38 +411,40 @@ export function CandidatesCard() {
         candidate_id: n.id,
         label,
         accuracy,
-        composite: sliced || isCourse ? null : (n.composite_fitness ?? live?.composite_fitness ?? null),
-        theta: sliced ? null : (n.theta ?? live?.theta ?? null),
-        theta_se: sliced ? null : (n.theta_se ?? live?.theta_se ?? null),
-        // From the same row as the bar above it, whichever row that was.
-        compositeCiLo: sliced ? null : (n.composite_ci_lo ?? live?.composite_ci_lo ?? null),
-        compositeCiHi: sliced ? null : (n.composite_ci_hi ?? live?.composite_ci_hi ?? null),
-        ciScale: sliced ? null : (n.ci_scale ?? live?.ci_scale ?? null),
-        // The tree serves identity + the round-close facts it is given; the matched-origin
-        // floor is not among them, and it belongs to `dashboard.json::rounds[]` (which is
-        // where the inspector reads it). Null rather than a second derivation of it here.
+        composite: sliced || isCourse ? null : (m.composite_fitness ?? null),
+        theta: sliced ? null : (m.theta ?? null),
+        theta_se: sliced ? null : (m.theta_se ?? null),
+        // From the same row as the bar above it, whichever half that was.
+        compositeCiLo: sliced ? null : (m.composite_ci_lo ?? null),
+        compositeCiHi: sliced ? null : (m.composite_ci_hi ?? null),
+        // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR.
+        // The matched origin is a per-candidate number the inspector renders for the one row it
+        // selected (`ScoringInspector`, off `roundCandidates`) — so serving it a second time on
+        // the tree would be a writer with no reader, which is why the election record does not
+        // carry it either: `rounds/round_NNNN.json` already addresses it per candidate.
         matchedOriginAccuracy: null,
         matchedOriginComposite: null,
         evaluators: n.evaluators,
-        is_winner: n.is_winner,
-        n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.scored_samples ?? null),
-        n_expected: sliced
-          ? (sampleSet?.length ?? null)
-          : (n.expected_samples ?? live?.expected_samples ?? null),
-        cached_samples: sliced ? null : (n.cached_samples ?? live?.cached_samples ?? null),
-        source: live ? "inflight" : "history",
+        is_winner: m.is_winner ?? false,
+        n_samples: sliced ? n.sample_set_n : (m.scored_samples ?? null),
+        n_expected: sliced ? (sampleSet?.length ?? null) : (m.expected_samples ?? null),
+        cached_samples: sliced ? null : (m.cached_samples ?? null),
+        source: useLive ? "inflight" : "history",
         whatif: sliced ? null : n.lens_value,
         // Ranks follow their values exactly: suppressed on the same two conditions, or a
         // bar would carry a position in an ordering whose number it is not showing.
         compositeRank: sliced || isCourse ? null : n.composite_rank,
         whatifRank: sliced ? null : n.lens_rank,
         started: accuracy != null,
-        // A course is not a round and holds no election of its own.
-        roundOpen: !isCourse && !closed.has(n.round ?? 0),
+        // SERVED, not inferred from whether the round has closed. `is_winner: false` says
+        // nothing on its own — a round that HELD crowned nobody and every bar in it reads the
+        // same as one still scoring — and the browser used to guess between them off
+        // `dash.rounds[]`, which reported every held round as undecided for the rest of the run.
+        electionPending: !isCourse && !n.election_held,
         diag: diagView(diagByLabel.get(label)),
       };
     });
-  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel, dash]);
+  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel]);
 
   // A fork's attempt is a course under the hood — the ⑂ marks lead there.
   const forkKeys = useMemo(

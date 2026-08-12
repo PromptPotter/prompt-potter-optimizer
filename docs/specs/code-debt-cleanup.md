@@ -117,12 +117,75 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 - **`matched_origin_*` is named for the origin and computed from the parent.** `matched_origin_stats(origin_results=…)` is called with `RoundParent.results`, and `RoundParent` is "the origin only at round 0; the prior winner after it" — so `matched_origin_accuracy` / `matched_origin_composite` / the round-level twins are the PARENT's rate on the candidate's rows at every round ≥ 2. The two coincide at round 1, which is why the name survived. A name that stopped describing its contents; the repo already owns the right word (`parent`, per root `CLAUDE.md`). Action: rename to `matched_parent_*` through the domain model, the round document, `RoundSummaryCandidate`, the served OpenAPI surface and the webapp field — one sweep, no compat alias. Blocker: it touches a persisted document and a generated client surface, so it lands with the entry above rather than beside it.
 - **The hard-sample ORDER knob has no browser control yet.** `CampaignConfig.hard_sample_order` is honoured by `/preview` + `/measurement-series` (`?order=` overrides per read), by the `log.md` leaderboard, and per-dataset in `campaign.yaml` — but the hard-samples pane has no select, so from the browser the operator can only read the order, never pick one. An `<entry-point-parity>` gap, not a wrong number: every surface agrees on what it shows. Action: thread `order` beside `hardSamplesScope` (AppShell owns it → `ChatPane` → **both** consumers, `HardSamplesHeatmap` and the run card's `HardSamplesPreview`) and add it to `useDatasetPreview`'s slice key, which is a third dimension on `(unit, scope)`. **Blocker: none.** The concurrent arc it was held back for has landed — `useDatasetPreview` now fetches one `(unit, scope)` slice at a time, so the third dimension slots into an existing key rather than a rewrite, and the second consumer is the reason to thread it through `ChatPane` rather than into one pane.
 
-## Blocked — named blocker
+**From the 2026-08-11 one-timeline pass.** The band's second home is fixed, the mask's parallel
+timeline is folded onto the ledger, and the whole cycle store was then WIPED (paid caches kept).
 
-**Behavior change (needs explicit sign-off, not a blind swap):**
-- **~~`dash.state` phase vocabulary hand-mirrored twice TS-side~~ — the `activeNodeId` half LANDED 2026-08-08.** The backend serves `current_round.active_node`, resolved over a `_STATE_TO_NODE` map that is TOTAL over `DashboardState` with an import-time exhaustiveness raise; `activeNodeId` and its five call sites are deleted, along with `TargetPipelineHero`'s `BACKEND_ACTIVE_PHASES`, a sixth spelling of the same predicate. `PHASE_PAUSE_LABEL` stays frontend — it is UI copy (VOICE.md) and genuinely belongs there.
-  **This entry's own judgment cost the most.** It predicted the symptom exactly — *"canvas node stops pulsing, silently (no compile error)"* — then priced the fix as "purely additive safety. Low value." It was not latent (the operator hit it as a recurring fade at phase interfaces and kept patching the symptom site) and it was not additive (four client-side joins came out). **The lesson is the `<root-fix>` one: "additive" was measured on the seam being touched rather than on the deletions it unlocks, and a "not debt / low value" verdict is precisely why nobody looked again.**
-- `webapp lib/poll.tsx` local `revalCount`/`setRevalCount` vs the global `lib/revalidate.ts::useRevalidation()` bus — the dashboard poll uses the local counter, so it does **not** re-tick on a mutation's `bumpRevalidation()`. The filed "just swap to `useRevalidation()`" is WRONG: verified `usePoll`'s interval effect (`lib/hooks/usePoll.ts`) deps `[intervalMs,pauseWhenHidden,tickOnFocus,enabled,runTick]` with `runTick` stable (`useCallback([])`), so on a unit switch (`enabled` unchanged) it does NOT restart/re-tick — the local `revalCount` bump is the ONLY immediate-tick trigger on campaign switch. Substituting the global bus would lose that. Real fix = feed BOTH signals (e.g. `revalidateOn: revalCount + globalReval`), which ADDS the mutation-tick behavior rather than removing a concept. Blocker: this is a behavior change (adds a trigger), not a subtractive cleanup — needs the light/dark + reduced-motion-style browser verification pass, not a blind edit.
+**So every count below is provenance, not state** — it was measured on the pre-wipe store and
+will not recompute. Each names a defect in CODE that survives its data; read the number as "this
+is how often it bit", never as "this is what is on disk". Re-measure before pricing any of them.
+
+- ~~**The ELECTION has no ledger record.**~~ **Fixed 2026-08-11.** `ElectionRecord` carries the
+  crown at the coordinate `elect_round_winner` decides it, so the tree crowns an `l1_critique`
+  call earlier than it did and `CandidatesCard::views` stopped choosing a half per bar. Two
+  parts of the filed action were **refused on evidence** and should not be re-proposed:
+  - **θ did not move.** It is RESTAMPED when the ruler warms — that is what round 0's second
+    close exists to deliver (`runner/loop.py`) — so it stays on `round:complete`, which every
+    close re-reads. Only the crown never moves, and only the crown belongs to a record that
+    does not replay.
+  - **`matched_origin_*` did not move either, and never should.** The entry called it
+    unservable; it is in fact *unwanted*. Nothing plots a floor on a bar — the only renderer is
+    `ScoringInspector`, which reads it off the row it selected — so serving it on the tree would
+    have shipped a writer with no reader. And by this package's own test
+    (`infrastructure/CLAUDE.md`: a value the round document carries per candidate is already
+    addressable without the chronology) it earns no ledger payload at all.
+
+  What the record DID buy beyond the crown is `LineageNode.election_held`: `is_winner: false`
+  reads identically on a round that HELD and one still scoring, and the browser was inferring
+  between them off `dash.rounds[]` — which reported every held round as undecided for the rest
+  of the run.
+
+- ~~**The mask's What-If ordering is a point estimate; the election it claims to reproduce is
+  not.**~~ **Closed 2026-08-11, and the filed action was the wrong one — do not re-propose it.**
+  "Rank the lens by the election" cannot be done from the mask record at any price worth paying:
+  θ under another formula must be re-fit from per-sample grades against a re-calibrated δ ruler,
+  which is `ab_replay`'s substrate (`with_replay=True` plus an archive read), not a cheaper
+  version of it. The lens and `ab` are **one mechanism at two prices**, not two rankings to
+  reconcile — and the cheap one is polled by the tree route, so adopting the exact one would put
+  a campaign-wide refit behind a 5 s poll.
+
+  What was actually wrong was the CLAIM, and it was wrong in three places at once. The ranking
+  helper was called `round_winner_key` while its own docstring said it is not the round-winner
+  election — a name that had to be disclaimed at every one of its six call sites, all of them
+  display. It is `display_rank_key` now, `display_fitness`'s argmax form and nothing more.
+  `mask-projection.md` told the operator the `score:` lens names "the candidate that formula
+  would have elected"; it names the candidate that formula ranks first, and the row beside it
+  already pointed at `ab` for the other question. **No number moved** — the whole fix is the
+  claim, which is why it needed none of the evidence the wipe took away.
+
+- ~~**A repair re-banks corrected rounds onto the branch without a `round:complete`.**~~ **Fixed
+  2026-08-11**, which closes the family. `_rebank_on_branch` takes each corrected round through
+  the whole ingress — mint, measurement, election, close — in its own chronological place, so the
+  branch no longer shows a round document nothing on the ledger backs. **Nothing was invented to
+  do it:** the crown comes off the corrected `winner_id` and the frontier off the same
+  `RoundResult` fields the live close reads, which is what made this a disagreement between two
+  surfaces rather than a missing measurement. The close record moved onto
+  `RunCallbacks.on_round_close` to get there — `persist_round` was building the `PhaseRecord`
+  inline, and a second spelling of that payload in the repair path is what the seam exists to
+  prevent. **Verify by repairing a fork**: the cycle it was measured on is gone with the wipe.
+
+**From the 2026-08-11 mobile pass — what it left half-done.**
+
+- **`TargetPipelineHero:PipelineBox` — the container glyph on `l1_score` opens nothing.** Missing is
+  one fact, not a mechanism: the *name* of the dataset a node recurses into. `fetchDatasetPipeline`
+  and this same box already render any pipeline by name; `inner_tasks.yaml` holds the name and nothing
+  wires it. Not sufficient (checked): `LineageNode` has no dataset, and the `task` stamp names a cell
+  that ran, not what the node would run. Action: declare in `m12-api-openapi.yaml`, serve, open the
+  box — or drop the glyph. Blocker: none.
+- **Mobile pass verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393, 412, 768,
+  landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse number recorded,
+  so there is no before/after. Action: sweep + record one pass. Blocker: none.
+
+## Blocked — named blocker
 
 **Behavior change (needs explicit sign-off, not a blind swap) — scoring:**
 - **All-errored candidate scores `accuracy = 0.0`, not the honest `None`** — `compute_accuracy` (evaluators.py) returns 0.0 when no scoreable row exists; for all-deprecated that IS the verdict, but for all-errored it fabricates one (declared stage-1 tolerance in its docstring, 2026-07-13). The honest `None` must propagate: `ScoredCandidate.accuracy`/`RoundResult.accuracy` → `float | None`, `compute_composite_fitness` handling a missing `accuracy` term without `ScoringTermMissingError` in `_running_scores` (an "unscoreable candidate" state, the outer sibling of `InnerCycleUnscoreableError`), `display_fitness` double-None, dashboard + `types.generated.ts` + chart null handling, `best_round_by_measured_accuracy`/`_apply_best` null-safety. Blocker: wide Optional-propagation across the served surface for a state PoBB DegradationCheck usually eliminates mid-round anyway; needs its own pass. **Smaller than filed:** its sibling `rescore_results` stamps errored rows `fitness = 0.0` citing `compute_accuracy`, which actually EXCLUDES them, and `_mean_fitness_by_cell` reads an absent key identically — so no cited reader depends on the stamp. Start from the audit that implies: every unguarded `r["fitness"]` subscript. Note the stamp makes a row's shape depend on replay (a freshly measured error row has no `fitness` key at all).
@@ -146,7 +209,9 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 
 ## Standing — long-lived design holds
 
-- **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a release.** (1) The `ui/HoverCard` primitive rides ONE hover, while the native `title=` tooltips spread across the webapp are the same job — consolidate incrementally, alongside the three bespoke popovers vs `ui/Popover`. (2) Keep candidate-CI resolution one seam if a third whisker source ever appears (CLT default vs θ-band override). (3) **Never examined, and the one with real reach:** `promptpotter/application/optimization/CLAUDE.md` asserts L2/L3/L4 are "the same family — each mutates a slower-changing surface of the level below", yet each is built from scratch (L2/L3 are escalation strategies, L4 a connector recursion). Whether the family should share machinery has never been asked, only asserted. The L2↔L4 hunt found one real collision underneath it (`NodeLayoutSpec.editor` claimed two owners of `l1_generate`'s layout, fixed `d1d792b0`), so the assertion is load-bearing enough to be wrong in places.
+- **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a release.** (1) The `ui/HoverCard` primitive rides ONE hover, while the native `title=` tooltips spread across the webapp are the same job — consolidate incrementally, alongside the three bespoke popovers vs `ui/Popover`. (2) Candidate-CI resolution is ONE seam and one estimator now (`scoring/selection.py::composite_ci`, stamped at `candidate_scored`); a second band beside it is what made the whisker appear and vanish by election gating, so do not add one back. (3) **Never examined, and the one with real reach:** `promptpotter/application/optimization/CLAUDE.md` asserts L2/L3/L4 are "the same family — each mutates a slower-changing surface of the level below", yet each is built from scratch (L2/L3 are escalation strategies, L4 a connector recursion). Whether the family should share machinery has never been asked, only asserted. The L2↔L4 hunt found one real collision underneath it (`NodeLayoutSpec.editor` claimed two owners of `l1_generate`'s layout, fixed `d1d792b0`), so the assertion is load-bearing enough to be wrong in places.
+
+- **Two numbers ARE computed in the browser, against § Scoring authority** — verified while tracing the whisker, not suspected: `CandidatesCard.tsx` derives `cached_samples / n` and plots it as a chart series (its own tooltip admits "the height is geometry, the counts are the measurement"), and `ScoringInspector.tsx` subtracts `matchedOriginAccuracy` from `accuracy` for the "vs origin" delta. Both need serving, not deleting. Beside them, `composite_ci`'s NAME is wrong and it is the root of a bug already paid for: it runs `mean_ci` over per-cell mean FITNESS, and accuracy IS mean fitness, so the band brackets accuracy whatever the composite formula says. Believing the name is what put a `composite == accuracy` guard on the θ override and made a reader think the whisker sat on the wrong bar. Renaming it (and its `composite_ci_lo/hi` fields) is a migration over ~200 round documents, so it is filed, not done.
 
 - **`idea_fingerprint` cannot see a SEMANTIC re-proposal, and the gate built on it is the only
   cross-round one.** `domain/candidate_diff.py::idea_fingerprint` matches content-word overlap

@@ -440,13 +440,25 @@ components:
             - injection_budget_overrun
             - layer_parse_failure
             - optimizer_deadline_retry
+            # The round measured cleanly and still resolved nothing: no arm's
+            # blocked lift over the origin excluded 0
+            # (`ScoredCandidate.matched_origin_lift_ci_*`). The round's numbers
+            # are real and its winner is the best of what it saw — but the
+            # panel cannot tell that winner from the origin, so the point
+            # estimate must not be read as a result. Distinct from every kind
+            # above: nothing failed, nothing was recovered from, and the round
+            # looks identical on every other channel. That silence is the
+            # defect this kind exists to break.
+            - round_not_separable
           description: Which degradation class this record reports.
         severity:
           type: string
           enum: [warning, error]
           description: |
             `error` = the round produced nothing usable (zero candidates);
-            `warning` = degraded but the round still progressed.
+            `warning` = degraded but the round still progressed. An
+            unresolvable round is a `warning`: it progressed, and what it
+            lacks is power rather than data.
         message:
           type: string
           description: |

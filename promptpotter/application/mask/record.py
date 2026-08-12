@@ -51,16 +51,9 @@ class MaskRound(StrictModel):
     # abort lens reads neither, and a lens should not pay for rows it never touches.
     round_data: RoundResult | None = None
     known_outcomes: list[dict[str, Any]] = Field(default_factory=list)
-    # The round's Rasch ability frontier (``RoundResult.cumulative_theta``) — the
-    # backprop fold's value signal. Subset-invariant BY CONSTRUCTION, which is what
-    # makes it the only honest thing to average up a lineage whose rounds scored
-    # different sample subsets; accuracy is subset-relative and would drift.
-    cumulative_theta: float = 0.0
-
-    @property
-    def node_key(self) -> str:
-        """The lineage spine key — matches the frontend tree node id."""
-        return f"{self.cycle_id}::r{self.round}"
+    # This round's ledger decisions — the replay verdict re-derives them. Carried only under
+    # ``with_replay``, like the two above: a scoring or abort lens never asks.
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MaskCycle(StrictModel):
@@ -83,4 +76,19 @@ class MaskRecord(StrictModel):
     cycles: list[MaskCycle] = Field(default_factory=list)
 
 
-__all__ = ["MaskCandidate", "MaskCycle", "MaskRecord", "MaskRound"]
+class SpineCycle(StrictModel):
+    """One cycle reduced to what UCB needs. Every term is a round-CLOSE fact already on the
+    ledger, so a rewind is decided without opening one round document — where the mask record
+    opens every one of them, for every cycle in the campaign, on the escalation path."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cycle_id: str
+    parent_cycle_id: str | None = None
+    fork_from_round: int | None = None
+    # round -> Rasch ability frontier. Subset-invariant BY CONSTRUCTION, which is what makes it
+    # the only honest thing to average up a lineage whose rounds scored different subsets.
+    theta_by_round: dict[int, float] = Field(default_factory=dict)
+
+
+__all__ = ["MaskCandidate", "MaskCycle", "MaskRecord", "MaskRound", "SpineCycle"]

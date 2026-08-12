@@ -4,8 +4,16 @@ inner_benchmark: justlogic-d234
 # variant cost exactly as much as the winner. 6 > 4 makes all three work — and elimination is
 # what keeps the wider panel from costing proportionally more, since a dud is cut at 4 cells.
 #
-# The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4 is
-# ~40% off a cell (~11 min / ~$0.045 at the measured rate).
+# The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4.
+#
+# WHAT A CELL COSTS, off the cycle ledgers rather than off arithmetic: every 4-round cell ever
+# banked here — 8 of them, across 3 origin families — landed between $0.123 and $0.150, mean
+# $0.136, split ~60% inner worker (`llm_only`) / ~40% inner optimizer. A cell stopped early by
+# `inner_lives` costs proportionally less ($0.06-$0.07 at 2 rounds). So the panel is ~$0.82 of
+# inner spend, and a full C0 re-measure lands near $1.0 once the outer optimizer's own calls are
+# counted. The figures this comment carried before ($0.045/cell, $0.31/panel) were 3x under and
+# never matched a run on disk; nothing here is a target, and the ledger is what to re-read when
+# the geometry above changes.
 #
 # `max_inner_rounds` IS BINDING — counted across every banked inner cell that recorded a stop, a
 # majority terminated ON the cap rather than on `inner_lives`, and most used every round. That is
@@ -93,8 +101,8 @@ inner_benchmark_config:
 # impossible rows. Duplicated difficulty buys nothing, which is why the spread is the target.
 #
 # Changing this list changes `_identity_config`, so every banked outer cell voids: any swap costs
-# a full C0 panel re-measure (~1 h, ~$0.31). That is why seats move in one batch, never one at a
-# time.
+# a full C0 panel re-measure (~1 h, ~$1.0 — see the cost note at the top). That is why seats move
+# in one batch, never one at a time.
 tasks:
   - id: justlogic-d234/seed-0
     inner_dataset_seed: 0

@@ -99,7 +99,7 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 ## Wound 4 — L3 tends L2's parsed-output failure
 
-`cycle.opt_sp.wounds.l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — written by `apply_side_effects` off `TransitionResult.l2_guard_breaches`. **Any** breach after L2 runs makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
+`cycle.opt_sp.wounds.l2_guard_breaches` holds L2's HARD layout breaches (the set is [`l2-internals.md`](l2-internals.md) § Wound 4's), written by `apply_side_effects` off `TransitionResult.l2_guard_breaches`. **Any** breach after L2 runs makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
 **Every breach is hard** — owned by [`l2-internals.md`](l2-internals.md) § Wound 4. This layer must route every breach straight to L3; it has no soft-reject tier to fall back to.
 

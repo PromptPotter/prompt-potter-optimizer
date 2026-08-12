@@ -10,14 +10,14 @@
   z-index:50;
   display:inline-flex;
   align-items:center;
-  gap:12px;
+  gap:var(--space-12);
   max-width:calc(100vw - 24px);
-  padding:7px 14px;
+  padding:var(--space-6) var(--space-14);
   border:1px solid var(--color-border);
   border-radius:999px;
   background:var(--color-background-secondary);
   box-shadow:0 6px 24px rgba(0,0,0,.28);
-  font-size:12px;
+  font-size:var(--text-sm);
   color:var(--color-text-secondary);
 }
 
@@ -39,18 +39,28 @@
    (it reads the server's last-known run_phase, not the connection), just
    dimmed + labelled so the operator knows the state on screen may lag. */
 .remote-bar-offline{opacity:.6}
-.remote-offline{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-tertiary);font-weight:600}
+
+/* The pill floats (position:fixed) and so reserves no space. On a desktop it
+   hovers over the whitespace below a short page and nobody notices; on a phone
+   the content reaches the bottom of the viewport, so the pill sat on top of the
+   last ~45px of EVERY tab with no way to scroll it clear. Reserve its height —
+   but only while it is actually mounted, which `:has` answers without the shell
+   having to publish a state class for it. */
+.shell:has(> .remote-bar) .content{
+  padding-bottom:calc(62px + env(safe-area-inset-bottom,0px));
+}
+.remote-offline{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-tertiary);font-weight:600}
 
 /* Skip — bordered pill matching the .run-ctl register (state by icon
    colour, quiet border that lifts to accent on hover). */
 .remote-btn{
-  display:inline-flex;align-items:center;gap:5px;
-  height:24px;padding:0 10px;
+  display:inline-flex;align-items:center;gap:var(--space-4);
+  height:24px;padding:0 var(--space-10);
   border:1px solid var(--color-border);
   border-radius:6px;
   background:var(--color-background-secondary);
   color:var(--color-text-secondary);
-  font-size:12px;cursor:pointer;
+  font-size:var(--text-sm);cursor:pointer;
   transition:border-color .12s,color .12s,background .12s;
 }
 .remote-btn:hover:not(:disabled){border-color:var(--color-accent)}
@@ -68,7 +78,7 @@
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */
-.remote-status{display:inline-flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
+.remote-status{display:inline-flex;align-items:center;gap:var(--space-8);font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
 .remote-round{font-weight:600;color:var(--color-text-secondary)}
 /* Current candidate being scored ("C3.2") — the finer position marker beside
    the round, so the remote tells you which individual the loop is on, not just
@@ -77,17 +87,17 @@
 
 /* Babysat tag — this cycle was human-steered (a skip), no longer purely
    reproducible. Icon + word, never colour alone. */
-.remote-babysat{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
+.remote-babysat{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
 /* Unpriced-spend warning — some calls had no resolvable USD cost (e.g. Groq
    returns no wire cost), so the $ figure undercounts and the USD cap is blind.
    Icon + word, never colour alone. */
-.remote-spend-warn{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
+.remote-spend-warn{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
 .remote-err{color:var(--color-danger);max-width:200px}
 
 /* On narrow widths drop the button word labels + spend to keep the pill compact. */
 @media (max-width:640px){
-  .remote-bar{gap:8px;padding:6px 10px}
+  .remote-bar{gap:var(--space-8);padding:var(--space-6) var(--space-10)}
   .remote-btn-label,.remote-spend{display:none}
 }

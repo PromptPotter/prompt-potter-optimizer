@@ -7,8 +7,17 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    WithJsonSchema,
+    create_model,
+    model_validator,
+)
 
+from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -101,9 +110,13 @@ class L1Variant(OptimizerResponseModel):
     # a promise the model could make and then break, and it did: the required set asked for a
     # name and a paragraph while marking the payload optional, so ~10% of live variants arrived
     # narrated-but-empty, each one a no-op candidate that dragged the round's diversity and
-    # cleanliness down. `evidence_grounding` stays optional at parse time so a provider omitting
-    # the citation on one variant doesn't crash the round — `evidence_grounding_present` is its
-    # canonical enforcement point and records misses as wounds without burning an LLM call.
+    # cleanliness down. `evidence_grounding` stays optional HERE, at the parse boundary, so a
+    # provider omitting the citation on one variant doesn't crash the round —
+    # `evidence_grounding_present` is its canonical enforcement point and records misses as wounds
+    # without burning an LLM call. It is REQUIRED on the wire (`l1_wire_schema.py`), and the split
+    # is the point: tolerating an omission is not the same as offering one. While the emitted
+    # schema also carried the `| None`, `null` was a legal answer to a mandatory question, and 2 of
+    # 19 live rounds gave it — for every variant in the call, one response being one decision.
     evidence_grounding: VariantEvidenceGrounding | None = None
     pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -260,24 +273,52 @@ class TerminateProposal(OptimizerResponseModel):
 
 
 class L2ContextOutput(OptimizerResponseModel):
-    """L2 refinement; all fields optional, the LLM sets only what it changes. It deliberately carries neither
-    ``task_context`` (operator-authored, frozen for the run) nor ``action``."""
+    """L2 refinement. The LEVERS are optional — set only what you change; the REASON
+    (``axis_targeted`` + ``rationale``) rides every fire, because it is what the behaviour checks grade and the only
+    thing separating a steer from a guess. It deliberately carries neither ``task_context`` (operator-authored,
+    frozen for the run) nor ``action``."""
 
     # Sized off 70 live fires (output 582 median / 2187 max; `rationale` peaked at 745,
     # `axis_targeted` at 14), so a normal call is untouched. `l1_layout` needs no char bound —
-    # its vocabulary is the placeholder registry, which `validate_l1_layout` already enforces.
+    # its vocabulary is the placeholder registry, which the schema now DECLARES instead of leaving
+    # `validate_l1_layout` to discover it was ignored. Enforcing a vocabulary is not stating one.
     axis_targeted: Annotated[str, BeforeValidator(_truncate_marked(30))] = Field(
-        default="", max_length=30
+        default="",
+        max_length=30,
+        description=(
+            "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, "
+            "a param for a quantitative one. Name it on every fire; it is the anchor the lever "
+            "is judged against, not a label for the lever."
+        ),
     )
-    l1_layout: dict[str, list[str]] = Field(default_factory=dict)
+    # PARSED as a plain dict on purpose. Typing the slots would make one off-enum signal fail the
+    # whole model, taking `axis_targeted`, `rationale` and both control proposals down with the
+    # layout edit — and the breach must still reach L2's next fire as a `ValidatorOutcome`, which
+    # is a thing only `validate_l1_layout` can emit. The schema teaches; the validator judges.
+    l1_layout: Annotated[
+        dict[str, list[str]], WithJsonSchema(layout_json_schema(NODE_LAYOUTS["l1_generate"]))
+    ] = Field(default_factory=dict)
     l1_overrides: Annotated[dict[str, Any], BeforeValidator(_keep_known_keys(L1_OVERRIDE_KEYS))] = (
         Field(
             default_factory=dict,
             description="Optional runtime knobs; only 'creativity' and 'n_variants' are read.",
         )
     )
+    # Optional at PARSE time only, so a fire that omits it still lands its layout edit rather
+    # than taking the whole model down. It is not optional to WRITE: two behaviour checks read
+    # it (`l2_rationale_substantive` against a 40-char floor, `l2_evidence_anchored` for the
+    # cited number), and neither floor was stated anywhere the model could see. Undescribed and
+    # sitting under an "set only what you change" header, it read as a lever to skip — 3 of 14
+    # live fires returned it empty, failing both checks at once.
     rationale: Annotated[str, BeforeValidator(_truncate_marked(400))] = Field(
-        default="", max_length=400
+        default="",
+        max_length=400,
+        description=(
+            "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the "
+            "named data point behind it — a sample id, a count, a yield number. Required on "
+            "every fire, including one that pulls no lever; a lever with no diagnosis behind "
+            "it cannot be told from a guess."
+        ),
     )
     fork_proposal: ForkProposal | None = None
     terminate_proposal: TerminateProposal | None = None

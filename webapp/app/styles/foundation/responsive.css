@@ -3,8 +3,9 @@
    app.promptpotter.com. Every desktop rule above was written for an
    operator viewport (≥980px). This block adapts the chat-tab tree
    (Topbar + ChatPane + WelcomeLockoutModal) for a 375px phone.
-   Other tabs (Dashboard / Verify / Files) remain desktop-shaped — a
-   phone visitor who reaches them is an edge case for another day. */
+   The other tabs are no longer excepted: they carry no phone fork at all,
+   because the fluid --space-* / --text-* scales contract them from
+   foundation/tokens.css and their fixed grid tracks wrap on their own. */
 @media (max-width:640px){
   /* The shell pins min-height:700px desktop-wide; on mobile the
      viewport height itself bounds the layout. Drop the floor so a
@@ -15,10 +16,10 @@
   /* Topbar — tighten padding + let the tabs scroll. The search is a
      single magnifying-glass placeholder at all widths now (topbar.css),
      so no input collapse/expand handling is needed here. */
-  .topbar{padding:0 8px;gap:6px}
+  .topbar{padding:0 var(--space-8);gap:var(--space-6)}
   .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .tabs::-webkit-scrollbar{display:none}
-  .tab{padding:0 10px;font-size:13px;height:52px}
+  .tab{padding:0 var(--space-10);font-size:var(--text-base);height:52px}
 
   /* Account/auth chips — keep them touch-sized but compact. Auth
      chips at 30h are just under the 44px touch target so bump padding
@@ -26,64 +27,71 @@
      navbar so the account button is the single user control; theme
      moves into Account → Preferences (PreferencesTab). */
   .theme-toggle{display:none}
-  .auth-chip{height:32px;padding:0 12px;font-size:12px}
+  .auth-chip{height:32px;padding:0 var(--space-12);font-size:var(--text-sm)}
 
   /* Chat job bar — only rendered for authed-with-cycle. The head already
      wraps + flows the chips in normal order by default (chat.css); here we
      just tighten gaps and chip sizing for the phone. */
-  .chat-job-bar{padding:6px 10px 8px}
-  .chat-job-head{gap:6px}
-  .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:8px 10px;gap:6px}
-  .chat-job-toggle .chip-row{gap:6px}
-  .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
+  .chat-job-bar{padding:var(--space-6) var(--space-10) var(--space-8)}
+  .chat-job-head{gap:var(--space-6)}
+  .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:var(--space-8) var(--space-10);gap:var(--space-6)}
+  .chat-job-toggle .chip-row{gap:var(--space-6)}
+  .chat-job-toggle .chip{padding:3px var(--space-10);font-size:var(--text-base)}
 
-  /* Pipeline hero — on phones the flanking Input/Output boxes shrink to a
-     small icon + label so the LLM chip keeps its full glassmorphic
-     prominence and the centre spot (same emphasis as desktop). The LLM is
-     capped so it stays a contained chip rather than spanning the whole row;
-     the centred flow splits the freed space evenly around it. No scroll.
-     Desktop is unchanged (chat.css). */
-  .wf-hero{padding:10px 12px 14px;max-width:none}
-  .wf-hero-flow{justify-content:center;gap:0;padding:10px 0 4px;flex-wrap:nowrap;overflow:visible}
+  /* Pipeline hero — the flanking Input/Output boxes shrink to an icon + label so
+     the LLM chip keeps the centre. Every item in the nowrap row must be able to
+     SHRINK: fixed flanks plus a fixed 238px chip demanded ~390px inside a ~351px
+     box, and `justify-content:center` split the excess evenly, hanging Input and
+     Output off both edges. Each flank claims max-content so it owns its label
+     (its box is sized by a 24px icon, the centred label is wider); all the give
+     then lives in the chip and the two arrows. Desktop is unchanged (chat.css). */
+  .wf-hero{padding:var(--space-10) var(--space-12) var(--space-14);max-width:none}
+  .wf-hero-flow{justify-content:center;gap:0;padding:var(--space-10) 0 var(--space-4);flex-wrap:nowrap;overflow:visible;max-width:100%;min-width:0}
   .wf-hero-node-toggle{
-    flex:0 0 auto;min-width:0;padding:0;gap:3px;flex-direction:column;
+    flex:0 0 auto;min-width:max-content;padding:0;gap:3px;flex-direction:column;
     align-items:center;text-align:center;background:none;border:0;box-shadow:none
   }
   .wf-hero-node-toggle .ico svg{width:24px;height:24px}
   .wf-hero-node-toggle .text-col{gap:0;align-items:center}
-  .wf-hero-node-toggle .lbl{font-size:10px;letter-spacing:.05em}
+  .wf-hero-node-toggle .lbl{font-size:var(--text-xs);letter-spacing:.05em}
   .wf-hero-node-toggle .val{display:none}
-  .wf-hero-node.llm{flex:1 1 auto;min-width:0;max-width:238px;padding:12px 16px}
-  .wf-hero-arrow{flex:0 0 auto;min-width:30px;max-width:48px}
+  .wf-hero-node.llm{flex:1 1 auto;min-width:0;max-width:min(238px,100%);padding:var(--space-12) var(--space-16)}
+  .wf-hero-arrow{flex:0 1 auto;min-width:14px;max-width:32px}
+  /* The connector pop centres on its dot (left:50% + translateX(-50%)), and that
+     dot sits ~30px from the left edge — a 240px card centred there starts
+     off-screen, and on touch a TAP is what opens it. Anchor to the dot's left
+     edge; position:fixed is out because .connector itself carries a transform. */
+  .connector-pop{left:0;transform:none;min-width:0;max-width:calc(100vw - 48px)}
 
   /* Chat grid — the 980px breakpoint already collapses to 1fr, but
      desktop padding + pinned 620px panel-height create overflow on a
      phone. Slim padding, set a phone-sized floor so the message stack
      is readable in flow (desktop 620px is too tall here; <300px would
      show only the first bubble + input). */
-  .chat-grid{padding:0 12px;gap:14px}
+  .chat-grid{padding:0 var(--space-12);gap:var(--space-14)}
   .chat-panel{min-height:420px}
-  .chat-panel-header{padding:12px 14px}
-  .chat-messages{padding:14px;gap:10px}
-  .chat-msg{max-width:88%;font-size:13px;padding:9px 12px}
-  .chat-input-row{padding:10px 12px;gap:6px}
+  .chat-panel-header{padding:var(--space-12) var(--space-14)}
+  .chat-messages{padding:var(--space-14);gap:var(--space-10)}
+  .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
+  .chat-input-row{padding:var(--space-10) var(--space-12);gap:var(--space-6)}
   /* 44×44 minimum on touch — Apple HIG floor. Bumped from 38×38 to
      honor the foundation tokens; row-height grows by 12px which is
      well within the chat-panel min-height budget. */
   .chat-attach{width:44px;height:44px;flex-shrink:0}
-  /* 16px font-size is the iOS Safari focus-zoom suppressor — anything
-     under 16px triggers an auto-zoom on tap, which permanently scales
-     the layout until the operator manually pinches back. */
+  /* 16px suppresses iOS Safari's focus-zoom — under it, a tap permanently
+     scales the layout until the operator pinches back. Literal, not --text-xl:
+     a token that merely equals 16 today would take the suppressor with it the
+     day someone retunes the scale. */
   .chat-input{font-size:16px;min-height:44px}
-  .chat-send{padding:10px 18px;font-size:14px;min-height:44px}
+  .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
 
   /* Settings card — wand-row has `margin:0 -12px` for its overhang
      glow; on a narrow card that pushes content past the panel edge.
      Tighten + let the desc line wrap instead of clipping. */
-  .chat-settings-card{padding:14px}
-  .toggle-row{padding:6px 0;gap:10px}
-  .toggle-row .name{font-size:13px}
-  .toggle-row.wand-row{margin:0 -6px;padding:10px 10px}
+  .chat-settings-card{padding:var(--space-14)}
+  .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
+  .toggle-row .name{font-size:var(--text-base)}
+  .toggle-row.wand-row{margin:0 -6px;padding:var(--space-10)}
   .toggle-row.wand-row .name{white-space:normal}
   .toggle-row.wand-row .desc{max-width:none}
 
@@ -93,12 +101,12 @@
      screen comfortably. account-modal is shared with AccountModal
      (operator-facing); if a phone operator opens it the same compact
      layout applies, which is the right call. */
-  .account-overlay{padding:8px;align-items:flex-start;padding-top:24px}
+  .account-overlay{padding:var(--space-8);align-items:flex-start;padding-top:24px}
   .account-modal{max-width:none;width:100%;height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
   .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
-  .account-pane-body{padding:18px 16px 14px;gap:12px}
-  .account-pane-body-auth{padding:18px 16px 14px;gap:12px}
-  .login-button{padding:14px 16px;min-height:44px;font-size:14px}
+  .account-pane-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
+  .account-pane-body-auth{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
+  .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
 }
 
 /* Tighter band for iPhone-SE-class screens (≤380px). Only the
@@ -185,9 +193,11 @@
 }
 
 /* ── Rotate-to-landscape prompt (Phase 0 foundation) ──────────────
-   Dense visualisations (the candidates Forest view, WhatIfGrid, HardSamplesHeatmap,
-   RoundFileView, leverage, console, etc.) wrap in <RotatePrompt>. The
-   Dashboard-tab boxes deliberately do NOT — they're sized to fit portrait.
+   Exactly two surfaces wrap in <RotatePrompt>: the candidates Forest view and
+   HardSamplesHeatmap. Both are genuinely 2D — a heat grid and a deep-indent
+   cladogram — so a portrait rendering would have to pick a different
+   representation and would misstate the measurement. Everything else fits
+   portrait, including the tables, which scroll inside their own box.
    On portrait phone (orientation:portrait + width<bp-rotate) the
    wrapper renders the rotate card and hides children via CSS. On
    landscape or ≥bp-rotate the children render at full density.
@@ -195,10 +205,10 @@
 .rotate-prompt-card{display:none}
 @media (orientation:portrait) and (max-width:767px){
   .rotate-prompt-host > .rotate-prompt-children{display:none}
-  .rotate-prompt-host > .rotate-prompt-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:40px 24px;min-height:60vh;text-align:center;color:var(--color-text-secondary)}
+  .rotate-prompt-host > .rotate-prompt-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-14);padding:var(--space-40) var(--space-24);min-height:60vh;text-align:center;color:var(--color-text-secondary)}
   .rotate-prompt-card .rotate-icon{width:48px;height:48px;color:var(--color-accent);animation:rotate-hint 2.4s ease-in-out infinite}
-  .rotate-prompt-card .rotate-title{font-size:16px;font-weight:600;color:var(--color-text-primary)}
-  .rotate-prompt-card .rotate-body{font-size:14px;max-width:280px;line-height:1.5}
+  .rotate-prompt-card .rotate-title{font-size:var(--text-xl);font-weight:600;color:var(--color-text-primary)}
+  .rotate-prompt-card .rotate-body{font-size:var(--text-md);max-width:280px;line-height:1.5}
 }
 @keyframes rotate-hint{
   0%,100%{transform:rotate(0deg)}

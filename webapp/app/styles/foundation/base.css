@@ -2,5 +2,5 @@
 *:focus{outline:none}
 *:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
 
-body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:13px}
+body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:var(--text-base)}
 

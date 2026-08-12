@@ -48,17 +48,17 @@ export class ErrorBoundary extends Component<Props, State> {
           borderRadius: 10,
         }}
       >
-        <h1 style={{ fontSize: 18, margin: "0 0 8px" }}>
+        <h1 style={{ fontSize: "var(--text-2xl)", margin: "0 0 8px" }}>
           The dashboard hit a render error
         </h1>
-        <p style={{ fontSize: 14, lineHeight: 1.5, margin: "0 0 12px" }}>
+        <p style={{ fontSize: "var(--text-md)", lineHeight: 1.5, margin: "0 0 12px" }}>
           This is a read-only view — your campaign on disk is untouched.
           Reloading usually clears it; if it repeats, the console has the
           component stack.
         </p>
         <pre
           style={{
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             color: "#ff8a8a",
@@ -71,7 +71,7 @@ export class ErrorBoundary extends Component<Props, State> {
           type="button"
           onClick={() => window.location.reload()}
           style={{
-            fontSize: 14,
+            fontSize: "var(--text-md)",
             padding: "8px 16px",
             color: "#fff",
             background: "#3b6fe0",

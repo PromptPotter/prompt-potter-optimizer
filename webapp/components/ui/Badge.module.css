@@ -3,8 +3,8 @@
    (always carry a text label too — never colour alone). */
 
 .badge {
-  font-size: 11px;
-  padding: 2px 8px;
+  font-size:var(--text-xs);
+  padding: 2px var(--space-8);
   border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
   color: var(--color-text-secondary);

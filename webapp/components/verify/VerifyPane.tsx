@@ -10,7 +10,6 @@ import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { ErrorNote, Loading, SignInPrompt } from "@/components/ui";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 export function VerifyPane() {
   const { status } = useAuth();
@@ -69,7 +68,6 @@ export function VerifyPane() {
   }
 
   return (
-    <RotatePrompt surfaceName="The verify view">
     <div className="verify-pane">
       <header className="verify-header">
         <h2>Workspace verification</h2>
@@ -103,7 +101,6 @@ export function VerifyPane() {
         </table>
       </div>
     </div>
-    </RotatePrompt>
   );
 }
 

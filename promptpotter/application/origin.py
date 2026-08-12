@@ -57,10 +57,9 @@ async def rescore_parent(
         scoring_set,
         session,
         label="round_parent",
-        # The parent is one half of a PAIRED diff; the candidates it is differenced against
-        # are scored with their own. Both sides must sit on the same vacuous fallback or the
-        # delta reads a prompt-length difference as a behaviour difference. `l1_diversity`
-        # is not passed for that same reason — it keeps the 1.0 vacuous default.
+        # One half of a PAIRED diff: both sides must sit on the same vacuous fallback or the
+        # delta reads a prompt-length difference as a behaviour difference. `l1_diversity` is
+        # withheld for the same reason — it keeps its 1.0 vacuous default.
         opt_sp=None,
         degradation_checks=None,
         n_total_candidates=0,
@@ -86,9 +85,8 @@ async def rescore_parent(
             scores,
             results,
             scoring_set,
-            # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), read off the round it won.
-            # It reaches disk — a held round persists the parent's label as its own — so a
-            # synthesized round name here ("origin", "round_2") names no candidate.
+            # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), off the round it won — it
+            # reaches disk, so a synthesized round name here would name no candidate.
             label=cycle.rounds[-1].label,
         ),
     )
@@ -113,16 +111,10 @@ def try_inherit_fork_origin(
     model/provider-only steer. Re-scoring would re-roll a different number and the lineage would jump."""
     if seed is None:
         return None
-    # Overlay gate. `render()` below compares the PROMPT; it says nothing about the
-    # pipeline. A fork carries a `pipeline_overlay` (the node-config editor beside Steer
-    # & fork) that `runner/entry.py` layers on top of the dataset config, so the fork RUNS
-    # under different params. A NON-locked param edit (temperature, effort, …) genuinely
-    # changes what the origin measures → re-score (return None). But a **model/provider-only**
-    # steer is the sanctioned babysit path: the origin is unchanged in every other respect,
-    # so the done C0 is inherited exact and only the candidate is measured under the steered
-    # model — grade C carries the "measured off the origin's model" caveat. An empty overlay
-    # (a no-edit fork) also inherits. This is why the param-only pp-self origin can be steered
-    # without re-paying its C0.
+    # Overlay gate — `render()` below compares the PROMPT and says nothing about the pipeline
+    # the fork RUNS under. A non-locked param edit (temperature, effort, …) changes what the
+    # origin measures → re-score. A model/provider-only steer is the sanctioned babysit path:
+    # C0 is inherited exact and grade C carries the "measured off the origin's model" caveat.
     if seed.pipeline_overlay and not overlay_is_locked_axis_only(seed.pipeline_overlay):
         return None
 
@@ -151,19 +143,14 @@ def try_inherit_fork_origin(
     if cand is None:
         return None
 
-    # Identity gate: the fork origin's prompt must render identically to the
-    # branch-point candidate's. An operator edit changes the render → re-score.
+    # Identity gate: an operator edit changes the render → re-score.
     if resolved_origin.render() != OptSearchPoint.from_prompt_fields(cand.prompt_fields).render():
         return None
 
     origin_acc = cand.accuracy
-    # Carry the branch-point candidate's per-sample rows (they ARE in the round file —
-    # `all_candidate_results[candidate_id]`, the origin's own being round 0's `results`).
-    # This is what makes the inherited C0 a FAITHFUL copy of the validated origin, not an
-    # empty shell: round 0's health is assessed on real samples (so the strict origin gate
-    # doesn't misfire "zero samples → critical" on an origin the parent already measured),
-    # and round-1 hard-sample seeding inherits the origin's per-sample δ evidence. No
-    # re-measurement — these are the recorded parent rows, exactly the inherited origin measurement.
+    # The branch-point candidate's recorded per-sample rows, which is what makes the inherited
+    # C0 a faithful copy rather than an empty shell: the strict origin gate assesses round 0 on
+    # real samples, and round-1 hard-sample seeding inherits the origin's per-sample δ evidence.
     inherited_results = list(parent_round.all_candidate_results.get(from_candidate_id) or [])
     if not inherited_results:
         inherited_results = list(parent_round.results)
@@ -177,14 +164,13 @@ def try_inherit_fork_origin(
         origin_acc,
         len(inherited_results),
     )
-    # resolved_origin carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
-    # its lineage(source=seed.origin_source) — same shape the re-score path produces.
+    # The OSP object, not a prompt-field dict, so the inherited C0 keeps its
+    # lineage(source=seed.origin_source) — same shape the re-score path produces.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
-        # The inherited C0's measurement IS the branch-point candidate's report, re-identified
-        # onto this fork's own C0. Carrying only the accuracy and re-deriving the rest is what
-        # "faithful copy" cannot mean — composite, evaluators, counts and whisker are the
-        # parent's measurement or they are a new one.
+        # The branch-point candidate's whole report, re-identified onto this fork's C0:
+        # composite, evaluators, counts and whisker are the parent's measurement or they
+        # are a new one.
         report=cand.model_copy(
             update={"candidate_id": resolved_origin.lineage.id, "label": candidate_label(0, 0)}
         ),
@@ -192,8 +178,7 @@ def try_inherit_fork_origin(
     )
 
 
-# C0 lineage description per ``CycleSeed.origin_source`` — keyed lookup, no
-# branch: the seed declares its own provenance, the resolver stamps it.
+# The seed declares its own provenance; the resolver stamps it.
 _SEED_ORIGIN_LINEAGE = {
     "fork_seed": "Operator-steered fork — edited searchpoint as origin",
     "campaign_origin": "Fresh campaign minted from a chosen prior origin",
@@ -247,10 +232,9 @@ def resolve_origin_opt_search_point(
         )
 
     # The framing RENDERS — `_field_value` splices up/downstream around `problem_description` —
-    # so an origin resolved without it is a DIFFERENT prompt from the one the run scores, and
-    # `build_origin_cycle_id` hashes exactly that render. Stamped here, on every branch, because
-    # each caller that attached it itself got a different answer: identity read one prompt while
-    # the run measured another.
+    # and `build_origin_cycle_id` hashes exactly that render, so an origin resolved without it
+    # is a different prompt from the one the run scores. Stamped here on every branch, never by
+    # the callers: each attached its own and identity read a prompt the run never measured.
     origin.memory.task_context = task_context
     return origin
 
@@ -270,9 +254,8 @@ async def establish_campaign_origin(
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        # The SAME read identity used. Handed the framing instead, this seam could be given a
-        # value the cycle id never saw — which is exactly how C0 came to render a prompt its own
-        # id did not name.
+        # The SAME read identity uses. Handed the framing instead, this seam could be given a
+        # value the cycle id never saw.
         task_context=committed_task_context(session.store, session.dataset_name),
         seed=seed,
     )
@@ -322,28 +305,24 @@ async def prepare_scoring_context(
     dataset = train_data or []
 
     # Score the origin whenever there is a live run to score it in (session + config +
-    # dataset). We deliberately do NOT sniff the searchpoint shape to guess "is there a
-    # program here?" — that guess (non-empty prose OR a dict-valued pipeline_param)
-    # silently skipped the L4 outer origin, whose prose is empty and whose node configs
-    # are empty because its program IS the inner recursion the connector runs. A silent
-    # skip is indistinguishable downstream from a crash (round 0 lands total=0). An origin
-    # that genuinely cannot be scored is caught LOUD by the round-0 origin gate (total=0 →
-    # critical → halt-and-decide), never hidden here. The remaining guard is the
-    # no-session notebook/test path, which has nothing to score.
+    # dataset). Never sniff the searchpoint shape to guess "is there a program here?" — the
+    # L4 outer origin's prose and node configs are both empty because its program IS the inner
+    # recursion, and the skip that guess produced is indistinguishable downstream from a crash.
+    # An unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here; the
+    # remaining guard is the no-session notebook/test path, which has nothing to score.
     from promptpotter.application.optimization.l1.population import (
         INVALID_SCORES,
         build_score_report,
     )
 
     if not (campaign_config is not None and svc is not None and dataset):
-        # Nothing to score. The resolved origin still travels — dropping it here hands back
-        # a blank OptSearchPoint(instruction="").
+        # The resolved origin still travels — dropping it hands back a blank
+        # OptSearchPoint(instruction="").
         return (
             CampaignOrigin(
                 resolved_origin=resolved_origin,
-                # An unmeasured origin reports as unmeasured, in the same shape a measured
-                # one uses: `total=0` is the no-evidence marker every reader already knows,
-                # where a bare 0.0 accuracy is indistinguishable from a real floor of zero.
+                # Unmeasured reports as unmeasured in the shape a measured one uses: `total=0`
+                # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
                 report=build_score_report(
                     resolved_origin, None, INVALID_SCORES, [], [], label=candidate_label(0, 0)
                 ),
@@ -390,8 +369,7 @@ async def prepare_scoring_context(
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
-    # C0 is a minted candidate like any other: named on the ledger before it is measured,
-    # then measured through the same report every candidate deposits below.
+    # C0 is a minted candidate like any other — named on the ledger before it is measured.
     if (ledger := session.state.ledger) is not None:
         ledger.append(
             CandidateMintedRecord(
@@ -410,20 +388,18 @@ async def prepare_scoring_context(
     )
 
     try:
-        # The origin is the campaign's whole reference — a transient-transport scoring abort
-        # (a provider blip) must not bank a corrupted floor. Re-score once fresh if the first
-        # pass aborted transiently; the blip usually passes. A config-deterministic abort is
-        # NOT retried — it's a real fault the operator must fix.
+        # The origin is the campaign's whole reference, so a transient-transport abort must not
+        # bank a corrupted floor — re-score once fresh. A config-deterministic abort is NOT
+        # retried; it is a real fault the operator must fix.
         for attempt in range(2):
             origin_results, scores, signal = await score_search_point(
                 sp,
                 scoring_set,
                 session,
                 label="Origin",
-                # C0 is the reference every later delta is taken against, so it sits on the
-                # same vacuous fallback as the matched floor above. Threading the origin's
-                # own OSP here would give the reference an opt_sp-aware composite that no
-                # candidate's matched floor shares.
+                # The reference every later delta is taken against, so it sits on the same
+                # vacuous fallback as the matched floor above — an opt_sp-aware composite here
+                # is one no candidate's matched floor shares.
                 opt_sp=None,
                 measured=None,
                 force_fresh=attempt > 0,
@@ -439,9 +415,8 @@ async def prepare_scoring_context(
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
-        # Origin is candidate 0 of round 0, measured ONCE, here. This object is both what the
-        # ledger receives and what round 0's row is built from — never re-derive either from
-        # these rows a second time.
+        # Candidate 0 of round 0, measured ONCE. This object is both what the ledger receives
+        # and what round 0's row is built from — never re-derive either from these rows.
         report = build_score_report(
             resolved_origin,
             None,

@@ -98,14 +98,14 @@ def _record_launch_stop(
         logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
 
 
-# The one outcome → JobStatus mapping. Sole bridge from the StopReason outcome
-# table to JobRegistry's lifecycle vocabulary; there is no per-reason reconciler.
+# Sole bridge from the StopReason outcome table to JobRegistry's lifecycle vocabulary; there
+# is no per-reason reconciler.
 _JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
     StopOutcome.SUCCESS: "completed",
     StopOutcome.HALTED: "stopped",
     StopOutcome.FAILED: "failed",
-    # A pause exits the worker but the cycle stays resumable — the job's process
-    # is "stopped" (a fresh start-run mints a new job to continue).
+    # A pause exits the worker but the cycle stays resumable — a fresh start-run mints a new
+    # job to continue it.
     StopOutcome.PAUSED: "stopped",
 }
 
@@ -197,9 +197,8 @@ async def mint_campaign_command(
 ) -> tuple[str, str, Job]:
     """Mint a fresh campaign + cycle, then spawn the runner detached; the caller's 202 goes out the
     moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own."""
-    # Heal any dataset Replace interrupted mid-migration before resolving a pin —
-    # a crashed version-and-repoint can leave a campaign pointing at a name whose
-    # data has already moved to `-vN`. Cheap no-op when nothing's pending.
+    # A crashed version-and-repoint leaves a campaign pointing at a name whose data has moved
+    # to `-vN`, so heal before resolving a pin. Cheap no-op when nothing is pending.
     recover_pending_replacements(stores=stores)
     try:
         dataset_root = readable_dataset_dir(stores, dataset_name)
@@ -213,30 +212,27 @@ async def mint_campaign_command(
         tenant_id=str(stores.identity.tenant_id),
         email=claim_email(stores.identity),
     )
-    # Per-user gates first (count the caller's PRIOR runs), then the atomic
-    # global slot. Reserve writes a pending reservation before any ``await``, so
-    # a second near-simultaneous launch sees it and is rejected — the launch
-    # race is closed. The reservation's real ids land once the mint resolves.
+    # Per-user gates first (they count the caller's PRIOR runs), then the atomic global slot.
+    # `reserve` writes its pending reservation before any ``await``, so a second
+    # near-simultaneous launch sees it and is rejected; the real ids land once the mint does.
     check_launch_quotas(user=user, job_registry=job_registry, rate_limited=True)
     job = _admit(
         job_registry.reserve(user_id=str(stores.identity.user_id), dataset_name=dataset_name)
     )
 
-    # Everything below holds a slot — release it on any pre-launch failure so a
-    # crashed preflight/init never wedges the machine at capacity. `campaign_id` /
-    # `cycle_id` bind only once the mint resolves; init them so the failure handler
-    # can tell "crashed before a cycle existed" (nothing to mark) from "crashed
-    # after mint" (mark the cycle terminal).
+    # Everything below holds a slot — release it on any pre-launch failure so a crashed
+    # preflight/init never wedges the machine at capacity. The ids bind only once the mint
+    # resolves; init them so the failure handler can tell "crashed before a cycle existed"
+    # (nothing to mark) from "crashed after mint" (mark the cycle terminal).
     campaign_id = cycle_id = ""
     try:
-        # Pre-202 phase timing — the synchronous init is what the operator
-        # waits on (round-0 scoring is already backgrounded). One INFO line per
-        # phase so the dominant cost is visible on disk, not guessed at.
+        # Pre-202 phase timing — the synchronous init is what the operator waits on
+        # (round-0 scoring is already backgrounded), so the dominant cost lands on disk.
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
-        # Daily-cap composition globs + reads every cycle ledger — offload so the
-        # scan never blocks the single event loop on the launch path.
+        # Daily-cap composition globs + reads every cycle ledger — offload so the scan never
+        # blocks the single event loop on the launch path.
         spend_budget_usd = await asyncio.to_thread(
             effective_spend_cap_usd,
             requested_cap_usd=spend_budget_usd,
@@ -266,8 +262,8 @@ async def mint_campaign_command(
         )
 
         train_data = session.samples
-        # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
-        # ``application/jobs/mint.py``; the web path keeps only the gates + detached task.
+        # The one shared mint prologue — the same seam CLI ``new`` runs inline; the web path
+        # adds only the gates + detached task.
         minted = prepare_fresh_cycle(
             session,
             campaign_config,
@@ -363,8 +359,8 @@ async def start_run_command(
     if kind not in ("new", "resume"):
         raise LaunchError(f"start-run kind must be 'new' or 'resume', got {kind!r}")
 
-    # Same recovery guard as the mint path — a resumed cycle must not resolve a
-    # pin a crashed Replace left dangling (see ``recover_pending_replacements``).
+    # Same guard as the mint path — a resumed cycle must not resolve a pin a crashed Replace
+    # left dangling.
     recover_pending_replacements(stores=stores)
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
@@ -382,8 +378,8 @@ async def start_run_command(
         tenant_id=str(stores.identity.tenant_id),
         email=claim_email(stores.identity),
     )
-    # Per-user gates first, then the atomic global slot (ids are known up front,
-    # so the reservation carries them directly). See ``mint_campaign_command``.
+    # Per-user gates first, then the atomic global slot; the ids are known up front here, so
+    # the reservation carries them directly.
     check_launch_quotas(user=user, job_registry=job_registry, rate_limited=False)
     job = _admit(
         job_registry.reserve(
@@ -394,13 +390,11 @@ async def start_run_command(
     )
 
     try:
-        # Pre-202 phase timing — same instrumentation as ``mint_campaign_command``;
-        # this seam shares the preflight + spend-cap + init prologue.
+        # This seam shares ``mint_campaign_command``'s preflight + spend-cap + init prologue,
+        # and its instrumentation.
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
-        # Daily-cap composition globs + reads every cycle ledger — offload so the
-        # scan never blocks the single event loop on the launch path.
         spend_budget_usd = await asyncio.to_thread(
             effective_spend_cap_usd,
             requested_cap_usd=spend_budget_usd,
@@ -423,11 +417,10 @@ async def start_run_command(
             _t_init - _t_spendcap,
         )
 
-        # Resume/fork rebuild config from the LIVE dataset file (so declaration
-        # edits stay drift-detected), then re-apply the per-campaign overlay the
-        # dataset file never holds — origin-floor values + param locks — from the
-        # frozen `Campaign.config` snapshot. A steered-fork seed's lock edits
-        # override per node. Without this, locks silently reopen on every resume.
+        # Resume/fork rebuild config from the LIVE dataset file so declaration edits stay
+        # drift-detected, then re-apply the per-campaign overlay that file never holds —
+        # origin-floor values + param locks — off the frozen `Campaign.config` snapshot, a
+        # steered-fork seed's lock edits overriding per node. Without it locks silently reopen.
         campaign_config = apply_inherited_overlay(
             build_cycle_config(session, dataset_root),
             campaign.config,
@@ -436,12 +429,10 @@ async def start_run_command(
 
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-        # Bind the session to the EXISTING campaign/cycle before launch. Without
-        # this `_ensure_session_minted` (guards on an empty session_id) would mint
-        # a fresh random campaign + root cycle and steal the active pointer —
-        # stranding an operator-steered fork in its real campaign. The campaign was
-        # already loaded above, so auto-mint must never fire from this path.
-        # Mirrors CLI `cmd_resume`.
+        # Bind to the EXISTING campaign/cycle before launch, mirroring CLI `cmd_resume`.
+        # `_ensure_session_minted` guards on an empty session_id, so without this it mints a
+        # fresh campaign + root cycle and steals the active pointer, stranding an
+        # operator-steered fork in its real campaign.
         session.campaign_id = hop.campaign_id
         session.state.cycle_id = hop.cycle_id
         index = stores.campaigns.load(hop) or {}
@@ -495,11 +486,10 @@ async def _run_in_background(
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 
-    # asyncio.create_task copies the CURRENT context, where the dispatcher has the
-    # command ledger bound to _CYCLE_LEDGER. Clear it so any emit before
-    # build_run_observers binds the real cycle ledger no-ops instead of misfiling
-    # onto the command/workspace ledger. No reset — this task's context is its own
-    # and dies with it.
+    # create_task copies the CURRENT context, where the dispatcher has the command ledger
+    # bound to _CYCLE_LEDGER. Clear it so an emit before build_run_observers binds the real
+    # cycle ledger no-ops instead of misfiling onto the command/workspace ledger. No reset —
+    # this task's context is its own and dies with it.
     set_cycle_ledger(None)
 
     job_registry.mark_started(job_id)
@@ -521,10 +511,8 @@ async def _run_in_background(
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = result.stop_reason
-        # Job terminal status derives from the single StopReason outcome table — the SAME
-        # classification index.json / dashboard.json / the webapp read. No private
-        # reconciler, or a cycle reads "failed" here and "completed" there. For a FAILED
-        # outcome ``result.error.message`` is the runner's throw-site string.
+        # The SAME classification index.json / dashboard.json / the webapp read — a private
+        # reconciler here is how a cycle comes to read "failed" here and "completed" there.
         outcome = stop_reason_outcome(stop_reason)
         status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
         if outcome is StopOutcome.FAILED and result.error is not None:
@@ -543,22 +531,17 @@ async def _run_in_background(
         job_registry.mark_finished(job_id, status="stopped", stop_reason="task_cancelled")
         raise
     except Exception as exc:
-        # Anything reaching here fired BEFORE / OUTSIDE the runner's own
-        # try/except (e.g. ``build_run_observers`` blew up) — no
-        # ``ErrorRecord`` was emitted, so the exception's own message is
-        # the most informative thing we have. Preserve ``ClassName: message``
-        # shape for the audit trail; backend-unreachable cases are caught at
-        # the dispatcher boundary (R2) before they get this deep.
+        # Anything reaching here fired BEFORE / OUTSIDE the runner's own try/except (e.g.
+        # ``build_run_observers`` blew up), so no ``ErrorRecord`` was emitted and the
+        # exception's own ``ClassName: message`` is the most the audit trail can have.
         logger.exception("job %s failed", job_id)
         job_registry.mark_finished(
             job_id,
             status="failed",
             stop_reason=f"{type(exc).__name__}: {exc}",
         )
-        # Reaching here means the runner never finalized this cycle (the failure
-        # fired before / outside its own try/except — e.g. build_run_observers),
-        # so nothing wrote the cycle terminal. Stamp it so the fork doesn't sit
-        # frozen at `init` in the file tree and the webapp.
+        # Nothing wrote the cycle terminal either — stamp it so the fork does not sit frozen
+        # at `init` in the file tree and the webapp.
         _record_launch_stop(
             stores=session.store,
             hop=session.hop,

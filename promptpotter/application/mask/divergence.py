@@ -34,20 +34,20 @@ class Divergence(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    node_key: str
     cycle_id: str
     round: int
     alternative_candidate_id: str | None = None
 
 
 class DivergenceResult(StrictModel):
-    """The fold's output. ``divergences`` are the markers; ``divergent`` are the dimmed counterfactual keys STRICTLY after
-    each one — the divergence node itself stays a real, marked node."""
+    """The fold's output. ``divergences`` are the markers; ``divergent`` are the dimmed
+    counterfactual ``(cycle_id, round)`` coordinates STRICTLY after each one — a coordinate rather
+    than a ``::r`` key, which its only consumer used to parse straight back into this pair."""
 
     model_config = ConfigDict(frozen=True)
 
     divergences: list[Divergence] = Field(default_factory=list)
-    divergent: list[str] = Field(default_factory=list)
+    divergent: list[tuple[str, int]] = Field(default_factory=list)
 
 
 def find_divergences(record: MaskRecord, verdict: Verdict) -> DivergenceResult:
@@ -61,7 +61,7 @@ def find_divergences(record: MaskRecord, verdict: Verdict) -> DivergenceResult:
     roots = [c for c in record.cycles if not c.parent_cycle_id or c.parent_cycle_id not in ids]
 
     divergences: list[Divergence] = []
-    divergent: list[str] = []
+    divergent: list[tuple[str, int]] = []
     for root in sorted(roots, key=lambda c: c.cycle_id):
         _walk(root, children, verdict, divergences, divergent)
     return DivergenceResult(divergences=divergences, divergent=divergent)
@@ -72,7 +72,7 @@ def _walk(
     children: dict[str, list[MaskCycle]],
     verdict: Verdict,
     divergences: list[Divergence],
-    divergent: list[str],
+    divergent: list[tuple[str, int]],
 ) -> None:
     div_round: int | None = None
     for rnd in sorted(cycle.rounds, key=lambda r: r.round):
@@ -82,7 +82,6 @@ def _walk(
                 div_round = rnd.round
                 divergences.append(
                     Divergence(
-                        node_key=rnd.node_key,
                         cycle_id=cycle.cycle_id,
                         round=rnd.round,
                         alternative_candidate_id=outcome.alternative_candidate_id,
@@ -90,7 +89,7 @@ def _walk(
                 )
         else:
             # Strictly after the divergence point — counterfactual, dimmed.
-            divergent.append(rnd.node_key)
+            divergent.append((cycle.cycle_id, rnd.round))
 
     for child in sorted(children.get(cycle.cycle_id, []), key=lambda c: c.cycle_id):
         rooted_after = (
@@ -109,10 +108,10 @@ def _walk(
 def _mark_subtree_divergent(
     cycle: MaskCycle,
     children: dict[str, list[MaskCycle]],
-    divergent: list[str],
+    divergent: list[tuple[str, int]],
 ) -> None:
     for rnd in cycle.rounds:
-        divergent.append(rnd.node_key)
+        divergent.append((cycle.cycle_id, rnd.round))
     for child in children.get(cycle.cycle_id, []):
         _mark_subtree_divergent(child, children, divergent)
 

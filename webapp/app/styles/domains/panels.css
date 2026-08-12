@@ -1,21 +1,21 @@
 /* h1 weight 600 — vanilla used 500 which read as a subhead. Bumped per the
    visual-origin-redo carried into the React port. */
-h1{font-size:26px;font-weight:600;line-height:1.2}
-.meta{font-size:13px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px}
-.avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-accent);font-weight:500}
+h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
+.meta{font-size:var(--text-base);color:var(--color-text-secondary);display:flex;align-items:center;gap:var(--space-6)}
+.avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:var(--color-accent);font-weight:500}
 
 /* TopStrip — merged hero + progress. Three columns at >=640px, stacks
    below. One card, one paddings set, one source for the five stats the
    operator scans first: best%, phase, round, query progress, throughput. */
-.topstrip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
-.topstrip-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
+.topstrip{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
+.topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
 .topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
-.topstrip-best{display:inline-flex;align-items:center;gap:7px}
-.topstrip-best-val{font-size:15px;font-weight:600;color:var(--color-text-primary);font-family:var(--font-mono);line-height:1}
+.topstrip-best{display:inline-flex;align-items:center;gap:var(--space-6)}
+.topstrip-best-val{font-size:var(--text-lg);font-weight:600;color:var(--color-text-primary);font-family:var(--font-mono);line-height:1}
 .topstrip-spark{width:88px;height:15px;display:block}
 .topstrip-spark .line{stroke:var(--color-accent);stroke-width:1.5;fill:none}
 .topstrip-spark .area{fill:var(--color-accent-glow);stroke:none}
-.topstrip-phase,.topstrip-prog,.topstrip-last{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.topstrip-phase,.topstrip-prog,.topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .topstrip-round{font-weight:600;color:var(--color-text-primary)}
 /* Current candidate being scored ("C3.2"), beside the round — the finer
    position marker, shown only while scoring (see TopStrip). */
@@ -28,32 +28,32 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .chat-activity-hearts{margin-left:auto;padding-left:8px}
 .hearts-dead{line-height:1;font-size:.85em}
 .topstrip-qps{color:var(--color-text-tertiary)}
-.topstrip-counter-val{font-size:13px;color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
-.topstrip-trace{font-size:11px;color:var(--color-accent);text-decoration:none;font-weight:600}
+.topstrip-counter-val{font-size:var(--text-base);color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
+.topstrip-trace{font-size:var(--text-xs);color:var(--color-accent);text-decoration:none;font-weight:600}
 .topstrip-trace:hover{text-decoration:underline}
-.phase-tag{font-size:10px;color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:0 5px;border-radius:3px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.phase-tag{font-size:var(--text-xs);color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:0 var(--space-4);border-radius:3px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .phase-tag.is-error{color:var(--color-danger);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
 .phase-tag.is-warn{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 
-.card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:16px}
-.card-title{font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-.badge{font-size:11px;padding:2px 8px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border)}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16)}
+.card-title{font-size:var(--text-md);font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.badge{font-size:var(--text-xs);padding:2px var(--space-8);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border)}
 
 .table-wrap{overflow-x:auto;max-height:340px;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{font-size:12px;font-weight:500;color:var(--color-text-secondary);padding:6px 10px;text-align:left;border-bottom:0.5px solid var(--color-border);position:sticky;top:0;background:var(--color-background-primary)}
-td{padding:8px 10px;border-bottom:0.5px solid var(--color-border);vertical-align:top;color:var(--color-text-secondary)}
+table{width:100%;border-collapse:collapse;font-size:var(--text-base)}
+th{font-size:var(--text-sm);font-weight:500;color:var(--color-text-secondary);padding:var(--space-6) var(--space-10);text-align:left;border-bottom:0.5px solid var(--color-border);position:sticky;top:0;background:var(--color-background-primary)}
+td{padding:var(--space-8) var(--space-10);border-bottom:0.5px solid var(--color-border);vertical-align:top;color:var(--color-text-secondary)}
 td:first-child{color:var(--color-text-primary);font-weight:500}
-.pass{display:inline-block;background:var(--color-success-bg);color:var(--color-success);border:0.5px solid var(--color-success-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500;margin-bottom:3px}
-.fail{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500;margin-bottom:3px}
+.pass{display:inline-block;background:var(--color-success-bg);color:var(--color-success);border:0.5px solid var(--color-success-border);border-radius:4px;padding:1px var(--space-6);font-size:var(--text-xs);font-weight:500;margin-bottom:3px}
+.fail{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px var(--space-6);font-size:var(--text-xs);font-weight:500;margin-bottom:3px}
 
 /* Live-state card */
 .live-state-card{margin-bottom:14px}
-.formula-row{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:8px 12px;margin-bottom:14px;overflow-x:auto;white-space:nowrap}
-.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:12px 18px}
+.formula-row{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:var(--space-8) var(--space-12);margin-bottom:14px;overflow-x:auto;white-space:nowrap}
+.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:var(--space-12) var(--space-18)}
 .kv{display:flex;flex-direction:column;gap:2px;min-width:0}
-.kv-label{font-size:11px;letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}
-.kv-val{font-size:14px;color:var(--color-text-primary);font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv-label{font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}
+.kv-val{font-size:var(--text-md);color:var(--color-text-primary);font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kv-val.muted{color:var(--color-text-tertiary);font-weight:400}
 .kv-val.warn{color:var(--color-danger)}
 .kv-val.ok{color:var(--color-success)}
@@ -67,6 +67,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Cache provenance — neutral (neither pass nor fail), so it reads as
    metadata, not a scoring signal. 📖 glyph is always paired with the
    word "cached" (a11y: state never by colour/icon alone). */
-.tag-cached{color:var(--color-text-tertiary);font-weight:500;font-size:11px}
-.samples-empty{color:var(--color-text-tertiary);font-size:12px;font-style:italic;padding:24px 12px;text-align:center}
+.tag-cached{color:var(--color-text-tertiary);font-weight:500;font-size:var(--text-xs)}
+.samples-empty{color:var(--color-text-tertiary);font-size:var(--text-sm);font-style:italic;padding:var(--space-24) var(--space-12);text-align:center}
 

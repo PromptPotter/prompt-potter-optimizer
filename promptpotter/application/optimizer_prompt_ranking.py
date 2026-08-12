@@ -1,6 +1,12 @@
 """Rank every L4 optimizer prompt state on disk by its ANCHOR-TO-ORIGIN paired effect — absolute
 scores across runs are not comparable. Zero LLM calls; nothing persisted, nothing crowned."""
 
+# The effect is in `mean_round_delta` LOGITS, not composite fitness. Fitness is what the
+# per-campaign `campaign.yaml::scoring` formula made of the measurand, and this module pools one
+# state across every campaign that ever measured it — so reducing on fitness averaged numbers
+# produced by different formulas and called the result one quantity. The measurand is the same
+# question in every campaign; the formula is not.
+
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.verdict import cell_fitness
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, cell_values
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_rows_from_disk,
@@ -29,6 +35,8 @@ if TYPE_CHECKING:
 # The connector whose cycles carry optimizer prompt candidates — i.e. the L4 recursion.
 _PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
+# The scored L4 measurand, in logits — see the module note on why this is not `fitness`.
+_LEVEL_KEY = OUTER_PROXY_KEYS[0]
 
 
 class CellEffect(StrictModel):
@@ -103,13 +111,6 @@ def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
 
 
-def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, float]:
-    """Per-cell composite fitness for one candidate, one row per outer sample. A thin adapter over the
-    pure ``domain.l4.cell_fitness`` — the input is an already-loaded round doc, never a disk read."""
-    rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
-    return cell_fitness(rows)
-
-
 class _Accum:
     def __init__(self, prompt_state: dict[str, dict[str, str]], label: str) -> None:
         self.prompt_state = prompt_state
@@ -151,7 +152,7 @@ def rank_optimizer_prompts(stores: Stores) -> OptimizerPromptRanking:
             rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
                 continue
-            origin_cells = cell_fitness(origin_rows_from_disk(cycle_dir))
+            origin_cells = cell_values(origin_rows_from_disk(cycle_dir), _LEVEL_KEY)
             if not origin_cells:
                 continue
             n_cycles += 1
@@ -206,7 +207,9 @@ def _accumulate_round(
         state_hash = _state_hash(prompt_state)
         if state_hash == _ORIGIN_HASH:
             continue  # the no-op arm anchors others; it is not itself a ranked candidate
-        cand_cells = _cell_composites(doc, cand_id)
+        cand_cells = cell_values(
+            (doc.get("all_candidate_results") or {}).get(cand_id) or [], _LEVEL_KEY
+        )
         paired = {c: cand_cells[c] for c in cand_cells if c in origin_cells}
         if not paired:
             continue
@@ -258,7 +261,9 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
 
     anchor, anchor_se, n_cells = paired_diff_posterior(cell_cand, cell_orig)
     # Student-t on the CELL count, not z: the SE is estimated from the same handful of
-    # cells it widens (≈7 cells → 2.45, not 1.96). Matches `compute_outer_verdict`.
+    # cells it widens (≈7 cells → 2.45, not 1.96). Same rule as the per-round interval
+    # (`scoring/selection.py::matched_origin_lift`), so a corpus leader and a round verdict
+    # cannot disagree by bracketing the same evidence two ways.
     crit = t_critical(max(n_cells - 1, 1))
     return RankedOptimizerPrompt(
         state_hash=state_hash,

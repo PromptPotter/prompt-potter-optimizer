@@ -69,7 +69,8 @@ flowchart LR
   end
   style L3G fill:none,stroke:none
 
-  %% L1_GENERATE inputs — sees its own wounds (l1_wounds). LAYOUT is structural.
+  %% L1_GENERATE inputs — sees its own wounds (l1_wounds). LAYOUT is structural AND read back by
+  %% its own writer: an edit is per slot, so L2 must see what it is about to overwrite.
   PLAN --> L1G
   TC --> L1G
   TUN --> L1G
@@ -96,6 +97,7 @@ flowchart LR
   TC --> L2P
   CAT --> L2P
   AXM --> L2P
+  LAYOUT --> L2P
 
   %% L3_PLAN inputs — sink: sees both wound groups.
   PLAN --> L3P
@@ -126,7 +128,7 @@ flowchart LR
 
 ## Reference
 
-**The registered signals** are every `@signal(…)` across four modules (`injections/layer_state.py` · `panels.py` · `catalogues.py` · `wounds.py` — each renderer is its slot's SoT), plus 1 structural input (`l1_layout`) and 2 caller extras (`n_variants`, `citable_fields`). The highest-traffic slots are detailed below, grouped by role; numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+**The registered signals** are every `@signal(…)` across four modules (`injections/layer_state.py` · `panels.py` · `catalogues.py` · `wounds.py` — each renderer is its slot's SoT), plus 2 caller extras (`n_variants`, `citable_fields`). The highest-traffic slots are detailed below, grouped by role; numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
 ### Every item that reaches an LLM carries an upper limit — bounded where it is PRODUCED
 
@@ -196,14 +198,14 @@ This is where the reader's mental model of a round usually starts: candidates we
   - `n_variants`🧩 enters L1_GENERATE only via the `{{n_variants}}` caller extra (a directive — L1_GENERATE obeys)
   - `creativity`🧩 sets the L1_GENERATE LLM call's temperature; never reaches the prompt text
   - Field, injection, and placeholder all share the name `l1_overrides`
-- ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · structural, not an INJECTION
+- ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · the one name that is BOTH a structural input and a signal
   - L2_CONTEXT-only writer; consumed by `DispatchHub.fill` as `l1_generate`'s per-slot injection-name list that drives the slot walk (every node's layout comes from `NODE_LAYOUTS[node]`; `l1_generate`'s is L2-overridden via this field)
   - Decides *which* injection renderings land in each L1 addressable slot (`persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩) — content is rendered separately by the listed injections' `_r_*` functions
-  - Not registered in `INJECTIONS`; never resolves a `{{l1_layout}}` placeholder. Shape-shifts L1's prompt rather than filling a slot in it
+  - Registered too, on `l2_context`'s floor only — the writer's view of what it is about to overwrite, the twin `l1_overrides` always had. An edit is per slot and the floor packs 12 of 13 signals into one, so a blind writer drops whatever it fails to restate
 
 ### L2_CONTEXT / L3_PLAN-internal
 
-- ¹ **`l1_signal_catalogue`** ← sorted `L1_POSSIBLE` (`domain/l1_layout.py`) · menu L2_CONTEXT picks from when assembling L1_GENERATE's layout.
+- ¹ **`l1_signal_catalogue`** ← `NODE_LAYOUTS["l1_generate"].mandatory` (`domain/l1_layout.py`) · the one layout rule no JSON Schema can state — after an edit is applied, each mandatory signal must still sit under SOME slot. It binds the MERGED layout, which is what `validate_l1_layout` is handed, so it constrains what an edit may take AWAY and never asks L2 to restate slots it is not changing. The slots and the signal enum ride `l1_layout`'s own schema (`layout_json_schema`, one builder shared with L4's per-node `layout`), so this panel names neither.
 
 ### Caller extras — L1_GENERATE template scalars (`l1/generate.py`)
 
@@ -216,7 +218,7 @@ Substituted directly by `compile_prompt`; not signals.
 - **Entry points** — two, both stateless: `render(name, bundle)` (internal, one injection's text) and `fill(template, layout, bundle)` (**every** optimizer node). `InjectionBundle` is the per-call frozen state `(opt_sp, pipeline_schema, cycle_slice, digest)`, built once via `build_bundle(cycle)`; `digest` is a `RoundDigest(diagnostics, critique)` — the post-scoring compression chain in one place, so renderers read through it instead of off two parallel `latest_*` fields.
 - **Fill** — one path for every node: `fill(template, layout, bundle)` walks the node's layout (per-slot injection-name lists — `l1_generate`'s from `opt_sp.l1_layout`, the rest from `NODE_LAYOUTS[node].floor`), appends rendered injection text to each addressable slot, then scans the filled body for any `{{name}}` left in non-layout prose (`instruction`/`answer_format`) and renders the `INJECTIONS` ones into a kwargs dict → `(filled_template, injection_vars)`. The four optimizer prompt `problem_description` bodies are now empty strings (their `{{tokens}}` moved into `NODE_LAYOUTS`), and **no optimizer prose token names an injection any more** — every surviving `{{token}}` in the shipped prompts is a caller extra (`n_variants`, `citable_fields`, `consultation_instruction`). The `l2_context` instruction kept `{{rebase_capability}}`/`{{terminate_capability}}` after that move, so both directives rendered TWICE in every L2 prompt (~1.5k of ~10.9k chars, measured on the banked ledgers) — deleted; the layout channel is the only one. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any remaining `{{slot}}` is not in the `INJECTIONS` registry.
 - **L1_GENERATE visibility** — `L1_POSSIBLE` (`domain/l1_layout.py`) is the whole menu 🧩; the rest (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `guard_breaches`, the capability directives) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal — L2-internal signals are excluded so L1 can't see L2's own state.
-- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` — a guard breach that routes to L3_PLAN (replan) rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state (without these L1 has no parent prompt, plan, task framing, mutation surface, or failure digest).
+- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must sit across the 4 addressable slots once an edit is merged; missing fires `l1_layout_missing_mandatory` — a guard breach that routes to L3_PLAN (replan) rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state (without these L1 has no parent prompt, plan, task framing, mutation surface, or failure digest).
 
 ## L1 layout — L2's structural edit surface
 
@@ -237,7 +239,7 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 
 `L1Layout` (`promptpotter/domain/l1_layout.py`) is a Pydantic model with one list per addressable slot: `persona`, `task_intent`, `problem_description`, `thinking_style` (all L2-mutable). `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's injection renderings are appended. Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3; if an injection needs to differ per layer, that's two injections.
 
-**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `prompt_block_catalogue`, `plan`, `answer_distribution`, `critique`, `failing_samples`, `inner_narratives`, `mutation_memory`, `l1_wounds`, `escalation_panel`, `origin_strengths` in `problem_description`. `answer_distribution` leads the evidence because it frames everything after it: a pipeline collapsed onto one label needs that break, not a better-argued instruction, and no other panel can say so. `sample_transcripts` stays OFF the floor — it is the same misses at ~5x the bytes, and the generator reading it beside the critique duplicated a ~10k payload every round; `failing_samples` is its dense peer. Raw `diagnostics` and the cross-run panels stay off the floor too (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring. Most L2 fires don't touch the layout.
+**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `prompt_block_catalogue`, `plan`, `answer_distribution`, `critique`, `failing_samples`, `inner_narratives`, `mutation_memory`, `l1_wounds`, `escalation_panel`, `origin_strengths` in `problem_description`. `answer_distribution` leads the evidence because it frames everything after it: a pipeline collapsed onto one label needs that break, not a better-argued instruction, and no other panel can say so. `sample_transcripts` stays OFF the floor — it is the same misses at ~5x the bytes, and the generator reading it beside the critique duplicated a ~10k payload every round; `failing_samples` is its dense peer. Raw `diagnostics` and the cross-run panels stay off the floor too (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring — every L2 fire in the first banked run touched the layout, so treat the floor as what a *first* L1 round reads, not as what most rounds read.
 
 **Validation — split HARD / SOFT.** `validate_l1_layout(layout, *, spec, prior_layout)` enforces against the node's `NodeLayoutSpec` (`spec.mandatory`/`spec.possible`):
 

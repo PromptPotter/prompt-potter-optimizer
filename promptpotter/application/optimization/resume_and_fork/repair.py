@@ -16,6 +16,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
     _mint_fork,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import ReplayMismatch
+from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -117,28 +118,43 @@ def _rebank_on_branch(
     branch_cycle_id: str,
     retirements: list[tuple[RoundResult, int]],
 ) -> int:
-    """Put the corrected candidates on the BRANCH's own ledger — a measurement enters through the
-    ingress, and identity is copied while only the MEASUREMENT is re-emitted."""
+    """Each corrected round onto the BRANCH's own ledger through the WHOLE ingress — mint,
+    measurement, election, close. Banked without its close, a round is invisible to every scan."""
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
     parent_ledger = CycleLayout(campaign_store.cycle_dir(parent)).ledger
     minted_at = {(c.round, c.idx): c for c in scan_ledger_candidates(parent_ledger)}
     ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
+    cb = RunCallbacks(ledger=ledger)
     # `parent_id` and `source` reach a reader ONLY through the mint record; every other field
     # rides the snapshot (`ledger_scan._SCORED_INCLUDE`). Copied by shared field NAME, so
     # adding one to both models carries it without a third edit here.
     identity = set(CandidateMintedRecord.model_fields) & set(LedgerCandidate.model_fields)
-    for t, idx in retirements:
-        if (minted := minted_at.get((t.round, idx))) is not None:
-            ledger.append(CandidateMintedRecord(**minted.model_dump(include=identity)))
-        ledger.append(
-            SnapshotRecord(
-                event="candidate_scored",
-                round=t.round,
-                candidate_idx=idx,
-                candidate_total=len(t.candidate_scores),
-                payload={"scores": t.candidate_scores[idx].model_dump(mode="json")},
+    by_round: dict[int, list[tuple[RoundResult, int]]] = {}
+    for entry in retirements:
+        by_round.setdefault(entry[0].round, []).append(entry)
+    for entries in by_round.values():
+        for t, idx in entries:
+            if (minted := minted_at.get((t.round, idx))) is not None:
+                ledger.append(CandidateMintedRecord(**minted.model_dump(include=identity)))
+            ledger.append(
+                SnapshotRecord(
+                    event="candidate_scored",
+                    round=t.round,
+                    candidate_idx=idx,
+                    candidate_total=len(t.candidate_scores),
+                    payload={"scores": t.candidate_scores[idx].model_dump(mode="json")},
+                )
             )
-        )
+        # The round itself, closed in its own chronological place rather than after every other
+        # round's candidates. Without these two the branch showed a round document nothing on the
+        # ledger backed: no crown and no θ on the served tree, while a drill-in read both off the
+        # file — and `rewind_to_round` refused a round the branch's own document called complete.
+        # Neither record mints a number: the crown comes off the corrected `winner_id`, the
+        # frontier off the same `RoundResult` fields the live close reads. The one round that
+        # never reaches here is the origin, which a repair does not retire.
+        corrected = entries[0][0]
+        cb.on_election(corrected)
+        cb.on_round_close(corrected)
     return len(retirements)
 
 

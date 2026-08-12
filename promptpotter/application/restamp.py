@@ -3,7 +3,6 @@ EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged
 
 from __future__ import annotations
 
-import collections
 import json
 import os
 import pathlib
@@ -33,7 +32,22 @@ from promptpotter.infrastructure.store.io import read_json_optional, write_yaml
 from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
 from promptpotter.infrastructure.store.user_store import User
 
-__all__ = ["compact_cycle_ledgers", "refile_round_decisions", "restamp_campaign_configs"]
+__all__ = ["compact_cycle_ledgers", "restamp_campaign_configs"]
+
+
+def _iter_cycle_ledgers() -> list[pathlib.Path]:
+    """Every cycle ledger under the workspace, inner sandboxes included. The one place that walk
+    is written down — each verb below re-spelled it, and a depth-limited version of exactly this
+    glob is what made an earlier census read 25 round files where the store holds 218."""
+    root = DEFAULT_PROJECTS_ROOT
+    if not root.is_dir():
+        return []
+    trees = [root]
+    inner = inner_sandboxes_dir(root)
+    if inner.is_dir():
+        trees.extend(p for p in inner.iterdir() if p.is_dir())
+    return [p for tree in trees for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))]
+
 
 # What a row writes back once the record has validated. Takes the pruned mapping rather than
 # the validated model so no row has to narrow a type the table already fixed — the alternative
@@ -378,112 +392,23 @@ def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
     return before, after, rewritten
 
 
-def _document_decisions(ledger_path: pathlib.Path) -> dict[int, list[dict[str, Any]]]:
-    """Per round, every decision the ledger stamps with it — the document's whole content.
-
-    Keyed on the stamp ``record_decision`` was handed, never on ledger POSITION. Position looks
-    like the better signal (``persist_round`` appends a drain immediately before its
-    ``round:complete``, so the next close ought to name the flushing round) and it is wrong
-    here: round 0 closes TWICE, the second time when the ruler warms at round 1, so the next
-    close after a round-1 decision reads 0. Trusting that dropped 118 replayed decisions.
-    """
-    out: dict[int, list[dict[str, Any]]] = collections.defaultdict(list)
-    with ledger_path.open(encoding="utf-8") as fh:
-        for line in fh:
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if rec.get("record_type") != "decision" or rec.get("round") is None:
-                continue
-            out[int(rec["round"])].append(
-                {
-                    "kind": rec.get("kind"),
-                    "inputs_ref": rec.get("inputs_ref") or {},
-                    "outcome": rec.get("outcome"),
-                    "data": rec.get("data") or {},
-                }
-            )
-    return out
-
-
-def refile_round_decisions(*, apply: bool) -> dict[str, int]:
-    """Rebuild every round document's ``decisions`` from its own round's records.
-
-    ``replay_decisions`` walks this list and re-derives each REPLAYED kind against THIS round's
-    measurements, so a foreign record makes resume's divergence seam compare one round's
-    decision to another round's data — a spurious halt or a missed one, and silent either way.
-    """
-    root = DEFAULT_PROJECTS_ROOT
-    if not root.is_dir():
-        return {"round_files": 0, "moved": 0, "dropped": 0}
-
-    roots = [root]
-    inner = inner_sandboxes_dir(root)
-    if inner.is_dir():
-        roots.extend(p for p in inner.iterdir() if p.is_dir())
-
-    touched = added = removed = 0
-    for tree in roots:
-        for ledger_path in sorted(tree.glob("**/.runtime/ledger.jsonl")):
-            cycle_dir = ledger_path.parent.parent
-            rounds_dir = cycle_dir / "rounds"
-            if not rounds_dir.is_dir():
-                continue
-            wanted = _document_decisions(ledger_path)
-            for round_file in sorted(rounds_dir.glob("round_*.json")):
-                doc = read_json_optional(round_file)
-                if not isinstance(doc, dict) or doc.get("round") is None:
-                    continue
-                have = doc.get("decisions") or []
-                want = wanted.get(int(doc["round"]), [])
-                if have == want:
-                    continue
-                touched += 1
-                added += max(0, len(want) - len(have))
-                removed += max(0, len(have) - len(want))
-                if apply:
-                    doc["decisions"] = want
-                    round_file.write_text(
-                        json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8"
-                    )
-
-    verb = "re-filed" if apply else "would re-file"
-    print(f"\nRound-document decisions — {verb} {touched} file(s)")
-    if touched:
-        print(f"  {'entries added':>18}: {added}")
-        print(f"  {'entries removed':>18}: {removed}")
-    return {"round_files": touched, "moved": added, "dropped": removed}
-
-
 def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     """Re-project every finished cycle's ``.runtime/ledger.jsonl`` onto today's record shape."""
-    root = DEFAULT_PROJECTS_ROOT
-    if not root.is_dir():
-        print(f"No workspace at {root} — no ledgers to compact.")
-        return {"cycles": 0, "skipped_live": 0, "bytes_saved": 0}
-
-    roots = [root]
-    inner = inner_sandboxes_dir(root)
-    if inner.is_dir():
-        roots.extend(p for p in inner.iterdir() if p.is_dir())
-
     total_before = total_after = touched = skipped_live = 0
     rows: list[tuple[int, str]] = []
-    for tree in roots:
-        for ledger_path in sorted(tree.glob("**/.runtime/ledger.jsonl")):
-            cycle_dir = ledger_path.parent.parent
-            manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
-            finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-            if derive_run_phase(cycle_dir, is_terminal=finished) not in _COMPACTABLE_PHASES:
-                skipped_live += 1
-                continue
-            before, after, rewritten = _compact_one(ledger_path, apply=apply)
-            total_before += before
-            total_after += after
-            if rewritten:
-                touched += 1
-                rows.append((before - after, cycle_dir.name))
+    for ledger_path in _iter_cycle_ledgers():
+        cycle_dir = ledger_path.parent.parent
+        manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
+        finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
+        if derive_run_phase(cycle_dir, is_terminal=finished) not in _COMPACTABLE_PHASES:
+            skipped_live += 1
+            continue
+        before, after, rewritten = _compact_one(ledger_path, apply=apply)
+        total_before += before
+        total_after += after
+        if rewritten:
+            touched += 1
+            rows.append((before - after, cycle_dir.name))
 
     mb = 1024 * 1024
     verb = "compacted" if apply else "would compact"

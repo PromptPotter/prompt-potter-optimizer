@@ -72,7 +72,7 @@ Six *situational* guardrails against recurring AI blind spots live in [`docs/dev
 ## Commands
 
 ```bash
-pip install -e ".[all,dev]"
+pip install -e ".[all,dev]"                                  # add `,benchmarks` ONLY to fetch a public bank — opt-in, third-party surface
 python scripts/gate.py                                       # EVERY check CI runs, one invocation, nothing masking anything; re-execs itself into the locked env, so the verdict never depends on which python you had. --py / --web to halve it
 git config core.hooksPath .githooks                           # one-time per clone: `gate.py --staged`, the same list scoped to what you staged
 python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from datasets/<name>/, run from round 0

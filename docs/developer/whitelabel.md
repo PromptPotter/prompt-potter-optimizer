@@ -98,6 +98,25 @@ Three rules the fields encode, which is why they are not one flat string:
   derived from the marketing URL. A distributor answers for its own terms, and
   clearing the marketing URL must not take the consent links down with it.
 
+### The mark is a file swap, not a config key
+
+The mark has no env override, because a glyph is not a string. A distributor
+replaces the artwork instead — three files, and nothing else refers to them:
+
+| File | Where it shows | Constraint on a replacement |
+|---|---|---|
+| `webapp/public/brand/mark-pot.png` | login eyebrow, running-jobs button, About-this-unit | the **alpha channel is the mark** — it is used as a CSS mask painted with `currentColor`, so colour in the file is ignored. Ship a transparent cut, not a coloured one. |
+| `webapp/public/brand/tab-icon-pot-32.png` + `-dark.png` | browser tab | two cuts, ink and light, chosen by `media=` on the `<link>`. Raster cannot hold a `prefers-color-scheme` rule internally, so both are required. |
+| `webapp/public/brand/app-icon-pot-512.png` | Web App Manifest / installed icon | must be **opaque** — a launcher composites it onto a surface we do not control |
+
+`webapp/components/brand/PotterMark.tsx` is the only renderer; it masks the PNG
+rather than embedding an `<img>`, which is what keeps the glyph tinting with
+theme and hover instead of hardcoding an ink colour.
+
+Do **not** wrap a replacement mark in a circle to make it survive both themes —
+that is what the tab pair already solves, and only for the tab.
+→ [`BRAND.md`](../../BRAND.md)
+
 The engine's copies live on `Settings` (`config/settings.py`:
 `BRAND_SHORT_NAME`, `BRAND_SERVICE_NAME`, `BRAND_DOCS_URL`); the webapp's are
 enumerated by `webapp/lib/brand.ts`. Next inlines its half at build time, so

@@ -20,9 +20,9 @@ def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
     return composite_fitness if composite_fitness is not None else accuracy
 
 
-def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """Point-estimate ordering for the mask lens — NOT the round-winner election, which is
-    ``elect_round_winner``'s paired-delta LCB, read off the round result by every view."""
+def display_rank_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
+    """``display_fitness``'s argmax form — what every DISPLAY site orders by, the mask lens with
+    them. NOT the election (``elect_round_winner``'s Rasch θ-lift), which no aggregate reproduces."""
     return (display_fitness(composite_fitness, accuracy), accuracy)
 
 
@@ -277,7 +277,7 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 __all__ = [
     "classify_result",
     "display_fitness",
+    "display_rank_key",
     "extract_display_answer",
     "format_l1_critique_for_prompt",
-    "round_winner_key",
 ]

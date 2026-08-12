@@ -18,7 +18,7 @@ export function PipelineNodeList() {
   const nodes = (cv.view?.nodes ?? []).filter((n) => n.kind !== "io");
   const schema = cv.nodeConfigSchema;
   // Single-node pipeline (TermNorm `llm_only`): the lone node is already shown by
-  // TargetPipelineHero's SingleNodeChip, and the per-node `→`-chain + optimizer-lock
+  // the hero's pipeline box, and the per-node `→`-chain + optimizer-lock
   // badge this list exists for are multi-node mechanics. Showing it for one node is
   // a redundant row carrying a lock that makes no sense on a single node (the
   // optimizer must be free to tune it) — so hide the whole list at ≤1 node.

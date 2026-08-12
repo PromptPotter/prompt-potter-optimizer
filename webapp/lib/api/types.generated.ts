@@ -18,9 +18,12 @@ export interface DashboardCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
+  is_winner: boolean;
 }
 
 /** A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`. */
@@ -39,9 +42,11 @@ export interface RoundSummaryCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -64,37 +69,11 @@ export interface DegradationHealth {
   suggested_action: string | null;
 }
 
-/** One cell's paired (variant − origin) composite difference. */
-export interface OuterCellEffect {
-  cell: string;
-  variant_fitness: number;
-  origin_fitness: number;
-  diff: number;
-}
-
-/** Where the panel's spread comes from — estimation noise, or real between-cell difference. */
-export interface OuterVariance {
+/** How sharply each cell was measured, against how far apart the cells landed — the two bars */
+export interface PanelPrecision {
   estimation_sd: number;
   observed_sd: number;
-  estimation_share: number;
   n_cells: number;
-}
-
-/** The pooled blocked-paired verdict for a round's target variant. */
-export interface OuterVerdict {
-  variant_id: string;
-  variant_label: string;
-  per_cell: OuterCellEffect[];
-  effect: number;
-  se: number;
-  ci_lo: number;
-  ci_hi: number;
-  n_cells: number;
-  decision: string;
-  mde_remaining: number;
-  variant_is_winner: boolean;
-  variance: OuterVariance | null;
-  cells_dropped: string[];
 }
 
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
@@ -109,7 +88,7 @@ export interface RoundSummary {
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
-  outer_verdict: OuterVerdict | null;
+  panel_precision: PanelPrecision | null;
 }
 
 /** One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor`` */
@@ -222,11 +201,13 @@ export interface ScoredCandidate {
   degradation_context: unknown;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_scale: 'composite' | 'accuracy' | null;
 }
 
 /** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
@@ -339,6 +320,9 @@ export interface RoundResult {
   escalation_signal: unknown | null;
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
+  matched_origin_lift: number | null;
+  matched_origin_lift_ci_lo: number | null;
+  matched_origin_lift_ci_hi: number | null;
   cumulative_theta: number | null;
   cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;
@@ -350,7 +334,6 @@ export interface RoundResult {
   candidates_scored: number;
   electable_count: number;
   candidate_scores: ScoredCandidate[];
-  decisions: unknown[];
   evaluators: Record<string, number>;
   l1_yield: number;
   l1_parse_failure: string | null;
@@ -629,14 +612,14 @@ export interface DatasetPipelineResponse {
 }
 
 export interface ActiveSessionResponse {
-  /** Tenant the active session belongs to */
+  /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
-  /** Active session id */
-  session_id: string;
-  /** Active campaign id (pinned by the webapp) */
-  campaign_id: string;
-  /** Active cycle id within the campaign */
-  cycle_id: string;
+  /** Active session id; null when no session is active. */
+  session_id: string | null;
+  /** Active campaign id (pinned by the webapp); null when no session is active. */
+  campaign_id: string | null;
+  /** Active cycle id within the campaign; null when no session is active. */
+  cycle_id: string | null;
 }
 
 /** The outer work-item an L4 inner cycle was spawned to measure. */
@@ -874,7 +857,7 @@ export interface LineageNode {
    * position on this course's timeline. JOIN ON THIS, never on
    * `candidate_id`, when matching a node against a per-cycle projection:
    * `dashboard.json` is per-cycle and speaks the minting course's private
-   * counter, while `candidate_id` is re-minted per run (see `_close_facts`),
+   * counter, while `candidate_id` is re-minted per run (see `_round_facts`),
    * so an id join silently misses. */
   course_label: string;
   /** THE address, root → leaf: the course this node belongs to. A candidate a fork
@@ -889,8 +872,19 @@ export interface LineageNode {
   /** Candidate: minted | measured — never 'winner' (that rides `is_winner`).
    * Course: the cycle status. */
   state: string;
-  /** Elected this round. False throughout a round that never CLOSED — election is
-   * stamped at close, so such a round has no winner to report. */
+  /** This candidate's ROUND has held its election. The complement `is_winner`
+   * cannot supply: a round that HELD crowned nobody, so every bar in it reads
+   * `is_winner: false` exactly as a round still scoring does — and only this
+   * says whether an uncrowned bar lost or has not been judged yet. False on a
+   * course, which is not a round, and on a round halted before it stood (a
+   * holed panel). */
+  election_held: boolean;
+  /** Elected this round. Stamped at the ELECTION, which is the last thing scoring
+   * does — so it lands a whole `l1_critique` call before the round closes,
+   * and a round still running its optimizer calls already reports its winner.
+   * False where no election has been held (still scoring, or halted on a
+   * holed panel) and on a round that held: those two are told apart by the
+   * election record, not by this flag. */
   is_winner: boolean;
   /** Difficulty-adjusted Rasch ability the election ranked on — what explains a
    * lower-accuracy winner. Null outside the round's election fit. */
@@ -901,11 +895,6 @@ export interface LineageNode {
   evaluators: Record<string, number>;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  /** Which bar the band above brackets — the composite one or the accuracy one.
-   * Served with the bounds; both scales coexist within a round, so a client
-   * that re-derives it picks the wrong bar for every eliminated or cold-ruler
-   * candidate. */
-  ci_scale: 'composite' | 'accuracy' | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather

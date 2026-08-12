@@ -16,6 +16,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
+from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results_health import evidence_starved_node
@@ -23,18 +24,24 @@ from promptpotter.domain.results_health import evidence_starved_node
 logger = logging.getLogger(__name__)
 
 
+_PLAN_HEADER = "PLAN:\n"
+
+
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`, same number).
-    # A rail above that could never fire; one below would re-cut a plan already declared legal.
-    char_cap=800,
+    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`) — plus this
+    # renderer's own header, which production never bounded. Compared against the header too, the
+    # rail re-cut a plan already declared legal by exactly the header's width: a full-length plan
+    # rendered 806 against 800 and lost its tail to `text[:cap] + "…"` — unmarked, so downstream it
+    # read as a complete strategy, which is what production's own `_truncate_marked` exists to stop.
+    char_cap=800 + len(_PLAN_HEADER),
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> str:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
     plan = b.opt_sp.plan
-    return f"PLAN:\n{plan}" if plan else ""
+    return f"{_PLAN_HEADER}{plan}" if plan else ""
 
 
 @signal(
@@ -110,6 +117,26 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
 def _r_l1_overrides(b: InjectionBundle) -> str:
     overrides = b.opt_sp.memory.l1_overrides
     return f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else ""
+
+
+@signal(
+    "l1_layout",
+    kind=InjectionKind.TRACE,
+    char_cap=None,
+    citable=False,
+)
+def _r_l1_layout(b: InjectionBundle) -> str:
+    """The OTHER lever's current value — the sibling ``l1_overrides`` has always had, and L2's primary
+    lever went without. An edit is per SLOT, and the floor packs 12 of its 13 signals into
+    ``problem_description``, so rewriting the one slot worth editing drops everything not restated in
+    it. L2 restated nothing because it had never been shown what was there: all 13 banked edits lost
+    7-8 floor signals, ``mutation_memory`` every time. Blind, the schema's "carry over what you still
+    want" is an instruction that cannot be followed."""
+    layout = b.opt_sp.memory.l1_layout
+    lines = [f"  {slot}: {', '.join(layout.slot(slot)) or '(empty)'}" for slot in L1_LAYOUT_SLOTS]
+    if unplaced := sorted(NODE_LAYOUTS["l1_generate"].possible - set(layout.all_placeholders())):
+        lines.append(f"  available, not shown: {', '.join(unplaced)}")
+    return "CURRENT L1 LAYOUT — what l1_generate reads today:\n" + "\n".join(lines)
 
 
 @signal(

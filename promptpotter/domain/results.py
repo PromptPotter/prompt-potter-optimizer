@@ -15,14 +15,14 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
-from promptpotter.domain.scoring import CiScale, is_answer_collapsed
+from promptpotter.domain.run_records import ErrorRecord
+from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
-# Which IRT model a cycle's δ ruler was fitted under. The absence of a member is the third,
-# real state: a cold ruler is FLAT, so θ degenerates to logit-accuracy — neither 1PL nor 2PL.
-# Carried as `None` on the models below; never collapse it into "1PL".
+# Which IRT model a cycle's δ ruler was fitted under. The ABSENCE of a member is the third,
+# real state — a cold ruler is flat, so θ degenerates to logit-accuracy. Never collapse it
+# into "1PL".
 CalibrationModel = Literal["1PL", "2PL"]
 
 __all__ = [
@@ -137,16 +137,12 @@ class ScoredCandidate(StrictModel):
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
     pipeline_params_override: dict[str, Any] | None = None
-    # The fully-resolved per-node config this candidate's searchpoint executes —
-    # origin floor ⊕ this candidate's delta, config-only (model/provider/
-    # reasoning_effort/temperature + ``steps``; the prompt rides ``prompt_fields``).
-    # Served so the OBSERVE view reads the effective config verbatim and never
-    # re-merges client-side. Distinct from the sparse ``pipeline_params_override``
-    # above (the fork transport) — two data classes, not a stitch.
+    # Origin floor ⊕ this candidate's delta, served so the OBSERVE view reads the effective
+    # config verbatim and never re-merges client-side. Distinct from the sparse
+    # ``pipeline_params_override`` above (the fork transport) — two data classes, not a stitch.
     resolved_pipeline_params: dict[str, Any] | None = None
-    # The candidate's evolved prompt (``OptSearchPoint.prompt_field_dict()`` shape).
-    # Paired with ``pipeline_params_override`` this is the full searchpoint an
-    # operator selects to seed an operator-steered fork (read side, Decision F).
+    # Paired with ``pipeline_params_override``, the full searchpoint an operator selects to seed
+    # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
     escalation_aborted: bool = False
     elimination_stopped: bool = False
@@ -155,9 +151,8 @@ class ScoredCandidate(StrictModel):
     # Of ``scored_samples``, how many were replayed from the MeasurementArchive rather than
     # measured. Non-zero off the origin means the searchpoint already existed — a duplicate.
     cached_samples: int = 0
-    # Why a partial subset was scored (``scored_samples < expected_samples``):
-    # "" (full / not partial) | "skip" (operator early-abort — marks the cycle
-    # ``human_intervened``). Distinct from ``elimination_stopped``/``escalation_aborted``.
+    # Why ``scored_samples < expected_samples``: "" (not partial) | "skip" (operator
+    # early-abort, which marks the cycle ``human_intervened``).
     partial_reason: str = ""
     invalid: bool = False
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
@@ -165,32 +160,30 @@ class ScoredCandidate(StrictModel):
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
     # The origin as this candidate's comparison floor — ``None`` unless the candidate covered
-    # the origin's whole panel. This is NOT the population ``theta`` is ``None`` for: a cut
-    # candidate is usually still in the election fit and keeps its θ, because θ on the fixed δ
-    # ruler is subset-invariant and an accuracy is not. The round order is stratified on the
-    # incumbent's own grades, so on a prefix the origin's rate is ``⌊n/4⌋/n`` — see
-    # ``scoring/metrics.py::matched_origin_stats`` for the measurement.
-    # These MUST NOT default to 0.0. An unstamped 0.0 is indistinguishable from a real origin
-    # that scored nothing, and it reads as "this candidate beat the origin by its whole accuracy"
-    # — which is what the inner narrative told the outer optimizer, on every eliminated arm.
+    # the origin's whole panel, and NOT the population ``theta`` is ``None`` for (θ is
+    # subset-invariant, an accuracy is not). These MUST NOT default to 0.0: an unstamped 0.0 is
+    # indistinguishable from an origin that scored nothing, and reads as "this candidate beat
+    # the origin by its whole accuracy".
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
-    # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — the
-    # subset-invariant metric the winner election ranks by (`elect_round_winner`), stamped from
-    # that single fit. Distinct from subset-relative `accuracy`: it discounts for *which* samples
-    # this candidate saw, so it explains a lower-accuracy winner. `None` for candidates outside
-    # the election fit (eliminated / under the coverage floor).
+    # The BLOCKED lift over that floor: mean per-cell ``(candidate − origin)`` across the cells
+    # both measured, Student-t bracketed (``scoring/selection.py::matched_origin_lift``). Sharper
+    # than ``composite_ci_*`` on the same rows because pairing removes the origin's cell-to-cell
+    # variation instead of carrying it as noise. ``None`` below two shared cells — an interval
+    # from one pair is a fiction. It reads at EVERY level: inner cells are samples, outer cells
+    # whole inner campaigns, and the arithmetic does not care which.
+    matched_origin_lift: float | None = None
+    matched_origin_lift_ci_lo: float | None = None
+    matched_origin_lift_ci_hi: float | None = None
+    # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — what the
+    # election ranks by. Unlike subset-relative `accuracy` it discounts for *which* samples this
+    # candidate saw, so it explains a lower-accuracy winner. `None` outside the election fit.
     theta: float | None = None
     theta_se: float | None = None
-    # Normal-CLT CI on the mean per-cell composite fitness (``metrics.composite_ci`` —
-    # ``mean_ci`` over ``_mean_fitness_by_cell``, the same reader the θ / paired decision
-    # metrics use) — always present for any candidate with ≥1 scored cell, unlike ``theta_se``
-    # (fit-restricted). No composite point estimate should stand alone.
+    # Normal-CLT CI on the mean per-cell composite fitness — present for any candidate with ≥1
+    # scored cell, unlike ``theta_se``. No composite point estimate should stand alone.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-    # WHICH quantity the band above brackets — stamped by whichever site last set the bounds,
-    # never re-derived downstream. See `domain/scoring.py::CiScale`.
-    ci_scale: CiScale | None = None
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -234,11 +227,9 @@ def merge_known_outcomes(
     return list(by_sid.values())
 
 
-# ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
-# ``candidate_scores`` dump beside it in the same file (no θ / composite_ci): scoreboard =
-# the display table, candidate_scores = the complete record. The mutation text rides
-# ``changes_description`` (its real name) — the dashboard's ``label`` (the C{r}.{i} id) is a
-# different field, so the two never collide.
+# ``ScoredCandidate``'s display subset, spelled once and deliberately narrower than the
+# ``candidate_scores`` dump beside it in the same file: scoreboard = the display table,
+# candidate_scores = the complete record.
 _SCOREBOARD_INCLUDE: set[str] = {
     "candidate_id",
     "changes_description",
@@ -265,9 +256,8 @@ class ScoreboardRow(StrictModel):
     composite_fitness: float
     total: int
     escalation_aborted: bool
-    # ``None`` for a row that did not cover the origin's panel — see ``ScoredCandidate``. The
-    # round file carries the absence rather than a 0.0 that reads as a verdict the origin never
-    # gave, or a prefix rate that reads as one the origin never earned.
+    # ``None`` for a row that did not cover the origin's panel — see ``ScoredCandidate``: the
+    # file carries the absence rather than a 0.0 that reads as a verdict the origin never gave.
     matched_origin_accuracy: float | None
     matched_origin_composite: float | None
     composite_ci_lo: float | None
@@ -294,22 +284,18 @@ class RoundParent(StrictModel):
 
     opt_sp: OptSearchPoint
     report: ScoredCandidate
-    # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data protocol
-    # markers (``retry_of_degraded`` etc.) — kept ``dict`` so the markers survive
-    # serialization (a closed model would strip them); readers cast at hot sites.
+    # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data markers — kept ``dict``
+    # so the markers survive serialization, which a closed model would strip.
     results: list[dict[str, Any]] = Field(default_factory=list)
 
 
-# The reasons `RoundResult.l1_parse_failure` can carry. Two are opposite kinds of evidence,
-# so no reader may treat the field as a bool:
-#   MALFORMED  — the optimizer prompt drove the optimizer LLM to emit schema-noncompliant output.
-#                That IS the optimizer prompt's fault; charge it (L4 scores the round dirty).
-#   WRONG_TYPE — a MALFORMED variety worth naming: the response decoded cleanly but as some
-#                other model, so the failure is the schema the optimizer prompt asked for, not
-#                the transport. Charged like MALFORMED (`proxies.py` excludes only TOOLING).
-#   TOOLING    — the optimizer LLM returned empty/truncated content. Missing data, not a
-#                verdict. Charging it scores provider flakiness as a bad mutation; the round
-#                must be EXCLUDED, exactly as a crashed inner cycle is excluded as a sample.
+# The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no
+# reader may treat the field as a bool:
+#   MALFORMED  — schema-noncompliant output. The optimizer prompt's fault; charge it.
+#   WRONG_TYPE — decoded cleanly but as another model, so the fault is the schema it asked
+#                for, not the transport. Charged like MALFORMED.
+#   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
+#                provider flakiness as a bad mutation, so the round must be EXCLUDED.
 L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
 L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
 L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
@@ -338,34 +324,31 @@ class RoundResult(StrictModel):
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
-    # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks
-    # at q8/20 while origin has 20. Drives `improved`, p_value, verdict Δ.
-    # ``None`` when the round matched nothing — a generation-only sweep round scored no
-    # candidate, so there is no origin restricted to "the winner's samples". Nullable for the
-    # reason stated on ``ScoredCandidate``'s pair above, which this one contradicted: 0.0 is a
-    # measurement ("the origin got everything wrong"), and a round carrying it reads as a
-    # candidate that beat the origin by its entire accuracy.
+    # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks a
+    # candidate early. Drives `improved`, p_value, verdict Δ. ``None`` when the round matched
+    # nothing, nullable for the reason stated on ``ScoredCandidate``'s pair above.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
+    # The winner's blocked lift, copied from its ``ScoredCandidate``, so a reader of the round
+    # can say whether the margin it is about to print is one the round could resolve. ``None``
+    # on a round that crowned nobody: the parent's lift over itself is not a measurement.
+    matched_origin_lift: float | None = None
+    matched_origin_lift_ci_lo: float | None = None
+    matched_origin_lift_ci_hi: float | None = None
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
-    # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a
-    # drifting per-round subset can't inflate the outer fitness signal.
-    #
-    # There is deliberately no `cumulative_accuracy` beside it. θ is an ability fitted against
-    # an explicit per-sample δ, so pooling rows of mixed provenance is a modelled operation;
-    # a plain mean over the same rows is not — it silently attributes one configuration's
-    # score to another. See `merge_known_outcomes`.
+    # on the cycle's fixed δ ruler, so a drifting per-round subset cannot inflate the outer
+    # fitness signal. None when the ruler is cold. There is deliberately no
+    # `cumulative_accuracy` beside it — pooling rows of mixed provenance is modelled against an
+    # explicit per-sample δ, while a plain mean over them silently attributes one
+    # configuration's score to another.
     cumulative_theta: float | None = None
-    # That θ's own standard error, dispersion-corrected, straight off the same fit. It is how
-    # sharply THIS round measured the frontier — a precision, never a penalty: the spec forbids
-    # it in the election rank key or as a `mean - λ·se` haircut (that discards good candidates on
-    # wide posteriors), and the panel's `λ·std` slot is cross-seed OUTCOME dispersion, not this.
-    # Its consumer is the L4 panel, which without it must estimate estimation noise and
-    # between-cell heterogeneity from one spread of six scalars and cannot separate them.
+    # How sharply THIS round measured the frontier — a precision, never a penalty: the spec
+    # forbids it in the election rank key or as a `mean - λ·se` haircut, which discards good
+    # candidates on wide posteriors. The panel's `λ·std` slot is cross-seed OUTCOME dispersion,
+    # not this.
     cumulative_theta_se: float | None = None
-    # Which IRT model the δ ruler above was fitted under ("1PL" | "2PL"), so the operator
-    # reads the model the engine chose. None = the ruler is cold (flat δ) and θ is plain
-    # logit-accuracy — neither model, and the state a hardcoded "1PL" would misreport.
+    # None = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model, and the
+    # state a hardcoded "1PL" would misreport.
     calibration_model: CalibrationModel | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
@@ -377,56 +360,39 @@ class RoundResult(StrictModel):
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
-    # How many candidates actually entered the election — measured, leader-eligible, and not
-    # answer-collapsed. `candidates_scored` counts one step earlier, so the gap between them is
-    # exactly the candidates that answered a single label to everything and carry no measurement
-    # of ability at all.
-    #
-    # Zero is a DIFFERENT round from "everyone lost": nothing was compared against the
-    # incumbent, so the round says nothing about whether the search has stalled — it says
-    # l1_generate failed to produce a testable variant. The life bank reads this to tell those
-    # two apart (`EscalationFSM._bank_round`); the escalation rules already route the generator
-    # failure to L2 on their own signals.
+    # How many candidates actually entered the election — measured, leader-eligible, not
+    # answer-collapsed. `candidates_scored` counts one step earlier, so the gap is exactly the
+    # candidates carrying no measurement of ability at all. Zero is a DIFFERENT round from
+    # "everyone lost": nothing was compared against the incumbent, so it says l1_generate
+    # produced no testable variant rather than that the search has stalled — which is what the
+    # life bank reads it for.
     electable_count: int = 0
     candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
-    # ResumeCheckpoint records consumed by the divergence-replay walker.
-    decisions: list[DecisionRecord] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
-    # L1 yield + failure counts; defaults assume "all valid" for replay paths bypassing the detector.
-    # STORED, not derived: `l1_yield` is an INPUT to scoring, not a summary of it. It reaches
-    # `score_population` as the `l1_diversity` evaluator before any candidate has a score, so
-    # there is nothing to derive it from at the moment it is needed. The collapse COUNTS below
-    # are the opposite — pure outputs — and are derived.
+    # STORED, not derived: an INPUT to scoring, not a summary of it — it reaches
+    # `score_population` as the `l1_diversity` evaluator before any candidate has a score. The
+    # collapse COUNTS below are the opposite, pure outputs, and are derived.
     l1_yield: float = 1.0
-    # Reason this round's L1 output was unparseable (zero candidates), or None. The round owns
-    # it: a parse failure yields no candidate to charge, and `candidate_scores` is empty in
-    # exactly that round. One of `L1_PARSE_FAILURE_MALFORMED` / `L1_PARSE_FAILURE_TOOLING` —
-    # the two are opposite kinds of evidence (see their docstrings) and must never be
-    # collapsed to a bool by a reader.
+    # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
+    # a parse failure yields no candidate to charge. One of the three constants above.
     l1_parse_failure: str | None = None
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
     critique: CritiqueReadout | None = None
-    # Context-aware degradation verdict, stamped at round close (sole compute
-    # site); every surface (dashboard summary, CLI, round file) renders this.
+    # Stamped at round close — the sole compute site; every surface renders this one.
     health: DegradationHealth | None = None
     # --- stamped as the round closes (the document's own fields) ---
-    # The cycle's working searchpoint at close. Resume rebuilds `Cycle.opt_sp` from it,
-    # and review/stats/sibling-wounds read its lineage — so it is round state, not a
-    # rendering detail. None only on a round that never closed.
+    # Resume rebuilds `Cycle.opt_sp` from it and review/sibling-wounds read its lineage, so it
+    # is round state, not a rendering detail. None only on a round that never closed.
     opt_sp: OptSearchPoint | None = None
-    # AxisIndex's peaked set at close. Persisted because the review writer's
-    # `evidence_grounding_present` check needs it (`output.py::_compute_behavior_per_round`)
-    # and AxisIndex is not reconstructable from the round file alone.
+    # AxisIndex's peaked set at close, persisted because AxisIndex is not reconstructable from
+    # the round file alone and the review writer's `evidence_grounding_present` check needs it.
     axis_memory_peaked: list[str] = Field(default_factory=list)
-    # Which OPTIMIZER produced this round — per node, template ⊕ layout ⊕ resolved config
-    # (`compute_optimizer_prompt_hashes`). Stamped at close, and the only thing that can
-    # answer "was this round produced by the optimizer I am holding now?" after the process
-    # that ran it exited: everything else a resume can re-render depends on live cycle state
-    # and so cannot be reproduced across processes. Resume compares it per round and diverges
-    # at the FIRST one that disagrees, which is what lets a prompt edit fork a sibling instead
-    # of either being ignored or condemning the whole campaign. Empty ⇒ the round predates
-    # the stamp and cannot be asked; resume says so rather than assuming either answer.
+    # Which OPTIMIZER produced this round, per node. The only thing that can answer "was this
+    # round produced by the optimizer I am holding now?" once the process exited — everything
+    # else a resume re-renders depends on live cycle state. Resume diverges at the FIRST round
+    # that disagrees, which is what lets a prompt edit fork a sibling rather than condemn the
+    # campaign. Empty ⇒ the round predates the stamp and cannot be asked.
     optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
     # "generation_only" for a sweep round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
@@ -479,11 +445,11 @@ class RoundResult(StrictModel):
         Derived, never stored: it cannot drift from `candidate_scores` the way a
         hand-built twin could.
         """
-        from promptpotter.domain.rendering import round_winner_key
+        from promptpotter.domain.rendering import display_rank_key
 
         ranked = sorted(
             self.candidate_scores,
-            key=lambda c: round_winner_key(c.composite_fitness, c.accuracy),
+            key=lambda c: display_rank_key(c.composite_fitness, c.accuracy),
             reverse=True,
         )
         return [
@@ -510,22 +476,18 @@ class SpendBucket(StrictModel):
     used_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
-    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a
-    # SUBSET of it, so it is never added into a total. The question it answers is latency,
-    # not money: on the shipped optimizer route this runs ~94%, which is why the loop owns
-    # a third of an L4 cell's wall-clock while every worker-model swap left that untouched.
+    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a SUBSET of
+    # it, never added into a total. It answers latency, not money.
     reasoning_tokens: int = 0
     rate_known: bool = False
     model: str | None = None
-    # Tokens billed under this bucket whose USD cost couldn't be resolved (no wire
-    # cost AND no rate on file). >0 means the USD cap is blind to real spend here —
-    # the dashboard surfaces a "USD cap inactive" warning; the token cap backstops.
+    # Billed tokens whose USD cost could not be resolved (no wire cost AND no rate on file).
+    # >0 means the USD cap is blind to real spend here; the token cap backstops.
     unpriced_tokens: int = 0
 
     incurred_usd: float = 0.0
-    # The incurred-side twin of ``unpriced_tokens``: >0 ⇒ ``incurred_usd`` UNDERSTATES
-    # what this search costs, so anything dividing by it would read cheapness that never
-    # happened. The L4 no-evidence guard refuses such a cell rather than score it fitter.
+    # >0 ⇒ ``incurred_usd`` UNDERSTATES what this search costs, so anything dividing by it
+    # reads cheapness that never happened. The L4 no-evidence guard refuses such a cell.
     incurred_unpriced_tokens: int = 0
 
 
@@ -567,53 +529,35 @@ class SpendRollup(StrictModel):
 
 class CycleResult(StrictModel):
     rounds: list[RoundResult]
-    # Completed L1 rounds only — origin-EXCLUSIVE (the origin is round 0 but is
-    # not an L1 round). The persisted index.json::n_rounds counts round 0; the
-    # distinct name keeps the two counts from being conflated across sinks.
+    # Origin-EXCLUSIVE, unlike the persisted `index.json::n_rounds`, which counts round 0.
     n_l1_rounds: int
     best_accuracy: float
     best_round: int
-    # The origin's own two headline scalars, on the origin's own sample basis. They
-    # travel together because a consumer reading one against a composite computed on
-    # some other basis is comparing two different measurements.
+    # They travel together because a consumer reading one against a composite computed on some
+    # other basis is comparing two different measurements.
     origin_accuracy: float
     origin_composite_fitness: float = 0.0
-    # The L4 outer proxy's single-scale inner-search signal (built by
-    # `exploration.adopted_level_trajectory` at finalize). `origin_level` is the origin's level
-    # and `round_adopted_levels` the ability of the incumbent each round ADOPTED — both in ONE
-    # space (θ on the cycle's fixed δ ruler when warm, else the cycle is excluded), so no proxy
-    # delta ever subtracts across scales. Levels are NOT floored at origin — a regressing
-    # optimizer prompt yields a level below origin so the outer keeps a gradient to avoid it.
-    #
-    # These read the CROWNED frontier. They once read the round's proposals instead, on the
-    # argument that a conservative election rarely crowns at a small inner budget and so gave
-    # the outer ~zero signal. `5f6bcb44` fixed the election (a Rasch fit needs two arms; c0_ok
-    # was gating rounds it never should have), and crowning is now routine — while averaging
-    # proposals had turned the metric NEGATIVE for exactly the generators that explore, since
-    # every arm the search correctly discarded pulled the mean down.
-    #
-    # `origin_level` is `None`, not `0.0`, when the origin was never scored (an init-crash, a
-    # cycle that halted before round 0). A zero floor is not a low floor: every round's lift is
-    # differenced against it, so a fabricated 0.0 reports the whole trajectory as an enormous
+    # The L4 outer proxy's inner-search signal: the origin's level and the ability of the
+    # incumbent each round ADOPTED — the CROWNED frontier, never the round's proposals, which
+    # turn the metric NEGATIVE for exactly the generators that explore. Both live in ONE space
+    # (θ on the cycle's fixed δ ruler when warm, else the cycle is excluded), so no proxy delta
+    # subtracts across scales, and levels are NOT floored at origin: a regressing optimizer
+    # prompt must yield a level below origin or the outer loses the gradient away from it.
+    # `origin_level` is `None`, not `0.0`, when the origin was never scored — every round's lift
+    # is differenced against it, so a fabricated 0.0 reports the trajectory as an enormous
     # improvement over nothing. Absent ⇒ the cycle is excluded.
     origin_level: float | None = None
     round_adopted_levels: list[float] = Field(default_factory=list)
-    # Each level's own standard error, index-aligned with the two above and written by the same
-    # carry-forward (`exploration.adopted_level_trajectory`) — a round that did not move the
-    # incumbent did not sharpen the reading of it either. This is the WITHIN-cell precision an
-    # L4 panel needs: without it the outer verdict must infer estimation noise and between-cell
-    # heterogeneity from a single spread of six scalars, and cannot tell them apart. Precision
-    # only — never a penalty term (see `RoundResult.cumulative_theta_se`).
+    # Index-aligned with the two above: a round that did not move the incumbent did not sharpen
+    # the reading of it either. The WITHIN-cell precision an L4 panel needs to tell estimation
+    # noise from between-cell heterogeneity. Precision only — never a penalty term.
     origin_level_se: float | None = None
     round_adopted_level_ses: list[float] = Field(default_factory=list)
-    # The ROUND BUDGET this cycle was given — ``optimization.max_rounds``, the ceiling every
-    # arm on an L4 panel shares. It is the denominator the L4 law averages over, and it has to
-    # come from the config rather than from ``len(round_adopted_levels)``: a cycle stopped early
-    # by ``lives`` adopted fewer levels than one that ran the budget out, so a mean over "rounds
-    # that happened" is a mean over a DIFFERENT number of slots per cell — two estimands, then
-    # compared. Worse, it points the wrong way: ``lives`` stops a STALLING cycle, so dividing by
-    # the shorter series pays a cell for quitting once it had lifted. 0 = never declared, and the
-    # law then falls back to the series length (see ``domain/l4/proxies.py``).
+    # The denominator the L4 law averages over, and it must come from the config rather than
+    # ``len(round_adopted_levels)``: a cycle stopped early by ``lives`` adopted fewer levels, so
+    # a mean over "rounds that happened" compares two estimands — and it points the wrong way,
+    # since ``lives`` stops a STALLING cycle and the shorter series pays it for quitting once it
+    # had lifted. 0 = never declared, and the law falls back to the series length.
     round_budget: int = 0
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
@@ -627,10 +571,9 @@ class CycleResult(StrictModel):
     # This cycle's total spend, captured from the live dashboard state at
     # finalize. ``None`` only on an init-crash before any observer wired up.
     spend: SpendRollup | None = None
-    # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``;
-    # ``None`` on clean completions. The runner's ``except`` sites carry the
-    # record returned by ``emit_error_record`` straight here — the same
-    # ``ErrorRecord`` that lands on the ledger, no twin model.
+    # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``. The runner's ``except``
+    # sites carry ``emit_error_record``'s return straight here — the same record the ledger
+    # holds, no twin model.
     error: ErrorRecord | None = None
 
 
@@ -664,8 +607,7 @@ class DiagnosticRunRecord(StrictModel):
     source_campaign_accuracy: float
     source_campaign_composite: float
     source_campaign_n: int
-    # ``noise-floor`` only: the spread of ``k`` ``force_fresh`` re-scores of one fixed
-    # config — the backend's own run-to-run noise, not a comparison to history.
+    # ``noise-floor`` only: the backend's own run-to-run noise, not a comparison to history.
     noise_floor_k: int | None = None
     noise_floor_mean: float | None = None
     noise_floor_ci_lo: float | None = None
@@ -687,16 +629,13 @@ class WarningDict(TypedDict):
 
 HealthGrade = Literal["healthy", "degraded", "critical"]
 
-# Which fitness number headlines the operator's surfaces. One owner: `CampaignConfig`
-# declares the campaign default and `LiveDashboardState` serves it, so the two cannot
-# drift into a wide `str` on one side and a closed union on the other.
+# Which fitness number headlines the operator's surfaces. ONE owner, so `CampaignConfig` and
+# `LiveDashboardState` cannot drift into a wide `str` on one side and a closed union on the other.
 HeadlineMetric = Literal["accuracy", "composite", "ability"]
 
-# Which key ranks the hard-sample leaderboard. Same one-owner rule as `HeadlineMetric`
-# above. `info_gain` is the queue mechanism's own acquisition score (`pick_value`) — what
-# the leaderboard has always shown; `difficulty` is the Rasch ruler δ_s alone. Ranks what
-# the operator READS and nothing else: the order the engine actually scores in is
-# `build_round_order`, which no knob here reaches.
+# Which key ranks the hard-sample leaderboard: `info_gain` is the queue's own acquisition score,
+# `difficulty` the Rasch ruler δ_s alone. Same one-owner rule. Ranks what the operator READS and
+# nothing else — the order the engine scores in is `build_round_order`, which no knob reaches.
 HardSampleOrder = Literal["info_gain", "difficulty"]
 
 
@@ -711,48 +650,36 @@ class DegradationHealth(StrictModel):
     samples: int
     structural_count: int
     transient_count: int
-    # Samples whose pipeline SUCCEEDED but emitted no extractable prediction
-    # (empty terminal ranking → ``NO_RESULT``). PP-owned — the backend stamps no
-    # warning, since from its side generation succeeded. A high share is a
-    # structurally-unscoreable floor (answer-format / extraction mismatch),
-    # distinct from a wrong-but-extractable miss. Drives the ``unscoreable`` grade.
+    # Samples whose pipeline SUCCEEDED but emitted no extractable prediction. PP-owned — the
+    # backend stamps no warning, since from its side generation succeeded. A high share is a
+    # structurally-unscoreable floor, distinct from a wrong-but-extractable miss.
     no_result_count: int = 0
-    # HOLES — cells attempted that came back carrying no measurement at all
-    # (``unscoreable_cells``: a typed ``error_category`` that is not a transport failure,
-    # so ``pipeline_data`` is empty and every warning-based classifier is blind to it).
-    # Counted separately from ``no_result_count`` because the remedy differs and the
-    # operator banner names it: a NO_RESULT row means the pipeline RAN and emitted nothing
-    # parseable (fix the answer format), while a hole means the cell never reported (re-run
-    # it). Before this existed such a row joined ``samples`` and no numerator, so it made a
-    # round grade HEALTHIER the more of them it had — most consequentially at round 0,
-    # where the grade feeds ``origin_gate_tripped`` and there is no panel gate to catch it.
+    # HOLES — cells attempted that came back carrying no measurement at all, so every
+    # warning-based classifier is blind to them. Separate from ``no_result_count`` because the
+    # remedy differs: a NO_RESULT row means the pipeline RAN and emitted nothing parseable (fix
+    # the answer format), a hole means the cell never reported (re-run it). Uncounted, such a
+    # row joins ``samples`` with no numerator and grades a round HEALTHIER the more it has.
     hole_count: int = 0
-    # Share of this round's predictions on its single commonest label
-    # (``domain/scoring.py::modal_answer_share``); ``None`` where the answer space makes
-    # collapse meaningless. REPORTED, never graded — no ``reasons`` entry, no precedence
-    # arm, deliberately. A model hedging to one label is the addressable failure the loop
-    # exists to correct in its first rounds, so grading it critical would halt the very
-    # optimization that fixes it, and the round-over-round series is the point: falling =
-    # working. It rides HERE because health is the only per-round verdict every surface
-    # already renders, and until now nothing outside the L1 prompt panel could see it — an
-    # origin answering one label 95% of the time graded ``healthy`` and nobody was told.
+    # Share of this round's predictions on its single commonest label; ``None`` where the answer
+    # space makes collapse meaningless. REPORTED, never graded — hedging to one label is the
+    # addressable failure the loop exists to correct, so grading it critical would halt the
+    # optimization that fixes it. The round-over-round series is the point: falling = working.
     answer_modal_share: float | None = None
     degraded_rate: float
     consecutive_degraded_rounds: int
     prior_clean_rounds: int
     dominant_node: str | None = None
     node_failure_rates: dict[str, float] = Field(default_factory=dict)
-    # Verbatim upstream reasons per node ("[code] message"), harvested from the
-    # connector's StepWarnings — the evidence behind the verdict, connector-agnostic.
+    # Verbatim upstream reasons per node, harvested from the connector's StepWarnings — the
+    # evidence behind the verdict, connector-agnostic.
     node_warnings: dict[str, list[str]] = Field(default_factory=dict)
     suggested_action: str | None = None
 
 
 class PayloadOutcome(StrictModel):
     source_file: str
-    # A ``StopOutcome`` value for attempted forks (success | paused | halted |
-    # failed — the one StopReason classification, never a sweep-private
-    # vocabulary), or the batch bookkeeping states skipped | skipped_already_forked.
+    # A ``StopOutcome`` value for attempted forks — the one StopReason classification, never a
+    # sweep-private vocabulary — or the batch states skipped | skipped_already_forked.
     status: str
     cycle_id: str
 

@@ -35,6 +35,11 @@ def _r(score: float) -> dict:
     return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score}
 
 
+def _decisions(*recs: dict[str, Any]) -> list[dict[str, Any]]:
+    """The round's ledger decisions, as `scan_ledger_decisions` hands them to the replay."""
+    return list(recs)
+
+
 def _round(**kw: Any) -> RoundResult:
     """A round carrying only what the replayers read; the scoring scalars are inert."""
     return RoundResult.model_validate(
@@ -104,21 +109,24 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
             "c1": [_m(i, i < 5) for i in range(6)],  # 5/6 — clears the hard tail
             "c2": [_m(i, i < 1) for i in range(6)],  # 1/6 — below the origin
         },
-        decisions=[
-            {
-                "kind": "round_winner",
-                "inputs_ref": {
-                    "candidate_ids": ["c1", "c2"],
-                    "round_num": 0,
-                    "coverage_floor": 4,
-                },
-                "outcome": "c1",
-                "data": {"current_best_accuracy_at_record": 0.8},  # stale, never read
-            }
-        ],
+    )
+    decisions = _decisions(
+        {
+            "kind": "round_winner",
+            "inputs_ref": {
+                "candidate_ids": ["c1", "c2"],
+                "round_num": 0,
+                "coverage_floor": 4,
+            },
+            "outcome": "c1",
+            "data": {"current_best_accuracy_at_record": 0.8},  # stale, never read
+        }
     )
     # Origin hits only the two easiest samples → c1's wins on the rest are real lift, c2's are not.
-    assert replay_decisions(round_data, origin_results=[_m(i, i < 2) for i in range(6)]) is None
+    assert (
+        replay_decisions(round_data, decisions, origin_results=[_m(i, i < 2) for i in range(6)])
+        is None
+    )
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
@@ -127,23 +135,23 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     round_data = _round(
         round=2,
         all_candidate_results={"c0": priors, "c1": priors, "c2": current},
-        decisions=[
-            {
-                "kind": "elimination_cut",
-                "inputs_ref": {
-                    "candidate_id": "c2",
-                    "prior_candidate_ids": ["c0", "c1"],
-                    "queries_scored": 6,
-                    "epsilon": 0.05,
-                    "n_min": 4,
-                    "round_num": 2,
-                },
-                "outcome": True,
-                "data": {},
-            }
-        ],
     )
-    div = replay_decisions(round_data)
+    decisions = _decisions(
+        {
+            "kind": "elimination_cut",
+            "inputs_ref": {
+                "candidate_id": "c2",
+                "prior_candidate_ids": ["c0", "c1"],
+                "queries_scored": 6,
+                "epsilon": 0.05,
+                "n_min": 4,
+                "round_num": 2,
+            },
+            "outcome": True,
+            "data": {},
+        }
+    )
+    div = replay_decisions(round_data, decisions)
     assert div is not None
     assert div.kind == "elimination_cut"
     assert div.recorded_outcome is True and div.current_outcome is False
@@ -623,17 +631,20 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
 
 
 def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) -> None:
-    """A decision must reach the ledger once and the round document only if that round made it.
+    """A decision reaches the ledger exactly once, stamped with the round that MADE it.
 
-    Both halves are silent and both bite resume. (1) ``persist_round`` drained the whole buffer
-    into whichever round happened to be closing, and ``to_dict()`` drops ``round`` — so a
-    foreign record was indistinguishable from a native one, and ``replay_decisions``
-    re-derives every REPLAYED kind in that list against THIS round's measurements. On disk
-    that had filed 42 ``round_winner`` and 76 ``elimination_cut`` records under a round that
-    did not make them, so the divergence seam compared one round's decision to another
-    round's data — a spurious halt or a missed one, with nothing to see. (2) Escalation fires
-    after its round has already persisted, so a cycle stopping right there had no next
-    ``persist_round``: 8 of 89 real L2 fires carry no decision at all.
+    Silent, and it bites resume. The round document used to carry a second copy assembled at
+    drain time, which put the same fact in two places keyed differently: the ledger by its own
+    stamp, the document by whatever was pending when it happened to be written. Both failure
+    modes were real. A record drained into a round that did not make it was indistinguishable
+    from a native one, so ``replay_decisions`` re-derived it against the WRONG round's
+    measurements — a spurious halt or a missed one. Filtering the drain fixed that direction and
+    opened the other: a record stamped for an already-written round was dropped from the drain
+    and cleared from the buffer in one step, reaching no document at all. Only the stamp ever
+    identified the round, so the copy is gone and the replay reads the ledger.
+
+    The second half stands unchanged: escalation fires after its round has persisted, so a cycle
+    stopping right there has no next ``persist_round`` and teardown is the only flush.
     """
     from types import SimpleNamespace
 
@@ -641,6 +652,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         ResumeCheckpointKind,
         record_decision,
     )
+    from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.runner.round import flush_pending_decisions, persist_round
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import ResumeCheckpointRecord
@@ -650,6 +662,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     cycle_dir = CycleDir(tmp_path)
     (tmp_path / ".runtime").mkdir()
     ledger = CycleEventLog.open(cycle_dir)
+    cb = RunCallbacks(ledger=ledger)
     # `cycle_id=None` short-circuits the store half of `persist_round`; the ledger is real.
     session = SimpleNamespace(
         state=SimpleNamespace(ledger=ledger, cycle_id=None, audit_projection=None)
@@ -665,9 +678,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         True,
         round=1,
     )
-    rr1 = round_result(1)
-    persist_round(cycle, rr1, 1, session)  # type: ignore[arg-type]
-    assert [d["kind"] for d in rr1.decisions] == ["elimination_cut"]
+    persist_round(cycle, round_result(1), session, cb)  # type: ignore[arg-type]
 
     record_decision(
         cycle.pending_decisions,
@@ -683,10 +694,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         "c2",
         round=2,
     )
-    rr2 = round_result(2)
-    persist_round(cycle, rr2, 2, session)  # type: ignore[arg-type]
-    # Round 2's document carries round 2's decision and NOT round 1's escalation.
-    assert [d["kind"] for d in rr2.decisions] == ["round_winner"]
+    persist_round(cycle, round_result(2), session, cb)  # type: ignore[arg-type]
 
     # A fire with no round after it: the buffer is the only copy until teardown flushes it.
     record_decision(
@@ -837,3 +845,48 @@ def test_reindex_rebuilds_index_and_gcs_orphans_without_shrinking(built_stores: 
     assert archive.load_by_id("run_12") is not None  # winners survive
     assert archive.load_by_id("run_11") is not None
     assert archive.load_by_id("run_10") is None  # orphan GC'd
+
+
+def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Stores) -> None:
+    """A fork must answer for its lifted rounds ITSELF, on its own ledger.
+
+    Every ``scan_ledger_*`` reads the physical file — deliberately, so a fork's history begins at
+    its own first append. Resume replays the lifted rounds to find where the branch departs and
+    reads their decisions from that file, so a record only the parent holds is invisible: the
+    check sees an empty list and passes every inherited round, silently, which is the exact
+    shape of "a writer with no reader". The mint already copies those rounds' FILES; this is the
+    same copy for the same reason. Records at or after the cut are the parent's own future and
+    must NOT come along, or the branch replays a decision it never made.
+    """
+    from promptpotter.application.optimization.resume_and_fork.decisions import (
+        ResumeCheckpointKind,
+        record_decision,
+    )
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+        scan_ledger_decisions,
+    )
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    store = built_stores.campaigns
+    parent = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_fork_decisions")
+    store.create(parent, {"sibling_kind": "root"})
+    parent_ledger = CycleEventLog.open(CycleDir(store.cycle_dir(parent)))
+    for rnd, kind in (
+        (0, ResumeCheckpointKind.ROUND_WINNER),
+        (1, ResumeCheckpointKind.ELIMINATION_CUT),
+        (2, ResumeCheckpointKind.ROUND_WINNER),
+    ):
+        record_decision(parent_ledger, kind, {"round_num": rnd}, "x", round=rnd)
+
+    child = parent.model_copy(update={"cycle_id": "cycle_fork_decisions_fork_a"})
+    store.create(child, {"sibling_kind": "fork"})
+    store.copy_parent_rounds_and_candidates(
+        _CAMPAIGN, parent.cycle_id, child.cycle_id, before_round=2
+    )
+
+    lifted = scan_ledger_decisions(CycleLayout(store.cycle_dir(child)).ledger)
+    assert sorted(lifted) == [0, 1]
+    assert [d["kind"] for d in lifted[0]] == ["round_winner"]
+    assert [d["kind"] for d in lifted[1]] == ["elimination_cut"]

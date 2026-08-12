@@ -66,46 +66,16 @@ export function countDescendants(root: LineageNode): number {
   return walkCourses(root).length - 1;
 }
 
-// THE lookup: the node at an address.
-//
-// **The address is `(path, candidateId)`, read off the node it names** — never a label
-// (`C1.1` is a course's private position, minted by every course) and never a bare cycle_id
-// (inner ids repeat across sibling `.inner/` sandboxes; `path` is unique by construction).
-//
-// `candidateId` null addresses the course itself. A fork's path with no candidate addresses
-// nothing, correctly: there is no fork node to view.
-export function nodeAt(
-  root: LineageNode,
-  path: CyclePath,
-  candidateId?: string | null,
-): LineageNode | undefined {
-  const want = encodeCyclePath(path);
-  const wantKind = candidateId ? "candidate" : "course";
-  const visit = (node: LineageNode): LineageNode | undefined => {
-    if (
-      node.kind === wantKind &&
-      encodeCyclePath(pathOf(node)) === want &&
-      (!candidateId || node.id === candidateId)
-    ) {
-      return node;
-    }
-    for (const child of node.children) {
-      const hit = visit(child);
-      if (hit) return hit;
-    }
-    return undefined;
-  };
-  return visit(root);
-}
-
 // Every candidate whose OWN path is `path` — that course's timeline as THAT course minted
 // it, addressed inside the one served tree.
 //
-// This exists because `nodeAt(root, forkPath)` cannot answer for a fork: **a fork is not a
+// **The address is the `path`, read off the node it names** — never a label (`C1.1` is a
+// course's private position, minted by every course) and never a bare cycle_id (inner ids
+// repeat across sibling `.inner/` sandboxes; `path` is unique by construction).
+//
+// It answers for a FORK, which is the case a course lookup cannot reach: **a fork is not a
 // node.** The server dissolves it onto the parent's timeline, so its contributed attempts —
-// each carrying the fork's `path` — are the only trace of it in the tree, and a course
-// lookup finds nothing. Scanning for the fork's cycle_id would be the bug this file's header
-// warns about; the path is the address.
+// each carrying the fork's `path` — are the only trace of it in the tree.
 //
 // For an ordinary course this returns its own candidates MINUS anything a fork contributed
 // to it, which is what a per-course reader wants: a fork's attempts belong to the fork's own
@@ -128,9 +98,9 @@ export function nodeKeyOf(node: LineageNode): string {
   return nodeAddress(pathOf(node), node.id);
 }
 
-// ONE walk, indexed by encoded path. `nodeAt` / `candidatesAtPath` each re-walk the whole
-// tree per call; a surface that looks up per render (or holds several lookups) rides an
-// index built once per tree instead. Semantics per entry:
+// ONE walk, indexed by encoded path — and THE lookup every surface uses. `candidatesAtPath`
+// re-walks the whole tree per call; a surface that looks up per render (or holds several
+// lookups) rides an index built once per tree instead. Semantics per entry:
 //   `course`     — the course node AT that address (null for a fork: a fork is not a node).
 //   `candidates` — the candidates whose OWN path it is (`candidatesAtPath` semantics: a
 //                  fork's attempts under the fork's address, a course's own timeline minus

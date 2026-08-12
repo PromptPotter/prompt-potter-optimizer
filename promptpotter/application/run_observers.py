@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.results import RoundResult, is_round_winner
+from promptpotter.domain.run_records import (
+    ElectionRecord,
+    LedgerAbility,
+    PhaseRecord,
+    SnapshotRecord,
+)
 from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -77,6 +83,16 @@ def build_campaign_emitter(
     )
 
 
+def _round_abilities(round_result: RoundResult) -> dict[str, LedgerAbility]:
+    """Each row's θ, **keyed by LABEL** (``C{round}.{idx}``) — a resume re-mints ids, so an id join
+    drops it. The crown is not here; it rides ``ElectionRecord``."""
+    return {
+        cs.label: ability
+        for cs in round_result.candidate_scores
+        if (ability := LedgerAbility(theta=cs.theta, theta_se=cs.theta_se)) != LedgerAbility()
+    }
+
+
 @dataclass
 class RunCallbacks:
     """Single ingress: callbacks → typed ``CycleRecord`` → ``CycleEventLog.append``, ledger bound at
@@ -104,6 +120,54 @@ class RunCallbacks:
                 round=event.round,
                 data=event.data,
                 payload={"view": view},
+            )
+        )
+
+    def on_election(self, round_result: RoundResult) -> None:
+        """The crown, at the moment the election produced it — from ``execute_round`` once the
+        panel gate has let the round stand, and from ``emit_origin_round`` for round 0, which
+        adopts ``C0``. Round 0 differs in the VALUE it carries, never in the record it writes."""
+        self._emit(
+            ElectionRecord(
+                round=round_result.round,
+                # `winner_id` is non-empty on a HELD round too — it names the retained
+                # incumbent, which is no candidate of THIS round, so the match fails and the
+                # crown is empty. The emptiness is in the match, never in the id.
+                winner_label=next(
+                    (
+                        cs.label
+                        for cs in round_result.candidate_scores
+                        if is_round_winner(cs.candidate_id, round_result.winner_id)
+                    ),
+                    "",
+                ),
+            )
+        )
+
+    def on_round_close(self, round_result: RoundResult) -> None:
+        """The CLOSE — what the round knows and no candidate could: the frontier it advanced and
+        the ability fit behind it. Every term here is RE-READ on each close, which is what lets
+        round 0's second one (``runner/loop.py``, once the ruler warms) deliver a θ its own close
+        could not have had. The crown is deliberately absent: it never moves, so it lands once, at
+        ``on_election``."""
+        self._emit(
+            PhaseRecord(
+                phase="round",
+                event="complete",
+                round=round_result.round,
+                payload={
+                    "accuracy": round_result.accuracy,
+                    "composite_fitness": round_result.composite_fitness,
+                    "improved": round_result.improved,
+                    # Banked beside `improved` because the life bank needs both to replay a
+                    # round identically on resume (`EscalationFSM.fold`): `improved` says which
+                    # way to move the bank, this says whether to move it at all.
+                    "electable_count": round_result.electable_count,
+                    "label": round_result.label,
+                    "cumulative_theta": round_result.cumulative_theta,
+                    "cumulative_theta_se": round_result.cumulative_theta_se,
+                    "abilities": _round_abilities(round_result),
+                },
             )
         )
 

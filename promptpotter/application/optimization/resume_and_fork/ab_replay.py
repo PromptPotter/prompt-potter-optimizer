@@ -45,7 +45,7 @@ class AbReport:
     n_rounds: int
     mismatches: list[ReplayMismatch]
     divergences: list[Divergence]
-    divergent: list[str]
+    divergent: list[tuple[str, int]]
 
     @property
     def n_mismatches(self) -> int:
@@ -76,16 +76,19 @@ class AbReport:
                 }
                 for d in self.mismatches
             ],
+            # `node` is a LABEL for a human reading the report, composed here at the render
+            # site. It was a field on the record and got parsed back into this same pair by the
+            # tree's overlay — the two spellings of one coordinate that the pair now replaces.
             "divergences": [
                 {
-                    "node": d.node_key,
+                    "node": f"{d.cycle_id}::r{d.round}",
                     "cycle_id": d.cycle_id,
                     "round": d.round,
                     "alternative_candidate_id": d.alternative_candidate_id,
                 }
                 for d in self.divergences
             ],
-            "divergent": list(self.divergent),
+            "divergent": [f"{cid}::r{rnd}" for cid, rnd in self.divergent],
         }
 
 
@@ -108,7 +111,7 @@ def _make_replay_verdict(
         for items in rd.all_candidate_results.values():
             rescore_results(items, scorer, sc.scorer_id, sc.scorer_formula)
         found = replay_all_mismatches(
-            rd, origin_results=rnd.known_outcomes, delta_scale=delta_scale
+            rd, rnd.decisions, origin_results=rnd.known_outcomes, delta_scale=delta_scale
         )
         if not found:
             return VerdictOutcome(diverged=False)
@@ -172,7 +175,6 @@ def ab_replay_cycle(
         else ""
     )
     delta_scale, _, _ = _calibrate_delta_ruler(
-        session,
         origin_results,
         n_min,
         enable_2pl=enable_2pl,

@@ -37,6 +37,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
+from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
@@ -79,9 +80,8 @@ def _r_evidence_health(b: InjectionBundle) -> str:
         for node, rate in ranked[:NODE_FAILURE_RENDER_CAP]
     ]
     body = "PIPELINE NODE FAILURES (round-level):\n" + "\n".join(lines)
-    # The typed predicate, not a second comparison against the same constant — the health
-    # grade, the L2 router and `terminate_capability` all ask this one function, so the panel
-    # cannot say STARVED on a round the router calls healthy, or stay silent on one it doesn't.
+    # The typed predicate, never a second comparison against the same constant: the health
+    # grade, the L2 router and `terminate_capability` all ask this one function.
     if starved := evidence_starved_node(rates):
         worst_rate = rates[starved]
         body += (
@@ -157,11 +157,10 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
     if d.n_valid:
         rb = d.rank_buckets
-        # Renders only where ranking DISCRIMINATED — some ground truth landed below r=1. With
-        # every rank at 1-or-absent the buckets are the hit/miss split wearing ranking
-        # vocabulary, which L2 already has. That is the common case, not the edge: `llm_only`
-        # maps its one output onto `final_ranking`, so the schema-level "has a ranker?" test
-        # reads True on a width-1 list and the 0s only steer L2 toward "fix the ranker".
+        # Renders only where ranking DISCRIMINATED — some ground truth below r=1. With every
+        # rank at 1-or-absent the buckets are the hit/miss split wearing ranking vocabulary,
+        # and that is the COMMON case: `llm_only` maps its one output onto `final_ranking`, so
+        # the schema-level "has a ranker?" test reads True on a width-1 list.
         discriminated = any(rb.get(k, 0) for k in ("2-5", "6-10", "11-20"))
         if discriminated:
             rank_line = (
@@ -211,8 +210,8 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
-# Order keys surface to the LLM — effect-driven items first (rankings, top values, exhausted) so
-# attention lands on what to mutate; sample-side findings second; narrative tail last.
+# Effect-driven items first so attention lands on what to mutate; sample-side findings second;
+# narrative tail last.
 _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "axis_rankings",
     "top_values",
@@ -323,9 +322,8 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
 @signal(
     "sample_transcripts",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for TRANSCRIPT_RENDER_CAP=3 typical transcripts (~2.6-3k each on
-    # justlogic); worst case (~3.8k each) degrades by section-drop of the whole
-    # 3rd transcript — today's behavior, never a severed fence.
+    # Sized for TRANSCRIPT_RENDER_CAP typical transcripts; a worst-case overrun degrades by
+    # section-dropping the whole last transcript, never by severing a fence.
     char_cap=10000,
     citable=True,
 )
@@ -361,11 +359,17 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
-def _proxy_lift(r: dict[str, Any]) -> float | None:
-    """The L4 discriminator: only the ``promptpotter`` connector stamps it. A zero-lift seed — the
-    one an edit most needs to see — arrives as int 0, so accept any real number but not bool."""
-    d = (r.get("pipeline_data") or {}).get("mean_round_delta")
-    return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+# A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —
+# the two-sided ~95% bound, and the same bar `round_not_separable` applies one level up, so this
+# panel cannot rank a cell as beaten that the loop itself would refuse to call separable.
+_CELL_SEPARATION_SIGMAS = 2.0
+
+
+def _pd_number(r: dict[str, Any], key: str) -> float | None:
+    """A real number off ``pipeline_data``. A zero-lift seed — the one an edit most needs to see —
+    arrives as int 0, so accept any real number but not bool."""
+    v = (r.get("pipeline_data") or {}).get(key)
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
 
 
 def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
@@ -374,51 +378,77 @@ def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
     return [
         (lift, r)
         for r in b.trajectory_results
-        if (lift := _proxy_lift(r)) is not None
+        if (lift := _pd_number(r, OUTER_PROXY_KEYS[0])) is not None
         and (r.get("pipeline_data") or {}).get("reasoning_trace")
     ]
+
+
+def _paired_cell(
+    lift: float, r: dict[str, Any], origin: dict[str, Any] | None
+) -> tuple[float, float | None]:
+    """This cell's ``(candidate − origin)`` difference and the error bar on it."""
+    # No bar when either arm went unpriced — a FLOORED cell adopts no levels to have an SE over,
+    # and it is the one cell whose badness is not in question, so it ranks on its value alone.
+    base = _pd_number(origin, OUTER_PROXY_KEYS[0]) if origin else None
+    if origin is None or base is None:
+        return (lift, None)
+    se, base_se = _pd_number(r, ADOPTED_LEVEL_SE_KEY), _pd_number(origin, ADOPTED_LEVEL_SE_KEY)
+    # Quadrature, for the reason `panel_precision` gives: each arm carries its OWN half, the
+    # shared origin LEVEL already cancelled by the subtraction beside it.
+    bar = (se**2 + base_se**2) ** 0.5 if se is not None and base_se is not None else None
+    return (lift - base, bar)
 
 
 @signal(
     "inner_narratives",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative
-    # now, so a per-section overrun is a safety rail rather than an expected drop.
+    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative, so
+    # a per-section overrun is a safety rail rather than an expected drop.
     char_cap=13000,
     citable=True,
 )
 def _r_inner_narratives(b: InjectionBundle) -> str:
-    """Each cell's delta is shown BESIDE the origin's own delta on that seed — alone it is mostly
-    the seed. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
-    origin_lift = {
-        sid: lift
-        for r in b.origin_per_sample
-        if (sid := r.get("sample_id")) is not None and (lift := _proxy_lift(r)) is not None
-    }
+    """Each cell as its PAIRED difference from the origin on the same seed, ranked worst-CONFIDENT
+    first. Fires on ``mean_round_delta``, not ``reasoning_trace``, which any backend returns."""
+    # The rank decides which cells spend their FULL narrative, so a rank read off the point
+    # estimate alone spends the budget on whichever cell noise put first — the measured gaps are
+    # routinely narrower than either bar. Ranking on the upper bound keeps a wide cell out of
+    # the lead, and when nothing clears its own bar NO cell earns the wide trace cap: there is
+    # no evidence to amplify, and the header says so instead of pretending.
+    origin = {sid: r for r in b.origin_per_sample if (sid := r.get("sample_id")) is not None}
     scored = _inner_narrated(b)
     if not scored:
         return ""
-    scored.sort(key=lambda t: t[0])
+    # `upper` — how bad the cell is AFTER its own uncertainty — is computed once and carried, so
+    # the rank key and the separation test cannot come apart.
+    cells = []
+    for lift, r in scored:
+        d, bar = _paired_cell(lift, r, origin.get(r.get("sample_id")))
+        cells.append((d + _CELL_SEPARATION_SIGMAS * (bar or 0.0), d, bar, r))
+    cells.sort(key=lambda c: c[0])
+    n_worse = sum(1 for c in cells if c[0] < 0.0)
     header = (
-        f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest first — each is "
-        "one outer sample. D is that inner run's lift; `origin` is what the SAME seed scored "
-        "under the unedited optimizer prompts, so a low D beside a low origin is a hard seed, not "
-        "your edit. Equal values mean the incumbent on that seed still IS the origin. The "
-        "weakest carry their full story; ground every candidate in a specific observation):"
+        f"INNER RUN NARRATIVES ({len(cells)} inner campaigns this round, one per outer sample. "
+        "Each number is that seed's lift MINUS what the same seed scored under the unedited "
+        "optimizer prompts, so the seed's own difficulty is already subtracted; ± is the error "
+        "bar on that difference)"
+    ) + (
+        f". The first {n_worse} are worse than the origin by more than their own error bar — those "
+        "are the ones with something to learn from; ground every candidate in a specific "
+        "observation from one of them:"
+        if n_worse
+        else ". NOT ONE cell separates from the origin beyond its own error bar, so their ORDER "
+        "here carries no information — do not ground an edit in a cell's rank. Read the "
+        "narratives for what the inner loop actually did:"
     )
+    full_cells = min(n_worse, INNER_NARRATIVE_FULL_CELLS)
     sections = [header]
-    for i, (delta, r) in enumerate(scored):
-        pd = r.get("pipeline_data") or {}
+    for i, (_upper, d, bar, r) in enumerate(cells):
         label = str(r.get("query") or r.get("sample_id") or "inner")[:80]
-        base = origin_lift.get(r.get("sample_id"))
-        mark = f"D{delta:+.3f}" + (f" origin{base:+.3f}" if base is not None else "")
-        trace = str(pd.get("reasoning_trace") or "")
-        body = (
-            _head_at_line(trace, INNER_NARRATIVE_CAP)
-            if i < INNER_NARRATIVE_FULL_CELLS
-            else _head_at_line(trace, INNER_NARRATIVE_SUMMARY_CAP)
-        )
-        sections.append(fence_untrusted(f"[{label}] {mark}\n{body}"))
+        mark = f"{d:+.3f}" + (f" ±{bar:.3f}" if bar is not None else " (unpriced)")
+        trace = str((r.get("pipeline_data") or {}).get("reasoning_trace") or "")
+        cap = INNER_NARRATIVE_CAP if i < full_cells else INNER_NARRATIVE_SUMMARY_CAP
+        sections.append(fence_untrusted(f"[{label}] {mark}\n{_head_at_line(trace, cap)}"))
     return "\n\n".join(sections)
 
 
@@ -462,10 +492,9 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
 
     top_label, top_n = truth.most_common(1)[0]
     constant = top_n / n
-    # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable
-    # to the constant-answer floor beside it. Counting `fitness >= 1.0` instead made
-    # this line read "You score 0.00" on every graded scorer, so the panel told the
-    # generator a constant answer beat it while the run was in fact climbing.
+    # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable to the
+    # constant-answer floor beside it. A `fitness >= 1.0` count reads 0.00 on every graded
+    # scorer, telling the generator a constant answer beat it while the run is climbing.
     scored = compute_accuracy(results=cast("list[QueryMeasurement]", rows))
     if scored is None:
         return ""  # nothing scoreable — no score to compare the floor against
@@ -505,9 +534,9 @@ def _r_failing_samples(b: InjectionBundle) -> str:
     rows = _misses(b)
     errored = _errored(b)
     if not rows:
-        # Silence here would leave the generator with no account of the round at all, so the
-        # panel reports the non-measurement in its own voice (unfenced — it is a directive
-        # about PromptPotter's state, not dataset content the fence tells L1 to distrust).
+        # Silence would leave the generator with no account of the round, so the panel reports
+        # the non-measurement in its own voice — unfenced, being a statement about
+        # PromptPotter's state rather than dataset content the fence tells L1 to distrust.
         if not errored:
             return ""
         return (
@@ -572,9 +601,8 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
     if cand.total == 0:
-        # Zero samples means zero evidence, and `accuracy` defaults to 0.0 — so an unmeasured
-        # candidate is byte-identical to one that got everything wrong, and must never be
-        # quoted as an outcome. Same rule `matched_origin_accuracy` states one level up.
+        # `accuracy` defaults to 0.0, so an unmeasured candidate is byte-identical to one that
+        # got everything wrong and must never be quoted as an outcome.
         return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
@@ -594,15 +622,14 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     """ONE compact line per prior candidate, so every retained round fits and the record stays
     COMPLETE — recognition, not reproduction. A candidate that changed nothing is not an attempt."""
     prior = list(b.prior_rounds)
-    # Attempts per round, oldest first. Built for EVERY prior round before the retained
-    # window is taken, because a round's row count is not knowable from the round: C0 and
-    # a no-op variant both carry a candidate that changed nothing. Windowing on rounds
-    # that merely HAVE candidates spends a retained slot rendering nothing.
+    # Oldest first, and built for EVERY prior round BEFORE the retained window is taken: a
+    # round's row count is not knowable from the round (C0 and a no-op variant both carry a
+    # candidate that changed nothing), so windowing on rounds that merely HAVE candidates
+    # spends a retained slot rendering nothing.
     by_round: list[tuple[int, list[tuple[str, frozenset[str]]]]] = []
     for i, rr in enumerate(prior):
         parent = rr.prompt_fields
-        # The candidates' parent params = the PRIOR round's resolved pipeline_params
-        # (the winner / retained incumbent this round mutated from).
+        # The PRIOR round's resolved params — the incumbent this round mutated from.
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
         attempts: list[tuple[str, frozenset[str]]] = []
         for cand in rr.candidate_scores:
@@ -610,10 +637,9 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
             if not changed:
                 continue
             mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed]
-            # `total == 0` is checked BEFORE the paired quote, not inside `_candidate_fate`'s
-            # fallback: a never-measured candidate can still carry a `matched_origin_accuracy`
-            # (the origin was scored even though the candidate was not), which would otherwise
-            # take the branch above and render a fully-formed comparison out of nothing.
+            # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can
+            # still carry a `matched_origin_accuracy` (the origin was scored even though the
+            # candidate was not), and would otherwise render a comparison out of nothing.
             scored = (
                 f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%}"
                 if cand.total and cand.matched_origin_accuracy is not None
@@ -632,10 +658,9 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     if not by_round:
         return ""
     lines: list[str] = []
-    # (round, fingerprint) per rendered row, oldest first — the pool each later row is
-    # matched against. First match wins, so a marker always points at the EARLIEST occurrence
-    # and a long repeat chain keeps naming one round rather than the previous link. Matched
-    # only within the window, so a marker never names a round the panel does not show.
+    # (round, fingerprint) per rendered row, oldest first — the pool each later row is matched
+    # against. First match wins, so a marker points at the EARLIEST occurrence rather than the
+    # previous link. Matched only within the window, so it never names a round the panel hides.
     seen: list[tuple[int, frozenset[str]]] = []
     for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]:
         for body, fp in attempts:

@@ -7,9 +7,9 @@
      much room it has; better to overflow visibly and be fixed. */
   flex: 0 0 auto;
   font-family: inherit;
-  font-size: 11px;
+  font-size:var(--text-xs);
   letter-spacing: 0.04em;
-  padding: 3px 9px;
+  padding: 3px var(--space-8);
   border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
   color: var(--color-text-secondary);
@@ -49,7 +49,7 @@
 .group {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   flex: 0 0 auto;
 }
 
@@ -89,7 +89,7 @@
 }
 
 .groupLabel {
-  font-size: 10px;
+  font-size:var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-text-tertiary);

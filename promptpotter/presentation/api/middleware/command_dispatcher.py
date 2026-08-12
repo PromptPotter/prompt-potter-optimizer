@@ -150,10 +150,9 @@ CAP_FOR_KIND: dict[str, str] = {
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
-    # Editing the allow-list DEFINES what a babysit steer may reach — a strictly
-    # stronger authority than `campaign.babysit` (which only permits a tainted steer).
-    # Gating it on the owner-held lifecycle tier keeps a babysit-delegate from
-    # self-authorizing by adding their own model to the allow-list.
+    # Editing the allow-list DEFINES what a babysit steer may reach — strictly stronger
+    # authority than `campaign.babysit`. The owner-held lifecycle tier is what stops a
+    # babysit-delegate self-authorizing by adding their own model to it.
     "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
     # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
     # bucket rather than the campaign's own budget, so no tenant tier carries it — see
@@ -161,9 +160,8 @@ CAP_FOR_KIND: dict[str, str] = {
     "set-sample-lookahead": SCORING_SAMPLE_LOOKAHEAD_CAP,
 }
 
-# Import-time exhaustiveness — a new dispatched kind with no cap is a silent
-# unguarded verb (the membership-over-NAMES bug class). Derive the closed set
-# from the Literal types themselves so the map can never drift from the wire.
+# Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.
+# Derived from the Literal types themselves, so the map cannot drift from the wire.
 _ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     get_args(LifecycleKind)
     + get_args(CycleScopedKind)
@@ -286,9 +284,8 @@ class CommandDispatcher:
                 },
             )
 
-        # delete-cycle's apply step removes the dir AND its ledger file. We
-        # must build the CommandRecord + ack BEFORE the dir disappears; pre-
-        # emit on the parent's root ledger as the audit destination.
+        # delete-cycle's apply removes the dir AND its ledger, so the record + ack must be
+        # built BEFORE it disappears — pre-emitted on the parent's root ledger.
         if kind == "delete-cycle":
             return await self._dispatch_delete_cycle(
                 campaign=campaign, hop=hop, idempotency_key=idempotency_key
@@ -460,13 +457,9 @@ class CommandDispatcher:
                 ack_status = "rejected"
                 ack_detail = exc.reason
             except PotterError as exc:
-                # ONE central mapping seam for any applier error that carries an
-                # HTTP status — backend-unreachable (503), quota (429), launch
-                # (422), conflicts, not-founds. Emit a rejected ack so the audit
-                # trail stays on the ledger, then re-raise: main.py's PotterError
-                # handler serializes the flat ``ErrorEnvelope``
-                # (``docs/specs/m12-api-openapi.yaml``). Per CLAUDE.md root-fix:
-                # one site, not one arm per applier; no ``HTTPException`` here.
+                # ONE central mapping seam for every applier error carrying an HTTP status.
+                # Emit a rejected ack so the audit trail stays on the ledger, then re-raise for
+                # `main.py`'s handler. One site, not one arm per applier; no ``HTTPException``.
                 emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
                 raise
             except Exception as exc:
@@ -481,9 +474,8 @@ class CommandDispatcher:
             reset_cycle_ledger(token)
 
         if ack_status == "rejected":
-            # Apply rejected by a domain guard (e.g. stub-delete refused);
-            # surface to the caller as 409 with the guard's reason while the
-            # audit trail (CommandRecord + rejected ack) stays on the ledger.
+            # Rejected by a domain guard: 409 with the guard's reason, while the audit trail
+            # stays on the ledger.
             raise ConflictError(
                 f"command {kind} rejected: {ack_detail}",
                 details={"command_id": command_id, "reason": ack_detail},
@@ -514,10 +506,9 @@ class CommandDispatcher:
             )
 
             seed = _parse_cycle_seed(payload_extras.get("seed"))
-            # A seed that steers the inner-optimizer model OUTSIDE the origin's
-            # allow-list (`allowed_models`; empty = nothing sanctioned = any model
-            # steer counts) is the ADR-0005 §4 babysit action — a distinct cap above
-            # the RUN-tier fork. A steer to a SANCTIONED model is a clean human fork.
+            # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
+            # ADR-0005 §4 babysit action, a distinct cap above the RUN-tier fork. A steer to a
+            # SANCTIONED model is a clean human fork.
             allowed_models = campaign.config.get("allowed_models") if campaign else None
             steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
                 seed.pipeline_overlay, allowed_models
@@ -533,14 +524,9 @@ class CommandDispatcher:
                 raise NotFoundError("Not found", code="not_found")
 
             async def _apply_fork() -> None:
-                # Mint the operator-steered fork (writes the cycle + seed,
-                # retargets the active pointer), THEN launch it. Minting alone is
-                # just disk I/O — without the launch the fork sits seeded-but-idle
-                # waiting on a manual CLI `resume` that never comes when steering
-                # from the web. One gesture = stop parent → mint →
-                # continue optimizing from the edited searchpoint. Pass no
-                # spend/halt: the seed's reconciled limits govern at the runner
-                # seam (runner/entry.py::_apply_config_overrides).
+                # Mint THEN launch: minting alone is disk I/O, and the fork would sit
+                # seeded-but-idle awaiting a CLI `resume` that never comes from the web. Pass no
+                # spend/halt — the seed's reconciled limits govern at the runner seam.
                 new_cycle_id = mint_operator_fork(
                     stores=self._stores,
                     hop=hop,
@@ -558,9 +544,8 @@ class CommandDispatcher:
 
             return _apply_fork
         if kind == "step-cycle":
-            # Advance N rounds in place then auto-pause — reuses the resume machinery +
-            # RunMode's run-scoped stop; the `campaign.step` tier for a delegate without
-            # run. `rounds` defaults to 1 (StepCyclePayload).
+            # Advance N rounds in place then auto-pause, on the resume machinery + RunMode's
+            # run-scoped stop — the `campaign.step` tier for a delegate without run.
             rounds = payload_extras.get("rounds", 1)
             steps = int(rounds) if isinstance(rounds, int | float) else 1
             return lambda: self._apply_start_run(
@@ -593,11 +578,9 @@ class CommandDispatcher:
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
             max_tokens = payload_extras.get("max_tokens")
-            # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is
-            # non-numeric or negative is a typo, not a no-op. Reject it loud — a
-            # negative cap halts the run at the next checkpoint, and coercing it to
-            # None would drop that ceiling while the other one applies, so the
-            # operator believes both landed when only one did.
+            # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is non-numeric
+            # or negative is a typo, not a no-op. Coercing it to None drops that ceiling while
+            # the other applies, so the operator believes both landed when only one did.
             if max_usd is not None and (
                 not isinstance(max_usd, int | float) or isinstance(max_usd, bool) or max_usd < 0
             ):
@@ -734,10 +717,8 @@ class CommandDispatcher:
                 "job registry not initialised", code="job_registry_unavailable"
             )
         dataset_name = str(payload.get("dataset_name", ""))
-        # Campaign-from-origin rides the check-in path (start-checkin + the
-        # draft's reused_origin_id), not this workspace verb — so no
-        # origin_override here. Quota (429) / Launch (422) / BackendUnreachable
-        # (503) are PotterErrors the central catch in _record_and_apply maps.
+        # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
+        # origin_override here. Its PotterErrors map centrally in `_record_and_apply`.
         await mint_campaign_command(
             stores=self._stores,
             dataset_name=dataset_name,

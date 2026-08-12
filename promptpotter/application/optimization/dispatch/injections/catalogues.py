@@ -1,5 +1,6 @@
-"""Discoverability menus — pipeline-param search-space (L1 reads when proposing override) and
-L1 signal menu (L2 reads when authoring l1_layout). Load-bearing per architecture.md §0.5.
+"""Discoverability menus — pipeline-param search-space (L1 reads when proposing override) and the
+cross-slot layout rule (L2 reads when authoring l1_layout; that field's own schema carries its
+vocabulary). Load-bearing per architecture.md §0.5.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     signal,
 )
 from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
-from promptpotter.domain.l1_layout import L1_POSSIBLE
+from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, PipelineNode
 
 
@@ -119,7 +120,22 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     citable=False,
 )
 def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
-    """Names only — sorted ``L1_POSSIBLE``. L2 may pick from this menu."""
-    return "L1 SIGNAL MENU (placeholders L2 may use in l1_layout):\n  " + "\n  ".join(
-        sorted(L1_POSSIBLE)
+    """ONLY what the wire schema cannot say. It listed all 18 signal names and nothing else — the
+    values without the keys — so L2 supplied a shape: one fire keyed the map by slot with a
+    ``<slot>_block`` value apiece, the next keyed it by SIGNAL with invented sub-selectors. Both
+    reached ``validate_l1_layout`` as breaches and force-triggered L3 off L2's first fire. The slots
+    and the signal enum now ride ``l1_layout``'s own schema (``layout_json_schema``), which states
+    them AND is enforced where the provider honours it, so re-listing them here is a second copy of
+    the half that is already covered. What no JSON Schema can express is a constraint ACROSS the four
+    arrays — that is this panel's whole job now, and naming a COUNT of mandatory placeholders could
+    never resolve without it: a count is not a vocabulary. The constraint binds the MERGED layout,
+    which is what ``validate_l1_layout`` is handed — so it is a rule about what an edit may take
+    AWAY, and stating it as one an edit must satisfy by itself is what asked L2 to restate a layout
+    it was not changing."""
+    mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory)
+    return (
+        "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "
+        "enum; pick from there and invent nothing.\n"
+        "  The one rule it cannot state: after your edit is applied, each of these must still sit "
+        f"under SOME slot, or the whole edit rolls back —\n    {', '.join(mandatory)}"
     )

@@ -4,24 +4,15 @@ access is property-only, so "signals from measurement, not calendar" is structur
 from __future__ import annotations
 
 import enum
-from dataclasses import asdict, dataclass, is_dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import CampaignPhase, StopReason
-from promptpotter.domain.run_records import CycleRecord, PhaseRecord
+from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
-
-
-def _view_fields(record: PhaseRecord) -> dict[str, Any]:
-    """``payload["view"]`` as a mapping. A ledger replay deserializes it to a dict; the live
-    in-process path still holds the frozen view dataclass, and ``fold`` must read either."""
-    view = record.payload.get("view")
-    if is_dataclass(view) and not isinstance(view, type):
-        return asdict(view)
-    return view if isinstance(view, dict) else {}
 
 
 class NextAction(enum.StrEnum):
@@ -299,7 +290,7 @@ class EscalationFSM:
                 compared=int(record.payload["electable_count"]) > 0,
             )
         elif record.phase == CampaignPhase.REFINE_STRATEGY and record.event == "exit":
-            escalation_state = _view_fields(record)
+            escalation_state = view_fields(record)
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
@@ -309,7 +300,7 @@ class EscalationFSM:
             l2_theta = escalation_state.get("l2_best_theta_at_entry")
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
         elif record.phase == CampaignPhase.MODIFY_PLAN and record.event == "exit":
-            escalation_state = _view_fields(record)
+            escalation_state = view_fields(record)
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             l3_theta = escalation_state.get("l3_best_theta_at_entry")
             best_theta = None if l3_theta is None else float(l3_theta)

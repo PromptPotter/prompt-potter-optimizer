@@ -18,12 +18,12 @@
    (not a sibling card). Rendered below the SVG via a divider, so the
    summary + Endorse & fork button surface inside the lineage block
    the operator just clicked. */
-.scoring-inspector{border-top:1px solid var(--color-border);margin-top:12px;padding-top:10px;display:flex;flex-direction:column;gap:6px}
-.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:13px;font-weight:600;color:var(--color-text-primary)}
+.scoring-inspector{border-top:1px solid var(--color-border);margin-top:12px;padding-top:10px;display:flex;flex-direction:column;gap:var(--space-6)}
+.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-12);font-size:var(--text-base);font-weight:600;color:var(--color-text-primary)}
 .scoring-inspector .card-title{display:flex;align-items:center;justify-content:space-between}
-.inspector-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+.inspector-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-2xl);line-height:1;padding:0 var(--space-4)}
 .inspector-close:hover{color:var(--color-text-primary)}
-.inspector-body{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;padding:8px 12px;font-family:var(--font-mono);font-size:13px}
+.inspector-body{display:grid;grid-template-columns:max-content 1fr;gap:var(--space-4) var(--space-16);padding:var(--space-8) var(--space-12);font-family:var(--font-mono);font-size:var(--text-base)}
 .inspector-row{display:contents}
 .inspector-key{color:var(--color-text-secondary)}
 .inspector-val{color:var(--color-text-primary)}
@@ -31,44 +31,46 @@
 /* Fork action inside the ScoringInspector — only rendered when Edit mode
    is on. After a successful POST the action is replaced by the CLI command
    to run the new fork. */
-.inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
-.fork-button{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.inspector-actions{padding:var(--space-8) var(--space-12);border-top:1px solid var(--color-border);display:flex;align-items:center;gap:var(--space-8)}
+.fork-button{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:var(--space-6) var(--space-14);font-size:var(--text-base);cursor:pointer;font-family:inherit}
 .fork-button:disabled{opacity:0.5;cursor:not-allowed}
 
 /* Operator-steered fork — the inline edit+reconcile panel that replaces the
    inspector action row while steering. Select → edit evolved prompt → carry
    node config → reconcile limits → confirm `operator_steered` fork. */
-.steer-fork{display:flex;flex-direction:column;gap:12px;min-width:min(440px,82vw);max-width:560px}
-.steer-fork-sub{font-size:12px;color:var(--color-text-tertiary);margin:0 0 2px}
-.steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint);border-radius:5px;padding:6px 8px;margin:0}
-.steer-fork-err{color:var(--color-danger);font-size:12px}
-.steer-fork-locks{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-border);padding-top:10px}
+.steer-fork{display:flex;flex-direction:column;gap:var(--space-12);min-width:min(440px,82vw);max-width:560px}
+.steer-fork-sub{font-size:var(--text-sm);color:var(--color-text-tertiary);margin:0 0 2px}
+.steer-fork-note{font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-tint);border-radius:5px;padding:var(--space-6) var(--space-8);margin:0}
+.steer-fork-err{color:var(--color-danger);font-size:var(--text-sm)}
+.steer-fork-locks{display:flex;flex-direction:column;gap:var(--space-8);border-top:1px solid var(--color-border);padding-top:10px}
 /* Babysit warning — framed in the warn colour when a cap-holder can edit a locked
    axis (model/provider) on the fork; editing it taints the branch grade C. */
-.steer-fork-babysit{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);border-radius:6px;padding:8px 10px}
-.steer-fork-babysit-warn{margin:0;font-size:12px;line-height:1.45;color:var(--color-warn)}
-.steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
-.steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
-.steer-fork-confirm{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
+.steer-fork-babysit{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);border-radius:6px;padding:var(--space-8) var(--space-10)}
+.steer-fork-babysit-warn{margin:0;font-size:var(--text-sm);line-height:1.45;color:var(--color-warn)}
+.steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-8)}
+.steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-14);font-size:var(--text-base);font-family:inherit;cursor:pointer}
+.steer-fork-confirm{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:var(--space-6) var(--space-14);font-size:var(--text-base);font-family:inherit;cursor:pointer}
 .steer-fork-cancel:disabled,.steer-fork-confirm:disabled{opacity:0.5;cursor:not-allowed}
 
 /* Node structured-output — read-only contract shown beside the config. */
-.node-output-schema{display:flex;flex-direction:column;gap:4px}
-.node-output-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
+.node-output-schema{display:flex;flex-direction:column;gap:var(--space-4)}
+.node-output-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}
 .node-output-list{margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
-.node-output-row{display:grid;grid-template-columns:minmax(90px,auto) 1fr;align-items:baseline;gap:8px}
-.node-output-field{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary)}
-.node-output-desc{margin:0;font-size:11px;color:var(--color-text-tertiary)}
+.node-output-row{display:grid;grid-template-columns:minmax(90px,auto) 1fr;align-items:baseline;gap:var(--space-8)}
+.node-output-field{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
+.node-output-desc{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
 
 /* Limit reconcile — rounds + spend defaults to the parent's remaining. */
-.limit-reconcile{display:flex;flex-direction:column;gap:8px;padding:8px;border:0.5px solid var(--color-border);border-radius:6px}
-.limit-reconcile-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
-.limit-row{display:grid;grid-template-columns:74px 1fr;align-items:center;gap:6px 10px}
-.limit-label{font-size:12px;color:var(--color-text-secondary)}
-.limit-input{width:100%;min-width:0;padding:5px 8px;border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
-.limit-input-usd{display:flex;align-items:center;gap:6px}
-.limit-usd-prefix{color:var(--color-text-tertiary);font-size:12px}
-.limit-note{grid-column:2;color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
-.limit-reconcile-foot{color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
-.limit-advanced > summary{font-size:11px;color:var(--color-text-secondary);cursor:pointer}
-.limit-advanced-body{display:flex;flex-direction:column;gap:6px;padding-top:6px}
+.limit-reconcile{display:flex;flex-direction:column;gap:var(--space-8);padding:var(--space-8);border:0.5px solid var(--color-border);border-radius:6px}
+.limit-reconcile-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}
+.limit-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6) var(--space-10)}
+.limit-row > :first-child{flex:0 0 74px}
+.limit-row > :last-child{flex:1 1 160px;min-width:0}
+.limit-label{font-size:var(--text-sm);color:var(--color-text-secondary)}
+.limit-input{width:100%;min-width:0;padding:var(--space-4) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
+.limit-input-usd{display:flex;align-items:center;gap:var(--space-6)}
+.limit-usd-prefix{color:var(--color-text-tertiary);font-size:var(--text-sm)}
+.limit-note{grid-column:2;color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
+.limit-reconcile-foot{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
+.limit-advanced > summary{font-size:var(--text-xs);color:var(--color-text-secondary);cursor:pointer}
+.limit-advanced-body{display:flex;flex-direction:column;gap:var(--space-6);padding-top:6px}

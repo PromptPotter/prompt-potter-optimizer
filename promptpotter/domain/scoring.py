@@ -5,23 +5,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, cast
+from typing import Any, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
-
-# THE anchor for what a `composite_ci_lo/hi` pair brackets — every site that writes those bounds
-# writes this beside them, and no site re-derives it.
-#
-# A normal-CLT interval over per-cell mean COMPOSITE, until a warm-ruler election rewrites it to
-# the θ-implied ACCURACY band (`l1/score/winner.py`). That rewrite is gated three ways, so both
-# scales coexist inside one round and the bounds alone are ambiguous: the chart's re-derivation
-# ("composite if that series is drawn, else accuracy") drew composite-scale intervals against
-# accuracy bars for every eliminated or cold-ruler arm.
-#
-# Lives here rather than beside `CalibrationModel` in `results.py` because `run_records.py`
-# carries it too and `results` already imports THAT — this module is the leaf both reach.
-CiScale = Literal["composite", "accuracy"]
 
 
 class PipelineData(TypedDict, total=False):
@@ -47,10 +34,11 @@ class PipelineData(TypedDict, total=False):
     # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
     # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
     reasoning_trace: str
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. ``_se`` is the
-    # cell's own within-cell precision (`domain/l4/proxies.py`).
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. The SE beside it
+    # is this arm's OWN half of a paired cell difference — the shared origin level is excluded
+    # because it cancels in that difference (`domain/l4/proxies.py`).
     mean_round_delta: float
-    mean_round_delta_se: float
+    mean_adopted_level_se: float
     # Read defensively beside the top-level twins (`_absorb_sample_scored`, `RoundBuffer`):
     # no writer in this repo sets them here, but a backend that did must not be silently
     # dropped by ``ledger_sample_view``.

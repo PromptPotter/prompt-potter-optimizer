@@ -19,11 +19,11 @@ from promptpotter.domain.run_records import (
     LedgerAbility,
     LedgerCandidate,
 )
-from promptpotter.domain.scoring import CiScale
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_candidates,
+    scan_ledger_elections,
     scan_ledger_round_closes,
 )
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
@@ -90,7 +90,7 @@ class LineageNode(StrictModel):
         "on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a "
         "node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the "
         "minting course's private counter, while `candidate_id` is re-minted per run (see "
-        "`_close_facts`), so an id join silently misses.",
+        "`_round_facts`), so an id join silently misses.",
     )
     path: list[CycleHop] = Field(
         default_factory=list,
@@ -108,10 +108,21 @@ class LineageNode(StrictModel):
         description="Candidate: minted | measured — never 'winner' (that rides `is_winner`). "
         "Course: the cycle status.",
     )
+    election_held: bool = Field(
+        default=False,
+        description="This candidate's ROUND has held its election. The complement `is_winner` "
+        "cannot supply: a round that HELD crowned nobody, so every bar in it reads "
+        "`is_winner: false` exactly as a round still scoring does — and only this says whether "
+        "an uncrowned bar lost or has not been judged yet. False on a course, which is not a "
+        "round, and on a round halted before it stood (a holed panel).",
+    )
     is_winner: bool = Field(
         default=False,
-        description="Elected this round. False throughout a round that never CLOSED — "
-        "election is stamped at close, so such a round has no winner to report.",
+        description="Elected this round. Stamped at the ELECTION, which is the last thing "
+        "scoring does — so it lands a whole `l1_critique` call before the round closes, and a "
+        "round still running its optimizer calls already reports its winner. False where no "
+        "election has been held (still scoring, or halted on a holed panel) and on a round that "
+        "held: those two are told apart by the election record, not by this flag.",
     )
     theta: float | None = Field(
         default=None,
@@ -126,12 +137,6 @@ class LineageNode(StrictModel):
     )
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-    ci_scale: CiScale | None = Field(
-        default=None,
-        description="Which bar the band above brackets — the composite one or the accuracy "
-        "one. Served with the bounds; both scales coexist within a round, so a client that "
-        "re-derives it picks the wrong bar for every eliminated or cold-ruler candidate.",
-    )
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -327,41 +332,47 @@ def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
         return None
 
 
-class _CloseFacts(NamedTuple):
-    """What only a round CLOSE knows — the election, the ability it ranked on, the θ-implied band,
-    the frontier it advanced. No entry ⇒ no crown nobody awarded."""
+class _RoundFacts(NamedTuple):
+    """What a candidate learns from its ROUND, folded from the two records that hold it: the
+    ELECTION (the crown, stamped once at the end of scoring) and the CLOSE (θ + the frontier,
+    re-read every close so a warm ruler restamps them). Neither implies the other — a round elects
+    an ``l1_critique`` call before it closes. The whisker is in neither: it is the candidate's own,
+    and a round-scoped copy drew two quantities as one band."""
 
-    is_winner: bool
-    theta: float | None
-    theta_se: float | None
-    cumulative_theta: float | None
-    composite_ci_lo: float | None
-    composite_ci_hi: float | None
-    ci_scale: CiScale | None
+    election_held: bool = False
+    is_winner: bool = False
+    theta: float | None = None
+    theta_se: float | None = None
+    cumulative_theta: float | None = None
 
 
-def _close_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _CloseFacts]:
-    """``candidate_id -> _CloseFacts``, folded from the cycle's OWN ledger. **The join stays on
+def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
+    """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger. **The join stays on
     ``label``**: ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it."""
+    elections = scan_ledger_elections(ledger_path)
     closes = scan_ledger_round_closes(ledger_path)
-    out: dict[str, _CloseFacts] = {}
+    out: dict[str, _RoundFacts] = {}
     for cand in candidates:
+        election = elections.get(cand.round)
         close = closes.get(cand.round)
-        if close is None:
+        if election is None and close is None:
             continue
         # A HELD round adopted the incumbent, which is not among these — so nobody is crowned.
-        won = cand.label == close.winner_label
-        ability = close.abilities.get(cand.label) or LedgerAbility()
-        out[cand.candidate_id] = _CloseFacts(
+        won = (
+            election is not None
+            and bool(election.winner_label)
+            and cand.label == election.winner_label
+        )
+        ability = (
+            close.abilities.get(cand.label) if close is not None else None
+        ) or LedgerAbility()
+        out[cand.candidate_id] = _RoundFacts(
+            election_held=election is not None,
             is_winner=won,
             theta=ability.theta,
             theta_se=ability.theta_se,
             # The frontier belongs to the spine: only the adopted candidate advanced it.
-            cumulative_theta=close.cumulative_theta if won else None,
-            # Only where the warm ruler implied a band; else the candidate's own whisker stands.
-            composite_ci_lo=ability.composite_ci_lo,
-            composite_ci_hi=ability.composite_ci_hi,
-            ci_scale=ability.ci_scale,
+            cumulative_theta=close.cumulative_theta if won and close is not None else None,
         )
     return out
 
@@ -643,35 +654,19 @@ def _fold_contributions(
     return kids
 
 
-_NO_CLOSE = _CloseFacts(
-    is_winner=False,
-    theta=None,
-    theta_se=None,
-    cumulative_theta=None,
-    composite_ci_lo=None,
-    composite_ci_hi=None,
-    ci_scale=None,
-)
+_NO_ROUND_FACTS = _RoundFacts()
 
 
 def _candidate_node(
     cand: LedgerCandidate,
     *,
-    close: _CloseFacts,
+    close: _RoundFacts,
     children: list[LineageNode],
     retired_by: str | None,
     hops: list[CycleHop],
 ) -> LineageNode:
-    """One candidate as the tree serves it — ledger identity plus its round-CLOSE facts, two
-    appends to one ledger that identity joins (:func:`_close_facts`)."""
-    # Its OWN whisker unless a warm-ruler election implied a tighter band. All THREE move
-    # together — read apart, a `0.0` hi falls back and pairs with a lo that never bracketed it,
-    # and a scale left behind labels the new band with the old band's units.
-    ci_lo, ci_hi, ci_scale = (
-        (close.composite_ci_lo, close.composite_ci_hi, close.ci_scale)
-        if close.composite_ci_lo is not None
-        else (cand.composite_ci_lo, cand.composite_ci_hi, cand.ci_scale)
-    )
+    """One candidate as the tree serves it — ledger identity plus what its round decided about
+    it, appends to one ledger that identity joins (:func:`_round_facts`)."""
     return LineageNode(
         kind="candidate",
         id=cand.candidate_id,
@@ -685,12 +680,14 @@ def _candidate_node(
         composite_fitness=cand.composite_fitness,
         state=cand.state,
         evaluators=cand.evaluators,
-        composite_ci_lo=ci_lo,
-        composite_ci_hi=ci_hi,
-        ci_scale=ci_scale,
+        # The candidate's own band, and only ever that: the round close no longer carries a
+        # second one to prefer over it.
+        composite_ci_lo=cand.composite_ci_lo,
+        composite_ci_hi=cand.composite_ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,
+        election_held=close.election_held,
         # A RETIRED candidate wears no crown — the branch re-asks that election.
         is_winner=close.is_winner and retired_by is None,
         theta=close.theta,
@@ -737,7 +734,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     buckets = _bucket_by_parent(inner, candidates)
     hops = list(path)
 
-    closed = _close_facts(ledger_path, candidates)
+    decided = _round_facts(ledger_path, candidates)
 
     # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
@@ -759,7 +756,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
             [
                 _candidate_node(
                     cand,
-                    close=closed.get(cand.candidate_id, _NO_CLOSE),
+                    close=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
                     children=[
                         _build(c.store, c.path, depth=depth - 1, reads=reads)
                         for c in buckets.get(cand.candidate_id, [])

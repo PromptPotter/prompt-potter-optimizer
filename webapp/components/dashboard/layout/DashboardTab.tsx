@@ -13,7 +13,7 @@ import { TimeRay } from "./TimeRay";
 import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
-import { OuterVerdictPanel } from "@/components/dashboard/scoring/OuterVerdictPanel";
+import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
 import { OptimizerPromptRankingPanel } from "@/components/dashboard/scoring/OptimizerPromptRanking";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
@@ -61,7 +61,7 @@ export function DashboardTab() {
       </DashSpine>
       {isOuterSelfOpt && (
         <DashSpine>
-          <OuterVerdictPanel />
+          <OuterSignalPanel />
         </DashSpine>
       )}
       {/* Full-bleed, and deliberately OUTSIDE DashSpine: the spine is a 980px stripe that

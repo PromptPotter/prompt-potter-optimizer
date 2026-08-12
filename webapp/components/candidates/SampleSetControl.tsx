@@ -23,7 +23,7 @@ import { NEW_BG, NEW_BORDER, NEW_COLOR } from "@/components/dashboard/samples/tr
 
 const BTN: CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   padding: "1px 8px",
   border: "0.5px solid var(--color-border)",
   borderRadius: 2,
@@ -79,7 +79,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
               title={`Sample #${sid} — ${on ? "in" : "not in"} the fitness set. Click to toggle.`}
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 10,
+                fontSize: "var(--text-xs)",
                 minWidth: 22,
                 padding: "1px 4px",
                 borderRadius: 2,
@@ -110,7 +110,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
         >
           Off
         </button>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--color-text-tertiary)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
           round:
         </span>
         {roundSets.map((rs) => (
@@ -129,7 +129,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
           style={{
             marginLeft: "auto",
             fontFamily: "var(--font-mono)",
-            fontSize: 10,
+            fontSize: "var(--text-xs)",
             color: "var(--color-text-tertiary)",
           }}
         >
@@ -150,7 +150,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
           background: "transparent",
           cursor: "pointer",
           fontFamily: "var(--font-mono)",
-          fontSize: 10,
+          fontSize: "var(--text-xs)",
           color: "var(--color-text-tertiary)",
           textDecoration: "underline",
         }}
@@ -160,7 +160,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
       {detailOpen && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--color-text-tertiary)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
               a square loads:
             </span>
             <button

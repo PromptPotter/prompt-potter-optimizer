@@ -3,6 +3,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
 import { Popover } from "@/components/ui";
+import { PotterMark } from "@/components/brand/PotterMark";
 
 // The OS-style dock of open units, sitting in the topbar next to the view tabs:
 // aggregated, collapsed, glanceable. Absent when idle (the absence IS the "all
@@ -19,21 +20,9 @@ interface Props {
   onPicked?: () => void;
 }
 
-// Inline copy of public/brand/potter-mark.svg (currentColor → inherits the
-// button's text colour). Kept inline so the glyph tints with theme + hover.
-const POTTER_GLYPH = (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
-    <path
-      d="M12 1.6 21.5 7v10L12 22.4 2.5 17V7z"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinejoin="round"
-    />
-    <path d="M12 6.8 8 14.8h8z" fill="currentColor" />
-    <path d="M8 16.9h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    <path d="M3 12h3.4M17.6 12H21" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-  </svg>
-);
+// currentColor → inherits the button's text colour, so the glyph tints with
+// theme + hover. Shared definition in components/brand/PotterMark.
+const POTTER_GLYPH = <PotterMark size={16} />;
 
 export function RunningJobsButton({ onPicked }: Props) {
   const { liveCycles, campaigns, selectCycle } = useWorkspace();

@@ -98,10 +98,8 @@ class RunLimits(StrictModel):
     pobb_epsilon: float
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    # The ♥ bank's declared ceiling, the DENOMINATOR for the live ``hearts`` count.
-    # Without it ``hearts: 3`` is scaleless — the operator cannot tell healthy-of-four
-    # from nearly-dead-of-seven, and in lives mode ``max_rounds`` is null, so the round
-    # counter it replaces carried the only scale there was. ``None`` when lives is off.
+    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and
+    # in lives mode ``max_rounds`` is null. ``None`` when lives is off.
     lives_cap: int | None = None
 
 
@@ -117,25 +115,13 @@ class PobbBlock(StrictModel):
 
 class CurrentRound(StrictModel):
     """``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist.
+    The four rules it serves under (no ``live`` flag, ``round`` is ``state.round``, this-round-only
+    ``nodes``, one candidate shape) are ``infrastructure/CLAUDE.md`` § LiveDashboardView RESOLVES."""
 
-    There is deliberately **no** ``live`` flag here. "Is the run running" is ``run_phase``, one
-    field up and already server-owned; "is this the round I am looking at" is ``round`` below.
-    A third boolean spelling their conjunction as "has this round closed into ``rounds[]``" is
-    what blanked the optimizer canvas through the whole post-round escalation window, where the
-    round IS closed and ``l2_context`` is very much running."""
-
-    # ALWAYS ``state.round``, so a reader can select this block over the audit twin by plain
-    # equality — and the block stays the better source after close, since the escalation calls
-    # that fire next land here and never in the already-flushed twin.
     round: int = 0
-    # Which optimizer node is working, over the FULL phase vocabulary. ``None`` only when
-    # nothing is running.
     active_node: str | None = None
-    # This round's candidates, same shape as a closed round's — so a reader takes a whole row
-    # rather than merging two shapes field by field.
     candidates: list[DashboardCandidate] = Field(default_factory=list)
-    # Per-node LLM I/O for THIS round, keyed by node id, mirroring ``round_NNNN.json::nodes``.
-    # Free-form payloads (``build_node_block``, shared with the audit twin).
+    # Free-form per-node LLM I/O (``build_node_block``), mirroring ``round_NNNN.json::nodes``.
     nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     pobb: PobbBlock = Field(default_factory=PobbBlock)
 
@@ -146,91 +132,63 @@ class LiveDashboardState(StrictModel):
 
     model_config = ConfigDict(validate_assignment=False)
 
-    # Identity stamp — which session-family this dashboard.json describes.
-    # Set once at construction; the webapp drops any polled payload whose
-    # stamp doesn't match the unit it asked for.
+    # Set once at construction; the webapp drops any polled payload whose stamp doesn't
+    # match the unit it asked for.
     campaign_id: str
     cycle_id: str
     session_id: str
 
-    # Operator-facing deep link to this cycle's Langfuse trace, composed once
-    # (set at construction from the obs bridge's trace id). None when Langfuse
-    # is disabled. The webapp can't compose it — LANGFUSE_HOST is backend-only —
-    # so it ships pre-built; this is the live-run path to the full nested trace.
+    # Composed at construction because the webapp can't — LANGFUSE_HOST is backend-only.
+    # None when Langfuse is disabled.
     langfuse_trace_url: str | None = None
 
-    # Operator-visible activity name + transition timestamp.
     state: DashboardState = DashboardState.INIT
     state_since: str
 
-    # The single run-state vocabulary (RunPhase). Declared by the runner via
-    # control PhaseRecords and projected here, so a paused run reads as
-    # "paused" even after dashboard.json goes stale — freshness is no longer
-    # load-bearing for control state. ``state`` (above) stays the fine-grained
-    # activity (origin / scoring / l1_generate / …); ``run_phase`` is the
-    # coarse lifecycle+control axis every surface reads. Never "detached" here
-    # (a dead producer can't write) — that value is emitted only by the
-    # server-side ``derive_run_phase`` reader.
+    # The coarse lifecycle+control axis every surface reads, declared by the runner via
+    # control PhaseRecords — so a paused run reads as paused even once this file goes stale.
+    # ``state`` above stays the fine-grained activity. Never "detached" here (a dead producer
+    # can't write); only the server-side ``derive_run_phase`` reader emits that.
     run_phase: RunPhase = RunPhase.RUNNING
 
     stop_reason: str | None = None
 
-    # Current round / candidate / sample-progress markers.
     round: int = 0
     candidate: str = ""
     query: str = ""
     patience: str = ""
-    # Banked lives ("hearts") — the high-level ♥ readout when the run is in
-    # improvement-banked-budget mode; ``None`` when lives mode is off (the UI then
-    # shows the round counter as before). A dynamic per-round marker, not a declared
-    # ceiling, so it sits here beside ``round`` rather than in ``run_limits``.
+    # Banked lives in improvement-banked-budget mode; ``None`` when lives is off (the UI
+    # then shows the round counter). A per-round marker, not a ceiling — hence not in
+    # ``run_limits``.
     hearts: int | None = None
 
-    # Origin is round 0 — it lives in ``rounds[]`` as a normal one-candidate
-    # RoundSummary, not a separate block. Same shape every L1 round has.
     rounds: list[RoundSummary] = Field(default_factory=list)
 
     best: float = 0.0
     current_acc: float = 0.0
     # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's
-    # ``cumulative_theta`` minus the origin's. The ONE derivation of "how far above origin is
-    # the incumbent" — the webapp headline chip and the L4 inner progress line read it, neither
-    # recomputes it. ``None`` until round 0 has settled with an ability.
-    #
-    # It was ``best − rounds[0].accuracy``, and claimed "one basis on both sides". That is false
-    # under ``per_round_resubset``: each round draws a FRESH subset, so ``best`` is a running max
-    # over numbers measured on different sample sets — it selects the luckiest draw, and the
-    # origin it subtracts was measured on the full bank. On `justlogic-d234` seed-0 that served
-    # **+19%** for a cell whose ability never moved (θ +0.6823 in all four rounds, C0 winning
-    # every one, stop `lives_exhausted`). Ability is the only cross-round-comparable series here
-    # — the same reason `RoundSummary.cumulative_theta` exists — so the headline reads it.
-    # Renamed off `headline_delta` because the units changed; `headline_metric` still picks which
-    # fitness number headlines per-candidate TEXT, which is a different question.
+    # ``cumulative_theta`` minus the origin's. The ONE derivation — the webapp headline chip
+    # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
+    # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each
+    # round draws a fresh subset, so a max over rounds selects the luckiest draw.
     ability_delta: float | None = None
     composite_fitness_formula: str | None = None
-    # Campaign default for which fitness number headlines the operator's text
-    # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is
-    # always θ; this only seeds the webapp's client-overridable headline toggle.
-    # Stamped at INIT:exit beside run_limits, so a fork carries its own default.
-    # The SAME closed set `CampaignConfig.headline_metric` declares — widening it to
-    # `str` here only forced the webapp to re-narrow it by hand.
+    # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
+    # headline toggle. Stamped at INIT:exit beside run_limits, so a fork carries its own.
     headline_metric: HeadlineMetric = "accuracy"
 
     degraded_count: int = 0
     error_count: int = 0
 
-    # Backend retry / warning visibility.
     backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
-    # Optimizer-loop degradation visibility — sibling to recent_backend_warnings.
     recent_loop_warnings: list[LoopWarning] = Field(default_factory=list)
 
     total_queries_scored: int = 0
     total_backend_calls: int = 0
 
-    # In-flight sample markers — the OLDEST open sample, derived from the open set rather than
-    # assigned per event, since look-ahead leaves more than one open
-    # (``view.py::_refresh_open_sample_markers``).
+    # The OLDEST open sample, derived from the open set rather than assigned per event, since
+    # look-ahead leaves more than one open (``view.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
     current_sample_id: int | None = None
 
@@ -246,23 +204,18 @@ class LiveDashboardState(StrictModel):
     n_variants: int
     sp_budget_ttest: int
 
-    # Declared run-limit ceilings (max_rounds / patiences / pobb_epsilon /
-    # spend_budget). Written once at INIT:exit; None until then.
+    # None until INIT:exit.
     run_limits: RunLimits | None = None
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
 
     in_flight: InFlightCall | None = None
 
-    # Paired-PoBB backfill audit — per-sample log capped at 256 entries.
     backfill_log: list[BackfillLogEntry] = Field(default_factory=list)
 
-    # The round in flight (rebuilt every persist).
     current_round: CurrentRound = Field(default_factory=CurrentRound)
 
-    # Populated only when the runner crashed — operator-facing message +
-    # exception class. Absent on normal stops; sole writer is
-    # ``LiveDashboardView._handle_error``.
+    # Sole writer ``LiveDashboardView._handle_error``; absent on normal stops.
     error: DashboardError | None = None
 
     @classmethod
@@ -289,9 +242,8 @@ class LiveDashboardState(StrictModel):
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "patience": f"0/{l1_patience}",
-            # Stamped by the STARTING process, not carried from `prior`, and not waiting for
-            # INIT:exit — round 0 runs before any INIT event reaches the ledger, so waiting
-            # publishes the wrong headline for the whole origin pass.
+            # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
+            # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
             "headline_metric": headline_metric,
             "run_phase": RunPhase.RUNNING,
             "stop_reason": None,

@@ -18,7 +18,7 @@ from typing import Any, cast
 from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_override
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
-from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
+from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_DESCRIPTIONS_PARAM,
@@ -110,17 +110,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
         }
     if param == "layout":
         spec = NODE_LAYOUTS.get(node.name)
-        if spec is None:
-            return None
-        allowed = sorted(spec.possible)
-        return {
-            "type": "object",
-            "properties": {
-                slot: {"type": "array", "items": {"type": "string", "enum": allowed}}
-                for slot in L1_LAYOUT_SLOTS
-            },
-            "additionalProperties": False,
-        }
+        return None if spec is None else layout_json_schema(spec)
     if param == SCHEMA_RENAME_PARAM and NODE_LAYOUTS.get(node.name) is not None:
         return {
             "type": "object",
@@ -217,12 +207,22 @@ def build_l1_response_schema(
         del variant_props["prompt_fields_override"]
         del variant_props["task_context_override"]
 
-    # 4. evidence_grounding.field — the panels THIS round's prompt renders. The optional
-    # slot inlines as `anyOf: [<object>, null]`, so find the object arm.
-    for arm in variant_props["evidence_grounding"].get("anyOf", []):
-        eg_field = arm.get("properties", {}).get("field")
-        if eg_field is not None:
-            eg_field["enum"] = list(citable_fields)
+    # 4. evidence_grounding — the panels THIS round's prompt renders, and the one field this
+    # schema makes STRICTER than its parse twin. The model stays optional on purpose (a provider
+    # omitting the citation must not crash a whole round's variants), but the WIRE offered `null`
+    # as a legal answer to a question the loop treats as mandatory, and 2 of 19 live rounds took
+    # it — for every variant in the call, since one response is one decision. `citable_fields` is
+    # never empty, so the object arm alone is always satisfiable.
+    variant_items = inlined["properties"]["variants"]["items"]
+    eg = variant_props["evidence_grounding"]
+    object_arm = next(a for a in eg["anyOf"] if a.get("type") == "object")
+    object_arm["properties"]["field"]["enum"] = list(citable_fields)
+    # The null arm and the `default: null` beside it go together — either one alone still reads
+    # as "you may skip this".
+    variant_props["evidence_grounding"] = object_arm
+    required = variant_items.setdefault("required", [])
+    if "evidence_grounding" not in required:
+        required.insert(0, "evidence_grounding")
 
     # 5. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
     # reader observes the wire name. (The `description` lever no longer touches THIS schema:

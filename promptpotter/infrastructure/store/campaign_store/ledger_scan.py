@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CycleSeed,
+    ElectionRecord,
     LedgerCandidate,
     LedgerRoundClose,
 )
@@ -115,6 +116,45 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
     return out
 
 
+def scan_ledger_decisions(ledger_path: Path) -> dict[int, list[dict[str, object]]]:
+    """``round -> the decisions that round made``, in append order.
+
+    Keyed on the STAMP ``record_decision`` was handed, never on ledger position. Position looks
+    like the better signal — ``persist_round`` appends a drain immediately before its
+    ``round:complete``, so the next close ought to name the flushing round — and it is wrong:
+    round 0 closes TWICE, the second time when the ruler warms at round 1, so the next close
+    after a round-1 decision reads 0. Trusting that misfiled 118 replayed decisions."""
+    out: dict[int, list[dict[str, object]]] = {}
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"decision"})):
+        rnd = rec.get("round")
+        if not isinstance(rnd, int):
+            continue
+        out.setdefault(rnd, []).append(
+            {
+                "kind": rec.get("kind"),
+                "inputs_ref": rec.get("inputs_ref") or {},
+                "outcome": rec.get("outcome"),
+                "data": rec.get("data") or {},
+            }
+        )
+    return out
+
+
+def scan_ledger_elections(ledger_path: Path) -> dict[int, ElectionRecord]:
+    """``round -> the election it held``; last write per round wins, so a re-run supersedes. **A
+    round with no entry never elected** — still scoring, or halted on a holed panel — which is a
+    different fact from one that elected and crowned nobody (here, with an empty ``winner_label``).
+    Only this scan separates them, so an absent crown is no evidence on its own."""
+    out: dict[int, ElectionRecord] = {}
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"election"})):
+        try:
+            election = ElectionRecord.model_validate(rec)
+        except ValidationError:
+            continue
+        out[election.round] = election
+    return out
+
+
 def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     """``round -> LedgerRoundClose`` for every round that CLOSED; last write per round wins, so a rewind
     supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one."""
@@ -128,7 +168,6 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
         try:
             out[rnd] = LedgerRoundClose(
                 round=rnd,
-                winner_label=payload.get("winner_label") or "",
                 cumulative_theta=payload.get("cumulative_theta"),
                 cumulative_theta_se=payload.get("cumulative_theta_se"),
                 abilities=payload.get("abilities") or {},
@@ -141,6 +180,8 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
 __all__ = [
     "scan_ledger_candidates",
     "scan_ledger_cycle_seed",
+    "scan_ledger_decisions",
+    "scan_ledger_elections",
     "scan_ledger_max_round_complete",
     "scan_ledger_round_closes",
 ]

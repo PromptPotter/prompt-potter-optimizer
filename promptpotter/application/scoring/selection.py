@@ -22,19 +22,31 @@ __all__ = [
     "composite_ci",
     "elect_round_winner",
     "elimination_p_best",
+    "matched_origin_lift",
     "paired_fitness",
 ]
 
 
-def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
-    """Brackets the SCOREABLE population, since that is the number it is drawn beside — but do
-    not push that filter into ``_mean_fitness_by_cell``, which the overlap guard needs un-predicated."""
+def _scoreable(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
+    """The rows a PUBLISHED INTERVAL may bracket."""
+    # Deliberately NOT pushed into `_mean_fitness_by_cell`, which the overlap guard and the
+    # election need un-predicated: a DECISION grades an errored row 0.0 (the arm was asked and
+    # produced nothing), while an interval drawn beside a point estimate must bracket the same
+    # population that estimate came from. Load-bearing at L4, where a cell is a whole inner
+    # campaign and fitness re-anchors `mean_round_delta` — a floored 0.0 there does not read as
+    # "scored nothing", it reads as "drove the inner loop maximally DOWN". Refusing to convict an
+    # arm of that on a cell that crashed is the one thing the retired outer verdict got right.
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.classification import is_deprecated
+
+    return [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+
+
+def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
+    """Brackets the scoreable population, since that is the number it is drawn beside."""
     from promptpotter.shared.statistics import mean_ci
 
-    scoreable = [r for r in results if not is_deprecated(r) and not is_error_result(r)]
-    per_cell = list(_mean_fitness_by_cell(scoreable).values())
+    per_cell = list(_mean_fitness_by_cell(_scoreable(results)).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -95,6 +107,28 @@ def paired_fitness(
         cand_fit.append(cand_by_sid[sid])
         origin_fit.append(origin_by_sid[sid])
     return cand_fit, origin_fit
+
+
+def matched_origin_lift(
+    candidate_results: list[QueryMeasurement],
+    origin_results: list[QueryMeasurement],
+) -> tuple[float, float, float] | None:
+    """``(lift, ci_lo, ci_hi)`` against the origin ON THE CELLS BOTH MEASURED — the blocked
+    comparison, sharper than ``composite_ci`` on the same rows. ``None`` below two shared cells."""
+    # One pair has no spread, and an interval drawn from it claims a precision nobody bought.
+    from promptpotter.shared.statistics import paired_diff_posterior, t_critical
+
+    # ``_scoreable`` on both arms, matching ``composite_ci`` — the two intervals sit on one row and
+    # must bracket one population. A cell either arm errored on drops the PAIR, which is what makes
+    # the panel a narrowed comparison rather than a smaller one; ``n_cells`` alone cannot say which.
+    cand_fit, origin_fit = paired_fitness(_scoreable(candidate_results), _scoreable(origin_results))
+    if len(cand_fit) < 2:
+        return None
+    lift, se, n = paired_diff_posterior(cand_fit, origin_fit)
+    # Student-t, not z: the SE is estimated from the same handful of cells it widens (~7 cells ⇒
+    # 2.45, not 1.96). At the outer level those cells are whole inner campaigns and there are six.
+    crit = t_critical(n - 1)
+    return (lift, lift - crit * se, lift + crit * se)
 
 
 def elect_round_winner(

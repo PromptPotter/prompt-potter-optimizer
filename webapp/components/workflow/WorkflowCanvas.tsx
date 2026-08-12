@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CANVAS_W, CANVAS_H, DOT_R, EDGES, LAYOUT } from "./layout";
+import { CANVAS_W, CANVAS_H, DOT_R, EDGES, INTENTIONALLY_UNPLACED, LAYOUT } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
@@ -42,7 +42,16 @@ export function WorkflowCanvas({ pipeline }: Props) {
   const layout = LAYOUT;
   const edges = EDGES;
   const canvasW = CANVAS_W;
-  const canvasH = CANVAS_H;
+  // Served nodes this hand-drawn geometry has no position for. `output` is
+  // deliberately absent; anything else means the optimizer manifest gained a
+  // node LAYOUT was never told about. They get a stray row rather than being
+  // dropped — four hand-maintained copies of this topology agree today, and the
+  // only thing that would ever have reported them diverging was silence.
+  const strayNodes = (view?.nodes ?? []).filter(
+    (n) => !LAYOUT[n.id] && !INTENTIONALLY_UNPLACED.has(n.id),
+  );
+  const STRAY_ROW_H = 38;
+  const canvasH = CANVAS_H + (strayNodes.length ? STRAY_ROW_H : 0);
   const activeId = dash?.current_round.active_node ?? null;
   // The optimizer can only ever depict ONE round, so the round axis is this
   // card's own scope — its picker sits in the toolbar and its dots, labels and
@@ -138,7 +147,9 @@ export function WorkflowCanvas({ pipeline }: Props) {
         <CopyButton data={roundNodes} title="Copy the viewed round's nodes as JSON" />
       </div>
       <div className="workflow-canvas-bg">
-        <div className="workflow-canvas">
+        {/* The CSS pins aspect-ratio 360/160; a stray row makes the viewBox
+            taller, so the ratio has to follow or the diagram squashes. */}
+        <div className="workflow-canvas" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
           <svg
             width="100%"
             height="100%"
@@ -169,6 +180,21 @@ export function WorkflowCanvas({ pipeline }: Props) {
                   {edgeLabel && geom.labelXY && (
                     <text x={geom.labelXY[0]} y={geom.labelXY[1]} fontSize="12" fill={stroke} textAnchor="middle" fontFamily="ui-sans-serif,system-ui" paintOrder="stroke" stroke={colors.bg} strokeWidth="3">{edgeLabel}</text>
                   )}
+                </g>
+              );
+            })}
+            {strayNodes.map((n, i) => {
+              // Evenly spaced along a row below the diagram, labelled, so a node
+              // the geometry does not know about is impossible to miss.
+              const x = ((i + 0.5) * canvasW) / strayNodes.length;
+              const y = CANVAS_H + STRAY_ROW_H / 2;
+              return (
+                <g key={`stray-${n.id}`} className="wf-stray">
+                  <title>{`${n.label} — served by the optimizer manifest, missing from LAYOUT`}</title>
+                  <circle className="wf-dot kind-unplaced" cx={x} cy={y - 6} r={DOT_R - 3} />
+                  <text className="wf-dot-label" x={x} y={y + 12} textAnchor="middle">
+                    {n.label}
+                  </text>
                 </g>
               );
             })}
@@ -240,15 +266,25 @@ export function WorkflowCanvas({ pipeline }: Props) {
                       leaves the gap between dot and label dead). Mirrors the
                       lineage node's transparent backing rect. Skipped for I/O
                       nodes, which carry no selection handler. */}
-                  {!isIo && (
-                    <rect
-                      x={pos.cx - (DOT_R + 8)}
-                      y={pos.cy - (DOT_R + 8)}
-                      width={2 * (DOT_R + 8)}
-                      height={lDy + (sub ? 26 : 14) + (DOT_R + 8)}
-                      fill="transparent"
-                    />
-                  )}
+                  {!isIo && (() => {
+                    // Spans dot AND label band, whichever way the label sits —
+                    // a node labelling above its dot would otherwise get a rect
+                    // of near-zero (or negative) height and lose the hit target.
+                    const dotTop = -(DOT_R + 8);
+                    const dotBottom = DOT_R + 8;
+                    const labelTop = lDy - 11;
+                    const labelBottom = lDy + (sub ? 16 : 4);
+                    const top = Math.min(dotTop, labelTop);
+                    return (
+                      <rect
+                        x={pos.cx - (DOT_R + 8)}
+                        y={pos.cy + top}
+                        width={2 * (DOT_R + 8)}
+                        height={Math.max(dotBottom, labelBottom) - top}
+                        fill="transparent"
+                      />
+                    );
+                  })()}
                   <circle className={dotCls} cx={pos.cx} cy={pos.cy} r={DOT_R} />
                   <text
                     className="wf-dot-label"

@@ -44,9 +44,17 @@ Three verdicts ship, and each answers a different "what if".
 
 | Ask | How | Names an alternative? |
 |---|---|---|
-| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree` — each node also gets a `lens_value` | Yes — the candidate that formula would have elected |
+| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree` — each node also gets a `lens_value` | Yes — the candidate that formula ranks first |
 | **A PoBB contributor switched off** | `?lens=abort:<variant>`, variant ∈ `epsilon_off` \| `lock_in_off` \| `all_off` | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab` — replays the active cycle's whole campaign | Where a `round_winner` decision flips, yes |
+
+**Row one re-ranks the RECORD; row three re-runs the ELECTION, and the difference is not a
+matter of degree.** The lens orders candidates by `display_rank_key` over the masked aggregate,
+so its divergence means *under this formula the crowned candidate is no longer the best-scoring
+one*. The election ranks Rasch θ-lift over the anchor behind a coverage floor, and θ under
+another formula has to be re-fit from per-sample grades against a re-calibrated δ ruler — which
+is what `ab` does and what a polled tree read cannot. Ask the lens which rounds are worth
+replaying; ask `ab` whether the run would have moved.
 
 `?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples. No
 lens and no samples is the raw read.

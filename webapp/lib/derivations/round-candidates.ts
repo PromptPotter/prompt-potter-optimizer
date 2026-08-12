@@ -20,7 +20,7 @@
 
 import { liveCandidateId } from "@/lib/candidate-label";
 import { liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
-import type { DashboardCandidate, RoundSummaryCandidate } from "@/lib/api/types";
+import type { DashboardCandidate } from "@/lib/api/types";
 import type {
   CandidateRow,
   CandidateSource,
@@ -101,12 +101,13 @@ function rowOf(
     theta_se: c.theta_se,
     compositeCiLo: c.composite_ci_lo,
     compositeCiHi: c.composite_ci_hi,
-    ciScale: c.ci_scale,
     matchedOriginAccuracy: c.matched_origin_accuracy,
     matchedOriginComposite: c.matched_origin_composite,
     evaluators: c.evaluators,
-    // Only a CLOSED row carries a crown; a live one has held no election yet.
-    is_winner: (c as Partial<RoundSummaryCandidate>).is_winner ?? false,
+    // Served on the base shape, so a LIVE row carries it too: the election runs at the end
+    // of scoring, not at round close. `false` means nothing has been crowned yet — never
+    // that this candidate lost (`derivations/election.ts::crownState` owns that reading).
+    is_winner: c.is_winner,
     n_samples: c.scored_samples,
     n_expected: c.expected_samples,
     cached_samples: c.cached_samples,

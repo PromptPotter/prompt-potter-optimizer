@@ -5,7 +5,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
-const base: CSSProperties = { padding: 8, fontSize: 13 };
+const base: CSSProperties = { padding: 8, fontSize: "var(--text-base)" };
 
 export function Empty({
   children,

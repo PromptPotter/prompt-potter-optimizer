@@ -329,8 +329,8 @@ The persisted world is a four-entity containment hierarchy
 - **config coupling / config map** — the declared registry of which knob
   moves which estimand and which knobs *clash* (a combination that makes a
   shared estimand ill-defined or a tuned knob inert). One source of truth
-  (`application/knobs.py`), read by the pre-run preflight warning,
-  the `python -m promptpotter.diagnostics.config_map` table, and the webapp
+  (`application/knobs.py`), read by the pre-run preflight warning and by
+  `campaigns/manifests.py::get_campaign_config_map`, which serves the webapp
   Config-map panel. Answers "what overwrites what" (provenance: effective
   value + source layer per knob) and "what clashes with what" (the active
   couplings). Where the "deferred-with-the-flip" interactions in

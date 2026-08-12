@@ -1,6 +1,6 @@
 /* Unauthed Topbar chips — Log in (yellow-gold) + Sign up for free (rust/burnt-orange).
    Same shape, two color variants drawn straight from the accent palette. */
-.auth-chip{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:999px;border:0.5px solid transparent;font:inherit;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;transition:filter 120ms,transform 60ms}
+.auth-chip{display:inline-flex;align-items:center;height:30px;padding:0 var(--space-14);border-radius:999px;border:0.5px solid transparent;font:inherit;font-size:var(--text-base);font-weight:600;text-decoration:none;cursor:pointer;transition:filter 120ms,transform 60ms}
 .auth-chip:hover{filter:brightness(1.08)}
 .auth-chip:active{transform:translateY(1px)}
 .auth-chip-gold{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-text-on-accent)}
@@ -8,16 +8,16 @@
 /* Default-browser-style blue hyperlinks used inside the auth prompt. */
 .auth-link{color:#3b82f6;text-decoration:underline}
 .auth-link:hover{color:#60a5fa}
-.auth-legal-row{display:flex;justify-content:center;align-items:center;gap:8px;font-size:12px;color:var(--color-text-tertiary)}
+.auth-legal-row{display:flex;justify-content:center;align-items:center;gap:var(--space-8);font-size:var(--text-sm);color:var(--color-text-tertiary)}
 
 /* Shared auth core — the sign-in controls + copy reused by the /login page and
    the WelcomeLockoutModal overlay. Owns its own internal spacing so it drops
    into either parent (left-aligned) unchanged. */
-.auth-core{display:flex;flex-direction:column;gap:14px;width:100%;text-align:left}
+.auth-core{display:flex;flex-direction:column;gap:var(--space-14);width:100%;text-align:left}
 .auth-note{margin:0;color:var(--color-text-secondary);line-height:1.55}
-.auth-fineprint{margin:-4px 0 0;font-size:11px;color:var(--color-text-tertiary);line-height:1.5}
+.auth-fineprint{margin:-4px 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary);line-height:1.5}
 /* Value headline — popup-only (the showcase carries the pitch on /login). */
-.auth-headline{margin:0;font-size:20px;line-height:1.3;font-weight:500;color:var(--color-text-primary)}
+.auth-headline{margin:0;font-size:var(--text-3xl);line-height:1.3;font-weight:500;color:var(--color-text-primary)}
 
 /* Post-auth consent gate (ConsentGate) — the blocking Terms-acceptance overlay.
    Reuses .account-overlay/.account-modal chrome + .auth-note/.auth-link; the
@@ -25,8 +25,8 @@
    is the wide row), and these own the checkbox row + the accept action (button
    reuses .login-button). */
 .consent-modal{flex-direction:column;max-width:440px;min-height:0}
-.consent-modal .account-pane-body{gap:16px}
-.consent-check{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;color:var(--color-text-secondary);cursor:pointer}
+.consent-modal .account-pane-body{gap:var(--space-16)}
+.consent-check{display:flex;gap:var(--space-10);align-items:flex-start;font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary);cursor:pointer}
 .consent-check input{margin-top:3px;flex:0 0 auto;cursor:pointer}
 .consent-actions .login-button{cursor:pointer}
 .consent-actions .login-button:disabled{opacity:.5;cursor:not-allowed}
