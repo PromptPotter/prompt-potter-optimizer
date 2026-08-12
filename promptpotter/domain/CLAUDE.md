@@ -33,11 +33,8 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
   and every term the panel retired, is argued in
   [`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
-  `verdict.py`: what a ROUND of
-  them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
-  is what stops it growing a file read or a session dep, which is exactly how it drifted before.
-  Import the submodule, never the package: `domain.results` imports `verdict` while `proxies`
-  imports `domain.results`, so a re-exporting `__init__` would make two acyclic modules circular.
+  Round-level statistics (lift + CI over a round of cells) are now computed by the engine's scoring
+  layer and served as `matched_origin_lift{,_ci_lo,_ci_hi}` fields on `ScoredCandidate` / `RoundResult`.
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen
   `CampaignConfig` snapshot.
