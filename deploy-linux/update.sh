@@ -21,12 +21,13 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 
 # set_env_kv + the brand fan-out, shared with bootstrap.sh.
 source "$HERE/brand-env.sh"
+# wait_healthy — shared with every other script that starts something.
+source "$HERE/health.sh"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[1;31m✗\033[0m %s\n' "$*"; }
 sync() { git -C "$1" fetch --quiet origin && git -C "$1" reset --hard --quiet "@{u}"; }   # mirror origin
-probe(){ curl -fsS "$1" >/dev/null 2>&1; }
 
 # --- preflight: refuse the placeholder fallback -----------------------------
 # Without deploy.config, INSTALL_DIR defaults to a generic placeholder that
@@ -84,7 +85,7 @@ fi
 
 # --- health -----------------------------------------------------------------
 say "health"
-probe "http://127.0.0.1:$BIND_PORT$HEALTH_PATH" && ok "app up ($BIND_PORT)" || bad "app down — journalctl -u $SERVICE_NAME -e"
+wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH" && ok "app up ($BIND_PORT)" || bad "app down — journalctl -u $SERVICE_NAME -e"
 if [[ -n "$BACKEND_DIR" ]]; then
-  probe "http://127.0.0.1:$BACKEND_PORT/status" && ok "backend up ($BACKEND_PORT)" || bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"
+  wait_healthy "http://127.0.0.1:$BACKEND_PORT/status" && ok "backend up ($BACKEND_PORT)" || bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"
 fi
