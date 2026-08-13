@@ -231,7 +231,8 @@ def from_disk_log(
     return LogMdView(
         status=status,
         rounds=tuple(round_views),
-        formula=final.get("scorer_round_formula"),
+        # Top-level key is the running cycle's copy, stamped at init; `final` only exists at stop.
+        formula=final.get("scorer_round_formula") or index.get("scorer_round_formula"),
         origin_composite_fitness=final.get("origin_composite_fitness"),
         hard_samples=hard,
         final=final_view,

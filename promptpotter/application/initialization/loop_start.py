@@ -302,6 +302,22 @@ def _finalize_loop_state(
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
+    # Stamped at init rather than only into `index.json::final`: that block exists only once the
+    # cycle STOPS, and a RUNNING cycle's `log.md` must still name the formula its numbers carry.
+    if session.state.cycle_id:
+        from promptpotter.application.scoring.evaluators import resolve_round_formula
+        from promptpotter.shared.errors import graceful
+
+        with graceful("round-formula stamp failed"):
+            session.store.campaigns.update(
+                session.hop,
+                {
+                    "scorer_round_formula": resolve_round_formula(
+                        session.scoring.scorer_round_formula, session.pipeline_schema
+                    )[0]
+                },
+            )
+
     emit_phase(
         cb.on_phase,
         CampaignPhase.INIT,
