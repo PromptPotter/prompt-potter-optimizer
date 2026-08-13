@@ -415,14 +415,14 @@ async def measure_sample(
             val = data.get(key)
             if val is not None:
                 pd[key] = val
-        terminated_at = data.get("terminated_at")
-        if terminated_at is None:
+        terminal_node = data.get("terminal_node")
+        if terminal_node is None:
             st = pd.get("step_timings") or {}
             for node in pipeline_schema.nodes:
                 if st.get(node.name) is not None:
-                    terminated_at = node.name
-        if terminated_at is not None:
-            pd["terminated_at"] = terminated_at
+                    terminal_node = node.name
+        if terminal_node is not None:
+            pd["terminal_node"] = terminal_node
 
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
@@ -515,8 +515,8 @@ def _rerun_would_repeat_token_budget_failure(
     # The terminal LLM node is read off the cached result itself, so the infra-code / token
     # lookups key on the SAME node classify_result stamped. The trailing `or "llm_only"` is a
     # literal coupling to the single-node sentinel, fired when the row carries no
-    # `terminated_at` — folding it into a declared constant is an open design call.
-    node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"
+    # `terminal_node` — folding it into a declared constant is an open design call.
+    node = ((cached_result.get("pipeline_data") or {}).get("terminal_node")) or "llm_only"
     cl = classify_result(cached_result)
     budget_exhausted = (
         f"{node}:reasoning_budget_exhausted" in cl.infra_codes

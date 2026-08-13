@@ -152,9 +152,10 @@ controls:
         match the served origin (localhost vs 127.0.0.1 mismatch breaks the session cookie locally).
     status: ok
     gap: local redirect_uri is 127.0.0.1:8001 while preview is served on localhost:8001 — env-specific.
-  - id: no_google_fallback
-    do: No-Google-account path → "Open a GitHub issue to request beta access" (→ BRAND.supportUrl,
-        the repo issues; whitelabel-overridable). No editable field that discards input.
+  - id: no_request_access
+    do: There is NO request-access affordance and no invite framing — signing in IS signing up, so
+        this surface has no rejection to explain. Whether the new account may act is resolved after
+        sign-in and shown by access_gate below. No editable field that discards input.
     status: ok
   - id: legal.{privacy,terms,imprint}
     do: External links to brand legal pages; must resolve 200.
@@ -164,11 +165,33 @@ controls:
     status: ok
 ```
 
+### Access gate — blocking, post-auth, ahead of consent
+
+```yaml
+surface: access_gate   # components/onboarding/AccessGate.tsx, mounted in app/page.tsx
+shows_when: status==='authed' AND me.access_state === 'pending'
+controls:
+  - id: sign_out
+    do: POST /api/v1/auth/logout, then hard-navigate to /login. Navigates even when the logout
+        call fails — a dead button on a non-dismissable overlay strands the user.
+    status: ok
+invariants:
+  - anon NEVER sees this (no account yet) — I4.
+  - it PRECEDES consent_gate and the two are mutually exclusive: consent attaches when someone is
+    about to submit data, and a pending account cannot, so asking it to accept Terms would collect
+    a consent for something it may not do.
+  - reflects, never enforces — the server already refuses a pending account's every command at the
+    dispatcher's capability gate (it holds the empty set), so this adds no second check.
+  - NO dismiss beyond sign-out: no ×, no backdrop-close, no ESC. There is nothing to agree to, so
+    leaving is the only action, and it is offered plainly rather than hidden.
+```
+
 ### Consent gate — blocking, post-auth
 
 ```yaml
 surface: consent_gate   # components/onboarding/ConsentGate.tsx, mounted in app/page.tsx
-shows_when: status==='authed' AND me.terms_accepted_version !== me.terms_version
+shows_when: status==='authed' AND me.access_state === 'active'
+            AND me.terms_accepted_version !== me.terms_version
 controls:
   - id: checkbox
     do: Unticked on open (no pre-tick — GDPR/FADP affirmative consent). Gates the accept button.
@@ -550,9 +573,12 @@ The authenticated + live-campaign surface is verified against real on-disk
 campaigns via the faithful harness (`PROMPTPOTTER_AUTH=off` — recipe:
 [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture).
 
-Two states remain **un-exercised** (not contract gaps — just unreached here):
+Three states remain **un-exercised** (not contract gaps — just unreached here):
 - `warming` (origin running, `dashboard.json` not yet written) — needs a live
   starting campaign; verify on the next real run.
+- `access_state === 'pending'` — the `AUTH=off` harness resolves to the local
+  operator, who is entitled by construction, so the access gate has never been
+  rendered in a browser. Reach it by signing in with an off-allowlist account.
 - The real Google OIDC **login round-trip** — `AUTH=off` bypasses the redirect,
   so the post-login mount path is reachable only via the Dex harness
   (`dev/oidc-local/`), where it was driven end-to-end and the dashboard mounts

@@ -1,3 +1,4 @@
+import { AccessGate } from "@/components/onboarding/AccessGate";
 import { AppShell } from "@/components/shell/AppShell";
 import { ConsentGate } from "@/components/onboarding/ConsentGate";
 import { ErrorBoundary } from "@/components/ui";
@@ -17,9 +18,11 @@ export default function Home() {
         <ViewMemoryProvider>
           <AppShell />
         </ViewMemoryProvider>
-        {/* Blocking overlay for a signed-in user who hasn't accepted the
-            current Terms — self-hides for anon (read-only preview) and the
-            already-consented. */}
+        {/* Two blocking overlays, mutually exclusive by construction. AccessGate
+            holds a signed-in account the allowlist doesn't carry yet; ConsentGate
+            holds an entitled one that hasn't accepted the current Terms. Both
+            self-hide for anon (read-only preview). */}
+        <AccessGate />
         <ConsentGate />
       </WorkspaceProvider>
     </ErrorBoundary>

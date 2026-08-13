@@ -1,4 +1,4 @@
-"""Provenance grade (``A`` > ``B`` > ``C``) from ``source`` + per-sample ``terminated_at``, stamped once at
+"""Provenance grade (``A`` > ``B`` > ``C``) from ``source`` + per-sample ``terminal_node``, stamped once at
 ``build_dataset_run_data``. Consumers read the grade instead of being fooled by row count."""
 
 from __future__ import annotations
@@ -55,13 +55,13 @@ def llm_terminal_nodes(schema: PipelineSchema | None) -> frozenset[str]:
 
 
 def _ran_llm_path(measurement: Mapping[str, Any], llm_nodes: frozenset[str]) -> bool:
-    """Whether one sample reached the deliberate LLM evaluation. An EMPTY ``terminated_at`` means the pipeline ran to
-    completion; a set value naming a non-LLM node means it short-circuited before any LLM call."""
+    """Whether one sample reached the deliberate LLM evaluation. ``terminal_node`` names the deepest node that RAN, so a
+    value outside *llm_nodes* short-circuited before any LLM call; an unstamped row is credited, never penalised."""
     pd = measurement.get("pipeline_data") or {}
-    terminated_at = pd.get("terminated_at") or ""
-    if not terminated_at:
+    terminal_node = pd.get("terminal_node") or ""
+    if not terminal_node:
         return True
-    return terminated_at in llm_nodes
+    return terminal_node in llm_nodes
 
 
 def llm_path_fraction(

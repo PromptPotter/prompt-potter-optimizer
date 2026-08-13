@@ -35,8 +35,14 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   config an operator types is YAML, state code writes is JSON — but still check which
   tree a path is under before assuming a shape.
 - **`"llm_only"`** — the **single-node pipeline sentinel**, and nothing else
-  (`terminated_at`). It is a NODE name the six single-node benchmarks declare inside a
+  (`terminal_node`). It is a NODE name the six single-node benchmarks declare inside a
   `termnorm` pipeline — never a connector.
+- **`terminal_node`** — the **deepest pipeline node a sample REACHED**, on its
+  `pipeline_data`. Never a failure signal: a run that completed stamps the last node, so
+  a tally of it is a constant, not a diagnosis. It doubles as the archive's reuse depth
+  ("this outcome depends on config only up to here" — `MeasurementArchive.load_reusable_results`),
+  which is why the L4 connector stamps it outright (`runner/inner/spawn.py`). It was called
+  `terminated_at`, and three readers in a row took that as "where it died".
 - **thinking channel** — where a model puts its internal process: a `reasoning` slot in a
   node's `output_schema`, or the provider's native `message.reasoning` (captured as
   `LLMResponse.reasoning`). **Not optional instrumentation** — a model given nowhere to

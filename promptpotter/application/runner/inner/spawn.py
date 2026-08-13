@@ -523,8 +523,10 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
+            # No `spend_budget_usd=`: that argument is the RUN-SCOPED override, and restating the
+            # config's own value through it is a second spelling of the same cap. Omitted, the
+            # inner cycle is bound by `campaign_config.optimization.spend_budget_usd` directly.
             mode=RunMode(),
-            spend_budget_usd=campaign_config.optimization.spend_budget_usd,
         )
     finally:
         # One process runs dozens of inner campaigns back-to-back, so anything holding an OS
@@ -716,8 +718,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
 
     data: dict[str, Any] = {
         # The connector's `_extract_experiment` sets `ground_truth` to the same `inner:{query}`
-        # prefix — keep the two in sync. The outcome suffix is safe because no consumer matches
-        # predicted against ground_truth: the outer hit is `fitness >= 1.0`.
+        # prefix — keep the two in sync. The outcome suffix means the two can never be EQUAL, so
+        # every outer sample reads as a MISS. Nothing that grades reads it that way (the outer
+        # score is `fitness`, and a hit at `>= 1.0` is unreachable under this campaign's formula)
+        # — but the failure PANELS did, and a critique then diagnosed the artifact as a real
+        # defect. They now ask `panels._miss_is_placeholder` and stay silent instead; do not
+        # reintroduce a hit/miss reader here without teaching it that predicate.
         INNER_RESULT_KEY: [f"inner:{query} D{proxies.mean_round_delta:+.3f}"],
         # The outer loop's raw evidence, rendered as MODEL REASONING in its transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),
@@ -731,7 +737,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
         # only honest stamp is the LAST node of the outer chain — anything earlier lets a
         # candidate editing a later node silently replay the origin's rows.
-        "terminated_at": "l3_plan",
+        "terminal_node": "l3_plan",
         "total_time": elapsed,
         "step_timings": {"l1_critique": elapsed},
     }

@@ -31,8 +31,8 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 
 The person who **runs the box** is not the same principal as a user who owns a tenant on
 it, and the two must never collapse — on the team-online deployment (our default), every
-signup is a user, and users hold nearly all of an owner's rights. What separates a host
-admin is a small, explicitly-named set, never an implicit "and also…".
+signup is a user, and an ENTITLED user holds nearly all of an owner's rights. What separates a
+host admin is a small, explicitly-named set, never an implicit "and also…".
 
 **What host-admin can do** is one definition: `ADMIN_CAPABILITIES` (`shared/identity.py`).
 *Most* host-admin power still ships through the **operator-admin channel**
@@ -77,10 +77,11 @@ user's data from another's; a capability was never what did that work.
 never drift. Adding a power = one line there. Kept separate from `ADMIN_CAPABILITIES`:
 owning a tenant is not running the box.
 
-**Who holds what:** every authenticated user owns their own tenant and holds the full owner
-set (`_identity_context_from_session`, `presentation/api/middleware/oidc.py`); the single
-local operator gets the same from `default_identity` (`shared/identity.py`) on the CLI /
-auth-off path. A **delegate** holds an attenuated subset — see below.
+**Who holds what:** every **entitled** authenticated user owns their own tenant and holds the full
+owner set (`_identity_context_from_session`, `presentation/api/middleware/oidc.py`); a **pending**
+one owns the same tenant and holds nothing. The single local operator gets the full set from
+`default_identity` (`shared/identity.py`) on the CLI / auth-off path, where no allowlist stands. A
+**delegate** holds an attenuated subset — see below.
 
 **Command-verb authorization (ADR-0005).** Every
 control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
@@ -175,9 +176,15 @@ not backend-supplied.
 - **One public port behind Cloudflare Tunnel** (outbound-only; no inbound router port). uvicorn
   binds `127.0.0.1` with `--proxy-headers --forwarded-allow-ips=127.0.0.1`. TermNorm binds
   `127.0.0.1:8000`, never tunneled.
-- **AuthN:** Google OIDC + email allowlist (re-read live). Missing session → 401 at
-  `resolve_identity` (`deps.py`). Session cookie is httponly / secure / samesite=lax, opaque id
-  (no JWT past the middleware — ADR-0002).
+- **AuthN:** Google OIDC. Missing session → 401 at `resolve_identity` (`deps.py`). Session cookie is
+  httponly / secure / samesite=lax, opaque id (no JWT past the middleware — ADR-0002).
+- **Sign-up is open; the allowlist is an ENTITLEMENT gate, not a sign-in gate.** Anyone completing
+  OIDC gets an account. `oidc.py::resolve_access_state` (re-read live) decides whether it holds any
+  capability; a `pending` account resolves to an EMPTY set, so Tier 1b's dispatcher gate refuses its
+  every command with the same 404 a stranger gets. Nothing else re-checks. The one thing held behind
+  entitlement outside that set is `maybe_claim_default` — the marker it writes is what grants
+  `ADMIN_CAPABILITIES`, so an unguarded claim would make the first stranger on an unclaimed box the
+  host admin.
 - **Admin (allowlist) edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
 - **Response headers** (`main.py::SecurityHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
@@ -194,6 +201,7 @@ not backend-supplied.
 
 | Concern | Look at |
 |---|---|
+| Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
 | Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |

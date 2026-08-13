@@ -112,9 +112,8 @@ def _build_budget_gate(
 
 def _apply_config_overrides(
     config: CampaignConfig,
-    spend_budget_usd: float | None,
     overrides: ConfigOverrides,
-) -> tuple[CampaignConfig, float | None]:
+) -> CampaignConfig:
     """Snapshot the fork's effective config — parent frozen config plus absolute overrides, never a
     mutation. Reassigning it at the runner seam is what propagates to every reader."""
     opt_updates: dict[str, Any] = {
@@ -139,19 +138,15 @@ def _apply_config_overrides(
         if v is not None
     }
     if not opt_updates and not sel_updates:
-        return config, spend_budget_usd
+        return config
     if sel_updates:
         mech = config.optimization.mechanisms
         opt_updates["mechanisms"] = mech.model_copy(
             update={"selection": mech.selection.model_copy(update=sel_updates)}
         )
-    new_config = config.model_copy(
+    return config.model_copy(
         update={"optimization": config.optimization.model_copy(update=opt_updates)}
     )
-    effective_spend = (
-        overrides.spend_budget_usd if overrides.spend_budget_usd is not None else spend_budget_usd
-    )
-    return new_config, effective_spend
 
 
 def _read_cycle_seed(session: Session) -> CycleSeed | None:
@@ -165,11 +160,15 @@ def _read_cycle_seed(session: Session) -> CycleSeed | None:
 @dataclass(frozen=True)
 class _PreparedRun:
     """Resolved run inputs — the straight-line prep done once before the rebase loop.
-    ``campaign_config`` / ``spend_budget_usd`` re-emit because a seed may reconcile new limits."""
+    ``campaign_config`` re-emits because a seed may reconcile new limits.
+
+    There is deliberately no ``spend_budget_usd`` beside it: the run-scoped cap is folded INTO
+    ``campaign_config.optimization`` by ``_prepare_run``, so one value both halts the run and
+    reaches every reader. Held separately, the cap that halted was invisible — ``run_limits`` in
+    ``dashboard.json`` reported the campaign's declared default while a different number bound."""
 
     origin: CampaignOrigin
     campaign_config: CampaignConfig
-    spend_budget_usd: float | None
     scoring_spec: ScoringSpec
 
 
@@ -212,6 +211,18 @@ async def _prepare_run(
 ) -> _PreparedRun:
     cb = observers.callbacks
 
+    # Fold the run-scoped cap (CLI `--spend-budget`, the API's launch field) into the config
+    # BEFORE the seed block, so precedence stays seed > run-scoped > campaign default and every
+    # reader — the gate, `run_limits`, the webapp — sees the number that actually binds.
+    if spend_budget_usd is not None:
+        campaign_config = campaign_config.model_copy(
+            update={
+                "optimization": campaign_config.optimization.model_copy(
+                    update={"spend_budget_usd": spend_budget_usd}
+                )
+            }
+        )
+
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
     # after it makes the origin pass below pausable like every other phase.
@@ -229,9 +240,7 @@ async def _prepare_run(
         )
     if seed is not None:
         # Onto a FRESH config snapshot, reassigned before any downstream call.
-        campaign_config, spend_budget_usd = _apply_config_overrides(
-            campaign_config, spend_budget_usd, seed.config_overrides
-        )
+        campaign_config = _apply_config_overrides(campaign_config, seed.config_overrides)
         if (
             overlay_sets_model_outside_allowed(
                 seed.pipeline_overlay, campaign_config.allowed_models
@@ -267,7 +276,6 @@ async def _prepare_run(
     return _PreparedRun(
         origin=origin,
         campaign_config=campaign_config,
-        spend_budget_usd=spend_budget_usd,
         scoring_spec=split_scoring_block(campaign_config.scoring),
     )
 
@@ -422,9 +430,7 @@ async def _run_single_cycle(
         budget_gate = _build_budget_gate(
             observers,
             cycle_dir_for_probe,
-            usd_cap=prep.spend_budget_usd
-            if prep.spend_budget_usd is not None
-            else campaign_config.optimization.spend_budget_usd,
+            usd_cap=campaign_config.optimization.spend_budget_usd,
             token_cap=campaign_config.optimization.token_budget,
         )
         # Same gate, two cadences — the round boundary and the per-sample checkpoint — bound as
@@ -530,10 +536,8 @@ def _mint_and_rebase_fork(
     parent_cycle_id = session.state.cycle_id
     seed: CycleSeed | None = None
     if rebase_req.config_overrides is not None:
-        campaign_config, spend_budget_usd = _apply_config_overrides(
-            prep.campaign_config, prep.spend_budget_usd, rebase_req.config_overrides
-        )
-        prep = replace(prep, campaign_config=campaign_config, spend_budget_usd=spend_budget_usd)
+        campaign_config = _apply_config_overrides(prep.campaign_config, rebase_req.config_overrides)
+        prep = replace(prep, campaign_config=campaign_config)
         # No `origin_prompt_fields`: a rebase replays its origin from the parent's round, so it
         # has no C0 provenance to stamp.
         seed = CycleSeed(config_overrides=rebase_req.config_overrides)

@@ -1,23 +1,16 @@
 "use client";
-// Shared auth entry — Google sign-in (the ONLY method, now with the Google mark
-// on the button), the invite-only framing, and the Google-only / no-password
-// explanation kept VISIBLE (an earlier "Why Google only?" popover that hid it
-// tested worse — operator call). A "Request access" link points the un-invited
-// at the marketing waitlist rather than a GitHub issue. The single source of the
-// sign-in controls + copy, rendered identically by the standalone /login page
-// and the WelcomeLockoutModal overlay. Each surface wraps it with its own
-// framing: the page adds a wordmark, the modal adds header chrome + value
-// headline + legal footer.
-
-import { BRAND } from "@/lib/brand";
-
-// Beta-access request channels. The marketing waitlist is the friendly path;
-// the repo issue tracker is the whitelabel fallback (both NEXT_PUBLIC_*-
-// overridable). `marketing.url` is set by default, so "Request access" is a
-// real link unless a whitelabel host clears NEXT_PUBLIC_MARKETING_URL.
-const ISSUE_URL = BRAND.supportUrl;
-const WAITLIST_URL = BRAND.marketing.url ? `${BRAND.marketing.url}/product#waitlist` : null;
-const REQUEST_ACCESS_URL = WAITLIST_URL ?? ISSUE_URL;
+// Shared auth entry — Google sign-in (the ONLY method, with the Google mark on
+// the button) and the Google-only / no-password explanation kept VISIBLE (an
+// earlier "Why Google only?" popover that hid it tested worse — operator call).
+// The single source of the sign-in controls + copy, rendered identically by the
+// standalone /login page and the WelcomeLockoutModal overlay. Each surface wraps
+// it with its own framing: the page adds a wordmark, the modal adds header
+// chrome + value headline + legal footer.
+//
+// There is no "request access" affordance and no invite framing: signing in IS
+// how you get an account. Whether that account may run anything is resolved
+// after sign-in and shown by AccessGate, so this surface no longer has a
+// rejection to explain.
 
 // Google's "G" mark — inline so the one sign-in method carries its provider's
 // logo (an unmistakable "use Google" signal). Decorative; the button text is
@@ -48,10 +41,6 @@ function GoogleMark() {
 const AUTH_ERROR_FALLBACK = (): string => "Something went wrong during sign-in. Try again.";
 
 const AUTH_ERROR_COPY: Record<string, (email: string | null) => string> = {
-  not_allowlisted: (email) =>
-    email
-      ? `${email} isn't on the beta list yet. Open a GitHub issue below to request an invite.`
-      : "That Google account isn't on the beta list yet. Open a GitHub issue below to request an invite.",
   state_invalid_or_expired: () =>
     "That sign-in took too long and expired. Try Continue with Google again.",
   code_exchange_failed: () => "We couldn't verify your sign-in with Google. Try again.",
@@ -85,15 +74,8 @@ export function AuthCore({ errorCode, errorEmail }: Props) {
       ) : null}
 
       <p className="auth-note">
-        PromptPotter is{" "}
-        {WAITLIST_URL ? (
-          <a className="auth-link" href={WAITLIST_URL} target="_blank" rel="noopener noreferrer">
-            invite-only
-          </a>
-        ) : (
-          "invite-only"
-        )}{" "}
-        while we&rsquo;re in beta. Sign in with the Google account that received your invite.
+        Create your account with Google. PromptPotter is opening up in stages, so running
+        campaigns switches on once we reach you &mdash; your account is saved either way.
       </p>
 
       <div className="login-buttons">
@@ -105,11 +87,7 @@ export function AuthCore({ errorCode, errorEmail }: Props) {
 
       <p className="auth-fineprint">
         Google is the only sign-in. We federate identity and never store passwords, so there&rsquo;s no
-        email-and-password option. Each instance keeps its own invite list, so{" "}
-        <a className="auth-link" href={REQUEST_ACCESS_URL} target="_blank" rel="noopener noreferrer">
-          request access
-        </a>{" "}
-        from the people who run it.
+        email-and-password option.
       </p>
     </div>
   );

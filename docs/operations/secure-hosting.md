@@ -72,6 +72,31 @@ are clamped to yours at every use — a grant can never exceed what you hold.
 Every change is recorded to `.promptpotter/identity/allowlist_audit.jsonl` (allowlist) or
 `grants_audit.jsonl` (delegations) — an audit trail you can `cat` on the box.
 
+## New accounts into your CRM (optional)
+
+Signing in *is* signing up, and the allowlist decides only whether an account can *act*. So a
+new account is a contact worth keeping whether or not you entitle it. Set one more key in the
+same `.env` (the app service reads it through `EnvironmentFile`, exactly as the bot does):
+
+```bash
+N8N_SIGNUP_WEBHOOK_URL=https://<your-n8n>/webhook/<the-workflow's-path>
+```
+
+The app then POSTs `{email, name, use_case, signup_source}` there the first time a new account
+calls `/auth/me`, and the receiving workflow logs it and writes the CRM row. Leave the key unset
+and nothing is sent — the forward is best-effort and never fails a sign-in
+(`admin_bot.py::forward_new_account_to_crm`).
+
+**Copy the path from the workflow's webhook node, not from its file name** — the two drift, and a
+`POST`-only webhook answers *"not registered"* to the browser GET you would naturally test it with,
+so a wrong path and a live-but-unreachable one look identical. Confirm with the receiving side's
+own API instead of by probing the URL.
+
+**This does not contradict the section below.** The traffic is outbound-only and carries contact
+details, never a credential: n8n cannot call back, holds no token of yours, and a breach there
+reaches your mailing list, not your auth gate. The rule that stays is the direction of travel —
+nothing external may *drive* an admin action.
+
 ## Why not just expose an admin endpoint?
 
 Because that puts your front-door lock on the public internet behind a single token —

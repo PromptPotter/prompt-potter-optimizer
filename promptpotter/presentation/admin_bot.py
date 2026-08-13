@@ -1,5 +1,8 @@
-"""On-box admin bot (ADR-0004) — long-polls Telegram OUTBOUND only and edits the allowlist + delegations. It opens no
-inbound port, which is the entire point: the privileged auth-gate mutation never leaves the protected zone."""
+"""The operator-admin channel (ADR-0004) — long-polls Telegram OUTBOUND only and edits the allowlist + delegations. It
+opens no inbound port, which is the entire point: the privileged auth-gate mutation never leaves the protected zone.
+
+The same charter covers the one-shot outbound notices the API process fires when an account first exists
+(``notify_operator``, ``forward_new_account_to_crm``): deployment-side, outbound-only, best-effort, no inbound door."""
 
 from __future__ import annotations
 
@@ -133,6 +136,62 @@ def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
         client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
     except httpx.HTTPError:
         logger.warning("sendMessage failed", exc_info=True)
+
+
+def notify_operator(text: str) -> bool:
+    """One-shot outbound notice on the SAME channel the bot polls (ADR-0004): same token, same chat lock,
+    no inbound door. Callable from the API process, which is a different process from ``run_bot`` — this
+    opens its own short-lived client rather than sharing one.
+
+    Best-effort by contract: an unconfigured bot or a dead network returns ``False`` and never raises, so
+    a notice can't fail the request that triggered it. Returns whether it was sent.
+    """
+    token = os.environ.get("ADMIN_BOT_TELEGRAM_TOKEN", "").strip()
+    chat_id = os.environ.get("ADMIN_BOT_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        logger.info("Operator notice skipped (admin bot not configured): %s", text)
+        return False
+    try:
+        with httpx.Client(base_url=f"https://api.telegram.org/bot{token}", timeout=10) as client:
+            client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
+    except httpx.HTTPError:
+        logger.warning("Operator notice failed to send", exc_info=True)
+        return False
+    return True
+
+
+def forward_new_account_to_crm(email: str | None, name: str | None, user_id: str) -> bool:
+    """Announce a new account to the n8n ``signup-intake`` door, which logs it and writes the CRM row.
+
+    Every account joins the CRM on arrival; curation happens afterwards. The alternative — a row that
+    appears only when the operator taps a button — means the contact record depends on someone being at
+    their phone, and an untapped signup simply never exists.
+
+    n8n holds the Google Sheets credentials, so this announces the account rather than writing the row
+    itself: one system owns that surface, and it is not this one. Same charter as ``notify_operator``
+    (ADR-0004) — outbound-only, no inbound door, and best-effort by contract, so an unconfigured webhook
+    or a dead network returns ``False`` and never raises. A CRM hiccup must not fail the sign-in that
+    created the account. Returns whether it was sent.
+    """
+    url = os.environ.get("N8N_SIGNUP_WEBHOOK_URL", "").strip()
+    if not url:
+        logger.info("CRM forward skipped (N8N_SIGNUP_WEBHOOK_URL not set): %s", email or user_id)
+        return False
+    try:
+        with httpx.Client(timeout=10) as client:
+            client.post(
+                url,
+                json={
+                    "email": email or "",
+                    "name": name or "",
+                    "use_case": "",
+                    "signup_source": "promptpotter-app",
+                },
+            )
+    except httpx.HTTPError:
+        logger.warning("CRM forward failed for %s", email or user_id, exc_info=True)
+        return False
+    return True
 
 
 def _process_update(

@@ -126,7 +126,7 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
         advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
     if not advisories and is_error_result(result):
-        advisories.add(f"{pd.get('terminated_at', 'unknown')}:error")
+        advisories.add(f"{pd.get('terminal_node', 'unknown')}:error")
     if _is_refusal(result):
         advisories.add(f"{_terminal_node(result)}:model_refusal")
     return advisories
@@ -144,10 +144,10 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
 
 
 def _terminal_node(result: Mapping[str, Any]) -> str:
-    """The node this result terminated at, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
+    """The deepest node this result reached, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
     classification keys on this result's terminal node and fires for a multi-node terminal LLM too."""
     pd = result.get("pipeline_data") or {}
-    return pd.get("terminated_at") or "llm_only"
+    return pd.get("terminal_node") or "llm_only"
 
 
 def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:

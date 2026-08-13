@@ -438,8 +438,8 @@ class MeasurementArchive:
                 if not isinstance(sid, int) or item.get("predicted") == "ERROR":
                     continue
                 if not is_full_match:
-                    terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
-                    if not (terminated_at and terminated_at in trusted_nodes):
+                    terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
+                    if not (terminal_node and terminal_node in trusted_nodes):
                         continue
                 existing = cache.get(sid)
                 if (

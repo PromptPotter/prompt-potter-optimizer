@@ -154,7 +154,7 @@ def _compute_recall(
 ) -> float | None:
     def _step_ran(r: QueryMeasurement) -> bool:
         pd = r.get("pipeline_data") or {}
-        if pd.get("terminated_at") == node.name:
+        if pd.get("terminal_node") == node.name:
             return True
         return (pd.get("step_timings") or {}).get(node.name) is not None
 

@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId
+from promptpotter.infrastructure.identity.allowlist import check_allowlist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
@@ -18,6 +19,8 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
+    ACCESS_ACTIVE,
+    ACCESS_PENDING,
     ADMIN_CAPABILITIES,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
@@ -28,9 +31,26 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "promptpotter_session"
 
 
-def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str]:
-    """Capabilities for an authenticated web identity — every user owns their tenant, so each holds the
-    owner set. Admin is the PINNED marker identity: an env flag here would make every signup an admin."""
+def resolve_access_state(email: str | None, bundle: IdentityBundle) -> str:
+    """Is this account entitled to act? The allowlist is an ENTITLEMENT gate, not a sign-in gate: anyone
+    completing OIDC gets an account, and this decides whether it can do anything. The ONE derivation — the
+    capability set, the served ``access_state`` and the default-tenant claim all read it, so an account
+    cannot be pending on one surface and active on another."""
+    return (
+        ACCESS_ACTIVE if check_allowlist(bundle.paths.allowlist, email).allowed else ACCESS_PENDING
+    )
+
+
+def _session_capabilities(
+    user_id: str, bundle: IdentityBundle, access_state: str
+) -> frozenset[str]:
+    """Capabilities for an authenticated web identity — every ENTITLED user owns their tenant, so each
+    holds the owner set. A PENDING account holds none, which is the whole pre-stage: the dispatcher's
+    `_require_capability_for` refuses every command with the same 404 a stranger already gets, so no
+    surface needs its own check. Admin is the PINNED marker identity: an env flag here would make every
+    signup an admin."""
+    if access_state == ACCESS_PENDING:
+        return frozenset()
     admin_uid = registered_user_id(bundle.paths.default_claim_marker)
     if admin_uid is not None and user_id == admin_uid:
         return OWNER_COMMAND_CAPABILITIES | ADMIN_CAPABILITIES
@@ -45,7 +65,15 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
             user_id=UserId(data.user_id),
             tenant_id=TenantId(data.tenant_id),
             issuer=Issuer(data.issuer) if data.issuer else None,
-            claims={"email": data.email, "provider": data.provider, "subject": data.subject},
+            claims={
+                "email": data.email,
+                "provider": data.provider,
+                "subject": data.subject,
+                # A sub-principal's entitlement IS its grant, never the allowlist — it acts inside a
+                # delegator's tenant and was provisioned by the admin channel. Revoked reads as pending
+                # for the same reason a never-approved signup does: authenticated, holding nothing.
+                "access_state": ACCESS_PENDING,
+            },
             capabilities=frozenset(),
         )
     return IdentityContext(
@@ -59,6 +87,7 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
             "principal": data.user_id,
             "delegated_by": grant.delegated_by,
             "spend_ceiling_usd": grant.spend_ceiling_usd,
+            "access_state": ACCESS_ACTIVE,
         },
         capabilities=resolve_effective_capabilities(grant, OWNER_COMMAND_CAPABILITIES),
     )
@@ -75,6 +104,7 @@ def _identity_context_from_session(
     grant = read_grant(bundle.paths.grants, data.user_id)
     if grant is not None:
         return _delegated_identity(data, grant)
+    access_state = resolve_access_state(data.email, bundle)
     return IdentityContext(
         user_id=UserId(data.user_id),
         tenant_id=TenantId(data.tenant_id),
@@ -83,8 +113,9 @@ def _identity_context_from_session(
             "email": data.email,
             "provider": data.provider,
             "subject": data.subject,
+            "access_state": access_state,
         },
-        capabilities=_session_capabilities(data.user_id, bundle),
+        capabilities=_session_capabilities(data.user_id, bundle, access_state),
     )
 
 
@@ -115,4 +146,4 @@ def install_oidc_middleware(app: FastAPI) -> None:
     app.add_middleware(OIDCMiddleware)
 
 
-__all__ = ["SESSION_COOKIE_NAME", "install_oidc_middleware"]
+__all__ = ["SESSION_COOKIE_NAME", "install_oidc_middleware", "resolve_access_state"]

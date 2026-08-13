@@ -148,8 +148,6 @@ def render_round_stats(
         return "\n".join(lines)
 
     try:
-        from collections import Counter
-
         from promptpotter.application.optimization.pobb.classification import (
             get_ranked_items,
             ranked_item_keys_from_schema,
@@ -159,20 +157,15 @@ def render_round_stats(
         ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
         results = round_result.results
         n_results = len(results)
-        terminations: Counter[str] = Counter()
         degraded = 0
         for r in results:
             pd = r.get("pipeline_data") or {}
-            terminations[pd.get("terminated_at", "unknown")] += 1
             if (pd.get("diagnostics") or {}).get("warnings"):
                 degraded += 1
 
-        if terminations:
-            lines.append(
-                _node_line(
-                    f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in terminations.most_common())}"
-                )
-            )
+        # No "Pipeline: <node>:<n>" tally here. It counted `terminal_node`, the deepest node each
+        # sample REACHED, so a healthy round printed every sample under the last node — a constant
+        # dressed as a finding. Degradation below is the line that varies.
         if degraded > 0:
             lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
 

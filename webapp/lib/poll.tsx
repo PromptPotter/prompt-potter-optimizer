@@ -67,7 +67,7 @@ export interface LiveSample {
   prediction?: string;
   cached?: boolean;
   time_s?: number;
-  terminated_at?: string;
+  terminal_node?: string;
   input_tokens?: number;
   output_tokens?: number;
 }
