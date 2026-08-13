@@ -97,13 +97,18 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     from promptpotter.application.preflight import check_model_reasoning_floors
     from promptpotter.infrastructure.llm.registry import model_profile
 
-    prof = model_profile("deepseek/deepseek-v4-flash:nitro")
+    prof = model_profile("deepseek/deepseek-v4-flash-0731:nitro")
     assert prof is not None and prof.is_reasoning and prof.min_max_tokens >= 8000
     floor = prof.min_max_tokens
 
     # Below-floor reasoning model with an EXPLICIT cap → blocked (the l1_critique bug).
     below = check_model_reasoning_floors(
-        [("l1_critique", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor - 1})]
+        [
+            (
+                "l1_critique",
+                {"model": "deepseek/deepseek-v4-flash-0731:nitro", "max_tokens": floor - 1},
+            )
+        ]
     )
     assert len(below) == 1 and "l1_critique" in below[0]
 
@@ -111,8 +116,8 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     # sanctioned default), non-reasoning suffix-normalized, and an unprofiled model.
     clean = check_model_reasoning_floors(
         [
-            ("at_floor", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor}),
-            ("absent_cap", {"model": "deepseek/deepseek-v4-flash:nitro"}),
+            ("at_floor", {"model": "deepseek/deepseek-v4-flash-0731:nitro", "max_tokens": floor}),
+            ("absent_cap", {"model": "deepseek/deepseek-v4-flash-0731:nitro"}),
             ("unprofiled", {"model": "some/unknown-model", "max_tokens": 10}),
         ]
     )
@@ -2407,10 +2412,17 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
 
     The row that paid for this: every optimizer call goes to OpenRouter's
     ``deepseek/deepseek-v4-flash``, which is character-for-character DeepSeek's own
-    first-party key at $0.14/$0.28 against OpenRouter's listed $0.088/$0.176. OpenRouter
-    returns no wire cost on that route, so the estimate was the only number and nothing
-    could contradict it. ``None`` is the honest answer; it arms the "USD cap inactive"
-    warning instead of quoting a 1.6x guess as a measurement.
+    first-party key at $0.14/$0.28 against OpenRouter's listed $0.088/$0.176. ``None`` is
+    the honest answer; it arms the "USD cap inactive" warning instead of quoting a 1.6x
+    guess as a measurement.
+
+    This docstring used to add "OpenRouter returns no wire cost on that route", and that
+    was never true — the route reports ``cost`` on every call and our own client dropped
+    it before anyone downstream could read it (see
+    ``test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer``). The estimate
+    was the only number because of a bug on THIS side, and an explanation naming upstream
+    is why nobody went looking for it. The rule below is unaffected: a wire cost overrides
+    the table, and where there is none the pair-keyed lookup is still what answers.
 
     Driven from a FIXTURE table, not the shipped one. The claim is about the resolution
     rule, and pinning it to today's prices makes it assert two things at once — the first
@@ -2458,6 +2470,71 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
+
+
+def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> None:
+    """The provider's own price must survive the client, because on the optimizer route it is
+    the ONLY price there is: the rate table has no ``openrouter/deepseek/*`` key and correctly
+    refuses to quote DeepSeek's first-party number for an OpenRouter call, so a dropped wire
+    cost leaves the call unpriced with no error anywhere.
+
+    That is what happened. ``call.py`` read ``response.usage["cost"]`` while the client built
+    ``usage`` from four token keys and never copied it, so every optimizer row on disk carried
+    ``cost_usd: null``, ``spend.loop.used_usd`` read $0.00 in every cycle ever run, and
+    ``jobs/spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
+    see the half of the bill it was capping. Nothing raised; the numbers were simply absent.
+
+    Silent because the shape is right and only the value is missing: an unpriced call and a
+    free call are the same row.
+    """
+    from openai.types.chat import ChatCompletion
+
+    from promptpotter.infrastructure.llm.openai_compat import _attempt_cost, _billed_cost
+
+    def completion(usage: dict[str, object] | None) -> ChatCompletion:
+        return ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek/deepseek-v4-flash-0731",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "{}"},
+                    }
+                ],
+                **({"usage": usage} if usage is not None else {}),
+            }
+        )
+
+    # OpenRouter's real shape: `cost` rides as an EXTRA on the usage object (the SDK's models
+    # are extra="allow"), beside `cost_details`/`is_byok`. Measured live on this route.
+    priced = completion(
+        {
+            "prompt_tokens": 263,
+            "completion_tokens": 152,
+            "total_tokens": 415,
+            "cost": 7.938e-05,
+            "cost_details": {"upstream_inference_cost": 0},
+            "is_byok": False,
+        }
+    )
+    assert _attempt_cost(priced) == 7.938e-05
+
+    # A provider that reports nothing (Groq, OpenAI) must yield None, not 0.0 — 0.0 is a
+    # measurement and would silently satisfy the cap it should have escalated to the table.
+    unpriced = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    assert _attempt_cost(completion(unpriced)) is None
+    assert _attempt_cost(completion(None)) is None
+
+    # A schema-repair retry bills BOTH round-trips, same contract the token sums follow.
+    assert _billed_cost(1e-05, 2e-05) == pytest.approx(3e-05)
+    # ...and one silent half must not drag a real number down to nothing.
+    assert _billed_cost(None, 2e-05) == pytest.approx(2e-05)
+    assert _billed_cost(1e-05, None) == pytest.approx(1e-05)
+    assert _billed_cost(None, None) is None
 
 
 # --- sample look-ahead: the depth must not reach the record -------------------

@@ -42,7 +42,7 @@ class ModelProfile:
 # nodes (l2_context/l3_plan @ 8000, checkin @ 10000, l1_generate @ 12000); the complementary
 # lever for a reasoning model is keeping ``reasoning_effort`` low so reasoning stays bounded.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
-    "deepseek/deepseek-v4-flash": ModelProfile(
+    "deepseek/deepseek-v4-flash-0731": ModelProfile(
         is_reasoning=True,
         min_max_tokens=8000,
         notes="Emits ~4k reasoning tokens before content; a 4k cap returned 0 content on "

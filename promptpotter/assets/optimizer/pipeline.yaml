@@ -25,15 +25,15 @@ nodes:
       reasoning_effort: medium
       max_tokens: 12000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: deepseek/deepseek-v4-flash-0731:nitro
     description: &nitro_probe >-
       ':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe.
       On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently
       returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no
-      `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro`
-      was the one route that cleared speed, cost AND schema obedience together, and it reasons better
-      than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without
-      re-running the schema probe first — this failure mode does not error.
+      `variants`): it corrupts the search silently rather than raising. Rule: never point a schema-bearing
+      node at a new :nitro route without first spending ONE call that asks for the real schema and checking
+      the answer is an instance of it — this failure mode does not error, so nothing else will tell you.
+      `deepseek/deepseek-v4-flash-0731:nitro` was probed that way and answered with an instance.
   l1_score:
     type: measurement
     config:
@@ -51,7 +51,7 @@ nodes:
       reasoning_effort: low
       max_tokens: 12000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: deepseek/deepseek-v4-flash-0731:nitro
     description: *nitro_probe
   l2_context:
     type: llm/optimizer
@@ -67,7 +67,7 @@ nodes:
       reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: deepseek/deepseek-v4-flash-0731:nitro
     description: *nitro_probe
   l3_plan:
     type: llm/optimizer
@@ -84,7 +84,7 @@ nodes:
       reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: deepseek/deepseek-v4-flash-0731:nitro
     description: *nitro_probe
   checkin:
     type: llm/optimizer
@@ -96,7 +96,7 @@ nodes:
       reasoning_effort: high
       max_tokens: 10000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: deepseek/deepseek-v4-flash-0731:nitro
     description: *nitro_probe
 pipelines:
   default:

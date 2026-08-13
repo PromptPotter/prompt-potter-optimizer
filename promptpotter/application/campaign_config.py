@@ -374,9 +374,10 @@ class OptimizationConfig(StrictModel):
         description=(
             "L2/L3 terminate_proposal emission. When True, the "
             "``terminate_capability`` injection renders the stop-the-cycle "
-            "instruction into L2 + L3 prompts; an emitted terminate_proposal "
-            "raises ``StopReason.ABORT`` and the cycle finalizes HALTED on the "
-            "current cycle_id (no fork). The intended user is an unrecoverable "
+            "instruction into L2 + L3 prompts; a terminate_proposal NAMING A "
+            "REASON raises ``StopReason.ABORT`` and the cycle finalizes HALTED "
+            "on the current cycle_id (no fork), while a blank one is ignored "
+            "like any volunteered field. The intended user is an unrecoverable "
             "upstream fault — e.g. an evidence-starved enricher (backend quota "
             "exhausted) — that no framing refinement or replan can fix. When "
             "False, the injection renders empty — L2/L3 prompts contain no "

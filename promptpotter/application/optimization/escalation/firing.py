@@ -405,6 +405,7 @@ async def _run_transition(
     # this post-apply seam, so the layer's normal output is adopted and the exit-phase event
     # (which carries the proposal to the ledger) is emitted before the raise.
     if result.terminate_proposal is not None:
+        reason = result.terminate_proposal.reason.strip()
         if not cycle.config.optimization.terminate_capability:
             # Same shape as the fork gate below: off ⇒ the prompt carried no terminate
             # guidance, and a volunteered field must not ABORT the run.
@@ -412,11 +413,41 @@ async def _run_transition(
                 "%s emitted terminate_proposal while terminate_capability is off — ignored",
                 transition.layer_id,
             )
+        elif not reason:
+            # A stop with nothing to act on is not a decision. The field is OPTIONAL, so a model
+            # that fills it with "" has volunteered it exactly as a capability-off model does —
+            # and this branch is the one that was missing: presence alone ended a cycle whose
+            # fitness was still climbing, then the cell was re-measured from scratch. Never
+            # substitute a stand-in reason here; a stop nobody can act on must read as one.
+            logger.warning(
+                "%s emitted a blank terminate_proposal — ignored, cycle continues",
+                transition.layer_id,
+            )
+            emit_round_warning(
+                kind="layer_terminate_blank",
+                message=(
+                    f"{transition.layer_id} asked to stop the cycle but named no reason, so the "
+                    "request was ignored and the run continued. Nothing is wrong with this "
+                    "cycle; the layer's own output schema let it fill the stop field with an "
+                    "empty string."
+                ),
+                detail={"layer": transition.layer_id, "round": round_num},
+            )
         else:
             logger.info(
                 "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
                 transition.layer_id,
-                result.terminate_proposal.reason or "unrecoverable fault",
+                reason,
+            )
+            emit_round_warning(
+                kind="layer_terminated_cycle",
+                message=(
+                    f"{transition.layer_id} stopped this cycle: {reason} Nothing here resumes on "
+                    "its own — fix what that names, then `python -m promptpotter resume` picks "
+                    "the cycle up where it halted."
+                ),
+                severity="error",
+                detail={"layer": transition.layer_id, "reason": reason, "round": round_num},
             )
             raise StopLoop(StopReason.ABORT)
 

@@ -322,7 +322,6 @@ async def llm_call(
     # itself before raising. A cache hit is metered too, flagged — it spends nothing, but the
     # search still MADE the call, so incurred cost stays invariant to our cache history and the
     # always-warmest L4 origin arm does not read as free.
-    cost_raw = response.usage.get("cost") or response.usage.get("total_cost")
     emit_token_usage(
         node=node or "llm_call",
         kind="optimizer",
@@ -332,7 +331,7 @@ async def llm_call(
         provider=merged["provider"],
         duration_s=duration_s,
         model=response.model,
-        cost_usd=float(cost_raw) if cost_raw is not None else None,
+        cost_usd=response.cost_usd,
         cached=cached_payload is not None,
     )
 
