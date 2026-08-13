@@ -552,15 +552,24 @@ async def post_command(
     campaign_id = _require_string(payload, "campaign_id", max_len=128)
 
     if kind in _CAMPAIGN_CONFIG_KINDS:
-        # In-place campaign config edit (set-allowed-models) — campaign-scoped, no cycle.
-        allowed_raw = payload.get("allowed_models")
-        if not isinstance(allowed_raw, list) or not all(isinstance(m, str) for m in allowed_raw):
-            raise PayloadInvalidError("payload.allowed_models must be a list of strings.")
+        # In-place manifest edit — campaign-scoped, no cycle.
+        config_payload: dict[str, Any]
+        if kind == "set-allowed-models":
+            allowed_raw = payload.get("allowed_models")
+            if not isinstance(allowed_raw, list) or not all(
+                isinstance(m, str) for m in allowed_raw
+            ):
+                raise PayloadInvalidError("payload.allowed_models must be a list of strings.")
+            config_payload = {"allowed_models": allowed_raw}
+        else:
+            # Optional, not required: clearing the label restores the dataset-name
+            # fallback the display chain already documents, so "" is a real value.
+            config_payload = {"label": _optional_string(payload, "label", max_len=200).strip()}
         config_kind: CampaignConfigKind = kind  # type: ignore[assignment]
         config_outcome = await dispatcher.dispatch_campaign_config(
             kind=config_kind,
             campaign_id=campaign_id,
-            allowed_models=allowed_raw,
+            payload=config_payload,
             idempotency_key=idemp,
         )
         return config_outcome.accepted

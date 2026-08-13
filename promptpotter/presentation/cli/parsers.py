@@ -479,6 +479,19 @@ def build_parser() -> argparse.ArgumentParser:
                 "trace); drop only the heavy resume/audit/mirror tiers.",
             )
 
+    p_rename = sub.add_parser(
+        "rename",
+        help="Give a campaign an operator name, shown wherever it is named to a human. "
+        "Display only — the campaign id still addresses it. An empty name restores the "
+        "dataset-name fallback.",
+    )
+    p_rename.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+    # Optional rather than a positional `''`: PowerShell drops an empty argument before
+    # argparse ever sees it, so the clear form has to be the ABSENT one to exist at all.
+    p_rename.add_argument(
+        "label", nargs="?", default="", help="The new name; omit it to clear the name."
+    )
+
     return parser
 
 

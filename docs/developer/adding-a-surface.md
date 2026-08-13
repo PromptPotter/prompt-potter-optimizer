@@ -238,15 +238,18 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
 
 1. Write `presentation/cli/commands/<verb>.py` exporting one `cmd_<verb>(args)`
    entry function. Prefer a module; reach for a subpackage only when the verb has
-   genuinely separable parts (`lifecycle.py` holds three verbs in one module — a
-   directory per verb bought a reader a hop to learn there was nothing to choose).
+   genuinely separable parts (`lifecycle.py` holds every thin `CommandDispatcher`
+   shell in one module — a directory per verb bought a reader a hop to learn there
+   was nothing to choose).
 2. Add its argparse subparser in `presentation/cli/parsers.py`.
 3. Add the `"<verb>": cmd_<verb>` row to `COMMANDS` in
    `presentation/cli/campaign_runner.py`, importing the function at the top.
 4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
-   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`), or
-   **diagnostic** (`ab` / `verify` / `noise-floor` / `reindex` —
-   these must not perturb an existing cycle's measurements).
+   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`),
+   **manifest-edit** (`rename` — rewrites `campaign.json` in place, leaving the tree
+   and every measurement where they are), or **diagnostic** (`ab` / `verify` /
+   `noise-floor` / `reindex` — these must not perturb an existing cycle's
+   measurements).
 5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
    tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.
 

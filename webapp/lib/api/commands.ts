@@ -93,6 +93,19 @@ export async function postSetAllowedModels(
     allowed_models: allowedModels,
   });
 }
+// Give a campaign an operator name — `campaign.json::label`, which
+// `lib/names.ts::campaignDisplayName` prefers over the dataset name everywhere a
+// campaign is named to a human. `""` clears it and restores that fallback, so an
+// empty string is a real value here rather than a no-op. The campaign_id is NOT
+// touched: it addresses the directory, the measurement cache and every bookmark.
+// Owner-gated server-side (`campaign.lifecycle`); identity-neutral, so a rename
+// cannot void a banked origin.
+export async function postSetCampaignLabel(
+  campaignId: string,
+  label: string,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("set-campaign-label", { campaign_id: campaignId, label });
+}
 export async function postCleanupEmpty(
   campaignId: string,
   cycleId: string,

@@ -103,6 +103,7 @@
 .campaign-menu-item-danger{color:var(--color-danger)}
 .campaign-menu-item-danger:hover{color:var(--color-danger);background:var(--color-background-hover)}
 .campaign-menu-err{margin-left:4px;color:var(--color-danger);font-weight:700;font-size:var(--text-xs)}
+.campaign-rename-id{margin:var(--space-8) 0 0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary);word-break:break-all}
 /* Dataset filter chips — inside the header filter popover; narrow the flat
    campaign list to one dataset. Shown only when 2+ datasets are on disk. */
 .unit-library-filter{display:flex;flex-wrap:wrap;gap:var(--space-4);padding:0 var(--space-8) var(--space-8)}

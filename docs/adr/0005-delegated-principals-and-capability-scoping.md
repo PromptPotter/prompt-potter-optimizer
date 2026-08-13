@@ -182,7 +182,7 @@ routes reach it too). As-shipped tiers over the *real* verb set:
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin` | autonomous |
 | `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-spend-budget` (raise a ceiling) | budget |
-| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles` | destructive |
+| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-allowed-models`, `set-campaign-label` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4, SHIPPED) | privileged / provenance-tainting |
 | `scoring.lookahead` | `set-sample-lookahead` (SHIPPED) — **host-admin, not a campaign tier**: it spends the BOX's shared provider rate bucket, not the campaign's budget, so no delegate can hold it. Not `babysit` either — it taints nothing, because the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a | host privilege |
 

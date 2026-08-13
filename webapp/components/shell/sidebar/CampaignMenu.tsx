@@ -1,22 +1,24 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import {
   postArchiveCampaign,
   postDeleteCampaign,
+  postSetCampaignLabel,
   postUnarchiveCampaign,
   type CampaignSummary,
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
-import { Popover } from "@/components/ui";
+import { Button, Dialog, Popover } from "@/components/ui";
 
 // Per-campaign three-dots menu. Surfaces the lifecycle commands wired in
 // `mutations.ts`: archive / unarchive (MOVE the tree into / out of the archive/
 // recycle bin, reversible) and delete (DESTRUCTIVE — removes the campaign tree,
 // no recovery; the cross-campaign measurement cache survives per ADR-0002 §0.5
-// so siblings still cache-hit). Delete asks for confirmation; archive / unarchive
-// fire immediately. Dropdown open/close + click-outside/ESC come from the Popover.
+// so siblings still cache-hit), plus rename, the one edit that leaves the tree
+// where it is. Delete and rename ask first; archive / unarchive fire
+// immediately. Dropdown open/close + click-outside/ESC come from the Popover.
 
 interface Props {
   campaign: CampaignSummary;
@@ -26,6 +28,9 @@ export function CampaignMenu({ campaign }: Props) {
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const renameFormId = useId();
   // The ROOT hop's campaign — a drilled-in inner leaf still belongs to the campaign
   // being deleted, so this is the id that decides whether the view is affected.
   const { campaignId: viewedCampaignId, followActive } = useWorkspace();
@@ -55,6 +60,23 @@ export function CampaignMenu({ campaign }: Props) {
       setPending(false);
     }
   }, [campaign.campaign_id]);
+
+  // The label is display only — `campaignDisplayName` prefers it over the dataset
+  // name, and clearing it restores that fallback. Nothing addresses a campaign by
+  // it, so there is no view to reconcile here the way delete has to.
+  const runRename = useCallback(async () => {
+    setRenaming(false);
+    setPending(true);
+    setErr(null);
+    try {
+      await postSetCampaignLabel(campaign.campaign_id, draft.trim());
+      bumpRevalidation();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  }, [campaign.campaign_id, draft]);
 
   const runDelete = useCallback(async () => {
     setConfirmDelete(false);
@@ -113,6 +135,20 @@ export function CampaignMenu({ campaign }: Props) {
               onClick={(e) => {
                 e.stopPropagation();
                 close();
+                setErr(null);
+                setDraft(campaign.label);
+                setRenaming(true);
+              }}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="campaign-menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                close();
                 void (archived ? runUnarchive() : runArchive());
               }}
             >
@@ -138,6 +174,41 @@ export function CampaignMenu({ campaign }: Props) {
           !
         </span>
       )}
+      <Dialog
+        open={renaming}
+        title="Rename campaign"
+        onClose={() => setRenaming(false)}
+        footer={
+          <>
+            <Button onClick={() => setRenaming(false)}>Cancel</Button>
+            <Button variant="primary" type="submit" form={renameFormId}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <form
+          id={renameFormId}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void runRename();
+          }}
+        >
+          <label className="new-campaign-field">
+            <span>Name</span>
+            <input
+              type="text"
+              value={draft}
+              maxLength={200}
+              placeholder={campaign.dataset_name}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          </label>
+        </form>
+        {/* The id nothing renames — it addresses the directory, the measurement
+            cache and every bookmark. Shown so the operator can still copy it. */}
+        <p className="campaign-rename-id">{campaign.campaign_id}</p>
+      </Dialog>
       <Modal
         open={confirmDelete}
         title="Delete this campaign?"

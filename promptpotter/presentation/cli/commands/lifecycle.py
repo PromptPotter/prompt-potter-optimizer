@@ -1,5 +1,5 @@
-"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` — thin shells over ``CommandDispatcher``, the sole
-writer of ``CommandRecord``. ``measurements/`` is never touched, so siblings still cache-hit."""
+"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` / ``rename`` — thin shells over ``CommandDispatcher``,
+the sole writer of ``CommandRecord``. ``measurements/`` is never touched, so siblings still cache-hit."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from promptpotter.shared.errors import ConflictError, NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
-__all__ = ["cmd_archive", "cmd_delete", "cmd_pause", "cmd_unarchive"]
+__all__ = ["cmd_archive", "cmd_delete", "cmd_pause", "cmd_rename", "cmd_unarchive"]
 
 
 async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandResult | None:
@@ -125,6 +125,42 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
         human=(
             f"{campaign_id}/{cycle_id} -> pause requested{_reason_suffix(args)}. "
             "The loop exits at its next checkpoint; `resume` picks it up."
+        ),
+    )
+
+
+async def cmd_rename(args: argparse.Namespace) -> CommandResult:
+    """Set the campaign's operator name — display only, and the one every surface prefers over the
+    dataset name. The campaign id is untouched: it addresses the directory, the measurement cache and
+    every bookmark. Identity-neutral, so a rename cannot void a banked origin."""
+    campaign_id: str = args.campaign_id
+    label: str = str(getattr(args, "label", "") or "").strip()
+    dispatcher = CommandDispatcher(
+        build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    )
+    try:
+        await dispatcher.dispatch_campaign_config(
+            kind="set-campaign-label",
+            campaign_id=campaign_id,
+            payload={"label": label},
+            idempotency_key=uuid.uuid4().hex,
+        )
+    except NotFoundError:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "status": "not_found"},
+            human=f"campaign not found: {campaign_id}",
+        )
+    except ConflictError as exc:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "status": "conflict"}, human=str(exc)
+        )
+    logger.info("campaign %s -> label %r", campaign_id, label)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "label": label},
+        human=(
+            f"{campaign_id} -> named {label!r}"
+            if label
+            else f"{campaign_id} -> name cleared (shows its dataset name again)"
         ),
     )
 

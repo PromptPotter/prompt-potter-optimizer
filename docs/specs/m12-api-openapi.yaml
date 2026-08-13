@@ -831,6 +831,42 @@ paths:
         '404': { $ref: '#/components/responses/CommandTargetNotFound' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/set-campaign-label:
+    post:
+      operationId: setCampaignLabel
+      summary: Rename a campaign (in place).
+      description: |
+        In-place edit of `campaign.json::label` — the operator's own name for the
+        campaign, preferred over the dataset name wherever a campaign is shown to a
+        human. An empty string clears it and restores that fallback, so `""` is a
+        real value rather than a no-op. The campaign_id is NOT touched: it addresses
+        the directory, the measurement cache and every bookmark. Campaign-scoped —
+        no `Expected-Version`; the `CommandRecord` lands on the WORKSPACE ledger.
+        Owner-gated on `campaign.lifecycle`, beside the verbs that decide the
+        campaign's existence. Identity-neutral: `label` is not in
+        `root_content_hash`, so a rename cannot void a banked origin.
+      tags: [campaign]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-campaign-label }
+                    payload: { $ref: '#/components/schemas/SetCampaignLabelPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/change-scoring-composite:
     post:
       operationId: changeScoringComposite
@@ -3114,6 +3150,21 @@ components:
                 The full sanctioned model list, replacing the campaign's set wholesale.
                 Empty clears it (restrictive default). A human fork steered to a listed
                 model is clean; to an unlisted one, babysat (grade C).
+
+    SetCampaignLabelPayload:
+      allOf:
+        - $ref: '#/components/schemas/CampaignRef'
+        - type: object
+          required: [label]
+          additionalProperties: false
+          properties:
+            label:
+              type: string
+              maxLength: 200
+              description: |
+                The operator's name for this campaign, replacing any previous one and
+                trimmed of surrounding whitespace. Empty restores the dataset-name
+                fallback. Display only — nothing addresses a campaign by it.
 
     MarkHardSamplePayload:
       allOf:
