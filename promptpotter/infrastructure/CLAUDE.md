@@ -52,8 +52,21 @@ a live producer.
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
 | `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
-| `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
+| `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
 | `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+
+**`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
+Someone alt-tabbing to the file tree mid-run has to see the truth, so before deferring or skipping
+any write, answer whether they still can. It is **always on disk and always swapped atomically**
+(tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
+It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event**: the writer coalesces high-frequency
+bursts (sample-scored, token-usage, LLM-call progress) but converges behind real-time by no more
+than that constant (`view.py::_schedule_persist`). And it flushes **immediately, with no debounce,
+at round boundaries** — `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` go
+through `view.py::_flush_pending_persist`, so a round's file is current before the next begins.
+Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
+round. The public round file carries the same atomicity, with `CampaignStore.save_round_file` its
+sole writer, persisting `RoundResult.model_dump()` — the model **is** the round document.
 
 **`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round`
 was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to
@@ -73,8 +86,8 @@ a convention:
   `domain/dashboard_rows.py`). Two shapes for one
   entity force the client to merge them field by field, which put a bar and its error whisker on
   two different polls. **Each field lands at the moment its FACT exists, and none of them is the
-  round close:** the value and its band at `candidate_scored`, the crown at `l1_score:exit`,
-  where the election has just run. (θ stays null on a live row — it needs the round's joint fit,
+  round close:** the value and its band at `candidate_scored`, the crown on its own
+  `ElectionRecord`, written where the election runs. (θ stays null on a live row — it needs the round's joint fit,
   which is a different fact, not a late one.) A field held back to `round:display` surfaces
   whenever the next node happens to finish, which is not a time the operator can read anything into.
 

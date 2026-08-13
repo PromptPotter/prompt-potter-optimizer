@@ -53,7 +53,7 @@ invariants:
                       can't swallow that — so the cure is not firing them. The auth/me 401 is the
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
-                      {running, gate, paused} (IN_FLIGHT_PHASES, webapp/lib/run-phase.ts). detached
+                      {running, gate, paused} (IN_FLIGHT, webapp/lib/run-phase.ts). detached
                       means a dead producer (the heartbeat invariant, architecture.md §0 State +
                       persistence) and never renders as in-flight. Client-side connection loss
                       (failed poll, offline, hidden tab) is presented as connection state (offline /

@@ -66,14 +66,10 @@ store method, so the test exercises the loader the engine actually uses.
 
 ## Running the tests
 
-```bash
-cd webapp
-npm install     # one-time — picks up vitest from devDependencies
-npm run test    # vitest run
-```
-
-Vitest discovers files matching `lib/**/__tests__/**/*.test.ts` and
-`components/**/__tests__/**/*.test.ts` (see `webapp/vitest.config.ts`).
+`python scripts/gate.py --web` runs the webapp suite along with everything else CI
+runs. A fixture is only reached if its test file matches the discovery globs
+`lib/**/__tests__/**/*.test.ts` or `components/**/__tests__/**/*.test.ts` — put it
+somewhere else and it is silently never run (`webapp/vitest.config.ts`).
 
 ## Freezing a new fixture
 
@@ -113,20 +109,10 @@ Then:
 Hand-strip; a scripted helper only earns its place once several fixtures
 need the same treatment.
 
-## Testing posture (mirrors `webapp/CLAUDE.md`)
-
-Vitest is scoped to `lib/**/` + `components/**/__tests__/` — pure
-data → data helpers and reader-side derivations that have no React
-rendering. Pure render components stay covered by the
-compile-time + smoke gate (`npm run lint`, `npx tsc --noEmit`,
-`npm run build`, manual smoke at `http://localhost:8001/`).
-
-If a regression turns out to need a component-render test, reach for
-`@testing-library/react` then; today's bug classes don't.
-
 ## Related docs
 
-- [`webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture — the
-  compile-time + smoke gate Vitest sits next to, not replaces.
+- **Testing posture** — owned by [`webapp/CLAUDE.md`](../../webapp/CLAUDE.md) §
+  Testing posture; a fixture earns its place only for a reader-side derivation,
+  since render components are covered by smoke instead.
 - [`docs/specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) §
   audit guidance — pattern: bug blocked on operator-local context.

@@ -47,7 +47,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
         index.json                     # phase, trials, final block, sibling_kind, parent_cycle_id (forks)
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
-        rounds/round_NNNN.json         # resume source of truth (serialized OptSearchPoint)
+        rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
         .runtime/
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
@@ -70,7 +70,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
-| `rounds/round_NNNN.json` | per cycle | Serialized `OptSearchPoint` — the resume source of truth. |
+| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
