@@ -1,4 +1,5 @@
 import type { PipelineView } from "@/components/workflow";
+import { interiorNodes } from "@/lib/derivations";
 
 // Operator vocabulary — single source of truth for in-product tooltips.
 // Keep entries to one short sentence; longer explanations belong in docs/manual/.
@@ -54,13 +55,12 @@ export const TERMS: Record<string, string> = {
 
 // The target/backend node ids of a connector view — every node that isn't a
 // pure I/O port. These are the ids the selection store uses for the backend
-// node panel (TargetPipelineHero click → BackendNodeDetail). Used by ChatPane
+// node panel (PipelineStack click → BackendNodeDetail). Used by ChatPane
 // as the membership gate for which node clicks open the read-only detail.
 //
 // No view means no target nodes. This used to return a synthetic `["llm"]`,
 // claiming to match "the hero's own placeholder" — but the placeholder is inert
 // and never sets a selection, so nothing could ever equal that id.
 export function targetNodeIds(view: PipelineView | null): string[] {
-  if (!view) return [];
-  return view.nodes.filter((n) => n.kind !== "io").map((n) => n.id);
+  return interiorNodes(view).map((n) => n.id);
 }

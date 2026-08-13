@@ -601,6 +601,14 @@ export interface NodeOutputSchema {
   json_schema: Record<string, unknown>;
 }
 
+/** Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are */
+export interface NestedPipelineRef {
+  /** Node id in this pipeline whose measurement runs `dataset`. */
+  node: string;
+  /** Slug of the pipeline that node runs; fetch it the same way. */
+  dataset: string;
+}
+
 /** Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero; */
 export interface DatasetPipelineResponse {
   name: string;
@@ -610,6 +618,7 @@ export interface DatasetPipelineResponse {
   view: Record<string, unknown> | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
+  nests: NestedPipelineRef | null;
 }
 
 export interface ActiveSessionResponse {
@@ -1026,6 +1035,7 @@ export interface MeResponse {
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
   capabilities: string[];
+  access_state: 'active' | 'pending';
   terms_version: string;
   terms_accepted_version: string | null;
 }

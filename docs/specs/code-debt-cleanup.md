@@ -175,12 +175,6 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
 
 **From the 2026-08-11 mobile pass — what it left half-done.**
 
-- **`TargetPipelineHero:PipelineBox` — the container glyph on `l1_score` opens nothing.** Missing is
-  one fact, not a mechanism: the *name* of the dataset a node recurses into. `fetchDatasetPipeline`
-  and this same box already render any pipeline by name; `inner_tasks.yaml` holds the name and nothing
-  wires it. Not sufficient (checked): `LineageNode` has no dataset, and the `task` stamp names a cell
-  that ran, not what the node would run. Action: declare in `m12-api-openapi.yaml`, serve, open the
-  box — or drop the glyph. Blocker: none.
 - **Mobile pass verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393, 412, 768,
   landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse number recorded,
   so there is no before/after. Action: sweep + record one pass. Blocker: none.

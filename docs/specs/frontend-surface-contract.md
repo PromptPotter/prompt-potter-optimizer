@@ -280,14 +280,36 @@ controls:
 surface: chat
 controls:
   - id: preview.toggle
-    do: Show/hide the hard-samples project preview (TargetPipelineHero's button,
-        aria-pressed/aria-label "Show|Hide project preview"). The pipeline strip itself is
-        NOT toggleable — it renders unconditionally.
+    do: Show/hide the hard-samples project preview — the stack's Input/Output chips
+        (aria-pressed/aria-label "Show|Hide project preview"). They flank the ANCHOR level
+        only, so there is exactly one pair at any zoom. The pipeline strip itself is NOT
+        toggleable — it renders unconditionally.
     status: ok
   - id: preview.connector
     do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
         "no backend selected" (nothing is being probed). Resolved + probed → reachable / unreachable.
     status: ok   # idle when connector==null; "probing…" only during a real probe
+  - id: preview.zoom
+    do: A strip sharing the anchor's row, ahead of its Input end — ONE button per stack
+        level that is NOT drawn, each drawing that level and every ancestor
+        between it and the innermost (so two levels up is one press, not two). A drawn level
+        has NO button, so the strip empties as the stack grows and disappears at full
+        zoom-out; the only way back in is preview.node.nest. Button count is therefore data:
+        at most 1 on an ordinary campaign, 2 on `promptpotter-self`, more the day a dataset
+        declares deeper nesting. The stack is the optimization loop (structural, every
+        campaign has one) then one level per served `nests`. The INNERMOST level is the
+        anchor — always drawn, never buttoned, the only one wearing Input/Output (the only
+        one a sample flows through), and the only one at full size: an ancestor is context,
+        so it drops its node labels and renders as a strip about a third the height, filled
+        from a two-tone alternation counted OUTWARD from the anchor. Nodes below the
+        campaign's own pipeline render read-only (no detail panel owns them).
+    status: ok
+  - id: preview.node.nest
+    do: A node that runs a whole nested pipeline draws a frame glyph instead of a lock —
+        neither tunable here nor paramless, since its knobs live in another cycle. Clicking
+        it ISOLATES: the level is already on screen, so the click drops every level above
+        it. The inward half of the zoom whose outward half is preview.zoom.
+    status: ok
   - id: preview.node.llm
     do: Expand to model & params; "declares no configurable params" when none.
     status: ok

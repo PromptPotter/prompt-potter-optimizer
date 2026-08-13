@@ -1,5 +1,5 @@
 // Shared workflow types — consumed by WorkflowCanvas (optimizer L1/L2/L3
-// graph) and TargetPipelineHero (chat-pane connector graph). The wire shape
+// graph) and PipelineFlow (the chat pane's nested pipeline graph). The wire shape
 // mirrors PipelineView in promptpotter/domain/pipeline_schema.py — keep them
 // in sync.
 

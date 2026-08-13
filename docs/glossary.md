@@ -444,6 +444,11 @@ The persisted world is a four-entity containment hierarchy
   L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
   (`connectors/promptpotter.py`) + `runner/inner/spawn.py::run_inner_cycle`, driven
   by `datasets/promptpotter-self/`. Plan: `docs/specs/l4-outer-loop.md`.
+- **`nests`** — that recursion made READABLE: which node of a pipeline runs another whole
+  pipeline, and whose. Served on `DatasetPipelineResponse`
+  (`routers/datasets/index.py::NestedPipelineRef`), both halves DERIVED — the node is the
+  schema's measurement node, the dataset is `inner_tasks.yaml::inner_benchmark` — so it is
+  a projection, never a second place the nesting is declared. Null on an ordinary dataset.
 - **sweep** — a cheap A/B of L1 candidates ahead of full promotion: sibling cycles
   under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter new --sweep-batch`.
   `application/sweep.py`. A sweep cycle carries no `CycleSeed`; `sibling_kind == "sweep"`.

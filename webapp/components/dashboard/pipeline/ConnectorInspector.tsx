@@ -13,7 +13,7 @@
 // control-plane wires the write half).
 
 import { cx } from "@/lib/cx";
-import { connectorReachability, isSelfOptimization } from "@/lib/derivations";
+import { connectorReachability, interiorNodes, isSelfOptimization } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
 
 const SECURITY_DOC_URL =
@@ -56,7 +56,7 @@ export function ConnectorInspector({ view }: Props) {
         : reachable
           ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
           : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
-  const interior = pipelineView ? pipelineView.nodes.filter((n) => n.kind !== "io") : [];
+  const interior = interiorNodes(pipelineView);
 
   return (
     <span className={cx("connector", stateCls)}>

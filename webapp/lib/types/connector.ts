@@ -19,7 +19,13 @@
 // true up/down. `isLive` (live per-node observations from the run) is a separate
 // signal: whether the optimizer is actively scoring through this connector.
 
-import type { BackendHealthResponse, BackendResponse, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type {
+  BackendHealthResponse,
+  BackendResponse,
+  NestedPipelineRef,
+  NodeConfigParam,
+  NodeOutputSchema,
+} from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
 // How the `GET /datasets/{name}/pipeline` read went. A null `view` alone cannot
@@ -58,4 +64,8 @@ export interface ConnectorView {
   // The per-node structured-output contract (read-only), shown beside the config
   // so the operator sees the whole node. Same fetch.
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
+  // Which node of THIS pipeline runs another whole pipeline, and whose — served,
+  // never guessed from a node name. Null for every ordinary dataset. It is what
+  // lets the mechanics panel walk the layer stack past this dataset.
+  nests: NestedPipelineRef | null;
 }

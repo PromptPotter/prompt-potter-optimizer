@@ -8,7 +8,7 @@ import { targetNodeIds } from "@/lib/terms";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { searchPoint } from "@/lib/derivations";
+import { interiorNodes, searchPoint } from "@/lib/derivations";
 
 // The pipeline block in "Set up campaign" — the SAME rendering the Chat tab uses
 // (inline node list + per-node `NodeSurface`), plus a two-mode toggle. Reuses the
@@ -87,7 +87,7 @@ function PipelineSetupInner({
 
   // Research+Match preset = the committed pipeline's nodes (stable during setup).
   // `llm_only` isn't in a committed Research+Match view, so its preset is fixed.
-  const nodes = (cv.view?.nodes ?? []).filter((n) => n.kind !== "io");
+  const nodes = interiorNodes(cv.view);
   const researchSteps = nodes.map((n) => n.id);
   const hasResearch = researchSteps.length > 0;
   const isLlmOnly = arraysEqual(draft.optimizer_locks.pipeline, LLM_ONLY);
@@ -153,7 +153,11 @@ function PipelineSetupInner({
         </>
       ) : (
         <>
-          <PipelineNodeList />
+          <PipelineNodeList
+            nodes={interiorNodes(cv.view)}
+            schema={cv.nodeConfigSchema}
+            scope="target"
+          />
           {showDetail ? (
             <BackendNodeDetail
               draft={draft}

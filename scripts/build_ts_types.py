@@ -118,6 +118,7 @@ from promptpotter.presentation.api.routers.datasets.index import (
     DatasetIndexEntry,
     DatasetIndexResponse,
     DatasetPipelineResponse,
+    NestedPipelineRef,
 )
 from promptpotter.presentation.api.routers.datasets.leaderboard import (
     DatasetItem,
@@ -172,6 +173,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MeasurementSeriesResponse,
     NodeConfigParam,
     NodeOutputSchema,
+    NestedPipelineRef,  # nested in DatasetPipelineResponse — the emitter does not recurse
     DatasetPipelineResponse,
     # --- active router ---
     ActiveSessionResponse,
