@@ -46,23 +46,38 @@ Mostly ignorable — they reassure you the campaign is moving. When something go
 
 ## Round summaries
 
-```
-ROUND 3 COMPLETE
-  Winner:   C4/8 — 62% (+4% vs prev best)
-  Layer:    L1     Patience: 0/3
-  Queries:  50     Cache hit: 78%
+A round opens with a rule naming the round and the distance to the next escalation, followed by the `GENERATE` block (the CLI draws these framed; the fields are what matter):
 
-CRITIQUE: ...
-NEXT: continue L1
+```
+ROUND 3/10                                        stall 0/3 → L2
+
+GENERATE
+  Current best    62.0%
+  Parent prompt   You are a careful reasoner…
+  Candidates      5   Prior critique: from R2
+  Model           openai/gpt-oss-20b
 ```
 
-| Field | Meaning |
-|-------|---------|
-| Winner | Best candidate (of N) and improvement over previous best. "No winner" line if nothing beat it. |
-| Layer | [L1](../concepts/the-loop.md) (normal), L2 (stall recovery — rewrites framing), L3 (L2 stall — rewrites strategy). |
-| Patience | Consecutive no-improvement rounds. Hits the configured max → escalates. |
-| Queries | Scored count + cache hit %. |
-| CRITIQUE | 2–4 lines of optimizer's own analysis. |
+It closes with a scoreboard, one verdict line, and the critique:
+
+```
+  Scoreboard: C3.1=74.0% | C3.2=71.0% | C3.3=68.0%
+  ✓ IMPROVED  74.0% (was 62.0%, +12.0%)  p=0.003 **  ->  next: continue
+  L1 Critique: …
+```
+
+| Line | Meaning |
+|------|---------|
+| `ROUND 3/10` | Round number and ceiling. In lives mode the ceiling is replaced by a ♥ bank. |
+| `stall 0/3 → L2` | Rounds of no improvement, and how many trigger [L2](../concepts/the-loop.md). Reads `L2 every round` when patience is 0. |
+| `Prior critique` | Whether last round produced one — the input this round's candidates were built from. |
+| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the winner marked `*`. |
+| the verdict | One of `✓ IMPROVED`, `✗ NOT PROMOTED` (a positive delta blocked by significance or the sample floor — the reason is named inline) or `⚠ NO IMPROVEMENT`. |
+| `(was 62.0%, +12.0%)` | The **matched-pair** origin: the origin restricted to the samples this winner actually measured. A winner that stopped before covering the panel gets no such clause, because subtracting the full-set origin from a prefix would publish lift nobody measured. |
+| `p=0.003 **` | Significance of the improvement; the stars are the band. |
+| `L1 Critique:` | The optimizer's own analysis, flattened to a single line. |
+
+Candidate labels are `C0` for the origin and `C{round}.{n}` after it — so `C3.2` is the second candidate of round 3.
 
 ## Annotation lines (⚠ / ↳)
 
@@ -74,12 +89,18 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
 ```
 
 ```
-⚠ llm_only.model = 'gpt-4o' not in allowed set
-  ↳ scored 0; L2 brief will name this value
-
-⚠ candidate degraded on 3/4 queries; eliminated early
-  ↳ L2 will steer next round away from this region
+⚠ llm_only.model = 'gpt-4o'  ∉ [openai/gpt-oss-20b, groq/llama-3.3-70b, … (+5)]
+  ↳ scored 0 (no backend call); L2 brief will name this value
 ```
+
+A candidate cut mid-scoring says which mechanism cut it, and both forms start `✂`:
+
+```
+✂ eliminated q18/28  p_best=3.2% < eps=15%  vs C3.2 (of 4 priors)
+✂ degradation q3/4  75% degraded  (empty_output)
+```
+
+The first is [PoBB](../methods/candidate-elimination.md) — the candidate's posterior probability of being best fell below the abort threshold, so the remaining samples were not worth buying. The second is the degradation check: the pipeline itself was breaking. A `✓ leader locked` line is the same machinery reaching the opposite verdict.
 
 The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 

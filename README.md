@@ -102,26 +102,40 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 ## Watching a run
 
-While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](docs/manual/04-reading-the-output.md).
+While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{campaign_id}/cycles/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `rounds/`, `log.md`, `index.json`. Internal resume + audit state lives under `.runtime/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](docs/manual/04-reading-the-output.md).
 
 > [!TIP]
 > <details>
 > <summary><b>What a round actually looks like</b> (click to expand)</summary>
-> 
+>
+> Every cycle writes a per-round digest to `log.md`. This is an excerpt from a real JustLogic run — the round that took it from 65.0% to 75.0%:
+>
 > ```
-> round 3/10 · 5 candidates · sp_budget_ttest=40
-> ├─ c0  seed                             acc=0.62  [origin]
-> ├─ c1  +thinking_style:step-by-step     acc=0.74  ✓
-> ├─ c2  +thinking_style:socratic          acc=0.71
-> ├─ c3  +persona:domain expert           acc=0.68  ✗ eliminated @ q18 (PoBB)
-> └─ c4  model:gpt-oss-120b→… ⚠ invalid   acc=0.00  ↳ validation_failure
->                                                      → L2 brief next round
-> 
-> winner: c1  (+12pp over origin, p=0.003)
-> L1 critique: "Step-by-step improves multi-hop reasoning. Socratic overlaps
->               but adds no marginal gain. Persona drift hurt format compliance."
+> ### Round 2 — Added systematic deduction step to thinking_style to force
+> exhaustive derivation before defaulting to Uncertain, targeting the premature
+> 'no direct info' pattern seen in #82, #37, #0. (75.0%)
+>
+> - improved: **yes**
+> - samples: 28
+> - composite_fitness: `0.7500`
+>
+> > Fix: thinking_style: Adopt a formal logical deduction method: translate each
+> > premise into symbolic formulas, then derive the claim's truth value using
+> > entailment rules. This counters the pattern of defaulting to Uncertain when
+> > logical entailment exists, as seen in the 'When X is true' misinterpretation.
+> > Axes: thinking_style, instruction, problem_description, answer_format
+> > Failures:
+> >   Logical misinterpretation (~5/14 misses): model fails to recognize that a
+> >   premise phrased 'When X is true, it follows Y' asserts X as true, leading
+> >   to over-hedging with Uncertain. Predicted: Uncertain, GT: TRUE. (Query #82)
+>
+> P(best) trajectory:
+>   5536f04bc9 ▆▇▇▇▇▇▇████████▇▇▇█████   87.6% [winner]
+>   c2ac162dea ▇▆▆▆▆▆▆▅▄▅▅▅▄▄▅▅▄▅▄▅▅▅▄   50.0%
 > ```
-> 
+>
+> Those trajectory bars are [PoBB](docs/methods/candidate-elimination.md) at work — one tick per scored sample, and the trailing arm's posterior never recovers. What every stream a run produces means: [reading the output](docs/manual/04-reading-the-output.md).
+>
 > </details>
 
 ## Five ways to run it
