@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_lineage_spine
-from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.facade import (
+    DispatchHub,
+    build_bundle,
+    injection_char_counts,
+)
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
@@ -324,7 +328,7 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        template, prompt_vars, _ = DispatchHub.fill(
+        template, prompt_vars, rendered = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
             resolve_node_layout(transition.template_name),
             build_bundle(cycle),
@@ -338,6 +342,7 @@ async def _run_transition(
                     ledger=cycle.session.state.ledger,
                     round_num=round_num,
                     cache=cycle.session.store.optimizer_reuse,
+                    injection_chars=injection_char_counts(rendered, prompt_vars),
                 ),
             )
             result = transition.parse(raw, cycle.opt_sp, prompt)

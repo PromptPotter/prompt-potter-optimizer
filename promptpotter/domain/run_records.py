@@ -160,6 +160,11 @@ class LLMCallStartRecord(StrictModel):
     started_at_ms: int
     # Sets the operator's latency expectation on the in-flight line.
     prompt_chars: int = 0
+    # What `prompt_chars` is MADE OF — injection name → rendered chars, for the node's live
+    # layout. The total alone says a producer-side bound failed but never which one, so the
+    # over-budget warning could be read and not acted on; this is the breakdown that names the
+    # panel. Empty for a node that composes no layout (`checkin`) and on a cache replay.
+    injection_chars: dict[str, int] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

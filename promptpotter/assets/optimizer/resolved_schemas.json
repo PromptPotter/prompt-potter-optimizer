@@ -48,6 +48,7 @@
                 "type": "object"
               },
               "changes_description": {
+                "maxLength": 320,
                 "title": "Changes Description",
                 "type": "string"
               }
@@ -67,6 +68,7 @@
                 "type": "string"
               },
               "citation": {
+                "maxLength": 320,
                 "title": "Citation",
                 "type": "string"
               }
@@ -199,7 +201,7 @@
           },
           "l1_layout": {
             "additionalProperties": false,
-            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given. Editing is per SLOT: a slot you name replaces that slot's whole list, so carry over what you still want there; a slot you omit keeps what it has, and `[]` empties one.",
+            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given. Editing is per SLOT: a slot you name replaces that slot's whole list, so carry over what you still want there; a slot you omit keeps what it has, and `[]` empties one. Each signal may appear at most ONCE across the whole layout — a signal listed in two slots is rendered twice, verbatim, and the edit is rejected.",
             "properties": {
               "persona": {
                 "items": {

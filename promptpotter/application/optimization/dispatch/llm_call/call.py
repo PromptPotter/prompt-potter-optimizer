@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -56,13 +56,18 @@ __all__ = ["LLMCallContext", "llm_call", "run_optimizer_node"]
 
 @dataclass(frozen=True)
 class LLMCallContext:
-    """Audit + cache context for one optimizer LLM call — the four kwargs that always travel
+    """Audit + cache context for one optimizer LLM call — the kwargs that always travel
     together. ``cache`` is consulted only when non-``None``, so omitting it silently re-spends."""
 
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
     cache: OptimizerReuseCache | None = None
+    # `DispatchHub.fill`'s third return value, measured — the composition behind `prompt_chars`.
+    # It rides the context rather than `trace_meta` because it belongs on the START record: the
+    # over-budget warning fires there, and a breakdown that lands only after the call cannot
+    # explain the warning the operator is reading.
+    injection_chars: dict[str, int] = field(default_factory=dict)
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
@@ -209,6 +214,7 @@ async def llm_call(
                     model=merged.get("model"),
                     started_at_ms=int(time.time() * 1000),
                     prompt_chars=prompt_chars,
+                    injection_chars=dict(context.injection_chars),
                 )
             )
         # Lets the operator tell an in-flight call from a frozen process without opening
@@ -217,12 +223,27 @@ async def llm_call(
         budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(node or "")
         oversize = budget is not None and prompt_chars > budget
         log = logger.warning if oversize else logger.info
+        # An over-budget line that does not name the panel sends the reader to go and find it,
+        # which is how this warning came to fire on 23% of `l1_generate` calls unacted-on. The
+        # heaviest three are printed only on the warning path, so a healthy call stays one line.
+        heaviest = (
+            " · heaviest: "
+            + ", ".join(
+                f"{name} {chars:,}c"
+                for name, chars in sorted(context.injection_chars.items(), key=lambda kv: -kv[1])[
+                    :3
+                ]
+            )
+            if oversize and context.injection_chars
+            else ""
+        )
         log(
-            "→ optimizer call: %s · %s · %d-char prompt%s",
+            "→ optimizer call: %s · %s · %d-char prompt%s%s",
             node or "llm_call",
             merged["model"],
             prompt_chars,
             f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
+            heaviest,
         )
         # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
         # Cancelled on every path by the `finally` below.

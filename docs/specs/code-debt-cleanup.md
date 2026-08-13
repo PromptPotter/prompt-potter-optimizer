@@ -32,14 +32,23 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
   53 s / 5352 output tokens median, `l1_critique` (effort **`low`**) 45 s / 4206, `l2_context`
   23 s / 2157. One `l1_critique` round-trip billed 4790 completion tokens for a 1044-character
   answer — **~94% reasoning, against a schema that caps the answer at ~1300 characters** — so a
-  two-step effort change buys ~27% and the knob is not the lever. `_MODEL_PROFILES` already
-  says this model "emits ~4k reasoning tokens before content"; what it advises (pair with
-  `reasoning_effort=low`) is what `l1_critique` was already doing. The real options are a
+  two-step effort change buys ~27% and the knob is not the lever. (`l1_critique` has since been
+  moved to `medium` deliberately — `low` was inherited from a profile note about the token FLOOR,
+  never measured as the better DISTILLER, so the comparison arm simply did not exist. Its
+  `max_tokens` went to 16000 with it: the tail already ran 11,370 against 12000.) The real options are a
   different optimizer model for the schema-bearing nodes or an explicit reasoning budget, and
-  both are choices, not cleanups. **Blocker: read the share off a live run first** — it is on
-  the ledger and the CLI call line as of this arc, and picking a model on the strength of a
-  one-cell reading is the mistake the bake-off itself documented. Its cheaper twin is already
-  the plan: `l1_generate` semantic widening at a net-SHORTER prompt.
+  both are choices, not cleanups. Its cheaper twin is already the plan: `l1_generate` semantic
+  widening at a net-SHORTER prompt.
+
+  **Blocker CLEARED — and the headline was high.** Read off 46 banked ledgers joining
+  `llm_call_start.prompt_chars` to `token_usage`: the optimizer is **~20% of LLM seconds and
+  ~21% of cost**, not a third (`l1_generate` 8.7% / `l1_critique` 7.6% / `l2_context` 4.0% /
+  `l3_plan` 0.3%); backend scoring is the other 80%. The reasoning share holds — `l1_critique`
+  spends 4,724 reasoning tokens on a 932-char answer AT effort `low` — so the conclusion stands
+  and only its size moved. What the same read DID surface as a lever is input, not effort:
+  `l1_generate` split into thirds by prompt size runs 11.7k chars → 3,831 reasoning tok / 26.7s
+  against 23.2k → 5,408 / 42.1s, and 6.4% of every character ever sent to that node was a
+  verbatim second copy of a panel (fixed: `l1_layout_dups_across_slots`).
 
 - **No structured-output route probe before a run spends money.** `inclusionai/ling-3.0-flash`
   answered HTTP 405 `json_schema response format is not supported` (DeepInfra);

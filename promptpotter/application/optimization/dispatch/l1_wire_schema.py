@@ -126,12 +126,20 @@ def build_l1_response_schema(
     *,
     citable_fields: Sequence[str],
     schema_field_rename: bool = False,
+    n_variants: int | None = None,
 ) -> dict[str, Any]:
     """Returns the BARE JSON Schema — ``chat()``'s ``response_schema`` IS the wire schema, and an
     envelope here nests it where the provider reads no ``type`` and every constraint goes inert."""
     raw_schema = L1GenerateOutput.model_json_schema()
     defs = raw_schema.pop("$defs", {})
     inlined = _inline_refs(raw_schema, defs)
+
+    # The ceiling the prompt states, stated again where the decoder can enforce it. Without it
+    # the only bound was `l1/generate.py`'s `variants_list[:n_variants]` slice — so an
+    # over-generating model was BILLED for every extra variant and the overflow was then thrown
+    # away. Per-round, like the citable enum below, because `n_variants` is per-round.
+    if n_variants is not None:
+        inlined["properties"]["variants"]["maxItems"] = n_variants
 
     variant_props = inlined["properties"]["variants"]["items"]["properties"]
 

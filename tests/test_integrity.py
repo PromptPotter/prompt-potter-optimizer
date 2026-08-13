@@ -97,7 +97,7 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     from promptpotter.application.preflight import check_model_reasoning_floors
     from promptpotter.infrastructure.llm.registry import model_profile
 
-    prof = model_profile("deepseek/deepseek-v4-flash-0731:nitro")
+    prof = model_profile("deepseek/deepseek-v4-flash:nitro")
     assert prof is not None and prof.is_reasoning and prof.min_max_tokens >= 8000
     floor = prof.min_max_tokens
 
@@ -106,7 +106,7 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
         [
             (
                 "l1_critique",
-                {"model": "deepseek/deepseek-v4-flash-0731:nitro", "max_tokens": floor - 1},
+                {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor - 1},
             )
         ]
     )
@@ -116,8 +116,8 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
     # sanctioned default), non-reasoning suffix-normalized, and an unprofiled model.
     clean = check_model_reasoning_floors(
         [
-            ("at_floor", {"model": "deepseek/deepseek-v4-flash-0731:nitro", "max_tokens": floor}),
-            ("absent_cap", {"model": "deepseek/deepseek-v4-flash-0731:nitro"}),
+            ("at_floor", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor}),
+            ("absent_cap", {"model": "deepseek/deepseek-v4-flash:nitro"}),
             ("unprofiled", {"model": "some/unknown-model", "max_tokens": 10}),
         ]
     )
@@ -249,7 +249,7 @@ def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hi
                     "predicted": "p",
                     "hit": hit,
                     "fitness": 1.0 if hit else 0.0,
-                    "pipeline_data": {"terminated_at": "llm_only"},
+                    "pipeline_data": {"terminal_node": "llm_only"},
                 }
             ],
             "dataset_name": dataset_name,
@@ -274,8 +274,8 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
     (dropped). An inversion silently feeds the optimizer connector-retrieval noise
     instead of its real explored datapoints — no error, just a biased digest."""
     schema = _StubSchema([_StubNode("token_matching", False), _StubNode("llm_only", True)])
-    llm_batch = [{"pipeline_data": {"terminated_at": "llm_only"}}]
-    connector_batch = [{"pipeline_data": {"terminated_at": "token_matching"}}]
+    llm_batch = [{"pipeline_data": {"terminal_node": "llm_only"}}]
+    connector_batch = [{"pipeline_data": {"terminal_node": "token_matching"}}]
     assert grade_run("optimization_loop", llm_batch, schema).grade == "A"
     assert grade_run("origin", llm_batch, schema).grade == "A"
     assert grade_run("", connector_batch, schema).grade == "C"
@@ -290,7 +290,7 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
 
 
 def _seed_graded(
-    archive: MeasurementArchive, *, run_id: str, grade: str, terminated_at: str, sample_id: int
+    archive: MeasurementArchive, *, run_id: str, grade: str, terminal_node: str, sample_id: int
 ) -> None:
     """Save one run carrying a provenance grade and a single sample. The two runs measure
     DIFFERENT samples — the cache keys on ``sample_id``, so they need distinct ones to
@@ -318,7 +318,7 @@ def _seed_graded(
                     "predicted": "p",
                     "hit": True,
                     "fitness": 1.0,
-                    "pipeline_data": {"terminated_at": terminated_at},
+                    "pipeline_data": {"terminal_node": terminal_node},
                 }
             ],
             "dataset_name": "aime",
@@ -332,9 +332,9 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     silently served as if it were a real evaluation. The default (no floor) keeps
     every run, so ordinary scoring caching is unchanged."""
     archive = MeasurementArchive(tmp_path)
-    _seed_graded(archive, run_id="clean", grade="A", terminated_at="llm_only", sample_id=7)
+    _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
     _seed_graded(
-        archive, run_id="connector", grade="C", terminated_at="token_matching", sample_id=8
+        archive, run_id="connector", grade="C", terminal_node="token_matching", sample_id=8
     )
     node_configs = [("llm_only", {"model": "X"})]
 
@@ -347,7 +347,7 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
-    """A sample whose outcome consumed the FULL node chain (``terminated_at`` =
+    """A sample whose outcome consumed the FULL node chain (``terminal_node`` =
     last node — the L4 inner-recursion stamp) must not replay for a query that
     differs at a later node. The buggy stamp (``l1_critique``, a mid-chain node)
     let a candidate editing ``l2_context``/``l3_plan`` silently replay the
@@ -356,7 +356,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     archive = MeasurementArchive(tmp_path)
     chain = ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
 
-    def _seed_chain(run_id: str, terminated_at: str) -> None:
+    def _seed_chain(run_id: str, terminal_node: str) -> None:
         _archive(
             archive,
             run_id,
@@ -378,15 +378,15 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
                         "predicted": "p",
                         "hit": True,
                         "fitness": 1.0,
-                        "pipeline_data": {"terminated_at": terminated_at},
+                        "pipeline_data": {"terminal_node": terminal_node},
                     }
                 ],
                 "dataset_name": "promptpotter-self",
             },
         )
 
-    _seed_chain("full_chain", terminated_at="l3_plan")
-    _seed_chain("short_circuit", terminated_at="l1_critique")
+    _seed_chain("full_chain", terminal_node="l3_plan")
+    _seed_chain("short_circuit", terminal_node="l1_critique")
 
     # Query differs at l2_context → prefix match of length 2.
     query_configs: list[tuple[str, dict[str, Any]]] = [
@@ -401,7 +401,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     assert cache[1]["query"] == "q_short_circuit", (
         "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
     )
-    assert cache[1]["pipeline_data"]["terminated_at"] == "l1_critique"
+    assert cache[1]["pipeline_data"]["terminal_node"] == "l1_critique"
     assert all(r["query"] != "q_full_chain" for r in cache.values()), (
         "full-chain row replayed across a later-node config change — fake measurement"
     )
@@ -850,10 +850,10 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         base = CampaignConfig(
             optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
         )
-        forked, _ = _apply_config_overrides(base, None, ConfigOverrides(schema_field_rename=True))
+        forked = _apply_config_overrides(base, ConfigOverrides(schema_field_rename=True))
         assert forked.optimization.schema_field_rename is True
         assert base.optimization.schema_field_rename is False
-        inherited, _ = _apply_config_overrides(forked, None, ConfigOverrides(max_rounds=3))
+        inherited = _apply_config_overrides(forked, ConfigOverrides(max_rounds=3))
         assert inherited.optimization.schema_field_rename is True
 
         # The inner cycle applies a bound rename even though its OWN knob is off (default).
@@ -2497,7 +2497,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
                 "id": "c",
                 "object": "chat.completion",
                 "created": 0,
-                "model": "deepseek/deepseek-v4-flash-0731",
+                "model": "deepseek/deepseek-v4-flash",
                 "choices": [
                     {
                         "index": 0,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -32,6 +32,16 @@ if TYPE_CHECKING:
     from openai.types.chat import ChatCompletion
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_titles(node: object) -> object:
+    """Drop Pydantic's auto-emitted ``title`` keys from a wire schema. The schema is serialized
+    into the input, so these are prompt tokens the model reads and learns nothing from."""
+    if isinstance(node, dict):
+        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_strip_titles(v) for v in node]
+    return node
 
 
 def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
@@ -156,6 +166,12 @@ class OpenAICompatibleClient(LLMClientBase):
             response_model.model_json_schema() if response_model else None
         )
         if wire_schema is not None:
+            # The JSON Schema is serialized into the INPUT, so every key in it is prompt text.
+            # Pydantic auto-emits a `title` per field and per model that no provider needs and
+            # no model learns from — `l1_wire_schema.py::_inline_refs` already strips them, but
+            # only `l1_generate` passes through it, so the other four nodes shipped them on
+            # every call. Stripped once here, at the one seam every schema crosses.
+            wire_schema = cast("dict[str, Any]", _strip_titles(wire_schema))
             request_params["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {

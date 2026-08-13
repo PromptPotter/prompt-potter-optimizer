@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.facade import (
+    DispatchHub,
+    build_bundle,
+    injection_char_counts,
+)
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
@@ -38,11 +42,11 @@ async def run_l1_critique(
         load_optimizer_prompt,
     )
 
-    template, prompt_vars, _ = DispatchHub.fill(
+    template, prompt_vars, rendered = DispatchHub.fill(
         load_optimizer_prompt("l1_critique"), resolve_node_layout("l1_critique"), bundle
     )
 
-    result, prompt, _ = await run_optimizer_node(
+    result, _prompt, _repairs = await run_optimizer_node(
         template_name="l1_critique",
         prompt_vars=prompt_vars,
         template=template,
@@ -50,15 +54,10 @@ async def run_l1_critique(
             ledger=ledger,
             round_num=round_num,
             cache=cycle.session.store.optimizer_reuse,
+            injection_chars=injection_char_counts(rendered, prompt_vars),
         ),
     )
     assert isinstance(result, L1CritiqueOutput), (
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"
-    )
-    logger.info(
-        "L1 critique: %d chars prompt, round %d, acc=%.3f",
-        len(prompt),
-        round_num,
-        round_result.accuracy,
     )
     return cast(CritiqueReadout, result.model_dump())

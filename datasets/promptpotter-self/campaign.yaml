@@ -5,9 +5,10 @@ campaign_config:
   # four nodes — so the model actually in use was outside its own campaign's allow-list, and
   # every run silently sat in the taints-the-branch case the gate exists to mark. The list
   # now names what runs; gpt-oss-120b stays because `pipeline.yaml::available_models` still
-  # offers it as a sanctioned alternative. Move this list in the SAME commit as the manifest.
+  # offers it as a sanctioned alternative. Move this list in the SAME commit as the manifest —
+  # it and `_MODEL_PROFILES` are the two that do not fail loudly when they lag behind it.
   allowed_models:
-    - deepseek/deepseek-v4-flash-0731:nitro
+    - deepseek/deepseek-v4-flash:nitro
     - openai/gpt-oss-120b
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
   # incumbent, so exploring costs nothing. The four-factor composite this replaces is described

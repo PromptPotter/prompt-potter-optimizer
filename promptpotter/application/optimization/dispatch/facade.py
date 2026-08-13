@@ -11,6 +11,8 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch.bundle import (
+    FENCE_CLOSE,
+    FENCE_OPEN_PREFIX,
     CycleSlice,
     InjectionBundle,
     RoundDigest,
@@ -39,6 +41,17 @@ logger = logging.getLogger(__name__)
 _SECTION_SEP = "\n\n"
 
 
+def _close_open_fence(body: str) -> str:
+    """Re-close a dataset-content fence the cut left open. Renderers fence per section so the
+    section-drop path never opens one, but the last-resort mid-text slice below can — and an
+    unterminated fence lets untrusted sample text run loose to the end of the prompt, which is
+    the one failure here that is a SECURITY hole rather than a lost paragraph. Belongs in the
+    backstop, not in each renderer: the slice is what breaks the tag, so the slice repairs it."""
+    if body.count(FENCE_OPEN_PREFIX) > body.count(FENCE_CLOSE):
+        return body + "\n" + FENCE_CLOSE
+    return body
+
+
 def _truncate_to_cap(text: str, cap: int) -> tuple[str, int]:
     """Section-aware truncation for an over-budget injection: renderers join sections highest-priority
     first, so whole sections drop from the TAIL and nothing is sliced mid-section."""
@@ -48,8 +61,8 @@ def _truncate_to_cap(text: str, cap: int) -> tuple[str, int]:
         marker = f"{_SECTION_SEP}[…{dropped} section(s) dropped]"
         body = _SECTION_SEP.join(sections[:keep])
         if len(body) + len(marker) <= cap:
-            return body + marker, dropped
-    return sections[0][:cap] + "…", len(sections) - 1
+            return _close_open_fence(body) + marker, dropped
+    return _close_open_fence(sections[0][:cap]) + "…", len(sections) - 1
 
 
 class InjectionRenderError(Exception):
@@ -164,6 +177,15 @@ class DispatchHub:
         return filled, injection_vars, rendered
 
 
+def injection_char_counts(
+    rendered: dict[str, str], injection_vars: dict[str, str]
+) -> dict[str, int]:
+    """Per-signal rendered size, for the ledger's start record — the composition behind
+    ``prompt_chars``. Reads BOTH of ``fill``'s channels (the layout walk and the prose tokens);
+    silent panels are omitted, since a zero names nothing a reader can act on."""
+    return {name: len(text) for name, text in {**rendered, **injection_vars}.items() if text}
+
+
 @contextlib.contextmanager
 def _no_round_warnings() -> Iterator[None]:
     """Unbind the cycle ledger for the duration — a probe render must not emit. Otherwise the
@@ -259,6 +281,7 @@ __all__ = [
     "DispatchHub",
     "InjectionRenderError",
     "build_bundle",
+    "injection_char_counts",
     "node_packages",
     "validate_template",
 ]

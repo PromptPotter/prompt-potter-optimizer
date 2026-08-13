@@ -1494,7 +1494,7 @@ def test_classify_result_routes_refusal_to_infra() -> None:
     ]
     for predicted in cases_route_to_infra:
         cls = classify_result(
-            {"predicted": predicted, "pipeline_data": {"terminated_at": "llm_only"}}
+            {"predicted": predicted, "pipeline_data": {"terminal_node": "llm_only"}}
         )
         assert "llm_only:model_refusal" in cls.infra_codes, (
             f"expected refusal classification for {predicted!r}, got {sorted(cls.all_codes)}"
@@ -1508,7 +1508,7 @@ def test_classify_result_routes_refusal_to_infra() -> None:
         "Therefore the answer is \\boxed{63}."
     )
     cls = classify_result(
-        {"predicted": real_reasoning, "pipeline_data": {"terminated_at": "llm_only"}}
+        {"predicted": real_reasoning, "pipeline_data": {"terminal_node": "llm_only"}}
     )
     assert "llm_only:model_refusal" not in cls.infra_codes
 
@@ -1590,7 +1590,7 @@ def test_content_empty_on_a_result_that_answered_is_not_an_empty_response() -> N
         return {
             "predicted": predicted,
             "pipeline_data": {
-                "terminated_at": "llm_only",
+                "terminal_node": "llm_only",
                 "step_tokens": {"llm_only": {"finish_reason": finish, "reasoning": reasoning}},
                 "diagnostics": {
                     "warnings": [
@@ -2111,6 +2111,22 @@ def test_run_l3_output_validators_aggregates():
                 problem_description=["rendered_prompt", "pipeline_param_catalogue", "plan"],
             ),
             "l1_layout_dups_within_slot",
+        ),
+        # Same placeholder in TWO slots — every other check passes, and the panel is rendered
+        # twice verbatim. Silent by construction: `char_cap` is per render and never sees the
+        # second copy, so the prompt doubles with every gate green.
+        (
+            L1Layout(
+                task_intent=["task_context"],
+                problem_description=[
+                    "rendered_prompt",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "critique",
+                ],
+                thinking_style=["task_context"],
+            ),
+            "l1_layout_dups_across_slots",
         ),
     ],
 )
