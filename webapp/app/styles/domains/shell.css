@@ -165,7 +165,8 @@
    overflow — is the `HoverCard` primitive). Meta on every row; the on-disk
    storage grid only where a campaign endpoint exists. */
 .rowhover{display:flex;flex-direction:column;gap:var(--space-8);max-width:320px}
-.rowhover-desc{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
+.rowhover-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8)}
+.rowhover-desc{flex:1 1 auto;font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
 .rowhover-meta{display:grid;grid-template-columns:auto 1fr;column-gap:var(--space-12);row-gap:3px;align-items:baseline}
 .rowhover-key{font-size:var(--text-xs);letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
 .rowhover-val{font-size:var(--text-xs);color:var(--color-text-primary);font-variant-numeric:tabular-nums;word-break:break-all}

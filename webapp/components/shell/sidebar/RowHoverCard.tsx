@@ -1,6 +1,6 @@
 "use client";
 import { Fragment } from "react";
-import { HoverCard } from "@/components/ui";
+import { CopyButton, HoverCard } from "@/components/ui";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchCampaignStorage } from "@/lib/api";
 import { fmtAgo, fmtBytes, fmtDateTime } from "@/lib/format";
@@ -9,6 +9,10 @@ import { fmtAgo, fmtBytes, fmtDateTime } from "@/lib/format";
 // clashing pair (the bespoke storage card + a native `title=` tooltip that
 // floated over it). Meta is shown for every row; the on-disk breakdown only
 // where a per-campaign storage endpoint exists (top-level campaign rows).
+//
+// The card is reachable (see `HoverCard`), so what is in it selects by drag, and
+// the copy button hands the same rows over as JSON. Both read the SAME two
+// lists, so the payload cannot claim anything the card does not show.
 export function RowHoverCard({
   cycleId,
   description,
@@ -27,70 +31,83 @@ export function RowHoverCard({
   campaignId?: string;
   children: React.ReactNode;
 }) {
-  const meta: { label: string; value: string }[] = [];
-  if (datasetName) meta.push({ label: "Dataset", value: datasetName });
+  // Lazy either way — the card mounts `content` only while open — but owned here
+  // so the copy payload carries the same numbers the grid draws.
+  const { data, error } = useFetch(
+    campaignId != null ? (signal) => fetchCampaignStorage(campaignId, signal) : null,
+    [campaignId ?? null],
+  );
+
+  // The campaign id is what identifies this run to another person; the cycle id
+  // names the run inside it. Only top-level rows have the first.
+  const meta: [string, string][] = [];
+  if (datasetName) meta.push(["Dataset", datasetName]);
   if (createdAt) {
     const ago = fmtAgo(createdAt);
-    meta.push({
-      label: "Created",
-      value: ago ? `${fmtDateTime(createdAt)} · ${ago}` : fmtDateTime(createdAt),
-    });
+    meta.push(["Created", ago ? `${fmtDateTime(createdAt)} · ${ago}` : fmtDateTime(createdAt)]);
   }
-  meta.push({ label: "Cycle", value: cycleId });
+  if (campaignId) meta.push(["Campaign", campaignId]);
+  meta.push(["Cycle", cycleId]);
+
+  // One MECE hierarchy: "On disk" is the whole; the operator axis is Dataset /
+  // Connector / Loop, and Loop = State + Trace + History + Reports. The trailing
+  // flag indents a Loop leaf. Needs no campaign guard — without one there is no
+  // `data`, and both consumers below gate on that.
+  const loop =
+    data && data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes;
+  const sizes: [string, number | undefined, boolean?][] = [
+    ["On disk", data?.on_disk_bytes],
+    ["Dataset", data?.dataset_bytes],
+    ["Connector", data?.connector_bytes],
+    ["Loop", loop ?? undefined],
+    ["State", data?.state_bytes, true],
+    ["Trace", data?.trace_bytes, true],
+    ["History", data?.history_bytes, true],
+    ["Reports", data?.reports_bytes, true],
+  ];
+  const size = (n: number | undefined) => (error ? "—" : data ? fmtBytes(n ?? 0) : "…");
+  const key = (label: string) => label.toLowerCase().replace(" ", "_");
 
   const content = (
     <div className="rowhover">
-      <span className="rowhover-desc">{description}</span>
+      <div className="rowhover-head">
+        <span className="rowhover-desc">{description}</span>
+        <CopyButton
+          title="Copy these details as JSON"
+          data={{
+            description,
+            ...Object.fromEntries(meta.map(([k, v]) => [key(k), v])),
+            ...(data
+              ? { on_disk: Object.fromEntries(sizes.map(([k, n]) => [key(k), size(n)])) }
+              : {}),
+          }}
+        />
+      </div>
       <div className="rowhover-meta">
-        {meta.map((m) => (
-          <Fragment key={m.label}>
-            <span className="rowhover-key">{m.label}</span>
+        {meta.map(([label, value]) => (
+          <Fragment key={label}>
+            <span className="rowhover-key">{label}</span>
             {/* Operator IDs stay selectable (a11y). */}
-            <span className="rowhover-val">{m.value}</span>
+            <span className="rowhover-val">{value}</span>
           </Fragment>
         ))}
       </div>
-      {campaignId && <CampaignStorageRows campaignId={campaignId} />}
+      {campaignId && (
+        <div className="csize-grid">
+          {sizes.map(([label, n, indent]) => (
+            <Fragment key={label}>
+              <span className="csize-label" data-indent={indent || undefined}>
+                {label}
+              </span>
+              <span className="csize-val">{size(n)}</span>
+            </Fragment>
+          ))}
+          {/* Flags what the keepsake `delete --keep-results` spares. */}
+          <span className="csize-note">delete --keep-results spares Reports + loop trace</span>
+        </div>
+      )}
     </div>
   );
 
   return <HoverCard content={content}>{children}</HoverCard>;
-}
-
-// The on-disk size breakdown, lazy-fetched while the card is open (it only
-// mounts when the HoverCard is open). One MECE hierarchy: "On disk" is the
-// whole; the operator axis is Dataset / Connector / Loop, and Loop = State +
-// Trace + History + Reports. A note flags the keepsake `delete --keep-results`
-// spares.
-function CampaignStorageRows({ campaignId }: { campaignId: string }) {
-  const { data, error } = useFetch((signal) => fetchCampaignStorage(campaignId, signal), [
-    campaignId,
-  ]);
-  const fmt = (n: number | undefined) => (error ? "—" : data ? fmtBytes(n ?? 0) : "…");
-  const loop = data
-    ? data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes
-    : undefined;
-  const rows: { label: string; value: number | undefined; indent?: boolean }[] = [
-    { label: "On disk", value: data?.on_disk_bytes },
-    { label: "Dataset", value: data?.dataset_bytes },
-    { label: "Connector", value: data?.connector_bytes },
-    { label: "Loop", value: loop },
-    { label: "State", value: data?.state_bytes, indent: true },
-    { label: "Trace", value: data?.trace_bytes, indent: true },
-    { label: "History", value: data?.history_bytes, indent: true },
-    { label: "Reports", value: data?.reports_bytes, indent: true },
-  ];
-  return (
-    <div className="csize-grid">
-      {rows.map((r) => (
-        <Fragment key={r.label}>
-          <span className="csize-label" data-indent={r.indent || undefined}>
-            {r.label}
-          </span>
-          <span className="csize-val">{fmt(r.value)}</span>
-        </Fragment>
-      ))}
-      <span className="csize-note">delete --keep-results spares Reports + loop trace</span>
-    </div>
-  );
 }
