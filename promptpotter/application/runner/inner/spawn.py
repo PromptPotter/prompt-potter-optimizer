@@ -73,7 +73,7 @@ OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 
 @dataclass(frozen=True)
 class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root so ``archive`` + ``optimizer_calls`` remain
+    """``shared_root`` stays the REAL workspace root so ``measurements`` + ``optimizer_reuse`` remain
     tenant-global: sandboxing them re-scored every inner origin, injecting more noise than the lift."""
 
     inner_sandbox_root: Path

@@ -236,7 +236,7 @@ def reindex_measurements(stores: Stores) -> dict[str, int]:
 
 
 def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
-    return stores.archive.base_dir / "derived" / f"sample_fold__{dataset_name}.jsonl"
+    return stores.archive.derived_dir() / f"sample_fold__{dataset_name}.jsonl"
 
 
 def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[dict[str, Any]]:

@@ -20,7 +20,7 @@ class BackendStore:
         self._base_dir = base_dir
 
     def _backends_root(self) -> Path:
-        return self._base_dir / "archive" / "backends"
+        return self._base_dir / "backends"
 
     def _backend_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)

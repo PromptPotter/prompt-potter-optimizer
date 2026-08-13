@@ -153,7 +153,7 @@ class WorkspaceStorageResponse(StrictModel):
         description="The tenant's real on-disk total — campaigns + caches + other"
     )
     shared_cache_bytes: int = Field(
-        description="Cross-campaign reuse caches (measurements/ + optimizer_calls/) — survive delete"
+        description="Cross-campaign reuse caches (measurements/ + optimizer_reuse/) — survive delete"
     )
     other_bytes: int = Field(
         description="Everything else under the tenant: sessions, workspace ledger, dataset/backend stores"
@@ -168,7 +168,7 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
     """Per-campaign on-disk slices across the caller's whole workspace, fattest first,
     plus the shared caches and a residual ``other`` slice so the grand total equals the
     tenant's real footprint — answers "where did the bucket sizes go?", nothing excluded.
-    Includes archived campaigns (they live in the ``archive/`` recycle bin)."""
+    Includes archived campaigns — they stay in ``campaigns/``, flagged, not moved."""
     owner = str(stores.identity.user_id)
     entries: list[WorkspaceStorageEntry] = []
     campaigns_total = 0
@@ -187,7 +187,7 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
         )
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
     base = stores.base_dir
-    shared = _dir_size(base / "measurements") + _dir_size(base / "archive" / "optimizer_calls")
+    shared = _dir_size(base / "measurements") + _dir_size(base / "optimizer_reuse")
     total = _dir_size(base)
     return WorkspaceStorageResponse(
         total_bytes=total,

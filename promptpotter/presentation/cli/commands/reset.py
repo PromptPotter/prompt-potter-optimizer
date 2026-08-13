@@ -1,4 +1,4 @@
-"""Drop campaigns + sessions; PRESERVE ``measurements/`` (the DB core) and ``archive/``. Anything unnamed at the tenant top
+"""Drop campaigns + sessions; PRESERVE the two paid caches and every config tier. Anything unnamed at the tenant top
 level defaults to preserve — a reset never reaches a path it cannot explain."""
 
 from __future__ import annotations
@@ -27,10 +27,21 @@ __all__ = ["cmd_reset"]
 # and is cleared in lockstep with the campaigns/ + sessions/ trees it points into.
 _DROP_NAMES = ("campaigns", "sessions")
 
-# Preserved names — listed separately so the confirm prompt can name what survives.
-# ``measurements/`` is the expensive DB core (real LLM spend); ``archive/`` is the
-# recycle bin of archived campaigns plus the optimizer-call / sweep caches.
-_PRESERVE_NAMES = ("measurements", "archive")
+# Preserved names — listed separately so the confirm prompt can name what survives, and named
+# EXHAUSTIVELY so anything left over surfaces as "unrecognized" instead of hiding among the
+# expected. The first two are real LLM spend; the rest is regenerable or operator config.
+_PRESERVE_NAMES = (
+    "measurements",
+    "optimizer_reuse",
+    "diagnostics",
+    "traces",
+    "backends",
+    "datasets",
+    "benchmark-rows",
+    "task-context",
+    ".workspace",
+    "user.json",
+)
 
 
 def _classify(tenant_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
@@ -122,7 +133,7 @@ def _tenants_with_pointers(tenant_dirs: list[Path]) -> list[WorkspaceDir]:
 
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
-    """Drop campaigns + sessions across the selected tenant(s); preserve ``archive/``."""
+    """Drop campaigns + sessions across the selected tenant(s); preserve the paid caches."""
     projects_root = DEFAULT_PROJECTS_ROOT
     tenant_dirs = _resolve_tenant_dirs(args, projects_root)
     classified = [(td, *_classify(td)) for td in tenant_dirs]
@@ -187,7 +198,7 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         data={"tenants": [str(td) for td in tenant_dirs], "dropped": dropped},
         human=(
             f"reset: dropped {len(dropped)} path(s).\n"
-            "preserved: measurements/ (DB core) + archive/ (recycle bin + optimizer_calls + sweeps).\n"
+            "preserved: measurements/ (DB core) + optimizer_reuse/ — the two paid caches.\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."
         ),
     )

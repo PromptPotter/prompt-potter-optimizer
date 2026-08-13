@@ -59,10 +59,10 @@ async def cmd_archive(args: argparse.Namespace) -> CommandResult:
     if refusal is not None:
         return refusal
     campaign_id: str = args.campaign_id
-    logger.info("lifecycle: %s -> archived (moved to archive/)", campaign_id)
+    logger.info("lifecycle: %s -> archived (flagged in place)", campaign_id)
     return CommandResult(
         data={"campaign_id": campaign_id, "lifecycle_status": "archived"},
-        human=f"{campaign_id} -> archived (moved to recycle bin){_reason_suffix(args)}",
+        human=f"{campaign_id} -> archived (hidden from the default listing){_reason_suffix(args)}",
     )
 
 
@@ -71,7 +71,7 @@ async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
     if refusal is not None:
         return refusal
     campaign_id: str = args.campaign_id
-    logger.info("lifecycle: %s -> active (restored from archive/)", campaign_id)
+    logger.info("lifecycle: %s -> active (flag cleared)", campaign_id)
     return CommandResult(
         data={"campaign_id": campaign_id, "lifecycle_status": "active"},
         human=f"{campaign_id} -> active (restored)",

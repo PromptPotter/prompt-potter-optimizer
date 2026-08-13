@@ -178,7 +178,7 @@ class Settings(BaseSettings):
     # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
 
-    # Opt-in: FileSink writes per-round MLflow runs to ``archive/mlruns/``.
+    # Opt-in: MLflowSink writes per-round MLflow runs to ``traces/mlruns/``.
     MLFLOW_ENABLED: bool = False
 
     # Resolved, never CWD-relative — see ``config/paths.py::env_file_path``.

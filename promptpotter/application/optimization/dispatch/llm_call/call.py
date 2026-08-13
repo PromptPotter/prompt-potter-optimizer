@@ -44,7 +44,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning, emit_token_usage
-from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
+from promptpotter.infrastructure.store.stores import OptimizerReuseCache, hash_call
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -62,7 +62,7 @@ class LLMCallContext:
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
-    cache: OptimizerCallCache | None = None
+    cache: OptimizerReuseCache | None = None
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
@@ -196,7 +196,7 @@ async def llm_call(
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
-        logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
+        logger.debug("OptimizerReuseCache hit for %s (%s)", node or "llm_call", cache_key)
     else:
         prompt_chars = sum(len(m.get("content") or "") for m in messages)
         if context.ledger is not None:

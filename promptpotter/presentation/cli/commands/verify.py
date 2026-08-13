@@ -1,5 +1,5 @@
 """``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle, fork or sweep: no ledger event, no round id, and
-persistence lands in the workspace ``archive/`` tree only."""
+persistence lands in the workspace ``diagnostics/`` tree only."""
 
 from __future__ import annotations
 

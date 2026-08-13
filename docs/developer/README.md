@@ -84,9 +84,9 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 
 ## 4. Cross-run memory
 
-`archive/` is the database. `MeasurementArchive` is the only gateway. Two derived views
+`measurements/` is the database. `MeasurementArchive` is the only gateway. Two derived views
 (`SampleIndex`, `AxisIndex`) are folded from it by `refresh()`. `SampleIndex`'s per-run
-derivation is persisted (`derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
+derivation is persisted (`measurements/derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
 process re-reads and re-scores only runs it has not folded before; the fold is revalidated
 against the active formula and each detail's signature, and rebuilt whole if either moved.
 

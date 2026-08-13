@@ -17,8 +17,16 @@ class DiagnosticRunStore:
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
+    def _root(self) -> Path:
+        return self._base_dir / "diagnostics"
+
     def _dir(self) -> Path:
-        return self._base_dir / "archive" / "diagnostic_runs"
+        return self._root() / "runs"
+
+    def sidecar_path(self, filename: str) -> Path:
+        """A diagnostic that is not a :class:`DiagnosticRunRecord` still belongs in the same
+        directory, so this store owns ``diagnostics/`` rather than only its own subtree."""
+        return self._root() / filename
 
     def _path(self, ts: str, config_hash: str) -> Path:
         slug = _ts_filename_part(ts)

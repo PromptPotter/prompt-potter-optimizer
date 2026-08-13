@@ -1,5 +1,5 @@
 """Re-score a cached origin *k* times to measure the backend's own run-to-run noise. A fenced debug diagnostic,
-not a loop mechanism — the loop never learns it exists, and persistence is an ``archive/`` sidecar only."""
+not a loop mechanism — the loop never learns it exists, and persistence is a ``diagnostics/`` sidecar only."""
 
 from __future__ import annotations
 

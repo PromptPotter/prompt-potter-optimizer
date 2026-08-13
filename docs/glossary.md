@@ -123,7 +123,8 @@ The persisted world is a four-entity containment hierarchy
 (outermost → innermost). The Session is a unit of a campaign.
 
 - **Workspace** — the tenant-level container and queryable datastore:
-  every dataset, every campaign, the shared `archive/`. On disk
+  every dataset, every campaign, and the two shared content-addressed
+  caches (`measurements/`, `optimizer_reuse/`). On disk
   `projects/{tenant}/`.
 - **Dataset** — an immutable bank of labeled examples
   (`cache.json::items[]` of `{query, ground_truth}`) plus its origin
@@ -498,9 +499,15 @@ The persisted world is a four-entity containment hierarchy
   `CycleEventLog.append`. The writer-side API orchestration uses.
   `application/run_observers.py`.
 - **MeasurementArchive** — cross-cycle DB core. Content-addressed.
-  Lives at `archive/measurements/`. The optimizer's long-term memory.
+  Lives at `measurements/`. The optimizer's long-term memory.
   `infrastructure/store/measurement_archive.py`; facade functions in
   `infrastructure/store/archive_views.py`.
+- **OptimizerReuseCache** — the archive's peer, and the other half of
+  "the two caches": content-addressed optimizer-LLM answers, so the same
+  call asked again replays instead of being re-sampled. Lives at
+  `optimizer_reuse/`. Distinct from the ledger's `LLMCallStartRecord`,
+  which is the chronology of those same calls.
+  `infrastructure/store/stores.py`.
 - **Projection** — a `DerivedView` subclass that subscribes to the
   ledger and writes its own artifact (dashboard.json, audit cache,
   PoBB stream). `infrastructure/projections/`.

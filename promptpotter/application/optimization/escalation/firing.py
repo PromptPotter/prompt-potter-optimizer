@@ -337,7 +337,7 @@ async def _run_transition(
                 context=LLMCallContext(
                     ledger=cycle.session.state.ledger,
                     round_num=round_num,
-                    cache=cycle.session.store.optimizer_calls,
+                    cache=cycle.session.store.optimizer_reuse,
                 ),
             )
             result = transition.parse(raw, cycle.opt_sp, prompt)

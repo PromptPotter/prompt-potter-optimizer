@@ -194,8 +194,8 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
 *, projects_root=…, benchmarks_root=…, shared_root=…)` builder.
-`shared_root` roots the two CONTENT-ADDRESSED caches (`archive`,
-`optimizer_calls`) and equals `projects_root` everywhere except an L4
+`shared_root` roots the two CONTENT-ADDRESSED caches (`measurements/`,
+`optimizer_reuse/`) and equals `projects_root` everywhere except an L4
 inner sandbox, which isolates campaign state but must NOT isolate a
 cache keyed by content hash. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
@@ -210,7 +210,7 @@ attribute is what a call site shows you and the file is what you have to open:
 (`store/campaign_store/store.py`), `checkin` → `CheckinDraftStore`
 (`store/checkin_draft_store.py`), `sweeps` → `SweepStore`
 (`store/sweep_store.py`), `archive` → `MeasurementArchive`
-(`store/measurement_archive.py`), `optimizer_calls` → `OptimizerCallCache`
+(`store/measurement_archive.py`), `optimizer_reuse` → `OptimizerReuseCache`
 (`store/stores.py`, defined inline), `diagnostic_runs` → `DiagnosticRunStore`
 (`store/diagnostic_run_store.py`), `users` → `UserStore`
 (`store/user_store.py`). Shared I/O in
@@ -272,7 +272,7 @@ itself went. The
 not raw `str`/`Path` — as does `CycleHop`, which every per-cycle
 `CampaignStore` method takes in place of a `(campaign_id, cycle_id)`
 pair (both `str`, so a swapped call read as "no data" rather than
-raising). Build it from the carrier that owns both, never by re-pairing. `archive/` is cross-cycle/cross-tenant;
+raising). Build it from the carrier that owns both, never by re-pairing. `measurements/` is cross-cycle/cross-tenant;
 `MeasurementArchive` (`store/measurement_archive.py`) is the DB core, and
 `store/archive_views.py` is its single-writer facade — a write that does not
 go through that facade is the bug.

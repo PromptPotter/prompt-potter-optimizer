@@ -30,11 +30,11 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
-    archive_root_dir_for,
     campaign_cycles_dir,
     campaign_root_dir_for,
+    campaigns_root_dir_for,
     classify,
-    cycle_dir_under,
+    cycle_dir_for,
     inner_sandbox_key,
     root_cycle_id,
     sibling_kind,
@@ -149,22 +149,11 @@ class CampaignStore:
     # Path resolution + cross-cutting reads
     # ------------------------------------------------------------------
 
-    def _campaign_dir(self, campaign_id: str) -> Path:
-        """Archive-aware: ``campaigns/`` wins, then the ``archive/`` recycle bin. The free path
-        builders (``cycle_dir_for``) stay ``campaigns/``-only — archived is inert to browse."""
-        active = campaign_root_dir_for(self._base_dir, campaign_id)
-        if active.exists():
-            return active
-        archived = archive_root_dir_for(self._base_dir, campaign_id)
-        if archived.exists():
-            return archived
-        return active
-
     def campaign_root_dir(self, campaign_id: str) -> Path:
-        return self._campaign_dir(campaign_id)
+        return campaign_root_dir_for(self._base_dir, campaign_id)
 
     def cycle_dir(self, hop: CycleHop) -> Path:
-        return cycle_dir_under(self._campaign_dir(hop.campaign_id), hop.cycle_id)
+        return cycle_dir_for(self._base_dir, hop)
 
     def _manifest_path(self, campaign_id: str) -> Path:
         return self.campaign_root_dir(campaign_id) / "campaign.json"
@@ -195,24 +184,20 @@ class CampaignStore:
             return None
         return campaign
 
-    def _campaign_parents(self) -> list[Path]:
-        return [self._base_dir / "campaigns", self._base_dir / "archive"]
+    def _campaigns_root(self) -> Path:
+        return campaigns_root_dir_for(self._base_dir)
 
     def _index_files(self) -> list[Path]:
-        out: list[Path] = []
-        for parent in self._campaign_parents():
-            if parent.exists():
-                out.extend(parent.glob("*/cycles/*/index.json"))
-        return sorted(out)
+        root = self._campaigns_root()
+        return sorted(root.glob("*/cycles/*/index.json")) if root.exists() else []
 
     def iter_campaign_dirs(self) -> list[Path]:
-        """The one campaign-tree enumeration, ``archive/`` included — anything reducing over
+        """The one campaign-tree enumeration, archived included — anything reducing over
         all campaigns walks this, so an archived campaign's spend stays visible."""
-        out: list[Path] = []
-        for parent in self._campaign_parents():
-            if parent.exists():
-                out.extend(p.parent for p in parent.glob("*/campaign.json"))
-        return sorted(out)
+        root = self._campaigns_root()
+        if not root.exists():
+            return []
+        return sorted(p.parent for p in root.glob("*/campaign.json"))
 
     def iter_cycle_ledgers(self) -> list[Path]:
         """Every cycle ledger, archived included — archiving must not free daily spend-cap budget."""
@@ -272,14 +257,10 @@ class CampaignStore:
         return count
 
     def list_campaign_ids(self) -> list[str]:
-        ids: set[str] = set()
-        for parent in self._campaign_parents():
-            if not parent.is_dir():
-                continue
-            for p in parent.iterdir():
-                if p.is_dir() and (p / "campaign.json").is_file():
-                    ids.add(p.name)
-        return sorted(ids)
+        root = self._campaigns_root()
+        if not root.is_dir():
+            return []
+        return sorted(p.name for p in root.iterdir() if (p / "campaign.json").is_file())
 
     def list_campaigns(
         self,
@@ -306,7 +287,7 @@ class CampaignStore:
     def _live_cycle_ids(self, campaign_id: str) -> list[str]:
         """``RUNNING`` is the whole answer — a gated cycle heartbeats, so it derives ``RUNNING``
         too, and none of the rest is a reason to refuse a verb the operator asked for."""
-        cycles_dir = campaign_cycles_dir(self._campaign_dir(campaign_id))
+        cycles_dir = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
         if not cycles_dir.is_dir():
             return []
         live: list[str] = []
@@ -344,25 +325,16 @@ class CampaignStore:
         }
 
     def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        """Flags ``archived`` then MOVES the tree into the ``archive/`` recycle bin;
-        ``measurements/`` is untouched and ``unarchive_campaign`` reverses it."""
+        """``lifecycle_status`` is the WHOLE mechanism — the tree stays in ``campaigns/``. Every
+        reader already asks the flag (the ``list_campaigns`` filter, the sidebar, the storage
+        rollup), so moving the tree only bought a second parent each enumerator had to remember."""
         if self.load_campaign(campaign_id) is None:
             return False
         self._guard_and_release(campaign_id, "archive")
         self.update_campaign(campaign_id, self._lifecycle_updates("archived", changed_at, reason))
-        src = campaign_root_dir_for(self._base_dir, campaign_id)
-        dst = archive_root_dir_for(self._base_dir, campaign_id)
-        if src.exists() and not dst.exists():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
         return True
 
     def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        src = archive_root_dir_for(self._base_dir, campaign_id)
-        dst = campaign_root_dir_for(self._base_dir, campaign_id)
-        if src.exists() and not dst.exists():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
         if self.load_campaign(campaign_id) is None:
             return False
         self.update_campaign(campaign_id, self._lifecycle_updates("active", changed_at, reason))
@@ -379,7 +351,7 @@ class CampaignStore:
     ) -> bool:
         """Destructive. The cross-campaign ``measurements/`` cache is NEVER touched, and
         ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes (delete only)."""
-        campaign_dir = self._campaign_dir(campaign_id)
+        campaign_dir = self.campaign_root_dir(campaign_id)
         if not (campaign_dir / "campaign.json").is_file():
             return False
         self._guard_and_release(campaign_id, "delete")

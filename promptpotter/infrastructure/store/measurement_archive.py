@@ -125,6 +125,11 @@ class MeasurementArchive:
     def _runs_dir(self) -> Path:
         return self._store_dir() / "runs"
 
+    def derived_dir(self) -> Path:
+        """Read models folded FROM these measurements live under them — the derivation is the
+        archive's own, so the path is not something a view module gets to spell for itself."""
+        return self._store_dir() / "derived"
+
     def _detail_path(self, run_id: str) -> Path:
         return self._runs_dir() / f"{run_id}{_DETAIL_SUFFIX}"
 

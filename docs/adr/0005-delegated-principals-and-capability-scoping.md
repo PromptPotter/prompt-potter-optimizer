@@ -330,4 +330,4 @@ secure method exists — a *known, bounded* limitation, not a hidden one.
    a cautious user might bound even their own assistant. Ties to #5.
 7. **Re-delegation depth.** Bounded (one level) or arbitrary (always-narrowing)?
 8. **Interaction with ADR-0003 tenancy.** Is a sub-principal its own tenant, or a
-   sub-identity within the delegator's tenant (sharing its archive/measurements)?
+   sub-identity within the delegator's tenant (sharing its `measurements/`)?

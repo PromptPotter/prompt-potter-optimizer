@@ -485,16 +485,18 @@ paths:
   /commands/archive-campaign:
     post:
       operationId: archiveCampaign
-      summary: Archive a campaign — MOVE its tree into the ``archive/`` recycle bin (restorable).
+      summary: Archive a campaign — flag it ``archived``, hiding it from the default listing (restorable).
       description: |
         Campaign-scoped lifecycle transition. Campaign-scoped means
         workspace-level — no `Expected-Version` (the target is a campaign,
-        not a specific cycle's ledger tail). Physically MOVES the campaign
-        tree to `projects/{tenant}/archive/{campaign_id}/`; `unarchive`
-        moves it back. The `CommandRecord` lands on the WORKSPACE ledger
-        (`projects/{tenant}/.workspace/events.jsonl`) — the campaign's own
-        ledger moves with the tree, so it can't be the audit home. Archiving
-        the active-session campaign is refused (409). Shape pinned in
+        not a specific cycle's ledger tail). Sets
+        `campaign.json::lifecycle_status`; nothing moves on disk, and the
+        flag alone is what every reader filters on. The `CommandRecord`
+        lands on the WORKSPACE ledger
+        (`projects/{tenant}/.workspace/events.jsonl`) — the same home
+        `delete` needs, since a campaign's own ledger cannot record its
+        removal. Archiving the active-session campaign is refused (409).
+        Shape pinned in
         `docs/operations/persistence-and-state.md` § Beta hosting state.
       tags: [cycle-lifecycle]
       parameters:

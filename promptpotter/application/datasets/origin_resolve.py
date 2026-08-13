@@ -160,7 +160,7 @@ async def resolve_origin_turn(
     # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
     # no dispatcher) files its spend on the same cycle the web path does.
     # The consultation is deterministic (no timestamps, no ids), so an unchanged turn
-    # replays free off `archive/optimizer_calls/`; a schema or optimizer prompt edit changes
+    # replays free off `optimizer_reuse/`; a schema or optimizer prompt edit changes
     # `hash_call` and correctly misses.
     context = _checkin_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)

@@ -58,15 +58,15 @@ def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 
 
+def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
+    """The tenant's ONE campaign parent. An archived campaign stays here and is hidden by
+    ``campaign.json::lifecycle_status``, never by living somewhere else."""
+    return tenant_root / "campaigns"
+
+
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     """Campaign dir — ``campaign.json`` + ``log.md`` + ``hard_samples.json`` + ``cycles/``. Per-session telemetry binds one level down."""
-    return tenant_root / "campaigns" / validate_path_component(campaign_id)
-
-
-def archive_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
-    """Recycle bin for an archived campaign — ``archive`` MOVES the tree here, ``unarchive`` moves
-    it back. It sits beside ``measurements/``, the DB core, which is NOT trash."""
-    return tenant_root / "archive" / validate_path_component(campaign_id)
+    return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
 
 
 def campaign_cycles_dir(campaign_root: Path) -> Path:
@@ -75,15 +75,10 @@ def campaign_cycles_dir(campaign_root: Path) -> Path:
     return campaign_root / "cycles"
 
 
-def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
-    """Sole owner of the ``cycles/{cycle_id}`` layout. ``CampaignStore`` passes an archive-aware
-    root here; :func:`cycle_dir_for` passes the ``campaigns/``-only one."""
-    return campaign_cycles_dir(campaign_root) / validate_path_component(cycle_id)
-
-
 def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
-    return cycle_dir_under(campaign_root_dir_for(tenant_root, hop.campaign_id), hop.cycle_id)
+    campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
+    return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)
 
 
 def sweep_batch_dir_for(tenant_root: WorkspaceDir, campaign_id: str, batch_id: str) -> Path:
@@ -292,11 +287,10 @@ def classify(rel: Path) -> FileKind:
 __all__ = [
     "CycleLayout",
     "FileKind",
-    "archive_root_dir_for",
     "campaign_root_dir_for",
+    "campaigns_root_dir_for",
     "classify",
     "cycle_dir_for",
-    "cycle_dir_under",
     "inner_sandbox_dir",
     "inner_sandbox_key",
     "inner_sandboxes_dir",

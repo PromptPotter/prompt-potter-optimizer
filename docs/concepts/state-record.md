@@ -15,7 +15,7 @@ The record is the optimizer's working memory for two independent reasons:
 
 ## What the record is NOT
 
-- Not the trace archive — per-sample results live in `archive/measurements/` and are referenced by ID. See [`scoring-and-memory.md`](scoring-and-memory.md).
+- Not the trace archive — per-sample results live in `measurements/` and are referenced by ID. See [`scoring-and-memory.md`](scoring-and-memory.md).
 - Not the pipeline configuration — frozen target shape lives in `JobSearchPoint`.
 - Not the campaign config — operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
 

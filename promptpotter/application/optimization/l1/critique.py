@@ -49,7 +49,7 @@ async def run_l1_critique(
         context=LLMCallContext(
             ledger=ledger,
             round_num=round_num,
-            cache=cycle.session.store.optimizer_calls,
+            cache=cycle.session.store.optimizer_reuse,
         ),
     )
     assert isinstance(result, L1CritiqueOutput), (

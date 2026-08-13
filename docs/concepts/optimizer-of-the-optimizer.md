@@ -106,7 +106,8 @@ degrades it is cut, not kept for tidiness.
 > a cost term was never salvageable as a *measurement of a candidate*, and it is the argument any
 > future proposal to reintroduce one has to answer.
 
-PromptPotter's two caches — the measurement archive and the optimizer-call cache — are keyed by
+PromptPotter's two caches — the measurement archive (`measurements/`) and the optimizer reuse
+cache (`optimizer_reuse/`), root-level peers in the tenant tree — are keyed by
 content hash and shared across the whole tenant. That is deliberate and load-bearing: it is what
 makes the inner *origin* identical across every outer arm (same prompt, same hash, same rows), and
 therefore what lets the paired outer verdict cancel the inner loop's own noise. But it has a
