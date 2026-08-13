@@ -120,10 +120,10 @@ export interface DraftCampaignWire {
   // "drop the missing input" affordance in the ready panel.
   dependencies: PipelineDependencyWire[];
   // Server-authoritative mint-gate verdict, recomputed on every draft response
-  // (the full `origin_readiness` checklist — columns, task framing, answer
-  // space/format, node models). The UI gates Start on this and renders these
-  // gaps; the client never re-derives the gate (the omitted half — answer
-  // space/format/node-model — can't be mirrored faithfully and would drift).
+  // (the full `origin_readiness` checklist — columns, task framing, node
+  // models; no individual prompt field is gated). The UI gates Start on this
+  // and renders these gaps; the client never re-derives the gate (the
+  // node-model half can't be mirrored faithfully and would drift).
   readiness: { complete: boolean; gaps: OriginGap[] };
 }
 // One origin field still blocking mint, as returned by the server's

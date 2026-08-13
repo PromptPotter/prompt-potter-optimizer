@@ -3,7 +3,6 @@ GATES; only what the operator must genuinely state is gated, since a default is 
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -13,7 +12,6 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
 )
-from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
 
@@ -69,8 +67,6 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
         gaps=gaps,
     )
 
-    _check_answer_space(draft, gaps=gaps)
-    _check_commit_format(draft, gaps=gaps)
     _check_node_models(draft, gaps=gaps)
 
     return OriginReadiness(complete=not gaps, gaps=tuple(gaps))
@@ -123,58 +119,6 @@ def _check_confirmed(
     reason = "proposed_unconfirmed" if provenance is Provenance.PROPOSED else "unset"
     extra = " (proposed — confirm or correct)." if provenance is Provenance.PROPOSED else ""
     gaps.append(FieldGap(field=field_key, reason=reason, hint=f"{hint} [{label}]{extra}"))
-
-
-def _label_present(label: str, haystack: str) -> bool:
-    """Whole-token membership, so the label ``other`` is not matched inside ``another``. Boundaries
-    are non-alphanumeric, so multi-word and numeric labels still match cleanly."""
-    return re.search(rf"(?<![a-z0-9]){re.escape(label.lower())}(?![a-z0-9])", haystack) is not None
-
-
-def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """A closed-label dataset stays open until every target label appears verbatim in the prompt
-    that will be committed — otherwise the campaign mints a prompt that can never emit them."""
-    labels = draft.answer_space()
-    if not labels:
-        return
-    # Mirror the committed prompt exactly — checking the union of fields + the raw
-    # description would pass a draft whose labels live only in a task description
-    # that never reaches the prompt.
-    haystack = " ".join(str(v) for v in draft.committed_prompt_fields().values()).lower()
-    missing = [lab for lab in labels if not _label_present(lab, haystack)]
-    if not missing:
-        return
-    gaps.append(
-        FieldGap(
-            field="answer_space",
-            reason="unset" if not draft.origin_prompt_fields else "proposed_unconfirmed",
-            hint=(
-                "Enumerate every target label in the prompt so the model picks one: "
-                f"{', '.join(labels)}. Missing: {', '.join(missing)}."
-            ),
-        )
-    )
-
-
-def _check_commit_format(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """An extract-then-compare scorer needs a non-empty ``answer_format``: its sibling proves the
-    labels appear somewhere, but a model never told to COMMIT one leaves the scorer nothing to cut."""
-    if not extraction_note_for_scoring(draft.scoring_composite):
-        return
-    if str(draft.committed_prompt_fields().get("answer_format", "")).strip():
-        return
-    gaps.append(
-        FieldGap(
-            field="answer_format",
-            reason="proposed_unconfirmed" if draft.origin_prompt_fields else "unset",
-            hint=(
-                f"Author answer_format with the commit instruction — the "
-                f"{draft.scoring_composite!r} scorer extracts the answer from the "
-                "output (e.g. the last bolded span), so an empty format leaves "
-                "nothing to extract and every prediction misses."
-            ),
-        )
-    )
 
 
 def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:

@@ -26,7 +26,25 @@ __all__ = [
     "RunLimits",
     "SpendBucket",
     "SpendRollup",
+    "warming_payload",
 ]
+
+
+def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
+    """The canonical "this cycle has no ``dashboard.json`` yet" body, served at 200 rather than 404 so
+    the webapp renders "initialising" instead of appearing offline. It lives beside the model whose
+    absence it stands in for, because BOTH wire surfaces serve it — the dashboard route and the SSE
+    snapshot — and they had drifted into two hand-written shapes carrying different keys.
+
+    ``run_phase`` is required, not defaulted: a body with no phase is exactly what let the browser
+    invent one (a warming cycle read as "stopped", and the run-control button offered Start)."""
+    return {
+        "warming_up": True,
+        "campaign_id": hop.campaign_id,
+        "cycle_id": hop.cycle_id,
+        "phase_hint": "origin",
+        "run_phase": run_phase,
+    }
 
 
 class BackfillLogEntry(StrictModel):
@@ -145,11 +163,22 @@ class LiveDashboardState(StrictModel):
     state: DashboardState = DashboardState.INIT
     state_since: str
 
-    # The coarse lifecycle+control axis every surface reads, declared by the runner via
-    # control PhaseRecords — so a paused run reads as paused even once this file goes stale.
-    # ``state`` above stays the fine-grained activity. Never "detached" here (a dead producer
-    # can't write); only the server-side ``derive_run_phase`` reader emits that.
-    run_phase: RunPhase = RunPhase.RUNNING
+    # The runner's DECLARATION of the coarse lifecycle+control axis, made via control
+    # PhaseRecords — so a paused run stays readable as paused once this file goes stale.
+    # ``state`` above stays the fine-grained activity. It is an INPUT to
+    # ``derive_run_phase``, never the answer: its only writer is the runner's own process,
+    # so it cannot report "detached" (a dead producer can't write) and it went on saying
+    # "running" forever after a kill. It is NAMED for what it is, so that nobody reading
+    # this file in an editor — the folder-UI contract's equal consumer — mistakes it for
+    # the answer.
+    declared_phase: RunPhase = RunPhase.RUNNING
+
+    # The answer, and WIRE-ONLY: ``exclude=True`` keeps it out of every ``model_dump``, so
+    # it never reaches disk, while ``model_fields`` still carries it to the TS generator —
+    # which is what lets the browser's type name the field the browser actually reads. The
+    # route and the SSE snapshot set it from ``derive_run_phase`` on the way out; nothing
+    # in Python reads or writes it, and the writer must never start.
+    run_phase: RunPhase = Field(default=RunPhase.RUNNING, exclude=True)
 
     stop_reason: str | None = None
 
@@ -245,7 +274,7 @@ class LiveDashboardState(StrictModel):
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
             "headline_metric": headline_metric,
-            "run_phase": RunPhase.RUNNING,
+            "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,
             "in_flight": None,

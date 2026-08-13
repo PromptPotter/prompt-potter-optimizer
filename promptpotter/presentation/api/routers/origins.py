@@ -29,6 +29,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
     dataset_pipeline_path,
     is_dataset_dir,
     list_readable_datasets,
@@ -37,7 +38,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoresDep
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import NotFoundError, StoredConfigInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,14 @@ class OriginListResponse(StrictModel):
     total: int = Field(description="Number of origins")
 
 
+def _dataset_resolves(stores: Stores, name: str) -> bool:
+    try:
+        readable_dataset_dir(stores, name)
+    except DatasetAccessError:
+        return False
+    return True
+
+
 def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
     samples_by_dataset = {r.name: r.n_samples for r in list_readable_datasets(stores)}
     # Tenant-scoped (no owner_user_id filter), matching the dashboard's `/cycles`
@@ -87,6 +96,16 @@ def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
     out: list[OriginEntry] = []
     for origin_id, group in by_origin.items():
         canonical = min(group, key=lambda c: c.created_at)
+        # A campaign outlives its dataset (deleted, replaced, never committed), and
+        # reuse has nothing to run without one. Ask the SAME resolver the reuse
+        # click asks, so the list and the action cannot disagree.
+        if not _dataset_resolves(stores, canonical.dataset_name):
+            logger.info(
+                "origins: skipping origin %s — dataset %r no longer resolves",
+                origin_id,
+                canonical.dataset_name,
+            )
+            continue
         # Best origin score across the origin's campaigns (origin scoring is
         # nondeterministic at the backend, so runs of one origin vary); None when
         # no campaign recorded an origin_accuracy yet.
@@ -133,7 +152,17 @@ def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> 
             return None
         samples = [Sample(**it) for it in items]
         return build_origin_cycle_id(opt_sp, schema, samples, base_pp).removeprefix("cycle_")
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        json.JSONDecodeError,
+        StoredConfigInvalidError,
+    ):
+        # StoredConfigInvalidError included deliberately: this is a SURVEY over every
+        # tenant dataset, so one unreadable neighbour drops itself, never the list.
+        # The dataset's own direct reads still 500 with the restamp remedy.
         logger.exception("origins: prospective origin id failed for %s", dataset_name)
         return None
 

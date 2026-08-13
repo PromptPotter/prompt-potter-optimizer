@@ -115,8 +115,13 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
             human=str(exc),
         )
     logger.info("run control: %s/%s -> pause requested", campaign_id, cycle_id)
+    # `status`, matching this function's other two exits — NOT `run_phase`. The cycle's
+    # phase is still whatever `derive_run_phase` says (it runs until its next checkpoint),
+    # and the word this used to serve there, `pausing`, is in no `RunPhase`. Run-state has
+    # one server-owned answer and one vocabulary; a fourth entry point minting a seventh
+    # word for it is how the CLI and the browser come to describe one cycle differently.
     return CommandResult(
-        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "run_phase": "pausing"},
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "pause_requested"},
         human=(
             f"{campaign_id}/{cycle_id} -> pause requested{_reason_suffix(args)}. "
             "The loop exits at its next checkpoint; `resume` picks it up."

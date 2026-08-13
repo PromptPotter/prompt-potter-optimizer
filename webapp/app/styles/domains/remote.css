@@ -32,6 +32,9 @@
   margin-left:0;white-space:nowrap;
   opacity:0;pointer-events:none;transition:opacity .12s ease;
 }
+/* Why the run controls are inert while an inner run is viewed — the command
+   highway addresses one hop, so the outer campaign is the only target. */
+.remote-inner-note{font-size:var(--text-xs);color:var(--color-text-tertiary);max-width:26ch}
 .remote-follow:hover .follow-active-btn,
 .remote-follow:focus-visible .follow-active-btn{opacity:1}
 

@@ -228,26 +228,30 @@ class DraftCampaign:
         )
 
     def answer_space(self) -> tuple[str, ...] | None:
-        """The campaign's enumerable answer space, computed over the full upload at ingest — the
-        gate requires it land in the prompt, and the proposer is handed it to enumerate."""
+        """The campaign's enumerable answer space, computed over the full upload at ingest —
+        ``committed_prompt_fields`` lands it in the prompt deterministically."""
         if not self.column_ground_truth:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
     def committed_prompt_fields(self) -> dict[str, Any]:
-        """The one encoding of "the prompt this draft commits", shared with the answer-space gate so
-        they cannot drift. APPEND, never overwrite: the resolver's extraction instruction survives."""
+        """The one encoding of "the prompt this draft commits". Any field may be blank — the
+        optimizer evolves them — so only an ENTIRELY blank prompt (wiped strings included, hence
+        not keyed on the dict) falls back to the task description."""
+        authored = any(str(value).strip() for value in self.origin_prompt_fields.values())
         fields = (
             dict(self.origin_prompt_fields)
-            if self.origin_prompt_fields
+            if authored
             else {"instruction": self.raw_task_description}
         )
+        # Appended even when answer_format is blank: the optimizer prompts forbid the
+        # LLMs from re-typing labels on the promise that the system supplies them.
         labels = self.answer_space()
-        fmt = str(fields.get("answer_format", "")).strip()
-        if labels and fmt:
+        if labels:
             enumeration = closed_answer_format(labels)
+            fmt = str(fields.get("answer_format", "")).strip()
             if enumeration not in fmt:
-                fields["answer_format"] = f"{fmt}\n{enumeration}"
+                fields["answer_format"] = f"{fmt}\n{enumeration}" if fmt else enumeration
         return fields
 
     def patch(self, **changes: Any) -> DraftCampaign:

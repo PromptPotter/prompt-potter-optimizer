@@ -1,9 +1,10 @@
 // Origin check-in client helpers: the resolver answer-back loop (`questionPatch`
 // / `questionOptions`) and the jargon-free `plainLanguageRecap`. The mint GATE
-// itself is server-owned: `origin_readiness.py` is the single checklist, and its
+// itself is server-owned: `origin_readiness.py` is the single checklist (columns,
+// task framing, node models — no individual prompt field is gated), and its
 // verdict rides every draft response as `draft.readiness` (the UI reads that, it
-// does NOT re-derive — the answer-space / answer-format / node-model checks can't
-// be mirrored faithfully in the client and a partial mirror only drifts).
+// does NOT re-derive — the node-model check can't be mirrored faithfully in the
+// client and a partial mirror only drifts).
 
 import type { DraftCampaignWire, DraftPatch } from "./api";
 

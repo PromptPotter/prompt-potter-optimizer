@@ -3,7 +3,7 @@
   "cycle_id": "cycle_l2terminal01",
   "session_id": "fixture-session-l2terminal",
   "state": "stopped",
-  "run_phase": "terminal",
+  "declared_phase": "terminal",
   "stop_reason": "max_rounds",
   "round": 5,
   "candidate": null,

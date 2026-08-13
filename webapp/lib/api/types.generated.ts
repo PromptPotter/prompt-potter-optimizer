@@ -465,6 +465,7 @@ export interface LiveDashboardState {
   langfuse_trace_url: string | null;
   state: 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
   state_since: string;
+  declared_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   stop_reason: string | null;
   round: number;
@@ -870,8 +871,11 @@ export interface LineageNode {
   accuracy: number | null;
   composite_fitness: number | null;
   /** Candidate: minted | measured — never 'winner' (that rides `is_winner`).
-   * Course: the cycle status. */
-  state: string;
+   * Course: `index.json::status`, the same StopReason value `/cycles` serves
+   * under this same name. It was `state`, which is what
+   * `dashboard.json::state` calls the fine-grained ACTIVITY phase — a
+   * different axis entirely, and one word for both. */
+  status: string;
   /** This candidate's ROUND has held its election. The complement `is_winner`
    * cannot supply: a round that HELD crowned nobody, so every bar in it reads
    * `is_winner: false` exactly as a round still scoring does — and only this

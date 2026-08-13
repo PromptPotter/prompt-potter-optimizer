@@ -76,7 +76,10 @@ class JobRegistry:
     ) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        # Reentrant on purpose: `reserve` holds it across `list_running` →
+        # `_reap_if_orphaned` → `mark_finished`, each of which takes it again.
+        # A plain Lock deadlocks the event-loop thread on the SECOND launch.
+        self._lock = threading.RLock()
         self._capacity = capacity
         self._tasks: dict[str, asyncio.Task[None]] = {}
         # Fired whenever a job is proven dead (torn task, or stale-on-restart) so

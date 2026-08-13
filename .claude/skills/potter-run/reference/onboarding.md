@@ -22,7 +22,8 @@ those two servers do internally.
 4. One `checkin` turn proposes the column map (`query` + `ground_truth`), the six decomposed
    Layer-1 prompt fields, and the 7-field `task_context`; code fills the closed-label answer
    space deterministically. A pure checklist gate (no LLM) blocks mint until query +
-   ground_truth + framing + answer-space are all CONFIRMED.
+   ground_truth + framing are all CONFIRMED and every active LLM node owns a model —
+   no individual prompt field is gated (the optimizer evolves them).
 5. The origin lands as **round 0 / C0** in the lineage tree.
 6. Select · modify · start. Mint writes the tenant dataset + campaign + cycle and runs from
    round 0.

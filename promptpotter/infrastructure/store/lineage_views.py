@@ -103,10 +103,12 @@ class LineageNode(StrictModel):
     round: int | None = Field(default=None, description="Column hint. Candidates only.")
     accuracy: float | None = None
     composite_fitness: float | None = None
-    state: str = Field(
+    status: str = Field(
         default="",
         description="Candidate: minted | measured — never 'winner' (that rides `is_winner`). "
-        "Course: the cycle status.",
+        "Course: `index.json::status`, the same StopReason value `/cycles` serves under this "
+        "same name. It was `state`, which is what `dashboard.json::state` calls the "
+        "fine-grained ACTIVITY phase — a different axis entirely, and one word for both.",
     )
     election_held: bool = Field(
         default=False,
@@ -403,7 +405,7 @@ def _course_scalars(
 
     return {
         "course_kind": kind,
-        "state": str(index.get("status") or ""),
+        "status": str(index.get("status") or ""),
         # The ONE run-phase derivation, the same call `/cycles` makes.
         "run_phase": str(
             derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at")))
@@ -678,7 +680,7 @@ def _candidate_node(
         round=cand.round,
         accuracy=cand.accuracy,
         composite_fitness=cand.composite_fitness,
-        state=cand.state,
+        status=cand.state,
         evaluators=cand.evaluators,
         # The candidate's own band, and only ever that: the round close no longer carries a
         # second one to prefer over it.
@@ -780,7 +782,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     if branch is not None:
         scalars |= {
             "run_phase": branch.run_phase,
-            "state": branch.state,
+            "status": branch.status,
             "best_accuracy": branch.best_accuracy,
         }
 

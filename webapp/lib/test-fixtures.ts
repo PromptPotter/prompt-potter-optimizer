@@ -153,6 +153,10 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     langfuse_trace_url: null,
     state: "init",
     state_since: "",
+    // Both halves: `declared_phase` is what the runner wrote to disk, `run_phase` what the
+    // route derived and served. A fixture that set only one would type-check while
+    // describing a body the server never sends.
+    declared_phase: "running",
     run_phase: "running",
     stop_reason: null,
     round: 0,

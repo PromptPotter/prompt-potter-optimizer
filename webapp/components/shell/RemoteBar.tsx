@@ -41,7 +41,16 @@ interface Props {
 
 export function RemoteBar({ onFollowed }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
-  const { campaignId, cycleId, cycles, following, followActive } = useWorkspace();
+  const {
+    campaignId,
+    cycleId,
+    leafCampaignId,
+    leafCycleId,
+    viewedPath,
+    cycles,
+    following,
+    followActive,
+  } = useWorkspace();
   const { dash, dashRound, status } = useDashboard();
   const [pending, setPending] = useState<"skip" | "sample-lookahead" | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -67,10 +76,23 @@ export function RemoteBar({ onFollowed }: Props) {
     </>
   );
 
-  // Babysat marker for the in-view cycle — the canonical flag rides the cycle
-  // list (index.json::human_intervened), permanent once an operator intervenes.
+  // The phase above is the LEAF's; the command highway addresses exactly one hop
+  // and has no `descend`, so an inner cycle cannot be commanded. Firing anyway
+  // sent Skip/Pause — enabled by the INNER run's `running` — at the outer cycle.
+  // Disabled with the reason stated, rather than re-targeted (I3_affordance_honest).
+  const inner = (viewedPath?.length ?? 1) > 1;
+  const innerReason = inner
+    ? "Run control reaches the outer campaign only — back out of this inner run to use it."
+    : undefined;
+
+  // Babysat marker — the canonical flag rides the cycle list
+  // (index.json::human_intervened), permanent once an operator intervenes. Matched
+  // on the hop the CHIP describes, so it can't advertise the outer cycle's history
+  // beside an inner run's phase; an inner cycle is absent from `/cycles`, so it
+  // simply doesn't claim one.
   const babysat = Boolean(
-    cycles.find((c) => c.campaign_id === campaignId && c.cycle_id === cycleId)?.human_intervened,
+    cycles.find((c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId)
+      ?.human_intervened,
   );
   const spend = dash?.spend;
   // The armed USD ceiling comes from run_limits — the single authoritative
@@ -142,14 +164,23 @@ export function RemoteBar({ onFollowed }: Props) {
           <span aria-hidden="true">⭘</span> reconnecting
         </span>
       ) : null}
-      <RunControlButton />
+      {inner ? (
+        <span className="remote-inner-note" role="status">
+          {innerReason}
+        </span>
+      ) : (
+        <RunControlButton />
+      )}
       <button
         type="button"
         className="remote-btn remote-skip"
         onClick={() => void act("skip", () => postSkipSearchpoint(campaignId, cycleId))}
-        disabled={runPhase !== "running" || pending !== null}
+        disabled={inner || runPhase !== "running" || pending !== null}
         aria-label="Skip the rest of this searchpoint"
-        title="Cut the remaining samples of the searchpoint scoring now, accept the partial, and keep the cycle running. Marks the cycle babysat."
+        title={
+          innerReason ??
+          "Cut the remaining samples of the searchpoint scoring now, accept the partial, and keep the cycle running. Marks the cycle babysat."
+        }
       >
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
@@ -163,7 +194,7 @@ export function RemoteBar({ onFollowed }: Props) {
             postSetSampleLookahead(campaignId, cycleId, !sampleLookaheadArmed),
           )
         }
-        disabled={runPhase !== "running" || pending !== null}
+        disabled={inner || runPhase !== "running" || pending !== null}
         aria-pressed={sampleLookaheadArmed}
         aria-label={
           sampleLookaheadArmed
@@ -171,9 +202,10 @@ export function RemoteBar({ onFollowed }: Props) {
             : "Arm sample look-ahead for the next round of scoring"
         }
         title={
-          sampleLookaheadArmed
+          innerReason ??
+          (sampleLookaheadArmed
             ? `Look-ahead armed — 2 samples in flight, about half the wall clock. Expires when this round finishes scoring. Costs at most one discarded backend call per eliminated candidate${discards > 0 ? ` (${discards} so far)` : ""}; the measurement is unchanged and the cycle is NOT marked babysat.`
-            : "Run the next round's scoring with 2 samples in flight instead of 1 — roughly half the wall clock. Expires after that one round. The measurement is unchanged."
+            : "Run the next round's scoring with 2 samples in flight instead of 1 — roughly half the wall clock. Expires after that one round. The measurement is unchanged.")
         }
       >
         <span aria-hidden="true">⇉</span>

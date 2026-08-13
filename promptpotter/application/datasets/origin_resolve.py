@@ -311,8 +311,8 @@ def _apply_findings(
     # instruction — the bold/box it was handed in context); the closed answer-space
     # ENUMERATION is appended deterministically downstream (`committed_prompt_fields`
     # → `closed_answer_format`) because the LLM reliably drops labels from a many-way
-    # set. `_check_commit_format` nudges when the prose is left empty; the round-0
-    # health grade is the empirical backstop.
+    # set. Leaving the prose empty blocks nothing — the optimizer evolves it, and the
+    # round-0 health grade is the empirical backstop.
     return draft.apply_resolution(values=values, provenance=provenance)
 
 

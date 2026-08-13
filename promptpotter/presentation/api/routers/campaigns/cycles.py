@@ -16,6 +16,11 @@ from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.scoring import RoundScorer
+from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
+from promptpotter.infrastructure.runtime_flags import (
+    derive_run_phase,
+    run_phase_validator_epoch,
+)
 from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import (
@@ -24,11 +29,7 @@ from promptpotter.infrastructure.store.lineage_views import (
     build_lineage_tree,
 )
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
-from promptpotter.presentation.api.deps import (
-    StoresDep,
-    decode_descend,
-    warming_payload,
-)
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
     client_seen_at_or_after,
@@ -52,7 +53,8 @@ def serve_dashboard_response(
 ) -> Response:
     """The single dashboard-serving path — the outer route passes the caller's ``base_dir``, the inner a sandbox's. One
     implementation, two roots, so 304 / warming / atomic-read semantics cannot drift between them."""
-    cycle_path = cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+    cycle_path = cycle_dir_for(base_dir, hop)
     # WARMING is "no dashboard YET"; a cycle dir that isn't there is GONE. Answering
     # both with the warming placeholder conflates a transient state with a terminal
     # one: a deleted campaign then reads "initialising" forever, and the webapp gets
@@ -63,31 +65,39 @@ def serve_dashboard_response(
     path = CycleLayout(cycle_path).dashboard
     present = path.is_file()
 
-    # Conditional-GET once, before reading the body: Last-Modified rides the
-    # dashboard mtime when present, else the cycle dir's mtime (so polling
-    # clients still get cheap 304s while a fresh campaign warms up). The read
-    # only happens after the 304 check passes — keeps the 2 s poll cheap.
+    # Conditional-GET once, before reading the body — the read only happens after
+    # the 304 check passes, which keeps the 2 s poll cheap. The validator covers
+    # every input to the served phase, not just this file's mtime: the phase turns
+    # `detached` on the CLOCK, with nothing written, so an mtime-only validator
+    # would 304 a dead producer at "running" for as long as the browser polled.
     try:
-        mtime_epoch = (path if present else cycle_path).stat().st_mtime
+        mtime_epoch = run_phase_validator_epoch(cycle_path)
+        if mtime_epoch is None:
+            raise FileNotFoundError(cycle_path)
         headers = {"Last-Modified": http_date(mtime_epoch)}
         if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
             return Response(status_code=304, headers=headers)
     except FileNotFoundError:
         headers = {}
 
-    # ``run_phase`` rides dashboard.json itself (declared by the runner, projected
-    # by LiveDashboardView) — the webapp reads it straight off the 2 s poll, so a
-    # paused run reads "paused" with no separate /runstate round-trip. The spend
-    # cap rides ``dashboard.json::run_limits.spend_budget_usd`` (the single
-    # authoritative budget source); the deleted /runstate ``spend_cap_usd`` was unused.
+    # ``run_phase`` is DERIVED here, never served as stored. The file carries the
+    # runner's last declaration, written only by that process, so a kill / restart /
+    # orphan reap left it claiming "running" forever while `/cycles` and `/tree` —
+    # which have always re-derived — said terminal. One authority, every surface.
+    # The spend cap still rides ``dashboard.json::run_limits.spend_budget_usd``
+    # (the single authoritative budget source).
     body = read_json_tolerant(path) if present else None
+    declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
+    run_phase = str(derive_run_phase(cycle_path, declared=declared))
     if body is None:
         # Missing OR corrupt (half-written / truncated): degrade to the warming
         # placeholder rather than 500 on the 2 s poll. A present-but-unreadable
         # file carries a reason so the panel can say so, matching the SSE tail.
-        body = warming_payload(campaign_id, cycle_id)
+        body = warming_payload(hop, run_phase=run_phase)
         if present:
             body["reason"] = "dashboard_unreadable"
+    else:
+        body["run_phase"] = run_phase
     return JSONResponse(body, headers=headers)
 
 
@@ -109,9 +119,11 @@ def get_cycle_dashboard(
     inner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty
     ``descend`` is a plain per-cycle read — no session-root collapse.
 
-    Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
-    on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
-    quiescent stretches. A cycle that exists but has not yet flushed its first
+    Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when nothing the
+    body depends on has advanced — keeps the 2 s webapp poll cheap during quiescent
+    stretches. The validator is :func:`run_phase_validator_epoch`, which covers the
+    derived phase: it turns ``detached`` on the clock, so an mtime-only validator
+    would 304 a dead producer at ``running``. A cycle that exists but has not yet flushed its first
     ``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders
     "initialising" rather than appearing offline; a cycle that does not exist
     answers 404, because those are different facts.

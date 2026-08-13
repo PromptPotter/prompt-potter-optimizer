@@ -641,7 +641,10 @@ class CampaignStore:
         if layout.pause_flag.is_file() or is_checkin(cycle_dir):
             return False
         dash = read_json_optional(layout.dashboard)
-        if isinstance(dash, dict) and dash.get("run_phase") in (RunPhase.GATE, RunPhase.PAUSED):
+        if isinstance(dash, dict) and dash.get("declared_phase") in (
+            RunPhase.GATE,
+            RunPhase.PAUSED,
+        ):
             return False
         return self._stamp_terminal(hop, StopReason.PRODUCER_VANISHED)
 

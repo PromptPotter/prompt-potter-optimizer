@@ -28,7 +28,7 @@ function node(
     round: null,
     accuracy: null,
     composite_fitness: null,
-    state: "",
+    status: "",
     election_held: false,
     is_winner: false,
     theta: null,

@@ -90,9 +90,16 @@ Snapshot-then-tail plus a heartbeat; the ledger line index IS the
 `cycles/{cycle_id}/dashboard.json`, stamped with its own id; a fork's view can never
 surface the parent's, though it seeds its prior trajectory from the parent's file.
 Write target is the `CycleDir` newtype, and the read sites serve the viewed cycle's own
-file — no `root_cycle_id` collapse. Run-state rides `dashboard.json::run_phase`, declared
-by the runner: the old `/runstate` probe inferred "running" from freshness, which was the
-symptom that run-state had never been owned state.
+file — no `root_cycle_id` collapse. **`dashboard.json::declared_phase` is the runner's
+DECLARATION, never the served answer** — one input to `runtime_flags.py::derive_run_phase`, the
+ONE function every surface is served from; the two holding no `index.json` (the dashboard route
+and the SSE snapshot) pass neither optional input and let it read both. The file's only writer
+lives in the process that dies, so serving it raw read `running` forever after a kill — hence the
+key is NAMED as the declaration, and `run_phase` stays on the model `exclude=True`: wire-only, so
+the browser's generated type names the field it reads while nothing writes one to disk. The
+`running` → `detached` edge moves with the CLOCK, not with a write, so it is expressed once
+(`_detached_after`) and the conditional-GET validator reads it from there rather than restating
+it — a 304 computed off a second copy outlives the answer it stands for.
 
 **Seeding from that file may not be able to fail the run.** `resolve_resume_state` is the one
 reader that turns `dashboard.json` back into state, and the model is `extra="forbid"` — so a file
