@@ -52,7 +52,6 @@ Round-winner selection compares candidates on difficulty-adjusted ability (θ on
 
 ## Pointers
 
-- Glossary entries for `MeasurementArchive`, `AxisIndex`, `SampleIndex`, `score_search_point()`, `classify_result()`: [`../glossary.md`](../glossary.md)
 - Application contract: [`../../promptpotter/application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
 - Operator-facing forks + composite hot-swap: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)
 - Campaign-tree forks share the archive without duplication: [`campaign-tree.md`](campaign-tree.md)

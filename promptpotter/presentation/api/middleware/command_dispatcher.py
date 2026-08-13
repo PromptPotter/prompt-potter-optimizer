@@ -122,7 +122,7 @@ CycleScopedKind = Literal[
 WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
-# lifecycle, which moves/removes the tree). Rewrites `campaign.json`.
+# `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
 CampaignConfigKind = Literal["set-allowed-models", "set-campaign-label"]
 
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]

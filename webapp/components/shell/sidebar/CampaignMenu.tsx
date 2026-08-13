@@ -13,8 +13,8 @@ import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Button, Dialog, Popover } from "@/components/ui";
 
 // Per-campaign three-dots menu. Surfaces the lifecycle commands wired in
-// `mutations.ts`: archive / unarchive (MOVE the tree into / out of the archive/
-// recycle bin, reversible) and delete (DESTRUCTIVE — removes the campaign tree,
+// `mutations.ts`: archive / unarchive (a `lifecycle_status` flip that hides the
+// campaign from the listing, moving nothing) and delete (DESTRUCTIVE — removes the campaign tree,
 // no recovery; the cross-campaign measurement cache survives per ADR-0002 §0.5
 // so siblings still cache-hit), plus rename, the one edit that leaves the tree
 // where it is. Delete and rename ask first; archive / unarchive fire
@@ -214,7 +214,7 @@ export function CampaignMenu({ campaign }: Props) {
         title="Delete this campaign?"
         message={`This permanently removes "${
           campaign.label || campaign.campaign_id
-        }" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it moves the campaign to the recycle bin, restorable later.)`}
+        }" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
         actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
       />

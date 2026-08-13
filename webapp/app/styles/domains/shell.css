@@ -139,8 +139,9 @@
 .unit-library-family:not(.selected):hover{background:var(--color-background-hover)}
 .unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}
 .unit-library-family.selected{background:var(--color-background-tint-active)}
-/* Archived rows live in the recycle bin — muted, and their primary click restores
-   (the detail routes 404 until restored). The status cell reads "Archived · restore".
+/* An archived campaign moves nowhere — `lifecycle_status` drops it from the `active`
+   filter and nothing else, so it stays readable ("Archived ≠ gone", workspace.tsx).
+   Muted here; restore is the ⋯ menu, not the row click.
    A RETIRED candidate takes the same recede: it is the left-behind side of a supersede
    cut, still on the timeline and still selectable (it is the record of what ran), but not
    a peer of the attempt that replaced it. The dim never carries that alone — the row wears
@@ -177,7 +178,7 @@
 .csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}
 .csize-note{grid-column:1 / -1;margin-top:2px;font-size:var(--text-xs);letter-spacing:0.02em;color:var(--color-text-tertiary);opacity:0.8}
 /* Run-phase chip — a status dot paired with the phase word (never colour
-   alone), shared by the RemoteBar and the topbar active-jobs list so a run's
+   alone), shared by the RemoteControl and the topbar active-jobs list so a run's
    phase reads identically wherever it surfaces. */
 .phase-chip{display:inline-flex;align-items:center;gap:var(--space-6);font-weight:600;font-size:var(--text-sm);color:var(--color-text-primary)}
 .phase-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}

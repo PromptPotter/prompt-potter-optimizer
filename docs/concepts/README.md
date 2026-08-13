@@ -14,7 +14,6 @@
 | [Nodes and pipelines](nodes-and-pipelines.md) | Backend pipeline node anatomy |
 | [Structured output](structured-output.md) | The schema is a second prompt — name, field order, `description`; shape-determinism ≠ content-determinism |
 | [Optimizer of the optimizer](optimizer-of-the-optimizer.md) | PromptPotter optimizing its own optimizer prompts (M12) |
-| [Glossary](../glossary.md) | Domain vocabulary |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
 | [Paired-sample PoBB](paired-sample-pobb.md) | How sample-keyed priors + leader backfill restore PoBB's iid premise under hard-sample-first ordering |
 | [Hard-sample leaderboard](../methods/exploration-exploitation.md) | Sample selection in detail |

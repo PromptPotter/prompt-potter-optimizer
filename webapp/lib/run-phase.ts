@@ -69,7 +69,7 @@ function isRunPhase(v: string | null | undefined): v is RunPhase {
 // past RUN_FRESH_S (30 s). A stale dashboard therefore means the producer
 // vanished (crash / kill / sleep); such a cycle is dead and gets reaped to
 // terminal, not shown as an open app. Every "is anything running" surface reads
-// THIS one map — the navbar dock, the RemoteBar, the workspace `liveCycles` — so
+// THIS one map — the navbar dock, the RemoteControl, the workspace `liveCycles` — so
 // they can't disagree.
 //
 // A booleans-per-phase map rather than a Set, because a Set of three strings can

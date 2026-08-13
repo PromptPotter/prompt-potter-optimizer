@@ -115,8 +115,9 @@ export async function postCleanupEmpty(
     cycle_id: cycleId,
   });
 }
-// Campaign lifecycle. Archive MOVES the tree into the `archive/` recycle bin
-// (reversible via unarchive); delete is PHYSICAL and irreversible — the server
+// Campaign lifecycle. Archive moves NOTHING — it flips `lifecycle_status`, so the
+// tree stays in `campaigns/` and only the listing filter hides it (reversible via
+// unarchive); delete is PHYSICAL and irreversible — the server
 // defaults `keep_results` to false, so the whole campaign tree plus every L4
 // inner sandbox its cycles spawned is removed. Measurements survive either way:
 // `measurements/` belongs to no single campaign, so siblings still cache-hit.

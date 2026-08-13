@@ -10,7 +10,7 @@ import { PotterMark } from "@/components/brand/PotterMark";
 // quiet" signal), the Potter glyph when one unit is live, glyph + a count badge
 // when several are. Clicking an entry OPENS it (jumps the view to its dashboard).
 // It reads the workspace's shared `liveCycles` derivation (running / gate /
-// paused) — the same in-flight set the RemoteBar uses, so they can't disagree.
+// paused) — the same in-flight set the RemoteControl uses, so they can't disagree.
 // `detached` (dead producer) is not an open app and never appears here; running
 // units sort above suspended (paused) ones so "what's executing" reads first.
 

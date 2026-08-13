@@ -5,9 +5,9 @@ import type { RoundSummary } from "@/lib/api/types.generated";
 // Teaches the one piece of vocabulary the fitness surface can't show as a bar:
 // difficulty-adjusted ability θ, the metric the round winner is actually elected
 // on. Without this, a θ-elected winner sitting below a higher-accuracy sibling
-// reads as a contradiction. Copy is the human-facing twin of the θ/1PL/2PL
-// glossary entry (docs/glossary.md) + methods/exploration-exploitation.md — one
-// corpus, two audiences; don't fork the explanation, keep them in step.
+// reads as a contradiction. Copy is the human-facing twin of
+// docs/methods/exploration-exploitation.md — one corpus, two audiences; don't
+// fork the explanation, keep them in step.
 //
 // Content only — no trigger of its own. It's read once and then never again, so it
 // had no business owning a permanent toolbar button; it lives inside the card's

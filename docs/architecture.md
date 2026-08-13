@@ -12,9 +12,11 @@ If a request doesn't fit a §0 bucket, that's a flag — propose an answer that 
 
 ## §0 — PromptPotter on one page
 
-**Vocabulary cheat sheet:** [`docs/glossary.md`](glossary.md) — one
-line per term with the canonical implementation file. Read it before
-introducing a new domain word here.
+**Before coining a domain word here:** search the repo for it. Then check
+[`developer/concept-map.md`](developer/concept-map.md) § Bare words, which lists
+the ones already naming more than one thing, and
+[`developer/conventions.md`](developer/conventions.md) § Code style, which names
+the four that are banned outright.
 
 **Purpose.** Evolve a target prompt + pipeline params toward a fitness
 goal by iterating LLM-driven candidate generation against a scoring
@@ -571,8 +573,7 @@ the PR description.
   — without the discipline, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. The symbols are
-  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`);
-  vocabulary lives in `docs/glossary.md`.
+  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`).
 - **Campaign as a first-class entity** —
   `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
   with `log.md` + `hard_samples.json` at its root and

@@ -59,7 +59,7 @@ invariants:
                       (failed poll, offline, hidden tab) is presented as connection state (offline /
                       stale affordance) and MUST NOT impersonate a run phase or unmount run controls
                       while the last-known server phase is in-flight. Every "running" surface — the
-                      topbar jobs dock, the RemoteBar, workspace liveCycles — reads this one set AND
+                      topbar jobs dock, the RemoteControl, workspace liveCycles — reads this one set AND
                       one shared ordering (executing before suspended). A surface that RENDERS the
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
                       testing `=== "running"` renders half the vocabulary as nothing, which is how

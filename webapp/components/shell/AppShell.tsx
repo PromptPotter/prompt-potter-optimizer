@@ -21,7 +21,7 @@ import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
-import { RemoteBar } from "@/components/shell/RemoteBar";
+import { RemoteControl } from "@/components/shell/RemoteControl";
 
 // The non-landing surfaces load on demand, not on first paint. The operator
 // lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
@@ -454,7 +454,7 @@ function AppShellInner() {
           Self-sources identity + live state; renders null when idle/terminal.
           Following the active run lands on its dashboard, same as the topbar
           jobs dock. */}
-      <RemoteBar onFollowed={() => setTab("dashboard")} />
+      <RemoteControl onFollowed={() => setTab("dashboard")} />
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}

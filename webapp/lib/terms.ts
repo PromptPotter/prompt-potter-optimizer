@@ -39,8 +39,8 @@ export const TERMS: Record<string, string> = {
   whatif_down: "Lower value is better — direction-corrected (1 − x) before averaging.",
 
   // Stub badges + placeholder labels
-  stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in archive/measurements.",
-  stub_score_freq:    "Inferred bucket counts. Real per-sample scores live in archive/measurements.",
+  stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",
+  stub_score_freq:    "Inferred bucket counts. Real per-sample scores live in measurements/.",
   badge_top:          "Page-anchor card — primary signal for round health.",
   brand_live_preview: "This page polls dashboard.json every 2s. Read-only.",
 

@@ -2,7 +2,7 @@
 
 > **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
 
-A **Campaign** owns `campaigns/{campaign_id}/`: a `campaign.json` manifest, a campaign-wide `log.md`, `hard_samples.json`, and one root cycle plus its fork descendants under `cycles/`. Entity definitions (Campaign / Cycle / the no-Session-tier rule / `campaign_id` minting) are [`../architecture.md`](../architecture.md) §0's and [`../glossary.md`](../glossary.md)'s — this page owns only the tree mechanics. One id-parsing fact lives here: a cycle's family is parsed purely from its id — `infrastructure/store/layout.py::root_cycle_id` / `::sibling_kind` know exactly three separators (`_fork_`, `_diag_`, `_sweep_`).
+A **Campaign** owns `campaigns/{campaign_id}/`: a `campaign.json` manifest, a campaign-wide `log.md`, `hard_samples.json`, and one root cycle plus its fork descendants under `cycles/`. Entity definitions (Campaign / Cycle / the no-Session-tier rule / `campaign_id` minting) are [`../architecture.md`](../architecture.md) §0's — this page owns only the tree mechanics. One id-parsing fact lives here: a cycle's family is parsed purely from its id — `infrastructure/store/layout.py::root_cycle_id` / `::sibling_kind` know exactly three separators (`_fork_`, `_diag_`, `_sweep_`).
 
 ## Primitive
 
@@ -25,7 +25,7 @@ campaigns/justlogic__a1b2c3/        # one Campaign
 
 Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
 
-**`unit_kind`** is the webapp sidebar label derived from `(sibling_kind, fork_trigger)` — the four values are enumerated in [`../glossary.md`](../glossary.md).
+**`unit_kind`** is the webapp sidebar label derived from `(sibling_kind, fork_trigger)` by `campaign_store/store.py::_unit_kind`, which enumerates the values; the served type restates them as a `Literal` on `routers/active.py::ActiveCycle`.
 
 ## Three callers, one primitive
 

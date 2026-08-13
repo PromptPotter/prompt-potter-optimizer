@@ -101,7 +101,7 @@ template carries to any project, no pre-knowledge required:
 
 **One canonical "active" signal, and the SERVER resolves it.** The Step level is a declared
 field — `current_round.active_node` (`live_dashboard/view.py::_active_node`) — that every surface
-reads verbatim (the optimizer-canvas pulse, the RemoteBar, the TopStrip, the node detail). The
+reads verbatim (the optimizer-canvas pulse, the RemoteControl, the TopStrip, the node detail). The
 **in-flight LLM call's node** wins when there is one (`in_flight.node` names it directly for
 `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`); otherwise the phase does,
 through a map that is TOTAL over `DashboardState` and raises at import if a member is missing.

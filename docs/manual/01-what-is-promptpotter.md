@@ -27,7 +27,7 @@ Internals: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 ## Three concepts
 
-🧱 Everything in this manual uses these three terms (and more — see the [glossary](../glossary.md)).
+🧱 Everything in this manual is built from these three terms.
 
 **Campaign** — one complete optimization run. A campaign has a fixed dataset, a fixed pipeline endpoint, and a starting prompt. It runs until you stop it or it hits its round limit.
 

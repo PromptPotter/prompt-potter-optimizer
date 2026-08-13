@@ -6,8 +6,8 @@
 // Scope (Arc 1): the ORIGIN GATE only. The gate decision moved into the chat as
 // the canonical home (the old global `OriginGateModal` — mis-mounted inside the
 // hard-samples heatmap — is deleted; its rich verdict is folded in here). The
-// paused/running pause-resume-stop controls stay on the always-present RemoteBar
-// pill (cross-tab ambient remote) — not duplicated in-thread.
+// paused/running pause-resume-stop controls stay on the always-present
+// RemoteControl, which is present on every tab — not duplicated in-thread.
 
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { OriginGateDecision } from "@/lib/api";
