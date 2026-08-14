@@ -218,9 +218,21 @@ the heatmap artifacts, the `scope` API param, and the webapp toggle,
 so the operator always distinguishes "this campaign" vs "this
 dataset" vs "everything" identically.
 
-**State + persistence.** The entry points (CLI, webapp; a WIP notebook)
-share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. **Five I/O kinds** the orchestrator reads or
+**The loop is embeddable, and that bounds what may sit in core.** Two ways in, pulling
+opposite ways: an operator installs the whole product, while a *host program* — a DSPy
+module, an agent, a harness — runs the loop inside a dependency tree it did not choose to
+merge with ours. So the **core install is the engine and nothing else**; every surface above
+it is an extra (`api`, `excel`, `jupyter`, `stats`, `observability`, `anthropic`, `dspy`),
+and `all` folds the operator set back. What belongs in core is decided by *measured*
+reachability from the two embedding entry points (`cli/campaign_runner.py`,
+`application/embedded_run.py`), never by argument; an extra's import is guarded where a
+non-installer would hit it, naming the extra. A capability that seems to need a new core
+package is a design question first — the answer is usually that the capability is an extra.
+Contract: [`adr/0006-embeddable-core-and-extras.md`](adr/0006-embeddable-core-and-extras.md).
+
+**State + persistence.** The entry points (CLI, webapp, REST API, and the embedded library
+entry a host program drives) share **one** orchestration layer and **one** set of data types
+— no per-entry-point copies. **Five I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
 sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
 HITL collapses into this ingress: `inherit_from(parent, offset)` mints
@@ -571,6 +583,12 @@ the PR description.
   TermNorm is the only consumer today."
 - **Hexagonal layer separation** (fails loud at import; see `tests/CLAUDE.md`)
   — without the discipline, the three entry points drift.
+- **The core/extra split in `pyproject.toml`** — moving a package back into core is not
+  tidying; it is a cost charged to every program that embeds the loop, and nothing fails
+  when it happens. The `[api]` set in particular looks like it belongs in core, because
+  `main.py` is the obvious entry point and is not one of the embedding two. Re-measure
+  reachability rather than reasoning about it
+  ([`adr/0006`](adr/0006-embeddable-core-and-extras.md)).
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. The symbols are
   `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`).
