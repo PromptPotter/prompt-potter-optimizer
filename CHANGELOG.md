@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **The distribution is named `promptpotter`** — `promptpotter-optimizer` was never registered on any index. One word for the brand, the import, the CLI and the install.
+- **`pip install promptpotter` is the engine, not a server** — the seven web/identity packages moved to a new `[api]` extra and `openpyxl` to `[excel]`, taking a plain install from 44 packages to 28. Reachability was measured, not argued: the CLI and `application/embedded_run.py` import to exactly the nine that remain. `[all]` folds both back in, so `.[all,dev]` and `deploy-linux/` are unchanged; serving the dashboard now means `promptpotter[api]`, and an `.xlsx` ingest without `[excel]` fails as an ingest error naming the extra.
 
 ### Added
 

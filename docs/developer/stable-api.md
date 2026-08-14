@@ -212,6 +212,10 @@ loop. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaig
 campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
 for the closing box.
 
+Nothing on this path imports a server, and the dependency list says so: `pip install
+promptpotter` is the engine, `[api]` is what a host adds if it also wants to serve the API and
+the dashboard.
+
 `load_dataset_campaign_config(path, overrides=…)` (`application/datasets/authored.py`) is the
 supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
 a nested mapping merged depth-first **before** validation, so an unknown knob raises here instead

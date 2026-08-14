@@ -42,12 +42,12 @@ is naming, placement and stability of seams we already have — plus one genuine
    keeps pause / resume / fork / replay / the diagnostic verbs. What a DSPy user actually
    trades away is the **webapp and the agent**, not the campaign tree. *(landed with this
    commit)*
-2. **Re-tier core dependencies.** `fastapi`, `starlette`, `python-multipart`,
-   `scalar-fastapi`, `uvicorn`, `sse-starlette`, `cryptography` (OIDC) and `openpyxl`
-   (xlsx ingest) sit in `[project] dependencies`, so a library install pulls a web server
-   and a JWS verifier. Move them to extras; core keeps `pydantic`, `pydantic-settings`,
-   `openai`, `httpx`, `python-dotenv`, `filelock`, `numpy`, `json-repair`, `pyyaml`.
-   Operators keep installing `.[all,dev]` and notice nothing.
+2. **Re-tier core dependencies.** Moved to `[api]` (the seven web/identity packages) and
+   `[excel]` (openpyxl); core is the nine the engine actually imports. The split was
+   measured, not argued — `embedded_run` and the CLI entry each import to exactly that
+   closure, and the whole `[api]` set is reachable only through `main.py` and
+   `presentation/api/`. `[all]` folds both in, so `.[all,dev]` is unchanged.
+   *(landed with this commit)*
 3. **Link both docs** — the usage page from [`../developer/README.md`](../developer/README.md)
    and the root README table, this spec from [`CLAUDE.md`](CLAUDE.md). Not `docs/README.md`:
    that is a folder-level table with no per-doc rows. *(landed)*
@@ -150,6 +150,5 @@ split must survive the boundary intact.
   `pyproject.toml`, not a docs gap. Adoption means a PR into `dspy/teleprompt/`, which
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
   ([`../research/bbeh-comparison/`](../research/bbeh-comparison/)).
-- **Phase A2 — dependency re-tiering** is the one item not started: it moves `fastapi` /
-  `uvicorn` / `cryptography` / `openpyxl` and their peers into extras. Nothing else in A or
-  B waits on it, and the rename it queued behind has landed.
+- **Phase B4 and B5** are the two items left here: the export artifact, and the second
+  telemetry fan-out. Phase A is closed.

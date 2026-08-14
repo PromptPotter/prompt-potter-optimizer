@@ -305,6 +305,13 @@ def _execute(check: Check, sel: Sel) -> Result:
     return Result(check, rc, out, time.monotonic() - started)
 
 
+# Spelled once: the message a missing `uv` prints and the argv it would have run are the
+# same list, and they drifted the moment one grew an extra the other did not. `api` is here
+# because mypy type-checks `main.py` and the routers — from an engine-only install it cannot
+# resolve fastapi, and reports it as a first-party error.
+_PINNED_EXTRAS = ("stats", "dev", "api")
+
+
 def _reexec_pinned() -> None:
     """The gate picks its own interpreter, because a verdict must not depend on the caller.
 
@@ -316,24 +323,14 @@ def _reexec_pinned() -> None:
     if Path(sys.prefix) == _PINNED or os.environ.get(_REEXEC):
         return
     uv = shutil.which("uv")
-    pinned = "uv run --frozen --extra stats --extra dev python scripts/gate.py"
+    extras = [arg for extra in _PINNED_EXTRAS for arg in ("--extra", extra)]
     if not uv:
         raise SystemExit(
-            f"gate: `uv` is not on PATH, so the locked env is unreachable.\nRun: {pinned}"
+            "gate: `uv` is not on PATH, so the locked env is unreachable.\n"
+            f"Run: uv run --frozen {' '.join(extras)} python scripts/gate.py"
         )
     proc = subprocess.run(
-        [
-            uv,
-            "run",
-            "--frozen",
-            "--extra",
-            "stats",
-            "--extra",
-            "dev",
-            "python",
-            __file__,
-            *sys.argv[1:],
-        ],
+        [uv, "run", "--frozen", *extras, "python", __file__, *sys.argv[1:]],
         cwd=_REPO,
         env={**os.environ, _REEXEC: "1"},
     )

@@ -222,7 +222,14 @@ def _read_xlsx(blob: bytes) -> Table:
             message="Excel uploads are disabled in hardened mode — export your sheet to CSV and drop it again.",
         )
 
-    import openpyxl  # lazy: keep the import cost off the hot CSV/JSON path
+    try:
+        import openpyxl  # lazy: an extra since 0.8.11, and off the hot CSV/JSON path
+    except ModuleNotFoundError:
+        raise IngestError(
+            reason="unsupported_format",
+            message="This install cannot read .xlsx — `pip install promptpotter[excel]`, "
+            "or export the sheet to CSV and drop it again.",
+        ) from None
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True)

@@ -69,7 +69,13 @@ Groq daily-volume model swap (when `120b` exhausts): [`05-troubleshooting.md § 
 
 ## Optional dependency bundles
 
+A bare install is the **engine**: the CLI, the loop, the stores. Serving the API and the
+dashboard is `[api]`, because PromptPotter is also a library another program imports, and one
+that drags a web server along is one nobody adds.
+
 ```bash
+pip install -e ".[api]"            # the read-only API + the dashboard mount + OIDC identity
+pip install -e ".[excel]"          # ingest .xlsx as well as CSV/TSV/JSON/JSONL
 pip install -e ".[stats]"          # Wilson CI, significance tests (scipy)
 pip install -e ".[jupyter]"        # JupyterLab + IPython display
 pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)
