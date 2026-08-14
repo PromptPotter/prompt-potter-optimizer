@@ -3,6 +3,7 @@ deliberately absent: their 3-tier sourcing policy would force this reader to tak
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,11 +78,34 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
     return result
 
 
-def load_dataset_campaign_config(path: Path) -> CampaignConfig:
+def _deep_merge(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
+    ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
+    ``max_rounds`` silently dropped every other loop knob the dataset declared."""
+    out = dict(base)
+    for key, value in over.items():
+        current = out.get(key)
+        out[key] = (
+            _deep_merge(current, value)
+            if isinstance(current, dict) and isinstance(value, Mapping)
+            else value
+        )
+    return out
+
+
+def load_dataset_campaign_config(
+    path: Path, *, overrides: Mapping[str, Any] | None = None
+) -> CampaignConfig:
     """The read-and-validate pair, owned once. ``CampaignConfig`` is ``extra="forbid"``, so a dropped knob
-    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``."""
+    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``.
+
+    *overrides* is the ONE supported way a caller shapes a dataset's config without editing the
+    shared file: a nested mapping merged on before validation, so an unknown knob raises here
+    rather than being dropped. Hand-patching the parsed dict instead is what this replaces.
+    """
     try:
-        return validate_campaign_config(read_campaign_config_file(path))
+        raw = read_campaign_config_file(path)
+        return validate_campaign_config(_deep_merge(raw, overrides) if overrides else raw)
     except ValidationError as exc:
         reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc

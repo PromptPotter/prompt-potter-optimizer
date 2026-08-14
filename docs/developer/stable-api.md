@@ -189,6 +189,31 @@ and where the HuggingFace `datasets` library lives.
 
 The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error, not a fall-through to a single unpaired cycle.
 
+## 5b. Embedded launch entry (Python)
+
+The programmatic peer of §5's verbs — `application/embedded_run.py`, for a host program driving
+one campaign inside its own event loop:
+
+```python
+session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None)
+observers, dataset, origin = await mint_and_score_origin(
+    session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
+result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
+                            langfuse_session_id=None, spend_budget_usd=None, mode=None)
+```
+
+Three steps rather than one because every caller does its own work between them. It mints through
+the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
+resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
+loop. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
+campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
+for the closing box.
+
+`load_dataset_campaign_config(path, overrides=…)` (`application/datasets/authored.py`) is the
+supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
+a nested mapping merged depth-first **before** validation, so an unknown knob raises here instead
+of being silently dropped.
+
 ## 6. Ledger event types
 
 Typed records on the per-cycle ledger (`.runtime/ledger.jsonl` — the

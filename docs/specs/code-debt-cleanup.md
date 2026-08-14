@@ -188,6 +188,41 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
   landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse number recorded,
   so there is no before/after. Action: sweep + record one pass. Blocker: none.
 
+**From the 2026-08-14 DSPy source study.** Defects in OUR code, surfaced by comparing against a
+peer system and each verified here afterwards. The DSPy-facing conclusions live in
+[`../research/related-work.md`](../research/related-work.md); only our own defects are below.
+
+- **Seven ContextVars, and five never reset.** `_MODE` / `_MEASURED`
+  (`shared/instrument.py`), `_INNER_SPAWN` (`runner/inner/spawn.py`), the optimizer prompt
+  overrides (`dispatch/llm_call/prompts.py`), `_CYCLE_LEDGER` / `_CURRENT_ROUND`
+  (`infrastructure/llm/telemetry.py`), `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`).
+  Five `.set()` without keeping a token, so nothing restores the prior value. The fix is one
+  `@contextmanager` doing token set/reset, generalized from the two places we already do it
+  right (`measured_candidate_scope`, `dispatch/facade.py::_no_round_warnings`) — the mechanism
+  unified, the vars left separate. **Do not fuse them into one settings object:** `_ABORT_CHECK`
+  is *composed* at the runner seam (`own_pause() or inherited()`), and that composition is what
+  carries an outer pause into a nested L4 cycle.
+
+- **A telemetry fact that must also reach Langfuse costs eight edits, not four.**
+  [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1 documents four —
+  record, union arm, writer, projection override. A fact needing the observability bridge pays
+  four more: the event dataclass, the `ObservabilityBridge.emit()` match arm, the `_fan(...)`
+  tuple, and a per-sink handler (`infrastructure/tracing/bridge.py`). The second path has
+  already cost real money: `LangfuseSink` needed `_MAX_OPEN_OBSERVATIONS` + `_evict_orphans()`
+  after a leak killed a long run, and `FileSink` mirrors events in *Langfuse's own wire shape*,
+  growing `.inner/` to the majority of the store with paths past Windows' 260-char limit.
+  Consolidating the two fan-outs is what makes the export/handoff work cheap rather than a
+  ninth edit.
+
+- **§1's unprojected allowlist is stale by two, and the guard is a human reading it.**
+  `DerivedView.on_record` carries arms for 10 of the 14 `CycleRecord` union members;
+  `adding-a-surface.md` §1 names only `CommandRecord` / `CommandAckRecord` as sanctioned
+  exceptions. `CycleSeedRecord` and `ElectionRecord` are also unprojected and legitimately so
+  (the crown reaches `dashboard.json` via `LiveDashboardView._handle_phase`; `ElectionRecord`
+  is consumed by `scan_ledger_elections`). The code is right and the doc is two behind — which
+  matters more than usual here, because §1 states no standing test and makes that list the
+  guard.
+
 ## Blocked — named blocker
 
 **Behavior change (needs explicit sign-off, not a blind swap) — scoring:**

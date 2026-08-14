@@ -5,39 +5,35 @@ Colab and must stay import-safe there (no ``promptpotter.*`` imports).
 """
 
 import contextlib
-import json
 from pathlib import Path
 from typing import Any
 
-from shared_config import MODEL_ID, export_results
+from shared_config import MODEL_ID, Record, export_results
 
-from promptpotter.application.campaign_config import CampaignConfig, load_campaign_config
-from promptpotter.application.datasets import samples_from_dicts
+from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.loaders import samples_from_dicts
+from promptpotter.application.embedded_run import (
+    mint_and_score_origin,
+    open_session,
+    run_campaign,
+)
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
+from promptpotter.presentation.views.completion import report_completion
 from promptpotter.presentation.views.display import set_display_tags
-from promptpotter.presentation.views.notebook_run import (
-    init_notebook_session,
-    prepare_origin_notebook,
-    run_optimization_notebook,
-)
+from promptpotter.presentation.views.live.display import LiveDisplay
 
-BBEH_TASK_DESCRIPTION = (
-    "Solve a reasoning problem from BIG-Bench Extra Hard (BBEH), which spans 23 "
-    "diverse task types including boardgame QA, multi-step arithmetic, causal "
-    "reasoning, disambiguation, and adversarial distractor text. Read the input "
-    "carefully, reason step by step as needed, and return only the final answer."
-)
-
-# datasets/bbeh/{pipeline,campaign}.json are the SoT — pipeline.yaml drives the
-# target-layer schema (read by init_notebook_session via dataset_name="bbeh"),
-# campaign.json carries every loop-control knob and the optimizer LLM.
-_BBEH_CAMPAIGN_JSON = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.yaml"
+# datasets/bbeh/ is the SoT for everything about the task — pipeline.yaml drives the
+# target-layer schema (read by open_session via dataset_name="bbeh"), campaign.yaml
+# carries every loop-control knob and the optimizer LLM, task_description.md the framing.
+_BBEH_CAMPAIGN_YAML = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.yaml"
 
 
-def _normalize(examples: list[dict]) -> list[Sample]:
+def _normalize(examples: list[Record]) -> list[Sample]:
     return samples_from_dicts(
         [{"query": ex["input"], "ground_truth": ex["target"]} for ex in examples]
     )
@@ -49,42 +45,28 @@ def build_campaign_config(
     n_variants: int | None = None,
     sp_budget_ttest: int | None = None,
 ) -> CampaignConfig:
-    """Load campaign.json and patch any non-None overrides on top.
+    """Load ``datasets/bbeh/campaign.yaml`` and merge any non-None overrides on top.
 
-    Overrides are intended as ad-hoc notebook conveniences; campaign.json
-    stays the project default and the SoT for CLI runs. The optimizer LLM is
-    install-global (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that
-    file to change the optimizer model/provider, not the campaign config.
+    Overrides are ad-hoc notebook conveniences; the file stays the project default and the SoT
+    for CLI runs. The optimizer LLM is install-global
+    (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that to change the optimizer
+    model/provider, not the campaign config.
     """
-    raw = json.loads(_BBEH_CAMPAIGN_JSON.read_text(encoding="utf-8"))
-    cfg = raw.get("campaign_config", raw)
-
+    # Rasch-validation run scaffolding (git log): a large l1_patience defers L2/L3 firing for the
+    # run window so the per-round adaptive queue accumulates δ evidence.
+    optimization: dict[str, Any] = {"max_rounds": 5, "l1_patience": 99}
+    optimization.update(
+        {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
+    )
+    overrides: dict[str, Any] = {"optimization": optimization}
     if sp_budget_ttest is not None:
-        cfg["sp_budget_ttest"] = sp_budget_ttest
-
-    # Rasch-validation run scaffolding (git log):
-    # large l1_patience defers L2/L3 firing for the run window so the
-    # per-round adaptive queue mechanism has time to accumulate δ evidence.
-    cfg["optimization"] = {
-        **cfg.get("optimization", {}),
-        "max_rounds": 5,
-        "l1_patience": 99,
-    }
-
-    opt_overrides = {
-        k: v
-        for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items()
-        if v is not None
-    }
-    if opt_overrides:
-        cfg["optimization"] = {**cfg.get("optimization", {}), **opt_overrides}
-
-    return load_campaign_config(cfg)
+        overrides["sp_budget_ttest"] = sp_budget_ttest
+    return load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML, overrides=overrides)
 
 
 async def run_bbeh_campaign(
-    train_pool: list[dict],
-    test_by_task: dict[str, list[dict]],
+    train_pool: list[Record],
+    test_by_task: dict[str, list[Record]],
     *,
     output_path: Path,
     backend_url: str = "http://127.0.0.1:8000",
@@ -107,7 +89,7 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await init_notebook_session(dataset_name="bbeh", backend_url=backend_url)
+    session = await open_session("bbeh", backend_url=backend_url, on_status=print)
     try:
         campaign_config = build_campaign_config(
             max_rounds=max_rounds,
@@ -117,23 +99,27 @@ async def run_bbeh_campaign(
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)
 
-        observers, dataset_obj, origin = await prepare_origin_notebook(
+        observers, dataset_obj, origin = await mint_and_score_origin(
             session,
             train_norm,
             campaign_config,
             pipeline_params=pipeline_params,
+            display=LiveDisplay.for_campaign(session, campaign_config),
+            on_status=print,
         )
-        origin_train_acc = origin.origin_acc
+        origin_train_acc = origin.report.accuracy
 
-        cycle_result = await run_optimization_notebook(
+        cycle_result = await run_campaign(
             observers,
             dataset_obj,
             origin,
             campaign_config,
             session=session,
-            task_context={"task_description": BBEH_TASK_DESCRIPTION},
         )
-        if cycle_result is None or cycle_result.stop_reason == "interrupted":
+        report_completion(cycle_result, session=session)
+        # Ask the outcome table, never a hand-authored string: the export below is only
+        # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
+        if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
             return None
 
         winner_prompt_fields = cycle_result.winner_prompt_fields
@@ -144,7 +130,7 @@ async def run_bbeh_campaign(
         print("PER-TASK TEST EVALUATION")
         print("=" * 60)
 
-        per_task_results: dict[str, dict] = {}
+        per_task_results: dict[str, Record] = {}
         for i, task in enumerate(tasks, start=1):
             test_items = test_norm_by_task[task]
             hits = 0

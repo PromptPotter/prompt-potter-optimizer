@@ -15,7 +15,7 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
-from promptpotter.shared.errors import error_category, is_error_result
+from promptpotter.shared.errors import DatasetIdentityError, error_category, is_error_result
 from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate_scope
 
 if TYPE_CHECKING:
@@ -112,6 +112,28 @@ def _split_off_deprecated_samples(
     return kept, deprecated
 
 
+def _assert_measured_content_matches(
+    cached: dict[int, QueryMeasurement],
+    dataset: list[Sample],
+    dataset_name: str,
+) -> None:
+    """The one gate on positional sample identity. Every stored row carries the content it was
+    measured against, so this needs nothing on disk that is not already there — and it catches a
+    single edited row, which a whole-dataset fingerprint would only catch in aggregate."""
+    for sample in dataset:
+        prior = cached.get(sample.id)
+        if prior is None:
+            continue
+        stored = (prior.get("query", ""), prior.get("ground_truth", ""))
+        if stored != (sample.query, sample.ground_truth):
+            raise DatasetIdentityError(
+                dataset_name=dataset_name,
+                sample_id=sample.id,
+                stored=stored,
+                current=(sample.query, sample.ground_truth),
+            )
+
+
 def _resolve_prior_cache(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -142,6 +164,9 @@ def _resolve_prior_cache(
                 dataset_name=dataset_name,
             ),
         )
+
+    if cached_sample_results and dataset_name:
+        _assert_measured_content_matches(cached_sample_results, dataset, dataset_name)
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:
@@ -269,7 +294,12 @@ async def score_search_point(
 
     content_hash = search_point.content_hash(dataset)
     safe_label = label.lower().replace(" ", "_")
-    run_id = f"{safe_label}_{content_hash[:8]}"
+    # The FULL hash, not a second cut of it. `label` is a round-local position (`c1.1`, `origin`)
+    # that every campaign re-mints, so the hash is the only thing telling two runs apart — and at
+    # 8 hex it was 32 bits carrying that alone. A collision does not raise: `append_run` folds
+    # last-wins per `m:{sample_id}`, so both searchpoints' measurements merge into one run file and
+    # the archive reports a configuration that did not produce them.
+    run_id = f"{safe_label}_{content_hash}"
 
     cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
         search_point,

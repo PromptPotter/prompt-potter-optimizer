@@ -188,6 +188,43 @@ class ResumeDivergenceError(RuntimeError):
         return "\n".join(lines)
 
 
+class DatasetIdentityError(RuntimeError):
+    """The rows under this dataset name changed. ``sample_id`` is a POSITION within a name, so the
+    archive can only answer "what was measured at slot N" — replaying it would attribute a score to a
+    question that did not produce it, with no error anywhere. Re-cut rows need a new name."""
+
+    _PREVIEW = 160
+
+    def __init__(
+        self,
+        *,
+        dataset_name: str,
+        sample_id: int,
+        stored: tuple[str, str],
+        current: tuple[str, str],
+    ) -> None:
+        self.dataset_name = dataset_name
+        self.sample_id = sample_id
+        lines = [
+            f"Dataset {dataset_name!r}: sample_id {sample_id} was measured against different "
+            "content than the row now sitting at that position.",
+        ]
+        for field, was, now in (
+            ("query", stored[0], current[0]),
+            ("ground_truth", stored[1], current[1]),
+        ):
+            if was != now:
+                lines.append(f"  {field} measured: {was[: self._PREVIEW]!r}")
+                lines.append(f"  {field} now:      {now[: self._PREVIEW]!r}")
+        lines.append(
+            "The measurement cache keys on (dataset_name, node_configs, sample_id) — the query "
+            "text is not in the key, so serving these priors would carry a score for one question "
+            "onto another. Cut the changed rows under a NEW dataset name; the old name keeps its "
+            "measurements and stays replayable."
+        )
+        super().__init__("\n".join(lines))
+
+
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """Detection rides the typed ``error_category`` channel — the single owner of "this sample
     errored". ``predicted == "ERROR"`` is a display token, and ``error`` a human message."""
@@ -230,6 +267,7 @@ __all__ = [
     "BadRequestError",
     "ConflictError",
     "ContentTooLargeError",
+    "DatasetIdentityError",
     "ErrorCategory",
     "MachineBusyError",
     "NotFoundError",

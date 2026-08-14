@@ -1,8 +1,15 @@
 """Shared constants for BBEH competitor comparison notebooks.
 
-Both bbeh_capo.ipynb and bbeh_gepa.ipynb import this file to ensure
-identical dataset splits, model config, and output format.
+``bbeh_capo.ipynb`` and ``bbeh_dspy.ipynb`` both import this file, so the dataset splits,
+model config and output format are identical across methods. It imports nothing from
+``promptpotter`` on purpose — those two notebooks run on Colab, where the package is absent.
 """
+
+from datetime import UTC
+from typing import Any
+
+# One BBEH example as the notebooks pass it around: ``input`` / ``target`` / ``task``.
+Record = dict[str, Any]
 
 # ── Model ──────────────────────────────────────────────────────────
 MODEL_ID = "gpt-oss-120b"
@@ -14,7 +21,7 @@ SPLIT_SEED = 42
 
 
 # ── Dataset loading & splitting ────────────────────────────────────
-def load_and_split():
+def load_and_split() -> tuple[list[Record], dict[str, list[Record]]]:
     """Load full BBEH and split by HF `mini` flag.
 
     Train pool = all mini examples (460 total), pooled across tasks — used as
@@ -33,8 +40,8 @@ def load_and_split():
 
     ds = load_dataset(HF_DATASET)["train"]
 
-    train_pool: list[dict] = []
-    test_by_task: dict[str, list[dict]] = {}
+    train_pool: list[Record] = []
+    test_by_task: dict[str, list[Record]] = {}
 
     for ex in ds:
         record = {"input": ex["input"], "target": ex["target"], "task": ex["task"]}
@@ -45,6 +52,7 @@ def load_and_split():
 
     # Deterministic ordering
     import random
+
     rng = random.Random(SPLIT_SEED)
     rng.shuffle(train_pool)
     test_by_task = {k: test_by_task[k] for k in sorted(test_by_task.keys())}
@@ -55,14 +63,14 @@ def load_and_split():
 # ── Result export ──────────────────────────────────────────────────
 def export_results(
     method: str,
-    per_task: dict[str, dict],
-    config: dict,
+    per_task: dict[str, Record],
+    config: Record,
     optimized_prompts: dict[str, str],
     output_path: str = "results.json",
-):
+) -> Record:
     """Write standardized JSON results file."""
     import json
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     accuracies = [t["accuracy"] for t in per_task.values()]
     overall = sum(accuracies) / len(accuracies) if accuracies else 0.0
@@ -72,7 +80,7 @@ def export_results(
         "model": MODEL_ID,
         "dataset": "bbeh-full (train=mini 460, test=non-mini ~4060)",
         "split_seed": SPLIT_SEED,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "config": config,
         "per_task": per_task,
         "overall_accuracy": round(overall, 4),

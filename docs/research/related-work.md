@@ -77,6 +77,55 @@ PromptPotter and AlphaEvolve share the same statistical primitives, the same eva
 
 ---
 
+## What a DSPy source study settles
+
+The matchups above are published numbers. This section is a different kind of evidence: a read
+of DSPy's own source (3.1.3, the installed revision), because DSPy is the system our peers are
+compared *through* — MIPROv2, COPRO, BootstrapFewShot and GEPA all ship inside it — and because
+it is the reference for any ecosystem expansion we plan ([`../specs/roadmap.md`](../specs/roadmap.md)
+§ Application radius). Claims here are implementation facts, re-verified against our own tree
+afterwards; two were confirmed by running them.
+
+**Their ecosystem beats ours. Their code does not.** That is the finding, and both halves
+matter — the second is why we do not reshape our engine toward theirs, the first is why we
+must still be consumable by their world.
+
+Where the engines diverge, in their source:
+
+- **No statistical machinery at all.** Scoring is exhaustive `program × devset`, every time.
+  PoBB has no counterpart — and the absence is not an oversight they haven't reached:
+  `eval_candidate_program_with_pruning` exists as dead code, and `random_search.py` carries a
+  comment *designing* progressive elimination that was never built. MIPROv2's minibatch
+  compares candidates on **different** resampled subsets, unpaired, and promotes on the raw
+  arithmetic mean, with its own source TODO conceding the weighting problem.
+- **A cache hit reports as free.** On replay the response's usage is zeroed, so a re-run costs
+  nothing in their accounting. Ours splits the two deliberately — `TokenUsageRecord.cached`
+  exists so a replayed L4 arm cannot read as infinitely efficient. For a design whose premise
+  is most-fitness-per-dollar, this is the sharpest single contrast in the comparison.
+- **`KeyboardInterrupt` appears nowhere in the package.** Ctrl+C unwinds `compile()` and the
+  run is lost — no partial best, no trial log. There is no optimizer-level checkpoint or resume;
+  the one that exists lives in the external `gepa` package, not in DSPy.
+- **The saved artifact is not self-describing and drifts silently.** Signature fields serialize
+  positionally with no names or types, and reload through a `zip(..., strict=False)`: add one
+  input field between save and load and the prompt reloads scrambled, with no error and healthy-
+  looking instructions. It also carries zero provenance — no score, metric, dataset or run id.
+- **Fallbacks are silent and billed.** Their chat adapter catches a bare exception and re-runs
+  the *entire* call through the JSON adapter — a second billed request under a different prompt,
+  with no telemetry. A run's prompts are not reproducible from its config. Our no-fallback rule
+  (root `CLAUDE.md` § STOP) is the same judgment made the other way.
+- **No byte budget anywhere** — no cap, no truncation policy, no per-section accounting, no
+  untrusted-content boundary. Every signature field is always rendered, in declaration order.
+
+Where they are ahead, and it is the half that decides reach:
+
+- **Consumability.** MLflow's own integration extracts full per-call spans from DSPy while DSPy
+  contains no MLflow code at all. Our Langfuse sink is first-party and works; our MLflow sink
+  sees two events and is off by default. Their *ecosystem* does the work their *code* never did,
+  which is exactly the property we are missing.
+- **Extension cost for a new search regime.** A new DSPy optimizer is one file satisfying no
+  contract; GEPA drops in as an external adapter. Our seams are declarative for policy and
+  panels but not for algorithm — deliberate, and a real cost the day we want a second regime.
+
 ## Algorithm configuration: the classical lineage
 
 The umbrella term **algorithm configuration** is borrowed from AutoML, where it has a 23-year-old technical meaning: systematically tuning the parameters of a fixed algorithm (a SAT solver, a metaheuristic, an ML training procedure) over a distribution of problem instances using statistical primitives — racing, successive halving, surrogate models, configuration-space sampling. Modern LLM-driven systems (AlphaEvolve, MIPROv2, GEPA, PromptWizard, PromptPotter) are re-deriving these primitives under different names, almost without exception failing to cite the AutoML lineage. This section is the methodological anchor: where the racing tests, sampling models, and termination criteria actually come from, and how PromptPotter maps onto them.

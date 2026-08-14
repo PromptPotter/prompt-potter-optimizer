@@ -23,7 +23,7 @@ import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 import pydantic
@@ -31,17 +31,22 @@ import pytest
 import yaml
 
 from promptpotter.application.scoring import query_loop
+from promptpotter.application.scoring.search_point_scorer import (
+    _assert_measured_content_matches,
+)
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.io import _YamlDumper, read_yaml, write_yaml
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import DatasetIdentityError
 from promptpotter.shared.hashing import content_hash
 
 
@@ -634,6 +639,36 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     # refused outright rather than silently serving whichever run sorted last.
     with pytest.raises(ValueError, match="dataset_name"):
         archive.load_reusable_results(node_configs, dataset_name="")
+
+
+def test_recut_rows_under_a_used_dataset_name_are_refused(tmp_path: Path) -> None:
+    """The archive can answer "what was measured at slot 14", never "what was measured for THIS
+    question" — ``sample_id`` is a position and the query text is not in the cache key.
+
+    So re-cutting rows under a name already used serves every prior against a different question,
+    with no error anywhere: the run completes and each replayed score is attributed to text that
+    did not produce it. The guard reads the content off the stored row itself, which is why it
+    needs nothing on disk that measurement rows do not already carry — and why it catches ONE
+    edited row, where a whole-dataset fingerprint would only report the aggregate.
+    """
+    archive = MeasurementArchive(tmp_path)
+    _seed_run(archive, run_id="aime_cached", dataset_name="aime", hit=True)
+    cache = cast(
+        "dict[int, QueryMeasurement]",
+        archive.load_reusable_results([("llm_only", {"model": "X"})], dataset_name="aime"),
+    )
+    assert set(cache) == {14}, "precondition: the prior is reusable at slot 14"
+
+    same = [Sample(id=14, query="q_aime_14", ground_truth="g")]
+    _assert_measured_content_matches(cache, same, "aime")
+
+    # Ground truth alone is enough — a relabelled row is as wrong as a replaced question.
+    for recut in (
+        [Sample(id=14, query="an entirely different question", ground_truth="g")],
+        [Sample(id=14, query="q_aime_14", ground_truth="not_g")],
+    ):
+        with pytest.raises(DatasetIdentityError, match="sample_id 14"):
+            _assert_measured_content_matches(cache, recut, "aime")
 
 
 def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() -> None:
@@ -1662,6 +1697,28 @@ _BINARY_SUFFIXES = frozenset(
 )
 
 
+def _tracked_files(root: Path) -> list[str]:
+    """Tracked paths that are also ON DISK — the one walk every repo-wide scan here shares.
+
+    A file deleted in the worktree but still in the index is an ordinary mid-refactor state, and a
+    scan that reads the index and then opens each path blindly dies on it with `FileNotFoundError`
+    — not a finding, just a crash, and in a shared checkout it turns one colleague's unstaged
+    deletion into a red suite for everyone. A deleted file also makes no claims, so there is
+    nothing to skip past: filtering here is what these scans mean by "tracked".
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+    ).stdout
+    out: list[str] = []
+    for raw in listing.split(b"\x00"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "surrogateescape")
+        if (root / rel).is_file():
+            out.append(rel)
+    return out
+
+
 def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
     """A raw NUL makes ripgrep skip the whole file SILENTLY when recursing.
 
@@ -1678,16 +1735,10 @@ def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
     manufactured false dead-code findings twice.
     """
     root = Path(__file__).resolve().parents[1]
-    listing = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
-    ).stdout
     offenders: list[str] = []
-    for raw in listing.split(b"\x00"):
-        if not raw:
-            continue
-        rel = raw.decode("utf-8", "surrogateescape")
+    for rel in _tracked_files(root):
         path = root / rel
-        if path.suffix.lower() in _BINARY_SUFFIXES or not path.is_file():
+        if path.suffix.lower() in _BINARY_SUFFIXES:
             continue
         if b"\x00" in path.read_bytes():
             offenders.append(rel)
@@ -1772,9 +1823,7 @@ def test_claude_md_claims_resolve() -> None:
     to every tool an agent uses, invisible to every tool built on git.
     """
     root = Path(__file__).resolve().parents[1]
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
-    ).stdout.split("\n")
+    tracked = _tracked_files(root)
 
     def slug(heading: str) -> str:
         return re.sub(r"[^a-z0-9\- ]", "", heading.lower()).replace(" ", "-")
@@ -1844,9 +1893,7 @@ def test_every_test_named_by_the_package_exists() -> None:
     unchecked claim in a new place.
     """
     root = Path(__file__).resolve().parents[1]
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=root, capture_output=True, check=True, text=True
-    ).stdout.split()
+    tracked = _tracked_files(root)
 
     defined: set[str] = set()
     for rel in tracked:
@@ -2110,7 +2157,7 @@ def test_a_checkout_is_recognised_by_project_name_not_by_a_bare_marker(
     """``site-packages`` is a directory anyone may drop a ``pyproject.toml`` into, and
     mistaking a foreign one for this repo puts user data back inside the install."""
     paths = unbound_roots
-    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter")
     assert paths.source_checkout_root() == root
 
     _fake_checkout(paths, tmp_path / "other", monkeypatch, name="somebody-elses-package")
@@ -2126,7 +2173,7 @@ def test_user_data_root_resolves_env_then_checkout_then_app_data(
     """All three branches. The middle one keeps an existing checkout — and
     ``deploy-linux/``, which runs from one — writing exactly where it always has."""
     paths = unbound_roots
-    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter")
 
     monkeypatch.delenv("PROMPTPOTTER_HOME", raising=False)
     assert paths.user_data_root() == root / ".promptpotter"
@@ -2149,7 +2196,7 @@ def test_benchmark_root_is_install_content_and_never_the_huggingface_package(
     mode with no symptom.
     """
     paths = unbound_roots
-    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter")
     assert paths.benchmark_datasets_root() == root / "datasets"
 
     package = _fake_install(paths, tmp_path / "installed", monkeypatch)
