@@ -10,6 +10,7 @@ from typing import Any
 
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
@@ -23,10 +24,12 @@ from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
     read_json_tolerant,
+    read_text_optional,
     rmtree_robust,
     unlink_robust,
     validate_path_component,
     write_json,
+    write_text,
 )
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -547,6 +550,7 @@ class CampaignStore:
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
         final: dict[str, Any] | None = None,
+        export: PromptExport | None = None,
     ) -> None:
         from promptpotter.shared.errors import graceful
 
@@ -572,6 +576,28 @@ class CampaignStore:
             remove_keys.append("crash_traceback")
         with graceful("Cycle completion update failed"):
             self.update(hop, updates, remove=remove_keys)
+        # The export is written HERE, from the same call that stamps `final`, because both are
+        # projections of the one `CycleResult` the runner just built. A separate observer would
+        # be a second walk over the same facts, free to disagree with this one. It is its own
+        # FILE and not a key under `final` for the opposite reason: its readers are outside this
+        # package, and handing them the campaign index to dig through is not an artifact.
+        if export is not None:
+            with graceful("Export artifact write failed"):
+                write_text(
+                    self._layout(hop).export,
+                    export.model_dump_json(indent=2) + "\n",
+                )
+
+    def read_export(self, hop: CycleHop) -> PromptExport | None:
+        """The finished cycle's export artifact, or ``None`` when it wrote none.
+
+        The reader half of "we write a file and provide a reader" (`roadmap.md` § Application
+        radius). It lives here so a consumer never has to know where the file sits — every caller
+        that re-derived the winner from `CycleResult` instead built it out of the wire-side
+        `winner_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
+        """
+        text = read_text_optional(self._layout(hop).export)
+        return parse_prompt_export(text) if text else None
 
     def reopen_for_continuation(self, hop: CycleHop) -> None:
         """The ONLY writer that removes ``finished_at``, which is a latch: ``derive_run_phase``

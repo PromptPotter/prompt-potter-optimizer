@@ -46,6 +46,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
       cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
         index.json                     # phase, trials, final block, sibling_kind, parent_cycle_id (forks)
+        export.json                    # the winner + its provenance, for a program that is not us
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
         rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
@@ -75,6 +76,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |
+| `export.json` | per cycle | The export artifact — the winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |

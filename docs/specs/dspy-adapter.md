@@ -96,12 +96,18 @@ regardless of whether the adapter ever ships.
    real YAML, so the BBEH harness's `json.loads` raised on its first line — the harness could not
    run at all — and `scripts/smoke_campaign.py` swallowed the same error behind a bare `except`,
    so no smoke run ever read a dataset's declared scoring formula.
-4. **The export artifact** — one self-describing JSON, provenance carried inside it, written at
-   the seam that already writes `index.json::final`. Shape, rules and the three consumers are
-   owned by [`roadmap.md`](roadmap.md) § Application radius; this arc's stake is that it
-   **replaces** the adapter's handoff question entirely — the adapter reads an artifact instead
-   of re-deriving a winner, and `PromptTemplate(**winner_prompt_fields).render()` (what the BBEH
-   harness hand-rolls today) becomes the loader's business, not each caller's.
+4. **The export artifact.** *(landed)* `cycles/{id}/export.json` — shape, rules and the three
+   consumers are owned by [`roadmap.md`](roadmap.md) § Application radius; the reader contract is
+   [`../developer/stable-api.md`](../developer/stable-api.md) § 5c. This arc's stake was that it
+   **replaces** the adapter's handoff question — the adapter reads an artifact instead of
+   re-deriving a winner, and `PromptTemplate(**fields).render()` (what the BBEH harness hand-rolls
+   today) is the loader's business now, not each caller's.
+   **The hazard it turned up sits one layer in.** `CycleResult.winner_prompt_fields` is the
+   wire-side projection: `to_job_search_point` flattens `few_shot_examples` into a rendered
+   `few_shot_block`, which `from_prompt_fields` cannot restore and `extra="forbid"` rejects
+   outright. Every caller re-deriving a winner from it — the adapter included — would have built
+   a prompt missing its demonstrations, or crashed. The round document carries the structured
+   dict, so the artifact projects the ROUND the composite high-water names, origin round included.
 5. **Consolidate the two telemetry fan-outs.** A fact that must reach both the ledger and
    Langfuse costs eight synchronized edits, not the four `adding-a-surface.md` §1 documents
    ([`code-debt-cleanup.md`](code-debt-cleanup.md) § Ready). Landing this before C4 is what makes
@@ -150,5 +156,4 @@ split must survive the boundary intact.
   `pyproject.toml`, not a docs gap. Adoption means a PR into `dspy/teleprompt/`, which
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
   ([`../research/bbeh-comparison/`](../research/bbeh-comparison/)).
-- **Phase B4 and B5** are the two items left here: the export artifact, and the second
-  telemetry fan-out. Phase A is closed.
+- **Phase B5** is the one item left here — the second telemetry fan-out. Phase A is closed.

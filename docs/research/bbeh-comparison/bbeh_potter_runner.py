@@ -20,7 +20,6 @@ from promptpotter.application.embedded_run import (
 )
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
-from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.presentation.views.completion import report_completion
@@ -122,7 +121,11 @@ async def run_bbeh_campaign(
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
             return None
 
-        winner_prompt_fields = cycle_result.winner_prompt_fields
+        # The winner comes off the ARTIFACT, not off `CycleResult.winner_prompt_fields`: that one
+        # is the wire-side projection and carries a rendered `few_shot_block`, which
+        # `PromptTemplate` rejects outright (`extra="forbid"`) — a crash that waits for the first
+        # winner with demonstrations and lands after the whole campaign is paid for.
+        export = session.store.campaigns.read_export(session.hop)
         winner_pipeline_params = cycle_result.winner_pipeline_params
         train_acc = cycle_result.best_accuracy
 
@@ -152,7 +155,7 @@ async def run_bbeh_campaign(
             f"(global winner, {total_test} non-mini examples across {len(tasks)} tasks)"
         )
 
-        winner_prompt_str = PromptTemplate(**winner_prompt_fields).render()
+        winner_prompt_str = export.template().render() if export is not None else ""
         opt_cfg = campaign_config.optimization
         return export_results(
             method="promptpotter",

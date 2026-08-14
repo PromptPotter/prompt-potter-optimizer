@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A campaign now emits an artifact, not just a report** (`cycles/{id}/export.json`) — the winning prompt by field name plus the provenance that makes its fitness readable: the formula the number was computed under, n, the lift and its interval, θ, the rows' own hash, the optimizer manifest, and an `artifact_version` a reader refuses on. `domain/export.py::parse_prompt_export` reads it back to a `PromptTemplate`. Reader contract: [`docs/developer/stable-api.md`](docs/developer/stable-api.md) § 5c.
 - **Publishing a GitHub Release publishes to PyPI** (`.github/workflows/publish.yml`) — dashboard build, full `build_release.py`, a tag/version guard, then a wheel smoke outside any checkout that demands the dashboard CI's `--no-webapp` build cannot. Uploads over Trusted Publishing, so no credential is stored.
 
 ## [0.8.10] — 2026-08-08

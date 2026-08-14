@@ -48,6 +48,7 @@ from promptpotter.infrastructure.store.measurement_archive import MeasurementArc
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DatasetIdentityError
 from promptpotter.shared.hashing import content_hash
+from tests.factories import round_result
 
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
@@ -669,6 +670,73 @@ def test_recut_rows_under_a_used_dataset_name_are_refused(tmp_path: Path) -> Non
     ):
         with pytest.raises(DatasetIdentityError, match="sample_id 14"):
             _assert_measured_content_matches(cache, recut, "aime")
+
+
+def test_export_carries_one_round_whole_and_survives_the_file() -> None:
+    """The export is the one artifact leaving this package, and both ways it can lie are silent.
+
+    Its prompt and its numbers must come from ONE round — pair a winner's fields with a
+    neighbour's fitness and the consumer reads a prompt that never scored what the file says it
+    scored, with nothing anywhere to raise. And the fields must survive the round trip: the
+    round document carries ``few_shot_examples`` structured, while ``CycleResult``'s wire-side
+    ``winner_prompt_fields`` has already flattened them to a rendered ``few_shot_block`` —
+    reading the export off that one produces a file that looks complete and reconstructs a
+    prompt missing its demonstrations.
+    """
+    from promptpotter.domain.export import (
+        EXPORT_ARTIFACT_VERSION,
+        ExportVersionError,
+        build_prompt_export,
+        parse_prompt_export,
+    )
+
+    shots = [{"input": "2+2", "output": "4", "explanation": None}]
+    winner = round_result(
+        3,
+        accuracy=0.75,
+        composite_fitness=0.81,
+        total=28,
+        matched_origin_lift=0.1,
+        cumulative_theta=0.42,
+        prompt_fields={
+            "persona": "P",
+            "instruction": "I",
+            "plan": "PL",
+            "few_shot_examples": shots,
+        },
+        pipeline_params={"steps": ["llm_only"], "llm_only": {"model": "m", "prompt": "rendered"}},
+    )
+    export = build_prompt_export(
+        winner,
+        tool_version="0.0.0",
+        campaign_id="c",
+        cycle_id="cy",
+        dataset_name="d",
+        dataset_hash="h",
+        optimizer_prompt_hash="o",
+        stop_reason="completed",
+        finished_at=utcnow_iso(),
+        formula="accuracy",
+        origin_accuracy=0.65,
+        origin_composite_fitness=0.65,
+    )
+
+    m = export.measurement
+    assert (m.round, m.accuracy, m.composite_fitness, m.n) == (3, 0.75, 0.81, 28)
+    assert (m.matched_origin_lift, m.theta) == (0.1, 0.42)
+
+    # `steps` is wire scaffold and the rendered prompt is `prompt_fields` again — neither is a
+    # tunable, and one artifact does not state a fact twice.
+    assert export.tuned_params == {"llm_only": {"model": "m"}}
+
+    restored = parse_prompt_export(export.model_dump_json()).template()
+    assert (restored.persona, restored.instruction, restored.plan) == ("P", "I", "PL")
+    assert [ex.model_dump() for ex in restored.few_shot_examples] == shots
+
+    bumped = json.loads(export.model_dump_json())
+    bumped["artifact_version"] = EXPORT_ARTIFACT_VERSION + 1
+    with pytest.raises(ExportVersionError, match="this build reads"):
+        parse_prompt_export(json.dumps(bumped))
 
 
 def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() -> None:

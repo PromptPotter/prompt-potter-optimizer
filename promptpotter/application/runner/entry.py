@@ -38,6 +38,7 @@ from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.results import CycleResult, RoundResult, SpendRollup
@@ -56,6 +57,7 @@ from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, r
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
+from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +352,53 @@ def _build_cycle_result(
     )
 
 
+def _winning_round(cycle: Cycle | None, result: CycleResult) -> RoundResult | None:
+    """The round the composite high-water names — **round 0 included**, because a campaign nothing
+    beat still has a winner and it is the origin. Read off ``cycle.rounds``, which holds round 0 at
+    index 0, rather than ``result.rounds``, which drops it: the origin is the reference the result
+    is differenced against, so counting it as a search result would credit the loop with its floor.
+
+    It is also the round whose ``prompt_fields`` round-trip. ``CycleResult.winner_prompt_fields``
+    is the wire-side projection — it has already flattened ``few_shot_examples`` into a rendered
+    ``few_shot_block``, which ``from_prompt_fields`` cannot restore and ``extra="forbid"`` rejects.
+    """
+    if cycle is None:
+        return None
+    return next((rr for rr in cycle.rounds if rr.round == result.best_round), None)
+
+
+def _export_artifact(
+    session: Session,
+    cycle_result: CycleResult,
+    winner: RoundResult | None,
+    *,
+    formula: str | None,
+) -> PromptExport | None:
+    """``None`` when no round ever closed: there is no measured prompt to hand a consumer, and an
+    artifact whose whole point is a fitness with provenance may not carry an unmeasured one."""
+    if winner is None:
+        return None
+    from promptpotter.config.settings import APP_VERSION
+
+    # `campaign.json` is the one owner of both — every other surface derives from it, and a
+    # second copy here would be one more thing to re-sync.
+    campaign = session.store.campaigns.load_campaign(session.campaign_id)
+    return build_prompt_export(
+        winner,
+        tool_version=APP_VERSION,
+        campaign_id=session.campaign_id,
+        cycle_id=session.state.cycle_id,
+        dataset_name=campaign.dataset_name if campaign else (session.dataset_name or ""),
+        dataset_hash=dataset_hash(session.samples),
+        optimizer_prompt_hash=campaign.optimizer_prompt_hash if campaign else "",
+        stop_reason=str(cycle_result.stop_reason),
+        finished_at=cycle_result.finished_at,
+        formula=formula,
+        origin_accuracy=cycle_result.origin_accuracy,
+        origin_composite_fitness=cycle_result.origin_composite_fitness,
+    )
+
+
 @dataclass
 class _CycleOutcome:
     """One cycle run to completion. The observers may have been REBUILT mid-run by fork-on-divergence,
@@ -506,7 +555,13 @@ async def _run_single_cycle(
         # already complete.
         spend=observers.dashboard.state.spend,
     )
-    langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
+    langfuse_trace_id = _finalize_run(
+        session,
+        observers,
+        cycle_result,
+        winner=_winning_round(cycle, cycle_result),
+        sweep=mode.sweep,
+    )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
@@ -680,6 +735,7 @@ def _finalize_run(
     observers: RunObservers,
     cycle_result: CycleResult,
     *,
+    winner: RoundResult | None = None,
     sweep: bool = False,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
@@ -723,6 +779,9 @@ def _finalize_run(
 
         rounds = cycle_result.rounds
         rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
+        round_formula = resolve_round_formula(
+            session.scoring.scorer_round_formula, session.pipeline_schema
+        )[0]
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
@@ -731,10 +790,9 @@ def _finalize_run(
             # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
             # The formula EVERY number above was computed under, resolved by the same call the
-            # dashboard makes: one resolution, three readers.
-            "scorer_round_formula": resolve_round_formula(
-                session.scoring.scorer_round_formula, session.pipeline_schema
-            )[0],
+            # dashboard makes: one resolution, now four readers — the export names it too, since
+            # a fitness handed to another program without its formula is a number, not a result.
+            "scorer_round_formula": round_formula,
             "mode": "sweep" if sweep else "full",
             # Basis: the COMPOSITE-fitness high-water SP — the engine's adoption objective —
             # which may name a different round than the index's top-level
@@ -751,6 +809,7 @@ def _finalize_run(
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
             final=final_block,
+            export=_export_artifact(session, cycle_result, winner, formula=round_formula),
         )
     # Drain AFTER mark_stopped, so dashboard.json's stopped state is in place before the audit
     # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file.

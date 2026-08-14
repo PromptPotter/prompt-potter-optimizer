@@ -96,7 +96,7 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 
 **The boundary, and it is not negotiable: we write a file and provide a reader. We never load, host, route, or hot-swap.** The swap belongs to the host — a registry alias, a path the app reads at boot, a committed artifact. Becoming a serving framework is out of scope, permanently.
 
-**The artifact.** One self-describing JSON export, written by a projection of `CycleResult` at the seam that already writes `index.json::final` — not a sidecar. Each rule below is a defect of DSPy's own `save()` inverted, all verified in its source:
+**The artifact — SHIPPED.** `cycles/{id}/export.json`, projected from one `RoundResult` by `domain/export.py` and written by the same `mark_finished` call that stamps `index.json::final`. Its own file rather than a key under `final`: its readers are outside this package, and handing them the campaign index to dig through is not an artifact. Reader contract + the four rules as built: [`../developer/stable-api.md`](../developer/stable-api.md) § 5c. What each rule inverts, all verified in DSPy's source:
 
 - **Field names always, never positional.** `Signature.dump_state` writes fields positionally and `load_state` zips them back with `strict=False`, so a signature that gained a field reloads a scrambled prompt with no error at all.
 - **Provenance travels *in* the artifact** — campaign, cycle, the fitness **under its named formula**, n, CI, θ, matched-origin lift, the dataset fingerprint, the optimizer-manifest hash. DSPy's artifact carries none of this: you cannot ask it *"how good is this, and how do you know?"* This is the half we already compute and they cannot, and it turns the README's self-validation claim into a receipt that travels with the prompt.
@@ -105,9 +105,9 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 
 **Three consumers, one artifact.** (a) Our own runtime, via a loader returning a `PromptTemplate`. (b) A DSPy program — through a `to_dspy` view living in the `promptpotteropt` repo, never here (the dependency arrow is one-way, [`dspy-adapter.md`](dspy-adapter.md)); it applies the winner to a *live* program and never emits DSPy state, which sidesteps the positional-zip corruption rather than inheriting it. (c) MLflow — targeting the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs.
 
-**Dependency:** the dataset fingerprint is load-bearing, not decorative — an exported fitness number is only as trustworthy as the identity of the rows it was measured on. It lands with the sample-identity fix ([`dspy-adapter.md`](dspy-adapter.md) Phase B2), not after it.
+**Dependency, settled:** the dataset fingerprint is load-bearing, not decorative — an exported fitness number is only as trustworthy as the identity of the rows it was measured on. B2 needed none (it compares the content each stored row already carries), so the artifact brought its own: `shared/hashing.py::dataset_hash`, the rows alone. Deliberately not a slice of `content_hash`, which mixes prompt and pipeline config into the same digest — right for a cache key, useless as an identity two campaigns can compare.
 
-First slice is the already-captured § Captured "Export / copy from dashboard" — the same artifact, surfaced by a button.
+**Open — the three consumers.** (a) is built (`PromptExport.template()`); (b) `to_dspy` lives in the `promptpotteropt` repo and waits on Phase C; (c) MLflow's Prompt Registry is unwritten. So is § Captured "Export / copy from dashboard" — the same artifact behind a button.
 
 ### Prompt-iteration framework + exit gate
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
