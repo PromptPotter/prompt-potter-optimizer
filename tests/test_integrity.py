@@ -2147,7 +2147,9 @@ def test_third_party_connectors_load_and_are_held_to_the_same_contract(
 
     # 1. A valid plugin joins the registry, keeps the built-ins, and records its origin.
     registry, origins = _with([_FakeEntryPoint("acme-backend", _fake_connector("acme"))])
-    assert set(registry) == {"termnorm", "promptpotter", "acme"}
+    # Derived from `_BUILTIN`, never a hand-authored name list: this asserts that a plugin JOINS
+    # the built-ins, and spelling them out made a third connector look like a regression.
+    assert set(registry) == {*reg._BUILTIN, "acme"}
     assert registry["promptpotter"] is reg._BUILTIN["promptpotter"]
     # Format pinned, not merely probed for a substring: `stable-api.md` §1 publishes it as
     # the way to trace a name that greps to nothing, and it is the entry point's VALUE that

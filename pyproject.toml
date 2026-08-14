@@ -55,6 +55,14 @@ excel = [
     # format as policy, which is a separate answer to a separate question.
     "openpyxl>=3.1.0",
 ]
+dspy = [
+    # why kept: `presentation/teleprompter.py` (PromptPotterOpt) + the `dspy` connector, which
+    # runs the caller's own `dspy.Module` in-process. Deliberately absent from `all`: it drags
+    # litellm + optuna + pandas, and only a caller who asked to be a DSPy optimizer needs it.
+    # The connector's import is function-local, so `promptpotter.connectors` still loads without
+    # it; importing the teleprompter without it raises naming this extra.
+    "dspy>=3.0.0",
+]
 jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
     "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
@@ -199,6 +207,7 @@ module = [
     "scalar_fastapi.*",
     "openpyxl.*",
     "datasets.*",
+    "dspy.*",
     "scipy.*",
     "IPython.*",
     "tests.*",

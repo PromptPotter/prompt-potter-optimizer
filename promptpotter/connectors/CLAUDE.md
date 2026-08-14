@@ -14,6 +14,13 @@ nodes.{name}.config`, never in the backend's repo.
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
 | `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
+
+> **`import dspy` is function-local, and must stay that way.** `__init__.py` imports every
+> built-in eagerly, so a module-level import would break `import promptpotter.connectors` for
+> every install that did not ask for the `[dspy]` extra — which is all of them by default. The
+> caller-facing half (`presentation/teleprompter.py`) imports it at module level instead, because
+> its only importer is the caller and a missing extra should stop them there, by name.
 
 > **`llm_only` is a NODE name, never a connector.** Every single-node benchmark
 > declares an `llm_only` node inside a `termnorm` pipeline and routes over HTTP to the

@@ -119,18 +119,36 @@ regardless of whether the adapter ever ships.
    §1). What remains of the tracing half is one routing table replacing the dispatch `match`,
    guarded at construction — so C4's bridge extends a registry rather than a ninth edit.
 
-## Phase C — the adapter, in its own repo
+## Phase C — the adapter, in this repo ✅
 
-Small by construction, if B lands. Four parts, none of them a loop:
+**It is an extra, not a second distribution** — `pip install promptpotter[dspy]`, one name and
+one version. The separate-repo plan was written before Phase B; what B1–B5 left was ~300 lines,
+which does not carry its own CI, release pipeline and version matrix. It also *shrank* the work:
+the connector is a row in `_BUILTIN` rather than a published entry-point registration, and
+`expected_revision` / `version_check` — the cross-repo drift machinery — is needed for nothing.
+The one cost that survives the move is release coupling: DSPy moves fast (this was read against
+3.1.3 and built against 3.3.0), so a break there cuts a `promptpotter` release.
 
-1. **A `dspy` connector** — `execution: "in_process"`, `in_process_run` calls the user's
-   `dspy.Module`, registered through the published entry-point group. Reference impls are
-   `connectors/promptpotter.py` (in-process) and `connectors/termnorm.py` (wire).
-2. **`PromptPotterOpt(Teleprompter)`** — obey `compile(student, *, trainset, valset)`, call the
-   Phase-B launch entry, read the winner off `export.json` (§ B4 — never re-derive one), and
-   apply it back with `with_instructions()`. Its async peer `acompile()` is § The async seam.
-3. **`Loop` / `Node`** — the two dataclasses on the usage page, mapped onto
-   `OptimizationConfig` and the node overlay through B3.
+`import dspy` is **function-local in the connector** — `connectors/__init__.py` imports built-ins
+eagerly, so a module-level import would break every install that did not ask for the extra — and
+module-level in `presentation/teleprompter.py`, whose only importer is the caller, where it raises
+naming the extra. Four parts, none of them a loop:
+
+1. **A `dspy` connector** ✅ `connectors/dspy_module.py` — `execution: "in_process"`, one row in
+   `_BUILTIN`. The caller's metric IS the scorer: its float rides the `dspy_score` observation
+   key and the campaign formula reads that key, the same channel the L4 connector's proxies use,
+   so no grading rule is restated on our side. The student and metric ride a ContextVar, because
+   `in_process_run` is a module-level hook with no call-site state.
+2. **`PromptPotterOpt(Teleprompter)`** ✅ `presentation/teleprompter.py` — the fifth entry point,
+   read-only over `application/embedded_run.py` exactly as the CLI is. It reads the winner off
+   `export.json` (§ B4 — never re-derives one) and applies it with `with_instructions()`.
+   `valset` is accepted and named as unused rather than silently dropped. Its async peer
+   `acompile()` is § The async seam.
+3. **`Loop` / `Node`** ✅ — projected onto a materialized `pipeline.yaml` + `campaign.yaml` under
+   the tenant dataset dir, which is what `dataset_name` then resolves. Rewritten each compile,
+   because they are a projection of the arguments and not operator-authored config. **One node:**
+   a DSPy program is a single call from here, so the prompt reaches every predictor — stated on
+   the usage page, since it is wrong for a program whose predictors do different jobs.
 4. **The observability bridge.** Narrower than first written. `BaseCallback` stops at
    `on_module_*` / `on_lm_*` / `on_adapter_{format,parse}_*` / `on_tool_*` / `on_evaluate_*`
    — **there is no compile-level hook**; `on_compile` appears nowhere in 3.1.3. So round and
@@ -183,9 +201,12 @@ Two of theirs to route around rather than lean on. **`program.save()` is not a s
 format**: `Signature.dump_state` writes fields positionally with no names or types, and
 `load_state` zips them back with `strict=False`, so a signature that gained a field reloads
 a scrambled prompt with no error. The adapter applies a winner to a live program via
-`with_instructions()` and never emits DSPy state. And **a cache hit zeroes `response.usage`**,
-so their token accounting reports a replayed run as free — our `TokenUsageRecord.cached`
-split must survive the boundary intact.
+`with_instructions()` and never emits DSPy state. And **a cache hit is not recorded at all** —
+`base_lm.py` guards `add_usage` on `response.cache_hit`, so a replayed completion is absent from
+`get_lm_usage()` rather than reported as zero (the earlier reading of this as "zeroes
+`response.usage`" was wrong). Our measurement cache sits above DSPy's and replays archived tokens
+through `_emit_cached_step_tokens`, so the only under-count left is a sample ours missed and
+DSPy's served; the usage page tells the caller how to turn DSPy's cache off for exact metering.
 
 ## Open
 
@@ -193,4 +214,9 @@ split must survive the boundary intact.
   `pyproject.toml`, not a docs gap. Adoption means a PR into `dspy/teleprompt/`, which
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
   ([`../research/bbeh-comparison/`](../research/bbeh-comparison/)).
-- **Phases A and B are closed.** What remains is Phase C, in its own repo.
+- **Phase C item 4 — the observability bridge — is the one part not built.** Nothing hangs a
+  DSPy `BaseCallback` onto the loop yet, so a compile emits our own telemetry and none of theirs.
+- **Never proven end to end against a live provider.** The seams are each exercised — the
+  materialized dataset parses, the metric's score reaches `pipeline_data`, the caller's LM class
+  survives a tuned copy, `compile()` inside a running loop takes the thread path — but no
+  campaign has been run through `acompile` on a real model. That is the first thing to do with it.
