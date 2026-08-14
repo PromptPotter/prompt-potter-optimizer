@@ -185,7 +185,13 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # completion while the outer sat "pausing" — COMPOSE the inherited predicate, never
     # overwrite it. Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
     inherited = get_abort_check()
-    session.pause_check = own_pause if inherited is None else lambda: own_pause() or inherited()
+    if inherited is None:
+        session.pause_check = own_pause
+    else:
+        # Bound to a local: a closure captures the NAME, so the narrowing above does not reach
+        # inside the lambda and the composed predicate would read as possibly-``None``.
+        parent_abort = inherited
+        session.pause_check = lambda: own_pause() or parent_abort()
     # Also bound into the ContextVar the rate-limit countdown polls — the one blocking seam
     # that otherwise ignores the pause channel.
     set_abort_check(session.pause_check)
