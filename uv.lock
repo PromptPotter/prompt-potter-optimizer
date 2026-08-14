@@ -2720,8 +2720,8 @@ wheels = [
 ]
 
 [[package]]
-name = "promptpotter-optimizer"
-version = "0.8.10"
+name = "promptpotter"
+version = "0.8.11"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

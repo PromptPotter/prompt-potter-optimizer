@@ -17,7 +17,7 @@ def _app_version() -> str:
     if checkout is not None:
         with (checkout / "pyproject.toml").open("rb") as f:
             return str(tomllib.load(f)["project"]["version"])
-    return version("promptpotter-optimizer")
+    return version("promptpotter")
 
 
 APP_VERSION: str = _app_version()
@@ -173,6 +173,16 @@ class Settings(BaseSettings):
     # stand in for this: unset means no browser sign-in writes the claim marker, and the box has
     # no admin identity until it is set. A hosted deployment must declare it.
     HOST_ADMIN_EMAIL: str = ""
+
+    # The ADR-0004 operator-admin channel: the bot's own Telegram credentials, plus the n8n door a
+    # new account is announced to. Declared here rather than read from `os.environ` so there is ONE
+    # answer to "where does a key live" — pydantic consults the process environment AND
+    # `env_file_path()`, while a bare environ read sees only what systemd's `EnvironmentFile`
+    # exported, and silently ignores the same key written to the install's own file.
+    ADMIN_BOT_TELEGRAM_TOKEN: str = ""
+    ADMIN_BOT_CHAT_ID: str = ""
+    ADMIN_BOT_PASSPHRASE: str = ""
+    N8N_SIGNUP_WEBHOOK_URL: str = ""
 
     # The lifetime USD ceiling a free-tier account spends against — TOTAL, not per day, and summed
     # over the account's whole ledger. It is the only thing bounding a stranger who signs up, since

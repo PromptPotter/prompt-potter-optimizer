@@ -11,6 +11,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
 APP_NAME="${APP_NAME:-myapp}"
 SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
+BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-$SERVICE_NAME-admin-bot}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
 WEBAPP_DIR="${WEBAPP_DIR:-webapp}"
 BIND_PORT="${BIND_PORT:-8001}"
@@ -18,6 +19,9 @@ HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+# The file systemd actually loads — see deploy.config.example. Branding any other one repaints
+# nothing.
+ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
 
 # set_env_kv + the brand fan-out, shared with bootstrap.sh.
 source "$HERE/brand-env.sh"
@@ -70,10 +74,14 @@ fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
 # NEXT_PUBLIC_* in at build time — so skipping this would silently repaint the
 # install upstream at the next deploy.
-[[ -f "$INSTALL_DIR/.env" ]] && brand_write_env "$INSTALL_DIR/.env"
+[[ -f "$ENV_FILE" ]] && brand_write_env "$ENV_FILE"
 brand_export_webapp
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"
+# The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code
+# leaves it on the old one until something restarts it — and nothing did. Silent, because a bot
+# still answering /blocked looks healthy. Skip where it was never installed.
+systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1 && sudo systemctl restart "$BOT_SERVICE_NAME"
 
 # --- backend (optional): sync → deps → restart ------------------------------
 if [[ -n "$BACKEND_DIR" ]]; then
@@ -86,6 +94,10 @@ fi
 # --- health -----------------------------------------------------------------
 say "health"
 wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH" && ok "app up ($BIND_PORT)" || bad "app down — journalctl -u $SERVICE_NAME -e"
+# The bot has no port to probe — outbound-only is the charter — so `is-active` IS its health.
+if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
+  systemctl is-active --quiet "$BOT_SERVICE_NAME" && ok "admin bot up" || bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"
+fi
 if [[ -n "$BACKEND_DIR" ]]; then
   wait_healthy "http://127.0.0.1:$BACKEND_PORT/status" && ok "backend up ($BACKEND_PORT)" || bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"
 fi

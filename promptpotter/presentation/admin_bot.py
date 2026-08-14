@@ -7,7 +7,6 @@ The same charter covers the one-shot outbound notices the API process fires when
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import time
 from typing import Any
@@ -15,6 +14,7 @@ from typing import Any
 import httpx
 
 from promptpotter.config.logging import setup_logging
+from promptpotter.config.settings import settings
 from promptpotter.infrastructure.identity.blocklist import (
     block_email,
     list_blocked,
@@ -152,8 +152,8 @@ def notify_operator(text: str) -> bool:
     Best-effort by contract: an unconfigured bot or a dead network returns ``False`` and never raises, so
     a notice can't fail the request that triggered it. Returns whether it was sent.
     """
-    token = os.environ.get("ADMIN_BOT_TELEGRAM_TOKEN", "").strip()
-    chat_id = os.environ.get("ADMIN_BOT_CHAT_ID", "").strip()
+    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
+    chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     if not token or not chat_id:
         logger.info("Operator notice skipped (admin bot not configured): %s", text)
         return False
@@ -181,7 +181,7 @@ def forward_new_account_to_crm(
     or a dead network returns ``False`` and never raises. A CRM hiccup must not fail the sign-in that
     created the account. Returns whether it was sent.
     """
-    url = os.environ.get("N8N_SIGNUP_WEBHOOK_URL", "").strip()
+    url = settings.N8N_SIGNUP_WEBHOOK_URL.strip()
     if not url:
         logger.info("CRM forward skipped (N8N_SIGNUP_WEBHOOK_URL not set): %s", email or user_id)
         return False
@@ -272,12 +272,9 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
 
 def main() -> int:
     setup_logging()
-    from dotenv import load_dotenv
-
-    load_dotenv()  # best-effort: load CWD .env for local runs; systemd uses EnvironmentFile
-    token = os.environ.get("ADMIN_BOT_TELEGRAM_TOKEN", "").strip()
-    chat_id = os.environ.get("ADMIN_BOT_CHAT_ID", "").strip()
-    passphrase = os.environ.get("ADMIN_BOT_PASSPHRASE", "").strip() or None
+    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
+    chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
+    passphrase = settings.ADMIN_BOT_PASSPHRASE.strip() or None
     if not token or not chat_id:
         logger.error(
             "ADMIN_BOT_TELEGRAM_TOKEN and ADMIN_BOT_CHAT_ID must be set "

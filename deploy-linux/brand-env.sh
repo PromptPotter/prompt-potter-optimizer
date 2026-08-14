@@ -12,14 +12,29 @@
 # Full map + what must never be renamed: docs/developer/whitelabel.md — which is
 # a DRAFT: these functions are exercised, but no deploy has yet run through them.
 
+# The env file is not always the caller's to touch: systemd loads EnvironmentFile as root, so on an
+# SELinux box it must live under /etc (root:root 0600) and every read and write here needs the same
+# privilege the service does. Escalate only when the plain access would fail, so the common case —
+# $INSTALL_DIR/.env, owned by the login user — never asks for a password it does not need.
+
 # idempotent KEY=VALUE in a .env-style file: replace the line if present, append if not.
 set_env_kv() {
-    local file="$1" key="$2" val="$3"
-    if grep -qE "^${key}=" "$file" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+    local file="$1" key="$2" val="$3" priv=""
+    [[ -w "$file" ]] || priv="sudo"
+    if $priv grep -qE "^${key}=" "$file" 2>/dev/null; then
+        $priv sed -i "s|^${key}=.*|${key}=${val}|" "$file"
     else
-        printf '%s=%s\n' "$key" "$val" >> "$file"
+        printf '%s=%s\n' "$key" "$val" | $priv tee -a "$file" >/dev/null
     fi
+}
+
+# One KEY's value, or empty. The mirror of set_env_kv — a caller that reads with a bare `grep` gets
+# empty on a root-owned file and cannot tell that from genuinely unset, which is how a "generate if
+# missing" secret quietly regenerates on every deploy and stops matching its peer.
+read_env_kv() {
+    local file="$1" key="$2" priv=""
+    [[ -r "$file" ]] || priv="sudo"
+    $priv grep -m1 -E "^${key}=" "$file" 2>/dev/null | cut -d= -f2-
 }
 
 # The engine's three: terminal prose, the API service title, the docs link.

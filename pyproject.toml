@@ -3,8 +3,8 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "promptpotter-optimizer"
-version = "0.8.10"
+name = "promptpotter"
+version = "0.8.11"
 description = "Automatic prompt optimization for LLMs — give it a dataset, it finds a better prompt"
 readme = "README.md"
 license = "MIT"
@@ -26,7 +26,9 @@ dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
     "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
-    "python-dotenv>=1.2.2",    # why kept: .env loading at init. Floor past CVE-2026-28684.
+    "python-dotenv>=1.2.2",    # why kept: nothing imports it — pydantic-settings does, to read
+                               # `env_file`, and asks only for >=0.21.0. The direct pin is the
+                               # floor past CVE-2026-28684 that the transitive one would not give.
     "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
     "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
@@ -39,7 +41,7 @@ dependencies = [
 [project.optional-dependencies]
 jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
-    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/notebook_run.py)
+    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
@@ -97,7 +99,7 @@ include = ["promptpotter*"]
 # deliberate and exhaustive: setuptools ships no non-.py file unless it is named
 # here, so an asset that is merely committed to git is NOT installed. Two of these
 # were already correctly placed inside the package and still absent from the wheel
-# — which is how `pip install promptpotter-optimizer` produced a CLI that starts
+# — which is how `pip install promptpotter` produced a CLI that starts
 # and then cannot make a single optimizer call.
 #
 # Re-verified 2026-07-30, and verifying it has a trap worth knowing: `*.egg-info/

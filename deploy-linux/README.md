@@ -96,7 +96,7 @@ Set these in `deploy.config` (or pass on the command line):
 | repo | `$INSTALL_DIR` |
 | Python venv | `$INSTALL_DIR/.venv` |
 | webapp build | `$INSTALL_DIR/$WEBAPP_DIR/out/` |
-| `.env` (secrets) | `$INSTALL_DIR/.env` — **0600 perms, don't commit** |
+| env file (secrets) | `$ENV_FILE`, default `$INSTALL_DIR/.env` — **0600 perms, don't commit**. Seeded by bootstrap, named as `EnvironmentFile` by both units; under SELinux it must move to `/etc` (see `deploy.config.example`) |
 | uvicorn unit | `/etc/systemd/system/$APP_NAME.service` |
 | cloudflared config | `~/.cloudflared/config.yml` + `~/.cloudflared/<UUID>.json` |
 | logs (uvicorn) | `journalctl -u $APP_NAME -f` |

@@ -18,13 +18,18 @@ HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 # Optional cgroup memory ceiling (e.g. "2G"). Empty = no limit. A bound turns the
 # pp-self memory-starvation failure into a clean cgroup OOM instead of a silent OS kill.
 MEMORY_MAX="${MEMORY_MAX:-}"
+# Where systemd reads the environment from — the same knob bootstrap.sh seeded. Not necessarily
+# $INSTALL_DIR: systemd loads EnvironmentFile as root, and SELinux denies root a file under $HOME.
+# deploy.config.example carries the full symptom.
+ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ -d "$INSTALL_DIR/.venv" ]] || die "no .venv at $INSTALL_DIR — run bootstrap.sh first"
-[[ -f "$INSTALL_DIR/.env" ]]  || die "no .env at $INSTALL_DIR — run bootstrap.sh first"
+[[ -f "$ENV_FILE" ]] || die "no env file at $ENV_FILE — run bootstrap.sh first, or set ENV_FILE in deploy.config"
 
 # --- SELinux: let systemd exec the venv (Fedora/RHEL enforcing) ----------
 # A venv under $HOME is labeled user_home_t; a confined service domain can't
@@ -52,7 +57,7 @@ Wants=network-online.target
 Type=simple
 User=$RUN_USER
 WorkingDirectory=$INSTALL_DIR
-EnvironmentFile=$INSTALL_DIR/.env
+EnvironmentFile=$ENV_FILE
 ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --host $BIND_HOST --port $BIND_PORT --workers 1 --proxy-headers \\
     --forwarded-allow-ips=127.0.0.1
@@ -97,6 +102,13 @@ say "reloading systemd, enabling + starting $SERVICE_NAME.service"
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME.service"
 sudo systemctl restart "$SERVICE_NAME.service"
+
+# A drop-in outranks the unit written above, so re-running this script cannot undo one — and the
+# box that first hit the SELinux denial got exactly that, by hand. Ask systemd which file is
+# actually in force rather than reporting the one we asked for: a service reading an env file
+# nobody edits is invisible until a key is missing, and then it looks like the app's bug.
+IN_FORCE="$(systemctl show "$SERVICE_NAME" -p EnvironmentFiles --value | sed 's/ (ignore_errors=.*//')"
+[[ "$IN_FORCE" == "$ENV_FILE" ]] || warn "systemd loads '$IN_FORCE', NOT '$ENV_FILE' — a drop-in under /etc/systemd/system/$SERVICE_NAME.service.d/ is overriding this unit. Put the path in ENV_FILE (deploy.config) and delete the drop-in, or every key bootstrap/update writes goes to a file the service never reads."
 
 if wait_healthy "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"; then
     say "service is up: http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"

@@ -29,10 +29,12 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
 # Read as ROOT, because that is who systemd reads it as. Checking it as the login user passes on a
 # file the service will then be denied, which is the whole failure this preflight exists to catch.
-sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=' "$ENV_FILE" \
-    || die "ADMIN_BOT_TELEGRAM_TOKEN not in $ENV_FILE — see docs/operations/secure-hosting.md"
-sudo grep -q '^ADMIN_BOT_CHAT_ID=' "$ENV_FILE" \
-    || die "ADMIN_BOT_CHAT_ID not in $ENV_FILE — see docs/operations/secure-hosting.md"
+# `=.` and not `=`: a key present but empty reads exactly like a key that was never set, and the
+# bot's own check cannot tell the operator which of the two they did.
+sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=.' "$ENV_FILE" \
+    || die "ADMIN_BOT_TELEGRAM_TOKEN not set in $ENV_FILE — see docs/operations/secure-hosting.md"
+sudo grep -q '^ADMIN_BOT_CHAT_ID=.' "$ENV_FILE" \
+    || die "ADMIN_BOT_CHAT_ID not set in $ENV_FILE — see docs/operations/secure-hosting.md"
 
 # ADMIN_BOT_MODULE is the one knob whose default is a PLACEHOLDER (`myapp.…`), so a deploy that
 # never set it installs a unit whose ExecStart cannot resolve. systemd reports that as

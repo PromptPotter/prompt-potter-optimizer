@@ -17,6 +17,10 @@ BIND_PORT="${BIND_PORT:-8001}"
 WEBAPP_DIR="${WEBAPP_DIR:-webapp}"
 HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-https://app.example.com}"
+# The ONE env file — where this script seeds secrets AND where systemd later reads them. Keep the
+# two the same or they silently diverge: a key written here never reaches the service. See
+# deploy.config.example for why an SELinux box has to move it under /etc.
+ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -109,30 +113,31 @@ say "installing python deps from uv.lock (this can take a minute)"
 command -v uv >/dev/null 2>&1 || python3 -m pip install --user -q uv
 PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all --extra dev
 
-# --- 5. .env -------------------------------------------------------------
-if [[ ! -f .env ]]; then
-    say "creating .env from .env.example"
-    cp .env.example .env
-    chmod 600 .env
+# --- 5. env file ---------------------------------------------------------
+if [[ ! -f "$ENV_FILE" ]]; then
+    say "creating $ENV_FILE from .env.example"
+    # Outside $HOME the file belongs to root — systemd reads it as root, and /etc is where SELinux
+    # permits that — so creating it takes the same privilege its edits do.
+    [[ -w "$(dirname "$ENV_FILE")" ]] && priv="" || priv="sudo"
+    $priv install -m 600 .env.example "$ENV_FILE"
     echo
-    warn "you MUST set at least one LLM API key in .env before starting the service"
+    warn "you MUST set at least one LLM API key in $ENV_FILE before starting the service"
     read -rp "set GROQ_API_KEY now? (paste key or press Enter to skip) > " groq_key
     if [[ -n "${groq_key:-}" ]]; then
-        # replace the placeholder line in-place
-        sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=${groq_key}|" .env
-        say "GROQ_API_KEY set in .env"
+        set_env_kv "$ENV_FILE" GROQ_API_KEY "$groq_key"
+        say "GROQ_API_KEY set in $ENV_FILE"
     else
-        warn "skipped — edit $INSTALL_DIR/.env manually before running the service"
+        warn "skipped — edit $ENV_FILE manually before running the service"
     fi
     # tighten CORS to the public hostname (from deploy.config)
-    sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=${ALLOWED_ORIGINS}|" .env
+    set_env_kv "$ENV_FILE" ALLOWED_ORIGINS "$ALLOWED_ORIGINS"
 else
-    say ".env already exists — leaving it alone"
+    say "$ENV_FILE already exists — leaving it alone"
 fi
 
-# Brand is re-applied on every run, existing .env or not: deploy.config is the
+# Brand is re-applied on every run, existing env file or not: deploy.config is the
 # declaration, so editing it and re-running must actually repaint the install.
-brand_write_env .env
+brand_write_env "$ENV_FILE"
 
 # --- 5b. shared TermNorm bearer token (both sides already implement the check) ---
 # The optimizer authenticates to the TermNorm backend with a shared secret sent as
@@ -140,11 +145,11 @@ brand_write_env .env
 # config/middleware.py::bearer_auth_middleware, gated on TERMNORM_REQUIRE_AUTH). This
 # only PROVISIONS the secret — generated once, written to BOTH .env files so they match.
 # Idempotent: an existing non-empty token is reused, never clobbered.
-CUR_TOKEN="$(grep -E '^TERMNORM_TOKEN=' .env | head -1 | cut -d= -f2-)"
+CUR_TOKEN="$(read_env_kv "$ENV_FILE" TERMNORM_TOKEN)"
 if [[ -z "$CUR_TOKEN" ]]; then
     CUR_TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    set_env_kv .env TERMNORM_TOKEN "$CUR_TOKEN"
-    say "generated a shared TERMNORM_TOKEN in .env"
+    set_env_kv "$ENV_FILE" TERMNORM_TOKEN "$CUR_TOKEN"
+    say "generated a shared TERMNORM_TOKEN in $ENV_FILE"
 fi
 if [[ -n "${BACKEND_DIR:-}" && -f "$BACKEND_DIR/.env" ]]; then
     set_env_kv "$BACKEND_DIR/.env" TERMNORM_TOKEN "$CUR_TOKEN"

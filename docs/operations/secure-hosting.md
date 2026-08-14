@@ -41,8 +41,11 @@ a stranger; this is what stops one you have already met.
 2. **Find your chat id.** Message your new bot anything, then open
    `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and read
    `message.chat.id` (a number). This locks the bot to you.
-3. **Put the secrets in `.env`** (on the box, in `$INSTALL_DIR/.env`, `0600`, never
-   committed):
+3. **Put the secrets in the env file** (on the box, `$ENV_FILE` from `deploy.config` — default
+   `$INSTALL_DIR/.env`, `0600`, never committed). Every key below is a `Settings` field, so it
+   resolves from the process environment *or* from the install's own `.env`
+   (`config/paths.py::env_file_path`) — a laptop needs no `$ENV_FILE` at all. On a box, put them
+   in `$ENV_FILE` anyway: one home is what keeps the two from drifting.
    ```bash
    ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
    ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
@@ -89,15 +92,15 @@ Every change is recorded to `.promptpotter/identity/blocklist_audit.jsonl` (bloc
 
 ## New accounts into your CRM (optional)
 
-Signing in *is* signing up, and the allowlist decides only whether an account can *act*. So a
-new account is a contact worth keeping whether or not you entitle it. Set one more key in the
-same `.env` (the app service reads it through `EnvironmentFile`, exactly as the bot does):
+Signing in *is* signing up, and the blocklist only ever takes an account away again. So a new
+account is a contact worth keeping the moment it arrives. Set one more key in the same env file
+(the app service reads it through `EnvironmentFile`, exactly as the bot does):
 
 ```bash
 N8N_SIGNUP_WEBHOOK_URL=https://<your-n8n>/webhook/<the-workflow's-path>
 ```
 
-The app then POSTs `{email, name, use_case, signup_source}` there the first time a new account
+The app then POSTs `{email, name, use_case, signup_source, account_count}` there the first time a new account
 calls `/auth/me`, and the receiving workflow logs it and writes the CRM row. Leave the key unset
 and nothing is sent — the forward is best-effort and never fails a sign-in
 (`admin_bot.py::forward_new_account_to_crm`).

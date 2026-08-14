@@ -454,3 +454,59 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     assert effective_spend_cap_usd(
         requested_cap_usd=10.0, user=free_tier, stores=_oidc_stores({})
     ) == pytest.approx(settings.FREE_TIER_SPEND_CAP_USD)
+
+
+def test_config_keys_are_read_through_settings() -> None:
+    """A config key read via ``os.environ`` is invisible to the file the operator edits.
+
+    ``Settings`` consults the process environment AND ``config/paths.py::env_file_path``;
+    a bare ``os.environ`` read sees only what the launcher exported. So the same key put in
+    the install's ``.env`` is silently ignored — no error, no warning, the feature simply
+    never fires. ``N8N_SIGNUP_WEBHOOK_URL`` sat that way on the live box for months, logging
+    "CRM forward skipped" while the operator believed the forward was on; the admin-bot
+    credentials fail the same way, leaving an operator certain the ADR-0004 channel and its
+    audit trail are armed when nothing is listening.
+
+    The invariant is about REACH, not style: only modules that must read the environment
+    to BUILD ``Settings`` may do so, and each states why. Everything else declares a field.
+    """
+    import ast
+    from pathlib import Path
+
+    import promptpotter
+
+    root = Path(promptpotter.__file__).parent
+    allowed = {
+        # Resolves PROMPTPOTTER_HOME + the OS data dir — which is what LOCATES the env file,
+        # so it cannot be read from the file it is computing.
+        "config/paths.py",
+        # Decides whether to PROMPT for a first key, and deliberately asks the shell rather
+        # than the file: an exported key means the operator already has one.
+        "config/first_run.py",
+        # PROMPTPOTTER_AUTH — a local-harness OIDC bypass, kept off the Settings surface so
+        # it can never be switched on by a file that ships or syncs.
+        "presentation/api/deps.py",
+        # PROMPTPOTTER_ADMIN — same reasoning, for the terminal's admin tier.
+        "shared/identity.py",
+    }
+
+    offenders: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel in allowed:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr in ("environ", "getenv")
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "os"
+            ):
+                offenders.append(f"{rel}:{node.lineno}")
+
+    assert not offenders, (
+        f"direct environment access outside the modules that must bootstrap it: {offenders}. "
+        "Declare the key as a `Settings` field and read `settings.X`, so it resolves from the "
+        "install's .env as well as the process environment. If the module genuinely must read "
+        "the environment first, add it to `allowed` above WITH the reason."
+    )
