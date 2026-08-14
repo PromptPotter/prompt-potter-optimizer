@@ -7,7 +7,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, Union
+from typing import Any, Union
 
 
 def generate_observation_id() -> str:
@@ -72,49 +72,10 @@ class NodeEnd:
     error: str | None = None
 
 
-# --- Mid-round write-point events ---
-# events.jsonl is an observability mirror; resume + fork read
-# ``campaigns/{cycle_id}/rounds/round_NNNN.json`` via ``CampaignStore``, not this.
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateCreated:
-    campaign_id: str
-    round_num: int
-    candidate_idx: int
-    candidate_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateScored:
-    campaign_id: str
-    round_num: int
-    candidate_idx: int
-    report: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class RoundWinnerChosen:
-    campaign_id: str
-    round_num: int
-    winner_candidate_id: str
-    winner_accuracy: float
-    improved: bool
-
-
-@dataclass(frozen=True, slots=True)
-class L1CritiqueWritten:
-    campaign_id: str
-    round_num: int
-    l1_critique_text: str
-
-
-@dataclass(frozen=True, slots=True)
-class LayerApplied:
-    layer: Literal["L2", "L3"]
-    campaign_id: str
-    round_num: int
-    changes_description: str
+# An event declared here must have a REMOTE sink. Five mid-round ones (candidate created /
+# scored, round winner, L1 critique, layer applied) reached only the file mirror, restating a
+# fact the ledger and ``rounds/round_NNNN.json`` already carried — so the writer paid the
+# tracing tax for a second copy nothing read. The ledger is where a mid-round fact lands.
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +137,6 @@ OptimizationEvent = Union[
     DatasetRun,
     RoundEnd,
     CampaignEnd,
-    CandidateCreated,
-    CandidateScored,
-    RoundWinnerChosen,
-    L1CritiqueWritten,
-    LayerApplied,
 ]
 
 
@@ -242,13 +198,9 @@ Event = Union[DatasetRegistered, OptimizationEvent, MeasurementEvent]
 __all__ = [
     "CampaignEnd",
     "CampaignStart",
-    "CandidateCreated",
-    "CandidateScored",
     "DatasetRegistered",
     "DatasetRun",
     "Event",
-    "L1CritiqueWritten",
-    "LayerApplied",
     "NodeEnd",
     "NodeStart",
     "PromptVersion",
@@ -257,7 +209,6 @@ __all__ = [
     "QueryScoreStart",
     "RoundEnd",
     "RoundStart",
-    "RoundWinnerChosen",
     "dataset_item_id",
     "generate_observation_id",
 ]

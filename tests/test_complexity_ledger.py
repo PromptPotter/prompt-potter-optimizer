@@ -15,7 +15,7 @@ LEDGER_BASELINE = {
     "settings_env": 25,
     "settings_const": 15,
     "opt_search_point_fields": 25,
-    "any_params": 64,
+    "any_params": 63,
     "domain_any_maps": 79,
     "models_lax": 4,
     "prompt_string_fields": 6,

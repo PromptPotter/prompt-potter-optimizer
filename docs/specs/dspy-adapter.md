@@ -108,10 +108,16 @@ regardless of whether the adapter ever ships.
    outright. Every caller re-deriving a winner from it — the adapter included — would have built
    a prompt missing its demonstrations, or crashed. The round document carries the structured
    dict, so the artifact projects the ROUND the composite high-water names, origin round included.
-5. **Consolidate the two telemetry fan-outs.** A fact that must reach both the ledger and
-   Langfuse costs eight synchronized edits, not the four `adding-a-surface.md` §1 documents
-   ([`code-debt-cleanup.md`](code-debt-cleanup.md) § Ready). Landing this before C4 is what makes
-   the observability bridge a bridge rather than a ninth edit.
+5. **Consolidate the two telemetry fan-outs.** ✅ The premise was that a fact reaching both the
+   ledger and Langfuse costs eight synchronized edits. **Measured, the second four were being
+   paid by facts that reached no remote sink at all**: five mid-round events (candidate created
+   / scored, round winner, L1 critique, layer applied) routed to the local mirror alone, which
+   nothing reads, restating what the ledger and `rounds/round_NNNN.json` already carried — so
+   each cost its writer a second emit and bought nothing. They are deleted, and the rule is
+   stated where the next one would be added: an `Event` needs a remote sink, a mid-round fact
+   goes to the ledger ([`../developer/adding-a-surface.md`](../developer/adding-a-surface.md)
+   §1). What remains of the tracing half is one routing table replacing the dispatch `match`,
+   guarded at construction — so C4's bridge extends a registry rather than a ninth edit.
 
 ## Phase C — the adapter, in its own repo
 
@@ -187,4 +193,4 @@ split must survive the boundary intact.
   `pyproject.toml`, not a docs gap. Adoption means a PR into `dspy/teleprompt/`, which
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
   ([`../research/bbeh-comparison/`](../research/bbeh-comparison/)).
-- **Phase B5** is the one item left here — the second telemetry fan-out. Phase A is closed.
+- **Phases A and B are closed.** What remains is Phase C, in its own repo.

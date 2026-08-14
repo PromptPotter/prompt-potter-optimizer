@@ -18,7 +18,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json` |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Import-time: the `registry.py` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resumedecision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
@@ -61,9 +61,25 @@ impossible (the deep sites have nothing to call it on).
 **Guard (no standing test — the structural suite was cut, see
 [`tests/CLAUDE.md`](../../tests/CLAUDE.md)):** a union member with no `on_record`
 arm is silently dropped from every projection, so check the arm exists when you
-add the record (control-plane records `CommandRecord` / `CommandAckRecord` are
-the allowlisted exception — applied by `CommandDispatcher`, not projected). A
-missing arm breaks loud in use (the fact never reaches `dashboard.json`).
+add the record. Four members are deliberately unprojected: the control-plane pair
+`CommandRecord` / `CommandAckRecord` (applied by `CommandDispatcher`), plus
+`CycleSeedRecord` (read back by a pure ledger scan) and `ElectionRecord` (consumed
+by `scan_ledger_elections`; the crown reaches `dashboard.json` through
+`LiveDashboardView._handle_phase`). A missing arm breaks loud in use (the fact
+never reaches `dashboard.json`).
+
+**A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
+carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a
+remote sink renders — and every `Event` member must have a remote sink to reach. A
+mid-round fact (a candidate created or scored, a round winner, a critique, a layer
+applied) lands on the ledger and in `rounds/round_NNNN.json`, and stops there; five such
+events once existed whose only sink was the unread local mirror, so each cost its writer a
+second emit for nothing. Adding a real one is the dataclass in `tracing/events.py`, its
+row in `ObservabilityBridge._routes`, and a handler per sink named in that row.
+
+**Guard (at bridge construction):** `_routes` is the registry, and `__init__` raises when
+an `Event` member has no row — the one failure a fan-out cannot report on its own, since
+`emit` would otherwise drop it in silence.
 
 Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 "Per-call telemetry", [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)

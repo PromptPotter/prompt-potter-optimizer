@@ -36,13 +36,10 @@ from promptpotter.domain.results import (
 )
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared import truncate
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 import logging
 
@@ -87,7 +84,6 @@ async def l1_generate(
     *,
     n_variants: int,
     creativity: float,
-    obs: ObservabilityBridge | None = None,
     round_num: int = 0,
 ) -> tuple[list[CandidateProposal], str | None]:
     """Generate candidate variants. ``parse_failure`` names why the optimizer prompt produced unparseable output — the
@@ -98,7 +94,6 @@ async def l1_generate(
     model = optimizer_model("l1_generate")  # for warning/diagnostic surfaces only
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
-    tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
     bundle = build_bundle(cycle)
     # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
@@ -259,16 +254,6 @@ async def l1_generate(
                 prompt_fields_override=prompt_changes,
             )
         )
-
-        if obs:
-            with graceful("CandidateCreated emit failed"):
-                obs.emit_write_point(
-                    CandidateCreated,
-                    campaign_id=tracing_campaign_id,
-                    round_num=round_num,
-                    candidate_idx=len(population) - 1,
-                    candidate_id=child.lineage.id,
-                )
 
     return population, None
 

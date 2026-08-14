@@ -53,9 +53,7 @@ from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.tracing.bridge import observed_node
-from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared import truncate
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -313,7 +311,7 @@ async def _run_transition(
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
 ) -> None:
-    """enter → LLM → parse → adopt → LayerApplied → side-effects → exit.
+    """enter → LLM → parse → adopt → side-effects → exit.
     Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
     assert cycle.tracking.current_sp is not None
     current_pp = cycle.tracking.current_sp.pipeline_params
@@ -388,15 +386,6 @@ async def _run_transition(
     cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=current_pp, schema=pipeline_schema
     )
-    if obs is not None:
-        with graceful(f"LayerApplied({transition.layer_id}) emit failed"):
-            obs.emit_write_point(
-                LayerApplied,
-                layer=transition.layer_id,
-                campaign_id=tracing_campaign_id,
-                round_num=round_num,
-                changes_description=result.opt_sp.lineage.changes_description or "",
-            )
     transition.apply(cycle, result, round_num)
     emit_phase(
         on_phase,

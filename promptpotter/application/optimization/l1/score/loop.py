@@ -17,8 +17,6 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.infrastructure.tracing.events import CandidateScored
-from promptpotter.shared.errors import graceful
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -46,8 +44,6 @@ async def score_population(
     list[ScoredCandidate],
     EscalationSignal | None,
 ]:
-    session = cycle.session
-    obs = session.state.obs
     n = len(population)
 
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
@@ -178,15 +174,6 @@ async def score_population(
             ]
         candidate_scores.append(cr_result.report)
         callbacks.on_candidate_scored(idx, n, cr_result.report.model_dump())
-        if obs:
-            with graceful("CandidateScored emit failed"):
-                obs.emit_write_point(
-                    CandidateScored,
-                    campaign_id=session.state.tracing_campaign_id,
-                    round_num=round_num,
-                    candidate_idx=idx,
-                    report=cr_result.report.model_dump(),
-                )
 
         if cr_result.outcome == CandidateOutcome.ESCALATED:
             escalation_signal = cr_result.escalation_signal
