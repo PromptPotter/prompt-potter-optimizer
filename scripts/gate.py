@@ -101,7 +101,7 @@ def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
     ``--staged``.
     """
 
-    def check(_: Sel) -> Outcome:
+    def check(_sel: Sel) -> Outcome:
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
             return rc, out
@@ -221,11 +221,31 @@ class Check:
     staged: bool = False  # in the pre-commit fast set
 
 
+_BBEH_DIR = "docs/research/bbeh-comparison"
+
+
+def _mypy(_sel: Sel) -> Outcome:
+    """Every tracked module that imports ``promptpotter``, not just the package.
+
+    The harnesses outside it were unchecked and each had rotted against a rename: the BBEH
+    runner passed a kwarg no signature accepted and read a field off a NamedTuple that has
+    none, ``render_review.py`` named ``RoundResult.opt_search_point`` after it became
+    ``opt_sp``. None of them raised until someone ran them, and ruff cannot see an attribute
+    that is not there. ``shared_config`` is followed but not a target: it stays import-safe
+    for Colab, so it imports nothing of ours.
+    """
+    return _run(
+        _py("mypy", "promptpotter/", "scripts/", f"{_BBEH_DIR}/bbeh_potter_runner.py"),
+        _REPO,
+        MYPYPATH=str(_REPO / _BBEH_DIR),
+    )
+
+
 CHECKS: tuple[Check, ...] = (
     Check("ruff-format", "py", _ruff_format, staged=True),
     Check("ruff-check", "py", _ruff_check, staged=True),
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
-    Check("mypy", "py", lambda _: _run(_py("mypy", "promptpotter/"), _REPO)),
+    Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),
     Check(
         "ts-types",
@@ -323,7 +343,7 @@ def _reexec_pinned() -> None:
 def main() -> int:
     # A failing check's output is whatever the tool prints, and tools print ✖ and →.
     # On a cp1252 console that raised while REPORTING the failure, losing the verdict.
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     parser = argparse.ArgumentParser(description="Run every check CI runs.")
     parser.add_argument("--py", action="store_true", help="only the Python half (CI's `check` job)")
     parser.add_argument(
