@@ -26,6 +26,33 @@ Every measurement costs money, so the whole design is **most fitness per dollar*
 - **Optimizes itself** — point the optimizer at its own optimizer prompts. [L4](docs/concepts/optimizer-of-the-optimizer.md)
 - **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
+## Five ways to run it
+
+1. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
+2. **CLI** — `python -m promptpotter new <name>` / `resume`.
+3. **Python / Jupyter notebook**.
+4. **REST API**.
+5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
+
+**Direction — the sixth way: a tool another agent calls.** The aim is parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — can invoke PromptPotter as its *try-harness-first* move before reaching for fine-tuning. Why + a same-dataset head-to-head: [related-work § PromptPotter × NVIDIA AutoResearch](docs/research/related-work.md); tracked as [roadmap § Agent-tool parity](docs/specs/roadmap.md) (C5, MCP server mode).
+
+## Common questions
+
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
+- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.yaml`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
+- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run).
+- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
+- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
+
+## Limitations
+
+- **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
+- **Requires a labeled dataset.** Input/output pairs are mandatory.
+
+## Roadmap
+
+Status and the full forward plan live in one place: [`docs/specs/roadmap.md`](docs/specs/roadmap.md). Documentation index: [`docs/README.md`](docs/README.md).
+
 ## Peer systems
 
 PromptPotter belongs to the **LLM-driven evolution** family: an LLM proposes variants, an evaluator scores them, and the winners breed. The peer systems — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#systems-under-the-umbrella):
@@ -40,6 +67,10 @@ The code-evolution systems mutate source; the prompt-evolution systems mutate a 
 ## Scientific framing
 
 PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZero-shaped MCTS over the lineage**: [PoBB](docs/research/related-work.md#best-arm-identification--sequential-testing) prunes losers *within* a round, each round's ability backpropagates to its ancestors, and a UCB rule picks the ancestor to re-expand once a branch is spent. Rollouts give way to deterministic evaluation on your dataset, as in AlphaZero. [Comparison](docs/research/related-work.md#comparison-to-mcts).
+
+### The loop
+
+Each round is **generate → score → critique**: L1 proposes candidates, they're scored against your dataset, and the critique steers the next round. When the inner layer stalls, an outer layer (L2, then L3) redirects it; when the branch itself is spent, the search rewinds. Full mechanics: [the-loop.md](docs/concepts/the-loop.md).
 
 **AlphaEvolve** is the closest published peer — same loop, same memory across runs; read row one as scope (a different target, not a missing feature), the rest as capability.
 
@@ -61,22 +92,16 @@ PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZer
 
 The one place AlphaEvolve is unambiguously stronger is **code optimization** — its search reaches into source, which is not what PromptPotter is pointed at. The 🟡s are partial versions of the same capability. Full grading, including the prompt-tooling neighbours: [`related-work.md`](docs/research/related-work.md#feature-highlights).
 
-## The loop
+## Citation
 
-Each round is **generate → score → critique**: L1 proposes candidates, they're scored against your dataset, and the critique steers the next round. When the inner layer stalls, an outer layer (L2, then L3) redirects it; when the branch itself is spent, the search rewinds. Full mechanics: [the-loop.md](docs/concepts/the-loop.md).
-
-## Common questions
-
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
-- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.yaml`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
-- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run).
-- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
-- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
-
-## Limitations
-
-- **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
-- **Requires a labeled dataset.** Input/output pairs are mandatory.
+```bibtex
+@software{promptpotter,
+  title  = {PromptPotter: LLM-Driven Evolution of Prompts and Pipelines},
+  author = {Streuli, David},
+  year   = {2026},
+  url    = {https://github.com/PromptPotter/prompt-potter-optimizer}
+}
+```
 
 ## Benchmarks
 
@@ -96,7 +121,7 @@ Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against D
 | [Self-healing](docs/developer/self-healing-internals.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
 | [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |
 | [Campaign tree](docs/concepts/campaign-tree.md) | [Whitelabel — run it under your own name](docs/developer/whitelabel.md) *(draft)* | |
-| [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
+| [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | [Use it as a DSPy optimizer](docs/developer/dspy-optimizer.md) *(draft)* | |
 
 Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).
 
@@ -106,7 +131,7 @@ While `python -m promptpotter resume` is running, the cleanest setup is **`campa
 
 > [!TIP]
 > <details>
-> <summary><b>What a round actually looks like</b> (click to expand)</summary>
+> <summary><b>TODO: What a round actually looks like</b> (click to expand)</summary>
 >
 > Every cycle writes a per-round digest to `log.md`. This is an excerpt from a real JustLogic run — the round that took it from 65.0% to 75.0%:
 >
@@ -137,28 +162,3 @@ While `python -m promptpotter resume` is running, the cleanest setup is **`campa
 > Those trajectory bars are [PoBB](docs/methods/candidate-elimination.md) at work — one tick per scored sample, and the trailing arm's posterior never recovers. What every stream a run produces means: [reading the output](docs/manual/04-reading-the-output.md).
 >
 > </details>
-
-## Five ways to run it
-
-1. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
-2. **CLI** — `python -m promptpotter new <name>` / `resume`.
-3. **Python / Jupyter notebook**.
-4. **REST API**.
-5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
-
-**Direction — the sixth way: a tool another agent calls.** The aim is parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — can invoke PromptPotter as its *try-harness-first* move before reaching for fine-tuning. Why + a same-dataset head-to-head: [related-work § PromptPotter × NVIDIA AutoResearch](docs/research/related-work.md); tracked as [roadmap § Agent-tool parity](docs/specs/roadmap.md) (C5, MCP server mode).
-
-## Roadmap
-
-Status and the full forward plan live in one place: [`docs/specs/roadmap.md`](docs/specs/roadmap.md). Documentation index: [`docs/README.md`](docs/README.md).
-
-## Citation
-
-```bibtex
-@software{promptpotter,
-  title  = {PromptPotter: LLM-Driven Evolution of Prompts and Pipelines},
-  author = {Streuli, David},
-  year   = {2026},
-  url    = {https://github.com/PromptPotter/prompt-potter-optimizer}
-}
-```
