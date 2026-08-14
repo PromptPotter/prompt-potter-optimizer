@@ -16,7 +16,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Read by :func:`source_checkout_root` to prove a neighbouring ``pyproject.toml``
 # is OURS. Must match ``[project].name``.
-_PROJECT_NAME = "promptpotter-optimizer"
+_PROJECT_NAME = "promptpotter"
 
 _ENV_HOME = "PROMPTPOTTER_HOME"
 

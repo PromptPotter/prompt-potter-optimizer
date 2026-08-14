@@ -158,7 +158,10 @@ directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
 `scripts/build_release.py`, which is the supported way to build a wheel. A bare `uv build`
-produces one that quietly serves no dashboard and resolves no dataset.
+produces one that quietly serves no dashboard and resolves no dataset. Publishing a GitHub
+Release is what runs it — `.github/workflows/publish.yml` builds the dashboard, calls that
+script with no `--no-webapp`, smoke-installs the wheel outside any checkout, and uploads to
+PyPI over Trusted Publishing.
 
 Running from a checkout (development, and `deploy-linux/`) resolves exactly the paths it
 always has. There is no `REPO_ROOT`: the parent walk that once stood for all three roots

@@ -11,7 +11,7 @@ program*: a DSPy user who will never clone this repo or open the webapp. So it s
 **separate repo and PyPI name**, not a mode or a flag here.
 
 **The dependency arrow points one way: `promptpotteropt` depends on
-`promptpotter-optimizer`; this package never imports `dspy`.** That is what makes "no new
+`promptpotter`; this package never imports `dspy`.** That is what makes "no new
 dependency for existing installs" structural rather than a promise, and it forbids the
 obvious shortcut — a stripped copy of the loop inside the adapter — because two loops
 drift. One engine.
@@ -151,5 +151,5 @@ split must survive the boundary intact.
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
   ([`../research/bbeh-comparison/`](../research/bbeh-comparison/)).
 - **Phase A2 — dependency re-tiering** is the one item not started: it moves `fastapi` /
-  `uvicorn` / `cryptography` / `openpyxl` and their peers into extras, and `pyproject.toml` is
-  held by a concurrent PyPI-rename commit. Nothing else in A or B waits on it.
+  `uvicorn` / `cryptography` / `openpyxl` and their peers into extras. Nothing else in A or
+  B waits on it, and the rename it queued behind has landed.

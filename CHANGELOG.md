@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The distribution is named `promptpotter`** — `promptpotter-optimizer` was never registered on any index. One word for the brand, the import, the CLI and the install.
+
+### Added
+
+- **Publishing a GitHub Release publishes to PyPI** (`.github/workflows/publish.yml`) — dashboard build, full `build_release.py`, a tag/version guard, then a wheel smoke outside any checkout that demands the dashboard CI's `--no-webapp` build cannot. Uploads over Trusted Publishing, so no credential is stored.
+
 ## [0.8.10] — 2026-08-08
 
 > Continued 0.8.x beta-hardening toward the 0.9.0 broad launch. 123 commits since `v0.8.8` <!-- 0.8.9 was an in-flight version bump with no release of its own; consolidated here -->. No paired backend release this cycle. Zero released-between and zero long-lived on-disk data, so contract and on-disk changes ship without compatibility shims — **start clean** (see BREAKING).

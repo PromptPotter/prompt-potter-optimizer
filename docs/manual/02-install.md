@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-`[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
