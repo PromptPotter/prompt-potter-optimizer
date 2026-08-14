@@ -277,8 +277,6 @@ DEP002 = [
     "ipython",
     "uvicorn",
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
-    "starlette",         # FastAPI's ASGI core; pinned for a security floor, never imported directly by promptpotter/
-
     "jupyterlab",
     "pytest",
     "pytest-asyncio",

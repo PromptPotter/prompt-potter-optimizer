@@ -38,7 +38,7 @@ RUN_BOOTSTRAP = True
 4. Run All
 5. Download the `results_*.json` output file(s)
 
-**PromptPotter (local):** runs against this repo, not Colab (PromptPotter is not on PyPI).
+**PromptPotter (local):** runs against this repo, not Colab — step 3 boots a backend on localhost, which a Colab runtime cannot reach. Installing from PyPI would not change that.
 
 1. `pip install -e ".[dev,jupyter]"` from the repo root, plus `pip install datasets`
 2. `.env` at the repo root with `GROQ_API_KEY`

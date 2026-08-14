@@ -52,6 +52,11 @@ compiled.save("optimized.json")
 Every field below has a default, so that is a complete run. The rest of this page is what
 you override once you want the search shaped to your task.
 
+**In a notebook, or anywhere you already have an event loop, `await optimizer.acompile(…)`
+instead.** `compile()` still works there — it moves the run onto its own thread — but a thread
+never receives SIGINT, so Ctrl+C stops pausing the campaign; `promptpotter pause` and the webapp
+control are unaffected. `acompile()` keeps the interrupt.
+
 ## The loop is three layers
 
 L1 proposes candidates each round from the last winner. When L1 stops improving, **L2

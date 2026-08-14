@@ -120,8 +120,9 @@ Small by construction, if B lands. Four parts, none of them a loop:
 1. **A `dspy` connector** — `execution: "in_process"`, `in_process_run` calls the user's
    `dspy.Module`, registered through the published entry-point group. Reference impls are
    `connectors/promptpotter.py` (in-process) and `connectors/termnorm.py` (wire).
-2. **`PromptPotterOpt(Teleprompter)`** — obey `compile(student, *, trainset, valset)`,
-   call the Phase-B launch entry, apply the winner back with `with_instructions()`.
+2. **`PromptPotterOpt(Teleprompter)`** — obey `compile(student, *, trainset, valset)`, call the
+   Phase-B launch entry, read the winner off `export.json` (§ B4 — never re-derive one), and
+   apply it back with `with_instructions()`. Its async peer `acompile()` is § The async seam.
 3. **`Loop` / `Node`** — the two dataclasses on the usage page, mapped onto
    `OptimizationConfig` and the node overlay through B3.
 4. **The observability bridge.** Narrower than first written. `BaseCallback` stops at
@@ -132,6 +133,38 @@ Small by construction, if B lands. Four parts, none of them a loop:
    still gives a parent run per compile and a child run per trial, but it gets there by
    patching DSPy, not through a callback — so that behaviour is MLflow's to keep working,
    not a contract we can lean on. `mlflow` is already an optional dependency here.
+
+### The async seam — two crossings, two answers
+
+Our loop is async and `Teleprompter.compile` is sync, so the boundary is crossed twice, in
+opposite directions, and the two crossings share nothing.
+
+**Their program inside our loop** needs no bridge of ours — it needs the right one of theirs.
+`in_process_run` is already `async def (query, payload) -> dict` (`connectors/promptpotter.py` is
+the reference impl), so a module declaring `aforward` is simply awaited through `acall`. One
+declaring only `forward` goes through **`dspy.asyncify`**, which offloads via `anyio.to_thread`
+*and carries `thread_local_overrides` across*. `asyncio.to_thread` is the obvious substitute and
+the wrong one: `dspy.settings` is thread-local, so the worker would run under a default
+configuration and every measurement would be attributed to a model the user never chose — a
+wrong number with nothing to raise.
+
+**Our loop inside their caller** has to drive a loop from a sync method. `asyncio.run` raises
+inside a running one, and DSPy's own docs single out Jupyter / Colab / Databricks as a separate
+code pattern — so for this audience the running-loop case is the common one, not the edge. Two
+entry points, not a shim:
+
+- **`acompile()`** — the async peer, awaited directly by a host that already has a loop. Nothing
+  is offloaded and the engine behaves exactly as it does under the CLI.
+- **`compile()`** — `asyncio.run` when no loop is running, else the coroutine runs in a dedicated
+  thread with its own loop. `nest_asyncio` is not an option: it monkeypatches the loop, and it
+  would be a dependency added to *hide* a boundary rather than cross it (root § STOP).
+
+The thread's one cost is nameable. This package installs no signal handlers — its only
+`asyncio.run` is `cli/campaign_runner.py` — so nothing breaks by running off the main thread
+except that SIGINT never reaches it, and **Ctrl+C stops pausing the campaign**. Every other route
+to the same stop is untouched, because they poll `.runtime/pause.flag` rather than catch an
+interrupt: the `pause` verb and the webapp control both still work. `compile()` says so in its
+docstring and does not try to win the interrupt back.
 
 Verified by reading DSPy 3.1.3's source, and worth leaning on rather than rebuilding:
 `dspy.configure_cache()` (completion-level replay, complements our measurement cache —
@@ -150,8 +183,6 @@ split must survive the boundary intact.
 
 ## Open
 
-- **The async seam.** Our engine is async; DSPy's concurrency is thread-backed
-  (`asyncify` bridges one direction). Needs a design pass before C2.
 - **Upstream.** DSPy scans no entry-point group for optimizers — verified absent from its
   `pyproject.toml`, not a docs gap. Adoption means a PR into `dspy/teleprompt/`, which
   upstream gates on a benchmark against MIPROv2 / GEPA. We have that harness
