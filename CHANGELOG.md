@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.11] — 2026-08-14
+
+> The release that makes `pip install promptpotter` real: the name is claimed, the wheel is less than half the size, a plain install is the engine rather than a web server, and publishing a GitHub Release is what puts it on the index. 42 commits since `v0.8.10`.
+
 ### Changed
 
 - **The distribution is named `promptpotter`** — `promptpotter-optimizer` was never registered on any index. One word for the brand, the import, the CLI and the install.
@@ -19,6 +23,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PromptPotter is a DSPy optimizer** — `pip install promptpotter[dspy]`, then `PromptPotterOpt(...).compile(program, trainset=…)` returns a copy of the program with the winning prompt applied. An extra on the one distribution rather than a second package: after the Phase-A/B seams landed the adapter was ~300 lines, which does not carry its own CI and release matrix. Your metric is the scorer — its float rides an observation key the campaign formula reads, so no grading rule is restated on our side — and prompt *and* model settings evolve together, which is the half `with_instructions()` cannot reach. `acompile()` is the peer for a host that already has an event loop. [usage](docs/developer/dspy-optimizer.md) · [contract](docs/specs/dspy-adapter.md)
 - **A campaign now emits an artifact, not just a report** (`cycles/{id}/export.json`) — the winning prompt by field name plus the provenance that makes its fitness readable: the formula the number was computed under, n, the lift and its interval, θ, the rows' own hash, the optimizer manifest, and an `artifact_version` a reader refuses on. `domain/export.py::parse_prompt_export` reads it back to a `PromptTemplate`. Reader contract: [`docs/developer/stable-api.md`](docs/developer/stable-api.md) § 5c.
 - **Publishing a GitHub Release publishes to PyPI** (`.github/workflows/publish.yml`) — dashboard build, full `build_release.py`, a tag/version guard, then a wheel smoke outside any checkout that demands the dashboard CI's `--no-webapp` build cannot. Uploads over Trusted Publishing, so no credential is stored.
+
+### Technical Details
+
+- **42 commits since `v0.8.10`** (2026-08-08 → 2026-08-14): 18 fixes, 9 features, 8 refactors, 7 docs.
+- `APP_VERSION` + `pyproject.toml` → 0.8.11. It rides the L4 measurement identity hash, so banked `promptpotter-self` outer rows re-measure; inner rows cache-serve.
 
 ## [0.8.10] — 2026-08-08
 
