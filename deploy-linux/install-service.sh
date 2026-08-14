@@ -6,6 +6,7 @@ set -euo pipefail
 # --- config + knobs -----------------------------------------------------
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+source "$HERE/health.sh"
 APP_NAME="${APP_NAME:-myapp}"
 SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
 APP_MODULE="${APP_MODULE:-myapp.main:app}"
@@ -97,8 +98,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME.service"
 sudo systemctl restart "$SERVICE_NAME.service"
 
-sleep 2
-if curl -fsS "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH" >/dev/null; then
+if wait_healthy "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"; then
     say "service is up: http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"
 else
     die "service started but health check failed — see: journalctl -u $SERVICE_NAME -e"

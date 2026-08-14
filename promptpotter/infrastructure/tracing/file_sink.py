@@ -55,8 +55,8 @@ class FileSink:
                 self._tenant_root, CycleHop(campaign_id=self._campaign_id, cycle_id=self._cycle_id)
             )
         # Orphan fallback for out-of-campaign file_only() emits — tucked
-        # under archive/obs/ so it doesn't compete with operator views.
-        return self._tenant_root / "archive" / "obs"
+        # under traces/obs/ so it doesn't compete with operator views.
+        return self._tenant_root / "traces" / "obs"
 
     def _log_event(self, event: dict[str, Any]) -> None:
         event["timestamp"] = utcnow_iso()

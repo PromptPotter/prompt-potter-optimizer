@@ -25,6 +25,7 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
 # set_env_kv + the brand fan-out, shared with update.sh.
 source "$HERE/brand-env.sh"
+source "$HERE/health.sh"
 
 [[ "$(uname -s)" == "Linux" ]] || die "this script is Linux-only"
 [[ "$REPO_URL" != *"CHANGE-ME"* ]] || die "edit REPO_URL at the top of bootstrap.sh first (or pass REPO_URL=...)"
@@ -164,11 +165,10 @@ npm run build:deploy   # full shipped artifact: React Compiler + source maps
 cd ..
 
 # --- 7. smoke ------------------------------------------------------------
-say "smoke test: starting uvicorn for 4 seconds"
+say "smoke test: starting uvicorn until it answers"
 .venv/bin/python -m uvicorn "$APP_MODULE" --host "$BIND_HOST" --port "$BIND_PORT" &
 uv_pid=$!
-sleep 4
-if curl -fsS "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH" >/dev/null; then
+if wait_healthy "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"; then
     say "health check passed"
 else
     warn "health check failed — check logs above"

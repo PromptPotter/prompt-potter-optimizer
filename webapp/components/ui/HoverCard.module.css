@@ -2,11 +2,15 @@
   display: block;
 }
 
-/* The floating card shell. Positioned inline by the component (fixed, off the
-   trigger rect); this owns only the look. Callers extend via `className`. */
+/* The floating card shell. Positioned inline by the component (fixed, hung off
+   whichever trigger edge has room); this owns only the look. Callers extend via
+   `className`. Pointer events stay ON — the operator points into this card to
+   select an id out of it, which `pointer-events:none` made impossible, and a
+   card taller than the viewport scrolls rather than putting an id out of reach. */
 .card {
   z-index: 50;
-  pointer-events: none;
+  max-height: calc(var(--vh-full) - 16px);
+  overflow-y: auto;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);
   border-radius: 8px;

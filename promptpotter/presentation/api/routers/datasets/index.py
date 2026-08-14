@@ -3,7 +3,7 @@ and need nothing measured. The leaderboard reads live in ``leaderboard.py``, ing
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
@@ -11,8 +11,10 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
+from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
+from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
+from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema, PipelineView
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
@@ -27,6 +29,9 @@ from promptpotter.presentation.api.routers.datasets._router import datasets_rout
 from promptpotter.shared.errors import (
     NotFoundError,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class DatasetIndexEntry(StrictModel):
@@ -73,6 +78,15 @@ def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
     )
 
 
+class NestedPipelineRef(StrictModel):
+    """Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are
+    derived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary
+    dataset."""
+
+    node: str = Field(description="Node id in this pipeline whose measurement runs `dataset`.")
+    dataset: str = Field(description="Slug of the pipeline that node runs; fetch it the same way.")
+
+
 class DatasetPipelineResponse(StrictModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
@@ -98,6 +112,21 @@ class DatasetPipelineResponse(StrictModel):
     # beside the config so the operator sees the WHOLE node (model + params +
     # prompt + the structured output it produces). None for nodes with no schema.
     node_output_schema: dict[str, NodeOutputSchema | None]
+    # The only wire naming a nested pipeline: otherwise a client can recover the inner
+    # benchmark only as a prefix of `spawned_by.task`, which needs a cell already spawned.
+    nests: NestedPipelineRef | None
+
+
+def _nested_pipeline(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
+    """Owning an ``inner_tasks.yaml`` IS what makes a dataset outer (``runner/inner/tasks.py``);
+    no name test recognises one. The node is the schema's own measurement node."""
+    try:
+        panel = load_inner_tasks(inner_tasks_path(dataset_dir))
+    except InnerCycleUnscoreableError:
+        # A read-only view must not raise where the runner would.
+        return None
+    node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)
+    return NestedPipelineRef(node=node.id, dataset=panel.inner_benchmark) if node else None
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
@@ -135,7 +164,13 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
+        nests=_nested_pipeline(dataset_dir, schema.view),
     )
 
 
-__all__ = ["DatasetIndexEntry", "DatasetIndexResponse", "DatasetPipelineResponse"]
+__all__ = [
+    "DatasetIndexEntry",
+    "DatasetIndexResponse",
+    "DatasetPipelineResponse",
+    "NestedPipelineRef",
+]

@@ -125,6 +125,11 @@ class MeasurementArchive:
     def _runs_dir(self) -> Path:
         return self._store_dir() / "runs"
 
+    def derived_dir(self) -> Path:
+        """Read models folded FROM these measurements live under them — the derivation is the
+        archive's own, so the path is not something a view module gets to spell for itself."""
+        return self._store_dir() / "derived"
+
     def _detail_path(self, run_id: str) -> Path:
         return self._runs_dir() / f"{run_id}{_DETAIL_SUFFIX}"
 
@@ -433,8 +438,8 @@ class MeasurementArchive:
                 if not isinstance(sid, int) or item.get("predicted") == "ERROR":
                     continue
                 if not is_full_match:
-                    terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
-                    if not (terminated_at and terminated_at in trusted_nodes):
+                    terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
+                    if not (terminal_node and terminal_node in trusted_nodes):
                         continue
                 existing = cache.get(sid)
                 if (

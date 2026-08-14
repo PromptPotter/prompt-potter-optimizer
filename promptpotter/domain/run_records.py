@@ -160,6 +160,11 @@ class LLMCallStartRecord(StrictModel):
     started_at_ms: int
     # Sets the operator's latency expectation on the in-flight line.
     prompt_chars: int = 0
+    # What `prompt_chars` is MADE OF — injection name → rendered chars, for the node's live
+    # layout. The total alone says a producer-side bound failed but never which one, so the
+    # over-budget warning could be read and not acted on; this is the breakdown that names the
+    # panel. Empty for a node that composes no layout (`checkin`) and on a cache replay.
+    injection_chars: dict[str, int] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -255,6 +260,14 @@ RoundWarningKind = Literal[
     "injection_budget_overrun",
     "layer_parse_failure",
     "optimizer_deadline_retry",
+    # The cycle STOPPED and a human has to act. Its reason is the layer's own sentence, and it
+    # rides a warning because the log line it used to ride is not a channel an operator reads:
+    # the halt showed up as a bare `escalation_abort` with the why nowhere on disk.
+    "layer_terminated_cycle",
+    # A layer emitted `terminate_proposal` carrying no reason. Ignored — a contentless stop is a
+    # volunteered field, not a decision — but never silently: it means the layer's schema let it
+    # fill the kill switch with "" while its actual output was a healthy steer.
+    "layer_terminate_blank",
     # The odd one out, deliberately: nothing failed. The round measured cleanly and still
     # resolved nothing — no arm's blocked lift over the origin excluded 0 — which looks
     # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.

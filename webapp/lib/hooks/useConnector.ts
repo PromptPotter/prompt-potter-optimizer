@@ -43,6 +43,7 @@ import {
   fetchDatasetPipeline,
   type BackendHealthResponse,
   type BackendResponse,
+  type NestedPipelineRef,
   type NodeConfigParam,
   type NodeOutputSchema,
 } from "@/lib/api";
@@ -67,6 +68,7 @@ const EMPTY: ConnectorView = {
   nodeConfigSchema: null,
   nodeOutputSchema: null,
   phase: null,
+  nests: null,
 };
 
 // Connector reachability is rare-changing; a 5 s probe is plenty and stays
@@ -95,6 +97,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     string,
     NodeOutputSchema | null
   > | null>(null);
+  const [nests, setNests] = useState<NestedPipelineRef | null>(null);
 
   // Render-phase guarded reset — drops every dataset-keyed slot together
   // the same render the dataset id changes, so no consumer ever sees a
@@ -108,6 +111,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     setBackendType(null);
     setNodeConfigSchema(null);
     setNodeOutputSchema(null);
+    setNests(null);
   }
 
   // Drop the backend list when `authed` goes false (logout / dead
@@ -158,6 +162,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           backend_type?: string | null;
           node_config_schema?: Record<string, NodeConfigParam[]> | null;
           node_output_schema?: Record<string, NodeOutputSchema | null> | null;
+          nests?: NestedPipelineRef | null;
         };
         if (!cancelled) {
           setView(resp?.view ?? null);
@@ -165,6 +170,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(resp?.backend_type ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(resp?.node_output_schema ?? null);
+          setNests(resp?.nests ?? null);
           setLoaded({ key: datasetName, failed: false });
         }
       } catch {
@@ -174,6 +180,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(null);
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
+          setNests(null);
           setLoaded({ key: datasetName, failed: true });
         }
       }
@@ -268,6 +275,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
       nodeConfigSchema,
       nodeOutputSchema,
       phase,
+      nests,
     };
   }, [
     datasetName,
@@ -282,6 +290,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     nodeConfigSchema,
     nodeOutputSchema,
     phase,
+    nests,
   ]);
 }
 

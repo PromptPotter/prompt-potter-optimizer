@@ -45,8 +45,10 @@ _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(
         is_reasoning=True,
         min_max_tokens=8000,
-        notes="Emits ~4k reasoning tokens before content; a 4k cap returned 0 content on "
-        "l1_critique. Pair a >=8k budget with reasoning_effort=low.",
+        notes="Emits ~4k reasoning tokens before content (median 4.5k measured, tail 11.4k); a "
+        "4k cap returned 0 content on l1_critique. The FLOOR is what this profile knows — which "
+        "reasoning_effort distils better is not, and was never measured; the manifest sets that "
+        "per node. Budget the tail, not the median: effort moves output ~27% per two steps.",
     ),
     "openai/gpt-oss-20b": ModelProfile(
         is_reasoning=True,

@@ -122,6 +122,6 @@ The bbeh-comparison harness is deliberately scoped to **prompt-optimization peer
 
 ## Infrastructure Notes
 
-Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`).
+Wall-clock numbers in this document rely on prior-result reuse from `measurements/` (addressed by `PipelineSchema.node_configs`).
 
 See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, the head-to-head numbers, and (§ Algorithm configuration: the classical lineage) the classical AutoML racing ancestry.

@@ -314,7 +314,9 @@ def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
             "Which evidence panels fill each prompt slot. The keys below are the only addressable "
             "slots and the enum the only signals this node may be given. Editing is per SLOT: a slot "
             "you name replaces that slot's whole list, so carry over what you still want there; a "
-            "slot you omit keeps what it has, and `[]` empties one."
+            "slot you omit keeps what it has, and `[]` empties one. Each signal may appear at most "
+            "ONCE across the whole layout — a signal listed in two slots is rendered twice, verbatim, "
+            "and the edit is rejected."
         ),
         "properties": {
             slot: {"type": "array", "items": {"type": "string", "enum": sorted(spec.possible)}}
@@ -409,6 +411,29 @@ def validate_l1_layout(
                 )
             )
             is_valid = False
+
+    # HARD: nor may two slots list the SAME placeholder — `all_placeholders` concatenates the
+    # slot lists and `DispatchHub.fill` appends one render per occurrence, so a signal named
+    # twice is emitted twice, verbatim, in one prompt. Nothing else could catch it: `char_cap`
+    # is applied per render and never sees the second copy, which is how prompts reached 80%
+    # over their ceiling with every individual panel inside its own cap. Measured on the banked
+    # corpus before this check existed: 28% of `l1_generate` prompts carried a duplicate, median
+    # 2,414 wasted chars and up to 12,242 — 6.3% of every byte ever sent to the node.
+    across = sorted(
+        {
+            name
+            for name in layout.all_placeholders()
+            if sum(1 for slot in L1_LAYOUT_SLOTS if name in getattr(layout, slot)) > 1
+        }
+    )
+    if across:
+        outcomes.append(
+            ValidatorOutcome(
+                validator_id="l1_layout_dups_across_slots",
+                evidence={"duplicates": across},
+            )
+        )
+        is_valid = False
 
     # SOFT: unchanged from prior — L2 spent a fire on nothing. Flag, don't block.
     if prior_layout is not None and layout == prior_layout:

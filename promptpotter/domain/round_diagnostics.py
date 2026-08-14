@@ -36,7 +36,7 @@ class SampleDiag:
     ground_truth: str
     predicted: str
     rank: int | None
-    terminated_at: str
+    terminal_node: str
     gt_in_source: bool | None
     gt_in_ranked: bool | None
     warnings: list[str]
@@ -54,8 +54,10 @@ class RoundDiagnostics:
     near_misses: list[NearMiss] = field(default_factory=list)
     n_valid: int = 0
 
-    # Pipeline shape this round
-    termination_dist: dict[str, int] = field(default_factory=dict)
+    # Pipeline shape this round. Add no `terminal_node` tally beside these: that field names the
+    # deepest node a sample REACHED, so a healthy round tallies wholly under the last node and
+    # reads as a mass failure. A run that stopped short is already carried by these two rates and
+    # by `evidence_health`, and is derivable from `terminal_node` against the schema.
     error_rate: float = 0.0
     warning_rate: float = 0.0
 

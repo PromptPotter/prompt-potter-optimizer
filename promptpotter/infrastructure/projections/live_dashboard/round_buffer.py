@@ -95,7 +95,7 @@ class RoundBuffer:
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": round(query_time, 2),
-                "terminated_at": pd.get("terminated_at") or "",
+                "terminal_node": pd.get("terminal_node") or "",
                 "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
                 "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
             }

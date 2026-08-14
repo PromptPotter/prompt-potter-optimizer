@@ -107,7 +107,7 @@ class CycleListEntry(StrictModel):
     dataset_name: str = ""
     backend_id: str = ""
     sibling_kind: Literal["root", "fork", "diag", "sweep"]
-    # Operator-facing unit kind — see _unit_kind() in campaign_store/cycles.py.
+    # Operator-facing unit kind — see campaign_store/store.py::_unit_kind.
     unit_kind: Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
     is_root: bool
     # Precise terminal reason (StopReason value) once finished, else "active"

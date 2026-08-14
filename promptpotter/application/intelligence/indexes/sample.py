@@ -72,7 +72,7 @@ class SampleIndex:
             # `None` means "contributes no failure mode" — an error result is not a
             # bottleneck reading, and neither is a hit.
             failure_mode = (
-                None if (hit or is_error_result(item)) else pd.get("terminated_at", "unknown")
+                None if (hit or is_error_result(item)) else pd.get("terminal_node", "unknown")
             )
             cells.append([sid, hit, degraded, failure_mode])
 
@@ -256,7 +256,7 @@ class SampleIndex:
         return clusters[:max_clusters]
 
     def bottleneck_distribution(self) -> dict[str, float]:
-        """``{terminated_at_step: fraction_of_failures}``."""
+        """``{terminal_node: fraction_of_failures}``."""
         counts: dict[str, int] = defaultdict(int)
         total = 0
         for modes in self._failure_modes.values():

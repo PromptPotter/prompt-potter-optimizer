@@ -121,9 +121,9 @@ CycleScopedKind = Literal[
 ]
 WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
-# Campaign-scoped IN-PLACE config edits (the campaign persists — distinct from
-# lifecycle, which moves/removes the tree). Rewrites the frozen `campaign.json::config`.
-CampaignConfigKind = Literal["set-allowed-models"]
+# Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
+# `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
+CampaignConfigKind = Literal["set-allowed-models", "set-campaign-label"]
 
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
@@ -154,6 +154,9 @@ CAP_FOR_KIND: dict[str, str] = {
     # authority than `campaign.babysit`. The owner-held lifecycle tier is what stops a
     # babysit-delegate self-authorizing by adding their own model to it.
     "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
+    # Renaming is how every OTHER surface addresses the campaign to a human, so it sits
+    # with the verbs that decide the campaign's existence rather than with the run tiers.
+    "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
     # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
     # bucket rather than the campaign's own budget, so no tenant tier carries it — see
     # `shared/identity.py::SCORING_SAMPLE_LOOKAHEAD_CAP`.
@@ -229,26 +232,44 @@ class CommandDispatcher:
         *,
         kind: CampaignConfigKind,
         campaign_id: str,
-        allowed_models: list[str],
+        payload: dict[str, Any],
         idempotency_key: str,
     ) -> CommandOutcome:
-        """Rewrites the frozen ``allowed_models`` that both the fork cap-gate and the runner's
-        grade-C stamp read. In place, so its record is an ordinary workspace-ledger admin edit."""
+        """An in-place edit of ``campaign.json`` — the campaign persists, so the record is an
+        ordinary workspace-ledger admin edit rather than the lifecycle move beside it."""
         self._load_owned_campaign(campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload={"campaign_id": campaign_id, "allowed_models": list(allowed_models)},
+            payload={"campaign_id": campaign_id, **payload},
             idempotency_key=idempotency_key,
-            applier=lambda: self._apply_set_allowed_models(campaign_id, allowed_models),
+            applier=self._build_campaign_config_applier(kind, campaign_id, payload),
         )
+
+    def _build_campaign_config_applier(
+        self, kind: CampaignConfigKind, campaign_id: str, payload: dict[str, Any]
+    ) -> Applier:
+        if kind == "set-allowed-models":
+            raw = payload.get("allowed_models")
+            models = [str(m) for m in raw] if isinstance(raw, list) else []
+            return lambda: self._apply_set_allowed_models(campaign_id, models)
+        return lambda: self._apply_set_campaign_label(campaign_id, str(payload.get("label", "")))
 
     def _apply_set_allowed_models(
         self, campaign_id: str, allowed_models: list[str]
     ) -> dict[str, Any]:
+        """Rewrites the frozen ``allowed_models`` that both the fork cap-gate and the runner's
+        grade-C stamp read."""
         self._stores.campaigns.set_allowed_models(campaign_id, allowed_models)
         return {"campaign_id": campaign_id, "allowed_models": list(allowed_models)}
+
+    def _apply_set_campaign_label(self, campaign_id: str, label: str) -> dict[str, Any]:
+        """The operator's name for the campaign — what ``campaignDisplayName`` prefers over the
+        dataset name, and empty restores that fallback. Identity-neutral: ``label`` is not in
+        ``root_content_hash``, so a rename cannot void a banked origin."""
+        self._stores.campaigns.update_campaign(campaign_id, {"label": label})
+        return {"campaign_id": campaign_id, "label": label}
 
     # ------------------------------------------------------------------
     # Cycle-scoped (migrated sanctioned POSTs)

@@ -221,8 +221,9 @@ async def drive_cycle(
             session=session,
             observers=observers,
             mode=mode,
-            spend_budget_usd=getattr(args, "spend_budget_usd", None)
-            or campaign_config.optimization.spend_budget_usd,
+            # The FLAG only. `None` means "not given" and the runner keeps the campaign's own
+            # value; an `or` fallback here also read `--spend-budget 0` as absent.
+            spend_budget_usd=getattr(args, "spend_budget_usd", None),
         ),
         observers,
     )

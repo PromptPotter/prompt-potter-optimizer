@@ -50,7 +50,7 @@ def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
     return LLMCallContext(
         ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))),
         round_num=0,
-        cache=stores.optimizer_calls,
+        cache=stores.optimizer_reuse,
     )
 
 

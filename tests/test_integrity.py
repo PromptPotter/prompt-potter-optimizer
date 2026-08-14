@@ -103,7 +103,12 @@ def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
 
     # Below-floor reasoning model with an EXPLICIT cap → blocked (the l1_critique bug).
     below = check_model_reasoning_floors(
-        [("l1_critique", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor - 1})]
+        [
+            (
+                "l1_critique",
+                {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor - 1},
+            )
+        ]
     )
     assert len(below) == 1 and "l1_critique" in below[0]
 
@@ -244,7 +249,7 @@ def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hi
                     "predicted": "p",
                     "hit": hit,
                     "fitness": 1.0 if hit else 0.0,
-                    "pipeline_data": {"terminated_at": "llm_only"},
+                    "pipeline_data": {"terminal_node": "llm_only"},
                 }
             ],
             "dataset_name": dataset_name,
@@ -269,8 +274,8 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
     (dropped). An inversion silently feeds the optimizer connector-retrieval noise
     instead of its real explored datapoints — no error, just a biased digest."""
     schema = _StubSchema([_StubNode("token_matching", False), _StubNode("llm_only", True)])
-    llm_batch = [{"pipeline_data": {"terminated_at": "llm_only"}}]
-    connector_batch = [{"pipeline_data": {"terminated_at": "token_matching"}}]
+    llm_batch = [{"pipeline_data": {"terminal_node": "llm_only"}}]
+    connector_batch = [{"pipeline_data": {"terminal_node": "token_matching"}}]
     assert grade_run("optimization_loop", llm_batch, schema).grade == "A"
     assert grade_run("origin", llm_batch, schema).grade == "A"
     assert grade_run("", connector_batch, schema).grade == "C"
@@ -285,7 +290,7 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
 
 
 def _seed_graded(
-    archive: MeasurementArchive, *, run_id: str, grade: str, terminated_at: str, sample_id: int
+    archive: MeasurementArchive, *, run_id: str, grade: str, terminal_node: str, sample_id: int
 ) -> None:
     """Save one run carrying a provenance grade and a single sample. The two runs measure
     DIFFERENT samples — the cache keys on ``sample_id``, so they need distinct ones to
@@ -313,7 +318,7 @@ def _seed_graded(
                     "predicted": "p",
                     "hit": True,
                     "fitness": 1.0,
-                    "pipeline_data": {"terminated_at": terminated_at},
+                    "pipeline_data": {"terminal_node": terminal_node},
                 }
             ],
             "dataset_name": "aime",
@@ -327,9 +332,9 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     silently served as if it were a real evaluation. The default (no floor) keeps
     every run, so ordinary scoring caching is unchanged."""
     archive = MeasurementArchive(tmp_path)
-    _seed_graded(archive, run_id="clean", grade="A", terminated_at="llm_only", sample_id=7)
+    _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
     _seed_graded(
-        archive, run_id="connector", grade="C", terminated_at="token_matching", sample_id=8
+        archive, run_id="connector", grade="C", terminal_node="token_matching", sample_id=8
     )
     node_configs = [("llm_only", {"model": "X"})]
 
@@ -342,7 +347,7 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
-    """A sample whose outcome consumed the FULL node chain (``terminated_at`` =
+    """A sample whose outcome consumed the FULL node chain (``terminal_node`` =
     last node — the L4 inner-recursion stamp) must not replay for a query that
     differs at a later node. The buggy stamp (``l1_critique``, a mid-chain node)
     let a candidate editing ``l2_context``/``l3_plan`` silently replay the
@@ -351,7 +356,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     archive = MeasurementArchive(tmp_path)
     chain = ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
 
-    def _seed_chain(run_id: str, terminated_at: str) -> None:
+    def _seed_chain(run_id: str, terminal_node: str) -> None:
         _archive(
             archive,
             run_id,
@@ -373,15 +378,15 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
                         "predicted": "p",
                         "hit": True,
                         "fitness": 1.0,
-                        "pipeline_data": {"terminated_at": terminated_at},
+                        "pipeline_data": {"terminal_node": terminal_node},
                     }
                 ],
                 "dataset_name": "promptpotter-self",
             },
         )
 
-    _seed_chain("full_chain", terminated_at="l3_plan")
-    _seed_chain("short_circuit", terminated_at="l1_critique")
+    _seed_chain("full_chain", terminal_node="l3_plan")
+    _seed_chain("short_circuit", terminal_node="l1_critique")
 
     # Query differs at l2_context → prefix match of length 2.
     query_configs: list[tuple[str, dict[str, Any]]] = [
@@ -396,7 +401,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     assert cache[1]["query"] == "q_short_circuit", (
         "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
     )
-    assert cache[1]["pipeline_data"]["terminated_at"] == "l1_critique"
+    assert cache[1]["pipeline_data"]["terminal_node"] == "l1_critique"
     assert all(r["query"] != "q_full_chain" for r in cache.values()), (
         "full-chain row replayed across a later-node config change — fake measurement"
     )
@@ -845,10 +850,10 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         base = CampaignConfig(
             optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
         )
-        forked, _ = _apply_config_overrides(base, None, ConfigOverrides(schema_field_rename=True))
+        forked = _apply_config_overrides(base, ConfigOverrides(schema_field_rename=True))
         assert forked.optimization.schema_field_rename is True
         assert base.optimization.schema_field_rename is False
-        inherited, _ = _apply_config_overrides(forked, None, ConfigOverrides(max_rounds=3))
+        inherited = _apply_config_overrides(forked, ConfigOverrides(max_rounds=3))
         assert inherited.optimization.schema_field_rename is True
 
         # The inner cycle applies a bound rename even though its OWN knob is off (default).
@@ -2407,10 +2412,17 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
 
     The row that paid for this: every optimizer call goes to OpenRouter's
     ``deepseek/deepseek-v4-flash``, which is character-for-character DeepSeek's own
-    first-party key at $0.14/$0.28 against OpenRouter's listed $0.088/$0.176. OpenRouter
-    returns no wire cost on that route, so the estimate was the only number and nothing
-    could contradict it. ``None`` is the honest answer; it arms the "USD cap inactive"
-    warning instead of quoting a 1.6x guess as a measurement.
+    first-party key at $0.14/$0.28 against OpenRouter's listed $0.088/$0.176. ``None`` is
+    the honest answer; it arms the "USD cap inactive" warning instead of quoting a 1.6x
+    guess as a measurement.
+
+    This docstring used to add "OpenRouter returns no wire cost on that route", and that
+    was never true — the route reports ``cost`` on every call and our own client dropped
+    it before anyone downstream could read it (see
+    ``test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer``). The estimate
+    was the only number because of a bug on THIS side, and an explanation naming upstream
+    is why nobody went looking for it. The rule below is unaffected: a wire cost overrides
+    the table, and where there is none the pair-keyed lookup is still what answers.
 
     Driven from a FIXTURE table, not the shipped one. The claim is about the resolution
     rule, and pinning it to today's prices makes it assert two things at once — the first
@@ -2458,6 +2470,71 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
+
+
+def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> None:
+    """The provider's own price must survive the client, because on the optimizer route it is
+    the ONLY price there is: the rate table has no ``openrouter/deepseek/*`` key and correctly
+    refuses to quote DeepSeek's first-party number for an OpenRouter call, so a dropped wire
+    cost leaves the call unpriced with no error anywhere.
+
+    That is what happened. ``call.py`` read ``response.usage["cost"]`` while the client built
+    ``usage`` from four token keys and never copied it, so every optimizer row on disk carried
+    ``cost_usd: null``, ``spend.loop.used_usd`` read $0.00 in every cycle ever run, and
+    ``jobs/spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
+    see the half of the bill it was capping. Nothing raised; the numbers were simply absent.
+
+    Silent because the shape is right and only the value is missing: an unpriced call and a
+    free call are the same row.
+    """
+    from openai.types.chat import ChatCompletion
+
+    from promptpotter.infrastructure.llm.openai_compat import _attempt_cost, _billed_cost
+
+    def completion(usage: dict[str, object] | None) -> ChatCompletion:
+        return ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek/deepseek-v4-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "{}"},
+                    }
+                ],
+                **({"usage": usage} if usage is not None else {}),
+            }
+        )
+
+    # OpenRouter's real shape: `cost` rides as an EXTRA on the usage object (the SDK's models
+    # are extra="allow"), beside `cost_details`/`is_byok`. Measured live on this route.
+    priced = completion(
+        {
+            "prompt_tokens": 263,
+            "completion_tokens": 152,
+            "total_tokens": 415,
+            "cost": 7.938e-05,
+            "cost_details": {"upstream_inference_cost": 0},
+            "is_byok": False,
+        }
+    )
+    assert _attempt_cost(priced) == 7.938e-05
+
+    # A provider that reports nothing (Groq, OpenAI) must yield None, not 0.0 — 0.0 is a
+    # measurement and would silently satisfy the cap it should have escalated to the table.
+    unpriced = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    assert _attempt_cost(completion(unpriced)) is None
+    assert _attempt_cost(completion(None)) is None
+
+    # A schema-repair retry bills BOTH round-trips, same contract the token sums follow.
+    assert _billed_cost(1e-05, 2e-05) == pytest.approx(3e-05)
+    # ...and one silent half must not drag a real number down to nothing.
+    assert _billed_cost(None, 2e-05) == pytest.approx(2e-05)
+    assert _billed_cost(1e-05, None) == pytest.approx(1e-05)
+    assert _billed_cost(None, None) is None
 
 
 # --- sample look-ahead: the depth must not reach the record -------------------

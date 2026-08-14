@@ -15,7 +15,7 @@ class MLflowSink:
     def __init__(self, store_base_dir: str | Path) -> None:
         self._tenant_root = Path(store_base_dir)
         self._tenant_id = self._tenant_root.name
-        self._archive_dir = self._tenant_root / "archive"
+        self._traces_dir = self._tenant_root / "traces"
         self._cycle_id: str | None = None
         self._initialized = False
 
@@ -31,7 +31,7 @@ class MLflowSink:
         import mlflow
 
         if not self._initialized:
-            tracking_uri = (self._archive_dir / "mlruns").resolve().as_uri()
+            tracking_uri = (self._traces_dir / "mlruns").resolve().as_uri()
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(experiment_name=f"{self._tenant_id}/{self._cycle_id}")
             self._initialized = True

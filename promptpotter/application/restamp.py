@@ -82,13 +82,13 @@ class _Surface(NamedTuple):
 # THE coverage contract. A model that reaches disk belongs here the day it is written; adding
 # one is a row, not a code change. Ordered so a document addressed twice (the campaign manifest
 # and the config nested inside it) has its inner record settled first.
-# Measurements (`RoundResult`, extra="ignore") and the optimizer-call cache (evictable) are
+# Measurements (`RoundResult`, extra="ignore") and the optimizer reuse cache (evictable) are
 # deliberately absent: a stale key must never make a paid measurement unreadable.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
         title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
         verb="re-stamped",
-        workspace_globs=("*/campaigns/*/campaign.json", "*/archive/*/campaign.json"),
+        workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=("config",),
         model_cls=CampaignConfig,
         rewrite=_as_delta,
@@ -96,7 +96,7 @@ _SURFACES: tuple[_Surface, ...] = (
     _Surface(
         title="Campaign manifests (campaigns/*/campaign.json) — pruned only",
         verb="pruned",
-        workspace_globs=("*/campaigns/*/campaign.json", "*/archive/*/campaign.json"),
+        workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=(),
         model_cls=Campaign,
         rewrite=_as_pruned,
@@ -111,9 +111,9 @@ _SURFACES: tuple[_Surface, ...] = (
         benchmark_globs=("*/campaign.yaml",),
     ),
     _Surface(
-        title="Backend records (archive/backends/*/backend.json) — pruned only",
+        title="Backend records (backends/*/backend.json) — pruned only",
         verb="pruned",
-        workspace_globs=("*/archive/backends/*/backend.json",),
+        workspace_globs=("*/backends/*/backend.json",),
         key_path=(),
         model_cls=BackendConnection,
         rewrite=_as_pruned,
@@ -127,9 +127,9 @@ _SURFACES: tuple[_Surface, ...] = (
         rewrite=_as_pruned,
     ),
     _Surface(
-        title="Diagnostic runs (archive/diagnostic_runs/*.json) — pruned only",
+        title="Diagnostic runs (diagnostics/runs/*.json) — pruned only",
         verb="pruned",
-        workspace_globs=("*/archive/diagnostic_runs/*.json",),
+        workspace_globs=("*/diagnostics/runs/*.json",),
         key_path=(),
         model_cls=DiagnosticRunRecord,
         rewrite=_as_pruned,

@@ -52,7 +52,7 @@ def extract_sample_diagnostics(
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {
-        "terminated_at": pd.get("terminated_at"),
+        "terminal_node": pd.get("terminal_node"),
         "total_time_ms": pd.get("total_time"),
         "degraded": bool((pd.get("diagnostics") or {}).get("warnings")),
         "error": is_error_result(result),

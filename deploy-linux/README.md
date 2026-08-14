@@ -124,6 +124,11 @@ diverged box (tracked files are force-matched to origin; `.env`/runtime survive)
 It needs `deploy.config` (same one from setup) and aborts with the fix if it's
 missing — without it there's no real `INSTALL_DIR` to act on.
 
+The closing health line polls for up to 30s (`health.sh::wait_healthy`) rather
+than probing once, because uvicorn takes a few seconds to bind and the old
+one-shot check reported `✗ app down` on deploys that were fine. So a red cross
+there now means it really did not come up.
+
 ```bash
 cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the repo
 ```

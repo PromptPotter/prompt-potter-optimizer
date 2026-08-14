@@ -1,6 +1,6 @@
 # VOICE.md — Copy register & language
 
-> Single source of truth for **tone, copy register, and language** across this repo, the `/ui` webapp, and the sibling marketing repo `promptpotter-web`. Visual identity (palette, themes, mark, motion) lives in [`BRAND.md`](BRAND.md).
+> Single source of truth for **tone, copy register, and language** across this repo, the webapp, and the sibling marketing repo `promptpotter-web`. Visual identity (palette, themes, mark, motion) lives in [`BRAND.md`](BRAND.md).
 
 The value proposition we say plainly: **"fix a broken LLM pipeline in one hour of waiting, then it just works."**
 

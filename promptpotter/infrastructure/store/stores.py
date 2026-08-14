@@ -62,14 +62,16 @@ def hash_call(
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
-class OptimizerCallCache:
-    """File-backed optimizer-LLM cache; ``llm_call`` replays the stored ``LLMResponse.model_dump()`` on hash hit."""
+class OptimizerReuseCache:
+    """Content-addressed optimizer-LLM answers: on a hash hit ``llm_call`` replays the stored
+    ``LLMResponse.model_dump()`` rather than re-sampling it. Named for the reuse, not for the calls —
+    the ledger's ``LLMCallStartRecord`` already owns the chronology of the same events."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
     def _dir(self) -> Path:
-        return self._base_dir / "archive" / "optimizer_calls"
+        return self._base_dir / "optimizer_reuse"
 
     def _path(self, key: str) -> Path:
         return self._dir() / f"{key}.json"
@@ -79,7 +81,7 @@ class OptimizerCallCache:
 
     def save(self, key: str, value: dict[str, Any]) -> None:
         write_json(self._path(key), value)
-        logger.debug("OptimizerCallCache: saved %s", key)
+        logger.debug("OptimizerReuseCache: saved %s", key)
 
 
 @dataclass(frozen=True)
@@ -99,7 +101,7 @@ class Stores:
     checkin: CheckinDraftStore
     sweeps: SweepStore
     archive: MeasurementArchive
-    optimizer_calls: OptimizerCallCache
+    optimizer_reuse: OptimizerReuseCache
     diagnostic_runs: DiagnosticRunStore
     users: UserStore
 
@@ -135,7 +137,7 @@ def build_stores(
         checkin=CheckinDraftStore(tenant_dir),
         sweeps=SweepStore(tenant_dir),
         archive=MeasurementArchive(shared_tenant),
-        optimizer_calls=OptimizerCallCache(shared_tenant),
+        optimizer_reuse=OptimizerReuseCache(shared_tenant),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
     )
@@ -188,7 +190,7 @@ def resolve_cycle_path(stores: Stores, path: CyclePath) -> tuple[Stores, CycleHo
 
 
 __all__ = [
-    "OptimizerCallCache",
+    "OptimizerReuseCache",
     "Stores",
     "build_stores",
     "descend_store",

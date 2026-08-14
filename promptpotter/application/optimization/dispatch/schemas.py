@@ -33,6 +33,12 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
     return _v
 
 
+# Per-variant prose ceiling for `l1_generate` — `changes_description` and
+# `evidence_grounding.citation`. 320 is this file's established prose cap (`l1_critique`'s
+# `priority_fix`, sized so a mandated format can still hold a verbatim quote), and it sits ~29%
+# above the measured 249-chars-per-variant, so it binds the tail and leaves the median untouched.
+VARIANT_PROSE_MAX = 320
+
 # The only two keys anything reads off `l1_overrides` (`l1/candidate_source.py`). Filtered at parse
 # because `_parse_l2` MERGES this LLM-written dict forward on every fire: an invented key was
 # never read, never pruned, and rendered uncapped for the rest of the campaign.
@@ -97,7 +103,11 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
     but the parse boundary stays PERMISSIVE because not every provider honours it — the validator is the enforcement."""
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
-    citation: str
+    # WIRE-strict, PARSE-permissive — the same split `evidence_grounding` itself is built on one
+    # class down. `maxLength` states the budget where the model reads it; the parse boundary must
+    # NOT truncate, because `_citation_in_prompt` (`validators/l1_behavior.py`) substring-matches
+    # this against the rendered prompt, and a truncation marker would fail every real quote.
+    citation: Annotated[str, WithJsonSchema({"type": "string", "maxLength": VARIANT_PROSE_MAX})]
 
 
 class L1Variant(OptimizerResponseModel):
@@ -139,7 +149,16 @@ class L1Variant(OptimizerResponseModel):
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
-    changes_description: str
+    # Capped like every other node's prose. `l1_generate` was the ONLY optimizer node with no
+    # length bound on any output field, while it is the most-fired and the one whose answer can
+    # run into `max_tokens` — a truncated response is not a short answer, it is a ZERO-CANDIDATE
+    # ROUND (`l1/generate.py` classifies it `L1_PARSE_FAILURE_MALFORMED`). Measured over 133
+    # banked rounds, this field plus `citation` are 36% of the answer JSON at ~249 chars each,
+    # so the cap binds only the tail. Marked truncation, not silent: the tail is a steer a
+    # reader would otherwise take as complete.
+    changes_description: Annotated[str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX))] = (
+        Field(max_length=VARIANT_PROSE_MAX)
+    )
 
     @model_validator(mode="after")
     def _reject_empty_mutation(self) -> L1Variant:

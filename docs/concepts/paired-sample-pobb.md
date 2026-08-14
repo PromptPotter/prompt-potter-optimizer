@@ -69,7 +69,7 @@ measurements:
   pairs already exist (cross-cycle, cross-fork — the MeasurementArchive
   is the DB core).
 * Run fresh on the leader's prompt for genuinely new pairs, land in
-  `archive/measurements/`, and become reusable for every future round.
+  `measurements/`, and become reusable for every future round.
 
 **A backfill row is not a panel row.** It is stamped with the PRIOR's identity and
 `MeasurementRole.BACKFILL` (`shared/instrument.py`) — the closure receives the prior's id

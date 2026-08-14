@@ -84,9 +84,9 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 
 ## 4. Cross-run memory
 
-`archive/` is the database. `MeasurementArchive` is the only gateway. Two derived views
+`measurements/` is the database. `MeasurementArchive` is the only gateway. Two derived views
 (`SampleIndex`, `AxisIndex`) are folded from it by `refresh()`. `SampleIndex`'s per-run
-derivation is persisted (`derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
+derivation is persisted (`measurements/derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
 process re-reads and re-scores only runs it has not folded before; the fold is revalidated
 against the active formula and each detail's signature, and rebuilt whole if either moved.
 
@@ -156,6 +156,5 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 | [L1 candidate analysis checklist](l1-candidate-analysis-checklist.md) | Round-trace review checklist + the self-optimizing campaign parallel-use lookup |
 | [Local OIDC](local-oidc.md) | Dex harness for the auth-on dashboard |
 | [Conventions](conventions.md) | Style + code-shape rules + the six situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock) |
-| [Glossary](../glossary.md) | Domain vocabulary + canonical file pointers |
 
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/`](../concepts/README.md).

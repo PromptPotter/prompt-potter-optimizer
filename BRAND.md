@@ -1,10 +1,10 @@
 # BRAND.md — Visual identity
 
-> Single source of truth for **design** across this repo, the `/ui` webapp, and the sibling marketing repo `promptpotter-web`. Copy register and language rules live in [`VOICE.md`](VOICE.md). Tokens live in `webapp/app/styles/foundation/tokens.css`.
+> Single source of truth for **design** across this repo, the webapp, and the sibling marketing repo `promptpotter-web`. Copy register and language rules live in [`VOICE.md`](VOICE.md). Tokens live in `webapp/app/styles/foundation/tokens.css`.
 
-PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. CLI-first today; the file tree (per-cycle `dashboard.json`, `rounds/`, `log.md`) is the operator's primary surface, with a read-only webapp at `/ui` (Next.js static export at `webapp/out/`, source at `webapp/`) polling `dashboard.json` every 2 s. M12 promotes the webapp to a full control plane while keeping the file tree authoritative. Whitelabel distribution is a stated goal — every brand element must be themable.
+PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. CLI-first today; the file tree (per-cycle `dashboard.json`, `rounds/`, `log.md`) is the operator's primary surface, with a read-only webapp served at the **domain root** (Next.js static export at `webapp/out/`, source at `webapp/`) polling `dashboard.json`. M12 promotes the webapp to a full control plane while keeping the file tree authoritative. Whitelabel distribution is a stated goal — every brand element must be themable.
 
-The public **pre-release landing + waitlist site** is a *separate* Astro repo at `promptpotter-web` (sibling of this repo). Both repos share the **light-register elegant palette** and the logo/mark set. This document covers the CLI and the `/ui` webapp directly; marketing copy, CTAs, and Astro page structure live in the sibling repo and read the same tokens.
+The public **pre-release landing + waitlist site** is a *separate* Astro repo at `promptpotter-web` (sibling of this repo). Both repos share the **light-register elegant palette** and the logo/mark set. This document covers the CLI and the webapp directly; marketing copy, CTAs, and Astro page structure live in the sibling repo and read the same tokens.
 
 ## Users — theme maps to audience
 

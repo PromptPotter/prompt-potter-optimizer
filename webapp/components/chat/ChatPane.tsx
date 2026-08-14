@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { cx } from "@/lib/cx";
 import type { DatasetItem, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -16,9 +15,8 @@ import { Switch } from "@/components/ui";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { CyclePicker } from "@/components/shell/CyclePicker";
-import { TargetPipelineHero } from "@/components/dashboard/pipeline/TargetPipelineHero";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
-import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
+import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
@@ -119,7 +117,6 @@ export function ChatPane({
     useWorkspace();
   const [jobOpen, setJobOpen] = useState(false);
   const [samplesOpen, setSamplesOpen] = useState(false);
-  const [mechanicsOpen, setMechanicsOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
   // Compose mode — entered by the shell's "New campaign" button (newCampaignTick).
@@ -321,34 +318,16 @@ export function ChatPane({
       </div>
       ) : null}
 
-        {/* One frame over Input→backend→Output and the per-node mechanics. The
-            chips restate the hero's node names, so they start hidden behind the
-            square toggle: the hero answers "what is the shape", the chips answer
-            "let me open one", and only the first earns standing space. Ingest
-            keeps the list always-on — there you configure nodes, not watch them. */}
-        <div className={cx("pipeline-frame", mechanicsOpen && "mechanics-open")}>
-          <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} />
-          <button
-            type="button"
-            className="pipeline-mechanics-toggle"
-            aria-expanded={mechanicsOpen}
-            aria-controls="pipeline-mechanics"
-            aria-label={mechanicsOpen ? "Hide node mechanics" : "Show node mechanics"}
-            title={mechanicsOpen ? "Hide node mechanics" : "Show node mechanics"}
-            onClick={() => setMechanicsOpen((v) => !v)}
-          >
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-              <circle cx="3" cy="8" r="1.9" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.9" fill="currentColor" />
-              <circle cx="13" cy="8" r="1.9" fill="currentColor" />
-              <path d="M4.9 8h1.2M9.9 8h1.2" stroke="currentColor" strokeWidth="1.1" />
-            </svg>
-          </button>
-          {mechanicsOpen && (
-            <div id="pipeline-mechanics">
-              <PipelineNodeList />
-            </div>
-          )}
+        {/* One frame over the nesting this campaign sits in — the corner buttons are the
+            zoom axis and belong to the stack, which is the only thing that knows how many
+            levels there are to zoom to. Ingest keeps its node list always-on: there you
+            configure nodes, not watch them. */}
+        <div className="pipeline-frame">
+          <PipelineStack
+            datasetName={datasetName}
+            samplesOpen={samplesOpen}
+            onToggleSamples={toggleSamples}
+          />
         </div>
         {showBackendDetail && (
           <BackendNodeDetail

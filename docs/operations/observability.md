@@ -35,7 +35,7 @@ Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, t
 
 ## MLflow sink
 
-`MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `archive/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs alongside the file + Langfuse sinks.
+`MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `traces/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs alongside the file + Langfuse sinks.
 
 ## Display convention — `⚠ … ↳`
 

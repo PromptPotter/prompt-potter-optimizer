@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from typing import Any
 
 from promptpotter.application.intelligence.exploration import graded_response
@@ -45,7 +44,7 @@ def compute_round_diagnostics(
     results = round_result.results
 
     rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results, ranked_item_keys)
-    termination_dist, error_rate, warning_rate = _pipeline_health(results)
+    error_rate, warning_rate = _pipeline_health(results)
     evolution_rows, anomalies = _evolution(rounds_history)
     trajectory, trajectory_desc = _trajectory(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
@@ -56,7 +55,6 @@ def compute_round_diagnostics(
         top_k_accuracy=top_k,
         near_misses=near_misses,
         n_valid=n_valid,
-        termination_dist=termination_dist,
         error_rate=error_rate,
         warning_rate=warning_rate,
         evolution_rows=evolution_rows,
@@ -115,22 +113,21 @@ def _rank_analysis(
     return buckets, top_k, near_misses, n_valid
 
 
-def _pipeline_health(results: list[dict[str, Any]]) -> tuple[dict[str, int], float, float]:
+def _pipeline_health(results: list[dict[str, Any]]) -> tuple[float, float]:
+    """Rates only — ``terminal_node`` is not a health signal and must not be tallied here
+    (``domain/round_diagnostics.py::RoundDiagnostics``)."""
     total = len(results)
     if not total:
-        return {}, 0.0, 0.0
-    termination: Counter[str] = Counter()
+        return 0.0, 0.0
     warning_count = 0
     error_count = 0
     for r in results:
-        pd = r.get("pipeline_data") or {}
-        diag = pd.get("diagnostics") or {}
+        diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
         if diag.get("warnings"):
             warning_count += 1
-        termination[pd.get("terminated_at", "unknown")] += 1
         if is_error_result(r):
             error_count += 1
-    return dict(termination), error_count / total, warning_count / total
+    return error_count / total, warning_count / total
 
 
 def _warning_str(w: object) -> str:
@@ -282,7 +279,7 @@ def _sample_diagnostics(
                 ground_truth=(r.get("ground_truth") or "")[:60],
                 predicted=(r.get("predicted") or "?")[:60],
                 rank=rank,
-                terminated_at=pd.get("terminated_at", "unknown"),
+                terminal_node=pd.get("terminal_node", "unknown"),
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],

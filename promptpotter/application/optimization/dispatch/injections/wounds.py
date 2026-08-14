@@ -8,6 +8,7 @@ from typing import Any
 
 from promptpotter.application.optimization.dispatch.bundle import (
     RUNTIME_FAILURE_RECENCY_WINDOW,
+    VALIDATION_RENDER_CAP,
     InjectionBundle,
     InjectionKind,
     fence_untrusted,
@@ -34,17 +35,23 @@ def _rf_matches_current_config(
 
 
 def _validation_block(b: InjectionBundle) -> str:
-    """Parse-time validation failures (all owner=L1 — L1's own invalid variants)."""
+    """Parse-time validation failures (all owner=L1 — L1's own invalid variants). Bounded to the
+    most RECENT ``VALIDATION_RENDER_CAP``, which is where the fixable ones are: the list
+    accumulates on the searchpoint, so an unbounded render grew with the cycle until the cap
+    downstream cut it — and cut the newest, the round L1 is being asked to heal."""
     failures = b.opt_sp.memory.wounds.validation_failures
     if not failures:
         return ""
+    shown = failures[-VALIDATION_RENDER_CAP:]
     sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
-    for vf in failures:
+    for vf in shown:
         allowed_str = ", ".join(vf.allowed[:5])
         sec.append(
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
         )
+    if len(failures) > len(shown):
+        sec.append(f"  … {len(failures) - len(shown)} older failures suppressed.")
     return "\n".join(sec)
 
 
@@ -90,8 +97,12 @@ def _runtime_block(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_l1_wounds(b: InjectionBundle) -> str:
-    blocks = [blk for blk in (_validation_block(b), _runtime_block(b)) if blk]
-    return fence_untrusted("\n\n".join(blocks)) if blocks else ""
+    # Fenced PER BLOCK. One fence around the joined pair left its separator inside the fence,
+    # so `_truncate_to_cap` split there and dropped the closing tag — the failure the fence
+    # note in `bundle.py` describes.
+    return "\n\n".join(
+        fence_untrusted(blk) for blk in (_validation_block(b), _runtime_block(b)) if blk
+    )
 
 
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:

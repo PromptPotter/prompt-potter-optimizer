@@ -1,4 +1,4 @@
-// Workflow topology — pipeline shape never changes (per docs/specs/archive/m11-webapp-minimal-preview.md).
+// Workflow topology — the pipeline shape never changes.
 // Dot-and-outside-label layout, matching the chat-pane hero aesthetic.
 // One compact wide-short arrangement at every width (it renders inside a
 // 360px-capped canvas on desktop too), so the optimizer card stays short

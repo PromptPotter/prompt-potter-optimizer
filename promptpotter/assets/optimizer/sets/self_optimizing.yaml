@@ -5,10 +5,10 @@ _doc: >-
   field-override channel the inner runner uses (resolve_node_override). Each node lists ONLY the PromptTemplate
   fields this set rewrites — all injection slots (the pipeline_param_catalogue in problem_description,
   the evidence panels, …) stay intact from the default manifest. The tightness rationale here used to
-  name gpt-oss-120b's empty-content-on-over-reasoning failure; the four nodes have run
-  deepseek-v4-flash:nitro for a while, so keep this prose tight on its own merits — every line competes
-  with the evidence panels for the same attention — and re-measure before treating any model's limit as
-  the reason. Spec: docs/specs/l4-outer-loop.md § 3.
+  name gpt-oss-120b's empty-content-on-over-reasoning failure, and the nodes stopped running that model
+  long ago — so keep this prose tight on its own merits (every line competes with the evidence panels for
+  the same attention) and re-measure before treating any model's limit as the reason. Naming today's pin
+  here would only re-rot: the manifest owns it. Spec: docs/specs/l4-outer-loop.md § 3.
 l1_generate:
   persona: >-
     You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit

@@ -9,11 +9,11 @@ generator was deliberately removed; don't resurrect it.)
 **Scope, stated so a miss reads as a miss.** The rows below are *curated*, not
 exhaustive: one row per **cross-cutting concern** — something spanning several
 packages, where landing in the wrong one costs a hunt. A concern living wholly
-inside one package usually has no row and does not need one. **If you came here
-with a bare WORD** — a class name, or an ambiguous term like `seed` / `config` /
-`session` / `steps` / `mask` — this is the wrong surface: [`glossary.md`](../glossary.md)
-is the term index, one line per word ending in its implementation file, and it is
-much wider than this table. Concept-map for a concern, glossary for a name.
+inside one package usually has no row and does not need one. **A concept whose
+name is unambiguous has no row here either** — search the repo for it. This page
+earns its keep only where searching lands you somewhere plausible and wrong,
+which is why every row carries a NOT column and why the second table below
+exists at all.
 
 Each row names **one orienting entry** (read it first — it summarizes the rest),
 the **key files** the concept spans, and — where the name itself is a trap — the
@@ -31,15 +31,16 @@ the mechanism and edits it has usually built beside the seam rather than on it.
 | **memory / indexes** — axes, samples, ability, hard samples, earned blocks | `promptpotter/application/CLAUDE.md` § Subpackages → the `intelligence/` row; it names all five pieces and the "`indexes/` is a cursor pattern, not a base class" rule. Both `intelligence/__init__.py` and `indexes/__init__.py` are empty by design — there is no prose beside the modules. | `intelligence/indexes/axis.py` (`AxisIndex` — `refresh`, `ensure_for`, `digest`, `peaked_axes`), `intelligence/indexes/sample.py` (`SampleIndex` — `ingest_run`, the `_seen_runs` cursor), `intelligence/exploration.py` (`fit_rasch`, `RaschPosterior`, `select_round_subset`), `intelligence/hard_sample_sorter.py` (`build_hard_samples_artifact`), `intelligence/earned_blocks.py` (`mine_earned_blocks`, `earned_library_for`) | **Neither index owns truth** — both are derived views over `MeasurementArchive`, and they are not peers: `AxisIndex` OWNS a `SampleIndex`, and `AxisIndex.refresh` is what drives the per-sample ingest. Second trap: the **earned** block library is mined from measured lift (`earned_blocks.py`); the static fallback catalogue is `config/prompt_blocks.py::general_reasoning_blocks` and the pick between them happens in `dispatch/injections/catalogues.py` — editing `prompt_variants.json` does not change what a run earned. |
 | **structured output / the second prompt** | [`concepts/structured-output.md`](../concepts/structured-output.md) — the schema IS a second prompt; its levers are field names, field order, and `description=`. | `domain/pipeline_schema.py` (`NodeOutputSchema` — the TARGET node's wire schema; the backend consumes `cfg["output_schema"]` and destructures the named slot), `domain/pipeline_overlay.py` (`fold_schema_descriptions`), `dispatch/l1_wire_schema.py` (`build_l1_response_schema` — the OPTIMIZER's own response schema) | **`output_schema` names two live things.** The editable target-side value is `datasets/{name}/pipeline.yaml::nodes.{node}.config.output_schema` — NOT `build_l1_response_schema`, which shapes what `l1_generate` returns. The L4 levers named `output_schema_*` act on the optimizer side. Type / `enum` / raw schema have no lever (`SCHEMA_OWNED_FIELDS`); the field NAME is locked behind `schema_field_rename`. |
 | **config / overlay resolution** | `promptpotter/application/CLAUDE.md` § Backend overlay — the merge contract. | `application/pipeline_resolve.py` (`configure_and_apply_pipeline`), `application/campaign_config.py` (`CampaignConfig`), `application/datasets/prompts.py` (`load_dataset_node_overlay`), `infrastructure/store/dataset_access.py` (`readable_dataset_dir` — tenant-first dir choice), `runner/entry.py` (`_read_cycle_seed`) | **Precedence is seed > campaign-override > dataset > backend default.** The file you edit is the dataset overlay `datasets/{name}/pipeline.yaml::nodes.{name}.config` — never the backend repo, and never a hidden default in service code. |
-| **connector boundary** | `promptpotter/connectors/CLAUDE.md` — one file per backend exporting a `Connector(...)` binding. | `connectors/protocol.py` (the binding + `ConnectorExecution`), `connectors/__init__.py` (`CONNECTORS` registry + `DEFAULT_CONNECTOR` + the import-time guard), `connectors/{termnorm,promptpotter}.py`, `infrastructure/backend.py` (`BackendClient.run_query` dispatches on the DECLARED `execution` mode, never the name) | **`"llm_only"` is the single-node pipeline sentinel** (`terminated_at`) — a NODE name, never a connector, so a raw `"llm_only"` literal is always the sentinel. |
+| **connector boundary** | `promptpotter/connectors/CLAUDE.md` — one file per backend exporting a `Connector(...)` binding. | `connectors/protocol.py` (the binding + `ConnectorExecution`), `connectors/__init__.py` (`CONNECTORS` registry + `DEFAULT_CONNECTOR` + the import-time guard), `connectors/{termnorm,promptpotter}.py`, `infrastructure/backend.py` (`BackendClient.run_query` dispatches on the DECLARED `execution` mode, never the name) | **`"llm_only"` is the single-node pipeline sentinel** (`terminal_node`) — a NODE name, never a connector, so a raw `"llm_only"` literal is always the sentinel. |
 | **target-prompt interpolation** | `promptpotter/application/scoring/sample_measurement.py` — `{{var}}` slots a dataset row fills on the way to the backend. | `domain/opt_search_point.py` (`PromptTemplate.compile_prompt`) | **NOT the dispatch-hub injections.** Same `{{…}}` syntax, different population: `INJECTIONS` fills slots in the OPTIMIZER's optimizer prompts. Adding an L1/L2/L3 prompt input goes there ([adding-a-surface §2](adding-a-surface.md#2-a-prompt-injection)), never here. |
 | **dispatch / injections** | [`dispatch-hub.md`](dispatch-hub.md) — single info-ingress to every optimizer prompt; the `INJECTIONS` registry + `DispatchHub` (one `fill` path per node, from `NODE_LAYOUTS`). To add a prompt input, add an injection — anything else is drift. | `dispatch/bundle.py` (frozen `InjectionBundle` types), `dispatch/facade.py` (`DispatchHub`, `build_bundle`, `validate_template`), `dispatch/injections/registry.py` (`INJECTIONS`), `dispatch/llm_call/call.py` (`llm_call` — the sole optimizer LLM call seam) | A phantom panel (a citable name that never renders) invites fabricated citations — a slot must be in `INJECTIONS` *and* reachable via `NODE_LAYOUTS[node].possible`. |
+| **prompt homes** — which file holds which prompt | `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — the optimizer's own optimizer prompts, install-global, keyed `{node}/{n}` (so check-in's second mode is `checkin/2`). | `datasets/{name}/prompts/{node}.yaml` (the TARGET prompt the optimizer evolves), `promptpotter/assets/optimizer/sets/self_optimizing.yaml` (the OUTER L4 optimizer prompts — prompt fields only, no `pipeline.yaml`; picked per-cycle by `OptimizationConfig.optimizer_set`), `config/paths.py::optimizer_pipeline_path` (an installed operator's shadow) | **A per-node overlay is not a fourth home.** `pipeline.yaml::nodes.{name}.config.prompt` is a *tunable* the optimizer may mutate; the three homes above are operator-owned files that nothing writes. |
 | **L4 / inner recursion** | [`specs/l4-outer-loop.md`](../specs/l4-outer-loop.md) — the living finish-line plan; read before touching L4. | `application/runner/inner/spawn.py` (`run_inner_cycle`), `connectors/promptpotter.py` (the `in_process` connector), `datasets/promptpotter-self/`, `promptpotter/assets/optimizer/sets/` (the outer optimizer prompts — the third sanctioned persistence space) | **L4 is recursion, not a 4th layer.** There is no `l4_*.py` and there will not be one; the ladder is closed at L1/L2/L3. Never add a 4th `LayerStrategy`. |
 | **origin / check-in resolution** | [`architecture.md`](../architecture.md) §0.5 — the start-definitions bullet + the two gates. | `application/origin.py` (`resolve_origin_opt_search_point`), `application/datasets/origin_resolve.py` (`resolve_origin_turn`), `application/datasets/origin_readiness.py`, `runner/origin_gate.py` | **Origin ≠ check-in ≠ round-0.** The *origin* is the complete starting spec and exists independent of measurement; *check-in* is the resolver+gate that produces one; *round 0 / C0* is the origin's measurement, downstream and separate. Say "origin", never "baseline". |
 | **ingest / draft campaign** | `promptpotter/application/datasets/ingest.py` — `ingest_draft` / `draft_from_dataset`, the one seam both CLI `new <file>` and `POST /datasets/ingest` call. | `application/datasets/draft_campaign.py` (`DraftCampaign`), `application/jobs/launcher/checkin.py` (`prepare_checkin_run`), `infrastructure/store/checkin_draft_store.py` | There is **no `ingest` CLI verb** — `new <file.csv>` folds onto the durable check-in path. CLI and web differ only in run-invocation (inline vs detached). |
 | **PoBB / elimination** | `promptpotter/application/optimization/pobb/checks.py` — `build_elimination_check`, the sole call site deciding how the round's query budget is spent across N candidates. A new strategy implements the `StopRule` protocol and gains a branch there, never a second call site. | `pobb/checks.py` (`PoBBCheck`, `DegradationCheck`), `pobb/classification.py` (`terminal_ranking`), `scoring/selection.py` (`elimination_p_best`, `elect_round_winner`) | **Never "query ranking."** That is `llm_ranking` (a backend node). Nor the Rasch *sort* (`intelligence/hard_sample_sorter.py`), which orders samples. Knob: `campaign.yaml::optimization.pobb_epsilon`. A stop is a budget decision, never a verdict — the election alone ranks. |
 | **lineage / fork / resume** | `promptpotter/application/optimization/resume_and_fork/resume.py` — the `--from N` / `--fork-on-divergence` entry; one public surface, no sidecar fork-mint path, and a replayer re-derives rather than touching the live `Cycle`. | `resume_and_fork/fork_siblings.py` (`_mint_fork`, the unified mint primitive), `resume_and_fork/replayers.py` (`replay_decisions` + `REPLAYERS`), `resume_and_fork/decisions.py` (`RESUME_CHECKPOINT_GATING` — the gating SoT), `resume_and_fork/resume.py` (`resume_with_divergence_check`), `resume_and_fork/repair.py` (`apply_correction`, `repair_cut`, `_rebank_on_branch` — the OTHER question, asked independently: incompleteness is not divergence, so the repair runs whatever the config diff says), `domain/run_records.py` (`ForkSpec` / `CycleSeed` / `ResumeCheckpointKind`) | A behavior-knob change forks a sibling at offset 0 — it never mutates a running cycle. |
-| **cycle paths / persistence spaces** | `promptpotter/infrastructure/store/layout.py` — the pure path builders + the frozen `CycleLayout` (every per-cycle path) + `FileKind`/`classify`; `cycle_dir_under` owns the `cycles/{id}` layout. | `domain/cycle_paths.py` (`CycleDir` / `WorkspaceDir` newtypes), `store/campaign_store/store.py` (archive-aware resolution) | **The read-once cycle seed rides the ledger** (`CycleSeedRecord`, recovered by replay); `.runtime/` flags are polled-every-tick and transient. Don't conflate a durable ledger fact with a transient flag. |
+| **cycle paths / persistence spaces** | `promptpotter/infrastructure/store/layout.py` — the pure path builders + the frozen `CycleLayout` (every per-cycle path) + `FileKind`/`classify`; `cycle_dir_for` composes `campaign_root_dir_for` + `campaign_cycles_dir` into the `cycles/{id}` layout. | `domain/cycle_paths.py` (`CycleDir` / `WorkspaceDir` newtypes), `store/campaign_store/store.py` (`_campaigns_root` — the one campaign parent) | **An archived campaign does not move**: `lifecycle_status` is the whole mechanism, so resolution never branches on two parents and every tenant root is named for what it holds. **The read-once cycle seed rides the ledger** (`CycleSeedRecord`, recovered by replay); `.runtime/` flags are polled-every-tick and transient. Don't conflate a durable ledger fact with a transient flag. |
 | **identity / tenancy** | [`adr/0002-identity-foundation.md`](../adr/0002-identity-foundation.md) — the contract; `infrastructure/identity/` is its Stage-1 wiring (provider config + allowlist + sessions + OAuth flows + default-tenant claim), consumed only by the middleware seam at `presentation/api/middleware/oidc.py`. | `shared/identity.py` (`IdentityContext`, Stage-0 tenant scope), `infrastructure/store/stores.py` (`build_stores(identity, …)` — `Stores.tenant_id` derived from identity, never an independent field) | `OIDCSessionStore` (browser login) is **not** `infrastructure.store.SessionStore` (a campaign run's session artifacts). |
 | **spend / budget** | `promptpotter/application/runner/termination.py` — `BudgetGate` (spend/token termination armed at the cycle boundary). | `shared/spend.py` (spend math types), `infrastructure/projections/live_dashboard/view.py` (the `spend` rollup — sole writer of `backend` + `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd`) | The value you edit is `campaign.yaml::optimization.spend_budget_usd`, not `BudgetGate`. Spend is the headline number — never patience or round count. |
 | **persistence / ledger** | `promptpotter/infrastructure/ledger.py` — `CycleEventLog` (`.runtime/ledger.jsonl`), the sole per-cycle persistence ingress; forks via `inherit_from`. | `infrastructure/projections/` (`live_dashboard/view.py`, `audit_trail.py`, `pobb_stream.py` — newtype-guarded read projections; `base.py` owns the `DerivedView` dispatch), `infrastructure/store/stores.py` (`build_stores` composite over leaf stores), `application/run_observers.py` (`RunCallbacks`, the writer-side API over `CycleEventLog.append`) | The per-cycle ledger is `.runtime/ledger.jsonl`. `events.jsonl` is the **workspace** ledger (`.workspace/events.jsonl`) — a different file for a different scope. |
@@ -49,7 +50,70 @@ the mechanism and edits it has usually built beside the seam rather than on it.
 | **knobs / preflight** | `promptpotter/application/knobs.py` — `KNOBS`, the one config-leaf taxonomy, *walked* off each `CampaignConfig` field's own `Annotated[T, Knob(scope, *estimands)]` rather than re-listed. A knob without one fails at import. | `application/campaign_config.py` (`CampaignConfig`, `Knob`, `Scope`, `Estimand`, `freeze_campaign_config`), `application/preflight.py` (`run_preflight_checks`, `check_model_reasoning_floors`), `infrastructure/llm/registry.py` (`ModelProfile.min_max_tokens`, `model_profile()`), `application/initialization/loop_start.py` (the `raise ValueError` that fires before any spend, over target AND optimizer nodes), `presentation/api/routers/campaigns/manifests.py` (`resolve_knob_states` — the webapp config map) | **`preflight.py` blocks nothing.** `run_preflight_checks` returns advisory `PreflightWarning`s that are only logged and attached to `INIT.enter`, and `check_model_reasoning_floors` merely returns strings — the hard stop is the `raise ValueError` at its caller in `initialization/loop_start.py`. The editable value is the node's `max_tokens` in the dataset `pipeline.yaml` (or `assets/optimizer/pipeline.yaml`), never `ModelProfile`; an ABSENT `max_tokens` is the sanctioned default, not a violation. |
 | **mask / lens** — an alternative criterion over the record | `promptpotter/application/mask/divergence.py` — `find_divergences`, the one shared tree fold: the first node per branch where the verdict flips, with the subtree marked counterfactual. Operator narrative: [`operations/mask-projection.md`](../operations/mask-projection.md); `mask/__init__.py` is empty. | `mask/record.py` (`MaskRecord` / `MaskCycle` / `MaskRound` / `MaskCandidate` — recorded facts, no scoring math), `mask/load.py` (`load_mask_record` — a pure disk read that never re-runs; round N's anchor is N−1's winner, so a fork's first round reaches into the parent), `mask/verdicts.py` (`make_scoring_verdict`, `make_abort_verdict`), `mask/backprop.py` (`select_rewind_round`, `accumulate_node_stats` — UCB1, called from `escalation/firing.py`), `presentation/api/routers/campaigns/cycles.py` (`_resolve_lens`) | **Mask ≠ lens.** The mask is the alternative criterion projected over the record; the *lens* is only the query parameter that picks one (`?lens=score:<formula>` / `abort:<variant>`), parsed once at the API edge — a client that re-derives a lens value answers a different question in the same slot. And the mask **decides nothing about rewinding**: it splits invariant from divergent with no re-runs and no LLM calls; escalation decides *whether*, `backprop.py::select_rewind_round` only *where*. It rides positional `(cycle_id, round)`, never the `store/lineage_views.py` read model. |
 
+## Bare words — the ones search answers wrong
+
+A definition is not worth writing down: search the repo and read the code. What
+search *cannot* tell you is that the thing you found is one of three, or that the
+word on screen and the word on disk are the same concept. That is this table, and
+it is the only vocabulary surface — a term missing from it is a term whose name
+already points at one place.
+
+- **`seed`** — three senses. (1) **`CycleSeed`**, the chosen starting point a
+  non-root cycle begins from (`domain/run_records.py`) — the only fork sense.
+  (2) the **incumbent candidate** a round measures against (`seed-MISS` stratum,
+  `θ_seed`, `domain/results.py`). (3) an **RNG integer** on a node's wire config.
+- **`config`** — at least six referents: `CampaignConfig`, a node's
+  `nodes.{name}.config` overlay block, `config/settings.py` (install-global
+  constants), the `promptpotter/config/` package, a connector's
+  `default_node_config`, and `node_config` (the wire key). Qualify the word.
+- **`steps`** — `list[str]` as the reserved top-level `pipeline_params` key
+  (active node names, `RESERVED_PIPELINE_PARAM_KEYS`); `list[dict]` on the
+  backend's `GET /pipeline` payload. Walk the former with `node_config_items`,
+  never a re-derived isinstance check.
+- **`terminal_node`** — the **deepest pipeline node a sample REACHED**. Never a
+  failure signal: a completed run stamps its last node, so a tally of it is a
+  constant, not a diagnosis. It doubles as the archive's reuse depth
+  (`MeasurementArchive.load_reusable_results`). It was called `terminated_at`,
+  and three readers in a row took that as "where it died".
+- **`campaign.yaml` vs `campaign.json`** — two incompatible schemas. The former
+  is the operator-authored **template** under `datasets/{name}/` (a
+  `campaign_config` wrapper, `application/datasets/authored.py`); the latter is
+  the minted **manifest** under `campaigns/{id}/` (a frozen `Campaign`,
+  `extra="forbid"`, owned by `CampaignStore`). Config an operator types is YAML,
+  state code writes is JSON — but check which tree a path is under first.
+- **thinking channel** — a model's own reasoning slot (a node `output_schema`
+  field, or the provider's native `message.reasoning` → `LLMResponse.reasoning`).
+  **Strictly analytical** — never a gate, metric, validator, scorer or cache key,
+  so it has no code reader by design and is not dead surface
+  ([`concepts/structured-output.md`](../concepts/structured-output.md)). Distinct
+  from the backend's per-sample `reasoning_trace` (the TARGET model thinking) and
+  from `reasoning_chars` (a truncation diagnostic that counts and discards).
+- **answer extraction** — a double seam, one arm outside this repo. The SHAPE arm
+  is the BACKEND's (`_step_llm_only` destructures the slot named by
+  `answer_field`); the LABEL arm is ours (`scoring/formula/matchers.py`, parsing
+  the prose into HIT/MISS). Display-side extraction (`domain/rendering.py`) is a
+  third. Shape first, label second.
+- **`index_terms`** — the retrieval index a `candidate_source` node ranks each
+  query against; the second half of every connector's `extract_experiment`.
+  Empty for connectors with no retrieval index. Sourced from
+  `candidate_library.txt` for an authored dataset.
+- **`sample` vs `query`** — a sample is one dataset row; `query` is the
+  input-string *field* on it. Use `query` only as a field name — everything that
+  aggregates over rows says sample (`n_samples`, `per_sample`, `SampleProfile`).
+- **`candidate`** — one prompt-SearchPoint variant inside a round, and never a
+  retrieval-list item: those are `ranked_items`. Both are "the things being
+  ranked", which is why the word drifts.
+- **Patience is not Lives** — patience is the per-cycle stall budget, the distance
+  to the next *escalation*; lives are the improvement-banked round budget, the
+  run's remaining life. Neither is `max_rounds`.
+
+**Same concept, two words — operator-facing vs on-disk.** Say the first on a
+screen, the second in code; never coin a third.
+
+- **Unit** / **Cycle** — the webapp and docs say unit; the identifier stays
+  `cycle_id`.
+- **hearts** / **lives** — the ♥ bank in the terminal readout and on the view
+  models; `LivesConfig` in config and on disk.
+
 See also: per-layer `CLAUDE.md` contracts under `promptpotter/*/` (load only the
-layer you touch), the info-flow doc [`dispatch-hub.md`](dispatch-hub.md), and
-[`glossary.md`](../glossary.md) for bare-word lookups (`seed`, `config`, `session`,
-`steps` — each names more than one thing).
+layer you touch) and the info-flow doc [`dispatch-hub.md`](dispatch-hub.md).

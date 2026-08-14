@@ -46,28 +46,28 @@
 .spend-control-hint{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
 .spend-control-note{color:var(--color-success);font-size:var(--text-xs)}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
-/* One frame over the pipeline: the Input→backend→Output hero, plus the per-node
-   chip list which is collapsed by default (it restates the hero's node names, so
-   it is worth space only when the operator wants to open a node). The square
-   toggle sits on the frame edge rather than in the hero, because it governs the
-   frame's second half, not the hero. */
-.pipeline-frame{position:relative;max-width:980px;margin:0 auto;width:100%;border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);background:var(--color-background-primary)}
+/* Width and positioning only — no card. The alternating levels ARE the framing, so a
+   panel around them was a second box holding one picture, mostly empty. */
+.pipeline-frame{position:relative;max-width:980px;margin:0 auto;width:100%}
 .pipeline-frame > .wf-hero{max-width:none}
-.pipeline-mechanics-toggle{
-  position:absolute;top:var(--space-8);right:var(--space-8);
+/* Inline with the Input/Output ends rather than a row of its own: the strip costs no
+   vertical, and it reads as "one more level out" beside the thing it wraps. */
+.pipeline-zoom{display:flex;align-items:center;gap:var(--space-4);flex-shrink:0;margin-right:var(--space-8)}
+.pipeline-zoom-btn{
   display:inline-flex;align-items:center;justify-content:center;
   width:26px;height:26px;padding:0;
   border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);
   background:var(--color-background-secondary);color:var(--color-text-tertiary);
   cursor:pointer;transition:color .12s,border-color .12s,background .12s
 }
-.pipeline-mechanics-toggle:hover{color:var(--color-accent);border-color:var(--color-accent)}
-.pipeline-mechanics-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.pipeline-frame.mechanics-open .pipeline-mechanics-toggle{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-tint-active)}
-#pipeline-mechanics{padding:0 var(--space-16) var(--space-14)}
+.pipeline-zoom-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
+.pipeline-zoom-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+/* Horizontal room for the outermost frame. The vertical rhythm stays on `.wf-hero-flow`,
+   which owns it at every depth. */
+.pipeline-stack{padding:0 var(--space-16)}
 
-.wf-hero{position:relative;padding:var(--space-24) var(--space-16) var(--space-40);max-width:980px;margin:0 auto;width:100%}
-.wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-18) 0 var(--space-8)}
+.wf-hero{position:relative;padding:var(--space-16) var(--space-16) var(--space-18);max-width:980px;margin:0 auto;width:100%}
+.wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wf-hero-node .text-col{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -191,7 +191,9 @@
    chip — at every width, not as a phone special case: twelve nodes crowd a
    1440px screen too, just later. */
 .wf-hero-multi-rail{max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
-.wf-hero-multi-svg{display:block;height:70px}
+/* No height: the strip carries `height={CELL_H}` beside a viewBox of the same height, and
+   a CSS height contradicting it makes `meet` scale the level instead of shortening it. */
+.wf-hero-multi-svg{display:block}
 /* The cells reflow when one expands; without this the whole strip jumps. */
 .wf-hero-multi-node{transition:transform .18s ease}
 @media (prefers-reduced-motion:reduce){
@@ -242,6 +244,51 @@
 .wf-hero-multi-node .node.kind-cache{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}
 .wf-hero-multi-node .node-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
+/* A node whose only job is to run something else: the frame glyph is a HANDLE, so it
+   keeps the pointer while an unclickable node in a read-only level gives it up. */
+.wf-hero-multi-node.inert{cursor:default}
+.wf-hero-multi-node.inert:hover .node{transform:none}
+/* Single-node box: the chip is the button, so the frame can hold the nested level
+   below it. Was a <button> wrapping everything, which cannot legally contain one. */
+.wf-hero-sole{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-4);width:100%}
+.wf-hero-sole:disabled{cursor:default}
+.wf-hero-sole:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow);border-radius:8px}
+/* THE RECURSION. The unit is the box and the level it runs as SIBLINGS, so the box's own
+   `.wf-hero-node.llm <part>` rules cannot reach into the inner level. `max-width` is
+   load-bearing: unbounded, the wrapper takes the rail's intrinsic width and squeezes the
+   flanking chips instead of letting the rail scroll. */
+.wf-hero-unit{display:flex;flex-direction:column;min-width:0;max-width:100%;position:relative;z-index:2}
+/* `has-nested` = a level drawn AROUND another, so context rather than subject: tag on the
+   strip's row, half the padding, no border and no glow. Depth reads as accent fill on
+   alternate levels only, counted outward from the anchor — the untinted ones take the
+   frame's own paper. `max-width:none` keeps the card square against the 560px cap above.
+   Child combinators: a descendant selector would re-cut every deeper box too. */
+.wf-hero-unit.has-nested{border-radius:12px}
+.wf-hero-unit.has-nested > .wf-hero-node.llm{
+  max-width:none;
+  flex-direction:row;align-items:center;gap:var(--space-10);
+  padding:var(--space-6) var(--space-12);
+  border:0;box-shadow:none;background:none;border-radius:12px 12px 0 0
+}
+/* Tint is opt-in on the STRIP only, never on the area it nests: an untinted level
+   inherits whatever its parent painted, which cancels the alternation either way. */
+.wf-hero-unit.tone-accent.has-nested > .wf-hero-node.llm{background:rgba(var(--color-accent-rgb),0.10)}
+.wf-hero-unit.has-nested > .wf-hero-node.llm > .wf-hero-multi-tag{
+  padding-bottom:0;line-height:1;text-align:left;
+  flex:0 1 auto;min-width:0;max-width:30%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.wf-hero-unit.has-nested > .wf-hero-node.llm > .wf-hero-multi-rail{flex:1 1 auto;min-width:0}
+.wf-hero-nested{padding:var(--space-6) var(--space-8);border-radius:0 0 12px 12px}
+.wf-hero-nested > .wf-hero-flow{padding:0;gap:0}
+/* Every level in narrows; the box padding and the icon give first, the rail keeps the rest. */
+.wf-hero-nested .wf-hero-node{min-width:0;padding:var(--space-8) var(--space-10)}
+.wf-hero-nested .wf-hero-arrow{min-width:14px;max-width:56px}
+.wf-hero-nested .wf-hero-node .ico svg{width:20px;height:20px}
+@media (max-width:640px){
+  .wf-hero-nested{padding-left:var(--space-4);padding-right:var(--space-4)}
+  .pipeline-stack{padding-left:var(--space-8);padding-right:var(--space-8)}
+}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:var(--space-24);justify-content:center;flex:1;min-height:0;padding:0 var(--space-18)}
 @media (max-width:980px){.chat-grid{grid-template-columns:1fr}}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:620px;min-width:0}

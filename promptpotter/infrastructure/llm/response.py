@@ -68,6 +68,17 @@ class LLMResponse(StrictModel):
             "that reports no breakdown."
         ),
     )
+    cost_usd: float | None = Field(
+        None,
+        description=(
+            "What the PROVIDER says the call cost, summed across a repair retry (both "
+            "round-trips are billed). Its own field rather than a ``usage`` key because "
+            "``usage`` counts tokens and this is money. ``None`` means the provider "
+            "reported nothing — the honest answer, which routes the reader back to the "
+            "rate table (``shared/spend.py::compute_usd`` takes it as ``override_usd``) "
+            "instead of quoting a zero nobody measured."
+        ),
+    )
     parsed: Any | None = Field(
         None,
         description=(

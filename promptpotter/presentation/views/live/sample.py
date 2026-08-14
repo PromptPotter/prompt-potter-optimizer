@@ -39,7 +39,7 @@ def fmt_query_result(
     q = _ellide((r.get("query") or "").replace("\n", " ").strip(), 15)
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
-    step_name = pd.get("terminated_at")
+    step_name = pd.get("terminal_node")
     if step_name is None and (st := pd.get("step_timings")):
         # Last non-None entry wins (dict insertion order).
         step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)

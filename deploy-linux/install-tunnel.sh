@@ -9,6 +9,7 @@ set -euo pipefail
 # --- config + knobs -----------------------------------------------------
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+source "$HERE/health.sh"
 APP_NAME="${APP_NAME:-myapp}"
 SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
 TUNNEL_NAME="${TUNNEL_NAME:-$APP_NAME}"
@@ -113,15 +114,7 @@ fi
 
 # --- 7. end-to-end check ------------------------------------------------
 say "checking https://$PUBLIC_HOSTNAME$HEALTH_PATH (may take ~10s for DNS to propagate)"
-ok=0
-for i in 1 2 3 4 5 6; do
-    if curl -fsS --max-time 10 "https://$PUBLIC_HOSTNAME$HEALTH_PATH" >/dev/null; then
-        ok=1; break
-    fi
-    sleep 5
-done
-
-if [[ $ok -eq 1 ]]; then
+if wait_healthy "https://$PUBLIC_HOSTNAME$HEALTH_PATH"; then
     printf '\n\033[1;32mtunnel is live — https://%s\033[0m\n\n' "$PUBLIC_HOSTNAME"
     cat <<EOF
   - dashboard: https://$PUBLIC_HOSTNAME/

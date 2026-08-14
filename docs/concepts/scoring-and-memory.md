@@ -36,7 +36,7 @@ On a cold cache the two are equal — which is exactly why this could sit undete
 
 ## Deprecated samples
 
-Backend emits neutral advisories (e.g. `llm_only:content_empty`) + raw response shape; `classify_result()` walks those signals and derives **fatal codes** (empty response, content filtered — candidate-fault, so one sighting eliminates) and **infra codes** (reasoning budget exhausted, reasoning-only response, output truncated — provider-fault, so they never fast-eliminate). A result carrying either kind is deprecated and excluded from primary statistics; evicted from cache (fresh re-measurements tagged `retry_of_deprecated_cache`, prefixed 🔄); tagged `DEPR` in per-sample view. The trace itself stays in `archive/measurements/` — the archive is the forensic record.
+Backend emits neutral advisories (e.g. `llm_only:content_empty`) + raw response shape; `classify_result()` walks those signals and derives **fatal codes** (empty response, content filtered — candidate-fault, so one sighting eliminates) and **infra codes** (reasoning budget exhausted, reasoning-only response, output truncated — provider-fault, so they never fast-eliminate). A result carrying either kind is deprecated and excluded from primary statistics; evicted from cache (fresh re-measurements tagged `retry_of_deprecated_cache`, prefixed 🔄); tagged `DEPR` in per-sample view. The trace itself stays in `measurements/` — the archive is the forensic record.
 
 ## Decision replay + fork
 
@@ -52,7 +52,6 @@ Round-winner selection compares candidates on difficulty-adjusted ability (θ on
 
 ## Pointers
 
-- Glossary entries for `MeasurementArchive`, `AxisIndex`, `SampleIndex`, `score_search_point()`, `classify_result()`: [`../glossary.md`](../glossary.md)
 - Application contract: [`../../promptpotter/application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
 - Operator-facing forks + composite hot-swap: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)
 - Campaign-tree forks share the archive without duplication: [`campaign-tree.md`](campaign-tree.md)

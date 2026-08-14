@@ -20,7 +20,10 @@ class PipelineData(TypedDict, total=False):
     # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
     final_ranking: list[dict[str, Any]]
     total_time: float
-    terminated_at: str
+    # The DEEPEST node that ran — never a failure signal. It doubles as the archive's reuse
+    # depth ("this outcome depends on config only up to here"), which is what the L4 connector
+    # stamps outright. Read it as "where did it get to", never as "where did it die".
+    terminal_node: str
     step_timings: dict[str, Any]
     # Per-LLM-node tokens — mirror of ``StepTokenUsage`` (application/scoring/
     # sample_measurement.py): ``{node: {input, output, estimated,
@@ -134,7 +137,7 @@ _LEDGER_SAMPLE_KEYS: frozenset[str] = frozenset(
 _LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
     {
         "total_time",
-        "terminated_at",
+        "terminal_node",
         "step_timings",
         "step_tokens",
         "diagnostics",

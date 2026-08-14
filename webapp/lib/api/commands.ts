@@ -93,6 +93,19 @@ export async function postSetAllowedModels(
     allowed_models: allowedModels,
   });
 }
+// Give a campaign an operator name — `campaign.json::label`, which
+// `lib/names.ts::campaignDisplayName` prefers over the dataset name everywhere a
+// campaign is named to a human. `""` clears it and restores that fallback, so an
+// empty string is a real value here rather than a no-op. The campaign_id is NOT
+// touched: it addresses the directory, the measurement cache and every bookmark.
+// Owner-gated server-side (`campaign.lifecycle`); identity-neutral, so a rename
+// cannot void a banked origin.
+export async function postSetCampaignLabel(
+  campaignId: string,
+  label: string,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("set-campaign-label", { campaign_id: campaignId, label });
+}
 export async function postCleanupEmpty(
   campaignId: string,
   cycleId: string,
@@ -102,8 +115,9 @@ export async function postCleanupEmpty(
     cycle_id: cycleId,
   });
 }
-// Campaign lifecycle. Archive MOVES the tree into the `archive/` recycle bin
-// (reversible via unarchive); delete is PHYSICAL and irreversible — the server
+// Campaign lifecycle. Archive moves NOTHING — it flips `lifecycle_status`, so the
+// tree stays in `campaigns/` and only the listing filter hides it (reversible via
+// unarchive); delete is PHYSICAL and irreversible — the server
 // defaults `keep_results` to false, so the whole campaign tree plus every L4
 // inner sandbox its cycles spawned is removed. Measurements survive either way:
 // `measurements/` belongs to no single campaign, so siblings still cache-hit.

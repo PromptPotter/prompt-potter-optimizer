@@ -291,11 +291,13 @@ async def screen_inner_seeds(
             + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
         )
 
-    # Workspace `archive/` sidecar, the same disk discipline `verify` and `noise_floor` use — no
+    # Sidecar in `diagnostics/`, the same disk discipline `verify` and `noise_floor` use — no
     # ledger event, because a screen is not a run. Its own file rather than a
     # `DiagnosticRunRecord`: that model is shaped for a re-scored campaign origin (k, CI, a
     # source cycle), and bending seed readings into those fields would name them wrongly.
-    path = stores.base_dir / "archive" / f"seed-screen-{dataset_name}-{utcnow_iso()[:10]}.json"
+    path = stores.diagnostic_runs.sidecar_path(
+        f"seed-screen-{dataset_name}-{utcnow_iso()[:10]}.json"
+    )
     write_json(
         path,
         {

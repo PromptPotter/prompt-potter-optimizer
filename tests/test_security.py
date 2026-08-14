@@ -112,7 +112,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 ground_truth="42",
                 predicted="canary",
                 rank=None,
-                terminated_at="llm_only",
+                terminal_node="llm_only",
                 gt_in_source=None,
                 gt_in_ranked=None,
                 warnings=[],

@@ -52,7 +52,7 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     hit = is_hit(s.get("fitness"))
     cached = bool(s.get("cached"))
     time_s = float(s.get("time_s") or 0.0)
-    badge = _NODE_BADGES.get(s.get("terminated_at") or "", (s.get("terminated_at") or "?")[:2])
+    badge = _NODE_BADGES.get(s.get("terminal_node") or "", (s.get("terminal_node") or "?")[:2])
     cache_icon = "📖" if cached else " "
     mark = "HIT " if hit else "MISS"
     query = _trim(s.get("query") or "", 42)

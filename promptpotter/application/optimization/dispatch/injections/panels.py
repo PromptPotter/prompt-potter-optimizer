@@ -6,13 +6,19 @@ from typing import Any, cast
 
 from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.bundle import (
+    ANSWER_LABEL_STEM,
+    ANSWER_TALLY_ROWS,
+    FENCE_OVERHEAD,
     INNER_NARRATIVE_CAP,
     INNER_NARRATIVE_FULL_CELLS,
     INNER_NARRATIVE_SUMMARY_CAP,
     MEMORY_FIELD_CAP,
+    MEMORY_MARK_ALLOWANCE,
+    MEMORY_RENDER_CAP,
     MEMORY_ROUND_CAP,
     MEMORY_VALUE_CAP,
     MISS_GT_CAP,
+    MISS_PANEL_CAP,
     MISS_PREDICTED_CAP,
     MISS_QUERY_CAP,
     MISS_RENDER_CAP,
@@ -101,7 +107,13 @@ def _r_evidence_health(b: InjectionBundle) -> str:
 )
 def _r_diagnostics(b: InjectionBundle) -> str:
     """Section order is actionability-first BECAUSE the façade truncates section-aware at
-    ``char_cap`` — least-actionable last is the first dropped, and no section is ever half-rendered."""
+    ``char_cap`` — least-actionable last is the first dropped, and no section is ever half-rendered.
+
+    Each part is its OWN section, and the fence wraps only the three that echo dataset text. It
+    used to wrap every part in one fence whose body still carried section separators, so
+    ``_truncate_to_cap`` split INSIDE it and dropped the closing tag — the exact failure
+    ``bundle.py``'s fence note says per-section fencing exists to prevent. The three sit
+    together, so this costs no extra fence."""
     sections: list[str] = []
     cs = b.cycle_slice
     status: list[str] = [
@@ -119,12 +131,21 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     d = b.digest.diagnostics
     if d is None:
         return "\n\n".join(sections)
+    # Our OWN plateau classification, not dataset text — unfenced, like every numeric part below.
+    if d.anomalies:
+        sections.append("ANOMALIES:\n  " + "\n  ".join(d.anomalies))
+    # The three that echo raw queries, predictions and ground truths. Contiguous, so one fence
+    # covers them and the numeric parts after them need none.
     parts: list[str] = []
 
-    if d.anomalies:
-        parts.append("ANOMALIES:\n  " + "\n  ".join(d.anomalies))
-
-    miss_samples = [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
+    # Same recursion split `_misses` applies, on the typed per-sample view: one level up a MISS
+    # is an artifact of scoring a graded proxy against a placeholder label, and rank /
+    # gt_in_source are empty there too, so every row is noise wearing a diagnosis.
+    miss_samples = (
+        []
+        if _miss_is_placeholder(b)
+        else [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
+    )
     if miss_samples:
         s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
         for s in miss_samples:
@@ -136,7 +157,7 @@ def _r_diagnostics(b: InjectionBundle) -> str:
                 extras.append(f"gt_in_ranked={s.gt_in_ranked}")
             extra_str = f" | {', '.join(extras)}" if extras else ""
             s_lines.append(
-                f"  MISS [{s.terminated_at}] {s.query[:70]} → {s.predicted[:60]}"
+                f"  MISS [{s.terminal_node}] {s.query[:70]} → {s.predicted[:60]}"
                 f" (GT: {s.ground_truth[:60]}, {rank_str}{extra_str})"
             )
         parts.append("\n".join(s_lines))
@@ -154,6 +175,9 @@ def _r_diagnostics(b: InjectionBundle) -> str:
             "MISSED OPPORTUNITIES (queries other candidates solved but winner missed):\n"
             + "\n".join(d.cross_candidate_diff)
         )
+
+    if parts:
+        sections.append(fence_untrusted("\n\n".join(parts)))
 
     if d.n_valid:
         rb = d.rank_buckets
@@ -173,23 +197,18 @@ def _r_diagnostics(b: InjectionBundle) -> str:
                 rank_line += "\n  " + " | ".join(
                     f"top-{k}: {v:.0%}" for k, v in sorted(d.top_k_accuracy.items())
                 )
-            parts.append(rank_line)
+            sections.append(rank_line)
 
-    # PIPELINE HEALTH: skip when single-terminator + 0% errors + 0% warnings (default success).
-    if d.termination_dist and (
-        d.error_rate > 0 or d.warning_rate > 0 or len(d.termination_dist) > 1
-    ):
-        td_lines = ["PIPELINE HEALTH:"]
-        for step, count in sorted(d.termination_dist.items(), key=lambda x: -x[1]):
-            td_lines.append(f"  terminate@{step}: {count}")
-        if d.error_rate > 0 or d.warning_rate > 0:
-            td_lines.append(
-                f"  error_rate: {d.error_rate:.0%} | warning_rate: {d.warning_rate:.0%}"
-            )
-        parts.append("\n".join(td_lines))
+    # PIPELINE HEALTH: rates only, and silent on a clean round — never a `terminal_node` tally,
+    # which reports the node each sample REACHED and so reads as a mass failure on a healthy one.
+    if d.error_rate > 0 or d.warning_rate > 0:
+        sections.append(
+            "PIPELINE HEALTH:\n"
+            f"  error_rate: {d.error_rate:.0%} | warning_rate: {d.warning_rate:.0%}"
+        )
 
     if d.l1_diversity != 1.0:
-        parts.append(f"POPULATION: diversity={d.l1_diversity:.2f}")
+        sections.append(f"POPULATION: diversity={d.l1_diversity:.2f}")
 
     # TRAJECTORY + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
     # Skipped at R1 — "too few rounds to classify" is dead weight.
@@ -197,16 +216,14 @@ def _r_diagnostics(b: InjectionBundle) -> str:
         line = f"TRAJECTORY: {d.trajectory}"
         if d.trajectory_description:
             line += f" — {d.trajectory_description}"
-        parts.append(line)
+        sections.append(line)
         tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
         for row in d.evolution_rows[-5:]:
             tbl.append(
                 f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
             )
-        parts.append("\n".join(tbl))
+        sections.append("\n".join(tbl))
 
-    if parts:
-        sections.append(fence_untrusted("\n\n".join(parts)))
     return "\n\n".join(sections)
 
 
@@ -328,9 +345,8 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     citable=True,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> str:
-    """Silent on the recursion — the mirror of ``inner_narratives``, which is silent off it. A MISS
-    selects these rows, and one level up a miss is a scoring artifact of the placeholder label."""
-    if _inner_narrated(b):
+    """Silent on the recursion — the mirror of ``inner_narratives``, which is silent off it."""
+    if _miss_is_placeholder(b):
         return ""
     rows = _misses(b)
     if not rows:
@@ -460,6 +476,14 @@ def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
     ]
 
 
+def _miss_is_placeholder(b: InjectionBundle) -> bool:
+    """Whether a MISS here means anything. One level up the outer "answer" is the seed's own identity
+    token plus a proxy suffix, so ``predicted`` can never equal ``ground_truth`` and EVERY sample reads
+    as a miss — a split that partitions nothing. Panels contrasting misses against hits ask this and
+    stay silent; ``inner_narratives`` renders the same rows as paired lifts, which is what they are."""
+    return bool(_inner_narrated(b))
+
+
 def _errored(b: InjectionBundle) -> list[dict[str, Any]]:
     return [r for r in b.trajectory_results if is_error_result(r)]
 
@@ -468,8 +492,19 @@ def _label_counts(rows: list[dict[str, Any]], key: str) -> Counter[str]:
     return Counter(str(v) for r in rows if (v := r.get(key)) not in (None, ""))
 
 
-def _tally(counts: Counter[str], total: int) -> str:
-    return " | ".join(f"{lbl} {n} ({100 * n / total:.0f}%)" for lbl, n in counts.most_common())
+def _tally(counts: Counter[str], total: int, *, rows: int | None = None) -> str:
+    """Bounded HERE, at the production site. ``rows=None`` renders the whole tally — that is the
+    TRUTH line, a value space already bounded to ``ANSWER_SPACE_CAP`` distinct labels, and
+    clipping a value space would hide part of what the reader is being asked to answer within.
+    The PREDICTED line passes a row count, because it is an OBSERVATION and was bounded by
+    nothing: a hedging pipeline emits long, near-unique strings, one bucket each, and the panel
+    then overran a cap sized for a label set. Either way the label is a STEM — collapse is
+    visible in which labels dominate, not in every spelling of a run-on answer."""
+    ordered = counts.most_common(rows) if rows is not None else counts.most_common()
+    parts = [f"{lbl[:ANSWER_LABEL_STEM]} {n} ({100 * n / total:.0f}%)" for lbl, n in ordered]
+    if len(counts) > len(ordered):
+        parts.append(f"(+{len(counts) - len(ordered)} other answers)")
+    return " | ".join(parts)
 
 
 @signal(
@@ -499,14 +534,21 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
     if scored is None:
         return ""  # nothing scoreable — no score to compare the floor against
 
-    lines = [
-        f"ANSWER DISTRIBUTION (over the {n} samples scored so far):",
-        f"  you answer : {_tally(said, n) if said else '(nothing parsed)'}",
-        f"  the truth  : {_tally(truth, n)}",
-        f'  Answering "{top_label}" to EVERY sample would score {constant:.2f}. '
-        f"You score {scored:.2f}.",
-    ]
-    return fence_untrusted("\n".join(lines))
+    # Header and the constant-answer verdict are OUR statements about the run; only the two
+    # tally lines echo dataset labels. Splitting them keeps the fence off the tail, so a cap
+    # overrun on a wide label set drops a whole section instead of severing the closing tag.
+    return "\n\n".join(
+        [
+            f"ANSWER DISTRIBUTION (over the {n} samples scored so far):",
+            fence_untrusted(
+                f"  you answer : "
+                f"{_tally(said, n, rows=ANSWER_TALLY_ROWS) if said else '(nothing parsed)'}\n"
+                f"  the truth  : {_tally(truth, n)}"
+            ),
+            f'  Answering "{top_label}" to EVERY sample would score {constant:.2f}. '
+            f"You score {scored:.2f}.",
+        ]
+    )
 
 
 def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
@@ -525,12 +567,14 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
 @signal(
     "failing_samples",
     kind=InjectionKind.MEASUREMENT,
-    char_cap=2400,
+    char_cap=MISS_PANEL_CAP,
     citable=True,
 )
 def _r_failing_samples(b: InjectionBundle) -> str:
     """Ordered easiest-first — the one thing here L1 cannot compute for itself. A cold ruler renders
     the misses unordered rather than quoting a difficulty that would move next round."""
+    if _miss_is_placeholder(b):
+        return ""
     rows = _misses(b)
     errored = _errored(b)
     if not rows:
@@ -553,32 +597,46 @@ def _r_failing_samples(b: InjectionBundle) -> str:
         *graded,
         *((None, r) for r in ungraded),
     ]
-    shown = ordered[:MISS_RENDER_CAP]
-
     ruled = "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
     cold = "the difficulty ruler is still cold, so these are unordered"
+    # The row COUNT is only half the bound: `MISS_RENDER_CAP` rows of up to
+    # MISS_QUERY_CAP+MISS_PREDICTED_CAP+MISS_GT_CAP each overran the panel's own cap, so the
+    # budget is spent here, at the production site, and the header is written once the count
+    # is known. Rows drop hardest-first — the panel is ordered easiest-first precisely because
+    # the tail is what nothing can win back.
+    budget = MISS_PANEL_CAP - FENCE_OVERHEAD - len(ruled) - 80
+    shown: list[str] = []
+    used = 0
+    for delta, r in ordered[:MISS_RENDER_CAP]:
+        d_str = f"δ={delta:+.2f}" if delta is not None else "δ=?"
+        line = (
+            f"  [#{r.get('sample_id')}] {d_str} | {_query_stem(r, MISS_QUERY_CAP)}"
+            f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
+            f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}"
+        )
+        if shown and used + len(line) + 1 > budget:
+            break
+        used += len(line) + 1
+        shown.append(line)
+
     header = (
         f"FAILING SAMPLES ({len(shown)}/{len(rows)} current misses — "
         + (f"{ruled}winnable ones" if graded else cold)
         + "):"
     )
-    lines = [header]
-    for delta, r in shown:
-        d_str = f"δ={delta:+.2f}" if delta is not None else "δ=?"
-        lines.append(
-            f"  [#{r.get('sample_id')}] {d_str} | {_query_stem(r, MISS_QUERY_CAP)}"
-            f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
-            f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}"
-        )
+    # Header and the two footnotes stay OUTSIDE the fence: they are PromptPotter's own voice
+    # about its own state, and only the rows echo dataset content. Joined as SECTIONS, not
+    # lines — the façade truncates on the blank-line boundary, so a single newline here would
+    # make the whole panel one section again and put the slice back inside the fence.
+    out = [header, fence_untrusted("\n".join(shown))]
     if len(ordered) > len(shown):
-        lines.append(f"  (+{len(ordered) - len(shown)} harder misses not shown)")
-    body = fence_untrusted("\n".join(lines))
+        out.append(f"  (+{len(ordered) - len(shown)} harder misses not shown)")
     if errored:
-        body += (
-            f"\n({len(errored)} further samples errored before answering — not misses, and not "
+        out.append(
+            f"({len(errored)} further samples errored before answering — not misses, and not "
             "reachable by a prompt edit; the measurement never happened there.)"
         )
-    return body
+    return "\n\n".join(out)
 
 
 def _candidate_mutation(
@@ -615,12 +673,13 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
 @signal(
     "mutation_memory",
     kind=InjectionKind.DERIVED,
-    char_cap=1800,
+    char_cap=MEMORY_RENDER_CAP,
     citable=True,
 )
 def _r_mutation_memory(b: InjectionBundle) -> str:
-    """ONE compact line per prior candidate, so every retained round fits and the record stays
-    COMPLETE — recognition, not reproduction. A candidate that changed nothing is not an attempt."""
+    """ONE compact line per prior candidate, NEWEST round first, bounded to ``MEMORY_RENDER_CAP``
+    here so the cap downstream never has to cut — recognition, not reproduction. A candidate that
+    changed nothing is not an attempt."""
     prior = list(b.prior_rounds)
     # Oldest first, and built for EVERY prior round BEFORE the retained window is taken: a
     # round's row count is not knowable from the round (C0 and a no-op variant both carry a
@@ -657,22 +716,41 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
             by_round.append((rr.round, attempts))
     if not by_round:
         return ""
-    lines: list[str] = []
+    header = (
+        "ALREADY TRIED (this cycle, most recent round first — a mutation measured and lost here "
+        "does not improve by being proposed again; ↺ marks an idea already tried in an earlier "
+        "round, in whatever field it was written into):"
+    )
+    rows = [
+        (round_num, body, fp)
+        for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]
+        for body, fp in attempts
+    ]
+    # Pick the survivors BEFORE marking, newest-first, so what falls off the budget is the
+    # oldest — and so a ↺ can never name a round the panel then hides.
+    budget = MEMORY_RENDER_CAP - len(header) - FENCE_OVERHEAD
+    kept: list[tuple[int, str, frozenset[str]]] = []
+    used = 0
+    for row in reversed(rows):
+        cost = len(row[1]) + len(f"  r{row[0]} \n") + MEMORY_MARK_ALLOWANCE
+        if kept and used + cost > budget:
+            break
+        used += cost
+        kept.append(row)
+    kept.reverse()
     # (round, fingerprint) per rendered row, oldest first — the pool each later row is matched
     # against. First match wins, so a marker points at the EARLIEST occurrence rather than the
-    # previous link. Matched only within the window, so it never names a round the panel hides.
+    # previous link. Matched only within what SURVIVED, so it never names a round the panel hides.
+    lines: list[str] = []
     seen: list[tuple[int, frozenset[str]]] = []
-    for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]:
-        for body, fp in attempts:
-            echoes = [r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)]
-            mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
-            seen.append((round_num, fp))
-            lines.append(f"  r{round_num} {body}{mark}")
-    header = (
-        "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
-        "being proposed again; ↺ marks an idea already tried in an earlier round, in whatever "
-        "field it was written into):"
-    )
+    for round_num, body, fp in kept:
+        echoes = [r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)]
+        mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
+        seen.append((round_num, fp))
+        lines.append(f"  r{round_num} {body}{mark}")
+    lines.reverse()
+    if len(kept) < len(rows):
+        lines.append(f"  (+{len(rows) - len(kept)} older attempts not shown)")
     return fence_untrusted("\n".join([header, *lines]))
 
 
@@ -728,13 +806,15 @@ def _r_rare_hit_samples(b: InjectionBundle) -> str:
     if b.axes is None:
         return ""
     rare = b.axes.sample_index.rare_hit_samples(max_hits=3, min_observations=10)
-    if not rare:
+    # A row that was never cracked carries no unlock pattern to replicate, which is this panel's
+    # whole offer. All-zero it rendered as a header promising one over six rows saying there is
+    # none — the reader is told to engineer for nothing, at full token price. Show the cracked
+    # rows and let the never-cracked ones be silent; with none cracked the panel says nothing.
+    cracked = [row for row in rare if row[2] > 0]
+    if not cracked:
         return ""
     lines = ["RARE-HIT SAMPLES (cracked by ≤3 of ≥10 attempts — replicate the unlock pattern):"]
-    for sid, query, hits, total, hit_run_ids in rare[:6]:
-        if hits == 0:
-            lines.append(f"  [#{sid}] {query}… → 0/{total} (capacity-bound; do not engineer for)")
-        else:
-            run_str = ", ".join(rid[:24] for rid in hit_run_ids[:2])
-            lines.append(f"  [#{sid}] {query}… → {hits}/{total} hit by {run_str}")
+    for sid, query, hits, total, hit_run_ids in cracked[:6]:
+        run_str = ", ".join(rid[:24] for rid in hit_run_ids[:2])
+        lines.append(f"  [#{sid}] {query}… → {hits}/{total} hit by {run_str}")
     return fence_untrusted("\n".join(lines))

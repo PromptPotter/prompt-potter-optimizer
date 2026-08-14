@@ -12,9 +12,11 @@ If a request doesn't fit a §0 bucket, that's a flag — propose an answer that 
 
 ## §0 — PromptPotter on one page
 
-**Vocabulary cheat sheet:** [`docs/glossary.md`](glossary.md) — one
-line per term with the canonical implementation file. Read it before
-introducing a new domain word here.
+**Before coining a domain word here:** search the repo for it. Then check
+[`developer/concept-map.md`](developer/concept-map.md) § Bare words, which lists
+the ones already naming more than one thing, and
+[`developer/conventions.md`](developer/conventions.md) § Code style, which names
+the four that are banned outright.
 
 **Purpose.** Evolve a target prompt + pipeline params toward a fitness
 goal by iterating LLM-driven candidate generation against a scoring
@@ -135,9 +137,10 @@ prose are bounded on the same rule.
 world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and **queryable
-  datastore**: every user-uploaded dataset, every campaign, and the
-  shared `archive/` measurement store. On disk it is
-  `projects/{tenant}/`.
+  datastore**: every user-uploaded dataset, every campaign, and the two
+  shared content-addressed caches — `measurements/` (the measurement
+  store) and `optimizer_reuse/` (optimizer-LLM answers). On disk it is
+  `projects/{tenant}/`, whose every directory is named for what it holds.
 - **Dataset** — the optimization target plus its config. Two
   first-class tiers, served by one read path: (a) **user-uploaded**
   datasets at `projects/{tenant}/datasets/{slug}/` — the
@@ -208,9 +211,9 @@ L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 **Three data scopes — campaign / dataset / workspace.** The
 Workspace datastore is queryable at three named, consistently-used
 scopes: **campaign** (one campaign's own cycles — the campaign dir),
-**dataset** (every campaign for one dataset — `archive/` filtered by
+**dataset** (every campaign for one dataset — `measurements/` filtered by
 `dataset_name`), **workspace** (everything, all datasets — the whole
-`archive/`). The same three names are used by the archive query API,
+measurement store). The same three names are used by the archive query API,
 the heatmap artifacts, the `scope` API param, and the webapp toggle,
 so the operator always distinguishes "this campaign" vs "this
 dataset" vs "everything" identically.
@@ -442,7 +445,7 @@ for, so a freshly minted cycle never renders another's data. Each campaign is a
 standalone dashboard: the operator understands a campaign from
 `campaign.json` + `log.md` plus the per-cycle `dashboard.json`
 streams, without descending into per-cycle round detail.
-`archive/` stays a peer of `campaigns/` — dataset-scoped,
+`measurements/` stays a peer of `campaigns/` — dataset-scoped,
 cross-campaign by design (see "Measurement archive" below).
 
 **Entry-point scope rules.** A notebook is a thin UI shell — every
@@ -570,8 +573,7 @@ the PR description.
   — without the discipline, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. The symbols are
-  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`);
-  vocabulary lives in `docs/glossary.md`.
+  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`).
 - **Campaign as a first-class entity** —
   `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
   with `log.md` + `hard_samples.json` at its root and

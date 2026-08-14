@@ -9,7 +9,6 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | File | Role |
 |---|---|
 | [`architecture.md`](architecture.md) | **§0 + §0.5 — the single page every PR measures against.** AI entry point. |
-| [`glossary.md`](glossary.md) | Domain vocabulary; one line per term with canonical implementation file. **Two jobs, and the second is the one that gets missed:** read it before introducing a new word, *and* read it to answer "which file owns the thing called X?" for any bare word — it is the widest file→term index in the tree. |
 | [`README.md`](README.md) | Operator-facing index (the friendly door) + the short status/roadmap summary; the live forward plan is [`specs/roadmap.md`](specs/roadmap.md). |
 
 ## Subtrees
@@ -30,7 +29,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Question | Read first |
 |---|---|
 | Where does this **subsystem** live — a cross-cutting concern spanning several packages (scoring, escalation, lineage, dispatch, identity)? | [`developer/concept-map.md`](developer/concept-map.md) — curated rows, each naming the orienting entry, the files it spans, and the wrong-but-plausible neighbour |
-| Which file owns the thing called **X** — a bare word, a class name, an ambiguous term (`seed`, `config`, `session`, `steps`, `mask`)? | [`glossary.md`](glossary.md) — one line per term ending in its implementation file. Ask this one FIRST for a name; concept-map is for a concern, glossary for a word. |
+| Which file owns the thing called **X** — a bare word, a class name? | **Search the repo.** There is no term index and there will not be one: a definition beside the code is a copy that drifts. The exception is a word naming more than one live thing (`seed`, `config`, `steps`, `terminal_node`) — [`developer/concept-map.md`](developer/concept-map.md) § Bare words, which says which senses exist — the one thing search cannot tell you. |
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine |
 | How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |

@@ -92,6 +92,14 @@
   line-height: 1;
   margin-right: 2px;
 }
+/* Status notes under the stack (loading / truncated). Never the stack itself — a
+   level that failed says so where it sits, not in a footer. */
+.pipeline-stack-note {
+  font-size:var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  margin: var(--space-8) 0 0;
+}
 
 /* Close affordance grouped with the sub-note at the right of the reused
    `.setup-preview-head` (title left, sub + × right). */

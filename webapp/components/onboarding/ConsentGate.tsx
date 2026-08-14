@@ -8,6 +8,8 @@
 // (version + server-stamped timestamp) to user.json, then re-probes `/auth/me`
 // so the gate clears. An anon visitor (read-only public preview) is never
 // gated — consent attaches only when someone is about to actually submit data.
+// A PENDING account is never gated either, for that same reason: it holds no
+// capability, so it is not about to submit anything. AccessGate has it instead.
 //
 // Unlike WelcomeLockoutModal this has no close affordance: no ×, no
 // overlay-click dismiss, no ESC (the a11y hook's onClose is a no-op). The only
@@ -33,7 +35,11 @@ export function ConsentGate() {
 
   // Focus-trap + focus-into-card, but NO ESC dismiss — onClose is a no-op so
   // the gate can't be keyboard-escaped.
-  const open = status === "authed" && !!me && me.terms_accepted_version !== me.terms_version;
+  const open =
+    status === "authed" &&
+    !!me &&
+    me.access_state === "active" &&
+    me.terms_accepted_version !== me.terms_version;
   const cardRef = useDialogA11y(open, NOOP);
 
   if (!open) return null;

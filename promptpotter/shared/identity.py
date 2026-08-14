@@ -77,6 +77,14 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
 
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
+# ── Entitlement: authenticated, but may it act? ────────────────────────────
+# Completing OIDC mints an account; the allowlist decides whether that account
+# holds any capability. So a pending user is a real, authenticated identity with
+# an EMPTY capability set — the dispatcher's existing gate is what makes the
+# pre-stage real, and no surface needs a second check.
+ACCESS_ACTIVE = "active"
+ACCESS_PENDING = "pending"
+
 
 @dataclass(frozen=True)
 class IdentityContext:
@@ -118,7 +126,17 @@ def claim_email(identity: IdentityContext) -> str | None:
     return raw if isinstance(raw, str) else None
 
 
+def claim_access_state(identity: IdentityContext) -> str:
+    """Entitlement as the web seam resolved it. Absent means this is not an OIDC session — the CLI and the
+    ``PROMPTPOTTER_AUTH=off`` harness both run as the local operator, who is entitled by construction
+    because no allowlist stands on that path."""
+    raw = identity.claims.get("access_state")
+    return raw if isinstance(raw, str) else ACCESS_ACTIVE
+
+
 __all__ = [
+    "ACCESS_ACTIVE",
+    "ACCESS_PENDING",
     "ADMIN_CAPABILITIES",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
@@ -131,6 +149,7 @@ __all__ = [
     "SCORING_SAMPLE_LOOKAHEAD_CAP",
     "IdentityContext",
     "capabilities_from_tiers",
+    "claim_access_state",
     "claim_email",
     "default_identity",
     "has_capability",

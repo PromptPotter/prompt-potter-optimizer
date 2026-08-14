@@ -20,6 +20,7 @@ export type {
   CyclesResponse,
   DatasetItem,
   DatasetPipelineResponse,
+  NestedPipelineRef,
   DatasetPreviewResponse,
   DegradationHealth,
   DiagnosticRunListResponse,

@@ -8,8 +8,12 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
 
-// The global remote control — a bottom-fixed hovering pill, rendered as shell
-// chrome on every tab while a cycle is live. It consolidates the run controls
+// The global remote control — bottom-fixed and hovering, rendered as shell
+// chrome on every tab while a cycle is live. The name is the one the operator
+// hears (`aria-label` below); it is not named for its shape, because "pill" in
+// this codebase means a border-radius and already belongs to four other things
+// (Badge, the round-axis LIVE marker, the provenance tag, the round strip).
+// It consolidates the run controls
 // that were scattered (play/pause was buried in the Chat-tab heat-map): one
 // strip with run-phase, play/pause (the reused RunControlButton), Skip, and
 // concise round/spend status, plus the babysat tag once the operator has
@@ -39,7 +43,7 @@ interface Props {
   onFollowed?: () => void;
 }
 
-export function RemoteBar({ onFollowed }: Props) {
+export function RemoteControl({ onFollowed }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
   const {
     campaignId,
@@ -132,7 +136,7 @@ export function RemoteBar({ onFollowed }: Props) {
 
   return (
     <div
-      className={cx("remote-bar", offline && "remote-bar-offline")}
+      className={cx("remote-control", offline && "remote-control-offline")}
       role="group"
       aria-label="Campaign remote control"
     >

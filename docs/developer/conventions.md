@@ -47,8 +47,14 @@ collects everything else.
   and an import-time guard keeps it stripped. What ships there is
   `Field(description=)` — editing one IS a prompt change, so regenerate via
   `scripts/build_optimizer_schemas.py`.
-- **Pipeline components are nodes** — never "building blocks", never
-  "services".
+- **Four banned words**, in identifiers and prose alike. **node** — never
+  "building block", never "service". **eval** — use loop / round / scoring /
+  fitness (the `Evaluator` class is the sole exception). **legacy** — either the
+  path is dead, so delete the path, or the word is wrong, so delete the word.
+  **query ranking** — it names three different things, so pick the one you mean:
+  PoBB (budget allocation), the Rasch sort (samples), or `llm_ranking` (a backend
+  node). The positive rule these serve — evolutionary framing for anything new —
+  is the root [`CLAUDE.md`](../../CLAUDE.md) § Conventions'.
 
 ## Code shape
 
@@ -162,7 +168,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 3. **Delegate any search spanning more than three files.** A sub-agent reads in a window that is thrown away and hands back a conclusion; direct searching leaves every hit resident. This is measured, not stylistic: sub-agents were 3.3% of spend while direct `Grep` + shell `grep` was ten times that. Ask for the verdict and the paths, never the excerpts.
 4. **Make a command assert, not display.** Header scaffolding and unconditional dumps around a check are pure cost — print on failure, and let success be silent. Same rule as rule 3 in miniature: return the conclusion, not the evidence for it.
 
-**And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the row in [`concept-map.md`](concept-map.md) or [`../glossary.md`](../glossary.md) that should have answered it, in the same session, while you still know what you were looking for.
+**And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the row in [`concept-map.md`](concept-map.md) that should have answered it, in the same session, while you still know what you were looking for. A row earns its place only where search lands you somewhere plausible and wrong — a definition search already answers is not a missing row.
 </read-once>
 
 **When you reach for the shell, a sub-agent, or a wait → `<wall-clock>`:**

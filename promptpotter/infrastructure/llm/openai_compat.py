@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -34,6 +34,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _strip_titles(node: object) -> object:
+    """Drop Pydantic's auto-emitted ``title`` keys from a wire schema. The schema is serialized
+    into the input, so these are prompt tokens the model reads and learns nothing from."""
+    if isinstance(node, dict):
+        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_strip_titles(v) for v in node]
+    return node
+
+
 def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
     """Usage for ONE round-trip, per-attempt on purpose. ``reasoning_tokens`` is the tell — a reasoning model can spend its
     whole budget thinking and emit nothing — but only if read off the attempt that actually failed."""
@@ -44,6 +54,23 @@ def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
         usage.completion_tokens if usage else 0,
         int(getattr(details, "reasoning_tokens", 0) or 0),
     )
+
+
+def _attempt_cost(response: ChatCompletion) -> float | None:
+    """What the provider says this ONE round-trip cost. OpenRouter reports it as an extra on the usage object (the SDK's models
+    are ``extra="allow"``); Groq and OpenAI report nothing, and ``None`` sends the reader to the rate table rather than
+    quoting a zero it never measured."""
+    usage = getattr(response, "usage", None)
+    cost = getattr(usage, "cost", None) if usage is not None else None
+    return float(cost) if cost is not None else None
+
+
+def _billed_cost(first: float | None, second: float | None) -> float | None:
+    """Both round-trips of a repaired call are billed, same contract the token sums follow. ``None`` only when NEITHER side
+    reported — one silent half must not drag a real number down to nothing."""
+    if first is None and second is None:
+        return None
+    return (first or 0.0) + (second or 0.0)
 
 
 def _finish_reason(response: ChatCompletion) -> str | None:
@@ -139,6 +166,12 @@ class OpenAICompatibleClient(LLMClientBase):
             response_model.model_json_schema() if response_model else None
         )
         if wire_schema is not None:
+            # The JSON Schema is serialized into the INPUT, so every key in it is prompt text.
+            # Pydantic auto-emits a `title` per field and per model that no provider needs and
+            # no model learns from — `l1_wire_schema.py::_inline_refs` already strips them, but
+            # only `l1_generate` passes through it, so the other four nodes shipped them on
+            # every call. Stripped once here, at the one seam every schema crosses.
+            wire_schema = cast("dict[str, Any]", _strip_titles(wire_schema))
             request_params["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -171,6 +204,7 @@ class OpenAICompatibleClient(LLMClientBase):
         first_prompt = 0
         first_completion = 0
         first_reasoning = 0
+        first_cost: float | None = None
         if validation_err is not None:
             # The FAILING attempt's own account. Captured here because `response` is about
             # to be rebound to the retry's, and the retry cannot answer why this one was
@@ -178,6 +212,7 @@ class OpenAICompatibleClient(LLMClientBase):
             # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
             # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
             first_prompt, first_completion, first_reasoning = _attempt_usage(response)
+            first_cost = _attempt_cost(response)
             first_finish_reason = _finish_reason(response)
             schema_name = response_model.__name__ if response_model else "<schema>"
             content_len = len(content.strip())
@@ -258,6 +293,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 result.usage["total_tokens"] = (
                     result.usage["prompt_tokens"] + result.usage["completion_tokens"]
                 )
+                result.cost_usd = _billed_cost(first_cost, result.cost_usd)
                 # Reconcile the rolling-window reservation with the ACTUAL two-round-trip
                 # total, not the cheap chars//4 estimate — else the TPM self-throttle
                 # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
@@ -325,6 +361,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 "total_tokens": prompt_tokens + completion_tokens,
                 "reasoning_tokens": reasoning_tokens,
             },
+            cost_usd=_billed_cost(first_cost, _attempt_cost(response)),
             parsed=parsed,
             schema_repair_attempts=schema_repair_attempts,
         )

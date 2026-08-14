@@ -167,7 +167,7 @@ export function CandidatesCard() {
   const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
 
   // ── 2b. Diagnostic-run records — one per `python -m promptpotter verify`
-  // invocation, persisted at archive/diagnostic_runs/*.json. Fetched per
+  // invocation, persisted at diagnostics/runs/*.json. Fetched per
   // cycle switch; not polled (the card never auto-refreshes verify state,
   // re-run verify + reload for a fresh red bar). Filtered to runs whose
   // (source_campaign, source_cycle) match the unit currently in view, then

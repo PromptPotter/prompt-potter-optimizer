@@ -170,6 +170,12 @@ class LiveDisplay(DerivedView):
         bits = [f"{marker}optimizer call: {node_label} · {model}"]
         if record.prompt_chars > 0:
             bits.append(f"{record.prompt_chars:,}c prompt")
+        # ADDRESSED, not reprinted: on the warning path only, name the one panel to go and look
+        # at. The full breakdown is `injection_chars` on this record — the alarm's job here is to
+        # point, and without a pointer it fired on 23% of l1_generate calls and taught nothing.
+        if oversize and record.injection_chars:
+            worst, chars = max(record.injection_chars.items(), key=lambda kv: kv[1])
+            bits.append(f"heaviest {worst} {chars:,}c")
         color = YELLOW if oversize else DIM
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
 

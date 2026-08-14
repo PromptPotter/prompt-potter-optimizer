@@ -53,13 +53,13 @@ invariants:
                       can't swallow that — so the cure is not firing them. The auth/me 401 is the
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
-                      {running, gate, paused} (IN_FLIGHT_PHASES, webapp/lib/run-phase.ts). detached
+                      {running, gate, paused} (IN_FLIGHT, webapp/lib/run-phase.ts). detached
                       means a dead producer (the heartbeat invariant, architecture.md §0 State +
                       persistence) and never renders as in-flight. Client-side connection loss
                       (failed poll, offline, hidden tab) is presented as connection state (offline /
                       stale affordance) and MUST NOT impersonate a run phase or unmount run controls
                       while the last-known server phase is in-flight. Every "running" surface — the
-                      topbar jobs dock, the RemoteBar, workspace liveCycles — reads this one set AND
+                      topbar jobs dock, the RemoteControl, workspace liveCycles — reads this one set AND
                       one shared ordering (executing before suspended). A surface that RENDERS the
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
                       testing `=== "running"` renders half the vocabulary as nothing, which is how
@@ -152,9 +152,10 @@ controls:
         match the served origin (localhost vs 127.0.0.1 mismatch breaks the session cookie locally).
     status: ok
     gap: local redirect_uri is 127.0.0.1:8001 while preview is served on localhost:8001 — env-specific.
-  - id: no_google_fallback
-    do: No-Google-account path → "Open a GitHub issue to request beta access" (→ BRAND.supportUrl,
-        the repo issues; whitelabel-overridable). No editable field that discards input.
+  - id: no_request_access
+    do: There is NO request-access affordance and no invite framing — signing in IS signing up, so
+        this surface has no rejection to explain. Whether the new account may act is resolved after
+        sign-in and shown by access_gate below. No editable field that discards input.
     status: ok
   - id: legal.{privacy,terms,imprint}
     do: External links to brand legal pages; must resolve 200.
@@ -164,11 +165,33 @@ controls:
     status: ok
 ```
 
+### Access gate — blocking, post-auth, ahead of consent
+
+```yaml
+surface: access_gate   # components/onboarding/AccessGate.tsx, mounted in app/page.tsx
+shows_when: status==='authed' AND me.access_state === 'pending'
+controls:
+  - id: sign_out
+    do: POST /api/v1/auth/logout, then hard-navigate to /login. Navigates even when the logout
+        call fails — a dead button on a non-dismissable overlay strands the user.
+    status: ok
+invariants:
+  - anon NEVER sees this (no account yet) — I4.
+  - it PRECEDES consent_gate and the two are mutually exclusive: consent attaches when someone is
+    about to submit data, and a pending account cannot, so asking it to accept Terms would collect
+    a consent for something it may not do.
+  - reflects, never enforces — the server already refuses a pending account's every command at the
+    dispatcher's capability gate (it holds the empty set), so this adds no second check.
+  - NO dismiss beyond sign-out: no ×, no backdrop-close, no ESC. There is nothing to agree to, so
+    leaving is the only action, and it is offered plainly rather than hidden.
+```
+
 ### Consent gate — blocking, post-auth
 
 ```yaml
 surface: consent_gate   # components/onboarding/ConsentGate.tsx, mounted in app/page.tsx
-shows_when: status==='authed' AND me.terms_accepted_version !== me.terms_version
+shows_when: status==='authed' AND me.access_state === 'active'
+            AND me.terms_accepted_version !== me.terms_version
 controls:
   - id: checkbox
     do: Unticked on open (no pre-tick — GDPR/FADP affirmative consent). Gates the accept button.
@@ -280,14 +303,36 @@ controls:
 surface: chat
 controls:
   - id: preview.toggle
-    do: Show/hide the hard-samples project preview (TargetPipelineHero's button,
-        aria-pressed/aria-label "Show|Hide project preview"). The pipeline strip itself is
-        NOT toggleable — it renders unconditionally.
+    do: Show/hide the hard-samples project preview — the stack's Input/Output chips
+        (aria-pressed/aria-label "Show|Hide project preview"). They flank the ANCHOR level
+        only, so there is exactly one pair at any zoom. The pipeline strip itself is NOT
+        toggleable — it renders unconditionally.
     status: ok
   - id: preview.connector
     do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
         "no backend selected" (nothing is being probed). Resolved + probed → reachable / unreachable.
     status: ok   # idle when connector==null; "probing…" only during a real probe
+  - id: preview.zoom
+    do: A strip sharing the anchor's row, ahead of its Input end — ONE button per stack
+        level that is NOT drawn, each drawing that level and every ancestor
+        between it and the innermost (so two levels up is one press, not two). A drawn level
+        has NO button, so the strip empties as the stack grows and disappears at full
+        zoom-out; the only way back in is preview.node.nest. Button count is therefore data:
+        at most 1 on an ordinary campaign, 2 on `promptpotter-self`, more the day a dataset
+        declares deeper nesting. The stack is the optimization loop (structural, every
+        campaign has one) then one level per served `nests`. The INNERMOST level is the
+        anchor — always drawn, never buttoned, the only one wearing Input/Output (the only
+        one a sample flows through), and the only one at full size: an ancestor is context,
+        so it drops its node labels and renders as a strip about a third the height, filled
+        from a two-tone alternation counted OUTWARD from the anchor. Nodes below the
+        campaign's own pipeline render read-only (no detail panel owns them).
+    status: ok
+  - id: preview.node.nest
+    do: A node that runs a whole nested pipeline draws a frame glyph instead of a lock —
+        neither tunable here nor paramless, since its knobs live in another cycle. Clicking
+        it ISOLATES: the level is already on screen, so the click drops every level above
+        it. The inward half of the zoom whose outward half is preview.zoom.
+    status: ok
   - id: preview.node.llm
     do: Expand to model & params; "declares no configurable params" when none.
     status: ok
@@ -528,9 +573,12 @@ The authenticated + live-campaign surface is verified against real on-disk
 campaigns via the faithful harness (`PROMPTPOTTER_AUTH=off` — recipe:
 [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture).
 
-Two states remain **un-exercised** (not contract gaps — just unreached here):
+Three states remain **un-exercised** (not contract gaps — just unreached here):
 - `warming` (origin running, `dashboard.json` not yet written) — needs a live
   starting campaign; verify on the next real run.
+- `access_state === 'pending'` — the `AUTH=off` harness resolves to the local
+  operator, who is entitled by construction, so the access gate has never been
+  rendered in a browser. Reach it by signing in with an off-allowlist account.
 - The real Google OIDC **login round-trip** — `AUTH=off` bypasses the redirect,
   so the post-login mount path is reachable only via the Dex harness
   (`dev/oidc-local/`), where it was driven end-to-end and the dashboard mounts

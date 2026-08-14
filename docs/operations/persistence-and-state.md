@@ -9,7 +9,7 @@ Your work lives in `.promptpotter/`, in two trees:
 
 A strict containment hierarchy: **Workspace → Dataset → Campaign → Cycle**.
 
-- **Workspace** (`projects/{tenant}/`) — the tenant's datastore: every dataset, every campaign, the shared `archive/`.
+- **Workspace** (`projects/{tenant}/`) — the tenant's datastore: every dataset, every campaign, and the two shared content-addressed caches. Every directory in it is named for what it holds, and the root partitions by lifecycle — which is how you answer "what survives a delete?" by looking.
 - **Dataset** — the optimization target plus its config. Resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
 - **Campaign** — one declared optimization effort: a dataset, a pipeline origin, context text. `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash` (an audit join key — optimizer drift is asked per ROUND, where it can name one and fork at it). Neither is the id. Dataset is embedded, so "campaigns for dataset X" is a prefix scan.
 - **Cycle** — one node in a campaign's lineage tree: root | fork | diag | sweep. Id is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
@@ -26,7 +26,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 - **`--session <id>`** overrides the pointer for one command.
 - **`--tenant <id>`** (default `"default"`) selects the partition under `projects/` for the command.
 
-Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `reindex`, `noise-floor`, `seed-screen`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Manifest-edit verbs: `rename` (sets the campaign's display name; the `campaign_id` still addresses it). Diagnostic verbs: `verify`, `ab`, `reindex`, `noise-floor`, `seed-screen`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
 
 **The diagnostics are fenced — none is wired into the loop, and none may become so.** `verify` re-scores ONE candidate on more samples and records the result without touching the cycle — **the canonical way to deepen a winner you want to believe.** Depth comes from more samples, never from asking the same cell again: a re-ask measures how noisy the model is, which is not something the loop can act on, and against the recursive L4 backend it replays the first answer outright. `ab` re-derives a campaign's recorded decisions under the current engine/scorer and reports where the change stops carrying over ([`mask-projection.md`](mask-projection.md)), zero LLM calls. `noise-floor` re-scores a campaign's cached origin `--k` times with `force_fresh`, reading the backend's run-to-run noise. `seed-screen` scores a candidate inner-bank draw against the dataset origin over repeated passes and rejects any whose constant-answer floor EXCEEDS it by more than the measurement's own error bar — such a bank pays a candidate for collapsing to a single label, which is the degeneracy the instrument exists to catch. Each pass also reports its own median and mean per-call latency, wire cost, and the share of the model's answers that went to a single label, off the rows it already scored — so screening a candidate *model* needs no second instrument. The gap between the two latency readings is itself the signal that the route is retrying, and the answer share is the twin of the floor: the floor says what a constant answer would SCORE here, the share says how nearly this model IS one, which a margin alone cannot distinguish. Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
 
@@ -47,19 +47,25 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
         index.json                     # phase, trials, final block, sibling_kind, parent_cycle_id (forks)
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
-        rounds/round_NNNN.json         # resume source of truth (serialized OptSearchPoint)
+        rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
         .runtime/
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
-    measurements/                       # measurement store (DB core) — cross-cycle/session/tenant, peer of campaigns/
+    measurements/                       # PAID cache 1 — measurements. Cross-cycle/session/tenant, peer of campaigns/
       index.jsonl                  # append-only, last-wins by content_hash; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
-    archive/{campaign_id}/              # recycle bin — `archive` MOVES a campaign tree here; `unarchive` moves it back
+      derived/                     # read models folded FROM the runs (regenerable)
+    optimizer_reuse/{hash}.json         # PAID cache 2 — optimizer-LLM answers, replayed instead of re-sampled
+    diagnostics/                        # seed-screen + noise-floor + verify — the three verbs that mint no cycle
+      runs/{ts}_{config_hash}.json
+    traces/obs|mlruns/                  # observability sinks (regenerable; mlruns is settings-gated)
+    backends/{backend_id}/backend.json  # backend registration + synced API responses
+    datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context
 ```
 
-**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement store (`measurements/`, formerly mis-homed under `archive/`) is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. `archive/` is now the **recycle bin** (archived campaign trees), a distinct concept from the measurement store. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
+**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement store (`measurements/`) is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. `optimizer_reuse/` is its peer on the optimizer's own leg: the same optimizer call, asked again, replays its stored answer rather than being re-sampled. **The two are the only paid tiers** — everything else in the root is campaign state, regenerable, or config, which is what `reset` acts on. There is deliberately no recycle bin: an archived campaign stays in `campaigns/` and is hidden by `campaign.json::lifecycle_status`, so a campaign has ONE home and no enumerator has a second parent to remember. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
 
 ## File reference
 
@@ -70,7 +76,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
-| `rounds/round_NNNN.json` | per cycle | Serialized `OptSearchPoint` — the resume source of truth. |
+| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
@@ -303,7 +309,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 
 Hand-edit to lift/lower caps; checked on every `mint-campaign` and `start-run`. The effective per-cycle spend cap is `min(requested, daily_cap - daily_spent)`.
 
-**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). The verbs are physical, not soft flags: **`archive`** MOVES the campaign tree into the `archive/{campaign_id}/` recycle bin (restorable by `unarchive`, which moves it back); **`delete`** is destructive (no recovery) — it removes the tree outright, or with `--keep-results` strips the heavy tiers and spares the keepsake (manifest + reports + the shallow langfuse loop trace — the Reports leaf + loop trace of the [storage taxonomy](#the-storage-taxonomy--connector--loop--dataset)), flagging the manifest `deleted`. Archiving or deleting a campaign is refused only while one of its cycles is LIVE (the one liveness derivation, `derive_run_phase`) — the active pointer is released and the verb proceeds. It used to refuse the **active** campaign outright and tell the operator to "switch first", naming a gesture that exists in neither the command vocabulary nor the webapp; in a single-operator workspace the campaign in view IS the active one, so both verbs were dead buttons. The cross-campaign measurement store (`measurements/`) is never touched, so siblings still cache-hit.
+**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). **`archive`** is the flag and nothing else — the tree stays in `campaigns/`, hidden from the default listing and restorable by `unarchive`, because a campaign with two possible homes made every enumerator carry a second parent. **`delete`**, by contrast, is physical and destructive (no recovery) — it removes the tree outright, or with `--keep-results` strips the heavy tiers and spares the keepsake (manifest + reports + the shallow langfuse loop trace — the Reports leaf + loop trace of the [storage taxonomy](#the-storage-taxonomy--connector--loop--dataset)), flagging the manifest `deleted`. Archiving or deleting a campaign is refused only while one of its cycles is LIVE (the one liveness derivation, `derive_run_phase`) — the active pointer is released and the verb proceeds. It used to refuse the **active** campaign outright and tell the operator to "switch first", naming a gesture that exists in neither the command vocabulary nor the webapp; in a single-operator workspace the campaign in view IS the active one, so both verbs were dead buttons. The cross-campaign measurement store (`measurements/`) is never touched, so siblings still cache-hit.
 
 ```bash
 python -m promptpotter archive   <campaign_id> [--reason TEXT]
@@ -311,7 +317,7 @@ python -m promptpotter delete    <campaign_id> [--reason TEXT]
 python -m promptpotter unarchive <campaign_id>
 ```
 
-Each is idempotent, and each — from the terminal exactly as from the web — dispatches through `CommandDispatcher`, which writes a `CommandRecord` to the **workspace** ledger (`.workspace/events.jsonl`) before marking the manifest. The workspace ledger is the audit home because `archive` moves the campaign's own ledger and `delete` removes it, so it cannot record its own disappearance.
+Each is idempotent, and each — from the terminal exactly as from the web — dispatches through `CommandDispatcher`, which writes a `CommandRecord` to the **workspace** ledger (`.workspace/events.jsonl`) before marking the manifest. The workspace ledger is the audit home because `delete` removes the campaign's own ledger, so it cannot record its own disappearance.
 
 ## The storage taxonomy — Connector / Loop / Dataset
 

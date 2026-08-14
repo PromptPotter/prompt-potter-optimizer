@@ -297,7 +297,7 @@ def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
 
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     """Tenant scope + safety flags for ``reset``. Drops campaigns + sessions + the active pointer;
-    ``measurements/`` (the DB core) and ``archive/`` are PRESERVED. ``--dry-run`` first."""
+    ``measurements/`` (the DB core) and ``optimizer_reuse/`` are PRESERVED. ``--dry-run`` first."""
     scope = p_reset.add_mutually_exclusive_group()
     scope.add_argument(
         "--all-tenants",
@@ -361,8 +361,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(
             "reset",
             help="Drop campaigns/ + sessions/ + active_session.json for the "
-            "selected tenant; preserve measurements/ (DB core) + archive/ "
-            "(recycle bin + optimizer_calls + sweeps). The escape hatch for cycles "
+            "selected tenant; preserve the two paid caches, measurements/ (DB core) "
+            "+ optimizer_reuse/. The escape hatch for cycles "
             "obsoleted by code changes — per-sample measurements survive so the "
             "next `new` hits cache immediately.",
         )
@@ -452,15 +452,15 @@ def build_parser() -> argparse.ArgumentParser:
     for verb, summary in (
         (
             "archive",
-            "Move a campaign into the archive/ recycle bin — hides from the default sidebar, "
-            "restorable by unarchive.",
+            "Flag a campaign archived — hides from the default sidebar, restorable by "
+            "unarchive. The tree does not move.",
         ),
         (
             "delete",
             "Destructively remove a campaign (no recovery); --keep-results spares the keepsake. "
             "Measurements still cache-hit for siblings.",
         ),
-        ("unarchive", "Restore a campaign from the archive/ recycle bin to 'active'."),
+        ("unarchive", "Restore an archived campaign to 'active'."),
     ):
         p = sub.add_parser(verb, help=summary)
         p.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
@@ -478,6 +478,19 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Spare the keepsake tier (manifest + reports + the shallow langfuse loop "
                 "trace); drop only the heavy resume/audit/mirror tiers.",
             )
+
+    p_rename = sub.add_parser(
+        "rename",
+        help="Give a campaign an operator name, shown wherever it is named to a human. "
+        "Display only — the campaign id still addresses it. An empty name restores the "
+        "dataset-name fallback.",
+    )
+    p_rename.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+    # Optional rather than a positional `''`: PowerShell drops an empty argument before
+    # argparse ever sees it, so the clear form has to be the ABSENT one to exist at all.
+    p_rename.add_argument(
+        "label", nargs="?", default="", help="The new name; omit it to clear the name."
+    )
 
     return parser
 

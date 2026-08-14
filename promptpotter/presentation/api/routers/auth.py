@@ -23,7 +23,6 @@ from promptpotter.application.jobs.spend import (
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.allowlist import check_allowlist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.github import (
     GitHubTokenExchangeError,
@@ -36,15 +35,19 @@ from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.user_store import ConsentRecord
+from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import IdentityDep, StoresDep
-from promptpotter.presentation.api.middleware.oidc import SESSION_COOKIE_NAME
+from promptpotter.presentation.api.middleware.oidc import (
+    SESSION_COOKIE_NAME,
+    resolve_access_state,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     ServiceUnavailableError,
 )
-from promptpotter.shared.identity import claim_email
+from promptpotter.shared.identity import ACCESS_ACTIVE, claim_access_state, claim_email
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,11 @@ class ActivityBucket(StrictModel):
 ActivityWindow = Literal["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]
 ActivityGroupBy = Literal["model", "api_key"]
 
+# Entitlement, closed server-side so the browser narrows off the generated type rather than
+# re-declaring the members. `active` = the allowlist holds this email; `pending` = the account exists
+# and holds no capability yet. Resolved once at the session seam (`resolve_access_state`).
+AccessState = Literal["active", "pending"]
+
 
 class ActivityResponse(StrictModel):
     """Time-bucketed spend / requests / tokens over the requested window."""
@@ -145,6 +153,10 @@ class MeResponse(StrictModel):
     # (e.g. benchmark-dataset read). Server routes enforce them; the webapp reads
     # this to reflect, not to gate (the outer-loop dashboard boxes gate on data).
     capabilities: list[str]
+    # Entitlement gate input, the sibling of the consent gate below: a `pending` account is signed in
+    # and holds nothing, so the webapp shows the holding screen instead of the app. Reflecting, not
+    # gating — the server already refuses a pending account's commands at the dispatcher.
+    access_state: AccessState
     # Consent gate inputs. ``terms_version`` is the live required version;
     # ``terms_accepted_version`` is what this user last accepted (None = never).
     # The webapp blocks the app while the two differ. The accepted timestamp
@@ -260,17 +272,23 @@ async def callback(
         logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
         return _redirect_with_error("code_exchange_failed")
 
-    decision = check_allowlist(bundle.paths.allowlist, identity.email)
-    if not decision.allowed:
-        logger.info("Allowlist rejected %s (%s): %s", identity.email, provider, decision.reason)
-        return _redirect_with_error("not_allowlisted", email=identity.email)
-
+    # The allowlist is NOT consulted here. Anyone completing OIDC gets an account; entitlement is
+    # resolved per-request at the session seam (`resolve_access_state`), which hands a pending account
+    # an empty capability set. Rejecting at the callback is what left an interested stranger with
+    # nothing but an error banner and no record we could later approve.
     user_id = derive_user_id(identity.issuer, identity.subject)
-    maybe_claim_default(
-        projects_root=DEFAULT_PROJECTS_ROOT,
-        user_id=str(user_id),
-        marker_path=bundle.paths.default_claim_marker,
-    )
+    access_state = resolve_access_state(identity.email, bundle)
+    if access_state == ACCESS_ACTIVE:
+        # Held behind entitlement on purpose: the marker is what `_session_capabilities` reads to grant
+        # ADMIN_CAPABILITIES, and it is written by the FIRST sign-in that reaches it. Unguarded, opening
+        # sign-up would make the first stranger on an unclaimed box the host admin.
+        maybe_claim_default(
+            projects_root=DEFAULT_PROJECTS_ROOT,
+            user_id=str(user_id),
+            marker_path=bundle.paths.default_claim_marker,
+        )
+    else:
+        logger.info("Pending account signed in: %s (%s)", identity.email, provider)
 
     session_id, _data = bundle.session_store.create(
         user_id=str(user_id),
@@ -312,21 +330,46 @@ async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeRe
     `connected_accounts` is a single-entry list at Stage 1 (one provider
     per session). `available_providers` is configured-minus-connected so
     the "+ Connect account" affordance only surfaces real targets.
-    `terms_*` drive the post-auth consent gate (read from `user.json`).
+    `terms_*` drive the post-auth consent gate (read from `user.json`);
+    `access_state` drives the entitlement gate in front of it.
+
+    This is also where a new account first becomes real on disk, so it is where both
+    new-account notices fire — the operator's and the CRM's. See the comment on
+    `is_new_account`.
     """
     bundle = _require_bundle(request)
     claims = cast(dict[str, Any], identity.claims)
     email = cast(str | None, claims.get("email"))
     provider = cast(str | None, claims.get("provider"))
+    access_state = cast(AccessState, claim_access_state(identity))
     name = _display_name_from(email)
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
+    # `load() is None` is the single moment an account comes into being: `get_or_create` writes
+    # `user.json` on the next line and every later request finds it. The notice fires HERE rather
+    # than at the OIDC callback because that makes it exactly-once per account instead of once per
+    # sign-in — a pending user who retries login would otherwise re-notify every time.
+    is_new_account = stores.users.load() is None
     user = stores.users.get_or_create(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
         email=email,
     )
+    if is_new_account:
+        who = email or f"(no email) {identity.user_id}"
+        notify_operator(
+            f"New PromptPotter account: {who}\nAccess: {access_state}"
+            + (
+                f"\nOpen it with:  /allow {email}"
+                if access_state != ACCESS_ACTIVE and email
+                else ""
+            )
+        )
+        # Entitlement and contact record are separate questions: a pending account is still a real
+        # person worth keeping. Both notices fire regardless of `access_state`, and both are
+        # best-effort — neither may fail the request that just created the account.
+        forward_new_account_to_crm(email=email, name=name, user_id=str(identity.user_id))
     return MeResponse(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
@@ -337,6 +380,7 @@ async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeRe
         connected_accounts=connected,
         available_providers=available,
         capabilities=sorted(identity.capabilities),
+        access_state=access_state,
         terms_version=TERMS_VERSION,
         terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
     )

@@ -4,7 +4,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
 import { useSelection } from "@/lib/SelectionContext";
-import { observeOptions, type ObserveState } from "@/lib/derivations";
+import { interiorNodes, observeOptions, type ObserveState } from "@/lib/derivations";
 import { SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
@@ -44,7 +44,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   // optimizer-scoped id could otherwise match a same-named target node (pp-self
   // declares `l1_generate` on both canvases).
   const selectedId = selected?.scope === "target" ? selected.id : null;
-  const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
+  const node = interiorNodes(cv.view).find((n) => n.id === selectedId) ?? null;
 
   // The selected node id scopes prompt resolution: an optimizer prompt node (pp-self's
   // l1_generate / l1_critique / …) carries its evolved prompt per-node inside the

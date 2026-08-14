@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.facade import (
+    DispatchHub,
+    build_bundle,
+    injection_char_counts,
+)
 from promptpotter.application.optimization.dispatch.injections.registry import citable_fields
 from promptpotter.application.optimization.dispatch.l1_wire_schema import (
     build_l1_response_schema,
@@ -120,6 +124,7 @@ async def l1_generate(
             pipeline_schema,
             citable_fields=citable,
             schema_field_rename=schema_field_rename,
+            n_variants=n_variants,
         )
         if pipeline_schema
         else None
@@ -128,7 +133,7 @@ async def l1_generate(
     # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
     response_model = build_l1_response_model(effective_l1_field_names())
     try:
-        generated, optimizer_prompt, _ = await run_optimizer_node(
+        generated, _prompt, _repairs = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=creativity,
@@ -137,7 +142,8 @@ async def l1_generate(
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
                 round_num=round_num,
-                cache=cycle.session.store.optimizer_calls,
+                cache=cycle.session.store.optimizer_reuse,
+                injection_chars=injection_char_counts(rendered, injection_vars),
             ),
             template=template,
         )
@@ -194,21 +200,6 @@ async def l1_generate(
             detail={"reason": reason, "model": model, **parse_err.warning_detail()},
         )
         return [], reason
-    slot_sizes = sorted(
-        (
-            (slot, len(slot_text.rstrip()))
-            for slot in ("persona", "task_intent", "problem_description", "thinking_style")
-            if (slot_text := getattr(template, slot)) and slot_text.strip()
-        ),
-        key=lambda x: -x[1],
-    )
-    logger.info(
-        "L1 R%d optimizer prompt: %d chars | %s",
-        round_num,
-        len(optimizer_prompt),
-        " | ".join(f"{n}={s}" for n, s in slot_sizes),
-    )
-
     # The repair-retry path can leak a raw str/dict/list past validation when JSON parses but
     # doesn't bind. Route unexpected types to the wound channel so the round completes cleanly
     # (zero candidates → L2 heals next round) instead of crashing on `.variants`.

@@ -485,16 +485,18 @@ paths:
   /commands/archive-campaign:
     post:
       operationId: archiveCampaign
-      summary: Archive a campaign — MOVE its tree into the ``archive/`` recycle bin (restorable).
+      summary: Archive a campaign — flag it ``archived``, hiding it from the default listing (restorable).
       description: |
         Campaign-scoped lifecycle transition. Campaign-scoped means
         workspace-level — no `Expected-Version` (the target is a campaign,
-        not a specific cycle's ledger tail). Physically MOVES the campaign
-        tree to `projects/{tenant}/archive/{campaign_id}/`; `unarchive`
-        moves it back. The `CommandRecord` lands on the WORKSPACE ledger
-        (`projects/{tenant}/.workspace/events.jsonl`) — the campaign's own
-        ledger moves with the tree, so it can't be the audit home. Archiving
-        the active-session campaign is refused (409). Shape pinned in
+        not a specific cycle's ledger tail). Sets
+        `campaign.json::lifecycle_status`; nothing moves on disk, and the
+        flag alone is what every reader filters on. The `CommandRecord`
+        lands on the WORKSPACE ledger
+        (`projects/{tenant}/.workspace/events.jsonl`) — the same home
+        `delete` needs, since a campaign's own ledger cannot record its
+        removal. Archiving the active-session campaign is refused (409).
+        Shape pinned in
         `docs/operations/persistence-and-state.md` § Beta hosting state.
       tags: [cycle-lifecycle]
       parameters:
@@ -824,6 +826,42 @@ paths:
                   properties:
                     kind: { const: set-allowed-models }
                     payload: { $ref: '#/components/schemas/SetAllowedModelsPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/set-campaign-label:
+    post:
+      operationId: setCampaignLabel
+      summary: Rename a campaign (in place).
+      description: |
+        In-place edit of `campaign.json::label` — the operator's own name for the
+        campaign, preferred over the dataset name wherever a campaign is shown to a
+        human. An empty string clears it and restores that fallback, so `""` is a
+        real value rather than a no-op. The campaign_id is NOT touched: it addresses
+        the directory, the measurement cache and every bookmark. Campaign-scoped —
+        no `Expected-Version`; the `CommandRecord` lands on the WORKSPACE ledger.
+        Owner-gated on `campaign.lifecycle`, beside the verbs that decide the
+        campaign's existence. Identity-neutral: `label` is not in
+        `root_content_hash`, so a rename cannot void a banked origin.
+      tags: [campaign]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-campaign-label }
+                    payload: { $ref: '#/components/schemas/SetCampaignLabelPayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -3114,6 +3152,21 @@ components:
                 The full sanctioned model list, replacing the campaign's set wholesale.
                 Empty clears it (restrictive default). A human fork steered to a listed
                 model is clean; to an unlisted one, babysat (grade C).
+
+    SetCampaignLabelPayload:
+      allOf:
+        - $ref: '#/components/schemas/CampaignRef'
+        - type: object
+          required: [label]
+          additionalProperties: false
+          properties:
+            label:
+              type: string
+              maxLength: 200
+              description: |
+                The operator's name for this campaign, replacing any previous one and
+                trimmed of surrounding whitespace. Empty restores the dataset-name
+                fallback. Display only — nothing addresses a campaign by it.
 
     MarkHardSamplePayload:
       allOf:

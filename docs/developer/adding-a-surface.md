@@ -140,8 +140,9 @@ mirror onto decides the cost, so ask first *whose* fact it is:
   `projections/live_dashboard/round_summary.py`.
 
 Reach for the round-level route only when the fact genuinely isn't a candidate's. Note that
-`RoundSummary.improved` is served and rendered by nothing — a round-level field with no
-panel is dead served surface, which is this page's own warning pointed the other way.
+`RoundSummary.improved` and `electable_count` are both served to the browser and rendered by
+nothing — the engine reads them (escalation's `compared`), but no panel does, so the served copy
+is dead surface. That is this page's own warning pointed the other way.
 
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No
@@ -238,15 +239,18 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
 
 1. Write `presentation/cli/commands/<verb>.py` exporting one `cmd_<verb>(args)`
    entry function. Prefer a module; reach for a subpackage only when the verb has
-   genuinely separable parts (`lifecycle.py` holds three verbs in one module — a
-   directory per verb bought a reader a hop to learn there was nothing to choose).
+   genuinely separable parts (`lifecycle.py` holds every thin `CommandDispatcher`
+   shell in one module — a directory per verb bought a reader a hop to learn there
+   was nothing to choose).
 2. Add its argparse subparser in `presentation/cli/parsers.py`.
 3. Add the `"<verb>": cmd_<verb>` row to `COMMANDS` in
    `presentation/cli/campaign_runner.py`, importing the function at the top.
 4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
-   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`), or
-   **diagnostic** (`ab` / `verify` / `noise-floor` / `reindex` —
-   these must not perturb an existing cycle's measurements).
+   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`),
+   **manifest-edit** (`rename` — rewrites `campaign.json` in place, leaving the tree
+   and every measurement where they are), or **diagnostic** (`ab` / `verify` /
+   `noise-floor` / `reindex` — these must not perturb an existing cycle's
+   measurements).
 5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
    tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.
 
