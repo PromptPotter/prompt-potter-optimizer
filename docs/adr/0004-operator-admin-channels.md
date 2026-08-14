@@ -18,13 +18,13 @@ tags: [security, identity, operations, self-hosting, zero-trust, admin]
 
 A self-hosted PromptPotter install has a small set of **deployment-admin**
 actions that are neither campaign orchestration nor end-user identity: today the
-sole one is editing the OIDC sign-in allowlist (`.promptpotter/identity/allowlist.json`,
-read fresh on every callback by `check_allowlist`). The operator wants to perform
+sole one is editing the OIDC sign-in blocklist (`.promptpotter/identity/blocklist.json`,
+read fresh on every request by `check_blocklist`). The operator wants to perform
 these from a phone — over Telegram — without SSHing into the box.
 
-The allowlist is **the most security-critical file in the install**: it gates
+The blocklist is **the most security-critical file in the install**: it gates
 authentication itself. A mistake here is not "a campaign mis-scored" — it is
-"the wrong person can sign in." So the question is not "how do we wire a Telegram
+"the wrong person can act." So the question is not "how do we wire a Telegram
 command" but **"how does an untrusted message channel safely reach a control-plane
 mutation, on an install a non-expert is hosting?"** Adoption depends on the answer
 being secure *by default*, not secure-if-configured-perfectly.
@@ -34,9 +34,9 @@ Two prior instincts were wrong and are worth recording so they don't recur:
 1. **"Expose an admin HTTP endpoint + bearer token."** Puts a privileged mutation
    on the public internet surface, with the only credential living in a third-party
    cloud (n8n / Railway). Breach of that SaaS, or a leaked token, lets an attacker
-   add themselves to the auth gate. Single factor, maximal exposure.
+   lift themselves off the auth gate. Single factor, maximal exposure.
 2. **"Ride the `POST /commands/{kind}` Control-remote highway."** A category error.
-   The allowlist is the **Identity** I/O kind (architecture.md §0), not Control-remote;
+   The blocklist is the **Identity** I/O kind (architecture.md §0), not Control-remote;
    it is deployment-global, not per-tenant; the campaign command highway is
    OIDC-session-gated for *humans* and lands records on a *tenant* ledger. Forcing a
    global identity mutation through it inverts the scope and conflates two I/O kinds.
@@ -60,8 +60,8 @@ Two prior instincts were wrong and are worth recording so they don't recur:
 ## Considered Options
 
 * **A — Public admin HTTP endpoint + bearer token.** A route on the unit's public
-  hostname (`$PUBLIC_HOSTNAME`) that edits the allowlist, authed by a static token n8n holds.
-* **B — Ride the campaign Control-remote highway** (`allowlist-add` / `-remove` as
+  hostname (`$PUBLIC_HOSTNAME`) that edits the blocklist, authed by a static token n8n holds.
+* **B — Ride the campaign Control-remote highway** (`blocklist-add` / `-remove` as
   command kinds + a machine-token branch in `resolve_identity`).
 * **C — n8n drives, via a brokered conduit.** Keep n8n as orchestrator, but the admin
   endpoint is reachable *only* behind a Cloudflare Access **service token** (the tunnel
@@ -82,12 +82,12 @@ nothing added behind the tunnel to attack), authenticates the operator with
 **defense-in-depth** (channel token + a pinned operator identity + an optional command
 passphrase), mutates **Identity-kind** state through the sanctioned writer functions,
 and records each change to an **identity-zone append-only audit log**
-(`allowlist_audit.jsonl`), never the campaign ledger.
+(`blocklist_audit.jsonl`), never the campaign ledger.
 
 First instance: a Telegram bot (`promptpotter/presentation/admin_bot.py`) run as a
 systemd service, long-polling `getUpdates`, dropping any update whose `chat.id` is not
-the configured operator's, supporting `/allow`, `/deny`, `/list` over the allowlist
-writers in `infrastructure/identity/allowlist.py`.
+the configured operator's, supporting `/block`, `/unblock`, `/blocked` over the blocklist
+writers in `infrastructure/identity/blocklist.py`.
 
 This is the most secure option *and* the cheapest to self-host: no Cloudflare Access
 config, no SSH conduit, no exposed endpoint — one systemd unit and three env vars.
@@ -142,8 +142,8 @@ Full steps live in [`../operations/secure-hosting.md`](../operations/secure-host
 and [`../../deploy-linux/README.md`](../../deploy-linux/README.md). In brief: create a
 bot with @BotFather (token), find your numeric `chat_id`, put
 `ADMIN_BOT_TELEGRAM_TOKEN` / `ADMIN_BOT_CHAT_ID` (+ optional `ADMIN_BOT_PASSPHRASE`)
-in `.env`, run `deploy-linux/install-allowlist-bot.sh`, then message the bot
-`/allow you@example.com`.
+in `.env`, run `deploy-linux/install-admin-bot.sh`, then message the bot
+`/blocked`.
 
 ### Out of scope
 
@@ -151,7 +151,7 @@ in `.env`, run `deploy-linux/install-allowlist-bot.sh`, then message the bot
   generalizes to them, but each is its own change that amends §0 when added.
 * **Authorization model** — the operator is the single deployment admin; per-admin RBAC
   is post-M13 (rides ADR-0002's `capabilities`).
-* **A webapp admin surface** — managing the allowlist from the webapp would be a *human*
+* **A webapp admin surface** — managing the blocklist from the webapp would be a *human*
   OIDC-gated surface; possible later, orthogonal to this out-of-band channel.
 
 ### Cross-refs
@@ -171,9 +171,9 @@ verified by review, no standing test (see [`../../tests/CLAUDE.md`](../../tests/
 | Concern | File |
 |---|---|
 | §0 Identity-kind amendment (admin facet + operator-admin channel) | `docs/architecture.md` |
-| Allowlist writers + audit (`add_email` / `remove_email` / `list_emails`) | `promptpotter/infrastructure/identity/allowlist.py` |
-| Identity-zone paths (`allowlist`, `allowlist_audit`) | `promptpotter/infrastructure/identity/paths.py` |
+| Blocklist writers + audit (`block_email` / `unblock_email` / `list_blocked`) | `promptpotter/infrastructure/identity/blocklist.py` |
+| Identity-zone paths (`blocklist`, `blocklist_audit`) | `promptpotter/infrastructure/identity/paths.py` |
 | On-box admin bot (first operator-admin channel) | `promptpotter/presentation/admin_bot.py` |
-| systemd installer for the bot | `deploy-linux/install-allowlist-bot.sh` |
+| systemd installer for the bot | `deploy-linux/install-admin-bot.sh` |
 | Operator-facing secure-hosting guide | `docs/operations/secure-hosting.md` |
 | Identity foundation (the kind this extends) | `docs/adr/0002-identity-foundation.md` |

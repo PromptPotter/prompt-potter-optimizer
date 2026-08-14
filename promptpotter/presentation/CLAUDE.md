@@ -32,7 +32,7 @@ panels poll `dashboard.json` plus a few JSON endpoints and never drive
 the loop.
 
 This is *not* a ban on every mutation in the codebase. **Identity-surface
-administration** (editing the sign-in allowlist, provider config) is a
+administration** (editing the sign-in blocklist, provider config) is a
 different I/O kind — it is delivered by an **operator-admin channel**
 (a deployment-side, outbound-only companion such as
 `presentation/admin_bot.py`), **not** an inbound API route and **not**

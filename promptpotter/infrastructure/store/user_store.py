@@ -38,9 +38,9 @@ class User(StrictModel):
         default=None,
         description="Provable Terms-acceptance record (version + server-stamped timestamp). None until the consent gate is cleared.",
     )
-    spend_budget_usd_daily: float | None = Field(
+    spend_budget_usd_total: float | None = Field(
         default=None,
-        description="Per-UTC-day cap composed with the per-cycle cap at mint time.",
+        description="This account's LIFETIME USD ceiling, summed over its whole ledger and composed with the per-cycle cap at mint time. None means no personal override, so the install-wide free-tier ceiling applies; a number is this account's own ceiling. Not a per-day allowance — spending it is spending it.",
     )
     max_concurrent_cycles: int = Field(default=2, ge=1)
     max_campaigns_per_day: int = Field(default=1000, ge=1)
@@ -81,4 +81,14 @@ class UserStore:
         return user
 
 
-__all__ = ["ConsentRecord", "User", "UserStore"]
+def count_accounts(projects_root: Path) -> int:
+    """How many accounts exist on this install. A CROSS-tenant read, so it takes the projects root rather
+    than a ``Stores`` — a tenant-scoped store cannot name another tenant's directory, which is the isolation
+    working, not a gap to route around. ``user.json`` is what makes a tenant dir an account; a directory
+    without one is a workspace nobody has signed into."""
+    if not projects_root.is_dir():
+        return 0
+    return sum(1 for child in projects_root.iterdir() if (child / "user.json").is_file())
+
+
+__all__ = ["ConsentRecord", "User", "UserStore", "count_accounts"]

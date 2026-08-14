@@ -1,5 +1,5 @@
 """Per-user quota + abuse-limit gates fired from the launcher. At mint the per-cycle cap collapses to
-``min(requested, daily_cap − spent_today)``, so stacking N small caps cannot outrun the daily one."""
+``min(requested, lifetime_ceiling − spent_ever)``, so stacking N small caps cannot outrun the ceiling."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ import threading
 import time
 
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.jobs.spend import start_of_utc_day, sum_user_spend
+from promptpotter.application.jobs.spend import sum_user_spend
+from promptpotter.config.settings import settings
+from promptpotter.infrastructure.identity.migration import registered_user_id
+from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import PotterError
@@ -92,13 +95,40 @@ def effective_spend_cap_usd(
     user: User,
     stores: Stores,
 ) -> float | None:
-    """Compose the per-cycle cap with the user's daily cap and any delegated ceiling, taking the ``min``.
-    A negative remainder collapses to ``0.0`` so the runner halts at the first round boundary."""
+    """Compose the per-cycle cap with what is LEFT of this account's lifetime ceiling and any delegated
+    ceiling, taking the ``min``. A negative remainder collapses to ``0.0`` so the runner halts at the
+    first round boundary — and, the ceiling being a lifetime one, it stays halted."""
     caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
-    if user.spend_budget_usd_daily is not None:
-        spent = sum_user_spend(stores=stores, since=start_of_utc_day(), until=time.time())
-        caps.append(max(0.0, user.spend_budget_usd_daily - spent))
+    ceiling = lifetime_ceiling_usd(user=user, stores=stores)
+    if ceiling is not None:
+        spent = sum_user_spend(stores=stores, since=0.0, until=time.time())
+        caps.append(max(0.0, ceiling - spent))
     return min(float(c) for c in caps) if caps else None
+
+
+def lifetime_ceiling_usd(*, user: User, stores: Stores) -> float | None:
+    """The total-spend ceiling this account answers to, or ``None`` when it answers to none.
+
+    Free-tier metering exists to bound a STRANGER spending the host's provider key — that is the whole
+    trade for making signup the grant. The person running the box is not that stranger, so metering them
+    would cap the operator against their own money, which is what a shared default would silently do to
+    every terminal run on every install.
+    """
+    if _spends_the_hosts_own_key(stores):
+        return None
+    if user.spend_budget_usd_total is not None:
+        return user.spend_budget_usd_total
+    return settings.FREE_TIER_SPEND_CAP_USD
+
+
+def _spends_the_hosts_own_key(stores: Stores) -> bool:
+    """Is this identity the operator of the box rather than a free-tier signup? One question, two arms it
+    can arrive by: an identity with no issuer came through the terminal, which only the operator reaches;
+    an OIDC identity matching the claim marker is that same operator arriving by browser."""
+    if stores.identity.issuer is None:
+        return True
+    claimed = registered_user_id(default_identity_paths().default_claim_marker)
+    return claimed is not None and str(stores.identity.user_id) == claimed
 
 
 def _delegated_spend_ceiling(stores: Stores) -> float | None:
@@ -110,4 +140,5 @@ __all__ = [
     "QuotaExceededError",
     "check_launch_quotas",
     "effective_spend_cap_usd",
+    "lifetime_ceiling_usd",
 ]

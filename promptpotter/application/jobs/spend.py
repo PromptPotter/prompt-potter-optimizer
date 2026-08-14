@@ -3,17 +3,12 @@ block is cumulative-from-seed, so summing those snapshots double-counts a fork's
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.spend import compute_usd
-
-
-def start_of_utc_day() -> float:
-    """UTC-midnight timestamp — the day boundary ``JobRegistry.list_created_today`` uses."""
-    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
 def iter_user_token_usage(*, stores: Stores, since: float, until: float) -> list[dict[str, Any]]:
@@ -71,4 +66,4 @@ def sum_user_spend(*, stores: Stores, since: float, until: float) -> float:
     )
 
 
-__all__ = ["iter_user_token_usage", "record_cost_usd", "start_of_utc_day", "sum_user_spend"]
+__all__ = ["iter_user_token_usage", "record_cost_usd", "sum_user_spend"]

@@ -1,4 +1,4 @@
-"""The operator-admin channel (ADR-0004) — long-polls Telegram OUTBOUND only and edits the allowlist + delegations. It
+"""The operator-admin channel (ADR-0004) — long-polls Telegram OUTBOUND only and edits the blocklist + delegations. It
 opens no inbound port, which is the entire point: the privileged auth-gate mutation never leaves the protected zone.
 
 The same charter covers the one-shot outbound notices the API process fires when an account first exists
@@ -9,12 +9,17 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from typing import Any
 
 import httpx
 
 from promptpotter.config.logging import setup_logging
-from promptpotter.infrastructure.identity.allowlist import add_email, list_emails, remove_email
+from promptpotter.infrastructure.identity.blocklist import (
+    block_email,
+    list_blocked,
+    unblock_email,
+)
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
     list_grants,
@@ -27,8 +32,9 @@ from promptpotter.shared.identity import capabilities_from_tiers
 logger = logging.getLogger(__name__)
 
 _POLL_TIMEOUT_S = 50
+_RETRY_BACKOFF_S = 5
 _USAGE = (
-    "Commands:\n/allow <email>\n/deny <email>\n/list\n"
+    "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
     "/grant <sub_user_id> <tiers>\n/revoke <sub_user_id>\n/grants"
 )
 
@@ -52,26 +58,26 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
 
 def handle_command(command: str, argument: str, actor: str) -> str:
     paths = default_identity_paths()
-    if command == "list":
-        emails = list_emails(paths.allowlist)
-        return "Allowlist:\n" + ("\n".join(emails) if emails else "(empty)")
-    if command in ("allow", "deny"):
+    if command == "blocked":
+        emails = list_blocked(paths.blocklist)
+        return "Blocked:\n" + ("\n".join(emails) if emails else "(nobody)")
+    if command in ("block", "unblock"):
         if not argument:
             return f"Usage: /{command} <email>"
         try:
-            if command == "allow":
-                emails = add_email(
-                    paths.allowlist, argument, actor=actor, audit_path=paths.allowlist_audit
+            if command == "block":
+                emails = block_email(
+                    paths.blocklist, argument, actor=actor, audit_path=paths.blocklist_audit
                 )
-                verb = "Added"
+                verb = "Blocked"
             else:
-                emails = remove_email(
-                    paths.allowlist, argument, actor=actor, audit_path=paths.allowlist_audit
+                emails = unblock_email(
+                    paths.blocklist, argument, actor=actor, audit_path=paths.blocklist_audit
                 )
-                verb = "Removed"
+                verb = "Unblocked"
         except ValueError as exc:
             return f"Error: {exc}"
-        return f"{verb} {argument.strip().lower()}. Allowlist now has {len(emails)} entr{'y' if len(emails) == 1 else 'ies'}."
+        return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
     if command in ("grant", "revoke", "grants"):
         return _handle_grant_command(command, argument, actor, paths)
     return _USAGE
@@ -160,7 +166,9 @@ def notify_operator(text: str) -> bool:
     return True
 
 
-def forward_new_account_to_crm(email: str | None, name: str | None, user_id: str) -> bool:
+def forward_new_account_to_crm(
+    email: str | None, name: str | None, user_id: str, account_count: int
+) -> bool:
     """Announce a new account to the n8n ``signup-intake`` door, which logs it and writes the CRM row.
 
     Every account joins the CRM on arrival; curation happens afterwards. The alternative — a row that
@@ -186,6 +194,10 @@ def forward_new_account_to_crm(email: str | None, name: str | None, user_id: str
                     "name": name or "",
                     "use_case": "",
                     "signup_source": "promptpotter-app",
+                    # How many accounts exist once this one is counted. n8n renders it straight into
+                    # the real-time notice, so the operator reads the running total at the moment the
+                    # signup lands rather than waiting for the next morning's digest to derive one.
+                    "account_count": account_count,
                 },
             )
     except httpx.HTTPError:
@@ -222,7 +234,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
     """Outbound long-poll loop. Blocks forever (until SIGTERM / Ctrl-C)."""
     base_url = f"https://api.telegram.org/bot{token}"
     offset: int | None = None
-    logger.info("Allowlist admin bot started (outbound long-poll; no inbound port).")
+    logger.info("Admin bot started (outbound long-poll; no inbound port).")
     with httpx.Client(base_url=base_url, timeout=_POLL_TIMEOUT_S + 10) as client:
         while True:
             try:
@@ -230,10 +242,26 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 if offset is not None:
                     params["offset"] = offset
                 resp = client.get("/getUpdates", params=params)
+                if resp.status_code == 409:
+                    # Telegram refuses getUpdates while a webhook is registered on the same bot. It is
+                    # a CONFIGURATION error, not a transient one — this token belongs to a bot something
+                    # else already drives (n8n's Telegram Trigger is how it happened here), and no amount
+                    # of retrying resolves it. Mint a separate bot with @BotFather for this channel.
+                    logger.error(
+                        "getUpdates refused with 409: a webhook is active on this bot, so it cannot "
+                        "also be long-polled. Give the admin channel its OWN bot token."
+                    )
+                    return
                 resp.raise_for_status()
                 updates = resp.json().get("result", [])
             except httpx.HTTPError:
-                logger.warning("getUpdates failed; retrying", exc_info=True)
+                # A bare `continue` here spins as fast as the network answers: the long-poll only
+                # blocks when the request SUCCEEDS, so an erroring one returns instantly and the
+                # loop hammers the API with no gap. Back off before retrying.
+                logger.warning(
+                    "getUpdates failed; retrying in %ss", _RETRY_BACKOFF_S, exc_info=True
+                )
+                time.sleep(_RETRY_BACKOFF_S)
                 continue
             for update in updates:
                 if not isinstance(update, dict):
@@ -259,7 +287,7 @@ def main() -> int:
     try:
         run_bot(token, chat_id, passphrase)
     except KeyboardInterrupt:
-        logger.info("Allowlist admin bot stopped.")
+        logger.info("Admin bot stopped.")
     return 0
 
 

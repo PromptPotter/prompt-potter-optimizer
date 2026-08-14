@@ -220,11 +220,15 @@ coupon on provider Y unless the coupon is voided.
 remaining coupon dies the moment they go self-serve); otherwise it persists as spendable free
 credit. Entirely the host's policy.
 
-**D1 — the coupon is the single host-wallet gate.** Shipping the coupon *and* keeping the
-daily-cap path (`effective_spend_cap_usd` / `User.spend_budget_usd_daily`) would be two
-mechanisms guarding one concern — the "no redundant mechanism" rule (root `CLAUDE.md`). The
-daily-cap path is **deleted**; coupon-remaining is the host ceiling. (Tracked in
-[`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md).)
+**D1 — ONE host-wallet gate, and today it is the free-tier ceiling.** Two mechanisms guarding
+one concern is the "no redundant mechanism" rule (root `CLAUDE.md`), so there is exactly one:
+`effective_spend_cap_usd` composing `Settings.FREE_TIER_SPEND_CAP_USD` (overridable per account
+at `User.spend_budget_usd_total`) against what the account has spent over its WHOLE ledger.
+It became load-bearing when signup stopped requiring approval — it is now the only thing
+standing between a stranger and the host's provider key, which is why it is a lifetime
+allowance rather than the per-day one it replaced: a daily cap resets, and a stranger with a
+resetting cap is unbounded given patience. If the coupon below is ever built it **replaces**
+this path rather than joining it; whichever exists is the host ceiling, never both.
 
 **D2 — live, not a mint-time snapshot.** The per-cycle `BudgetGate`
 (`application/runner/termination.py`) reads coupon-remaining (re-summed from the host-key

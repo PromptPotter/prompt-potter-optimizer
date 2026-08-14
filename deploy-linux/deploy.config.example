@@ -4,7 +4,7 @@
 #   cp deploy.config.example deploy.config
 #
 # All four scripts (bootstrap / install-service / install-tunnel /
-# install-allowlist-bot) source `deploy.config` if present, then fall back to
+# install-admin-bot) source `deploy.config` if present, then fall back to
 # these defaults. Anything you leave commented uses the default shown.
 # Every value can also be overridden inline, e.g.
 #   PUBLIC_HOSTNAME=staging.example.com ./install-tunnel.sh
@@ -17,7 +17,12 @@ APP_NAME="myapp"
 # uvicorn target — the FastAPI ASGI app, "package.module:attr".
 APP_MODULE="myapp.main:app"
 
-# Optional admin/allowlist bot module (only needed for install-allowlist-bot.sh).
+# Where systemd reads the environment from. Leave unset and it is $INSTALL_DIR/.env — correct on a
+# box without SELinux. WITH SELinux, systemd (as root) is denied a file under $HOME, and the unit
+# dies as "unavailable resources"; put the file under /etc and name it here instead.
+#ENV_FILE="/etc/myapp.env"
+
+# Optional admin bot module (only needed for install-admin-bot.sh).
 ADMIN_BOT_MODULE="myapp.presentation.admin_bot"
 
 # --- source + install ---------------------------------------------------

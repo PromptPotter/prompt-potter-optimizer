@@ -18,12 +18,12 @@ class IdentityPaths:
         return self.root / "oidc.json"
 
     @property
-    def allowlist(self) -> Path:
-        return self.root / "allowlist.json"
+    def blocklist(self) -> Path:
+        return self.root / "blocklist.json"
 
     @property
-    def allowlist_audit(self) -> Path:
-        return self.root / "allowlist_audit.jsonl"
+    def blocklist_audit(self) -> Path:
+        return self.root / "blocklist_audit.jsonl"
 
     @property
     def sessions_dir(self) -> Path:
@@ -36,7 +36,7 @@ class IdentityPaths:
     @property
     def grants(self) -> Path:
         """Sealed sub-principal grant store (ADR-0005) — the delegation authority
-        file, in the same protected zone as the allowlist."""
+        file, in the same protected zone as the blocklist."""
         return self.root / "grants.json"
 
     @property

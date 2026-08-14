@@ -1,19 +1,20 @@
 "use client";
-// Post-auth entitlement gate — the pre-stage between "has an account" and "may
-// use it".
+// Post-auth entitlement gate — the state between "has an account" and "may use
+// it".
 //
-// Mounts for a SIGNED-IN user the allowlist doesn't hold yet
-// (`me.access_state === "pending"`) and blocks the app behind a non-dismissable
-// overlay. Nothing here submits: the server already refuses a pending account's
-// commands at the dispatcher's capability gate, so this reflects that state
-// rather than enforcing it (webapp/CLAUDE.md § Scoring authority, same posture).
+// Signing up IS the grant now, so this is no longer a waiting room: it mounts
+// only for an account the operator has BLOCKED (`me.access_state === "blocked"`)
+// and holds the app behind a non-dismissable overlay. Nothing here submits: the
+// server already refuses a blocked account's commands at the dispatcher's
+// capability gate, so this reflects that state rather than enforcing it
+// (webapp/CLAUDE.md § Scoring authority, same posture).
 //
 // It takes precedence over ConsentGate. Consent attaches when someone is about
-// to submit data, and a pending account cannot — asking them to accept Terms
+// to submit data, and a blocked account cannot — asking them to accept Terms
 // first would collect a consent for something they can't do.
 //
 // Unlike ConsentGate there IS a way out, because there is nothing to agree to:
-// signing out is the only action a pending user can take, so it is the one
+// signing out is the only action a blocked user can take, so it is the one
 // affordance. Still no × / ESC / overlay-click — leaving means leaving.
 //
 // Reuses .account-overlay / .account-modal / .account-pane-head /
@@ -31,7 +32,7 @@ export function AccessGate() {
   const { status, me } = useAuth();
   const [leaving, setLeaving] = useState(false);
 
-  const open = status === "authed" && !!me && me.access_state === "pending";
+  const open = status === "authed" && !!me && me.access_state === "blocked";
   const cardRef = useDialogA11y(open, NOOP);
 
   if (!open) return null;
@@ -56,14 +57,14 @@ export function AccessGate() {
     >
       <div ref={cardRef} className="account-modal consent-modal">
         <header className="account-pane-head">
-          <h3 id="access-gate-title">Your account is ready</h3>
+          <h3 id="access-gate-title">This account is switched off</h3>
         </header>
 
         <div className="account-pane-body">
           <p className="auth-note">
-            {me.email ? <strong>{me.email}</strong> : "This account"} is signed in and saved.
-            PromptPotter is still opening up in stages, so running campaigns isn&rsquo;t switched
-            on for you yet &mdash; we&rsquo;ll email you the moment it is. Nothing more to do.
+            {me.email ? <strong>{me.email}</strong> : "This account"} is signed in, but access to
+            PromptPotter has been withdrawn for it. Nothing here will change that &mdash; whoever
+            runs this instance has to switch it back on.
           </p>
 
           <div className="consent-actions">

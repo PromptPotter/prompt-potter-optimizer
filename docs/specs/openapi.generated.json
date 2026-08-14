@@ -2283,7 +2283,7 @@
           "access_state": {
             "enum": [
               "active",
-              "pending"
+              "blocked"
             ],
             "title": "Access State",
             "type": "string"
@@ -2805,7 +2805,7 @@
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "Live snapshot of the abuse-limit knobs vs. today's usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.",
+        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend pair is LIFETIME — spent-ever against the account's total\nceiling — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit.",
         "properties": {
           "campaigns_today": {
             "title": "Campaigns Today",
@@ -2823,7 +2823,7 @@
             "title": "Max Concurrent Cycles",
             "type": "integer"
           },
-          "spend_budget_usd_daily": {
+          "spend_budget_usd_total": {
             "anyOf": [
               {
                 "type": "number"
@@ -2832,16 +2832,16 @@
                 "type": "null"
               }
             ],
-            "title": "Spend Budget Usd Daily"
+            "title": "Spend Budget Usd Total"
           },
-          "spend_used_today_usd": {
-            "title": "Spend Used Today Usd",
+          "spend_used_total_usd": {
+            "title": "Spend Used Total Usd",
             "type": "number"
           }
         },
         "required": [
-          "spend_used_today_usd",
-          "spend_budget_usd_daily",
+          "spend_used_total_usd",
+          "spend_budget_usd_total",
           "concurrent_running",
           "max_concurrent_cycles",
           "campaigns_today",
@@ -3588,7 +3588,7 @@
     },
     "/api/v1/auth/quota-status": {
       "get": {
-        "description": "Live quota snapshot for the Security pane.\n\nToday's spend sums ``TokenUsageRecord`` cost from the canonical ledger since\nUTC midnight via ``sum_user_spend`` — uncapped, so an over-budget day shows\nthe true overage rather than clamping the display to the cap; concurrent +\ndaily counts ride the `JobRegistry`.",
+        "description": "Live quota snapshot for the Security pane.\n\nSpend sums ``TokenUsageRecord`` cost across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceiling is the RESOLVED one\n(``lifetime_ceiling_usd``), never the raw nullable override, so the browser\nis not left joining a null against an install default to learn its own cap.",
         "operationId": "quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {

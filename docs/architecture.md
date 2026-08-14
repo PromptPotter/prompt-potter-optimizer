@@ -331,13 +331,13 @@ it (ADR-0002 gate #2 — review-enforced; no standing test). Stage 0 (auth-off, 
 operator) is the degenerate case: `default_identity()` substitutes
 for the middleware. Permanent contract:
 `docs/adr/0002-identity-foundation.md`. This kind also
-**administers the gate**: editing who may sign in (`allowlist.json`)
+**administers the gate**: editing who may no longer act (`blocklist.json`)
 or the provider config is an identity-config *write*, distinct from
 campaign state and never on the campaign ledger. Privileged identity
 or deployment mutations ride an **in-zone operator-admin channel** — a
 deployment-side companion (e.g. an on-box bot) that reaches an
 untrusted message channel *outbound*, exposing no inbound surface to a
-low-trust zone; audited in the identity zone (`allowlist_audit.jsonl`).
+low-trust zone; audited in the identity zone (`blocklist_audit.jsonl`).
 They never become Control-remote commands and never an inbound public
 route — the Purdue/zero-trust rule that a control-plane mutation is not
 reachable from the lowest-trust zone. Permanent contract:

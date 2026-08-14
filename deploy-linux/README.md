@@ -76,7 +76,7 @@ Set these in `deploy.config` (or pass on the command line):
 |---|---|---|
 | `APP_NAME` | `myapp` | slug → systemd unit, tunnel name, install-dir, Description |
 | `APP_MODULE` | `myapp.main:app` | uvicorn ASGI target |
-| `ADMIN_BOT_MODULE` | `myapp.presentation.admin_bot` | allowlist-bot module (optional) |
+| `ADMIN_BOT_MODULE` | `myapp.presentation.admin_bot` | admin-bot module (optional) |
 | `REPO_URL` | `…/CHANGE-ME/your-repo.git` | git clone source — **edit before bootstrap** |
 | `INSTALL_DIR` | `$HOME/$APP_NAME/your-repo` | where the repo lands |
 | `RUN_USER` | `$USER` | systemd `User=` |
@@ -142,33 +142,35 @@ cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the 
 > token, firewall decision) is [`docs/operations/access-model.md`](../docs/operations/access-model.md)
 > § Deploy actions. This section is the perimeter summary.
 
-Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Email gate:
-`.promptpotter/identity/allowlist.json` (re-read on every sign-in — edits are
-instant, no restart). Don't stack Cloudflare Access — double-gate.
+Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Signing up grants
+access, so what bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue;
+`.promptpotter/identity/blocklist.json` is the revoke (re-read on every request — edits
+are instant, no restart). Set `HOST_ADMIN_EMAIL` in `.env` or nothing ever claims this
+box. Don't stack Cloudflare Access — double-gate.
 
 **The one rule:** a control-plane change never has an inbound door open to the
-internet. The allowlist is your front-door lock; editing it is a privileged action,
+internet. The blocklist is your front-door lock; editing it is a privileged action,
 so it is **not** exposed as a public endpoint. Instead an **on-box admin bot**
 reaches *out* to Telegram (long-poll, no open port, nothing new to attack) and edits
 the local file — the zero-trust / Purdue posture (protected zone never reachable from
 the lowest-trust zone). Full rationale:
 [`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md).
 
-### Manage the allowlist from your phone
+### Block someone from your phone
 
 ```bash
 # .env (0600, never committed):
 #   ADMIN_BOT_TELEGRAM_TOKEN=...   (from @BotFather)
 #   ADMIN_BOT_CHAT_ID=...          (your numeric chat id, locks the bot to you)
 #   ADMIN_BOT_PASSPHRASE=...       (optional 2nd factor; prefix commands with it)
-./install-allowlist-bot.sh        # systemd service, outbound-only, auto-restart
+./install-admin-bot.sh            # systemd service, outbound-only, auto-restart
 ```
 
-Then message the bot `/allow you@example.com`, `/deny ...`, `/list`. Changes are
-audited to `.promptpotter/identity/allowlist_audit.jsonl`. Step-by-step + secret
+Then message the bot `/block them@example.com`, `/unblock ...`, `/blocked`. Changes are
+audited to `.promptpotter/identity/blocklist_audit.jsonl`. Step-by-step + secret
 hygiene: [`docs/operations/secure-hosting.md`](../docs/operations/secure-hosting.md).
 
-| logs (allowlist bot) | `journalctl -u $APP_NAME-allowlist-bot -f` |
+| logs (admin bot) | `journalctl -u $APP_NAME-admin-bot -f` |
 
 ## Uninstall
 

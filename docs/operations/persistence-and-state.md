@@ -304,7 +304,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 **Per-user quotas (`user.json`).** Abuse-limit knobs the launcher gates against (one tenant per user; missing file ⇒ defaults):
 
 ```json
-{ "spend_budget_usd_daily": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 10 }
+{ "spend_budget_usd_total": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 10 }
 ```
 
 Hand-edit to lift/lower caps; checked on every `mint-campaign` and `start-run`. The effective per-cycle spend cap is `min(requested, daily_cap - daily_spent)`.

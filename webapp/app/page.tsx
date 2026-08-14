@@ -19,9 +19,9 @@ export default function Home() {
           <AppShell />
         </ViewMemoryProvider>
         {/* Two blocking overlays, mutually exclusive by construction. AccessGate
-            holds a signed-in account the allowlist doesn't carry yet; ConsentGate
-            holds an entitled one that hasn't accepted the current Terms. Both
-            self-hide for anon (read-only preview). */}
+            holds an account the operator has blocked; ConsentGate holds an entitled
+            one that hasn't accepted the current Terms. Both self-hide for anon
+            (read-only preview). */}
         <AccessGate />
         <ConsentGate />
       </WorkspaceProvider>

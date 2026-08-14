@@ -6,23 +6,33 @@
 
 For the operator running PromptPotter on their own box (the
 [Linux deploy](../../deploy-linux/README.md)): the one admin task you'll repeat —
-**managing who can sign in** — and the rule that keeps it safe.
+**taking access away from an account** — and the rule that keeps it safe.
+
+Signing up is the grant. Anyone completing OIDC gets an account that can act immediately,
+bounded by a lifetime spend ceiling rather than by your approval — the contract is
+[ADR-0003 § Spend](../adr/0003-spend-and-tenancy.md), the ceiling is
+`Settings.FREE_TIER_SPEND_CAP_USD`. So there is no queue to work through, and the only
+recurring admin action is the reverse one.
 
 ## The one rule
 
 **A control-plane change never has an inbound door open to the internet.**
 
-The allowlist is your front-door lock, so its edit never sits behind a public endpoint
+The blocklist is your front-door lock, so its edit never sits behind a public endpoint
 (reachable by the whole internet and any cloud service holding a key). Instead the edit
 happens **on the box**, which reaches *out* to your phone — nothing new is exposed. This
 is the standard zero-trust / Purdue posture (protected zone never directly reachable from
 the lowest-trust zone); full rationale in [ADR-0004](../adr/0004-operator-admin-channels.md).
 
-## Managing the allowlist from Telegram
+## Blocking an account from Telegram
 
-The allowlist lives at `.promptpotter/identity/allowlist.json` and is re-read on every
-sign-in, so **edits take effect instantly — no restart**. You manage it with an on-box
-admin bot that long-polls Telegram (outbound only — it opens no port).
+The blocklist lives at `.promptpotter/identity/blocklist.json` and is re-read on every
+request, so **edits take effect instantly — no restart, no re-login**. You manage it with an
+on-box admin bot that long-polls Telegram (outbound only — it opens no port).
+
+It is a courtesy control, not a boundary: a blocked person can sign up again from another
+address and land in a fresh account with a fresh ceiling. The ceiling is what actually bounds
+a stranger; this is what stops one you have already met.
 
 ### One-time setup
 
@@ -37,11 +47,16 @@ admin bot that long-polls Telegram (outbound only — it opens no port).
    ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
    ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
    ADMIN_BOT_PASSPHRASE=optional-extra-word         # optional 2nd factor (see below)
+   HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box (see below)
    ```
+   `HOST_ADMIN_EMAIL` is separate from the bot and required on a hosted box. It names the one
+   sign-in allowed to write the claim marker that grants the host-admin tier. Leave it unset and
+   no browser identity ever claims the box, which also leaves the terminal on the `default`
+   tenant while every browser session resolves its own — the app logs a warning saying so.
 4. **Install the service:**
    ```bash
    cd ~/deploy-linux
-   ./install-allowlist-bot.sh
+   ./install-admin-bot.sh
    ```
    This runs the bot under systemd (auto-restart, starts on boot), the same way the app
    and tunnel run.
@@ -52,15 +67,15 @@ Message your bot:
 
 | You send | Effect |
 |---|---|
-| `/allow alice@example.com` | Adds the email to the allowlist (she can now sign in). |
-| `/deny alice@example.com` | Removes the email (she can no longer sign in). |
-| `/list` | Replies with the current allowlist. |
+| `/block alice@example.com` | Withdraws access. She stays signed in and keeps her account; every command she sends is refused from the next request on. |
+| `/unblock alice@example.com` | Gives it back. |
+| `/blocked` | Replies with everyone currently blocked. |
 | `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capability tiers. |
 | `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
 | `/grants` | Replies with the current delegations. |
 
 If you set `ADMIN_BOT_PASSPHRASE`, prefix the command with it:
-`my-word /allow alice@example.com`. Messages from any chat id other than yours are
+`my-word /block alice@example.com`. Messages from any chat id other than yours are
 silently ignored.
 
 Delegation tiers are `step, run, create, budget, lifecycle, babysit` (see the access
@@ -69,7 +84,7 @@ model). A `<sub_user_id>` is the canonical id shown in the delegate's own accoun
 sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities
 are clamped to yours at every use — a grant can never exceed what you hold.
 
-Every change is recorded to `.promptpotter/identity/allowlist_audit.jsonl` (allowlist) or
+Every change is recorded to `.promptpotter/identity/blocklist_audit.jsonl` (blocks) or
 `grants_audit.jsonl` (delegations) — an audit trail you can `cat` on the box.
 
 ## New accounts into your CRM (optional)

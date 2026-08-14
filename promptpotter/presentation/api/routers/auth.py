@@ -13,15 +13,15 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
+from promptpotter.application.jobs.quota import lifetime_ceiling_usd
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import (
     iter_user_token_usage,
     record_cost_usd,
-    start_of_utc_day,
     sum_user_spend,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.config.settings import TERMS_VERSION
+from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.github import (
@@ -31,10 +31,10 @@ from promptpotter.infrastructure.identity.google import (
     GoogleTokenExchangeError,
     ProviderIdentity,
 )
-from promptpotter.infrastructure.identity.migration import maybe_claim_default
+from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
-from promptpotter.infrastructure.store.user_store import ConsentRecord
+from promptpotter.infrastructure.store.user_store import ConsentRecord, count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import IdentityDep, StoresDep
 from promptpotter.presentation.api.middleware.oidc import (
@@ -47,7 +47,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     ServiceUnavailableError,
 )
-from promptpotter.shared.identity import ACCESS_ACTIVE, claim_access_state, claim_email
+from promptpotter.shared.identity import ACCESS_BLOCKED, claim_access_state, claim_email
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +69,18 @@ class ConnectedAccount(StrictModel):
 
 
 class QuotaStatus(StrictModel):
-    """Live snapshot of the abuse-limit knobs vs. today's usage.
+    """Live snapshot of the abuse-limit knobs vs. usage.
 
     Drives the Security pane's quota card. ``*_max`` mirrors `user.json`
     so the operator can hand-edit limits; ``*_used`` is the live count
     that ``check_launch_quotas`` would gate against on the next launch.
+    The spend pair is LIFETIME — spent-ever against the account's total
+    ceiling — while the campaign pair stays per-day, because one is an
+    allowance and the other an abuse limit.
     """
 
-    spend_used_today_usd: float
-    spend_budget_usd_daily: float | None
+    spend_used_total_usd: float
+    spend_budget_usd_total: float | None
     concurrent_running: int
     max_concurrent_cycles: int
     campaigns_today: int
@@ -116,9 +119,10 @@ ActivityWindow = Literal["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"
 ActivityGroupBy = Literal["model", "api_key"]
 
 # Entitlement, closed server-side so the browser narrows off the generated type rather than
-# re-declaring the members. `active` = the allowlist holds this email; `pending` = the account exists
-# and holds no capability yet. Resolved once at the session seam (`resolve_access_state`).
-AccessState = Literal["active", "pending"]
+# re-declaring the members. `active` = signed up, which is the grant; `blocked` = the operator revoked
+# this email, so the account exists and holds no capability. Resolved once at the session seam
+# (`resolve_access_state`).
+AccessState = Literal["active", "blocked"]
 
 
 class ActivityResponse(StrictModel):
@@ -153,9 +157,9 @@ class MeResponse(StrictModel):
     # (e.g. benchmark-dataset read). Server routes enforce them; the webapp reads
     # this to reflect, not to gate (the outer-loop dashboard boxes gate on data).
     capabilities: list[str]
-    # Entitlement gate input, the sibling of the consent gate below: a `pending` account is signed in
+    # Entitlement gate input, the sibling of the consent gate below: a `blocked` account is signed in
     # and holds nothing, so the webapp shows the holding screen instead of the app. Reflecting, not
-    # gating — the server already refuses a pending account's commands at the dispatcher.
+    # gating — the server already refuses a blocked account's commands at the dispatcher.
     access_state: AccessState
     # Consent gate inputs. ``terms_version`` is the live required version;
     # ``terms_accepted_version`` is what this user last accepted (None = never).
@@ -163,6 +167,14 @@ class MeResponse(StrictModel):
     # stays server-side in user.json — the frontend needs only the version match.
     terms_version: str
     terms_accepted_version: str | None
+
+
+def _is_declared_host_admin(email: str | None) -> bool:
+    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL` alone. Unset means nobody may,
+    which is a refusal rather than a fallback — the alternative, "first one in wins", is the thing that
+    stopped being safe the moment signing up became the grant."""
+    declared = settings.HOST_ADMIN_EMAIL.strip().lower()
+    return bool(declared) and (email or "").strip().lower() == declared
 
 
 def _require_bundle(request: Request) -> IdentityBundle:
@@ -272,23 +284,32 @@ async def callback(
         logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
         return _redirect_with_error("code_exchange_failed")
 
-    # The allowlist is NOT consulted here. Anyone completing OIDC gets an account; entitlement is
-    # resolved per-request at the session seam (`resolve_access_state`), which hands a pending account
-    # an empty capability set. Rejecting at the callback is what left an interested stranger with
-    # nothing but an error banner and no record we could later approve.
+    # The blocklist is NOT consulted here. Anyone completing OIDC gets an account and is entitled by
+    # that alone; the blocklist is resolved per-request at the session seam (`resolve_access_state`),
+    # which hands a blocked account an empty capability set. Rejecting at the callback is what left an
+    # interested stranger with nothing but an error banner and no record we could later act on.
     user_id = derive_user_id(identity.issuer, identity.subject)
     access_state = resolve_access_state(identity.email, bundle)
-    if access_state == ACCESS_ACTIVE:
-        # Held behind entitlement on purpose: the marker is what `_session_capabilities` reads to grant
-        # ADMIN_CAPABILITIES, and it is written by the FIRST sign-in that reaches it. Unguarded, opening
-        # sign-up would make the first stranger on an unclaimed box the host admin.
+    if access_state == ACCESS_BLOCKED:
+        logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
+    elif _is_declared_host_admin(identity.email):
+        # The marker is what `_session_capabilities` reads to grant ADMIN_CAPABILITIES, so WHO may
+        # write it must be DECLARED. Entitlement used to stand in for that and cannot any more: now
+        # that signing up entitles, an inferred claim would hand the box to whoever arrived first.
         maybe_claim_default(
             projects_root=DEFAULT_PROJECTS_ROOT,
             user_id=str(user_id),
             marker_path=bundle.paths.default_claim_marker,
         )
-    else:
-        logger.info("Pending account signed in: %s (%s)", identity.email, provider)
+    elif registered_user_id(bundle.paths.default_claim_marker) is None:
+        # A state the box can enter, so it says so: unclaimed AND undeclared means the terminal keeps
+        # resolving the `default` tenant while every browser session resolves its own, and the two
+        # workspaces drift apart in silence.
+        logger.warning(
+            "Sign-in by %s did not claim this box: HOST_ADMIN_EMAIL is unset, so no browser identity "
+            "may write the claim marker. Terminal and browser will resolve DIFFERENT tenants until it is.",
+            identity.email,
+        )
 
     session_id, _data = bundle.session_store.create(
         user_id=str(user_id),
@@ -358,18 +379,21 @@ async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeRe
     )
     if is_new_account:
         who = email or f"(no email) {identity.user_id}"
+        # Counted AFTER `get_or_create`, so the arriving account is inside the total the operator reads.
+        # The count is the headline of both notices: with signup as the grant, "how many are on the free
+        # tier" is the number that decides whether anything needs doing, and no surface held it before.
+        total = count_accounts(DEFAULT_PROJECTS_ROOT)
         notify_operator(
-            f"New PromptPotter account: {who}\nAccess: {access_state}"
-            + (
-                f"\nOpen it with:  /allow {email}"
-                if access_state != ACCESS_ACTIVE and email
-                else ""
-            )
+            f"New PromptPotter account: {who}\n"
+            f"Accounts now: {total}\n"
+            f"Access: {access_state}" + (f"\nRevoke it with:  /block {email}" if email else "")
         )
-        # Entitlement and contact record are separate questions: a pending account is still a real
+        # Entitlement and contact record are separate questions: a blocked account is still a real
         # person worth keeping. Both notices fire regardless of `access_state`, and both are
         # best-effort — neither may fail the request that just created the account.
-        forward_new_account_to_crm(email=email, name=name, user_id=str(identity.user_id))
+        forward_new_account_to_crm(
+            email=email, name=name, user_id=str(identity.user_id), account_count=total
+        )
     return MeResponse(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
@@ -413,10 +437,12 @@ _N_BUCKETS = 30
 def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     """Live quota snapshot for the Security pane.
 
-    Today's spend sums ``TokenUsageRecord`` cost from the canonical ledger since
-    UTC midnight via ``sum_user_spend`` — uncapped, so an over-budget day shows
-    the true overage rather than clamping the display to the cap; concurrent +
-    daily counts ride the `JobRegistry`.
+    Spend sums ``TokenUsageRecord`` cost across the account's WHOLE ledger via
+    ``sum_user_spend`` — uncapped, so an over-budget account shows the true
+    overage rather than clamping the display to the cap; concurrent + daily
+    counts ride the `JobRegistry`. The served ceiling is the RESOLVED one
+    (``lifetime_ceiling_usd``), never the raw nullable override, so the browser
+    is not left joining a null against an install default to learn its own cap.
     """
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
@@ -431,16 +457,14 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     running = job_registry.list_running(user_id=user.user_id)
     today = job_registry.list_created_today(user_id=user.user_id)
 
-    # Real spend today straight from the ledger — uncapped on purpose, so an
-    # over-budget day reports the true overage instead of clamping to the cap
-    # (the cap itself rides `spend_budget_usd_daily` below).
-    spent = sum_user_spend(
-        stores=stores, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
-    )
+    # Lifetime spend straight from the ledger — uncapped on purpose, so an over-budget
+    # account reports the true overage instead of clamping to the cap (the cap itself
+    # rides `spend_budget_usd_total` below).
+    spent = sum_user_spend(stores=stores, since=0.0, until=datetime.now(UTC).timestamp())
 
     return QuotaStatus(
-        spend_used_today_usd=round(spent, 6),
-        spend_budget_usd_daily=user.spend_budget_usd_daily,
+        spend_used_total_usd=round(spent, 6),
+        spend_budget_usd_total=lifetime_ceiling_usd(user=user, stores=stores),
         concurrent_running=len(running),
         max_concurrent_cycles=user.max_concurrent_cycles,
         campaigns_today=len(today),

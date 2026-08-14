@@ -36,7 +36,7 @@ host admin is a small, explicitly-named set, never an implicit "and also…".
 
 **What host-admin can do** is one definition: `ADMIN_CAPABILITIES` (`shared/identity.py`).
 *Most* host-admin power still ships through the **operator-admin channel**
-(`presentation/admin_bot.py` — sign-in allowlist, `/grant`, `/revoke`, provider config),
+(`presentation/admin_bot.py` — the sign-in blocklist, `/grant`, `/revoke`, provider config),
 which [ADR-0004](../adr/0004-operator-admin-channels.md) fixes as outbound-only and
 explicitly **not** an inbound API route. The set holds what that channel cannot express: a
 host privilege that is a **command against a running campaign**.
@@ -80,7 +80,7 @@ owning a tenant is not running the box.
 **Who holds what:** every **entitled** authenticated user owns their own tenant and holds the full
 owner set (`_identity_context_from_session`, `presentation/api/middleware/oidc.py`); a **pending**
 one owns the same tenant and holds nothing. The single local operator gets the full set from
-`default_identity` (`shared/identity.py`) on the CLI / auth-off path, where no allowlist stands. A
+`default_identity` (`shared/identity.py`) on the CLI / auth-off path, where no blocklist stands. A
 **delegate** holds an attenuated subset — see below.
 
 **Command-verb authorization (ADR-0005).** Every
@@ -95,7 +95,7 @@ full `OWNER_COMMAND_CAPABILITIES`, so single-owner installs are unaffected.
 **Delegated sub-principals (ADR-0005 §1).** A user may delegate an **attenuated** slice of
 their rights to a sub-principal (a friendly sub-user / an AI assistant reaching in). The grant
 lives in the **sealed grant store** — `.promptpotter/identity/grants.json`, the same protected
-identity zone as the allowlist, which a delegate cannot write (no self-escalation). At the OIDC
+identity zone as the blocklist, which a delegate cannot write (no self-escalation). At the OIDC
 seam, `_identity_context_from_session` resolves the grant and rebinds the delegate to act
 inside the delegator's tenant with `grant ∩ owner` capabilities — **attenuation is enforced at
 read**, so a hand-edited over-grant is clamped, and a malformed/no-delegator grant fails secure
@@ -178,14 +178,19 @@ not backend-supplied.
   `127.0.0.1:8000`, never tunneled.
 - **AuthN:** Google OIDC. Missing session → 401 at `resolve_identity` (`deps.py`). Session cookie is
   httponly / secure / samesite=lax, opaque id (no JWT past the middleware — ADR-0002).
-- **Sign-up is open; the allowlist is an ENTITLEMENT gate, not a sign-in gate.** Anyone completing
-  OIDC gets an account. `oidc.py::resolve_access_state` (re-read live) decides whether it holds any
-  capability; a `pending` account resolves to an EMPTY set, so Tier 1b's dispatcher gate refuses its
-  every command with the same 404 a stranger gets. Nothing else re-checks. The one thing held behind
-  entitlement outside that set is `maybe_claim_default` — the marker it writes is what grants
-  `ADMIN_CAPABILITIES`, so an unguarded claim would make the first stranger on an unclaimed box the
-  host admin.
-- **Admin (allowlist) edits never have an inbound door** — delivered out-of-band by the on-box,
+- **Sign-up is open AND signing up is the grant.** Anyone completing OIDC gets an account holding
+  `OWNER_COMMAND_CAPABILITIES` over their own tenant. What bounds them is money, not approval: the
+  free-tier lifetime ceiling (`Settings.FREE_TIER_SPEND_CAP_USD`, composed at
+  `quota.py::effective_spend_cap_usd`). `oidc.py::resolve_access_state` (re-read live) answers
+  `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
+  capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
+  gets. Nothing else re-checks.
+- **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
+  writes is what grants `ADMIN_CAPABILITIES`, and entitlement can no longer stand in front of it now
+  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`
+  and nothing else. Unset means no browser identity ever claims the box. Inferring it would hand a
+  fresh public box to whichever stranger signed in first.
+- **Blocklist edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
 - **Response headers** (`main.py::SecurityHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
   DENY`, `Referrer-Policy`, HSTS on https; CSP strict (`default-src 'none'`) on JSON API paths,
@@ -204,6 +209,8 @@ not backend-supplied.
 | Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
 | Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
+| Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` |
+| Who is exempt from free-tier metering (one predicate) | `quota.py::_spends_the_hosts_own_key` — no issuer (terminal) or the claimed identity |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
