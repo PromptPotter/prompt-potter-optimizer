@@ -56,9 +56,20 @@ def _clear(dst: Path) -> None:
 
 
 def stage_webapp() -> int:
-    """Copy the exported dashboard into the package. Returns the file count."""
+    """Copy the exported dashboard into the package, minus its source maps. Returns the file count.
+
+    ``next.config.ts`` emits ``.map`` files under ``DEPLOY_BUILD=1`` so a live DevTools session on
+    the deployed dashboard resolves React errors to a component and line. That box runs from a
+    checkout and reads ``webapp/out`` directly, so it keeps them; the wheel is the one consumer
+    that must not, because a browser fetches a map only when DevTools is open and they were **55%
+    of the download** (1.9 MiB of 3.5). Filtering here rather than in ``next.config.ts`` because
+    the same flag gates the React Compiler pass, which the wheel does want.
+
+    The minified ``.js`` keeps its ``//# sourceMappingURL=`` comments, which costs one silent 404
+    in DevTools — do not "fix" that by shipping the maps again.
+    """
     _clear(_WEBAPP_DST)
-    shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST)
+    shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST, ignore=shutil.ignore_patterns("*.map"))
     return sum(1 for p in _WEBAPP_DST.rglob("*") if p.is_file())
 
 

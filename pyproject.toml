@@ -13,7 +13,12 @@ keywords = ["prompt-optimization", "llm", "fastapi", "evaluation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.13"
 # The ENGINE and nothing else — what `import promptpotter` needs to optimize. This list is
@@ -119,7 +124,11 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/PromptPotter/prompt-potter-optimizer"
 Repository = "https://github.com/PromptPotter/prompt-potter-optimizer"
+Documentation = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/README.md"
+Changelog = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/CHANGELOG.md"
+Issues = "https://github.com/PromptPotter/prompt-potter-optimizer/issues"
 
 [project.scripts]
 promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
