@@ -6,7 +6,6 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 |---|---|---|---|---|
 | `aime_2025` | `openai/gpt-oss-20b:nitro` | `low` | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. Empirical A/B table below. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
-| `hotpotqa` | `openai/gpt-oss-120b` | `medium` | absent | Multi-hop QA. Medium reasoning. |
 | `bbeh` | `openai/gpt-oss-20b` | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional. |
 | `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning (`TRUE`/`FALSE`/`Uncertain`). iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name and shares no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |

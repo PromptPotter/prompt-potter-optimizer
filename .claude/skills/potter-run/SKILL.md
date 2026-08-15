@@ -215,8 +215,6 @@ leaderboard picks.
 ## References
 
 - [reference/onboarding.md](reference/onboarding.md) — new-dataset flow (web + CLI), Claude-simulated check-in, cold-machine bootstrap
-- [reference/bbeh-notes.md](reference/bbeh-notes.md) — BBEH overrides (notebook-driven, single global prompt)
-- [reference/benchmark-datasets.md](reference/benchmark-datasets.md) — readiness + cost model
 - [reference/optimization-layers.md](reference/optimization-layers.md) — L1/L2/L3 escalation
 - [reference/troubleshooting.md](reference/troubleshooting.md) — stop-reason recovery
 - [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) — running + supervising `promptpotter-self`

@@ -1,38 +1,15 @@
 # LCA TermNorm — Dataset Context
 
-## Type
+The multi-node connector-validation set: a mixed BOM (Bill of Materials) corpus splitting into
+**materials** (raw material names from engineering BOMs) and **processing** (manufacturing process
+descriptions). It is the only dataset here that is not a single `llm_only` node, which is what makes
+it the per-connector regression rather than an optimizer-iteration target.
 
-`backend` — requires a running TermNorm backend.
+**`dataset_name` is `train`, not `lca-termnorm`.** It is set in `campaign.yaml`, and the CLI
+resolves positional → `--dataset-name` → config, so `new lca-termnorm` names the campaign
+`lca-termnorm` while the rows come from `train`. Pass `--dataset-name` explicitly if you need them
+to agree.
 
-## Prerequisites
-
-- TermNorm backend must be running: `curl -s http://127.0.0.1:8000/status`
-- If backend is down, tell the user: "Start the TermNorm backend first, then re-run `/potter-run`"
-
-## Init Flags
-
-```
---backend-url http://127.0.0.1:8000
---backend-id local
---config datasets/lca-termnorm/campaign.yaml
-```
-
-Init is pure prep — no scoring. The optimizer evaluates origin as phase 0 on the `sp_budget_ttest` slice before round 1.
-
-`dataset_name` is set in `campaign.yaml` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
-
-## Data
-
-The `train` dataset is a mixed BOM (Bill of Materials) set combining:
-- **Materials** (159 test items) — raw material names from engineering BOMs
-- **Processing** (82 test items) — manufacturing process descriptions
-- **Total train set**: 984 items (materials + processing combined with train split)
-
-This matches the notebook's `prepare_datasets()` behavior which loads both BOM sheets from Excel.
-
-Separate test splits are also available: `test_material` (165 items), `test_processes` (82 items).
-
-## Pipeline Notes
-
-- Full pipeline: `cache_lookup -> fuzzy_matching -> web_search -> entity_profiling -> token_matching -> llm_ranking`
-- `llm_ranking` is active — its prompt string fields (persona, task_intent, instruction, …) are a live optimization surface, alongside the pipeline params
+Row counts are not recorded here — there is no shipped bank, so count the resolved rows rather than
+trusting a number in a doc. The node chain and every tunable are in `pipeline.yaml`; `llm_ranking`'s
+prompt fields are a live optimization surface alongside the pipeline params.

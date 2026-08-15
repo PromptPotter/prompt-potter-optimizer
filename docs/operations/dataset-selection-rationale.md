@@ -4,6 +4,8 @@
 
 Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-dataset model defaults). This doc captures *which* datasets we trial during L1 optimizer prompt evolution and *why* — same operator-driven format, evidence + verdicts + dates.
 
+**The measurement roster and the saturation bar** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured and § The admission bar; this page adds only the recon detail and the selection decision standing behind each score.
+
 ## Frame — BBEH is the headline; self-optimizing campaign needs signal
 
 **BBEH stays the headline benchmark** for publication framing. Nothing about the candidate list below changes that.

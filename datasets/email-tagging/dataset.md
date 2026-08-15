@@ -23,15 +23,9 @@ running TermNorm backend.
 
 ## Scoring
 
-`exact_match(predicted, ground_truth)` — case-insensitive, whitespace-stripped string equality. The model
-must emit only the label.
-
-## Pipeline Notes
-
-- `llm_only` on OpenRouter `openai/gpt-oss-20b`, `reasoning_effort: low` (floored; the optimizer may raise it
-  within the allowed set).
-- Model + provider are always optimizer-locked; the optimizer evolves the prompt fields,
-  `temperature`, `max_tokens`, and `reasoning_effort`.
+`exact_match(predicted, ground_truth)`. The answer-format contract is the live string
+`matchers.py::EXTRACTION_NOTES`, already fed to the prompt by the origin resolver — read it there,
+not from a paraphrase.
 
 ## Follow-ups (not in this pilot)
 

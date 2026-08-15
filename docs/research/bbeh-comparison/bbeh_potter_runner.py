@@ -8,7 +8,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
-from shared_config import MODEL_ID, Record, export_results
+from shared_config import Record, export_results
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
@@ -97,6 +97,15 @@ async def run_bbeh_campaign(
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)
+        # The model this run actually reaches, resolved from datasets/bbeh/pipeline.yaml — never
+        # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
+        # than default: a results file naming the wrong model is worse than no results file.
+        llm_node = session.llm_node_name()
+        target_model = (pipeline_params.get(llm_node) or {}).get("model")
+        if not target_model:
+            raise RuntimeError(
+                f"node {llm_node!r} resolved no model — datasets/bbeh/pipeline.yaml must pin one."
+            )
 
         observers, dataset_obj, origin = await mint_and_score_origin(
             session,
@@ -165,20 +174,21 @@ async def run_bbeh_campaign(
                 "max_rounds": opt_cfg.max_rounds,
                 "n_variants": opt_cfg.n_variants,
                 "sp_budget_ttest": campaign_config.sp_budget_ttest,
-                "model_id": MODEL_ID,
+                "model_id": target_model,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4),
                 "origin_train_accuracy": round(origin_train_acc, 4),
                 "rounds": cycle_result.n_l1_rounds,
                 "methodology": (
-                    "Single global prompt optimized on 460 mini-BBEH examples pooled "
-                    "across 23 tasks; evaluated on all non-mini examples (~4,060). "
-                    "Mini/non-mini partition is disjoint by HF flag - no leakage."
+                    "Single global prompt optimized on the pooled per-task train halves of "
+                    "BBEH mini; evaluated on the held-out test halves, the same rows every "
+                    "peer optimizer is scored on. Train/test disjoint by construction."
                 ),
                 "note": "unmeasured starting hyperparameters - pre-sweep",
             },
             optimized_prompts={"__global__": winner_prompt_str},
             output_path=str(output_path),
+            model=target_model,
         )
     finally:
         # Always close the httpx pool — leaked async clients are the most
