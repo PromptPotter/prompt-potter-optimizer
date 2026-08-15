@@ -47,7 +47,7 @@ The two contracts shape the seams once; the implementation behind each seam swap
 
 Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names verbatim. The tenant claim normalizes to `org_id` at the verifier edge. Schema.org `Person` JSON-LD is an output projection on public surfaces — not the internal model. `IdentityContext` (5-field frozen dataclass at `promptpotter/shared/identity.py`) is the sole carrier past the seam; the deleted `TenantContext` collapses into it.
 
-**Administering the gate** is a facet of this kind, not a new one. Editing the sign-in allowlist or provider config is an identity-config *write* — delivered through an in-zone **operator-admin channel** (outbound conduit, no inbound public route) and audited in the identity zone, never the campaign Control-remote highway and never a tenant ledger. The channel pattern + Purdue/zero-trust threat model live in [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md).
+**Administering the gate** is a facet of this kind, not a new one. Editing the sign-in blocklist or provider config is an identity-config *write* — delivered through an in-zone **operator-admin channel** (outbound conduit, no inbound public route) and audited in the identity zone, never the campaign Control-remote highway and never a tenant ledger. The channel pattern + Purdue/zero-trust threat model live in [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md).
 
 ### Consequences
 
@@ -303,5 +303,5 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 - [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
 - [`../specs/roadmap.md`](../specs/roadmap.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
 - [`../specs/roadmap.md`](../specs/roadmap.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
-- [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations (allowlist edits) are delivered in-zone, outbound-only, without exposing an inbound route.
+- [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations (blocklist edits) are delivered in-zone, outbound-only, without exposing an inbound route.
 - [`../architecture.md`](../architecture.md) §0 — `Identity` I/O kind amendment lands here at Stage 1.

@@ -206,12 +206,17 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
         overrides[field] = (info.annotation, Field(**kwargs))
     variant = create_model("L1Variant", __base__=L1Variant, **overrides)
     suffix = "_".join(f"{f}2{w}" for f, w in items)
+    # `variant` is a class only at runtime (`create_model` above), so `list[variant]` written as a
+    # subscript is a type expression over a variable and mypy objects — correctly. Whether it
+    # objects is NOT stable: it turns on cache state and on what else is in the build graph, so a
+    # `type: ignore` there read as needed under one invocation and unused under the next, and the
+    # check could only ever be green for one of them. `__class_getitem__` builds the same
+    # `list[...]` as a VALUE, which no configuration type-analyses, so none of them has an opinion.
+    variants_field: Any = (list.__class_getitem__(variant), ...)
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        # `variant` is built by `create_model` above, so it is a value at type-check time
-        # and a class only at runtime. That is the intended construction here, not a mistake.
-        variants=(list[variant], ...),
+        variants=variants_field,
     )
 
 

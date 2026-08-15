@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId
-from promptpotter.infrastructure.identity.allowlist import check_allowlist
+from promptpotter.infrastructure.identity.blocklist import check_blocklist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
@@ -20,7 +20,7 @@ from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
     ACCESS_ACTIVE,
-    ACCESS_PENDING,
+    ACCESS_BLOCKED,
     ADMIN_CAPABILITIES,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
@@ -32,12 +32,11 @@ SESSION_COOKIE_NAME = "promptpotter_session"
 
 
 def resolve_access_state(email: str | None, bundle: IdentityBundle) -> str:
-    """Is this account entitled to act? The allowlist is an ENTITLEMENT gate, not a sign-in gate: anyone
-    completing OIDC gets an account, and this decides whether it can do anything. The ONE derivation — the
-    capability set, the served ``access_state`` and the default-tenant claim all read it, so an account
-    cannot be pending on one surface and active on another."""
+    """Is this account entitled to act? Signing up IS the grant, so this answers ``active`` for everyone the
+    operator has not blocked. The ONE derivation — the capability set and the served ``access_state`` both
+    read it, so an account cannot be blocked on one surface and active on another."""
     return (
-        ACCESS_ACTIVE if check_allowlist(bundle.paths.allowlist, email).allowed else ACCESS_PENDING
+        ACCESS_BLOCKED if check_blocklist(bundle.paths.blocklist, email).blocked else ACCESS_ACTIVE
     )
 
 
@@ -45,11 +44,10 @@ def _session_capabilities(
     user_id: str, bundle: IdentityBundle, access_state: str
 ) -> frozenset[str]:
     """Capabilities for an authenticated web identity — every ENTITLED user owns their tenant, so each
-    holds the owner set. A PENDING account holds none, which is the whole pre-stage: the dispatcher's
-    `_require_capability_for` refuses every command with the same 404 a stranger already gets, so no
-    surface needs its own check. Admin is the PINNED marker identity: an env flag here would make every
-    signup an admin."""
-    if access_state == ACCESS_PENDING:
+    holds the owner set. A BLOCKED account holds none: the dispatcher's `_require_capability_for` refuses
+    every command with the same 404 a stranger already gets, so no surface needs its own check. Admin is
+    the PINNED marker identity: an env flag here would make every signup an admin."""
+    if access_state == ACCESS_BLOCKED:
         return frozenset()
     admin_uid = registered_user_id(bundle.paths.default_claim_marker)
     if admin_uid is not None and user_id == admin_uid:
@@ -69,10 +67,10 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
                 "email": data.email,
                 "provider": data.provider,
                 "subject": data.subject,
-                # A sub-principal's entitlement IS its grant, never the allowlist — it acts inside a
-                # delegator's tenant and was provisioned by the admin channel. Revoked reads as pending
-                # for the same reason a never-approved signup does: authenticated, holding nothing.
-                "access_state": ACCESS_PENDING,
+                # A sub-principal's entitlement IS its grant, never the blocklist — it acts inside a
+                # delegator's tenant and was provisioned by the admin channel. Revoked reads as blocked
+                # for the same reason a blocked signup does: authenticated, holding nothing.
+                "access_state": ACCESS_BLOCKED,
             },
             capabilities=frozenset(),
         )

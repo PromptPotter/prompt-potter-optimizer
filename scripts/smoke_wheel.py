@@ -15,7 +15,8 @@ value in them; there is no framework here on purpose — it must run under a bar
 has the wheel and nothing else.
 
 Requires ``$PROMPTPOTTER_HOME`` to be set to a scratch dir: half of what is checked is
-that user data lands there rather than inside the install.
+that user data lands there rather than inside the install. ``$PROMPTPOTTER_SMOKE_EXPECT_WEBAPP=1``
+additionally demands the dashboard — set it for a release wheel, never for a ``--no-webapp`` one.
 """
 
 from __future__ import annotations
@@ -94,6 +95,24 @@ def main() -> int:
     # the check, since that is what `scripts/build_openapi.py` gates in CI.
     served = app.openapi().get("paths") or {}
     assert "/api/v1/cycles" in served, f"API did not mount its routes: {sorted(served)[:8]}"
+
+    # 5. The dashboard, when the wheel was built to carry one. `build_release.py` checks the
+    #    zip holds `assets/webapp/index.html`; nothing checks that the CONSUMER finds it, and
+    #    `main.py` mounts behind a bare `.exists()` — so a wheel serving a naked API looks
+    #    identical to `--no-webapp`, which is the shape CI builds. Opt-in by env because this
+    #    one script covers both shapes.
+    if os.environ.get("PROMPTPOTTER_SMOKE_EXPECT_WEBAPP") == "1":
+        from promptpotter.main import WEBAPP_DIR
+
+        assert WEBAPP_DIR.is_relative_to(paths.PACKAGE_ROOT), (
+            f"dashboard resolved outside the installed package: {WEBAPP_DIR}"
+        )
+        assert (WEBAPP_DIR / "index.html").is_file(), (
+            f"no index.html under {WEBAPP_DIR} — the API mounts, the dashboard 404s"
+        )
+        assert any(getattr(r, "name", None) == "webapp" for r in app.routes), (
+            "index.html is present but nothing mounted it at /"
+        )
 
     print(f"wheel smoke OK — package {paths.PACKAGE_ROOT}, user data {home_path}")
     return 0

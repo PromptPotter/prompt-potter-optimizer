@@ -101,7 +101,7 @@ def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
     ``--staged``.
     """
 
-    def check(_: Sel) -> Outcome:
+    def check(_sel: Sel) -> Outcome:
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
             return rc, out
@@ -221,11 +221,31 @@ class Check:
     staged: bool = False  # in the pre-commit fast set
 
 
+_BBEH_DIR = "docs/research/bbeh-comparison"
+
+
+def _mypy(_sel: Sel) -> Outcome:
+    """Every tracked module that imports ``promptpotter``, not just the package.
+
+    The harnesses outside it were unchecked and each had rotted against a rename: the BBEH
+    runner passed a kwarg no signature accepted and read a field off a NamedTuple that has
+    none, ``render_review.py`` named ``RoundResult.opt_search_point`` after it became
+    ``opt_sp``. None of them raised until someone ran them, and ruff cannot see an attribute
+    that is not there. ``shared_config`` is followed but not a target: it stays import-safe
+    for Colab, so it imports nothing of ours.
+    """
+    return _run(
+        _py("mypy", "promptpotter/", "scripts/", f"{_BBEH_DIR}/bbeh_potter_runner.py"),
+        _REPO,
+        MYPYPATH=str(_REPO / _BBEH_DIR),
+    )
+
+
 CHECKS: tuple[Check, ...] = (
     Check("ruff-format", "py", _ruff_format, staged=True),
     Check("ruff-check", "py", _ruff_check, staged=True),
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
-    Check("mypy", "py", lambda _: _run(_py("mypy", "promptpotter/"), _REPO)),
+    Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),
     Check(
         "ts-types",
@@ -285,6 +305,13 @@ def _execute(check: Check, sel: Sel) -> Result:
     return Result(check, rc, out, time.monotonic() - started)
 
 
+# Spelled once: the message a missing `uv` prints and the argv it would have run are the
+# same list, and they drifted the moment one grew an extra the other did not. `api` is here
+# because mypy type-checks `main.py` and the routers — from an engine-only install it cannot
+# resolve fastapi, and reports it as a first-party error.
+_PINNED_EXTRAS = ("stats", "dev", "api")
+
+
 def _reexec_pinned() -> None:
     """The gate picks its own interpreter, because a verdict must not depend on the caller.
 
@@ -296,24 +323,14 @@ def _reexec_pinned() -> None:
     if Path(sys.prefix) == _PINNED or os.environ.get(_REEXEC):
         return
     uv = shutil.which("uv")
-    pinned = "uv run --frozen --extra stats --extra dev python scripts/gate.py"
+    extras = [arg for extra in _PINNED_EXTRAS for arg in ("--extra", extra)]
     if not uv:
         raise SystemExit(
-            f"gate: `uv` is not on PATH, so the locked env is unreachable.\nRun: {pinned}"
+            "gate: `uv` is not on PATH, so the locked env is unreachable.\n"
+            f"Run: uv run --frozen {' '.join(extras)} python scripts/gate.py"
         )
     proc = subprocess.run(
-        [
-            uv,
-            "run",
-            "--frozen",
-            "--extra",
-            "stats",
-            "--extra",
-            "dev",
-            "python",
-            __file__,
-            *sys.argv[1:],
-        ],
+        [uv, "run", "--frozen", *extras, "python", __file__, *sys.argv[1:]],
         cwd=_REPO,
         env={**os.environ, _REEXEC: "1"},
     )
@@ -323,7 +340,7 @@ def _reexec_pinned() -> None:
 def main() -> int:
     # A failing check's output is whatever the tool prints, and tools print ✖ and →.
     # On a cp1252 console that raised while REPORTING the failure, losing the verdict.
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     parser = argparse.ArgumentParser(description="Run every check CI runs.")
     parser.add_argument("--py", action="store_true", help="only the Python half (CI's `check` job)")
     parser.add_argument(

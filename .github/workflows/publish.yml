@@ -1,0 +1,106 @@
+name: Publish
+
+# Publishing a GitHub Release IS the release: you write the notes, and the upload
+# follows from publishing them — there is no second thing to remember. Manual dispatch
+# runs the identical build and smoke and uploads nothing, which is how a release wheel
+# gets proven before a release exists to carry it.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # First, before anything is built: nothing else in this repo pins the tag and
+      # `pyproject.toml` together, and a version uploaded to an index can neither be
+      # recalled nor re-uploaded. Skipped on dispatch, where there is no tag to agree with.
+      - name: The tag must match pyproject
+        if: github.event_name == 'release'
+        run: |
+          declared=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME means $tagged, pyproject.toml says $declared"
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra stats --extra dev --extra api --frozen
+
+      # CI gates `main`; a release is cut from a COMMIT, and the two are the same thing
+      # only by habit. Running the one check list here is what makes the gate a property
+      # of the artifact being published rather than of a branch that once passed.
+      - name: Gate
+        run: uv run python scripts/gate.py --py
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Build the dashboard
+        run: npm ci && npm run build:deploy
+        working-directory: webapp
+
+      # No `--no-webapp`, and that is the whole difference from ci.yml's wheel job. The
+      # wheel CI proves is API-only, so three things are exercised for the first time
+      # here: the `assets/webapp/**` package-data glob, the mount that reads it, and the
+      # credential scan over a Next.js bundle — which inlines every NEXT_PUBLIC_* value.
+      - name: Build the wheel
+        run: uv run python scripts/build_release.py
+
+      # Same shape as ci.yml's, plus the dashboard demand the API-only build cannot make.
+      - name: Install it elsewhere and run it
+        env:
+          PROMPTPOTTER_SMOKE_EXPECT_WEBAPP: "1"
+        run: |
+          uv venv --python 3.13 --seed "$RUNNER_TEMP/venv"
+          wheel=(dist/*.whl)
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "${wheel[0]}[api]"
+          mkdir -p "$RUNNER_TEMP/elsewhere" "$RUNNER_TEMP/home"
+          cd "$RUNNER_TEMP/elsewhere"
+          export PROMPTPOTTER_HOME="$RUNNER_TEMP/home"
+          "$RUNNER_TEMP/venv/bin/promptpotter" --help > /dev/null
+          "$RUNNER_TEMP/venv/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_wheel.py"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+
+    # The environment name is half of the publisher's identity: PyPI's trusted-publisher
+    # record names this repository, `publish.yml` AND `pypi` together, so no other
+    # workflow in the repo can mint a token for the project.
+    environment: pypi
+    permissions:
+      id-token: write # mint the OIDC token PyPI trades for a short-lived upload token
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+
+      # No `with:` block, and none is missing. Under Trusted Publishing the action
+      # exchanges the OIDC token above for an upload token that expires in minutes, so
+      # this repository stores no PyPI credential at all — there is nothing to leak or
+      # rotate. PEP 740 attestations are signed and attached by default.
+      - uses: pypa/gh-action-pypi-publish@release/v1

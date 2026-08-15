@@ -156,7 +156,7 @@ Reach for a component-render test only for a regression class that compile + smo
 
 ## Build + run
 
-**Two build modes (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview: compile only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns behind `DEPLOY_BUILD=1` — the gate sets that env var directly, and `npm run build:deploy` sets it for a shell. Type-check and lint run inside *neither*; they are separate gate checks, so repeating them in `next build` would be duplication. From PowerShell, preview compiler-on behaviour with `$env:DEPLOY_BUILD=1; npm run build`.
+**Two build modes (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview: compile only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns behind `DEPLOY_BUILD=1` — the gate sets that env var directly, and `npm run build:deploy` sets it for a shell. **The maps serve the deployed box only** — `scripts/build_release.py::stage_webapp` strips them, so the wheel is not a consumer. Type-check and lint run inside *neither*; they are separate gate checks, so repeating them in `next build` would be duplication. From PowerShell, preview compiler-on behaviour with `$env:DEPLOY_BUILD=1; npm run build`.
 
 `out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to the API via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).
 

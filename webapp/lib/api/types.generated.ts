@@ -1035,15 +1035,15 @@ export interface MeResponse {
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
   capabilities: string[];
-  access_state: 'active' | 'pending';
+  access_state: 'active' | 'blocked';
   terms_version: string;
   terms_accepted_version: string | null;
 }
 
-/** Live snapshot of the abuse-limit knobs vs. today's usage. */
+/** Live snapshot of the abuse-limit knobs vs. usage. */
 export interface QuotaStatus {
-  spend_used_today_usd: number;
-  spend_budget_usd_daily: number | null;
+  spend_used_total_usd: number;
+  spend_budget_usd_total: number | null;
   concurrent_running: number;
   max_concurrent_cycles: number;
   campaigns_today: number;

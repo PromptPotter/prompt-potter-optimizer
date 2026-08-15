@@ -60,6 +60,8 @@ from promptpotter.shared.composite import render_composite_fitness_block
 if TYPE_CHECKING:
     from typing import TextIO
 
+    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
@@ -113,6 +115,25 @@ class LiveDisplay(DerivedView):
         self._pobb_printed_for: str = ""
         self._pending_calls: dict[str, int] = {}
         self._readout = _open_readout()
+
+    @classmethod
+    def for_campaign(
+        cls,
+        session: Session,
+        campaign_config: CampaignConfig,
+        *,
+        origin_acc: float = 0.0,
+    ) -> LiveDisplay:
+        """The one construction from a session + its config. Every entry point spelled these four
+        arguments out by hand, so the per-sample half of the scoring block was re-derived per caller."""
+        from promptpotter.application.scoring.formula import split_scoring_block
+
+        return cls(
+            origin_acc=origin_acc,
+            l1_patience=campaign_config.optimization.l1_patience,
+            pipeline_schema=session.pipeline_schema,
+            scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
+        )
 
     def _write(self, line: str) -> None:
         print(line, flush=True)

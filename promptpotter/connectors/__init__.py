@@ -3,6 +3,7 @@ from __future__ import annotations
 import typing
 from importlib.metadata import entry_points
 
+from promptpotter.connectors.dspy_module import CONNECTOR as _DSPY
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import (
     BackendUnreachableError,
@@ -29,6 +30,7 @@ un-registers every plugin at once."""
 _BUILTIN: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
+    "dspy": _DSPY,
 }
 
 DEFAULT_CONNECTOR = "termnorm"

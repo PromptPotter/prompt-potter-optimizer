@@ -33,8 +33,20 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
   and every term the panel retired, is argued in
   [`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
-  Round-level statistics (lift + CI over a round of cells) are now computed by the engine's scoring
-  layer and served as `matched_origin_lift{,_ci_lo,_ci_hi}` fields on `ScoredCandidate` / `RoundResult`.
+  `verdict.py`: what a ROUND of
+  them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
+  is what stops it growing a file read or a session dep, which is exactly how it drifted before.
+  Import the submodule, never the package: `domain.results` imports `verdict` while `proxies`
+  imports `domain.results`, so a re-exporting `__init__` would make two acyclic modules circular.
+- `export.py` — the export artifact (`cycles/{id}/export.json`): the winning prompt by field name
+  plus the provenance that makes its fitness readable — the formula the number was computed under,
+  n, lift + CI, θ, the rows' own hash, the optimizer manifest — and an `artifact_version` a reader
+  refuses on. Pure over ONE `RoundResult`, which is what keeps it here: the projection can grow no
+  file read and no session dependency. **The round it projects is the one the composite high-water
+  names, origin round included** — a campaign nothing beat exports its origin under round 0, not
+  nothing. Read the round document's `prompt_fields`, never `CycleResult.winner_prompt_fields`:
+  that one is the wire-side projection and has already flattened `few_shot_examples` into a
+  rendered block that `from_prompt_fields` cannot restore.
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen
   `CampaignConfig` snapshot.

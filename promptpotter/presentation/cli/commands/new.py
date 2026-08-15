@@ -366,7 +366,7 @@ async def _run_sweep_batch(
     from promptpotter.presentation.cli.session import load_session
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
-        return build_observers(args, session, campaign_config, train_data, origin_acc)
+        return build_observers(session, campaign_config, train_data, origin_acc)
 
     result = await run_sweep_batch(
         lambda: load_session(args),

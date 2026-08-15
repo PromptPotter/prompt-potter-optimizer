@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import (
@@ -19,18 +19,13 @@ from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,
-    CandidateCreated,
-    CandidateScored,
     DatasetRegistered,
     DatasetRun,
-    L1CritiqueWritten,
-    LayerApplied,
     NodeEnd,
     NodeStart,
     PromptVersion,
     RoundEnd,
     RoundStart,
-    RoundWinnerChosen,
     dataset_item_id,
     generate_observation_id,
 )
@@ -157,41 +152,6 @@ class FileSink:
         if metadata_extra:
             obs_data.setdefault("metadata", {}).update(metadata_extra)
         write_json(obs_path, obs_data)
-
-    # Fields per event-class mirrored into events.jsonl.
-    _WRITE_POINT_FIELDS: ClassVar[dict[type, tuple[str, tuple[str, ...]]]] = {
-        CandidateCreated: ("candidate_created", ("candidate_idx", "candidate_id")),
-        CandidateScored: ("candidate_scored", ("candidate_idx", "report")),
-        RoundWinnerChosen: (
-            "round_winner_chosen",
-            ("winner_candidate_id", "winner_accuracy", "improved"),
-        ),
-        L1CritiqueWritten: ("l1_critique_written", ("l1_critique_text",)),
-    }
-
-    def on_write_point(self, event: Any) -> None:
-        event_name, fields = self._WRITE_POINT_FIELDS[type(event)]
-        payload = {
-            "event": event_name,
-            "trace_id": self._campaign_traces.get(event.campaign_id, ""),
-            "campaign_id": event.campaign_id,
-            "round": event.round_num,
-            **{f: getattr(event, f) for f in fields},
-        }
-        self._log_event(payload)
-
-    def on_layer_applied(self, event: LayerApplied) -> None:
-        """Append an applied-layer mirror to the event log. The event-name STRING is preserved on disk, because downstream
-        consumers key on it rather than on the dataclass."""
-        self._log_event(
-            {
-                "event": f"{event.layer.lower()}_applied",
-                "trace_id": self._campaign_traces.get(event.campaign_id, ""),
-                "campaign_id": event.campaign_id,
-                "round": event.round_num,
-                "changes_description": event.changes_description,
-            }
-        )
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
 

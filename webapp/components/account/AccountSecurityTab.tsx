@@ -66,14 +66,14 @@ export function AccountSecurityTab({ me }: { me: MeResponse }) {
 }
 
 function QuotaCard({ quota }: { quota: QuotaStatus }) {
-  const spendCap = quota.spend_budget_usd_daily;
+  const spendCap = quota.spend_budget_usd_total;
   return (
     <ul className="quota-grid">
       <li className="quota-cell">
-        <span className="quota-cell-label">Spend today</span>
-        <span className="quota-cell-value">{fmtUsd(quota.spend_used_today_usd)}</span>
+        <span className="quota-cell-label">Spend to date</span>
+        <span className="quota-cell-value">{fmtUsd(quota.spend_used_total_usd)}</span>
         <span className="quota-cell-sub">
-          {spendCap !== null ? `of ${fmtUsd(spendCap)} daily cap` : "no daily cap"}
+          {spendCap !== null ? `of ${fmtUsd(spendCap)} total` : "uncapped"}
         </span>
       </li>
       <li className="quota-cell">

@@ -165,6 +165,11 @@ class CycleLayout:
     def hard_samples(self) -> Path:
         return self.cycle_dir / "hard_samples.json"
 
+    @property
+    def export(self) -> Path:
+        """The artifact a program that is not us reads — ``domain/export.py::PromptExport``."""
+        return self.cycle_dir / "export.json"
+
     # --- resume state (heavy: dropped by ``delete --keep-results``) ---
     @property
     def rounds(self) -> Path:

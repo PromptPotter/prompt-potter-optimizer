@@ -1,5 +1,7 @@
-"""Email allowlist. Missing file → allow-all (local-dev escape hatch); an EMPTY list denies everyone. An unmatched
-email is 403 at the callback, not 404 — existence-hiding covers campaigns, not the OIDC seam itself."""
+"""Email blocklist. Completing OIDC ENTITLES: an account holds the owner capability set unless its email is
+listed here. The free-tier spend ceiling, not this file, is what bounds a stranger — this is the operator's
+revoke, and it is a courtesy control rather than a security boundary, because a blocked person can sign up
+again from another address and land in a fresh account with a fresh ceiling."""
 
 from __future__ import annotations
 
@@ -15,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class AllowlistDecision:
-    allowed: bool
+class BlocklistDecision:
+    blocked: bool
     reason: str
 
 
@@ -26,29 +28,38 @@ def _norm_email(email: str) -> str:
     return email.strip().lower()
 
 
-def check_allowlist(path: Path, email: str | None) -> AllowlistDecision:
-    """Allowlist gate. Missing file → allow; empty list → deny; otherwise membership."""
+def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
+    """Blocklist gate. Missing or empty file → nobody blocked; otherwise membership.
+
+    Malformed blocks EVERYONE, which is the same shape the allowlist used and for the same reason: absent and
+    corrupt are opposite security answers, and the corrupt one may never be the wider of the two. A typo in
+    this file locks the box out loudly, where an un-ban nobody ordered would be silent.
+    """
     if not path.is_file():
-        return AllowlistDecision(allowed=True, reason="allowlist_absent")
+        return BlocklistDecision(blocked=False, reason="blocklist_absent")
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
-        return AllowlistDecision(allowed=True, reason="allowlist_absent")
+        return BlocklistDecision(blocked=False, reason="blocklist_absent")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("allowlist.json is not valid JSON; treating as deny-all")
-        return AllowlistDecision(allowed=False, reason="allowlist_invalid")
+        logger.warning("blocklist.json is not valid JSON; treating as block-all")
+        return BlocklistDecision(blocked=True, reason="blocklist_invalid")
     emails_raw = data.get("emails") if isinstance(data, dict) else None
     if not isinstance(emails_raw, list):
-        return AllowlistDecision(allowed=False, reason="allowlist_invalid")
-    permitted = {_norm_email(e) for e in emails_raw if isinstance(e, str)}
-    if not permitted:
-        return AllowlistDecision(allowed=False, reason="allowlist_empty")
+        logger.warning("blocklist.json has no `emails` list; treating as block-all")
+        return BlocklistDecision(blocked=True, reason="blocklist_invalid")
+    blocked = {_norm_email(e) for e in emails_raw if isinstance(e, str)}
+    if not blocked:
+        return BlocklistDecision(blocked=False, reason="blocklist_empty")
     if not email:
-        return AllowlistDecision(allowed=False, reason="email_missing_from_claims")
-    if _norm_email(email) in permitted:
-        return AllowlistDecision(allowed=True, reason="email_permitted")
-    return AllowlistDecision(allowed=False, reason="email_not_permitted")
+        # An identity with no email claim cannot be matched against the list. It is admitted rather than
+        # refused because entitlement is the default here — and it is bounded by the free-tier ceiling
+        # exactly like every other account.
+        return BlocklistDecision(blocked=False, reason="email_missing_from_claims")
+    if _norm_email(email) in blocked:
+        return BlocklistDecision(blocked=True, reason="email_blocked")
+    return BlocklistDecision(blocked=False, reason="email_not_blocked")
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +67,13 @@ def check_allowlist(path: Path, email: str | None) -> AllowlistDecision:
 #
 # These are the sanctioned mutators behind the operator-admin channel
 # (`presentation/admin_bot.py`). They edit the same `{"emails": [...]}` file
-# `check_allowlist` reads, atomically, and append one audit line per change to
-# the identity-zone `allowlist_audit.jsonl` — never the campaign ledger.
+# `check_blocklist` reads, atomically, and append one audit line per change to
+# the identity-zone `blocklist_audit.jsonl` — never the campaign ledger.
 # ---------------------------------------------------------------------------
 
 
 def _load_emails(path: Path) -> list[str]:
-    """The allowlist as a normalized sorted list. Tolerant — missing, empty or malformed all yield ``[]`` — so editing
+    """The blocklist as a normalized sorted list. Tolerant — missing, empty or malformed all yield ``[]`` — so editing
     always starts from a clean view and a corrupt file is overwritten by the next write."""
     if not path.is_file():
         return []
@@ -72,7 +83,7 @@ def _load_emails(path: Path) -> list[str]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("allowlist.json is not valid JSON; treating as empty for edit")
+        logger.warning("blocklist.json is not valid JSON; treating as empty for edit")
         return []
     emails_raw = data.get("emails") if isinstance(data, dict) else None
     if not isinstance(emails_raw, list):
@@ -108,11 +119,11 @@ def _normalize(email: str) -> str:
     return normalized
 
 
-def list_emails(path: Path) -> list[str]:
+def list_blocked(path: Path) -> list[str]:
     return _load_emails(path)
 
 
-def add_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
+def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
     current = _load_emails(path)
     before = len(current)
@@ -120,12 +131,12 @@ def add_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[s
         current = sorted({*current, normalized})
         _write_emails(path, current)
     _append_audit(
-        audit_path, action="add", email=normalized, actor=actor, before=before, after=len(current)
+        audit_path, action="block", email=normalized, actor=actor, before=before, after=len(current)
     )
     return current
 
 
-def remove_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
+def unblock_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
     current = _load_emails(path)
     before = len(current)
@@ -134,7 +145,7 @@ def remove_email(path: Path, email: str, *, actor: str, audit_path: Path) -> lis
         _write_emails(path, current)
     _append_audit(
         audit_path,
-        action="remove",
+        action="unblock",
         email=normalized,
         actor=actor,
         before=before,
@@ -143,4 +154,4 @@ def remove_email(path: Path, email: str, *, actor: str, audit_path: Path) -> lis
     return current
 
 
-__all__ = ["add_email", "check_allowlist", "list_emails", "remove_email"]
+__all__ = ["block_email", "check_blocklist", "list_blocked", "unblock_email"]

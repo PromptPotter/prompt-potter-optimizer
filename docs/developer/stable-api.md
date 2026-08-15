@@ -158,7 +158,10 @@ directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
 `scripts/build_release.py`, which is the supported way to build a wheel. A bare `uv build`
-produces one that quietly serves no dashboard and resolves no dataset.
+produces one that quietly serves no dashboard and resolves no dataset. Publishing a GitHub
+Release is what runs it — `.github/workflows/publish.yml` builds the dashboard, calls that
+script with no `--no-webapp`, smoke-installs the wheel outside any checkout, and uploads to
+PyPI over Trusted Publishing.
 
 Running from a checkout (development, and `deploy-linux/`) resolves exactly the paths it
 always has. There is no `REPO_ROOT`: the parent walk that once stood for all three roots
@@ -188,6 +191,60 @@ and where the HuggingFace `datasets` library lives.
 **Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
 
 The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error, not a fall-through to a single unpaired cycle.
+
+## 5b. Embedded launch entry (Python)
+
+The programmatic peer of §5's verbs — `application/embedded_run.py`, for a host program driving
+one campaign inside its own event loop:
+
+```python
+session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None)
+observers, dataset, origin = await mint_and_score_origin(
+    session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
+result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
+                            langfuse_session_id=None, spend_budget_usd=None, mode=None)
+```
+
+Three steps rather than one because every caller does its own work between them. It mints through
+the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
+resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
+loop. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
+campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
+for the closing box.
+
+Nothing on this path imports a server, and the dependency list says so: `pip install
+promptpotter` is the engine, `[api]` is what a host adds if it also wants to serve the API and
+the dashboard.
+
+`load_dataset_campaign_config(path, overrides=…)` (`application/datasets/authored.py`) is the
+supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
+a nested mapping merged depth-first **before** validation, so an unknown knob raises here instead
+of being silently dropped.
+
+## 5c. The export artifact
+
+Everything else this package writes answers *how the run went*; `cycles/{id}/export.json` answers
+*what it found, and how good it is* — for a reader that will never open the campaign tree. Written
+from the same call that stamps `index.json::final`, so both are projections of one `CycleResult`.
+
+```python
+from promptpotter.domain.export import parse_prompt_export
+export = parse_prompt_export(Path("…/export.json").read_text())
+template = export.template()          # PromptTemplate — fields by name, few-shot intact
+export.measurement.composite_fitness  # under export.measurement.formula, never a bare number
+```
+
+Four rules hold it, each a defect of DSPy's own `save()` inverted (`domain/export.py` argues them):
+**fields by name** (their `load_state` zips positionally with `strict=False`, so a signature that
+gained a field reloads scrambled and raises nothing) · **provenance inside the file** — the fitness
+under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest, which is the half
+we compute and they cannot · **an `artifact_version` a reader refuses on**, since we owe no
+back-compat · **JSON and scalars, never pickle**. `tuned_params` carries the node config the winner
+ran under, minus each node's rendered prompt — that is `prompt_fields` again, and one artifact does
+not state a fact twice.
+
+Absent when no round ever closed: an artifact whose point is a fitness with provenance may not
+carry an unmeasured one.
 
 ## 6. Ledger event types
 

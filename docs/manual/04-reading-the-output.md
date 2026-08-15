@@ -134,7 +134,7 @@ The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`,
 
 A campaign stops when: round limit reached, perfect accuracy, or Ctrl+C. First Ctrl+C cancels the in-flight call, saves everything already banked, and exits 130; second force-quits.
 
-After it **finishes**: best config in `index.json::final` (`winner_prompt_fields` / `winner_pipeline_params`); per-round digest in `log.md`; live state in `dashboard.json`. Open these directly — there is no read CLI. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
+After it **finishes**: best config in `index.json::final` (`winner_prompt_fields` / `winner_pipeline_params`); the same winner with its provenance, in the shape another program reads, in `export.json`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly — there is no read CLI. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
 
 ## Resuming and rewinding
 

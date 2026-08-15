@@ -124,29 +124,32 @@ def round_result(
         for reason, count in (("no_op_variant", no_op), ("duplicate_variant", dup))
         for i in range(count)
     ]
-    return RoundResult(
-        round=rnd,
-        label=f"round_{rnd}",
-        accuracy=0.5,
-        hits=2,
-        total=4,
-        improved=improved,
-        prompt_fields={},
-        candidates_scored=candidates_scored,
-        candidate_scores=measured + rejected,
-        all_candidate_results={
+    # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field. Spelled
+    # the other way it silently ``TypeError``s on the eight named here — the builder's contract is
+    # "bend the field you care about", and half the fields did not honour it.
+    base: dict[str, Any] = {
+        "round": rnd,
+        "label": f"round_{rnd}",
+        "accuracy": 0.5,
+        "hits": 2,
+        "total": 4,
+        "improved": improved,
+        "prompt_fields": {},
+        "candidates_scored": candidates_scored,
+        "candidate_scores": measured + rejected,
+        "all_candidate_results": {
             f"c{i}": [
                 {"predicted": "Uncertain" if i < collapsed or i < cut else t, "ground_truth": t}
                 for t in (_TRUTH[:2] if i < cut else _TRUTH)
             ]
             for i in range(candidates_scored)
         },
-        health=degradation_health(
+        "health": degradation_health(
             samples=samples, degraded_rate=degraded_rate, no_result=no_result
         ),
-        l1_parse_failure=parse_failure,
-        **overrides,
-    )
+        "l1_parse_failure": parse_failure,
+    }
+    return RoundResult(**(base | overrides))
 
 
 def cycle_result(

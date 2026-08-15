@@ -125,7 +125,8 @@ logs:
   journalctl -u cloudflared -f      # tunnel
   journalctl -u $SERVICE_NAME -f    # uvicorn
 
-reminder: this is currently public. Sign-in is gated by the OIDC allowlist;
+reminder: this is currently public. Sign-in is open and grants access — what
+bounds a stranger is FREE_TIER_SPEND_CAP_USD, and the blocklist is the revoke;
 see the Security posture section in deploy-linux/README.md.
 EOF
 else

@@ -2,15 +2,15 @@
 
 > **Beta.** Forward todo in execution order; this file absorbs the per-milestone specs (git log holds their full prose). The two `m12-*.yaml` files + the ADRs are the only other live contracts.
 >
-> **Live now:** deployed at `https://app.promptpotter.com` (Cloudflare Tunnel + systemd, OIDC + allowlist — see [`deploy-linux/`](../../deploy-linux/README.md)). Allowlist-gated but internet-reachable, on **one shared LLM key** from `.env` — so the sequence below is "harden a thing already serving users," not "prep before launch."
+> **Live now:** deployed at `https://app.promptpotter.com` (Cloudflare Tunnel + systemd, OIDC — see [`deploy-linux/`](../../deploy-linux/README.md)). **Open signup**: completing OIDC grants access, bounded by a per-account lifetime spend ceiling rather than an approval queue, on **one shared LLM key** from `.env` — so the sequence below is "harden a thing already serving users," not "prep before launch."
 >
 > **Three ways to run it (who operates it).** **(1) We run it** — the hosted beta above, allowlist-gated on one shared key; limited free (10 campaigns · 20 rounds each), then BYO key (the per-user coupon → BYO path is Lane A2 below, spec-only today). **(2) You run it** — local, Claude-operated via `/potter-run` on your own keys, unlimited, full source ([`docs/manual/02-install.md`](../manual/02-install.md)). **(3) Your team runs it** — the *same* self-hosted stack as the beta ([`deploy-linux/`](../../deploy-linux/README.md): Cloudflare Tunnel + OIDC allowlist), multi-user + whitelabel, yours to own (renaming it: [`whitelabel.md`](../developer/whitelabel.md)). **The developers and operator run tier 3** (self-hosted team-online); tiers 1 and 3 are one codebase + `deploy-linux/` stack, differentiated by who owns the box and whitelabel, not a fork. (Concurrent multi-user serving is `capacity=1`/sequential today — gated below.)
 
 ## Hard ordering (violate → rebuild)
 
 - **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for.
-- **Host coupon + BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota with no per-user ceiling. The fix: a per-user **coupon** (host-key spend up to a fixed size + expiry), then **BYO keys** to continue on their own money. Present liability → Lane A2.
-- **HTTP-edge abuse protection scales with the allowlist.** Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound the public surface now; app-level rate-limiting (C6) is due the moment the allowlist is removed.
+- **BYO per-user API keys — now the load-bearing half, and unbuilt.** Signup is open and each account is metered against `FREE_TIER_SPEND_CAP_USD` (lifetime, `quota.py::lifetime_ceiling_usd`), so the host key is bounded — but a user who spends their ceiling has **nowhere to go**: hitting it is a dead end until BYO lands. That is the liability now, not the unbounded spend it replaced. Lane A2, and the coupon layer is optional beside it rather than a prerequisite.
+- **HTTP-edge abuse protection is now due.** Cloudflare edge + the per-account ceiling + per-user `JobRegistry` quotas bound the public surface; with the approval queue gone, app-level rate-limiting (C6) is the remaining gap — nothing bounds the NUMBER of accounts, only what each one may spend.
 
 Any new endpoint is multi-tenant by default.
 
@@ -22,7 +22,7 @@ Drain before feature work: [`code-debt-cleanup`](code-debt-cleanup.md).
 
 Sequenced into lanes by dependency, not milestone number. **Front priority = Lane A + the publication lane, concurrent** (no shared seam). Lane B is closed; Lane C follows A.
 
-### Lane A — beta usable for allowlisted web users, end-to-end
+### Lane A — beta usable for free-tier web users, end-to-end
 
 | # | Item | Status |
 |---|---|---|
@@ -86,6 +86,29 @@ Today PromptPotter is driven by a human or by Claude via `/potter-run` (the entr
 
 Full argument + a same-dataset, same-base-model head-to-head experiment: [related-work.md](../research/related-work.md) § PromptPotter × NVIDIA AutoResearch. Tracked as **C5**.
 
+### Application radius — what PromptPotter EMITS, and the standing DSPy rule
+
+Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, this one widens what it *emits*.
+
+**The standing rule first, because it governs every future integration and not just this one: whenever we plan an ecosystem expansion — a new integration, export, registry, tracing sink, or callable surface — DSPy is the reference we read before designing.** Not because their code is better; a source study says plainly that it is not ([related-work.md](../research/related-work.md) § What a DSPy source study settles). **Their ecosystem beats ours while their code does not**, and that asymmetry is the whole lesson: reach is won by being consumable, not by being well-built. Read how DSPy gets consumed, then decide what we emit. Skipping that read is how we would build a good surface nobody plugs into.
+
+**The gap, located.** PromptPotter today is *terminal* — it ends at "here is your prompt", and a human carries that to whatever is in production. DSPy is *ambient* — it is already what runs, and optimization is one operation performed against it. The gap is not features: it is that our output is a **report** where theirs is an **artifact a running system consumes**. Closing it is emitting something their ecosystem already knows how to read.
+
+**The boundary, and it is not negotiable: we write a file and provide a reader. We never load, host, route, or hot-swap.** The swap belongs to the host — a registry alias, a path the app reads at boot, a committed artifact. Becoming a serving framework is out of scope, permanently.
+
+**The artifact — SHIPPED.** `cycles/{id}/export.json`, projected from one `RoundResult` by `domain/export.py` and written by the same `mark_finished` call that stamps `index.json::final`. Its own file rather than a key under `final`: its readers are outside this package, and handing them the campaign index to dig through is not an artifact. Reader contract + the four rules as built: [`../developer/stable-api.md`](../developer/stable-api.md) § 5c. What each rule inverts, all verified in DSPy's source:
+
+- **Field names always, never positional.** `Signature.dump_state` writes fields positionally and `load_state` zips them back with `strict=False`, so a signature that gained a field reloads a scrambled prompt with no error at all.
+- **Provenance travels *in* the artifact** — campaign, cycle, the fitness **under its named formula**, n, CI, θ, matched-origin lift, the dataset fingerprint, the optimizer-manifest hash. DSPy's artifact carries none of this: you cannot ask it *"how good is this, and how do you know?"* This is the half we already compute and they cannot, and it turns the README's self-validation claim into a receipt that travels with the prompt.
+- **An `artifact_version`,** so a reader can **refuse**. We owe no back-compat (root § STOP); refusing loudly is the point.
+- **Model identity yes, credentials never. JSON only, never pickle** — it is text and scalars.
+
+**Three consumers, one artifact.** (a) Our own runtime, via a loader returning a `PromptTemplate`. (b) A DSPy program — through a `to_dspy` view living in the `promptpotteropt` repo, never here (the dependency arrow is one-way, [`dspy-adapter.md`](dspy-adapter.md)); it applies the winner to a *live* program and never emits DSPy state, which sidesteps the positional-zip corruption rather than inheriting it. (c) MLflow — targeting the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs.
+
+**Dependency, settled:** the dataset fingerprint is load-bearing, not decorative — an exported fitness number is only as trustworthy as the identity of the rows it was measured on. B2 needed none (it compares the content each stored row already carries), so the artifact brought its own: `shared/hashing.py::dataset_hash`, the rows alone. Deliberately not a slice of `content_hash`, which mixes prompt and pipeline config into the same digest — right for a cache key, useless as an identity two campaigns can compare.
+
+**Open — the three consumers.** (a) is built (`PromptExport.template()`); (b) `to_dspy` lives in the `promptpotteropt` repo and waits on Phase C; (c) MLflow's Prompt Registry is unwritten. So is § Captured "Export / copy from dashboard" — the same artifact behind a button.
+
 ### Prompt-iteration framework + exit gate
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
 - `_mint_fork` (`resume_and_fork/fork_siblings.py`) is the single entry for all 7 `ForkTrigger` variants (one `ForkSpec` + `CycleSeed`); L2/L3 auto-rebase capped at `MAX_AUTO_REBASES = 10`/invocation, gated by `OptimizationConfig.rebase_capability`.
@@ -121,7 +144,7 @@ Hard-Sample Sorter Phase 2/3 (Phase 1 `build_hard_samples_artifact_from_observat
 
 ## Captured — pending triage
 
-- **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state); first slice of broader export.
+- **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state). Shape is owned by § Application radius; this is that artifact behind a button.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 
 ## Identity — live forward gap (non-derivable)

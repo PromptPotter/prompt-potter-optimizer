@@ -130,7 +130,6 @@ async def generate_or_load_candidates(
             cycle,
             n_variants=_n_variants,
             creativity=_creativity,
-            obs=obs,
             round_num=round_num,
         )
 

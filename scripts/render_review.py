@@ -36,8 +36,8 @@ def main(argv: list[str]) -> int:
     # stand-in for the live path's ``cycle.opt_sp.memory.task_context``.
     context_object: list[str] = []
     for r in reversed(rounds):
-        if r.opt_search_point is not None:
-            td = r.opt_search_point.memory.task_context
+        if r.opt_sp is not None:
+            td = r.opt_sp.memory.task_context
             context_object = [td.pipeline_purpose, td.optimization_goals, td.key_challenges]
             break
 

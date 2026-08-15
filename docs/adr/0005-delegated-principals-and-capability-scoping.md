@@ -146,7 +146,7 @@ and spend ceiling are chosen by the delegator, subject to the invariant:
 > **Sealed grant store:** a sub-principal's grants (caps + ceiling) live in a store the
 > sub-principal **cannot write** — the identity/config zone, never the tenant's own
 > editable space. A delegate that could edit its own grant would self-escalate, defeating
-> attenuation. Same protected-zone rule as the sign-in allowlist (ADR-0004): the file that
+> attenuation. Same protected-zone rule as the sign-in blocklist (ADR-0004): the file that
 > decides authority is the most protected file in the install.
 
 The user's **own AI assistant**, in the host==user case, acts under the user's
@@ -261,7 +261,7 @@ degenerate case of the subtree tag, underbuilt not contradicted. No edit-kind sp
 ### 5. Per-grant spend ceiling — SHIPPED
 
 Each grant carries a spend ceiling, enforced by the existing spend-cap probe (ADR-0003):
-`effective_spend_cap_usd` now folds `min(requested_cap, daily_remaining, grant_ceiling)`,
+`effective_spend_cap_usd` now folds `min(requested_cap, lifetime_remaining, grant_ceiling)`,
 reading the ceiling from the identity claims a delegated sub-principal carries. No new spend
 machinery — a narrower input to the one that exists. (Per-*channel* ceilings await §2.)
 
@@ -311,7 +311,7 @@ secure method exists — a *known, bounded* limitation, not a hidden one.
    attenuation might want; the system works without it — do not build it now.)
 3. **Where grants live + who edits them.** Decided in constraint (§1 sealed grant store):
    grants live in a store the sub-principal cannot write. Residual: *which* protected
-   store — the identity zone (`.promptpotter/identity/`, alongside the allowlist) edited
+   store — the identity zone (`.promptpotter/identity/`, alongside the blocklist) edited
    via an operator-admin channel (ADR-0004), or a tenant-scoped-but-owner-only surface for
    a user minting their own delegates? The write path must be one the delegate can't reach.
 4. **`step-cycle` scope — RESOLVED + SHIPPED.** One full clean L1 round is the unit

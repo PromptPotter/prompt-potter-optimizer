@@ -27,19 +27,25 @@ except ImportError:
     pass
 
 from promptpotter.application.campaign_config import load_campaign_config  # noqa: E402
+from promptpotter.application.datasets.authored import (  # noqa: E402
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
 from promptpotter.application.datasets.loaders import (  # noqa: E402
     dataset_loader,
     loadable_dataset_names,
 )
+from promptpotter.application.embedded_run import (  # noqa: E402
+    mint_and_score_origin,
+    open_session,
+    run_campaign,
+)
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
+from promptpotter.presentation.views.completion import report_completion  # noqa: E402
 from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
-from promptpotter.presentation.views.notebook_run import (  # noqa: E402
-    init_notebook_session,
-    prepare_origin_notebook,
-    run_optimization_notebook,
-)
+from promptpotter.presentation.views.live.display import LiveDisplay  # noqa: E402
 
 
 def _build_config(
@@ -49,7 +55,6 @@ def _build_config(
     variants: int,
     rounds: int,
     patience: int,
-    task_context: str,
 ) -> dict[str, Any]:
     return {
         "dataset_name": dataset,
@@ -70,19 +75,13 @@ def _build_config(
 
 
 def _infer_scoring(dataset: str) -> str:
-    """Prefer the dataset's own ``campaign.json`` formula; fall back to ``exact_match``."""
-    import json
-
-    cfg_path = _REPO_ROOT / "datasets" / dataset / "campaign.yaml"
-    if cfg_path.exists():
-        try:
-            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-            formula = cfg.get("campaign_config", {}).get("scoring")
-            if formula:
-                return str(formula)
-        except Exception:
-            pass
-    return "exact_match(predicted, ground_truth)"
+    """Prefer the dataset's own declared formula; fall back to ``exact_match``. Through the one
+    reader — this parsed the YAML template with ``json.loads`` behind a bare ``except``, so it
+    never once read a formula and every smoke run scored on the fallback."""
+    formula = read_campaign_config_file(
+        dataset_campaign_path(_REPO_ROOT / "datasets" / dataset)
+    ).get("scoring")
+    return str(formula) if formula else "exact_match(predicted, ground_truth)"
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -109,10 +108,11 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] campaigns:    {project_dir / 'campaigns'}", flush=True)
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
-    session = await init_notebook_session(
-        dataset_name=args.dataset,
+    session = await open_session(
+        args.dataset,
         backend_url=args.backend_url,
         backend_id=args.dataset,
+        on_status=print,
     )
 
     schema = session.pipeline_schema
@@ -133,7 +133,6 @@ async def _run(args: argparse.Namespace) -> int:
             variants=args.variants,
             rounds=args.rounds,
             patience=args.patience,
-            task_context=args.task_context,
         )
     )
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
@@ -144,28 +143,36 @@ async def _run(args: argparse.Namespace) -> int:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
-    observers, dataset_obj, origin = await prepare_origin_notebook(
+    observers, dataset_obj, origin = await mint_and_score_origin(
         session,
         train_slice,
         campaign_config,
         pipeline_params=pipeline_params,
+        display=LiveDisplay.for_campaign(session, campaign_config),
+        on_status=print,
     )
-    print(f"[smoke] origin: {origin.origin_acc:.3f} ({origin.hits}/{origin.total})", flush=True)
+    report = origin.report
+    print(
+        f"[smoke] origin: {report.accuracy:.3f} "
+        f"({round(report.accuracy * report.total)}/{report.total})",
+        flush=True,
+    )
 
-    result = await run_optimization_notebook(
+    result = await run_campaign(
         observers,
         dataset_obj,
         origin,
         campaign_config,
         session=session,
     )
+    report_completion(result, session=session)
 
-    cycle_id = result.cycle_id or "" if result is not None else ""
+    cycle_id = result.cycle_id or ""
     cycle_dir = (
         project_dir / "campaigns" / session.campaign_id / "cycles" / cycle_id if cycle_id else None
     )
 
-    if result is None or not result.rounds:
+    if not result.rounds:
         print(
             f"\n[smoke] dataset={args.dataset} "
             f"rounds=0 "
@@ -205,10 +212,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")
     p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")
     p.add_argument("--backend-url", default="http://127.0.0.1:8000")
-    p.add_argument(
-        "--task-context",
-        default="Solve the following problem. Provide only the final answer, nothing else.",
-    )
     return p.parse_args()
 
 

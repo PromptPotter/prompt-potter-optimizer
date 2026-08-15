@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
-    from promptpotter.presentation.views.live.display import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -142,55 +141,22 @@ def backend_unreachable_result(backend_url: str) -> CommandResult:
     )
 
 
-def _build_live_display(
-    args: argparse.Namespace,
-    *,
-    session: Session,
-    campaign_config: CampaignConfig,
-    origin_acc: float,
-) -> LiveDisplay:
-    from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.presentation.views.display import set_display_tags
-    from promptpotter.presentation.views.live.display import LiveDisplay as _LiveDisplay
-
-    set_display_tags(session.pipeline_schema)
-    scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
-    opt = campaign_config.optimization
-
-    if getattr(args, "verbose", False):
-        return _LiveDisplay(
-            campaign_rounds=[],
-            origin_acc=origin_acc,
-            l1_patience=opt.l1_patience,
-            pipeline_schema=session.pipeline_schema,
-            scoring_formula=scoring_formula,
-        )
-    return _LiveDisplay(
-        origin_acc=origin_acc,
-        l1_patience=opt.l1_patience,
-        scoring_formula=scoring_formula,
-        pipeline_schema=session.pipeline_schema,
-    )
-
-
 def build_observers(
-    args: argparse.Namespace,
     session: Session,
     campaign_config: CampaignConfig,
     train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
     from promptpotter.application.run_observers import build_run_observers
+    from promptpotter.presentation.views.display import set_display_tags
+    from promptpotter.presentation.views.live.display import LiveDisplay
 
-    display = _build_live_display(
-        args, session=session, campaign_config=campaign_config, origin_acc=origin_acc
-    )
+    set_display_tags(session.pipeline_schema)
     return build_run_observers(
         session=session,
         campaign_config=campaign_config,
         dataset=train_data,
-        display=display,
-        resumed_from_round=None,
+        display=LiveDisplay.for_campaign(session, campaign_config, origin_acc=origin_acc),
         origin_accuracy=origin_acc,
     )
 
@@ -209,7 +175,7 @@ async def drive_cycle(
     from promptpotter.application.runner.entry import run_optimization
 
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    observers = build_observers(args, session, campaign_config, train_data, pre_origin_acc)
+    observers = build_observers(session, campaign_config, train_data, pre_origin_acc)
 
     # Control-local hooks (pause.flag under .runtime/) are bound centrally in
     # run_optimization (the single runner seam) so CLI and API launches behave

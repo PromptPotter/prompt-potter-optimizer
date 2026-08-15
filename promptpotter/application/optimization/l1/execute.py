@@ -21,18 +21,15 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.termination import panel_gate_tripped
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, emit_phase
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import RoundResult, is_leader_eligible, unscoreable_cells
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.infrastructure.tracing.events import (
-    L1CritiqueWritten,
     PromptVersion,
     RoundEnd,
     RoundStart,
-    RoundWinnerChosen,
 )
 from promptpotter.shared.errors import graceful, is_error_result
 
@@ -132,16 +129,6 @@ async def execute_round(
         # (origin.opt_sp), so the ids match and absorb_round adopts nothing. absorb reads
         # this to advance the cycle's identity to the winner on an advancing round.
         round_result.opt_sp = winner_opt_sp
-        if obs and round_result.candidate_scores:
-            with graceful("RoundWinnerChosen emit failed"):
-                obs.emit_write_point(
-                    RoundWinnerChosen,
-                    campaign_id=session.state.tracing_campaign_id,
-                    round_num=round_num,
-                    winner_candidate_id=winner_opt_sp.lineage.id,
-                    winner_accuracy=round_result.accuracy,
-                    improved=round_result.improved,
-                )
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -250,7 +237,6 @@ async def execute_round(
         session.pipeline_schema,
     )
 
-    critique_text = ""
     # A zero-candidate round (l1_generate returned [] — empty/parse-failed provider
     # response) leaves ``round_result.results`` holding the ORIGIN's rows, so without the
     # ``candidates`` guard critique would fire a meta LLM call to critique nothing. Skip it:
@@ -285,16 +271,6 @@ async def execute_round(
                     ledger=session.state.ledger,
                 )
             round_result.critique = critique_result
-            critique_text = format_l1_critique_for_prompt(critique_result, session.pipeline_schema)
-    if obs and critique_text:
-        with graceful("L1CritiqueWritten emit failed"):
-            obs.emit_write_point(
-                L1CritiqueWritten,
-                campaign_id=session.state.tracing_campaign_id,
-                round_num=round_num,
-                l1_critique_text=critique_text,
-            )
-
     if obs:
         with graceful("RoundEnd emit failed"):
             obs.emit(

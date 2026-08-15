@@ -188,6 +188,21 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
   landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse number recorded,
   so there is no before/after. Action: sweep + record one pass. Blocker: none.
 
+**From the 2026-08-14 DSPy source study.** Defects in OUR code, surfaced by comparing against a
+peer system and each verified here afterwards. The DSPy-facing conclusions live in
+[`../research/related-work.md`](../research/related-work.md); only our own defects are below.
+
+- **Seven ContextVars, and five never reset.** `_MODE` / `_MEASURED`
+  (`shared/instrument.py`), `_INNER_SPAWN` (`runner/inner/spawn.py`), the optimizer prompt
+  overrides (`dispatch/llm_call/prompts.py`), `_CYCLE_LEDGER` / `_CURRENT_ROUND`
+  (`infrastructure/llm/telemetry.py`), `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`).
+  Five `.set()` without keeping a token, so nothing restores the prior value. The fix is one
+  `@contextmanager` doing token set/reset, generalized from the two places we already do it
+  right (`measured_candidate_scope`, `dispatch/facade.py::_no_round_warnings`) — the mechanism
+  unified, the vars left separate. **Do not fuse them into one settings object:** `_ABORT_CHECK`
+  is *composed* at the runner seam (`own_pause() or inherited()`), and that composition is what
+  carries an outer pause into a nested L4 cycle.
+
 ## Blocked — named blocker
 
 **Behavior change (needs explicit sign-off, not a blind swap) — scoring:**

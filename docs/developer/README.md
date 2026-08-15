@@ -149,6 +149,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 | [Pipeline JSON contract](pipeline-contract.md) | Strict field-level `pipeline.yaml` shape |
 | [Stable API v1](stable-api.md) | Fork-readiness surface |
 | [Whitelabel](whitelabel.md) **(draft)** | Running the unit under another name — the four rename tiers, what each breaks, what must never be renamed. Parked: wired and gate-green, never walked end to end |
+| [DSPy optimizer](dspy-optimizer.md) **(draft)** | Driving the loop from inside someone else's DSPy program via the separate `promptpotteropt` package — what that trades away, the `compile()` swap, `Loop` / `Node`, and why it asks for a dataset name. Spec: [`../specs/dspy-adapter.md`](../specs/dspy-adapter.md) |
 | [Run initialization](run-initialization.md) | The INIT phase: the four-step chain `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop` with pre/postconditions and an ASCII diagram |
 | [Concept map](concept-map.md) | "Where does concept X live" table |
 | [Event stream](event-stream.md) | SSE Profile-A contract |

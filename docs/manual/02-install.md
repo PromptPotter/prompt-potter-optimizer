@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-`[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
@@ -69,7 +69,13 @@ Groq daily-volume model swap (when `120b` exhausts): [`05-troubleshooting.md § 
 
 ## Optional dependency bundles
 
+A bare install is the **engine**: the CLI, the loop, the stores. Serving the API and the
+dashboard is `[api]`, because PromptPotter is also a library another program imports, and one
+that drags a web server along is one nobody adds.
+
 ```bash
+pip install -e ".[api]"            # the read-only API + the dashboard mount + OIDC identity
+pip install -e ".[excel]"          # ingest .xlsx as well as CSV/TSV/JSON/JSONL
 pip install -e ".[stats]"          # Wilson CI, significance tests (scipy)
 pip install -e ".[jupyter]"        # JupyterLab + IPython display
 pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)

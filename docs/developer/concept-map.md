@@ -66,6 +66,12 @@ already points at one place.
   `nodes.{name}.config` overlay block, `config/settings.py` (install-global
   constants), the `promptpotter/config/` package, a connector's
   `default_node_config`, and `node_config` (the wire key). Qualify the word.
+- **`origin`** — ours is the campaign root, C0, what a fork branches *from* (row
+  above). HTTP's is a **web origin** — scheme+host+port — and it arrives through
+  `ALLOWED_ORIGINS` / `settings.allowed_origins_list` / CORS `allow_origins`,
+  which decide who may call the API from a browser and say nothing about any
+  campaign. Neither name is ours to change: one is the domain's spine, the other
+  is the standard's. Read the `ALLOWED_` prefix as the tell.
 - **`steps`** — `list[str]` as the reserved top-level `pipeline_params` key
   (active node names, `RESERVED_PIPELINE_PARAM_KEYS`); `list[dict]` on the
   backend's `GET /pipeline` payload. Walk the former with `node_config_items`,

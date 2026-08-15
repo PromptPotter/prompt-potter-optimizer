@@ -3,8 +3,8 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "promptpotter-optimizer"
-version = "0.8.10"
+name = "promptpotter"
+version = "0.8.11"
 description = "Automatic prompt optimization for LLMs — give it a dataset, it finds a better prompt"
 readme = "README.md"
 license = "MIT"
@@ -13,33 +13,64 @@ keywords = ["prompt-optimization", "llm", "fastapi", "evaluation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.13"
+# The ENGINE and nothing else — what `import promptpotter` needs to optimize. This list is
+# measured, not asserted: `application/embedded_run.py` and the CLI entry each import to
+# exactly this closure and no further. Everything a SERVER needs is `[api]`, because the
+# fourth distribution tier is PromptPotter running inside someone else's program
+# (`docs/specs/dspy-adapter.md`), and a library that drags a web server in is one nobody adds.
 dependencies = [
+    "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
+    "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
+    "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
+    "python-dotenv>=1.2.2",    # why kept: nothing imports it — pydantic-settings does, to read
+                               # `env_file`, and asks only for >=0.21.0. The direct pin is the
+                               # floor past CVE-2026-28684 that the transitive one would not give.
+    "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
+    "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
+    "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
+    "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
+    "pyyaml>=6.0",             # why kept: parse/emit the operator-authored config tier (store/io.py::read_yaml/write_yaml). It used to ride in transitively behind uvicorn[standard]; that is an extra now, so this line is what installs it.
+]
+
+[project.optional-dependencies]
+api = [
+    # `python -m uvicorn promptpotter.main:app` needs this; `python -m promptpotter` does not.
+    # The whole set is reachable only through `main.py` and `presentation/api/`, cryptography
+    # included — identity gates the API and nothing else asks it a question.
     "fastapi>=0.119.0",        # why kept: read-only operator API + root webapp mount.
     "starlette>=1.0.1",        # why kept: FastAPI's ASGI core (not imported directly). Pinned because FastAPI's own floor (>=0.46.0) leaves the resolver on a Starlette with PYSEC-2026-161 / CVE-2025-54121 / CVE-2025-62727; this floor clears all three.
     "python-multipart>=0.0.27", # why kept: multipart/form-data transport for POST /datasets/ingest tabular-file upload (FastAPI fails at route registration without it). Floor past CVE-2026-24486/40347/42561.
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the read-only API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
-    "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
-    "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
-    "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
-    "python-dotenv>=1.2.2",    # why kept: .env loading at init. Floor past CVE-2026-28684.
-    "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
-    "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
-    "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
-    "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
     "cryptography>=46.0.7",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007.
-    "openpyxl>=3.1.0",         # why kept: .xlsx upload ingest (application/datasets/csv_ingest.py::_read_xlsx) + ground-truth Excel build (datasets/dataset_builder.py). Default-installed; xlsx parsing is gated off by settings.HARDENED_MODE, not by absence.
-    "pyyaml>=6.0",             # why kept: parse/emit the operator-authored config tier (store/io.py::read_yaml/write_yaml). Already present in every install transitively via uvicorn[standard]; declared because we import it.
 ]
-
-[project.optional-dependencies]
+excel = [
+    # why kept: .xlsx ingest (`application/datasets/csv_ingest.py::_read_xlsx`) + the
+    # ground-truth builder (`datasets/dataset_builder.py`). Lazy behind an install guard, so
+    # its absence is an ingest error naming this extra — `settings.HARDENED_MODE` refuses the
+    # format as policy, which is a separate answer to a separate question.
+    "openpyxl>=3.1.0",
+]
+dspy = [
+    # why kept: `presentation/teleprompter.py` (PromptPotterOpt) + the `dspy` connector, which
+    # runs the caller's own `dspy.Module` in-process. Deliberately absent from `all`: it drags
+    # litellm + optuna + pandas, and only a caller who asked to be a DSPy optimizer needs it.
+    # The connector's import is function-local, so `promptpotter.connectors` still loads without
+    # it; importing the teleprompter without it raises naming this extra.
+    "dspy>=3.0.0",
+]
 jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
-    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/notebook_run.py)
+    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
@@ -67,6 +98,14 @@ all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
     # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
+    "fastapi>=0.119.0",
+    "starlette>=1.0.1",
+    "python-multipart>=0.0.27",
+    "scalar-fastapi>=1.0.0",
+    "uvicorn[standard]>=0.27.0",
+    "sse-starlette>=2.4.1",
+    "cryptography>=46.0.7",
+    "openpyxl>=3.1.0",
     "jupyterlab>=4.0",
     "ipython>=8.0",
     "scipy>=1.12.0",
@@ -85,7 +124,11 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/PromptPotter/prompt-potter-optimizer"
 Repository = "https://github.com/PromptPotter/prompt-potter-optimizer"
+Documentation = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/README.md"
+Changelog = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/CHANGELOG.md"
+Issues = "https://github.com/PromptPotter/prompt-potter-optimizer/issues"
 
 [project.scripts]
 promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
@@ -97,7 +140,7 @@ include = ["promptpotter*"]
 # deliberate and exhaustive: setuptools ships no non-.py file unless it is named
 # here, so an asset that is merely committed to git is NOT installed. Two of these
 # were already correctly placed inside the package and still absent from the wheel
-# — which is how `pip install promptpotter-optimizer` produced a CLI that starts
+# — which is how `pip install promptpotter` produced a CLI that starts
 # and then cannot make a single optimizer call.
 #
 # Re-verified 2026-07-30, and verifying it has a trap worth knowing: `*.egg-info/
@@ -173,6 +216,7 @@ module = [
     "scalar_fastapi.*",
     "openpyxl.*",
     "datasets.*",
+    "dspy.*",
     "scipy.*",
     "IPython.*",
     "tests.*",
@@ -251,8 +295,6 @@ DEP002 = [
     "ipython",
     "uvicorn",
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
-    "starlette",         # FastAPI's ASGI core; pinned for a security floor, never imported directly by promptpotter/
-
     "jupyterlab",
     "pytest",
     "pytest-asyncio",
