@@ -10,7 +10,13 @@ import {
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
-import { cellFor, ORDER_COLUMN, RANK_HINT, type CellValue, type HeatDot } from "./columns";
+import {
+  cellFor,
+  headerTitle,
+  ORDER_COLUMN,
+  type CellValue,
+  type HeatDot,
+} from "./columns";
 import { HardSamplesFooter } from "./HardSamplesFooter";
 import { HardSamplesHeatTip, HardSamplesPopover } from "./HardSamplesPopover";
 import { useHardSamplesTableModel, wrappable } from "./useHardSamplesTableModel";
@@ -31,14 +37,11 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
-  // The key the server ranked the roster by, off its own echo. `null` while the read
-  // is in flight — the table then claims no key rather than guessing one. NOT
-  // `order`: `sampleOrder` next door is the scoring WALK, and one props list cannot
-  // hold two things called order.
+  // The key the server ranked by, off its echo; `null` while the read is in flight, and the
+  // table then claims none. Not `order` — `sampleOrder` in this tree is the scoring WALK.
   rankedBy: HardSampleOrder | null;
-  // The operator's PICK, null until they make one. Separate from `rankedBy` on
-  // purpose: the control must move the instant it is clicked, while every LABEL
-  // keeps naming the served order until the new rows actually land.
+  // The operator's PICK, null until they make one. Separate from `rankedBy`: the control
+  // moves on click, while every LABEL keeps naming the served order until the rows land.
   rankedByPick: HardSampleOrder | null;
   onRankedByChange: (o: HardSampleOrder) => void;
   scope?: HardSamplesScope;
@@ -100,8 +103,6 @@ export function HardSamplesTable({
     resetLayout,
   } = m;
 
-  // What auto-sort is actually ranking by. Null while unknown, which is a state the
-  // header must be able to render — see the marker below.
   const liveOrder = liveSortActive && rankedBy ? ORDER_COLUMN[rankedBy] : null;
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -136,10 +137,8 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              // Under live-sort the rows follow the SERVED ranking, and the marker
-              // follows it too — `liveOrder` is null until the roster read lands,
-              // because which key the rows are in is not knowable before then.
-              // Naming one anyway is how this labelled a δ-ranked roster "Info gain".
+              // The marker follows the SERVED ranking, and names none until it lands:
+              // which key the rows are in is not knowable before then.
               const sorted = liveSortActive
                 ? col.id === liveOrder?.col
                   ? "desc"
@@ -148,22 +147,7 @@ export function HardSamplesTable({
                   ? sortBy.dir
                   : null;
               const isRank = col.id === "rank";
-              const headerTitle = folded
-                ? "Unfold column"
-                : col.id === "pick_score"
-                  ? "Info gain — expected decision-information-gain from one measurement." +
-                    (liveOrder?.col === "pick_score"
-                      ? " Auto-sort ranks every row by this, highest first."
-                      : "")
-                  : liveSortActive && liveOrder
-                    ? col.id === liveOrder.col
-                      ? `Auto-sort ranks every row by ${liveOrder.label} (this column), highest first.`
-                      : `Auto-sort is ranking by ${liveOrder.label} — toggle it off to sort by this column.`
-                    : liveSortActive
-                      ? "Auto-sort follows the served ranking — toggle it off to sort by this column."
-                      : isRank
-                        ? RANK_HINT
-                        : `Sort by ${col.label}`;
+              const title = headerTitle(col, { folded, liveSortActive, liveOrder });
               return (
                 <div
                   key={col.id}
@@ -174,7 +158,7 @@ export function HardSamplesTable({
                     type="button"
                     className="hs-header-label"
                     onClick={() => handleHeaderClick(col.id, folded)}
-                    title={headerTitle}
+                    title={title}
                   >
                     {folded ? "⟩" : col.label}
                     {sorted && !folded && (

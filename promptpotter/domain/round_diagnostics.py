@@ -1,16 +1,9 @@
 """Typed post-scoring deterministics, computed once per round and attached to ``RoundResult``. Pure data — rendering lives in the
 dispatch hub's ``diagnostics`` signal, which is layer-agnostic.
 
-**Every field below defaults, and that is the contract, not laziness.** These are REPORTING
-payloads read back off disk — ``RoundResult.model_dump()`` IS the round document — and nothing
-gates, scores or escalates on them. So a field that loses its name must DEGRADE, never raise:
-otherwise one nested rename makes a paid measurement unreadable, which is the exact failure the
-document's ``extra="ignore"`` exists to prevent, and which that setting cannot reach on its own
-(it forgives an extra key, not a missing one). The SCORING payloads beside them on the same
-document — ``ScoredCandidate``, ``EscalationSignal`` — stay REQUIRED for the opposite reason: a
-missing field there means the record cannot be vouched for, and loading it blind would trade a
-loud failure for a silent wrong number. Producers pass every field explicitly; these defaults
-serve the read path alone."""
+**Tolerance is scoped by what a payload is FOR** — owned by
+[`CLAUDE.md`](CLAUDE.md) § Tolerance is scoped by what a payload is FOR. Everything here is
+reporting, so every field defaults and producers pass them all explicitly anyway."""
 
 from __future__ import annotations
 

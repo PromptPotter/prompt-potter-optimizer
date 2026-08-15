@@ -57,10 +57,8 @@ interface ScopeState {
   slice: ScopeSlice | null;
   error: string | null;
   splitTest: number | null;
-  // The key the server actually ranked `items` by, off its own echo. `null` until a
-  // read lands: what the rows are sorted by is not knowable before then, and a
-  // consumer that assumes one is how the table came to label a δ-ranked roster
-  // "Info gain".
+  // The key the server ranked `items` by, off its echo. `null` until a read lands — what
+  // the rows are sorted by is not knowable before then, and a consumer must not assume.
   order: HardSampleOrder | null;
 }
 
@@ -125,10 +123,8 @@ function sliceFrom(
 }
 
 // `${unitKey}\x1f${scope}\x1f${order}` — one entry per slice actually fetched. `order`
-// is the THIRD dimension, not a re-sort: the ranking is the server's, so asking for a
-// different key is a different read (webapp/CLAUDE.md § Scoring authority). Empty means
-// "whatever the dataset declares", which is its own slice — the server may resolve it to
-// either key, and the response says which.
+// is a dimension, not a re-sort: the ranking is the server's (webapp/CLAUDE.md § Scoring
+// authority). Empty is its own slice — "whatever the dataset declares".
 type SliceKey = string;
 
 // Keep only the unit in view. A roster is up to 1000 rows plus its series, so a
@@ -183,8 +179,7 @@ export function useDatasetPreview(
     const cmp = rootCampaignId;
     const cyc = rootCycleId;
     const key = sliceKey;
-    // Captured with the rest of the request identity: `order ?? undefined` is what the
-    // fetchers take, and the slice this write lands under is keyed on it.
+    // Captured with the rest of the request identity; the fetchers take `undefined`.
     const ord = order ?? undefined;
     let cancelled = false;
     const ac = new AbortController();

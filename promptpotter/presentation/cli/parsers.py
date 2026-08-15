@@ -392,9 +392,11 @@ def build_parser() -> argparse.ArgumentParser:
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
         "and the round files already hold and lifting escalation's resume counters onto "
-        "the persisted view. A cycle with a live producer is left alone. The sanctioned "
-        "remedy after a field rename or a record-shape change. Dry-run by default. "
-        "Pure disk work, zero spend.",
+        "the persisted view. A cycle with a live producer is left alone. (3) REPORT whether "
+        "every banked round document still loads, grouped by what drifted — read-only, because "
+        "pruning cannot restore a renamed field's value, so a repair there would be silently "
+        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
+        "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
     )
     p_restamp.add_argument(
         "--apply", action="store_true", help="Rewrite the files (default: report only)."

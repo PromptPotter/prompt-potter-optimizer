@@ -77,11 +77,9 @@ export const COLUMNS: ColDef[] = [
   { id: "ground_truth",  label: "Output",     align: "left",   numeric: false },
 ];
 
-// The served `hard_sample_order` → the column whose descending sort that ranking IS,
-// plus the name `log.md`'s own leaderboard already prints for it
-// (`application/views/render/heatmap.py`) — not a third word for the same key.
-// ONE table, because the sort marker and the header tooltips must never name
-// different keys for one served ranking: they did, and both named the wrong one.
+// The served `hard_sample_order` → the column its descending sort IS, under the name
+// `log.md`'s leaderboard prints (`application/views/render/heatmap.py`) rather than a third
+// word for it. ONE table, so the sort marker and the tooltips cannot name different keys.
 export const ORDER_COLUMN: Record<HardSampleOrder, { col: ColId; label: string }> = {
   info_gain: { col: "pick_score", label: "Info gain" },
   difficulty: { col: "delta", label: "Hardness" },
@@ -309,3 +307,31 @@ export function autoWidthFor(
 }
 
 export const RANK_HINT = "Position in current sort order — click to clear sort";
+
+// What a column MEANS, independent of how the roster is ordered. Absent ⇒ the label says it.
+const COLUMN_MEANING: Partial<Record<ColId, string>> = {
+  rank: RANK_HINT,
+  pick_score: "Info gain — expected decision-information-gain from one measurement.",
+};
+
+// *liveOrder* is the served ranking `ORDER_COLUMN` resolved, or null when auto-sort is on but
+// the roster read has not landed — the header then says a ranking is in force without naming
+// which, because naming one it cannot see is how a δ-ranked roster gets labelled Info gain.
+export function headerTitle(
+  col: ColDef,
+  { folded, liveSortActive, liveOrder }: {
+    folded: boolean;
+    liveSortActive: boolean;
+    liveOrder: { col: ColId; label: string } | null;
+  },
+): string {
+  if (folded) return "Unfold column";
+  const meaning = COLUMN_MEANING[col.id];
+  if (!liveSortActive) return meaning ?? `Sort by ${col.label}`;
+  const note = !liveOrder
+    ? "Auto-sort follows the served ranking — toggle it off to sort by this column."
+    : col.id === liveOrder.col
+      ? `Auto-sort ranks every row by ${liveOrder.label}, highest first.`
+      : `Auto-sort is ranking by ${liveOrder.label} — toggle it off to sort by this column.`;
+  return meaning ? `${meaning} ${note}` : note;
+}

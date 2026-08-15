@@ -1,5 +1,9 @@
 """Re-stamp every on-disk ``StrictModel`` record onto the current model. ``extra="forbid"`` obliges
-EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged — as a ROW."""
+EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged — as a ROW.
+
+Round documents are CHECKED and never rewritten: a row repairs by pruning to ``model_fields``,
+which cannot restore a renamed field's value. Which drift is fatal, and why that is correct, is
+owned by ``domain/CLAUDE.md`` § Tolerance is scoped by what a payload is FOR."""
 
 from __future__ import annotations
 
@@ -25,20 +29,19 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.phases import CampaignPhase, RunPhase
-from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.io import read_json_optional, write_yaml
 from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
 from promptpotter.infrastructure.store.user_store import User
 
-__all__ = ["compact_cycle_ledgers", "restamp_campaign_configs"]
+__all__ = ["check_round_documents", "compact_cycle_ledgers", "restamp_campaign_configs"]
 
 
-def _iter_cycle_ledgers() -> list[pathlib.Path]:
-    """Every cycle ledger under the workspace, inner sandboxes included. The one place that walk
-    is written down — each verb below re-spelled it, and a depth-limited version of exactly this
-    glob is what made an earlier census read 25 round files where the store holds 218."""
+def _workspace_trees() -> list[pathlib.Path]:
+    """Inner sandboxes are a SIBLING tree, not a subtree, so a ``*``-per-level glob silently
+    misses every one — it reports a plausible smaller number rather than raising."""
     root = DEFAULT_PROJECTS_ROOT
     if not root.is_dir():
         return []
@@ -46,7 +49,23 @@ def _iter_cycle_ledgers() -> list[pathlib.Path]:
     inner = inner_sandboxes_dir(root)
     if inner.is_dir():
         trees.extend(p for p in inner.iterdir() if p.is_dir())
-    return [p for tree in trees for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))]
+    return trees
+
+
+def _iter_cycle_ledgers() -> list[pathlib.Path]:
+    """Every cycle ledger under the workspace, inner sandboxes included."""
+    return [p for tree in _workspace_trees() for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))]
+
+
+def _iter_round_documents() -> list[pathlib.Path]:
+    """``**`` descends dot-directories, so the ``.runtime`` filter is what excludes the audit
+    twins under ``.runtime/cache/rounds/`` — same basename, and never a ``RoundResult``."""
+    return [
+        p
+        for tree in _workspace_trees()
+        for p in sorted(tree.glob("**/rounds/round_*.json"))
+        if ".runtime" not in p.parts
+    ]
 
 
 # What a row writes back once the record has validated. Takes the pruned mapping rather than
@@ -82,8 +101,9 @@ class _Surface(NamedTuple):
 # THE coverage contract. A model that reaches disk belongs here the day it is written; adding
 # one is a row, not a code change. Ordered so a document addressed twice (the campaign manifest
 # and the config nested inside it) has its inner record settled first.
-# Measurements (`RoundResult`, extra="ignore") and the optimizer reuse cache (evictable) are
-# deliberately absent: a stale key must never make a paid measurement unreadable.
+# Measurements (`RoundResult`) and the optimizer reuse cache (evictable) are deliberately absent.
+# Read the module docstring before adding either: the reason is NOT that `extra="ignore"` makes a
+# round document safe — it does not — and `check_round_documents` is what covers it instead.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
         title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
@@ -427,3 +447,39 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         "skipped_live": skipped_live,
         "bytes_saved": total_before - total_after,
     }
+
+
+def _drift_cause(exc: ValidationError) -> str:
+    """Indices collapse to ``[]`` so one rename reads as one cause rather than one per row."""
+    err = exc.errors()[0]
+    loc = ".".join("[]" if isinstance(part, int) else str(part) for part in err["loc"])
+    return f"{loc or '<document>'}: {err['type']}"
+
+
+def check_round_documents() -> dict[str, int]:
+    """Report which banked round documents no longer load. The drift this catches is otherwise
+    SILENT — ``verify``, ``resume`` and the ``ab`` replay each raise on it, and nothing else does."""
+    causes: Counter[str] = Counter()
+    first: dict[str, pathlib.Path] = {}
+    paths = _iter_round_documents()
+    for path in paths:
+        # `read_json_optional`, not tolerant: a corrupt round document is a finding, and
+        # collapsing it into "absent" is what would hide it.
+        try:
+            RoundResult.model_validate(read_json_optional(path))
+        except (ValidationError, ValueError, OSError) as exc:
+            cause = _drift_cause(exc) if isinstance(exc, ValidationError) else f"unreadable: {exc}"
+            causes[cause] += 1
+            first.setdefault(cause, path)
+
+    failed = sum(causes.values())
+    print(f"\nRound documents — {len(paths)} checked, {len(paths) - failed} load")
+    for cause, n in causes.most_common():
+        print(f"  {n:>6} {cause}")
+        print(f"         first: {first[cause]}")
+    if failed:
+        print(
+            "  Never rewritten here: pruning cannot restore a renamed field's value, so the fix "
+            "is the model or a migration of its own."
+        )
+    return {"rounds_checked": len(paths), "rounds_unreadable": failed}

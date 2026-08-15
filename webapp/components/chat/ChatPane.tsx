@@ -47,8 +47,7 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
-  // The key the server ranked the roster by, off its own echo — passed to BOTH
-  // consumers so the pane and the run card cannot name different orders.
+  // Passed to BOTH consumers, so the pane and the run card cannot name different orders.
   datasetOrder: HardSampleOrder | null;
   archivePerSample: Map<number, SampleSeries>;
   datasetTotals: SeriesTotals | null;

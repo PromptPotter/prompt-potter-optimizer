@@ -185,10 +185,9 @@ function AppShellInner() {
   // the switch is instant. The picker itself always runs on the dataset
   // scope regardless of this toggle — see l1/execute.py round-subset fit.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
-  // Which key the roster is ranked by. `null` = send no override, so the server resolves
-  // the dataset's declared `hard_sample_order` — the browser must not restate that default,
-  // because a client-side guess at it is exactly what mislabelled the table. What the
-  // control DISPLAYS is the served echo below, never this.
+  // `null` = send no override and let the server resolve the dataset's declared
+  // `hard_sample_order`; the browser must never restate that default. What the control
+  // DISPLAYS is the served echo below, never this.
   const [hardSampleOrder, setHardSampleOrder] = useState<HardSampleOrder | null>(null);
   // Dataset roster + per-sample measurement history for the unit in view.
   // One hook owns the fetch chain — it fetches ONE (unit, scope) slice at a time,

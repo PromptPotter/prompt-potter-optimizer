@@ -186,7 +186,10 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # It gets its own sandbox dir, whose pause flag nobody writes, so alone it would run to
     # completion while the outer sat "pausing" — COMPOSE the inherited predicate, never
     # overwrite it. Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
-    inherited = get_abort_check()
+    # The parent comes off the SESSION, never `get_abort_check()`: this runs again per rebase
+    # in the SAME task, so the ContextVar holds the predicate this task bound last time round —
+    # composing against that chains one per rebase, keeping retired forks' flags live in it.
+    inherited = session.inherited_pause_check
     if inherited is None:
         session.pause_check = own_pause
     else:
@@ -659,6 +662,8 @@ async def run_optimization(
     # Unconditional (the runner cannot know a child will recurse) and re-entrant (each level
     # publishes its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session, campaign_config)
+    # Read here, before anything binds, so it is still a parent's and not our own.
+    session.inherited_pause_check = get_abort_check()
     # Bound through the same per-node override channel the inner runner uses — task-isolated,
     # so an outer binding and the inner mutations of the cycles it spawns never collide. An
     # empty set is a no-op and must NOT clear an inner runner's already-bound mutations.

@@ -12,9 +12,7 @@ interface Props {
   // difficulty sort when on.
   syncLive: boolean;
   onToggleSyncLive: () => void;
-  // The key the server ranked by, off its own echo; `null` while the read is in
-  // flight. Named here rather than assumed, because these tooltips are what told
-  // the operator a δ-ranked roster was ranked by Info gain.
+  // The key the server ranked by, off its echo; `null` while the read is in flight.
   rankedBy: HardSampleOrder | null;
   rankedByPick: HardSampleOrder | null;
   onRankedByChange: (o: HardSampleOrder) => void;
@@ -51,8 +49,7 @@ export function HardSamplesFooter({
 }: Props) {
   const total = measuredCount + unmeasuredCount;
   const tag = datasetName ? `${datasetName} · ` : "";
-  // Falls back to a bare "the served ranking" while unknown — true either way, and it
-  // never names a key the roster might not be in.
+  // Empty ⇒ a bare "the served ranking", which never names a key the rows may not be in.
   const orderLabel = rankedBy ? `${ORDER_COLUMN[rankedBy].label} ` : "";
 
   return (
@@ -78,9 +75,8 @@ export function HardSamplesFooter({
           ]}
         />
       ) : null}
-      {/* The ranking key. Rendered only once the server has said which one the rows are
-          actually in — an exclusive control with no true value would have to invent one,
-          and inventing this one is the defect this pane just shed. */}
+      {/* Rendered only once the server has named the order: an exclusive control with no
+          true value has to invent one. */}
       {rankedBy ? (
         <SegmentedControl
           ariaLabel="Hard-sample ranking key"

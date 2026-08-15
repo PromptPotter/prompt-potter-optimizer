@@ -45,15 +45,6 @@ import type {
   WorkspaceStorageResponse,
 } from "./types";
 
-// Server health + the single-source app version (`APP_VERSION`, surfaced by the `/health` route
-// in `main.py`). Hand-written because that route declares no response model.
-export interface HealthResponse {
-  status: string;
-  service: string;
-  timestamp: string;
-  version: string;
-}
-
 // Derived, never re-declared: the closed sets live on the server's own response model
 // (`auth.py::ActivityWindow` / `ActivityGroupBy`, `datasets/index.py::DatasetIndexEntry.tier`),
 // and these read them back off the generated interface so a member added there arrives here.
@@ -68,19 +59,19 @@ export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
 }
 
-// Server health + the single-source app version (`APP_VERSION`, surfaced by
-// the `/health` route in `main.py`). The About pane reads version from here
-// rather than carrying a build-time copy that could drift.
+// Server health + the single-source app version (`APP_VERSION`, surfaced by the `/health` route
+// in `main.py`). Hand-written because that route declares no response model, and the About pane
+// reads the version from here rather than carrying a build-time copy that could drift.
 export interface HealthResponse {
   status: string;
   service: string;
   timestamp: string;
   version: string;
 }
+
 export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return jget<HealthResponse>(`${API}/health`, signal);
 }
-
 
 export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
   return jget<MeResponse>(`${API}/auth/me`, signal);
@@ -210,8 +201,8 @@ export function fetchFiles(
 // It only walks from the ROOT hop, so when descend is set both root ids ride
 // along regardless of scope. Empty/absent → byte-identical to a top-level read.
 // `order` overrides the ranking key for this read; absent → the server resolves the
-// dataset's `CampaignConfig.hard_sample_order`. Either way the resolved value comes back
-// on the response, and that echo — not this argument — is what a label may be drawn from.
+// dataset's `CampaignConfig.hard_sample_order`. A label is drawn from the response's echo,
+// never from this argument.
 function hardSamplesParams(
   limit: number,
   scope: HardSamplesScope,

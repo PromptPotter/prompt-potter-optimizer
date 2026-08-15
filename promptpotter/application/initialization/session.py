@@ -118,6 +118,9 @@ class Session:
     # the worker ends, the cycle stays resumable. Bound at the runner seam and
     # also fed to `set_abort_check` so a pause breaks a long rate-limit wait.
     pause_check: Callable[[], bool] | None = None
+    # The ENCLOSING run's `pause_check`, so an L4 outer cycle's stop reaches the inner cycle
+    # instrumenting it. Captured once at the runner seam; `None` for a top-level run.
+    inherited_pause_check: Callable[[], bool] | None = None
     # `skip_check` returns True while a one-shot `.runtime/skip.flag` is present
     # (operator early-abort of the searchpoint scoring now). Unlike pause it
     # does NOT end the cycle — the per-sample checkpoint accepts the partial and

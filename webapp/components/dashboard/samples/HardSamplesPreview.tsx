@@ -35,9 +35,8 @@ interface Props {
   // The key the server ranked the roster by, off its own echo; `null` while the read
   // is in flight. Not `order` — `sampleOrder` in this tree is the scoring WALK.
   rankedBy: HardSampleOrder | null;
-  // The operator's PICK, null until they make one. Separate from `rankedBy` on
-  // purpose: the control must move the instant it is clicked, while every LABEL
-  // keeps naming the served order until the new rows actually land.
+  // The operator's PICK, null until they make one. Separate from `rankedBy`: the control
+  // moves on click, while every LABEL keeps naming the served order until the rows land.
   rankedByPick: HardSampleOrder | null;
   onRankedByChange: (o: HardSampleOrder) => void;
   stale: boolean;

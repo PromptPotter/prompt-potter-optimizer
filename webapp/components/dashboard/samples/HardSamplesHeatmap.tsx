@@ -22,8 +22,8 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
-  // The key the server ranked the roster by, off its own echo; `null` while the read
-  // is in flight. Not `order` — `sampleOrder` in this tree is the scoring WALK.
+  // The key the server ranked by, off its echo. Not `order` — `sampleOrder` here is the
+  // scoring WALK.
   datasetOrder: HardSampleOrder | null;
   hardSampleOrder: HardSampleOrder | null;
   onHardSampleOrderChange: (o: HardSampleOrder) => void;
