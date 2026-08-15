@@ -79,13 +79,17 @@ class GitHubProviderClient:
                     f"GitHub /user response missing numeric id: {user!r}"
                 )
 
-            email = user.get("email") if isinstance(user.get("email"), str) else None
-            if email is None:
-                email_response = await client.get(GITHUB_EMAIL_URL, headers=auth_headers)
-                if email_response.status_code == 200:
-                    primary = _select_primary_verified_email(email_response.json())
-                    if primary is not None:
-                        email = primary
+            # ONLY the verified list. ``/user``'s ``email`` is the PUBLIC PROFILE field, which the
+            # account holder sets to any string and GitHub never checks — so preferring it (which
+            # this did, falling back to the verified list only when it was absent) inverted the
+            # trust order and handed us an address nobody proved they own. Downstream that address
+            # is an identity key: the sign-in blocklist matches on it, and so does the host-admin
+            # claim. An account with no verified address yields ``None`` and signs in on its
+            # subject alone, which is the honest answer rather than a guess.
+            email = None
+            email_response = await client.get(GITHUB_EMAIL_URL, headers=auth_headers)
+            if email_response.status_code == 200:
+                email = _select_primary_verified_email(email_response.json())
 
         return ProviderIdentity(
             issuer=GITHUB_ISSUER,

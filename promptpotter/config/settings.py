@@ -174,6 +174,17 @@ class Settings(BaseSettings):
     # no admin identity until it is set. A hosted deployment must declare it.
     HOST_ADMIN_EMAIL: str = ""
 
+    # ...and WHICH ISSUER must have vouched for that address. An email is a claim a provider makes,
+    # so the box's most privileged decision should not rest on one provider's word alone: with two
+    # providers wired, matching on the address by itself lets whichever of them has the weakest
+    # email handling grant the box. Pinning the issuer means a provider added later cannot
+    # re-open that by default.
+    #
+    # Empty accepts any issuer, which is the behaviour every existing box already has — so this
+    # never locks an operator out on deploy. Set it to the `iss` of the provider you actually sign
+    # in with (Google: "https://accounts.google.com").
+    HOST_ADMIN_ISSUER: str = ""
+
     # The ADR-0004 operator-admin channel: the bot's own Telegram credentials, plus the n8n door a
     # new account is announced to. Declared here rather than read from `os.environ` so there is ONE
     # answer to "where does a key live" — pydantic consults the process environment AND

@@ -1,5 +1,5 @@
 "use client";
-import { marked } from "marked";
+import { renderMarkdownSafe } from "@/lib/markdown";
 import { fetchCycleFile } from "@/lib/api";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { RoundFileView, type RoundDoc } from "./RoundFileView";
@@ -93,10 +93,11 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
             return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body, error: null };
           }
           if (ct === "markdown") {
-            const html = await Promise.resolve(marked.parse(r.content));
+            // `renderMarkdownSafe`, never `marked.parse` — this body reaches
+            // `dangerouslySetInnerHTML` below, and these artifacts quote tenant-supplied text.
             return {
               meta,
-              body: typeof html === "string" ? html : r.content,
+              body: renderMarkdownSafe(r.content),
               contentType: ct,
               isMarkdown: true,
               roundDoc: null,

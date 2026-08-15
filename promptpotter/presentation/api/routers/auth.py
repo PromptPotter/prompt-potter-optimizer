@@ -169,12 +169,27 @@ class MeResponse(StrictModel):
     terms_accepted_version: str | None
 
 
-def _is_declared_host_admin(email: str | None) -> bool:
-    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL` alone. Unset means nobody may,
-    which is a refusal rather than a fallback — the alternative, "first one in wins", is the thing that
-    stopped being safe the moment signing up became the grant."""
+def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
+    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL`, and from `HOST_ADMIN_ISSUER`
+    when that is set too. Unset email means nobody may, which is a refusal rather than a fallback —
+    the alternative, "first one in wins", is the thing that stopped being safe the moment signing up
+    became the grant.
+
+    The issuer half is why the email half is not enough on its own: an email is a CLAIM a provider
+    makes, and two providers are wired. Whichever has the weaker email handling would otherwise be
+    able to grant the box by asserting the declared address — so the pin bounds this to the one
+    provider the operator actually signs in with, and bounds any provider added later by default.
+    An empty `HOST_ADMIN_ISSUER` accepts any issuer, which is what every existing box already does,
+    so setting it is an upgrade and never a deploy-time lockout.
+
+    `email` arriving as ``None`` is the normal answer for an address the issuer would not vouch for
+    (`verifier.py`, `github.py`) — and it can never match here, which is the point.
+    """
     declared = settings.HOST_ADMIN_EMAIL.strip().lower()
-    return bool(declared) and (email or "").strip().lower() == declared
+    if not declared or (email or "").strip().lower() != declared:
+        return False
+    declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
+    return not declared_issuer or (issuer or "").strip() == declared_issuer
 
 
 def _require_bundle(request: Request) -> IdentityBundle:
@@ -292,7 +307,7 @@ async def callback(
     access_state = resolve_access_state(identity.email, bundle)
     if access_state == ACCESS_BLOCKED:
         logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
-    elif _is_declared_host_admin(identity.email):
+    elif _is_declared_host_admin(identity.email, identity.issuer):
         # The marker is what `_session_capabilities` reads to grant ADMIN_CAPABILITIES, so WHO may
         # write it must be DECLARED. Entitlement used to stand in for that and cannot any more: now
         # that signing up entitles, an inferred claim would hand the box to whoever arrived first.

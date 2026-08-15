@@ -22,6 +22,27 @@ MEMORY_MAX="${MEMORY_MAX:-}"
 # $INSTALL_DIR: systemd loads EnvironmentFile as root, and SELinux denies root a file under $HOME.
 # deploy.config.example carries the full symptom.
 ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
+# The ONE directory the service may write. Empty (the default) keeps the historical
+# `ReadWritePaths=$INSTALL_DIR` — which is the repo, the venv AND `.env`, so the service can
+# rewrite its own code and its own secrets and survive a restart. `ProtectSystem=strict` bounds
+# what the process can do to the SYSTEM and says nothing about the credentials it legitimately
+# holds; this is the knob that separates the two.
+#
+# Set it to a directory OUTSIDE $INSTALL_DIR and the unit below points both the data root
+# (`PROMPTPOTTER_HOME`) and the working directory at it, leaving the checkout read-only.
+#
+# `PROMPTPOTTER_HOME` IS the data root — `config/paths.py::user_data_root` returns it verbatim —
+# so the tree that lives at `$INSTALL_DIR/.promptpotter/` today moves to `$DATA_DIR` ITSELF, and
+# its CONTENTS are what move. Nesting it one level deeper (`$DATA_DIR/.promptpotter/`) starts an
+# empty workspace that looks exactly like a healthy first boot:
+#     sudo systemctl stop $SERVICE_NAME
+#     sudo mkdir -p /var/lib/$APP_NAME && sudo chown $RUN_USER: /var/lib/$APP_NAME
+#     mv $INSTALL_DIR/.promptpotter/* $INSTALL_DIR/.promptpotter/.[!.]* /var/lib/$APP_NAME/
+#     mv $INSTALL_DIR/logs /var/lib/$APP_NAME/   # the run readout is CWD-relative
+#     # then set DATA_DIR=/var/lib/<app> in deploy.config and re-run this script
+# Moving the tree without setting DATA_DIR (or the reverse) starts an EMPTY workspace rather than
+# failing, so do both in one go and check the campaign list before trusting the box.
+DATA_DIR="${DATA_DIR:-}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -30,6 +51,31 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ -d "$INSTALL_DIR/.venv" ]] || die "no .venv at $INSTALL_DIR — run bootstrap.sh first"
 [[ -f "$ENV_FILE" ]] || die "no env file at $ENV_FILE — run bootstrap.sh first, or set ENV_FILE in deploy.config"
+
+# Resolve the write surface once, so the unit below has a single answer to substitute.
+if [[ -n "$DATA_DIR" ]]; then
+    [[ -d "$DATA_DIR" ]] || die "DATA_DIR=$DATA_DIR does not exist — create it and move .promptpotter/ + logs/ into it first (see the DATA_DIR note in this script)"
+    case "$DATA_DIR" in
+        # A DATA_DIR inside the checkout would re-grant write access to the code it exists to
+        # protect, and would do it silently — the unit would look hardened and not be.
+        "$INSTALL_DIR"|"$INSTALL_DIR"/*) die "DATA_DIR=$DATA_DIR is inside INSTALL_DIR=$INSTALL_DIR — it must be outside, or the service can still rewrite its own code and .env" ;;
+    esac
+    # `projects/` is the marker, because DATA_DIR *is* the data root — a `.promptpotter/` found
+    # under it means the contents were moved one level too deep, which is the migration's one
+    # silent failure: the service comes up healthy on an empty workspace and the campaign list
+    # is simply blank.
+    if [[ -d "$DATA_DIR/.promptpotter" ]]; then
+        die "$DATA_DIR/.promptpotter exists — the tree was moved one level too deep. PROMPTPOTTER_HOME *is* the data root, so move its CONTENTS up: mv $DATA_DIR/.promptpotter/* $DATA_DIR/.promptpotter/.[!.]* $DATA_DIR/"
+    fi
+    [[ -d "$DATA_DIR/projects" ]] || warn "no projects/ under $DATA_DIR — the service will start on an EMPTY workspace. If this box has campaigns, stop here and move the CONTENTS of $INSTALL_DIR/.promptpotter into $DATA_DIR first."
+    WRITE_PATH="$DATA_DIR"
+    WORK_DIR="$DATA_DIR"
+    say "hardened write surface: $DATA_DIR (checkout + .env read-only to the service)"
+else
+    WRITE_PATH="$INSTALL_DIR"
+    WORK_DIR="$INSTALL_DIR"
+    warn "DATA_DIR unset — the service can write its own code, its venv and $ENV_FILE. Set DATA_DIR in deploy.config to take that away; see the note at the top of this script."
+fi
 
 # --- SELinux: let systemd exec the venv (Fedora/RHEL enforcing) ----------
 # A venv under $HOME is labeled user_home_t; a confined service domain can't
@@ -56,8 +102,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$RUN_USER
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$WORK_DIR
 EnvironmentFile=$ENV_FILE
+${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
 ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --host $BIND_HOST --port $BIND_PORT --workers 1 --proxy-headers \\
     --forwarded-allow-ips=127.0.0.1
@@ -65,14 +112,14 @@ Restart=on-failure
 RestartSec=3s
 # --- hardening (kernel-enforced blast-radius floor) ---------------------
 # uvicorn needs no privileges: drop every capability, deny privilege gain,
-# and make the whole filesystem read-only except the install dir it writes.
+# and make the whole filesystem read-only except the ONE directory it writes.
 NoNewPrivileges=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$INSTALL_DIR
+ReadWritePaths=$WRITE_PATH
 UMask=0077
 # kernel + process surface the app never touches
 RestrictSUIDSGID=true
