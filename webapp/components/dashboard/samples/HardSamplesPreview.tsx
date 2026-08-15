@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { DatasetItem, HardSamplesScope, SampleSeries } from "@/lib/api";
+import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { sampleBucket, sampleSpread, sampleWalk, type SampleBucket } from "@/lib/derivations";
@@ -32,6 +32,14 @@ interface Props {
   measuredCount: number;
   unmeasuredCount: number;
   splitTest: number | null;
+  // The key the server ranked the roster by, off its own echo; `null` while the read
+  // is in flight. Not `order` — `sampleOrder` in this tree is the scoring WALK.
+  rankedBy: HardSampleOrder | null;
+  // The operator's PICK, null until they make one. Separate from `rankedBy` on
+  // purpose: the control must move the instant it is clicked, while every LABEL
+  // keeps naming the served order until the new rows actually land.
+  rankedByPick: HardSampleOrder | null;
+  onRankedByChange: (o: HardSampleOrder) => void;
   stale: boolean;
   error: string | null;
   scope: HardSamplesScope;
@@ -52,6 +60,9 @@ export function HardSamplesPreview({
   measuredCount,
   unmeasuredCount,
   splitTest,
+  rankedBy,
+  rankedByPick,
+  onRankedByChange,
   stale,
   error,
   scope,
@@ -225,6 +236,9 @@ export function HardSamplesPreview({
             datasetMeasuredCount={measuredCount}
             datasetUnmeasuredCount={unmeasuredCount}
             datasetSplitTest={splitTest}
+            rankedBy={rankedBy}
+            rankedByPick={rankedByPick}
+            onRankedByChange={onRankedByChange}
             datasetStale={stale}
             scope={scope}
             onScopeChange={onScopeChange}

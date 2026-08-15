@@ -60,6 +60,9 @@ export interface HealthResponse {
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];
 export type DatasetTier = DatasetIndexEntry["tier"];
+// `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by. Both hard-sample
+// responses echo it, so either one can be read back for the alias.
+export type HardSampleOrder = DatasetPreviewResponse["order"];
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
@@ -206,14 +209,19 @@ export function fetchFiles(
 // scope artifact from the inner `.inner/` sandbox instead of the outer archive.
 // It only walks from the ROOT hop, so when descend is set both root ids ride
 // along regardless of scope. Empty/absent → byte-identical to a top-level read.
+// `order` overrides the ranking key for this read; absent → the server resolves the
+// dataset's `CampaignConfig.hard_sample_order`. Either way the resolved value comes back
+// on the response, and that echo — not this argument — is what a label may be drawn from.
 function hardSamplesParams(
   limit: number,
   scope: HardSamplesScope,
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): URLSearchParams {
   const params = new URLSearchParams({ limit: String(limit), scope });
+  if (order) params.set("order", order);
   if ((scope === "campaign" || scope === "cycle") && campaignId) {
     params.set("campaign_id", campaignId);
   }
@@ -234,8 +242,9 @@ export function fetchDatasetPreview(
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): Promise<DatasetPreviewResponse> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
   return jget<DatasetPreviewResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
@@ -250,8 +259,9 @@ export function fetchMeasurementSeries(
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): Promise<MeasurementSeriesResponse> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
   return jget<MeasurementSeriesResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
     signal,

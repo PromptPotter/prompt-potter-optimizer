@@ -115,11 +115,6 @@
 .hs-sync-toggle{display:inline-flex;align-items:center;gap:var(--space-6);flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
 .hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
 .hs-sync-toggle:hover{color:var(--color-text-primary)}
-.hs-scope-toggle{display:inline-flex;flex-shrink:0;border:1px solid var(--color-border);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:.04em}
-.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px var(--space-8);cursor:pointer;white-space:nowrap;border-right:1px solid var(--color-border)}
-.hs-scope-opt:last-child{border-right:0}
-.hs-scope-opt:hover{color:var(--color-text-primary)}
-.hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
 .hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
 @keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
 .hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:var(--space-24)}

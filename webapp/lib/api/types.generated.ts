@@ -571,6 +571,11 @@ export interface SampleSeries {
 export interface MeasurementSeriesResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
+  /** The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on
+   * BOTH responses because they are one page read twice: a client holding
+   * only one of them would otherwise have to name the order from the other,
+   * or guess the default. */
+  order: 'info_gain' | 'difficulty';
   items: SampleSeries[];
   /** Measurements across every series in `items` — the denominator of the roster's
    * headline, served so the reader adds nothing up. */

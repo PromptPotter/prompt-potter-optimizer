@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
+import { fetchCycleFile, type HardSampleOrder, type HardSamplesScope } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/commands";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
@@ -185,21 +185,27 @@ function AppShellInner() {
   // the switch is instant. The picker itself always runs on the dataset
   // scope regardless of this toggle — see l1/execute.py round-subset fit.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
+  // Which key the roster is ranked by. `null` = send no override, so the server resolves
+  // the dataset's declared `hard_sample_order` — the browser must not restate that default,
+  // because a client-side guess at it is exactly what mislabelled the table. What the
+  // control DISPLAYS is the served echo below, never this.
+  const [hardSampleOrder, setHardSampleOrder] = useState<HardSampleOrder | null>(null);
   // Dataset roster + per-sample measurement history for the unit in view.
-  // One hook owns the fetch chain — it loads BOTH scope slices per unit, so
-  // the scope toggle is a pure in-memory pick (no re-fetch, no cross-scope
-  // borrow). A campaign switch shows the prior data marked stale until the
-  // new fetch lands — never blanks.
+  // One hook owns the fetch chain — it fetches ONE (unit, scope) slice at a time,
+  // the one in view, and keeps each it has fetched, so flipping the toggle back is
+  // a pure in-memory pick and no slice is borrowed across scopes. A campaign switch
+  // shows the prior data marked stale until the new fetch lands — never blanks.
   const {
     items: datasetItems,
     measuredCount: datasetMeasuredCount,
     unmeasuredCount: datasetUnmeasuredCount,
     splitTest: datasetSplitTest,
+    order: datasetOrder,
     archivePerSample,
     totals: datasetTotals,
     isStale: datasetStale,
     error: datasetError,
-  } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope);
+  } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope, hardSampleOrder);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
@@ -432,12 +438,15 @@ function AppShellInner() {
             datasetMeasuredCount={datasetMeasuredCount}
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
+            datasetOrder={datasetOrder}
             archivePerSample={archivePerSample}
             datasetTotals={datasetTotals}
             datasetStale={datasetStale}
             datasetError={datasetError}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
+            hardSampleOrder={hardSampleOrder}
+            onHardSampleOrderChange={setHardSampleOrder}
             newCampaignTick={newCampaignTick}
             onMinted={(sel) => selectCycle(sel.campaignId, sel.cycleId)}
           />

@@ -1,11 +1,16 @@
 "use client";
 import { useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type DatasetItem, type HardSamplesScope, type SampleSeries } from "@/lib/api";
+import {
+  type DatasetItem,
+  type HardSampleOrder,
+  type HardSamplesScope,
+  type SampleSeries,
+} from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
-import { cellFor, RANK_HINT, type CellValue, type HeatDot } from "./columns";
+import { cellFor, ORDER_COLUMN, RANK_HINT, type CellValue, type HeatDot } from "./columns";
 import { HardSamplesFooter } from "./HardSamplesFooter";
 import { HardSamplesHeatTip, HardSamplesPopover } from "./HardSamplesPopover";
 import { useHardSamplesTableModel, wrappable } from "./useHardSamplesTableModel";
@@ -26,6 +31,16 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
+  // The key the server ranked the roster by, off its own echo. `null` while the read
+  // is in flight — the table then claims no key rather than guessing one. NOT
+  // `order`: `sampleOrder` next door is the scoring WALK, and one props list cannot
+  // hold two things called order.
+  rankedBy: HardSampleOrder | null;
+  // The operator's PICK, null until they make one. Separate from `rankedBy` on
+  // purpose: the control must move the instant it is clicked, while every LABEL
+  // keeps naming the served order until the new rows actually land.
+  rankedByPick: HardSampleOrder | null;
+  onRankedByChange: (o: HardSampleOrder) => void;
   scope?: HardSamplesScope;
   onScopeChange?: (s: HardSamplesScope) => void;
   // Displayed roster is from a prior (unit, scope) and a fresh fetch is in
@@ -42,6 +57,9 @@ export function HardSamplesTable({
   datasetMeasuredCount,
   datasetUnmeasuredCount,
   datasetSplitTest,
+  rankedBy,
+  rankedByPick,
+  onRankedByChange,
   scope,
   onScopeChange,
   datasetStale,
@@ -82,6 +100,10 @@ export function HardSamplesTable({
     resetLayout,
   } = m;
 
+  // What auto-sort is actually ranking by. Null while unknown, which is a state the
+  // header must be able to render — see the marker below.
+  const liveOrder = liveSortActive && rankedBy ? ORDER_COLUMN[rankedBy] : null;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 26;
   const virtualizer = useVirtualizer({
@@ -114,12 +136,12 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              // Under live-sort the rows follow the queue mechanism's blended
-              // pick-value ranking — which is the "Pick" column descending;
-              // mark it so the operator can see what the order is. Otherwise
-              // the manual header-click sort owns the marker.
+              // Under live-sort the rows follow the SERVED ranking, and the marker
+              // follows it too — `liveOrder` is null until the roster read lands,
+              // because which key the rows are in is not knowable before then.
+              // Naming one anyway is how this labelled a δ-ranked roster "Info gain".
               const sorted = liveSortActive
-                ? col.id === "pick_score"
+                ? col.id === liveOrder?.col
                   ? "desc"
                   : null
                 : sortBy?.col === col.id
@@ -129,13 +151,19 @@ export function HardSamplesTable({
               const headerTitle = folded
                 ? "Unfold column"
                 : col.id === "pick_score"
-                  ? "Info gain — expected decision-information-gain from one " +
-                    "measurement. Auto-sort ranks every row by this, highest first."
-                  : liveSortActive
-                    ? "Auto-sort is ranking by Info gain — toggle it off to sort by this column."
-                    : isRank
-                      ? RANK_HINT
-                      : `Sort by ${col.label}`;
+                  ? "Info gain — expected decision-information-gain from one measurement." +
+                    (liveOrder?.col === "pick_score"
+                      ? " Auto-sort ranks every row by this, highest first."
+                      : "")
+                  : liveSortActive && liveOrder
+                    ? col.id === liveOrder.col
+                      ? `Auto-sort ranks every row by ${liveOrder.label} (this column), highest first.`
+                      : `Auto-sort is ranking by ${liveOrder.label} — toggle it off to sort by this column.`
+                    : liveSortActive
+                      ? "Auto-sort follows the served ranking — toggle it off to sort by this column."
+                      : isRank
+                        ? RANK_HINT
+                        : `Sort by ${col.label}`;
               return (
                 <div
                   key={col.id}
@@ -330,6 +358,9 @@ export function HardSamplesTable({
           scope={scope}
           onScopeChange={onScopeChange}
           syncLive={persisted.syncLive}
+          rankedBy={rankedBy}
+          rankedByPick={rankedByPick}
+          onRankedByChange={onRankedByChange}
           onToggleSyncLive={() => setPersisted((p) => ({ ...p, syncLive: !p.syncLive }))}
           hideUnmeasured={persisted.hideUnmeasured}
           onToggleHideUnmeasured={() =>

@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { DatasetItem, HardSamplesScope, SampleSeries } from "@/lib/api";
+import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -54,6 +54,9 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
+  datasetOrder: HardSampleOrder | null;
+  hardSampleOrder: HardSampleOrder | null;
+  onHardSampleOrderChange: (o: HardSampleOrder) => void;
   archivePerSample: Map<number, SampleSeries>;
   datasetTotals: SeriesTotals | null;
   datasetStale: boolean;
@@ -71,6 +74,9 @@ export function RunCard({
   datasetMeasuredCount,
   datasetUnmeasuredCount,
   datasetSplitTest,
+  datasetOrder,
+  hardSampleOrder,
+  onHardSampleOrderChange,
   archivePerSample,
   datasetTotals,
   datasetStale,
@@ -122,6 +128,9 @@ export function RunCard({
             measuredCount={datasetMeasuredCount}
             unmeasuredCount={datasetUnmeasuredCount}
             splitTest={datasetSplitTest}
+            rankedBy={datasetOrder}
+            rankedByPick={hardSampleOrder}
+            onRankedByChange={onHardSampleOrderChange}
             stale={datasetStale}
             error={datasetError}
             scope={hardSamplesScope}

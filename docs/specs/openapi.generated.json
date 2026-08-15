@@ -2447,6 +2447,15 @@
             "title": "Name",
             "type": "string"
           },
+          "order": {
+            "description": "The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on BOTH responses because they are one page read twice: a client holding only one of them would otherwise have to name the order from the other, or guess the default.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
           "scope": {
             "enum": [
               "cycle",
@@ -2470,6 +2479,7 @@
         "required": [
           "name",
           "scope",
+          "order",
           "items",
           "total_measurements",
           "total_hits",

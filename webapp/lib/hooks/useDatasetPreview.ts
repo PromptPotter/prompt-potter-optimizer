@@ -21,6 +21,7 @@ import {
   fetchDatasetPreview,
   fetchMeasurementSeries,
   type DatasetItem,
+  type HardSampleOrder,
   type HardSamplesScope,
   type MeasurementSeriesResponse,
   type SampleSeries,
@@ -56,10 +57,16 @@ interface ScopeState {
   slice: ScopeSlice | null;
   error: string | null;
   splitTest: number | null;
+  // The key the server actually ranked `items` by, off its own echo. `null` until a
+  // read lands: what the rows are sorted by is not knowable before then, and a
+  // consumer that assumes one is how the table came to label a δ-ranked roster
+  // "Info gain".
+  order: HardSampleOrder | null;
 }
 
 interface DatasetPreviewState extends ScopeSlice {
   splitTest: number | null;
+  order: HardSampleOrder | null;
   isStale: boolean;
   // Honest failure signal — set when the read for the SCOPE IN VIEW failed for the
   // unit in view. Consumers MUST render it: an empty slice and a failed read are
@@ -79,6 +86,7 @@ const EMPTY_SLICE: ScopeSlice = {
 const EMPTY: DatasetPreviewState = {
   ...EMPTY_SLICE,
   splitTest: null,
+  order: null,
   isStale: false,
   error: null,
 };
@@ -116,7 +124,11 @@ function sliceFrom(
   };
 }
 
-// `${unitKey}\x1f${scope}` — one entry per slice actually fetched.
+// `${unitKey}\x1f${scope}\x1f${order}` — one entry per slice actually fetched. `order`
+// is the THIRD dimension, not a re-sort: the ranking is the server's, so asking for a
+// different key is a different read (webapp/CLAUDE.md § Scoring authority). Empty means
+// "whatever the dataset declares", which is its own slice — the server may resolve it to
+// either key, and the response says which.
 type SliceKey = string;
 
 // Keep only the unit in view. A roster is up to 1000 rows plus its series, so a
@@ -137,6 +149,10 @@ export function useDatasetPreview(
   path: CyclePath | null,
   datasetName: string | null,
   scope: HardSamplesScope,
+  // Null = send no override and let the server resolve the dataset's declared key.
+  // The resolved value comes back on `order`, so the caller never has to know the
+  // default to label what it is showing.
+  order: HardSampleOrder | null,
 ): DatasetPreviewState {
   // The scope artifact follows the VIEWED LEAF: the request addresses the ROOT
   // hop + a `descend` tail (like the dashboard), so an L4 inner drill-in reads
@@ -147,7 +163,7 @@ export function useDatasetPreview(
   const rootCycleId = root?.cycleId ?? null;
   const descend = path ? encodeDescend(path) : "";
   const unitKey = path ? encodeCyclePath(path) : null;
-  const sliceKey: SliceKey | null = unitKey ? `${unitKey}\x1f${scope}` : null;
+  const sliceKey: SliceKey | null = unitKey ? `${unitKey}\x1f${scope}\x1f${order ?? ""}` : null;
 
   const [slices, setSlices] = useState<Record<SliceKey, ScopeState>>({});
   // Slices already fetched or in flight. A ref, not state: it must not re-run the
@@ -167,6 +183,9 @@ export function useDatasetPreview(
     const cmp = rootCampaignId;
     const cyc = rootCycleId;
     const key = sliceKey;
+    // Captured with the rest of the request identity: `order ?? undefined` is what the
+    // fetchers take, and the slice this write lands under is keyed on it.
+    const ord = order ?? undefined;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
@@ -175,15 +194,20 @@ export function useDatasetPreview(
         // is best-effort: it decorates a roster rather than being one, so a roster
         // that arrived still renders with an honest "no measurements" column.
         const [preview, series] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, scope, cmp, cyc, descend),
-          fetchMeasurementSeries(name, 1000, ac.signal, scope, cmp, cyc, descend).catch(
+          fetchDatasetPreview(name, 1000, ac.signal, scope, cmp, cyc, descend, ord),
+          fetchMeasurementSeries(name, 1000, ac.signal, scope, cmp, cyc, descend, ord).catch(
             () => null,
           ),
         ]);
         if (cancelled) return;
         setSlices((prev) => ({
           ...keepUnit(prev, unitKey),
-          [key]: { slice: sliceFrom(preview.items, series), error: null, splitTest: preview.split_test },
+          [key]: {
+            slice: sliceFrom(preview.items, series),
+            error: null,
+            splitTest: preview.split_test,
+            order: preview.order,
+          },
         }));
       } catch (e) {
         if (cancelled || ac.signal.aborted) {
@@ -202,6 +226,7 @@ export function useDatasetPreview(
             slice: gone ? EMPTY_SLICE : null,
             error: gone ? null : e instanceof Error ? e.message : String(e),
             splitTest: null,
+            order: null,
           },
         }));
       }
@@ -210,7 +235,7 @@ export function useDatasetPreview(
       cancelled = true;
       ac.abort();
     };
-  }, [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope]);
+  }, [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope, order]);
 
   if (!sliceKey) return EMPTY;
   const state = slices[sliceKey];
@@ -227,6 +252,7 @@ export function useDatasetPreview(
     return {
       ...(sibling?.slice ?? EMPTY_SLICE),
       splitTest: sibling?.splitTest ?? null,
+      order: sibling?.order ?? null,
       isStale: true,
       error: null,
     };
@@ -235,6 +261,7 @@ export function useDatasetPreview(
   return {
     ...(state.slice ?? EMPTY_SLICE),
     splitTest: state.splitTest,
+    order: state.order,
     isStale: false,
     error: state.error,
   };

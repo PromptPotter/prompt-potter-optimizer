@@ -1,5 +1,16 @@
 """Typed post-scoring deterministics, computed once per round and attached to ``RoundResult``. Pure data — rendering lives in the
-dispatch hub's ``diagnostics`` signal, which is layer-agnostic."""
+dispatch hub's ``diagnostics`` signal, which is layer-agnostic.
+
+**Every field below defaults, and that is the contract, not laziness.** These are REPORTING
+payloads read back off disk — ``RoundResult.model_dump()`` IS the round document — and nothing
+gates, scores or escalates on them. So a field that loses its name must DEGRADE, never raise:
+otherwise one nested rename makes a paid measurement unreadable, which is the exact failure the
+document's ``extra="ignore"`` exists to prevent, and which that setting cannot reach on its own
+(it forgives an extra key, not a missing one). The SCORING payloads beside them on the same
+document — ``ScoredCandidate``, ``EscalationSignal`` — stay REQUIRED for the opposite reason: a
+missing field there means the record cannot be vouched for, and loading it blind would trade a
+loud failure for a silent wrong number. Producers pass every field explicitly; these defaults
+serve the read path alone."""
 
 from __future__ import annotations
 
@@ -15,32 +26,32 @@ TrajectoryClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
 class NearMiss:
     """A query whose ground truth landed in candidates rank 2-10."""
 
-    query: str
-    ground_truth: str
-    rank: int
-    predicted: str
+    query: str = ""
+    ground_truth: str = ""
+    rank: int = 0
+    predicted: str = ""
 
 
 @dataclass(frozen=True)
 class EvolutionRow:
-    round: int
-    accuracy: float
-    delta: float
-    degraded: int
-    n_candidates: int
+    round: int = 0
+    accuracy: float = 0.0
+    delta: float = 0.0
+    degraded: int = 0
+    n_candidates: int = 0
 
 
 @dataclass(frozen=True)
 class SampleDiag:
-    query: str
-    ground_truth: str
-    predicted: str
-    rank: int | None
-    terminal_node: str
-    gt_in_source: bool | None
-    gt_in_ranked: bool | None
-    warnings: list[str]
-    fitness: float
+    query: str = ""
+    ground_truth: str = ""
+    predicted: str = ""
+    rank: int | None = None
+    terminal_node: str = ""
+    gt_in_source: bool | None = None
+    gt_in_ranked: bool | None = None
+    warnings: list[str] = field(default_factory=list)
+    fitness: float = 0.0
 
 
 @dataclass(frozen=True)

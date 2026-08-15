@@ -3,7 +3,7 @@
 // No React — HardSamplesTable owns the rendering and the interaction state.
 
 import { type CSSProperties } from "react";
-import { type DatasetItem, type SampleSeries } from "@/lib/api";
+import { type DatasetItem, type HardSampleOrder, type SampleSeries } from "@/lib/api";
 import { fmtPct0, fmtPct1 } from "@/lib/format";
 
 export const STORAGE_KEY = "hs-grid:v1";
@@ -77,6 +77,16 @@ export const COLUMNS: ColDef[] = [
   { id: "ground_truth",  label: "Output",     align: "left",   numeric: false },
 ];
 
+// The served `hard_sample_order` → the column whose descending sort that ranking IS,
+// plus the name `log.md`'s own leaderboard already prints for it
+// (`application/views/render/heatmap.py`) — not a third word for the same key.
+// ONE table, because the sort marker and the header tooltips must never name
+// different keys for one served ranking: they did, and both named the wrong one.
+export const ORDER_COLUMN: Record<HardSampleOrder, { col: ColId; label: string }> = {
+  info_gain: { col: "pick_score", label: "Info gain" },
+  difficulty: { col: "delta", label: "Hardness" },
+};
+
 export interface PersistedState {
   widths: Partial<Record<ColId, number>>;
   folded: ColId[];
@@ -85,7 +95,7 @@ export interface PersistedState {
   // order and header-click sorting is suppressed. Which key that rank uses is the
   // campaign's `hard_sample_order` (default Info gain — the queue mechanism's
   // expected decision-information gain), so the marker follows the served key
-  // rather than being pinned to a column here. Default ON.
+  // via `ORDER_COLUMN` rather than being pinned to a column here. Default ON.
   syncLive: boolean;
   // When true ("Hide unmeasured"), rows with no measurements yet
   // (pick_score === null) are filtered out. Same behaviour under both
