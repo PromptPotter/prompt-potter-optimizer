@@ -94,11 +94,15 @@ any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*`
   difficulty cancels; trust the paired PoBB/θ reads.
 - The `inner_origin` identity fingerprint partitions runs into same-origin families; an
   origin edit = a NEW family. Never pool or compare across families.
-- **What counts as an origin edit is WIDER than the optimizer manifest** — read the inputs off
-  `connectors/promptpotter.py::_identity_config` before assuming a file is safe to touch
-  mid-run. Editing a dispatch *renderer* (the modules `injection_source_digest` hashes) moves
-  the fingerprint exactly as editing `assets/optimizer/` does, and so do `NODE_LAYOUTS`,
-  `APP_VERSION`, `inner_tasks.yaml` and the inner benchmark's node configs. The fingerprint is
+- **What counts as an origin edit is WIDER than the optimizer manifest, and NARROWER than the
+  whole of it** — read the inputs off `connectors/promptpotter.py::_identity_config` before
+  assuming a file is safe to touch mid-run. Editing a dispatch *renderer* (the modules
+  `injection_source_digest` hashes) or an *estimator* (the modules `_measurement_source_digest`
+  hashes) moves the fingerprint exactly as editing an inner optimizer node's prompt body does,
+  and so do `NODE_LAYOUTS`, `inner_tasks.yaml`, and the inner benchmark's `pipeline.yaml` node
+  configs and `campaign.yaml`. What does NOT move it — deliberately, because a corpus that
+  cannot survive them cannot accumulate at all — is the manifest's non-inner content
+  (`checkin`, node descriptions, `available_models`) and `APP_VERSION`. The fingerprint is
   resolved once per init (`pipeline_resolve.py`), so an edit mid-flight is invisible to the
   RUNNING cycle and lands on the next `resume` — which is the case that silently re-partitions.
 - Residual cross-run noise = inner-process stochasticity (inner optimizer sampling, adaptive

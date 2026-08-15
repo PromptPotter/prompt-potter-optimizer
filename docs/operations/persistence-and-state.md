@@ -258,19 +258,26 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    carry the campaign id too; a lookup by bare `cycle_id` would cross-wire siblings.
 
 4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the
-   origin.** `connectors/promptpotter.py::_identity_config` fingerprints the optimizer
-   manifest (`promptpotter/assets/optimizer/pipeline.yaml`) and its generated response-schema
-   sibling — which is prompt text, riding every optimizer call as `response_format` — plus the
-   per-node information-flow layouts, **the injection renderers' own source**
-   (`injection_source_digest`, normalized through the AST so a comment or docstring costs
-   nothing and a panel's prose or render condition voids the origin),
-   `APP_VERSION`, the dataset's whole `inner_tasks.yaml`, and the node configs of the
-   inner benchmark that file names — the worker model included, since swapping it changes what
-   every cell measures. Fact 2 does not cover
+   origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner
+   optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its
+   resolved response schema, which is prompt text riding every call as `response_format`, and
+   its config), plus the per-node information-flow layouts, **the injection renderers' own
+   source** (`injection_source_digest`), **the estimator's own source**
+   (`_measurement_source_digest`), the dataset's whole `inner_tasks.yaml`, and the inner
+   benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the
+   scoring formula included, since either changes what every cell measures. Both source digests
+   are normalized through the AST, so a comment or docstring costs nothing while an expression
+   voids the origin. Fact 2 does not cover
    these — they are read live, not snapshotted into `campaign.json` — so an edit lands on the
    *running* campaign: the banked outer origin stops joining and the next round pays to score
    it again. The function's docstring carries why a stale join would be the worse outcome.
    **Land config fixes before an origin is measured, never between its rounds.**
+
+   **What is deliberately NOT in it, because a corpus that cannot survive them cannot
+   accumulate:** the manifest's non-inner nodes (`checkin`, descriptions, `available_models`)
+   and `APP_VERSION`. The version constant voided every banked cell on every release while
+   saying nothing about whether the measurement had changed; `_measurement_source_digest` hashes
+   the four modules that actually decide the number instead.
 
 ## Changing the composite formula — fork, never swap
 
