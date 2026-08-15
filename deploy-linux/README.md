@@ -96,7 +96,8 @@ Set these in `deploy.config` (or pass on the command line):
 | repo | `$INSTALL_DIR` |
 | Python venv | `$INSTALL_DIR/.venv` |
 | webapp build | `$INSTALL_DIR/$WEBAPP_DIR/out/` |
-| env file (secrets) | `$ENV_FILE`, default `$INSTALL_DIR/.env` — **0600 perms, don't commit**. Seeded by bootstrap, named as `EnvironmentFile` by both units; under SELinux it must move to `/etc` (see `deploy.config.example`) |
+| env file (secrets) | `$ENV_FILE`, default `$INSTALL_DIR/.env` — **0600 perms, don't commit**. Seeded by bootstrap, named as `EnvironmentFile` by the app unit and, unless `BOT_ENV_FILE` splits it, by the bot too; under SELinux it must move to `/etc` (see `deploy.config.example`) |
+| writable surface | `$DATA_DIR` when set (campaigns, measurements, the run readout), else `$INSTALL_DIR`. Only the first stops the service being able to rewrite its own source, venv and env file |
 | uvicorn unit | `/etc/systemd/system/$APP_NAME.service` |
 | cloudflared config | `~/.cloudflared/config.yml` + `~/.cloudflared/<UUID>.json` |
 | logs (uvicorn) | `journalctl -u $APP_NAME -f` |
@@ -146,7 +147,8 @@ Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Signing up gr
 access, so what bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue;
 `.promptpotter/identity/blocklist.json` is the revoke (re-read on every request — edits
 are instant, no restart). Set `HOST_ADMIN_EMAIL` in `.env` or nothing ever claims this
-box. Don't stack Cloudflare Access — double-gate.
+box, and `HOST_ADMIN_ISSUER` beside it so the claim is pinned to one provider rather than to an
+address any wired provider could assert. Don't stack Cloudflare Access — double-gate.
 
 **The one rule:** a control-plane change never has an inbound door open to the
 internet. The blocklist is your front-door lock; editing it is a privileged action,
@@ -160,9 +162,10 @@ the lowest-trust zone). Full rationale:
 
 ```bash
 # .env (0600, never committed):
-#   ADMIN_BOT_TELEGRAM_TOKEN=...   (from @BotFather)
+#   ADMIN_BOT_TELEGRAM_TOKEN=...   (from @BotFather; the API sends sign-in alerts on it too,
+#                                   so it stays here even after a BOT_ENV_FILE split)
 #   ADMIN_BOT_CHAT_ID=...          (your numeric chat id, locks the bot to you)
-#   ADMIN_BOT_PASSPHRASE=...       (optional 2nd factor; prefix commands with it)
+#   ADMIN_BOT_PASSPHRASE=...       (optional 2nd factor; move to BOT_ENV_FILE — bot-only)
 ./install-admin-bot.sh            # systemd service, outbound-only, auto-restart
 ```
 

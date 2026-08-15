@@ -51,7 +51,14 @@ a stranger; this is what stops one you have already met.
    ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
    ADMIN_BOT_PASSPHRASE=optional-extra-word         # optional 2nd factor (see below)
    HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box (see below)
+   HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
    ```
+
+   **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once you set
+   `BOT_ENV_FILE` (`deploy.config`). It is the second factor on inbound `/block` and `/grant`,
+   and only the bot daemon reads it — a copy in the API's environment makes a read of that
+   process into command authority. The token and chat id must stay in **both**: `auth.py`
+   imports `notify_operator` and announces new sign-ins on the same bot.
    `HOST_ADMIN_EMAIL` is separate from the bot and required on a hosted box. It names the one
    sign-in allowed to write the claim marker that grants the host-admin tier. Leave it unset and
    no browser identity ever claims the box, which also leaves the terminal on the `default`
@@ -127,8 +134,10 @@ broker (Cloudflare Access service token) **plus** an app token — never a bare 
 ## Secret hygiene checklist
 
 - `.env` is `chmod 600` and **never committed** (it holds the bot token + API keys).
-- Rotate `ADMIN_BOT_TELEGRAM_TOKEN` (re-issue via @BotFather) if it ever leaks; paste
-  the new value into `.env` and `sudo systemctl restart promptpotter-allowlist-bot`.
+- Rotate `ADMIN_BOT_TELEGRAM_TOKEN` (re-issue via @BotFather) if it ever leaks; paste the new
+  value into every env file that carries it — the app's *and* the bot's, if you split them —
+  then restart both units. The unit is `promptpotter-admin-bot`; the `-allowlist-bot` this line
+  named for a while is the retired pre-blocklist service.
 - Don't stack Cloudflare Access in front of the app *and* the OIDC gate — that's a
   double-gate; pick one. (The bot is independent of either.)
 - Verify no surprise listener after install: `ss -tlnp` should show **no new port** for

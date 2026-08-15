@@ -150,14 +150,19 @@ This is the genuinely-partial boundary; the honest state:
   shares the API's process, `.env`, and every provider key.
 
 **Shipped wall (3a) — the hardened service unit** (`deploy-linux/install-service.sh`): the
-systemd unit drops all capabilities, `ProtectSystem=strict` (whole FS read-only except
-`$INSTALL_DIR`), a `@system-service` syscall filter, the kernel-protection set, and an optional
-`MemoryMax`. This is kernel-enforced and bounds **both** the API and the in-process loop it hosts.
+systemd unit drops all capabilities, `ProtectSystem=strict`, a `@system-service` syscall filter,
+the kernel-protection set, and an optional `MemoryMax`. This is kernel-enforced and bounds
+**both** the API and the in-process loop it hosts. The writable surface is `DATA_DIR` when set,
+else `$INSTALL_DIR` — and only the first takes away the service's ability to rewrite its own
+source, its venv and its `.env`, which is persistence rather than disclosure. Unset warns.
 
-**Not yet applied (3b) — the dedicated loop principal:** a `promptpotter-loop` service user, a
-`.env` **secret split** (loop gets provider keys, *not* the admin-bot/OIDC secrets), and
-`ReadWritePaths` scoped to the cycle tree only. This is what makes "loop below user" a real
-boundary rather than a label — but it only bites CLI-launched runs until 3c, so it is gated on 3c.
+**Partly applied (3b) — the dedicated loop principal.** The `.env` **secret split** is available
+now (`BOT_ENV_FILE`): the admin bot is already its own unit, so its `ADMIN_BOT_PASSPHRASE` — the
+second factor on inbound `/block` and `/grant` — leaves the API's environment, and a read of that
+process stops conferring command authority. The bot's token and chat id must stay in both, since
+`auth.py` imports `notify_operator` and sends on them. Still absent: a `promptpotter-loop` service
+user and `ReadWritePaths` scoped to the cycle tree alone — that half only bites CLI-launched runs
+until 3c, so it stays gated on 3c.
 
 **Deferred (3c), named honestly — the web-launch split:** making the web-launched loop a separate
 sandboxed process. It fights the current single-process design (a few hundred LOC + delicate
@@ -176,7 +181,9 @@ not backend-supplied.
 - **One public port behind Cloudflare Tunnel** (outbound-only; no inbound router port). uvicorn
   binds `127.0.0.1` with `--proxy-headers --forwarded-allow-ips=127.0.0.1`. TermNorm binds
   `127.0.0.1:8000`, never tunneled.
-- **AuthN:** Google OIDC. Missing session → 401 at `resolve_identity` (`deps.py`). Session cookie is
+- **AuthN:** Google OIDC — RS256 pinned, signature verified, `iss`/`aud`/`exp`/`iat`/`sub` checked,
+  and an `email` returned only where the issuer vouched for it. Missing session → 401 at
+  `resolve_identity` (`deps.py`). Session cookie is
   httponly / secure / samesite=lax, opaque id (no JWT past the middleware — ADR-0002).
 - **Sign-up is open AND signing up is the grant.** Anyone completing OIDC gets an account holding
   `OWNER_COMMAND_CAPABILITIES` over their own tenant. What bounds them is money, not approval: the
@@ -187,8 +194,11 @@ not backend-supplied.
   gets. Nothing else re-checks.
 - **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
   writes is what grants `ADMIN_CAPABILITIES`, and entitlement can no longer stand in front of it now
-  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`
-  and nothing else. Unset means no browser identity ever claims the box. Inferring it would hand a
+  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`,
+  and `HOST_ADMIN_ISSUER` too where that is set (empty accepts any issuer, so no deployed box
+  changes until an operator sets it). An email is a CLAIM a provider makes and two providers are
+  wired, so the address alone would let whichever has the weaker email handling assert the declared
+  one. Unset EMAIL means no browser identity ever claims the box. Inferring it would hand a
   fresh public box to whichever stranger signed in first.
 - **Blocklist edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
@@ -209,7 +219,8 @@ not backend-supplied.
 | Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
 | Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
-| Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` |
+| Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
+| Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
 | Who is exempt from free-tier metering (one predicate) | `quota.py::_spends_the_hosts_own_key` — no issuer (terminal) or the claimed identity |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |

@@ -47,11 +47,13 @@ sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=.' "$BOT_ENV_FILE" \
 sudo grep -q '^ADMIN_BOT_CHAT_ID=.' "$BOT_ENV_FILE" \
     || die "ADMIN_BOT_CHAT_ID not set in $BOT_ENV_FILE — see docs/operations/secure-hosting.md"
 
-# The split only DELIVERS once the app's copy is gone. Say so rather than reporting success on a
-# secret that is still in two places: a half-done split reads exactly like a done one.
+# Only the PASSPHRASE is the bot's alone. The token and chat id must stay in BOTH files: the API
+# imports `notify_operator` to announce a new sign-in, so it sends on the same bot. Naming the
+# wrong key here is worse than saying nothing — an operator who deletes the token to "finish the
+# split" silently loses every sign-in notification, and the bot keeps working, so nothing reports it.
 if [[ "$BOT_ENV_FILE" != "$ENV_FILE" ]] \
-    && sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=.' "$ENV_FILE" 2>/dev/null; then
-    warn "ADMIN_BOT_TELEGRAM_TOKEN is STILL in the app's $ENV_FILE. The bot now reads its own file, but the API worker keeps a copy of the one credential it never uses. Delete that line from $ENV_FILE and restart $SERVICE_NAME to finish the split."
+    && sudo grep -q '^ADMIN_BOT_PASSPHRASE=.' "$ENV_FILE" 2>/dev/null; then
+    warn "ADMIN_BOT_PASSPHRASE is STILL in the app's $ENV_FILE. It is the second factor on inbound /block and /grant commands, and only the bot reads it — a copy in the API's environment turns a read of that process into command authority. Delete THAT line (not the token or chat id, which the API needs to send notifications) and restart $SERVICE_NAME."
 fi
 
 # ADMIN_BOT_MODULE is the one knob whose default is a PLACEHOLDER (`myapp.…`), so a deploy that
