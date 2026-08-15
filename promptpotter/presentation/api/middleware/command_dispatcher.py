@@ -616,7 +616,11 @@ class CommandDispatcher:
                 )
             usd_val = float(max_usd) if max_usd is not None else None
             tok_val = int(max_tokens) if max_tokens is not None else None
-            return lambda: self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
+
+            async def _apply_budget() -> None:
+                await self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
+
+            return _apply_budget
         if kind == "start-run":
             run_kind = str(payload_extras.get("kind", ""))
             halt = payload_extras.get("halt_at_accuracy")
@@ -707,7 +711,29 @@ class CommandDispatcher:
         gate_path.parent.mkdir(parents=True, exist_ok=True)
         write_json(gate_path, {"decision": decision})
 
-    def _apply_change_spend_budget(
+    def _clamp_to_account_ceilings(
+        self, max_usd: float | None, max_tokens: int | None
+    ) -> tuple[float | None, int | None]:
+        """Only a SUPPLIED arm is clamped — composing an absent one would write a ceiling the
+        caller asked to leave alone."""
+        from promptpotter.application.jobs.quota import effective_launch_caps
+
+        user = self._stores.users.get_or_create(
+            user_id=str(self._stores.identity.user_id),
+            tenant_id=str(self._stores.identity.tenant_id),
+        )
+        caps = effective_launch_caps(
+            requested_cap_usd=max_usd,
+            requested_cap_tokens=max_tokens,
+            user=user,
+            stores=self._stores,
+        )
+        return (
+            caps.usd if max_usd is not None else None,
+            caps.tokens if max_tokens is not None else None,
+        )
+
+    async def _apply_change_spend_budget(
         self,
         hop: CycleHop,
         *,
@@ -715,7 +741,12 @@ class CommandDispatcher:
         max_tokens: int | None,
     ) -> None:
         """The round loop's BudgetGate re-reads this every clean round. A ``None`` arg leaves that
-        ceiling untouched; ``0`` halts at the next round boundary."""
+        ceiling untouched; ``0`` halts at the next round boundary. Both arms compose against the
+        account first, because ``entry.py::_usd_cap`` prefers this file over the cap the launch
+        composed — unclamped, raising one here is the way around the host-wallet gate."""
+        max_usd, max_tokens = await asyncio.to_thread(
+            self._clamp_to_account_ceilings, max_usd, max_tokens
+        )
         cap_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).spend_cap
         cap_path.parent.mkdir(parents=True, exist_ok=True)
         caps: dict[str, float | int] = {}

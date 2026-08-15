@@ -201,6 +201,15 @@ class Settings(BaseSettings):
     # the operator of the box is exempt (`quota.py::_spends_the_hosts_own_key`).
     FREE_TIER_SPEND_CAP_USD: float = 0.30
 
+    # The same ceiling in the unit a missing rate cannot blind (ADR-0003 D1). Sized ABOVE what the
+    # USD one buys on the cheapest configured model, so it binds only once that one has; re-derive
+    # it whenever the USD ceiling moves. Per-user override: `user.json::token_budget_total`.
+    FREE_TIER_TOKEN_CAP: int = 5_000_000
+
+    # What a metered account may still spend once its USD total is known to be understated. A
+    # CEILING on the remainder, never a bonus added to it: an exhausted account gets nothing.
+    UNPRICED_GRACE_USD: float = 0.10
+
     # How many campaigns the server admits at once; 1 = strictly sequential, and a launch
     # while a run is in flight gets 409 `machine_busy`. This is the concurrent-serving lever,
     # but DO NOT raise it above 1 until BYO per-user keys and a per-tenant RateLimiter land —

@@ -29,7 +29,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     persist_origin_candidate_library,
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
-from promptpotter.application.jobs.quota import check_launch_quotas, effective_spend_cap_usd
+from promptpotter.application.jobs.quota import check_launch_quotas, effective_launch_caps
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
@@ -182,6 +182,7 @@ async def start_checkin_campaign(
     campaign_id: str,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
+    token_budget: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Any:
     """Transition (b), web tail — reserve the machine slot, then spawn the runner as a detached task.
@@ -204,9 +205,10 @@ async def start_checkin_campaign(
 
     try:
         await _run_preflight(draft.connector, backend_url)
-        spend_budget_usd = await asyncio.to_thread(
-            effective_spend_cap_usd,
+        spend_budget_usd, token_budget = await asyncio.to_thread(
+            effective_launch_caps,
             requested_cap_usd=spend_budget_usd,
+            requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
         )
@@ -249,6 +251,7 @@ async def start_checkin_campaign(
             job_id=job.job_id,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
         ),
         name=f"job-{job.job_id}",
     )

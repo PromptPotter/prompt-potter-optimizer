@@ -108,11 +108,12 @@ async def run_campaign(
     session: Session,
     langfuse_session_id: str | None = None,
     spend_budget_usd: float | None = None,
+    token_budget: int | None = None,
     mode: RunMode | None = None,
 ) -> CycleResult:
-    """Run the loop over an origin this caller already scored. ``spend_budget_usd`` and ``mode`` are
-    the same ceiling and launch-shape flags the web launcher passes — an embedded run that omits the
-    ceiling runs uncapped."""
+    """Run the loop over an origin this caller already scored. The two ceilings and ``mode`` are the
+    same flags the web launcher passes — an embedded run that omits a ceiling keeps the campaign's
+    own value for it."""
     return await run_optimization(
         dataset,
         campaign_config,
@@ -121,5 +122,6 @@ async def run_campaign(
         origin=origin,
         langfuse_session_id=langfuse_session_id,
         spend_budget_usd=spend_budget_usd,
+        token_budget=token_budget,
         mode=mode,
     )

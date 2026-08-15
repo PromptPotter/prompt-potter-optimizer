@@ -418,8 +418,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     # A delegated spend ceiling (ADR-0005) clamps the effective cap — a sub-principal
     # cannot outspend its grant even if the requested/account caps are higher. Escaping
     # it is silent budget over-run, so it is pinned here with the other authority caps.
-    from promptpotter.application.jobs.quota import effective_spend_cap_usd
-    from promptpotter.config.settings import settings
+    from promptpotter.application.jobs.quota import effective_launch_caps
     from promptpotter.infrastructure.store.user_store import User
 
     def _oidc_stores(claims: dict[str, float]) -> types.SimpleNamespace:
@@ -433,27 +432,107 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
         )
 
     generous = User(
-        user_id="sub-9", tenant_id="sub-9", spend_budget_usd_total=50.0, created_at="2026-01-01"
+        user_id="sub-9",
+        tenant_id="sub-9",
+        spend_budget_usd_total=50.0,
+        token_budget_total=50_000,
+        created_at="2026-01-01",
     )
     assert (
-        effective_spend_cap_usd(
-            requested_cap_usd=10.0, user=generous, stores=_oidc_stores({"spend_ceiling_usd": 2.0})
-        )
+        effective_launch_caps(
+            requested_cap_usd=10.0,
+            requested_cap_tokens=None,
+            user=generous,
+            stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
+        ).usd
         == 2.0
     )
     assert (
-        effective_spend_cap_usd(requested_cap_usd=10.0, user=generous, stores=_oidc_stores({}))
+        effective_launch_caps(
+            requested_cap_usd=10.0,
+            requested_cap_tokens=None,
+            user=generous,
+            stores=_oidc_stores({}),
+        ).usd
         == 10.0
     )
 
-    # An account with no override must NOT read as uncapped. Signing up is the grant now, so
-    # the free-tier ceiling is the only thing standing between a stranger and the host's provider
-    # key — and losing it is silent: the run completes, the dashboard looks normal, the host pays.
+
+def test_host_wallet_ceilings_hold_in_both_units(tmp_path: Path) -> None:
+    """Losing a free-tier ceiling is silent: the run completes, the dashboard looks normal, and the
+    host pays. Signing up is the grant, so this gate is the only thing standing between a stranger
+    and the host's provider key (ADR-0003 D1) — and it answers in TWO units because a price needs a
+    rate on file while a token count never does.
+    """
+    import json
+    import types
+
+    from promptpotter.application.jobs.quota import effective_launch_caps
+    from promptpotter.config.settings import settings
+    from promptpotter.infrastructure.store.user_store import User
+
+    def _stores(*, issuer: str | None, ledgers: list[Path]) -> types.SimpleNamespace:
+        """`issuer` set is what makes this a WEB identity rather than the box operator, and the
+        operator is exempt from metering."""
+        return types.SimpleNamespace(
+            identity=types.SimpleNamespace(issuer=issuer, user_id="sub-9", claims={}),
+            campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: ledgers),
+        )
+
+    def _ledger(name: str, *, model: str) -> list[Path]:
+        path = tmp_path / name
+        path.write_text(
+            json.dumps(
+                {
+                    "record_type": "token_usage",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "model": model,
+                    "provider": "openrouter",
+                    "input_tokens": 400_000,
+                    "output_tokens": 100_000,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return [path]
+
+    web = "https://accounts.google.com"
     free_tier = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     assert free_tier.spend_budget_usd_total is None
-    assert effective_spend_cap_usd(
-        requested_cap_usd=10.0, user=free_tier, stores=_oidc_stores({})
-    ) == pytest.approx(settings.FREE_TIER_SPEND_CAP_USD)
+    assert free_tier.token_budget_total is None
+
+    # No override must NOT read as uncapped in either unit.
+    fresh = effective_launch_caps(
+        requested_cap_usd=10.0,
+        requested_cap_tokens=None,
+        user=free_tier,
+        stores=_stores(issuer=web, ledgers=[]),
+    )
+    assert fresh.usd == pytest.approx(settings.FREE_TIER_SPEND_CAP_USD)
+    assert fresh.tokens == settings.FREE_TIER_TOKEN_CAP
+
+    # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
+    # total reads $0.00 for 500k billed tokens. Trusting `ceiling - spent` would hand back nearly
+    # the whole ceiling; the grace bounds it, and the token arm counts what the USD arm cannot.
+    blind = effective_launch_caps(
+        requested_cap_usd=10.0,
+        requested_cap_tokens=None,
+        user=free_tier,
+        stores=_stores(
+            issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
+        ),
+    )
+    assert blind.usd == pytest.approx(settings.UNPRICED_GRACE_USD)
+    assert blind.tokens == settings.FREE_TIER_TOKEN_CAP - 500_000
+
+    # The box operator spends their own money and is metered in neither unit.
+    assert effective_launch_caps(
+        requested_cap_usd=None,
+        requested_cap_tokens=None,
+        user=free_tier,
+        stores=_stores(issuer=None, ledgers=[]),
+    ) == (None, None)
 
 
 def test_config_keys_are_read_through_settings() -> None:

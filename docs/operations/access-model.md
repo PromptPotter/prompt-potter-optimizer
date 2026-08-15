@@ -103,7 +103,7 @@ read**, so a hand-edited over-grant is clamped, and a malformed/no-delegator gra
 not the delegator it acts as. Provisioned only through the operator-admin channel
 (`admin_bot.py`: `/grant`, `/revoke`, `/grants`); the grant writer rejects a delegator that is
 itself a sub-principal (**one-level delegation**, enforced). A grant's **spend ceiling** is
-enforced — `effective_spend_cap_usd` folds it into `min(requested, daily_remaining, ceiling)`.
+enforced — `effective_launch_caps` folds it into `min(requested, lifetime_remaining, ceiling)`.
 The **`campaign.babysit`** cap gates a direct edit of an engine-locked value: unlocking the
 model/provider axis in a `fork-cycle` seed requires it, stamps the cycle babysat, and forces
 its runs to grade `C` (excluded from digest / reuse / L4). The **`campaign.step`** rung gates
@@ -187,8 +187,13 @@ not backend-supplied.
   httponly / secure / samesite=lax, opaque id (no JWT past the middleware — ADR-0002).
 - **Sign-up is open AND signing up is the grant.** Anyone completing OIDC gets an account holding
   `OWNER_COMMAND_CAPABILITIES` over their own tenant. What bounds them is money, not approval: the
-  free-tier lifetime ceiling (`Settings.FREE_TIER_SPEND_CAP_USD`, composed at
-  `quota.py::effective_spend_cap_usd`). `oidc.py::resolve_access_state` (re-read live) answers
+  free-tier lifetime ceilings (`Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed
+  at `quota.py::effective_launch_caps`). **Both units, because the USD one can go blind** — a billed
+  call with no resolvable rate leaves the money total a floor, so the token ceiling is what still
+  holds and the USD arm falls back to `Settings.UNPRICED_GRACE_USD`. Every path that sets a ceiling
+  composes there, `change-spend-budget` included: it writes the file `_usd_cap` prefers over the
+  launch-composed cap, so an unclamped one is the way around this whole section.
+  `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
   capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
   gets. Nothing else re-checks.

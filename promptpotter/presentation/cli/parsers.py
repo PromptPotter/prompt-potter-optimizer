@@ -38,8 +38,8 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """Shared ``--halt-at`` / ``--spend-budget``. Either source halts at the next round boundary once
-    cumulative spend (optimizer + backend) crosses the threshold."""
+    """Shared ``--halt-at`` / ``--spend-budget`` / ``--token-budget``. Any source halts at the next
+    round boundary once its own cumulative total (optimizer + backend) crosses the threshold."""
     p.add_argument(
         "--halt-at",
         dest="halt_at_accuracy",
@@ -55,6 +55,15 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="USD",
         help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD.",
+    )
+    p.add_argument(
+        "--token-budget",
+        dest="token_budget",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Halt when cumulative cycle tokens (optimizer + backend, in + out) ≥ N. "
+        "The model-portable twin of --spend-budget; whichever trips first halts.",
     )
 
 

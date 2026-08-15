@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from typing import NamedTuple
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import sum_user_spend
@@ -89,25 +90,52 @@ def check_launch_quotas(
             )
 
 
-def effective_spend_cap_usd(
+class SpendCeilings(NamedTuple):
+    """The two units a run is metered in; ``None`` on an arm means unmetered."""
+
+    usd: float | None
+    tokens: int | None
+
+
+def effective_launch_caps(
     *,
     requested_cap_usd: float | None,
+    requested_cap_tokens: int | None,
     user: User,
     stores: Stores,
-) -> float | None:
-    """Compose the per-cycle cap with what is LEFT of this account's lifetime ceiling and any delegated
-    ceiling, taking the ``min``. A negative remainder collapses to ``0.0`` so the runner halts at the
-    first round boundary — and, the ceiling being a lifetime one, it stays halted."""
-    caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
-    ceiling = lifetime_ceiling_usd(user=user, stores=stores)
-    if ceiling is not None:
+) -> SpendCeilings:
+    """**One host-wallet gate in two units** — owned by
+    [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every path that
+    sets a ceiling composes here. A remainder collapses to zero rather than going negative, and the
+    ceilings being LIFETIME ones, a run halted on one stays halted.
+    """
+    usd_caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
+    token_caps = [] if requested_cap_tokens is None else [requested_cap_tokens]
+    ceilings = lifetime_ceilings(user=user, stores=stores)
+    if ceilings.usd is not None or ceilings.tokens is not None:
         spent = sum_user_spend(stores=stores, since=0.0, until=time.time())
-        caps.append(max(0.0, ceiling - spent))
-    return min(float(c) for c in caps) if caps else None
+        if ceilings.usd is not None:
+            remaining = max(0.0, ceilings.usd - spent.used_usd)
+            if spent.unpriced_tokens:
+                remaining = min(remaining, settings.UNPRICED_GRACE_USD)
+                logger.warning(
+                    "spend: account %s has %d unpriced tokens, so its USD total is a floor; "
+                    "capping this launch at the $%.2f grace and leaning on the token ceiling",
+                    user.user_id,
+                    spent.unpriced_tokens,
+                    settings.UNPRICED_GRACE_USD,
+                )
+            usd_caps.append(remaining)
+        if ceilings.tokens is not None:
+            token_caps.append(max(0, ceilings.tokens - spent.used_tokens))
+    return SpendCeilings(
+        min(float(c) for c in usd_caps) if usd_caps else None,
+        min(token_caps) if token_caps else None,
+    )
 
 
-def lifetime_ceiling_usd(*, user: User, stores: Stores) -> float | None:
-    """The total-spend ceiling this account answers to, or ``None`` when it answers to none.
+def lifetime_ceilings(*, user: User, stores: Stores) -> SpendCeilings:
+    """The total-spend ceilings this account answers to, or ``None`` arms when it answers to none.
 
     Free-tier metering exists to bound a STRANGER spending the host's provider key — that is the whole
     trade for making signup the grant. The person running the box is not that stranger, so metering them
@@ -115,10 +143,13 @@ def lifetime_ceiling_usd(*, user: User, stores: Stores) -> float | None:
     every terminal run on every install.
     """
     if _spends_the_hosts_own_key(stores):
-        return None
-    if user.spend_budget_usd_total is not None:
-        return user.spend_budget_usd_total
-    return settings.FREE_TIER_SPEND_CAP_USD
+        return SpendCeilings(None, None)
+    usd = user.spend_budget_usd_total
+    tokens = user.token_budget_total
+    return SpendCeilings(
+        usd if usd is not None else settings.FREE_TIER_SPEND_CAP_USD,
+        tokens if tokens is not None else settings.FREE_TIER_TOKEN_CAP,
+    )
 
 
 def _spends_the_hosts_own_key(stores: Stores) -> bool:
@@ -138,7 +169,8 @@ def _delegated_spend_ceiling(stores: Stores) -> float | None:
 
 __all__ = [
     "QuotaExceededError",
+    "SpendCeilings",
     "check_launch_quotas",
-    "effective_spend_cap_usd",
-    "lifetime_ceiling_usd",
+    "effective_launch_caps",
+    "lifetime_ceilings",
 ]

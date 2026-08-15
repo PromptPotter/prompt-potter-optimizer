@@ -1049,6 +1049,9 @@ export interface MeResponse {
 export interface QuotaStatus {
   spend_used_total_usd: number;
   spend_budget_usd_total: number | null;
+  spend_unpriced_tokens: number;
+  tokens_used_total: number;
+  token_budget_total: number | null;
   concurrent_running: number;
   max_concurrent_cycles: number;
   campaigns_today: number;

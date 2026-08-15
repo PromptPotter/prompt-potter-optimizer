@@ -37,7 +37,7 @@ from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     check_launch_quotas,
-    effective_spend_cap_usd,
+    effective_launch_caps,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
@@ -191,6 +191,7 @@ async def mint_campaign_command(
     job_registry: JobRegistry,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
+    token_budget: int | None = None,
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -231,11 +232,12 @@ async def mint_campaign_command(
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
-        # Daily-cap composition globs + reads every cycle ledger — offload so the scan never
+        # Cap composition globs + reads every cycle ledger — offload so the scan never
         # blocks the single event loop on the launch path.
-        spend_budget_usd = await asyncio.to_thread(
-            effective_spend_cap_usd,
+        spend_budget_usd, token_budget = await asyncio.to_thread(
+            effective_launch_caps,
             requested_cap_usd=spend_budget_usd,
+            requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
         )
@@ -298,6 +300,7 @@ async def mint_campaign_command(
             job_id=job.job_id,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
         ),
         name=f"job-{job.job_id}",
     )
@@ -351,6 +354,7 @@ async def start_run_command(
     kind: str,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
+    token_budget: int | None = None,
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
@@ -395,9 +399,10 @@ async def start_run_command(
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
-        spend_budget_usd = await asyncio.to_thread(
-            effective_spend_cap_usd,
+        spend_budget_usd, token_budget = await asyncio.to_thread(
+            effective_launch_caps,
             requested_cap_usd=spend_budget_usd,
+            requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
         )
@@ -464,6 +469,7 @@ async def start_run_command(
             job_id=job.job_id,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
             stop_after_rounds=stop_after_rounds,
         ),
         name=f"job-{job.job_id}",
@@ -481,6 +487,7 @@ async def _run_in_background(
     job_id: str,
     halt_at_accuracy: float | None,
     spend_budget_usd: float | None,
+    token_budget: int | None,
     stop_after_rounds: int | None = None,
 ) -> None:
     from promptpotter.application.run_observers import build_run_observers
@@ -509,6 +516,7 @@ async def _run_in_background(
             observers=observers,
             mode=RunMode(halt_at_accuracy=halt_at_accuracy, stop_after_rounds=stop_after_rounds),
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
         )
         stop_reason = result.stop_reason
         # The SAME classification index.json / dashboard.json / the webapp read — a private

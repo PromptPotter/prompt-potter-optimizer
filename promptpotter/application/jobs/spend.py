@@ -4,7 +4,7 @@ block is cumulative-from-seed, so summing those snapshots double-counts a fork's
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.stores import Stores
@@ -44,26 +44,45 @@ def iter_user_token_usage(*, stores: Stores, since: float, until: float) -> list
     return out
 
 
-def record_cost_usd(rec: dict[str, Any]) -> float:
-    """Billed USD for one usage record; only ``cached=False`` is money that left the account. An unpriced
-    model resolves to ``0.0``, under-counting the cap — and this path has no channel to say so."""
+def record_cost_usd(rec: dict[str, Any]) -> float | None:
+    """Billed USD for one usage record; only ``cached=False`` is money that left the account. ``None``
+    means unpriced — no wire cost and no rate on file — which each caller answers for itself."""
     if rec.get("cached"):
         return 0.0
     raw = rec.get("cost_usd")
-    usd = compute_usd(
+    return compute_usd(
         rec.get("model"),
         int(rec.get("input_tokens", 0)),
         int(rec.get("output_tokens", 0)),
         override_usd=float(raw) if isinstance(raw, int | float) else None,
         provider=rec.get("provider"),
     )
-    return usd if usd is not None else 0.0
 
 
-def sum_user_spend(*, stores: Stores, since: float, until: float) -> float:
-    return sum(
-        record_cost_usd(r) for r in iter_user_token_usage(stores=stores, since=since, until=until)
-    )
+class UserSpend(NamedTuple):
+    """What an account has spent, in both units plus the residue the first one cannot see. Field
+    names mirror ``SpendBucket`` so the per-cycle and per-account reads name one concept."""
+
+    used_usd: float
+    used_tokens: int
+    unpriced_tokens: int
 
 
-__all__ = ["iter_user_token_usage", "record_cost_usd", "sum_user_spend"]
+def sum_user_spend(*, stores: Stores, since: float, until: float) -> UserSpend:
+    used_usd = 0.0
+    used_tokens = 0
+    unpriced_tokens = 0
+    for rec in iter_user_token_usage(stores=stores, since=since, until=until):
+        if rec["cached"]:
+            continue
+        tokens = int(rec["tokens"])
+        used_tokens += tokens
+        usd = record_cost_usd(rec)
+        if usd is None:
+            unpriced_tokens += tokens
+        else:
+            used_usd += usd
+    return UserSpend(used_usd, used_tokens, unpriced_tokens)
+
+
+__all__ = ["UserSpend", "iter_user_token_usage", "record_cost_usd", "sum_user_spend"]

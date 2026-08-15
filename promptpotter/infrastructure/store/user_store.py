@@ -42,6 +42,10 @@ class User(StrictModel):
         default=None,
         description="This account's LIFETIME USD ceiling, summed over its whole ledger and composed with the per-cycle cap at mint time. None means no personal override, so the install-wide free-tier ceiling applies; a number is this account's own ceiling. Not a per-day allowance — spending it is spending it.",
     )
+    token_budget_total: int | None = Field(
+        default=None,
+        description="This account's LIFETIME token ceiling, the model-portable twin of `spend_budget_usd_total` and the one that survives an unpriced model. Same shape: None means the install-wide free-tier ceiling applies, a number is this account's own. Whichever ceiling the account reaches first binds.",
+    )
     max_concurrent_cycles: int = Field(default=2, ge=1)
     max_campaigns_per_day: int = Field(default=1000, ge=1)
     demo_mode_enabled: bool = Field(
