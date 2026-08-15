@@ -152,64 +152,22 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 
 **Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/m12-api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
 
-First end-to-end command: **`pause-cycle`**. On certification, the dispatcher + runner contracts promote to `docs/developer/command-dispatch.md`; boxes 1–10, 17 flip.
+First end-to-end command: **`pause-cycle`**. On certification, boxes 1–10 and 17 flip.
 
-**Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). On certification, the capability matrix promotes to `docs/operations/auth-and-capabilities.md`; box 10 flips with OIDC-aware semantics.
+**Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). On certification, box 10 flips with OIDC-aware semantics; the capability matrix as built is [`../operations/access-model.md`](../operations/access-model.md).
 
-**Profile D** — `JobRegistry` (new at `application/jobs/`) becomes identity-scoped. Control routes reject cross-tenant `job_id`; SSE fans only the caller's tenant. No bare `tenant_id` parameters (identity-foundation no-drift gate #3). `projects/{install_id}/tenant.json` carries brand. On certification, isolation guarantees promote to `docs/operations/multi-tenant.md`; box 12 flips.
+**Profile D** — `JobRegistry` (new at `application/jobs/`) becomes identity-scoped. Control routes reject cross-tenant `job_id`; SSE fans only the caller's tenant. No bare `tenant_id` parameters (identity-foundation no-drift gate #3). `projects/{install_id}/tenant.json` carries brand. On certification, box 12 flips.
 
-**Profile E** — Webapp `usePoll` → SSE subscription. Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/chat/ChatPane.tsx`) alongside the configuration form. On certification, the client contract promotes to `docs/developer/webapp-state-model.md`; boxes 16, 17 flip; `webapp/lib/usePoll.ts` is deleted.
+**Profile E** — Webapp `usePoll` → SSE subscription. Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/chat/ChatPane.tsx`) alongside the configuration form. On certification, boxes 16 and 17 flip; the client contract as built is [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md).
 
-### Security checklist (20 boxes)
+### Where enforcement is recorded
 
-Each box is unchecked at Profile −1 and flips when its enforcement is on disk, tested, and the certified prose is in `docs/developer/` / `docs/operations/`.
-
-Wire-contract integrity:
-1. ☐ Every command + event kind has a declared schema in OpenAPI/AsyncAPI YAML *before* any handler lands.
-2. ☐ Closed-set policy: new command/event kind = YAML update in its own PR.
-3. ☐ Canonical ledger only — commands and acks are `*Record` entries on `.runtime/ledger.jsonl`.
-
-Sole writer / single emitter:
-4. ☑ ONE `CommandDispatcher` writes `CommandRecord` and the paired `CommandAckRecord` (the specified `RunnerCommandSubscriber` was never built — see 3). Outbound SSE frames have no writer — `CycleLedgerTail` reads the ledger directly, cross-process. *(Outbound half certified Profile A; inbound halves land at Profile B.)*
-5. ☐ `emit_command(*, command_id, kind, payload, idempotency_key, issued_by_user_id)` is the sole inbound helper. `emit_command_ack(*, command_id, status, detail)` is the sole outbound helper. Kwargs-only.
-6. ☐ Runner is the sole actuator. No API handler mutates optimizer state directly.
-
-Ambient context:
-7. ☐ `IdentityContext` (from `IdentityDep`) + `_ACTIVE_CYCLE: ContextVar[CycleId | None]` carry identity + cycle past the seam.
-
-Trust boundary:
-8. ☐ Idempotency mandatory. Every command carries `Idempotency-Key`; dispatcher dedupes via ledger hash lookup.
-9. ☐ Optimistic concurrency mandatory on state mutations. `expected_version` required; mismatch = 409 `version_conflict`.
-10. ☐ Capability gate on every handler. Even at Profile B (auth-off), handler asks `identity.capabilities`.
-11. ☐ CORS policy declared per origin; no `*`.
-12. ☐ Per-tenant request scoping verified — Profile D drift test asserts cross-tenant rejection.
-
-Outbound envelope:
-13. ☑ Every SSE frame is `ProjectionEnvelope{kind, version, cycle_id, sequence, payload}`. No raw payload variants. *(Profile A — closed envelope shipped; drift test asserts Python `ProjectionKind` Literal matches AsyncAPI enum exactly.)*
-14. ☑ Snapshot-then-tail. Subscribers receive a snapshot frame, then live tail with strictly-increasing sequence; missed frames detectable via gap. *(Profile A — `stream_snapshot` frame carries `snapshot_at_offset`; live tail strictly greater.)*
-15. ☑ Heartbeat frame every 15 s during idle. *(Profile A — SSE comment line every 15 s when subscriber queue is idle.)*
-
-Client contract:
-16. ☐ URL-as-truth: every view state reachable via URL.
-17. ☐ No client-side optimistic mutations. Pending commands shown as pending; only ack frames flip to confirmed.
-
-Architectural hygiene:
-18. ☑ §0-first. Control-remote definition lands in `architecture.md` §0 before any handler. *(Profile −1: shipped this ADR cluster.)*
-19. ☐ One §0 bucket per concept. Pre-flight gate Q1 enforced on every new type / projection / dispatcher.
-20. ☐ Anchors table — every claim in this ADR names a file. Drift detector test reads the table and asserts each path exists.
-
-### Pre-flight gate audit
-
-The eight questions from root `CLAUDE.md`, answered:
-
-1. **§0 bucket.** State + persistence (§0's I/O-kinds sub-bucket). Control-remote is the fourth named kind.
-2. **Existing channel.** No — Control-remote is genuinely new. Per-cycle ledger Persistence already exists; this contract reuses it.
-3. **Name distinctness.** "Control-remote" parallels "Control-local"; grep confirms no collision.
-4. **Self-describing.** Yes. Q4 sub-rule (new I/O kind → amend §0 first) is satisfied by this PR cluster.
-5. **Ride existing infrastructure.** Yes — commands ride `CycleEventLog.append` as `CommandRecord` on the same `.runtime/ledger.jsonl`.
-6. **AI/operator reads from a file.** Yes — closed sets in YAMLs; checklist + promotion log in this ADR.
-7. **§0 update.** Yes — landed in this PR cluster as a precondition.
-8. **Langfuse trace event.** Commands and acks ride the canonical ledger (already traced). Future command handlers that invoke LLM calls MUST wrap them with `observed_node()`.
+This ADR fixes the *contract*; it does not track how much of it is on disk. The
+checklist and profile-certification log that lived here reported neither reliably —
+every box still read unchecked long after the highway shipped. **What is enforced,
+by which symbol, is owned by [`../operations/access-model.md`](../operations/access-model.md); what has shipped is owned by**
+**[`../specs/roadmap.md`](../specs/roadmap.md)'s Status column.** The closed sets themselves are the two YAMLs, and they
+are the only self-checking record: a command with no schema there has nowhere to land.
 
 ### Anchors
 
@@ -234,13 +192,9 @@ enforcement detail that must move freely, so they are named in prose (see
 | SSE endpoint handler (Profile A) | `promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events` |
 | Certified Profile A contract | `docs/developer/event-stream.md` |
 
-### Promotion log
+### Certified artifacts
 
-Chronological log of what's been certified out of this ADR into the docs layer. Entry shape: `(date, profile, security-box numbers, target doc path, PR link)`. Empty at Profile −1.
-
-| Date | Profile | Boxes flipped | Target doc | PR |
-|---|---|---|---|---|
-| 2026-05-26 | A — outbound highway | 4 (sole writer, SSE half), 13 (envelope), 14 (snapshot-then-tail), 15 (heartbeat) | `docs/developer/event-stream.md` | (this commit) |
+Profile A (outbound highway) certified its wire contract into [`../developer/event-stream.md`](../developer/event-stream.md) on 2026-05-26 — that filename is load-bearing provenance, cited from `domain/projection_envelope.py` and the events router.
 
 ### Out of scope (forever, or for other documents)
 
@@ -255,6 +209,4 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 
 - [`0002-identity-foundation.md`](0002-identity-foundation.md) — foundation Profile C lights up Stage 1 of.
 - [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) — the highway template this ADR mirrors verbatim (first consumer of the identity seam).
-- [`docs/specs/roadmap.md`](../specs/roadmap.md) — orthogonal track (L4 self-recursion).
-- [`docs/specs/roadmap.md`](../specs/roadmap.md) — Phase 1 prerequisite.
-- [`docs/specs/roadmap.md`](../specs/roadmap.md) — end-state product surface.
+- [`docs/specs/roadmap.md`](../specs/roadmap.md) — the forward plan this ADR's profiles land inside.

@@ -138,7 +138,7 @@ sequencing rule.
 
 ### Setup (operator-facing)
 
-Full steps live in [`../operations/secure-hosting.md`](../operations/secure-hosting.md)
+Full steps live in [`../operations/access-model.md`](../operations/access-model.md)
 and [`../../deploy-linux/README.md`](../../deploy-linux/README.md). In brief: create a
 bot with @BotFather (token), find your numeric `chat_id`, put
 `ADMIN_BOT_TELEGRAM_TOKEN` / `ADMIN_BOT_CHAT_ID` (+ optional `ADMIN_BOT_PASSPHRASE`)
@@ -175,5 +175,5 @@ verified by review, no standing test (see [`../../tests/CLAUDE.md`](../../tests/
 | Identity-zone paths (`blocklist`, `blocklist_audit`) | `promptpotter/infrastructure/identity/paths.py` |
 | On-box admin bot (first operator-admin channel) | `promptpotter/presentation/admin_bot.py` |
 | systemd installer for the bot | `deploy-linux/install-admin-bot.sh` |
-| Operator-facing secure-hosting guide | `docs/operations/secure-hosting.md` |
+| Operator-facing secure-hosting guide | `docs/operations/access-model.md` |
 | Identity foundation (the kind this extends) | `docs/adr/0002-identity-foundation.md` |

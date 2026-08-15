@@ -48,7 +48,7 @@ Reads happen by opening files. There is no read CLI. The file tree is the dashbo
 
 ## Live-run supervision
 
-**Every ~2-minute checkup reads the ACTUAL LLM I/O of every tier — a checkup that only greps the log tail is NOT a checkup** (operator-mandated 2026-07-02). The five reads, the STOP-AND-DIAGNOSE red flags and the cross-run comparability rules are owned by [`docs/specs/l4-outer-loop.md`](../../../Desktop/PromptPotter/prompt-potter-optimizer/docs/specs/l4-outer-loop.md) § Running & supervising. Open it when a run is in flight; the cadence must be self-firing, never a passive log monitor.
+**Every ~2-minute checkup reads the ACTUAL LLM I/O of every tier — a checkup that only greps the log tail is NOT a checkup** (operator-mandated 2026-07-02). The five reads, the STOP-AND-DIAGNOSE red flags and the cross-run comparability rules are owned by [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § Running & supervising. Open it when a run is in flight; the cadence must be self-firing, never a passive log monitor.
 
 ## Why experiments did not accumulate — and what changed
 
@@ -187,7 +187,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 ## Useful pointers
 
-Repo root is `../../../Desktop/PromptPotter/prompt-potter-optimizer/`.
+Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 
 - **L1/L2/L3 agent contracts** — `promptpotter/CLAUDE.md` (read first: what each layer reads/writes).
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.

@@ -16,12 +16,12 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Folder | When to load | Index |
 |---|---|---|
 | [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
-| [`concepts/`](concepts/) | How the loop works conceptually — the three-layer loop, scoring + memory, candidate-elimination, **optimizer-of-the-optimizer (L4 recursion)**, campaign tree, paired-sample PoBB. Read before the developer docs. | [`concepts/README.md`](concepts/README.md) |
+| [`concepts/`](concepts/) | How the loop works conceptually. Read before the developer docs: [the-loop](concepts/the-loop.md) (the round shape + § The state record) · [scoring-and-memory](concepts/scoring-and-memory.md) · [campaign-tree](concepts/campaign-tree.md) · [structured-output](concepts/structured-output.md) · [optimizer-of-the-optimizer](concepts/optimizer-of-the-optimizer.md) · [paired-sample-pobb](concepts/paired-sample-pobb.md) | this table |
 | [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.yaml` contract, dispatch hub + L1 layout, L1-candidate-analysis checklist (incl. the self-optimizing campaign lookup), self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
-| [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`access-model.md`** (the security map an audit opens — tiers, boundaries, enforcement, deploy checklist), **`secure-hosting.md`** (allowlist admin via the on-box bot), **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults), **`mask-projection.md`** (what a criterion change costs the record). | [`operations/README.md`](operations/README.md) |
+| [`operations/`](operations/) | Running it — four unrelated subjects, load one group not the folder: **run/watch/diagnose** (`persistence-and-state.md`, whose § Diagnosing a live or stuck run owns hang triage · `observability.md` · `backend-integration.md`) · **datasets** (`dataset-selection-rationale.md`, incl. § Adding a dataset · `dataset-reasoning-matrix.md`) · **security + deploy** (`access-model.md` — the map an audit opens, incl. § Running it securely) · **carry-over** (`mask-projection.md`). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The statistical model (verdict resolution) + the two spend-control procedures that read it: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison + the PEvol-Bench definition), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
-| [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md) + living contracts (frontend-surface-contract, chat-foundation, the two control-plane YAMLs) + the debt backlog. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
+| [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md), whose lane **Status column is truth**; beside it the living contracts (`frontend-surface-contract`, `chat-foundation`, `l4-outer-loop`, the two control-plane YAMLs) and the debt backlog. The roster is the directory listing. | § What may live in `specs/` |
 | `assets/` | Images and diagrams; no contract. | n/a |
 
 ## Anchor docs for hot questions
@@ -46,6 +46,12 @@ L4 (PromptPotter optimizing its own optimizer prompts) is the project's closing 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, what the outer fitness measures today (`mean_round_delta`) and what is still open about it, cost realism.
 2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan.** Read § Finish line first; it is the single owner of L4 status, and of what the panel may claim about a leader — read before any outer number is trusted.
 3. The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
+
+## What may live in `specs/`
+
+**`specs/` describes direction of travel — a past-tense fact about how shipped behavior works belongs in [`concepts/`](concepts/) / [`developer/`](developer/) / [`operations/`](operations/) instead.** A spec that has fully shipped is finished, not archived: delete it and recover from `git log`. The failure this prevents is the tree's most common drift — a spec that shipped months ago still reading as "gating", which costs a reader a re-plan of work that already exists.
+
+Permanent constitutions live in [`adr/`](adr/) instead, and are never deleted on shipping: an ADR records *why* a boundary is where it is, which stays true after the code lands.
 
 ## Editing a doc
 

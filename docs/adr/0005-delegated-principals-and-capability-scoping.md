@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-15
 deciders: [maintainer]
 consulted: [identity-foundation, spend-and-tenancy, operator-admin-channels, m12-control-plane]

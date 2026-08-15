@@ -54,7 +54,7 @@ collects everything else.
   **query ranking** — it names three different things, so pick the one you mean:
   PoBB (budget allocation), the Rasch sort (samples), or `llm_ranking` (a backend
   node). The positive rule these serve — evolutionary framing for anything new —
-  is the root [`CLAUDE.md`](../../CLAUDE.md) § Conventions'.
+  is the root [`CLAUDE.md`](../../CLAUDE.md) § Conventions.
 
 ## Code shape
 
@@ -152,7 +152,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 **When you changed what the engine *decides* (a gate, metric, or state), or added a capability at any entry point → `<entry-point-parity>`:**
 
 <entry-point-parity>
-**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves every caller-facing half as a silent "later". Engine-correct is not product-complete. **There are four ways in — the CLI, an AI caller (the `/potter-run` skill), the REST API, and the webapp — and a capability that reaches only the one you happened to be editing is half-built.** This project is whitelabeled and user-facing; the forgotten surface is always the one sitting a layer past where the change was made, which is usually the webapp. Two rules:
+**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves every caller-facing half as a silent "later". Engine-correct is not product-complete. **There are five ways in — the CLI, an AI caller (the `/potter-run` skill), the embedded launch a host program drives (`application/embedded_run.py`: the notebooks, the BBEH harness, a packaged adapter), the REST API, and the webapp — and a capability that reaches only the one you happened to be editing is half-built.** This project is whitelabeled and user-facing; the forgotten surface is always the one sitting a layer past where the change was made, which is usually the webapp. Two rules:
 
 1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe every entry point that could ask for it a legible surface in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it from where they actually work, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
 2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a new statistic, a new mode) reaches the operator *taught*: a plain-language explainer, riding an **existing** surfacing channel (the lens/formula seam, not a new toggle), and **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the metric they chose. Teach from **one corpus** that serves the operator and the next AI reader alike — don't fork the prose.

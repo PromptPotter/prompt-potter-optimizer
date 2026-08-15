@@ -25,7 +25,7 @@ ORIGIN_ABILITY_ID = "__origin__"
 # and the 1PL→2PL switch is invisible above ``fit_theta_given_delta`` (the seam):
 # a plain float stays 1PL, a tuple carries discrimination, an absent sample is
 # flat (δ=0, a=1). This is the "one ruler, θ always, flat where cold" contract,
-# generalized to 2PL (fitness-comparability slice 3).
+# generalized to 2PL.
 RulerEntry = float | tuple[float, float]
 Ruler = Mapping[int, RulerEntry]
 

@@ -103,11 +103,17 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 - **An `artifact_version`,** so a reader can **refuse**. We owe no back-compat (root § STOP); refusing loudly is the point.
 - **Model identity yes, credentials never. JSON only, never pickle** — it is text and scalars.
 
-**Three consumers, one artifact.** (a) Our own runtime, via a loader returning a `PromptTemplate`. (b) A DSPy program — through a `to_dspy` view living in the `promptpotteropt` repo, never here (the dependency arrow is one-way, [`dspy-adapter.md`](dspy-adapter.md)); it applies the winner to a *live* program and never emits DSPy state, which sidesteps the positional-zip corruption rather than inheriting it. (c) MLflow — targeting the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs.
+**Three consumers, one artifact.** (a) Our own runtime, via a loader returning a `PromptTemplate`. (b) A DSPy program — through a `to_dspy` view living in the `promptpotteropt` repo, never here (the dependency arrow is one-way, and that packaging boundary is [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)); it applies the winner to a *live* program and never emits DSPy state, which sidesteps the positional-zip corruption rather than inheriting it. (c) MLflow — targeting the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs.
 
 **Dependency, settled:** the dataset fingerprint is load-bearing, not decorative — an exported fitness number is only as trustworthy as the identity of the rows it was measured on. B2 needed none (it compares the content each stored row already carries), so the artifact brought its own: `shared/hashing.py::dataset_hash`, the rows alone. Deliberately not a slice of `content_hash`, which mixes prompt and pipeline config into the same digest — right for a cache key, useless as an identity two campaigns can compare.
 
 **Open — the three consumers.** (a) is built (`PromptExport.template()`); (b) `to_dspy` lives in the `promptpotteropt` repo and waits on Phase C; (c) MLflow's Prompt Registry is unwritten. So is § Captured "Export / copy from dashboard" — the same artifact behind a button.
+
+### Schema-description axis — the one open step
+The axis itself shipped (`fold_schema_descriptions`, `SCHEMA_RENAME_PARAM`, `effective_l1_field_names`, pinned by `test_integrity.py`); why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). **Open: `new --sweep-batch` it on `justlogic-d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes the axis by reverting it.
+
+### Fitness comparability — the slice-4 remainder
+Slices 1–3 shipped (`fit_rasch_2pl`, `graduate_ruler_model`, `cumulative_theta`, the webapp headline). Open: the **cross-round headline surfaces** + the lineage `/N` badge ([`frontend-surface-contract.md`](frontend-surface-contract.md)), and **feeding graduated discrimination `aₛ` into `select_round_subset`**, which is still 1PL ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)).
 
 ### Prompt-iteration framework + exit gate
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).

@@ -43,9 +43,9 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 # `=.` and not `=`: a key present but empty reads exactly like a key that was never set, and the
 # bot's own check cannot tell the operator which of the two they did.
 sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=.' "$BOT_ENV_FILE" \
-    || die "ADMIN_BOT_TELEGRAM_TOKEN not set in $BOT_ENV_FILE — see docs/operations/secure-hosting.md"
+    || die "ADMIN_BOT_TELEGRAM_TOKEN not set in $BOT_ENV_FILE — see docs/operations/access-model.md"
 sudo grep -q '^ADMIN_BOT_CHAT_ID=.' "$BOT_ENV_FILE" \
-    || die "ADMIN_BOT_CHAT_ID not set in $BOT_ENV_FILE — see docs/operations/secure-hosting.md"
+    || die "ADMIN_BOT_CHAT_ID not set in $BOT_ENV_FILE — see docs/operations/access-model.md"
 
 # Only the PASSPHRASE is the bot's alone. The token and chat id must stay in BOTH files: the API
 # imports `notify_operator` to announce a new sign-in, so it sends on the same bot. Naming the

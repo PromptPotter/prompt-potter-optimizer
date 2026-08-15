@@ -76,7 +76,8 @@ operator to run `start-server-py-LLMs.bat` in their own terminal; wait for `/sta
 - **New bundled benchmark (rare):** register a loader returning `list[Sample]`
   (`domain/sample.py`) in `DATASET_LOADERS`, and draft
   `datasets/<name>/{pipeline.yaml, campaign.json, dataset.md, prompts/<node>.yaml}` against
-  `datasets/bbeh/`. Follow `docs/operations/adding-a-dataset.md` — canonical split first.
+  `datasets/bbeh/`. Follow `docs/operations/dataset-selection-rationale.md` § Adding a
+  dataset — canonical split first.
 
 ## First-run smoke
 

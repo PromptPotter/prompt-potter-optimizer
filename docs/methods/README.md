@@ -5,7 +5,7 @@ The statistical model and the two spend-control procedures that read it.
 | Page | Covers |
 |------|--------|
 | [Verdict resolution](verdict-resolution.md) | The single statistical model behind the live adaptive queue + the persisted `hard_samples.json` ranking — the model both procedures below draw from. |
-| [Mid-round elimination (PoBB)](candidate-elimination.md) | Search-only-with-evidence: each variant runs ~3–5 samples; only those with statistical evidence of being round's best get extended. Bayesian Posterior-of-Being-Best, joint-posterior MC. |
+| [Mid-round elimination (PoBB)](candidate-elimination.md) | Search-only-with-evidence: every variant runs the `elimination_n_min` floor before it may be cut at all; only those with statistical evidence of being the round's best get extended. Bayesian Posterior-of-Being-Best, joint-posterior MC. |
 | [Hard-sample leaderboard (Rasch + KG)](exploration-exploitation.md) | Between rounds, swap understood samples for high-information ones. Same posterior feeds the standalone hard-sample sorter. |
 
 Hand-tuning the optimizer's own optimizer prompts, and measuring whether an edit helped: [`../manual/06-going-deeper.md`](../manual/06-going-deeper.md) § Iterating on prompts manually.

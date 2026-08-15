@@ -150,7 +150,7 @@ The gate is `python scripts/gate.py --web`, which is also what CI's `webapp` job
 Smoke-test manually at `http://localhost:8001/` after a behavioural change. **Two states, two harnesses:**
 
 - **anon** — open `:8001` as-is (no flag); drives the public-preview surface.
-- **authed + live** — relaunch with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to the CLI's resolver, so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). The cheap way to exercise the surface contract's `live` / `warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`../dev/oidc-local/`](../dev/oidc-local/), [`../docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing it cannot reach: the real Google OIDC login round-trip.
+- **authed + live** — relaunch with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to the CLI's resolver, so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). The cheap way to exercise the surface contract's `live` / `warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`../dev/oidc-local/`](../dev/oidc-local/), [`../docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md) § Local OIDC harness) for the one thing it cannot reach: the real Google OIDC login round-trip.
 
 Reach for a component-render test only for a regression class that compile + smoke + the derivation tests cannot catch; today's bug classes are reader-side and ride the existing Vitest scope.
 

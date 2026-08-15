@@ -127,7 +127,9 @@ discordance-potential samples — hence the shared, seed-stratified order.
 - Round order — `intelligence/adaptive_queue_mechanism.py::build_round_order`,
   called once per round at `optimization/l1/score/loop.py::score_population`.
 - Between-round subset pick — `intelligence/exploration.py::select_round_subset`
-  (still fits **1PL** via `::fit_rasch`; see `fitness-comparability.md`).
+  (still fits **1PL** via `::fit_rasch` — feeding the graduated discrimination
+  `aₛ` in here is open, [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness
+  comparability — the slice-4 remainder).
 - Population profile fit — `intelligence/exploration.py::fit_rasch`.
 - Persisted ranking writer —
   `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,

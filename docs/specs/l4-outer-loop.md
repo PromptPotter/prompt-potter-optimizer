@@ -4,7 +4,7 @@
 >
 > **Scope:** CLI / headless only — no webapp surface yet (that's a later lane). The outer loop is a normal `python -m promptpotter new promptpotter-self` invocation.
 >
-> **Prerequisite:** [`fitness-comparability.md`](fitness-comparability.md) — the outer fitness reads inner-campaign improvement, which must be subset-invariant (θ-based).
+> **Prerequisite:** the outer fitness reads inner-campaign improvement, which must be subset-invariant (θ-based) — [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md) § Composite — recorded, not gating.
 
 ## Finish line — a distributable `promptpotter-self` (drives the remaining work)
 
@@ -167,7 +167,7 @@ Standing invariants (verified — don't re-chase):
 - **An L4 outer sample must stamp `terminal_node` = the LAST outer node (`l3_plan`), never a mid-chain one.** `terminal_node` is the archive's reuse contract; an inner campaign consumes the ENTIRE outer config at once, so a mid-chain stamp lets prefix-trust replay serve the ORIGIN's rows to any candidate editing a later node (fake 0.0s replays). **It is not a health signal and nothing may tally it** — the field was named `terminated_at`, a panel counted it as `terminate@l3_plan: 5`, and the critique spent an outer arm fixing a stall that never happened.
 - **A panel keyed on HIT/MISS must stay silent at L4** (`panels._miss_is_placeholder`). The outer `predicted` carries a proxy suffix its `ground_truth` lacks, so no cell can ever be a hit; rendered as misses, the critique diagnosed the artifact as a "proxy misalignment" and steered the inner loop off `mean_round_delta`, the only objective it has. A prompt clause telling the model to ignore the panel is NOT the fix — one was already there, and round 1 ignored it.
 - **A NO-OP probe's save REPLACES the origin's archive slot — by design, don't re-diagnose.** `MeasurementArchive.append_run` dedups on `content_hash` (newest wins); reuse stays correct, forensic origin rows live on in `round_0000.json` + the ledger, and index entries whose detail log was replaced dangle harmlessly.
-- **Hang triage order: ledger tail → `dashboard.json::declared_phase` → `.runtime/` flags → process table by command line → only then mtimes.** Control flags (`pause.flag`) are consumed at the next per-SAMPLE checkpoint — a mid-candidate pause stops within seconds and looks like a freeze to an mtime-watcher. The optimizer-call path already has a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`); overnight deaths with no terminal record are machine-sleep/session-end class, not code.
+- **Hang triage order** — owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Diagnosing a live or stuck run. At L4 read it alongside the outer-heartbeat bullet above: an outer round awaiting a multi-minute inner campaign is quiet by design, and nothing else here is L4-specific.
 - **`token_budget` stays `null` for L4** (`datasets/promptpotter-self/campaign.yaml`) — the inner-spend rollup lands each inner campaign's tokens on the outer ledger as backend cost, so the normal-campaign default trips after a couple of inner campaigns while the USD budget sits nearly untouched. For L4 `spend_budget_usd` is the meaningful cap. (Root is L4's scale, not the rollup — the rollup correctly reports real tokens; don't uncount them.)
 - **When the inner loop "stalls", suspect the SCHEMA before the prompt.** A schema that mandates the narration and marks the payload optional will get exactly that — a variant that names itself, cites a panel, describes a change and mutates nothing, cascading into a diversity/cleanliness drop, a lives drain and a multi-round stall that all read as a bad optimizer prompt. `L1Variant` generates the payload BEFORE the prose reporting it, and ≥1 override is enforced at parse.
 - **Never hand an LLM a character budget — it cannot count characters.** Told its cap explicitly, *with the consequence spelled out*, a node overruns it on essentially every round and loses its tail to the truncation rail — silently, from the frame every downstream prompt reads. A char cap is a **runaway rail, not a budget knob**: express the budget in a unit the writer can honour (bullets, sentences) and let the cap catch only a genuine runaway.
@@ -270,8 +270,8 @@ per-sample primitives):
   `metrics.py::elimination_p_best` over inner-campaign arms.
 
 The proxies read the inner loop's **θ-based**, grade-A improvement
-([`fitness-comparability.md`](fitness-comparability.md)) — subset-invariant and
-clean-measurement by inheritance, which is why comparability is the prerequisite.
+([`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md)) — subset-invariant
+and clean-measurement by inheritance, which is why comparability is the prerequisite.
 
 ## 5. Non-goals + validation
 

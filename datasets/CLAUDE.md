@@ -56,7 +56,7 @@ Status + the remaining work live in ONE place — [`../docs/specs/l4-outer-loop.
 
 Source of truth for wire / reject rationale, projection-bias findings, per-dataset model defaults:
 
-- **Adding a dataset + canonical splits** → [`../docs/operations/adding-a-dataset.md`](../docs/operations/adding-a-dataset.md). Research the canonical split; never invent one.
+- **Adding a dataset + canonical splits** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md) § Adding a dataset — the wiring process. Research the canonical split; never invent one.
 - **Why X is / isn't wired, trialed-and-rejected list** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md). Check first when asked "why didn't we use Y?" or "have we trialed Z?".
 - **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
 

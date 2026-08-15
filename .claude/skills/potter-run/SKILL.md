@@ -141,7 +141,8 @@ Where a loader assigns `sample_id` each display line carries `#NNN` right after 
 
 Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner) and
 `cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.winner_*`,
-`final.stop_reason` → [reference/troubleshooting.md](reference/troubleshooting.md)).
+`final.stop_reason` — its display label and outcome class come from the one
+`STOP_REASON_INFO` table, `promptpotter/domain/phases.py`).
 
 ### A held round is not proof the candidate failed — check the other estimator
 
@@ -215,7 +216,7 @@ leaderboard picks.
 ## References
 
 - [reference/onboarding.md](reference/onboarding.md) — new-dataset flow (web + CLI), Claude-simulated check-in, cold-machine bootstrap
-- [reference/optimization-layers.md](reference/optimization-layers.md) — L1/L2/L3 escalation
-- [reference/troubleshooting.md](reference/troubleshooting.md) — stop-reason recovery
+- [`promptpotter/application/optimization/CLAUDE.md`](../../../promptpotter/application/optimization/CLAUDE.md) — the L1/L2/L3 agent contracts: what each layer reads, writes and decides
+- [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order when a run is stuck; stop-reason recovery
 - [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) — running + supervising `promptpotter-self`
 - [`docs/concepts/the-loop.md`](../../../docs/concepts/the-loop.md) · [`docs/developer/self-healing-internals.md`](../../../docs/developer/self-healing-internals.md) · [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md)

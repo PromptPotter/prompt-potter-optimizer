@@ -171,7 +171,7 @@ the lowest-trust zone). Full rationale:
 
 Then message the bot `/block them@example.com`, `/unblock ...`, `/blocked`. Changes are
 audited to `.promptpotter/identity/blocklist_audit.jsonl`. Step-by-step + secret
-hygiene: [`docs/operations/secure-hosting.md`](../docs/operations/secure-hosting.md).
+hygiene: [`docs/operations/access-model.md`](../docs/operations/access-model.md).
 
 | logs (admin bot) | `journalctl -u $APP_NAME-admin-bot -f` |
 

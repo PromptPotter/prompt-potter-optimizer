@@ -54,7 +54,7 @@ def load_node_prompt(
     raise FileNotFoundError(
         f"Canonical prompt template not found in {d} for node={node_name!r}. "
         f"Expected either {node_path} (per-node) or {variant_path} (dataset default). "
-        f"Author one as a PromptTemplate YAML; see docs/concepts/state-record.md."
+        f"Author one as a PromptTemplate YAML; see docs/concepts/the-loop.md."
     )
 
 

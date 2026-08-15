@@ -1,7 +1,10 @@
 # presentation/ — entry-point adapters (read-only over application/)
 
-The thin shells wiring the operator's three entry points (CLI, notebook,
-webapp) to one orchestration layer. Orchestration itself lives in
+The thin shells wiring the operator's entry points (`cli/`, terminal +
+notebook `views/`, the FastAPI `api/` the webapp reads) to one orchestration
+layer. **How many ways in there are, and the parity rule over them, is owned by
+root [`CLAUDE.md`](../../CLAUDE.md) § Working principles** — this layer must give
+every adapter it wires the same orchestration call, never a private path. Orchestration itself lives in
 [`../application/CLAUDE.md`](../application/CLAUDE.md)'s tree and the disk
 seams in [`../infrastructure/CLAUDE.md`](../infrastructure/CLAUDE.md)'s;
 what may not happen here is § Out-of-bounds.
@@ -21,7 +24,7 @@ what may not happen here is § Out-of-bounds.
   (display); the per-cycle markdown writers (`log.md`, `review.md`) now live
   in `application/output.py` (orchestration-side), not here.
 - **No business logic here** — `cli/` and `api/` parse, route, and format; anything else is drift into the wrong layer.
-- **Three entry points, one orchestration layer.** A behavior reachable from the CLI but not the notebook or webapp is a bug, not a feature.
+- **One orchestration layer under every adapter.** A behavior reachable from the CLI but not the notebook or webapp is a bug, not a feature.
 
 ## Read-only API stance
 

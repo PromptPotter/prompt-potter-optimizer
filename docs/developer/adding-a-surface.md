@@ -21,7 +21,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Import-time: the `registry.py` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
-| A resume / decision checkpoint | [§4](#4-a-resumedecision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
+| A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
 | A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Breaks loud — an unknown verb exits non-zero |
