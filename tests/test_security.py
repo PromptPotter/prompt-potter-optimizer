@@ -485,6 +485,156 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
 
 
+def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) -> None:
+    """The per-cycle ledgers ARE the account's lifetime spend record, and `delete_campaign` takes
+    them under BOTH `keep_results` arms — `.runtime/ledger.jsonl` is not a keepsake. Unbanked, the
+    free-tier ceiling is re-earnable by deleting whatever you spent it on, forever, and
+    `delete-campaign` needs only `CAMPAIGN_LIFECYCLE_CAP`, which signup grants. Nothing errors and
+    every served number stays plausible — the account simply reads poorer than it is.
+
+    Banked by the destroyer itself, so the caller cannot skip it — which is what this asserts by
+    calling `delete_campaign` alone.
+    """
+    import json
+
+    from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
+
+    stores = built_stores
+    campaign_dir = stores.campaigns.campaign_root_dir("camp-1")
+    (campaign_dir).mkdir(parents=True, exist_ok=True)
+    (campaign_dir / "campaign.json").write_text(json.dumps({"campaign_id": "camp-1"}), "utf-8")
+    ledger = campaign_dir / "cycles" / "cyc-1" / ".runtime" / "ledger.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "record_type": "token_usage",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "kind": "optimizer",
+                "node": "l1_generate",
+                "model": "openai/gpt-4o",
+                "provider": "openrouter",
+                "input_tokens": 1_000,
+                "output_tokens": 500,
+                "cost_usd": 0.25,
+            }
+        )
+        + "\n",
+        "utf-8",
+    )
+
+    before = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
+    assert before.used_usd == pytest.approx(0.25)
+    assert before.used_tokens == 1_500
+
+    stores.campaigns.delete_campaign(
+        "camp-1", keep_results=False, changed_at="2026-01-02T00:00:00Z"
+    )
+    assert not ledger.exists()
+
+    after = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
+    assert after == before
+
+
+def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> None:
+    """The stub-delete path takes a whole cycle tree, ledger included, and a stub is deletable at
+    ``n_rounds == inherited`` — which an origin-scored fork reaches having already paid for round 0.
+    Unbanked, the free-tier ceiling is re-earnable one fork at a time by the auto-cleanup itself, on
+    `campaign.lifecycle` alone. Nothing errors; the account simply reads poorer than it is.
+
+    The bank also has to be REFUSAL-safe and RETRY-safe in opposite directions: banking a cycle the
+    delete then refuses counts the money twice, and banking after the rmtree loses it outright.
+    """
+    import json
+
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+        cleanup_stub_fork_if_empty,
+    )
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.account_spend import (
+        account_ledgers,
+        bank_spend,
+        sum_user_spend,
+    )
+    from promptpotter.infrastructure.store.io import write_json
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    stores = built_stores
+    root = "cycle_root0000"
+    stub, retried = f"{root}_fork_aaaa", f"{root}_fork_bbbb"
+    campaign_dir = stores.campaigns.campaign_root_dir("camp-2")
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+    (campaign_dir / "campaign.json").write_text(json.dumps({"campaign_id": "camp-2"}), "utf-8")
+
+    def _spent_cycle(cycle_id: str, *, n_rounds: int, cost_usd: float) -> Path:
+        write_json(
+            campaign_dir / "cycles" / cycle_id / "index.json",
+            {"campaign_id": "camp-2", "cycle_id": cycle_id, "n_rounds": n_rounds},
+        )
+        ledger = campaign_dir / "cycles" / cycle_id / ".runtime" / "ledger.jsonl"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(
+            json.dumps(
+                {
+                    "record_type": "token_usage",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "kind": "backend",
+                    "model": "openai/gpt-4o",
+                    "provider": "openrouter",
+                    "input_tokens": 2_000,
+                    "output_tokens": 800,
+                    "cost_usd": cost_usd,
+                }
+            )
+            + "\n",
+            "utf-8",
+        )
+        return ledger
+
+    _spent_cycle(root, n_rounds=3, cost_usd=0.07)
+    stub_ledger = _spent_cycle(stub, n_rounds=0, cost_usd=0.11)
+    retried_ledger = _spent_cycle(retried, n_rounds=0, cost_usd=0.05)
+
+    def _account_usd() -> float:
+        return sum_user_spend(
+            ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9
+        ).used_usd
+
+    before = _account_usd()
+    assert before == pytest.approx(0.23)
+
+    def _cleanup(cycle_id: str) -> tuple[bool, str]:
+        return cleanup_stub_fork_if_empty(
+            campaign_store=stores.campaigns,
+            hop=CycleHop(campaign_id="camp-2", cycle_id=cycle_id),
+            parent_cycle_id=root,
+        )
+
+    # A cycle the delete REFUSES must not be banked — it keeps its rows, so a tombstone beside
+    # them is the same money counted twice, and nothing ever removes a tombstone.
+    assert not _cleanup(root)[0]
+    assert _account_usd() == pytest.approx(before)
+
+    # The plain path: the rows go, the money stays.
+    assert _cleanup(stub)[0]
+    assert not stub_ledger.exists()
+    assert _account_usd() == pytest.approx(before)
+
+    # Banking precedes the delete, so a crash in between leaves the tombstone standing with the
+    # rows still there; every retry from that state must find it rather than bank a second one.
+    retried_hop = CycleHop(campaign_id="camp-2", cycle_id=retried)
+    for _crashed_attempt in range(2):
+        bank_spend(
+            workspace=stores.campaigns.workspace,
+            ledgers=[CycleLayout(stores.campaigns.cycle_dir(retried_hop)).ledger],
+            campaign_id="camp-2",
+            cycle_id=retried,
+        )
+    assert _cleanup(retried)[0]
+    assert not retried_ledger.exists()
+    assert _account_usd() == pytest.approx(before)
+
+
 async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     built_stores: Any, tmp_path: Path
 ) -> None:

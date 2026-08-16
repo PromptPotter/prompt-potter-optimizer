@@ -16,6 +16,7 @@ from promptpotter.domain.results import RoundResult, best_round_by_measured_accu
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
+from promptpotter.infrastructure.store.account_spend import bank_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
@@ -202,12 +203,18 @@ class CampaignStore:
             return []
         return sorted(p.parent for p in root.glob("*/campaign.json"))
 
+    def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
+        """One campaign's cycle ledgers — the enumeration `bank_spend` reads before
+        `delete_campaign` destroys them."""
+        cycles = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
+        return sorted(cycles.glob("*/.runtime/ledger.jsonl"))
+
     def iter_cycle_ledgers(self) -> list[Path]:
         """Every cycle ledger, archived included — archiving must not free daily spend-cap budget."""
         return [
             ledger
             for campaign_dir in self.iter_campaign_dirs()
-            for ledger in sorted(campaign_cycles_dir(campaign_dir).glob("*/.runtime/ledger.jsonl"))
+            for ledger in self.campaign_cycle_ledgers(campaign_dir.name)
         ]
 
     @staticmethod
@@ -353,11 +360,21 @@ class CampaignStore:
         inner_sandbox_root: Path | None = None,
     ) -> bool:
         """Destructive. The cross-campaign ``measurements/`` cache is NEVER touched, and
-        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes (delete only)."""
+        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes (delete only).
+
+        Both arms take the cycle ledgers — ``.runtime/ledger.jsonl`` is not a keepsake, so
+        ``keep_results`` does not spare it — and those ledgers ARE the account's lifetime spend
+        record, so the spend is banked here rather than by the caller. After the guard: a refused
+        delete keeps its rows, and a tombstone beside them is the same money counted twice."""
         campaign_dir = self.campaign_root_dir(campaign_id)
         if not (campaign_dir / "campaign.json").is_file():
             return False
         self._guard_and_release(campaign_id, "delete")
+        bank_spend(
+            workspace=self._base_dir,
+            ledgers=self.campaign_cycle_ledgers(campaign_id),
+            campaign_id=campaign_id,
+        )
         # Enumerate cycle_ids BEFORE the tree is stripped/removed — the inner
         # sandboxes are keyed by cycle_id and live off-tree, so we need the ids first.
         inner_cycle_ids: list[str] = []
@@ -696,36 +713,52 @@ class CampaignStore:
     def enumerate_cycles(self) -> list[dict[str, Any]]:
         return [self._entry_from_index(p) for p in self._index_files()]
 
-    def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
-        """Banked-nothing is measured against what the cut INHERITED, never against zero: a
-        rebase fork mints carrying ``n_rounds == from_round`` without having run a round."""
-        cycle_dir = self.cycle_dir(hop)
+    def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
+        """Why this cycle may NOT be deleted as a stub, or ``None`` when it may. Asked before the
+        spend is banked, because banking a cycle the delete then refuses counts that money twice.
+
+        Banked-nothing is measured against what the cut INHERITED, never against zero: a rebase
+        fork mints carrying ``n_rounds == from_round`` without having run a round."""
         index_path = self._index_path(hop)
         # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
         # stub to delete, the other is a cycle whose state we cannot vouch for.
         try:
             index = read_json_optional(index_path)
         except (OSError, json.JSONDecodeError) as exc:
-            return False, f"index.json unreadable: {exc}"
+            return f"index.json unreadable: {exc}"
         if index is None:
-            return False, "not on disk"
+            return "not on disk"
         if root_cycle_id(hop.cycle_id) == hop.cycle_id:
-            return False, "family root — deletion is for sibling stubs only"
+            return "family root — deletion is for sibling stubs only"
         n_rounds = index.get("n_rounds", 0)
         fork = index.get("fork")
         from_round = (fork or {}).get("from_round") if isinstance(fork, dict) else None
         inherited = from_round if isinstance(from_round, int) and from_round > 0 else 0
         if not isinstance(n_rounds, int) or n_rounds > inherited:
-            return False, (
-                f"n_rounds={n_rounds} against {inherited} inherited — cycle ran real work"
-            )
+            return f"n_rounds={n_rounds} against {inherited} inherited — cycle ran real work"
         for other in self._index_files():
             other_campaign, other_cycle = self._ids_from_index_path(other)
             if other_campaign != hop.campaign_id or other_cycle == hop.cycle_id:
                 continue
             other_data = read_json_optional(other)
             if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == hop.cycle_id:
-                return False, f"has descendant {other_cycle}"
+                return f"has descendant {other_cycle}"
+        return None
+
+    def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
+        """Bank, then destroy — a stub is deletable at ``n_rounds == inherited``, which an
+        origin-scored fork reaches having already paid for round 0, so its ledger holds real money
+        the ``rmtree`` would otherwise un-spend."""
+        blocked = self._stub_deletion_blocked(hop)
+        if blocked is not None:
+            return False, blocked
+        cycle_dir = self.cycle_dir(hop)
+        bank_spend(
+            workspace=self._base_dir,
+            ledgers=[CycleLayout(cycle_dir).ledger],
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+        )
         rmtree_robust(cycle_dir)
         return True, ""
 

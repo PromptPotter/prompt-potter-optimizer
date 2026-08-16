@@ -273,6 +273,26 @@ reads an untouched arm as unmetered. `quota.py::hold_ceiling` therefore takes th
 the single prior and writes the file as its projection; the file's shape is spelled once, by
 `runtime_flags.py`'s `read_spend_caps` / `write_spend_caps` pair.
 
+*Deleting the data does not un-spend the money.* The per-cycle ledgers ARE the lifetime record, and
+`delete_campaign` takes them under both `keep_results` arms, so the ceiling was re-earnable by
+deleting whatever you spent it on. `jobs/account_spend.py::bank_campaign_spend` sums the campaign first and
+writes a `SpendTombstoneRecord` to the workspace ledger, which `account_ledgers` folds back in.
+Totals, not rows: the rows are a chronology nobody can act on once their cycle is gone, and a
+synthetic `TokenUsageRecord` standing in for them would be a fabricated measurement.
+
+**Two destroyers, one bank, and it lives INSIDE them.** The stub delete takes a cycle tree the same
+way — and a stub is deletable at `n_rounds == inherited`, which an origin-scored fork reaches having
+already paid for round 0 — so `delete_campaign` and `try_delete_stub_cycle` each call `bank_spend`
+themselves (`infrastructure/store/account_spend.py`, which is why that module sits in the store
+layer rather than above it). No caller can take a ledger without banking it, and none is asked to
+remember: `cleanup-empty-cycles`, `delete-cycle` and the runner's own cleanup all just delete.
+
+The ordering inside each destroyer is the rest of the design. Banking runs AFTER the guard that
+decides the delete will proceed and BEFORE the rows go: after the `rmtree` a crash loses the money
+outright, and before the guard every refused sweep banks a cycle that keeps its rows. The residual
+crash window therefore double-counts, which is the safe direction, and the re-bank guard closes it
+— a subject (`campaign_id`, `cycle_id`) already carrying a tombstone is never banked twice.
+
 *A request may lower a ceiling and never raise one.* A `CycleSeed`'s `config_overrides` wins over
 run-scoped values for every policy knob it carries, but the budget arms are an authority bound
 rather than a preference, so `runner/entry.py::_bound_by_admitted_caps` composes them as a `min`

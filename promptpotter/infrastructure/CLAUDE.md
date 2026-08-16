@@ -262,7 +262,13 @@ Path helpers in
 `store/layout.py`; the per-tenant
 active-session pointer in `store/session_pointer.py`; derived reads are free
 functions in view modules (`store/archive_views.py` is the template — it is
-also the archive's single-writer facade). **`store/__init__.py` re-exports
+also the archive's single-writer facade). `store/account_spend.py` is the
+same shape over the ledgers: it sums an account's lifetime spend, and it
+BANKS that spend as a `SpendTombstoneRecord` before a delete takes the rows
+carrying it. It sits here rather than in `application/` for exactly that
+reason — the two destroyers (`delete_campaign`, `try_delete_stub_cycle`) call
+it themselves, so no caller can destroy a ledger and skip the bank.
+**`store/__init__.py` re-exports
 nothing** — import each leaf directly. It aggregated all ten eagerly, so any
 leaf import dragged in `CampaignStore` and cycled back through `runtime_flags`
 / `ledger`; three back-edges were cut to dodge that before the aggregator

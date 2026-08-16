@@ -125,7 +125,7 @@ class TokenUsageRecord(StrictModel):
     provider: str | None = None
     """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
     and the rate table registers the same model under many vendors at prices that differ
-    several-fold, so a model alone cannot be priced (``shared/spend.py::lookup_rate``).
+    several-fold, so a model alone cannot be priced (``shared/pricing.py::lookup_rate``).
     ``None`` on a row written before this field, where only an exact key resolves."""
     input_tokens: int
     output_tokens: int
@@ -142,6 +142,24 @@ class TokenUsageRecord(StrictModel):
     cost_usd: float | None = None
     cached: bool = False
     round: int | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class SpendTombstoneRecord(StrictModel):
+    """A deleted campaign's or cycle's spend, banked on the WORKSPACE ledger so the money outlives
+    the data — without it the free-tier ceiling is re-earnable by deleting whatever you spent it on.
+    It carries totals, not the rows: a chronology is unreadable once its cycle is gone."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["spend_tombstone"] = "spend_tombstone"
+    campaign_id: str
+    # Empty for a whole-campaign bank. The PAIR is the subject the re-bank guard keys on: banking
+    # precedes the delete, so a crash between the two must not let a retry count the money twice.
+    cycle_id: str = ""
+    used_usd: float
+    used_tokens: int
+    unpriced_tokens: int
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -518,6 +536,7 @@ CycleRecord = Annotated[
     | PhaseRecord
     | RoundWarningRecord
     | SnapshotRecord
+    | SpendTombstoneRecord
     | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]

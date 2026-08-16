@@ -812,6 +812,10 @@ class CommandDispatcher:
         )
 
     def _apply_cleanup_empty(self, hop: CycleHop) -> None:
+        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+            cleanup_stub_fork_if_empty,
+        )
+
         root_id = root_cycle_id(hop.cycle_id)
         _, active_cmp, active_cid = read_active_pointer(self._stores.base_dir)
         deleted_ids: list[str] = []
@@ -830,8 +834,12 @@ class CommandDispatcher:
                     continue
                 if hop.campaign_id == active_cmp and cid == active_cid:
                     continue
-                deleted, _reason = self._stores.campaigns.try_delete_stub_cycle(
-                    CycleHop(campaign_id=hop.campaign_id, cycle_id=cid)
+                # THE stub-deletion path, the same one `delete-cycle` takes — pointer discipline
+                # and the store's spend banking are not things a sweep may route around.
+                deleted, _reason = cleanup_stub_fork_if_empty(
+                    campaign_store=self._stores.campaigns,
+                    hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=cid),
+                    parent_cycle_id=root_id,
                 )
                 if deleted:
                     deleted_ids.append(cid)

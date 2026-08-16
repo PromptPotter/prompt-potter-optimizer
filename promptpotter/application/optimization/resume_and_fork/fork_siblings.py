@@ -285,8 +285,9 @@ def cleanup_stub_fork_if_empty(
     hop: CycleHop,
     parent_cycle_id: str,
 ) -> tuple[bool, str]:
-    """THE stub-deletion path — the runner's cleanup and ``delete-cycle`` both come here, so pointer
-    discipline has one home. The session id comes off the POINTER, never the caller, who may have none."""
+    """THE stub-deletion path — the runner's cleanup, ``delete-cycle`` and ``cleanup-empty-cycles``
+    all come here, so pointer discipline has one home. The session id comes off the POINTER, never
+    the caller, who may have none. Spend banking is the store's, inside the delete itself."""
     workspace = campaign_store.workspace
     session_id, _, active_cid = read_active_pointer(workspace)
     was_active = active_cid == hop.cycle_id
