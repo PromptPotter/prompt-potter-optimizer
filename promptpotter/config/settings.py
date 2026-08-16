@@ -198,7 +198,7 @@ class Settings(BaseSettings):
     # The lifetime USD ceiling a free-tier account spends against — TOTAL, not per day, and summed
     # over the account's whole ledger. It is the only thing bounding a stranger who signs up, since
     # signing up is now the grant. A per-user override lives on `user.json::spend_budget_usd_total`;
-    # the operator of the box is exempt (`quota.py::_spends_the_hosts_own_key`).
+    # the operator of the box is exempt (`quota.py::spends_the_hosts_own_key`).
     FREE_TIER_SPEND_CAP_USD: float = 0.30
 
     # The same ceiling in the unit a missing rate cannot blind (ADR-0003 D1). Sized ABOVE what the
@@ -209,6 +209,13 @@ class Settings(BaseSettings):
     # What a metered account may still spend once its USD total is known to be understated. A
     # CEILING on the remainder, never a bonus added to it: an exhausted account gets nothing.
     UNPRICED_GRACE_USD: float = 0.10
+
+    # The per-user token bucket every metered gesture draws on — a campaign launch and a check-in
+    # resolver turn keep separate buckets of this shape. Abuse-bound, not audit-bound: process
+    # state, reset by a restart. The burst is what a CONVERSATION spends in one sitting, so it is
+    # the arm to move if the check-in chat starts refusing a real operator.
+    USER_RATE_BURST: int = 5
+    USER_RATE_PER_MIN: float = 1.0
 
     # How many campaigns the server admits at once; 1 = strictly sequential, and a launch
     # while a run is in flight gets 409 `machine_busy`. This is the concurrent-serving lever,

@@ -809,6 +809,36 @@ the PR description.
   formula-independent number (`campaign_store/store.py::_apply_best`).
   Forcing them to agree would make the deployed winner stop optimizing the
   configured composite; don't "fix" one basis to the other.
+- **Spend-ceiling resolution chain** — **a ceiling is never one number;
+  always ask "at which tier?"** Four carry one, and they answer different
+  questions: the **campaign knob** (`optimization.spend_budget_usd` /
+  `token_budget`) is what the operator wants this run to cost; the
+  **run-scoped** pair is what the host wallet ADMITTED at launch
+  (`jobs/quota.py::admit_launch`, refuse-don't-clamp, reserved on the `Job`
+  until it ends); the **account lifetime** ceiling is what the tenant may
+  ever spend (`lifetime_ceilings`, `None`/`None` for the box operator); and
+  `.runtime/spend_cap.json` is a **mid-flight** move (`change-spend-budget`,
+  which clamps rather than refuses and dies with the run). Resolution:
+  seed > run-scoped > campaign default for every other config value, but the
+  admitted pair **bounds** rather than defaults
+  (`runner/entry.py::_bound_by_admitted_caps`) — a request may lower a
+  ceiling and never raise one, because a `CycleSeed` is request input from
+  anyone holding `campaign.run`. Only the cycle tier halts a run
+  (`termination.py::BudgetGate`, both units, whichever trips first); the
+  account tier admits or refuses and never interrupts a campaign in flight.
+  **An L4 inner cycle needs no fourth source:** it rolls its whole spend back
+  onto the OUTER cycle's ledger as one `backend` `TokenUsageRecord` per outer
+  sample (`inner/spawn.py` returns `step_tokens`;
+  `scoring/sample_measurement.py::emit_step_token_usage` writes it), so both
+  tiers already see it and a second walk of `.inner/` double-counts. The
+  rollup rides the SUCCESS return only — a cell that dies leaves its spend on
+  the sandbox ledger alone.
+  Spend is summed one way (`jobs/account_spend.py::account_ledgers` — every
+  cycle ledger, archived included, plus the workspace ledger's
+  `SpendTombstone` rows) and priced one way
+  (`shared/pricing.py::compute_usd`, which returns `None` for a call it
+  cannot price rather than `0.0`). Owned by
+  [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).

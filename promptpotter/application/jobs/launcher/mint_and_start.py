@@ -36,8 +36,8 @@ from promptpotter.application.jobs.launcher.draft_build import (
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
+    admit_launch,
     check_launch_quotas,
-    effective_launch_caps,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
@@ -232,15 +232,17 @@ async def mint_campaign_command(
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
-        # Cap composition globs + reads every cycle ledger — offload so the scan never
-        # blocks the single event loop on the launch path.
+        # Admission globs + reads every cycle ledger — offload so the scan never blocks the
+        # single event loop on the launch path.
         spend_budget_usd, token_budget = await asyncio.to_thread(
-            effective_launch_caps,
+            admit_launch,
             requested_cap_usd=spend_budget_usd,
             requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
+            job_registry=job_registry,
         )
+        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
         _t_spendcap = time.perf_counter()
 
         session = await init_services(
@@ -400,12 +402,14 @@ async def start_run_command(
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
         spend_budget_usd, token_budget = await asyncio.to_thread(
-            effective_launch_caps,
+            admit_launch,
             requested_cap_usd=spend_budget_usd,
             requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
+            job_registry=job_registry,
         )
+        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
         _t_spendcap = time.perf_counter()
 
         session = await init_services(

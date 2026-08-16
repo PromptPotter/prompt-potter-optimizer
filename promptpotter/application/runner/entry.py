@@ -58,7 +58,7 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
-from promptpotter.shared.spend import refresh_rates_in_background
+from promptpotter.shared.pricing import refresh_rates_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +212,27 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     session.sample_lookahead_consume = partial(sample_lookahead_flag.unlink, missing_ok=True)
 
 
+def _bound_by_admitted_caps(
+    config: CampaignConfig, usd: float | None, tokens: int | None
+) -> CampaignConfig:
+    """The run-scoped caps are what the host wallet ADMITTED (`jobs/quota.py::admit_launch`), so they
+    BOUND the config rather than merely defaulting it — a `CycleSeed` arrives over `fork-cycle` as
+    request input, and may lower a ceiling but never raise one. ``None`` imposes nothing."""
+    opt = config.optimization
+    bounded: dict[str, float | int] = {}
+    if usd is not None:
+        bounded["spend_budget_usd"] = (
+            usd if opt.spend_budget_usd is None else min(usd, opt.spend_budget_usd)
+        )
+    if tokens is not None:
+        bounded["token_budget"] = (
+            tokens if opt.token_budget is None else min(tokens, opt.token_budget)
+        )
+    if not bounded:
+        return config
+    return config.model_copy(update={"optimization": opt.model_copy(update=bounded)})
+
+
 async def _prepare_run(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
@@ -223,19 +244,6 @@ async def _prepare_run(
     token_budget: int | None,
 ) -> _PreparedRun:
     cb = observers.callbacks
-
-    # Fold the run-scoped caps into the config BEFORE the seed block, so precedence stays
-    # seed > run-scoped > campaign default and every reader — the gate, `run_limits`, the
-    # webapp — sees the numbers that actually bind.
-    caps = {
-        k: v
-        for k, v in (("spend_budget_usd", spend_budget_usd), ("token_budget", token_budget))
-        if v is not None
-    }
-    if caps:
-        campaign_config = campaign_config.model_copy(
-            update={"optimization": campaign_config.optimization.model_copy(update=caps)}
-        )
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
@@ -270,6 +278,9 @@ async def _prepare_run(
                 at=utcnow_iso(),
             )
             session.human_intervened = True
+
+    # LAST, and a bound rather than a default — see the function.
+    campaign_config = _bound_by_admitted_caps(campaign_config, spend_budget_usd, token_budget)
 
     if origin is None:
         # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound

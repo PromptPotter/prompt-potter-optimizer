@@ -77,6 +77,10 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
 
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
+# The id the terminal identity carries in BOTH slots, and so the name of the tenant dir it writes
+# (`projects/default/`) until a browser claim renames it — the only terminal marker a walk can read.
+TERMINAL_IDENTITY_ID = "default"
+
 # ── Entitlement: authenticated, but may it act? ────────────────────────────
 # Completing OIDC mints an account AND entitles it — signing up IS the grant, and
 # the free-tier spend ceiling is what bounds the stranger who takes it. The
@@ -104,7 +108,9 @@ def _admin_caps_from_env() -> frozenset[str]:
     return frozenset()
 
 
-def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
+def default_identity(
+    tenant_id: str = TERMINAL_IDENTITY_ID, user_id: str = TERMINAL_IDENTITY_ID
+) -> IdentityContext:
     """Stage-0 identity factory. A REGISTERED operator gets ``user_id == tenant_id``, so a terminal run
     lands in the same single workspace the authenticated web reads — one tenant per operator."""
     return IdentityContext(
@@ -148,6 +154,7 @@ __all__ = [
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
     "SCORING_SAMPLE_LOOKAHEAD_CAP",
+    "TERMINAL_IDENTITY_ID",
     "IdentityContext",
     "capabilities_from_tiers",
     "claim_access_state",

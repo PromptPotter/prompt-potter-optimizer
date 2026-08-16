@@ -2590,7 +2590,7 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     on CI and on every fresh clone, with its own "table unavailable" guard unable to see
     the difference. Upstream re-keying a model must not be able to red this.
     """
-    import promptpotter.shared.spend as spend_mod
+    import promptpotter.shared.pricing as spend_mod
 
     table = {
         # The defect in one row: DeepSeek's own first-party key, character-for-character
@@ -2640,7 +2640,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     That is what happened. ``call.py`` read ``response.usage["cost"]`` while the client built
     ``usage`` from four token keys and never copied it, so every optimizer row on disk carried
     ``cost_usd: null``, ``spend.loop.used_usd`` read $0.00 in every cycle ever run, and
-    ``jobs/spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
+    ``jobs/account_spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
     see the half of the bill it was capping. Nothing raised; the numbers were simply absent.
 
     Silent because the shape is right and only the value is missing: an unpriced call and a

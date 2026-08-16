@@ -418,7 +418,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     # A delegated spend ceiling (ADR-0005) clamps the effective cap — a sub-principal
     # cannot outspend its grant even if the requested/account caps are higher. Escaping
     # it is silent budget over-run, so it is pinned here with the other authority caps.
-    from promptpotter.application.jobs.quota import effective_launch_caps
+    from promptpotter.application.jobs.quota import admit_launch
     from promptpotter.infrastructure.store.user_store import User
 
     def _oidc_stores(claims: dict[str, float]) -> types.SimpleNamespace:
@@ -428,9 +428,12 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             identity=types.SimpleNamespace(
                 issuer="https://accounts.google.com", user_id="sub-9", claims=claims
             ),
-            campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: []),
+            campaigns=types.SimpleNamespace(
+                iter_cycle_ledgers=lambda: [], workspace=tmp_path / "ws-oidc"
+            ),
         )
 
+    idle_registry = types.SimpleNamespace(list_running=lambda *, user_id: [])
     generous = User(
         user_id="sub-9",
         tenant_id="sub-9",
@@ -439,26 +442,155 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
         created_at="2026-01-01",
     )
     assert (
-        effective_launch_caps(
+        admit_launch(
             requested_cap_usd=10.0,
             requested_cap_tokens=None,
             user=generous,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
+            job_registry=idle_registry,
         ).usd
         == 2.0
     )
     assert (
-        effective_launch_caps(
+        admit_launch(
             requested_cap_usd=10.0,
             requested_cap_tokens=None,
             user=generous,
             stores=_oidc_stores({}),
+            job_registry=idle_registry,
         ).usd
         == 10.0
     )
 
+    # The grant is a CEILING on what may be declared, never a declaration. Read as one, a launch
+    # declaring nothing was refused for exceeding a headroom it would have been held to anyway —
+    # a delegate locked out of the last of its own allowance, told the account is empty when it
+    # is not, with the refusal message quoting a number nobody asked for.
+    thin = User(
+        user_id="sub-9",
+        tenant_id="sub-9",
+        spend_budget_usd_total=1.0,
+        token_budget_total=50_000,
+        created_at="2026-01-01",
+    )
+    assert (
+        admit_launch(
+            requested_cap_usd=None,
+            requested_cap_tokens=None,
+            user=thin,
+            stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
+            job_registry=idle_registry,
+        ).usd
+        == 1.0
+    )
 
-def test_host_wallet_ceilings_hold_in_both_units(tmp_path: Path) -> None:
+
+async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
+    built_stores: Any, tmp_path: Path
+) -> None:
+    """``change-spend-budget`` takes each ceiling independently, and both halves of "leave it alone"
+    are silent when they break. Down at the clamp, a delegate's grant composed into an ABSENT arm
+    writes a USD ceiling the caller never asked for, and `BudgetGate` then halts a run nobody
+    capped. Up in the two homes a running ceiling lives in — the job's reservation and
+    `spend_cap.json` — an absent arm has to be left at its PRIOR, and the two priors are not the
+    same: the job's pair is complete from admission while the file starts empty. Merged against its
+    own, the file's absent arm reads unmetered and the job's reads released, so the account quotes
+    headroom this cycle is still holding and the next launch spends it twice.
+    """
+    import types
+
+    from promptpotter.application.jobs.quota import clamp_budget_change
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.runtime_flags import read_spend_caps
+    from promptpotter.infrastructure.store.user_store import User
+    from promptpotter.presentation.api.middleware.command_dispatcher import CommandDispatcher
+
+    stores = built_stores
+    hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
+    registry = JobRegistry(tmp_path / "jobs")
+    job = registry.reserve(user_id="default", dataset_name="ds1", hop=hop).job
+    assert job is not None
+    registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
+
+    await CommandDispatcher(stores, registry)._apply_change_spend_budget(
+        hop, max_usd=None, max_tokens=1_000
+    )
+    held = registry.get(job.job_id)
+    assert held is not None
+    assert held.cap_tokens == 1_000
+    assert held.cap_usd == pytest.approx(0.30), "the untouched USD reservation was released"
+    # Both homes, one answer — the gate probe must not read a ceiling the reservation disagrees with.
+    assert read_spend_caps(stores.campaigns.cycle_dir(hop)) == (pytest.approx(0.30), 1_000)
+
+    # An absent arm stays absent through the clamp too, delegated ceiling or not.
+    delegated = types.SimpleNamespace(
+        identity=types.SimpleNamespace(
+            issuer="https://accounts.google.com",
+            user_id="sub-9",
+            tenant_id="sub-9",
+            claims={"spend_ceiling_usd": 2.0},
+        ),
+        campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: [], workspace=tmp_path / "ws-d"),
+    )
+    caps = clamp_budget_change(
+        max_usd=None,
+        max_tokens=1_000,
+        user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
+        stores=delegated,
+        job_registry=types.SimpleNamespace(list_running=lambda *, user_id: []),
+        hop=hop,
+    )
+    assert caps.usd is None, "a grant became a ceiling on an arm the caller left alone"
+    assert caps.tokens == 1_000
+
+
+def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
+    """A `CycleSeed` arrives over `fork-cycle` as REQUEST INPUT from anyone holding `campaign.run`
+    — which every OIDC signup holds — and its `config_overrides` carry `spend_budget_usd` /
+    `token_budget`. Applied as a plain override it lands AFTER the admitted caps and arms
+    `BudgetGate` at a number the caller typed, while `admit_launch` and `JobRegistry.set_caps`
+    both still read the account as bounded. The run then burns the host's provider key with every
+    surface reporting a healthy account, and the same line escapes an ADR-0005 delegate's
+    `spend_ceiling_usd`, which is consulted only inside `admit_launch`.
+    """
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner.entry import _bound_by_admitted_caps
+
+    config = load_campaign_config(
+        {"optimization": {"improvement_threshold": 0.02, "degradation_threshold": 0.05}}
+    )
+    attacker = config.model_copy(
+        update={
+            "optimization": config.optimization.model_copy(
+                update={"spend_budget_usd": 1e9, "token_budget": 10**12}
+            )
+        }
+    )
+
+    bounded = _bound_by_admitted_caps(attacker, 0.30, 5_000_000)
+    assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
+    assert bounded.optimization.token_budget == 5_000_000
+
+    # A seed may still spend LESS than it was admitted for — bounding is not overriding.
+    thrifty = config.model_copy(
+        update={
+            "optimization": config.optimization.model_copy(
+                update={"spend_budget_usd": 0.05, "token_budget": 1_000}
+            )
+        }
+    )
+    frugal = _bound_by_admitted_caps(thrifty, 0.30, 5_000_000)
+    assert frugal.optimization.spend_budget_usd == pytest.approx(0.05)
+    assert frugal.optimization.token_budget == 1_000
+
+    # The unmetered operator imposes nothing, so the config stands untouched.
+    assert _bound_by_admitted_caps(attacker, None, None) is attacker
+
+
+def test_host_wallet_ceilings_hold_in_both_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Losing a free-tier ceiling is silent: the run completes, the dashboard looks normal, and the
     host pays. Signing up is the grant, so this gate is the only thing standing between a stranger
     and the host's provider key (ADR-0003 D1) — and it answers in TWO units because a price needs a
@@ -467,8 +599,9 @@ def test_host_wallet_ceilings_hold_in_both_units(tmp_path: Path) -> None:
     import json
     import types
 
-    from promptpotter.application.jobs.quota import effective_launch_caps
+    from promptpotter.application.jobs.quota import QuotaExceededError, admit_launch
     from promptpotter.config.settings import settings
+    from promptpotter.infrastructure.store.account_spend import sum_user_spend
     from promptpotter.infrastructure.store.user_store import User
 
     def _stores(*, issuer: str | None, ledgers: list[Path]) -> types.SimpleNamespace:
@@ -476,7 +609,9 @@ def test_host_wallet_ceilings_hold_in_both_units(tmp_path: Path) -> None:
         operator is exempt from metering."""
         return types.SimpleNamespace(
             identity=types.SimpleNamespace(issuer=issuer, user_id="sub-9", claims={}),
-            campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: ledgers),
+            campaigns=types.SimpleNamespace(
+                iter_cycle_ledgers=lambda: ledgers, workspace=tmp_path / "ws"
+            ),
         )
 
     def _ledger(name: str, *, model: str) -> list[Path]:
@@ -501,38 +636,137 @@ def test_host_wallet_ceilings_hold_in_both_units(tmp_path: Path) -> None:
     free_tier = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     assert free_tier.spend_budget_usd_total is None
     assert free_tier.token_budget_total is None
+    idle = types.SimpleNamespace(list_running=lambda *, user_id: [])
 
     # No override must NOT read as uncapped in either unit.
-    fresh = effective_launch_caps(
-        requested_cap_usd=10.0,
+    fresh = admit_launch(
+        requested_cap_usd=None,
         requested_cap_tokens=None,
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
+        job_registry=idle,
     )
     assert fresh.usd == pytest.approx(settings.FREE_TIER_SPEND_CAP_USD)
     assert fresh.tokens == settings.FREE_TIER_TOKEN_CAP
 
+    # Clamping a declaration down to the remainder is what makes a campaign halt mid-run, so a
+    # declaration the account cannot cover is refused at the door instead.
+    with pytest.raises(QuotaExceededError):
+        admit_launch(
+            requested_cap_usd=10.0,
+            requested_cap_tokens=None,
+            user=free_tier,
+            stores=_stores(issuer=web, ledgers=[]),
+            job_registry=idle,
+        )
+
+    # A cycle already in flight holds its whole declared ceiling, or two concurrent launches are
+    # both admitted against one remainder and the pair spends double it.
+    with pytest.raises(QuotaExceededError):
+        admit_launch(
+            requested_cap_usd=None,
+            requested_cap_tokens=None,
+            user=free_tier,
+            stores=_stores(issuer=web, ledgers=[]),
+            job_registry=types.SimpleNamespace(
+                list_running=lambda *, user_id: [
+                    types.SimpleNamespace(
+                        hop=None,
+                        cap_usd=settings.FREE_TIER_SPEND_CAP_USD,
+                        cap_tokens=settings.FREE_TIER_TOKEN_CAP,
+                    )
+                ]
+            ),
+        )
+
     # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
     # total reads $0.00 for 500k billed tokens. Trusting `ceiling - spent` would hand back nearly
     # the whole ceiling; the grace bounds it, and the token arm counts what the USD arm cannot.
-    blind = effective_launch_caps(
-        requested_cap_usd=10.0,
+    blind = admit_launch(
+        requested_cap_usd=None,
         requested_cap_tokens=None,
         user=free_tier,
         stores=_stores(
             issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
         ),
+        job_registry=idle,
     )
     assert blind.usd == pytest.approx(settings.UNPRICED_GRACE_USD)
     assert blind.tokens == settings.FREE_TIER_TOKEN_CAP - 500_000
 
+    # A rate belongs to the (provider, model) PAIR, so the record handed to the pricer must carry
+    # the provider. Dropped, every namespaced model reads UNPRICED: the USD total stays $0.00 for
+    # real spend and the grace renews on each launch, which is the ceiling silently not existing.
+    monkeypatch.setattr(
+        "promptpotter.shared.pricing.load_rates",
+        lambda: {"openrouter/openai/gpt-4o": (1e-6, 2e-6)},
+    )
+    priced = sum_user_spend(
+        ledgers=_ledger("priced.jsonl", model="openai/gpt-4o"), since=0.0, until=2e9
+    )
+    assert priced.unpriced_tokens == 0
+    assert priced.used_usd == pytest.approx(400_000 * 1e-6 + 100_000 * 2e-6)
+
     # The box operator spends their own money and is metered in neither unit.
-    assert effective_launch_caps(
+    assert admit_launch(
         requested_cap_usd=None,
         requested_cap_tokens=None,
         user=free_tier,
         stores=_stores(issuer=None, ledgers=[]),
+        job_registry=idle,
     ) == (None, None)
+
+
+def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(tmp_path: Path) -> None:
+    """The origin resolver is the one optimizer call reachable BEFORE a campaign, so no launch
+    admission has run and no ``BudgetGate`` is watching. Its spend is recorded — on the check-in
+    cycle's ledger — so nothing is lost; it is simply never checked, and an account already at its
+    ceiling keeps firing turns on the host's key for as long as it sends HTTP requests. Every
+    surface stays plausible while it happens: the account's own quota view reports its allowance
+    spent, which is exactly what it should report, and only the operator's `/spend` shows more
+    going out. Cost is bounded by nothing but request count.
+    """
+    import json
+    import types
+
+    from promptpotter.application.jobs.quota import QuotaExceededError, admit_llm_turn
+    from promptpotter.config.settings import settings
+    from promptpotter.infrastructure.store.user_store import User
+
+    user = User(user_id="sub-turn", tenant_id="sub-turn", created_at="2026-01-01")
+    ledger = tmp_path / "spent.jsonl"
+    ledger.write_text(
+        json.dumps(
+            {
+                "record_type": "token_usage",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "model": "openai/gpt-4o",
+                "provider": "openrouter",
+                "input_tokens": 1_000,
+                "output_tokens": 500,
+                "cost_usd": settings.FREE_TIER_SPEND_CAP_USD,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def _stores(issuer: str | None) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            identity=types.SimpleNamespace(
+                issuer=issuer, user_id="sub-turn", tenant_id="sub-turn", claims={}
+            ),
+            campaigns=types.SimpleNamespace(
+                iter_cycle_ledgers=lambda: [ledger], workspace=tmp_path / "ws"
+            ),
+            users=types.SimpleNamespace(get_or_create=lambda **_: user),
+        )
+
+    with pytest.raises(QuotaExceededError):
+        admit_llm_turn(stores=_stores("https://accounts.google.com"))
+
+    # The box operator spends their own money and is refused on neither arm.
+    admit_llm_turn(stores=_stores(None))
 
 
 def test_config_keys_are_read_through_settings() -> None:

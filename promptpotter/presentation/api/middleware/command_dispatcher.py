@@ -13,6 +13,8 @@ from typing import Any, Literal, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
+from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -26,7 +28,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -712,26 +714,27 @@ class CommandDispatcher:
         write_json(gate_path, {"decision": decision})
 
     def _clamp_to_account_ceilings(
-        self, max_usd: float | None, max_tokens: int | None
+        self,
+        hop: CycleHop,
+        job_registry: JobRegistry,
+        max_usd: float | None,
+        max_tokens: int | None,
     ) -> tuple[float | None, int | None]:
         """Only a SUPPLIED arm is clamped — composing an absent one would write a ceiling the
         caller asked to leave alone."""
-        from promptpotter.application.jobs.quota import effective_launch_caps
-
         user = self._stores.users.get_or_create(
             user_id=str(self._stores.identity.user_id),
             tenant_id=str(self._stores.identity.tenant_id),
         )
-        caps = effective_launch_caps(
-            requested_cap_usd=max_usd,
-            requested_cap_tokens=max_tokens,
+        caps = clamp_budget_change(
+            max_usd=max_usd,
+            max_tokens=max_tokens,
             user=user,
             stores=self._stores,
+            job_registry=job_registry,
+            hop=hop,
         )
-        return (
-            caps.usd if max_usd is not None else None,
-            caps.tokens if max_tokens is not None else None,
-        )
+        return caps.usd, caps.tokens
 
     async def _apply_change_spend_budget(
         self,
@@ -740,24 +743,25 @@ class CommandDispatcher:
         max_usd: float | None,
         max_tokens: int | None,
     ) -> None:
-        """The round loop's BudgetGate re-reads this every clean round. A ``None`` arg leaves that
-        ceiling untouched; ``0`` halts at the next round boundary. Both arms compose against the
-        account first, because ``entry.py::_usd_cap`` prefers this file over the cap the launch
-        composed — unclamped, raising one here is the way around the host-wallet gate."""
+        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arg
+        leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
+        against the account first, because ``entry.py::_usd_cap`` prefers this file over the cap the
+        launch composed — unclamped, raising one here is the way around the host-wallet gate."""
+        registry = self._job_registry
+        if registry is None:
+            raise ServiceUnavailableError(
+                "job registry not initialised", code="job_registry_unavailable"
+            )
         max_usd, max_tokens = await asyncio.to_thread(
-            self._clamp_to_account_ceilings, max_usd, max_tokens
+            self._clamp_to_account_ceilings, hop, registry, max_usd, max_tokens
         )
-        cap_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).spend_cap
-        cap_path.parent.mkdir(parents=True, exist_ok=True)
-        caps: dict[str, float | int] = {}
-        existing = read_json_tolerant(cap_path, {})  # missing/malformed → start clean
-        if isinstance(existing, dict):
-            caps.update(existing)
-        if max_usd is not None:
-            caps["max_usd"] = max_usd
-        if max_tokens is not None:
-            caps["max_tokens"] = max_tokens
-        write_json(cap_path, caps)
+        hold_ceiling(
+            job_registry=registry,
+            hop=hop,
+            cycle_dir=self._stores.campaigns.cycle_dir(hop),
+            max_usd=max_usd,
+            max_tokens=max_tokens,
+        )
 
     async def _apply_mint_campaign(self, payload: dict[str, Any]) -> None:
         """The 202 returns once the manifest + root cycle index are written; the run proceeds via

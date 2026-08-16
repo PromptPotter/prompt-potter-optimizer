@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from promptpotter.domain.phases import RunPhase
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 
@@ -37,6 +37,23 @@ def clear_run_control_flags(cycle_dir: Path) -> None:
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
     layout.sample_lookahead_flag.unlink(missing_ok=True)
+    # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
+    # clamped against a richer account governs every later resume unless it goes with the run.
+    layout.spend_cap.unlink(missing_ok=True)
+
+
+def write_spend_caps(cycle_dir: Path, *, usd: float | None, tokens: int | None) -> None:
+    """Land the live ceilings, an unmetered arm omitted. Peer of :func:`read_spend_caps` so the
+    shape is spelled once — a caller hand-building this dict is a writer that can drift from its
+    own reader."""
+    path = CycleLayout(cycle_dir).spend_cap
+    path.parent.mkdir(parents=True, exist_ok=True)
+    caps: dict[str, float | int] = {}
+    if usd is not None:
+        caps["max_usd"] = usd
+    if tokens is not None:
+        caps["max_tokens"] = tokens
+    write_json(path, caps)
 
 
 def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:
@@ -168,4 +185,5 @@ __all__ = [
     "is_paused",
     "read_spend_caps",
     "run_phase_validator_epoch",
+    "write_spend_caps",
 ]

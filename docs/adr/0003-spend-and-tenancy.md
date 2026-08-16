@@ -106,7 +106,7 @@ Three layers of confirmation:
 - **FastAPI seam shipped** — `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it. Stage 1 (M12 OIDC client) replaces only `resolve_identity`.
 - **CLI seam shipped** — `presentation/cli/commands/_shared.py::identity_from_args` reads `args.tenant`; `init_services_cli(identity=…)` + `init_services(identity=…)` accept the `IdentityContext`. All 8 `build_stores` call sites migrated.
 - **Seam enforced by types + review** — no-drift gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set) ride the typed seam; no standing test (structural/contract suite cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
-- `shared/spend.py` shipped — three-layer rate resolution (wire passthrough → `~/.promptpotter/rates.json` 24 h TTL → bundled `shared/data/rates.json`), stdlib-only fetcher, 8 MB cap.
+- `shared/pricing.py` shipped — three-layer rate resolution (wire passthrough → `~/.promptpotter/rates.json` 24 h TTL → bundled `shared/data/rates.json`), stdlib-only fetcher, 8 MB cap.
 - `TokenUsageRecord` is the sole cross-ledger shape for per-call cost telemetry (`domain/run_records.py::TokenUsageRecord`). `TokenUsage` dataclass deleted. Wire cost is extracted where the provider is spoken to — `infrastructure/llm/openai_compat.py::_attempt_cost` onto `LLMResponse.cost_usd` — and `call.py` passes it as the `cost_usd=` kwarg. This line read "extracted in `call.py`" until 2026-08-13, and `call.py` did read a `usage["cost"]` key; the client never wrote one, so the field was `None` on every optimizer call ever recorded. An ADR asserting a mechanism shipped is why three downstream surfaces explained the symptom as the provider sending no cost.
 - `--spend-budget` plumbed CLI → loop, `StopReason.SPEND_BUDGET` exists (`domain/phases.py`), halt probe at `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd` (clean accessor on the dashboard projection; no `state["spend"]` peek).
 
@@ -156,7 +156,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 #### 4. Spend feature
 
-- **Resolution.** `shared/spend.py` shipped as-is — three layers, stdlib only.
+- **Resolution.** `shared/pricing.py` shipped as-is — three layers, stdlib only.
 - **Dashboard projection.** `dashboard.json::spend` is the per-cycle aggregator: a `SpendRollup` over two `SpendBucket`s (`domain/results.py` owns the shape — read it there, it moves), sole writer `LiveDashboardView._handle_token_usage` (see § Highway architecture). **The same shape is `CycleResult.spend`**, so there is no bucket→cycle-total map to keep in step; the totals are properties on the rollup. Bar, publication, and `log.md` all read `total_used_usd`; the budget lives on `run_limits.spend_budget_usd`, not in the spend block.
 - **Budget config + halt.** `OptimizationConfig.spend_budget_usd: float | None`. `StopReason.SPEND_BUDGET` (root `CLAUDE.md`: no back-compat). `_probe_cycle_spend` halts the **current cycle only** at round boundary; the **per-user, cross-cycle** host-wallet gate is the **coupon** (see § Host coupon below), not a daily cap.
 - **Ledger event shape.** `TokenUsageRecord` stays cycle-scoped (already keyed on the ledger which is per-cycle). Identity is resolved at aggregation time by reading `Session.identity` — no `tenant_id` field on the event. The cycle dir's tenant prefix is the ground truth; the event doesn't need to duplicate it.
@@ -222,7 +222,7 @@ credit. Entirely the host's policy.
 
 **D1 — ONE host-wallet gate, expressed in two units; whichever trips first.** Two *mechanisms*
 guarding one concern is the "no redundant mechanism" rule (root `CLAUDE.md`), so there is exactly
-one: `effective_launch_caps` composing `Settings.FREE_TIER_SPEND_CAP_USD` /
+one: `admit_launch` composing `Settings.FREE_TIER_SPEND_CAP_USD` /
 `FREE_TIER_TOKEN_CAP` (overridable per account at `User.spend_budget_usd_total` /
 `token_budget_total`) against what the account has used over its WHOLE ledger. It became
 load-bearing when signup stopped requiring approval — it is now the only thing standing between a
@@ -238,9 +238,47 @@ unit that survives, which is why the per-cycle `BudgetGate` has always run both.
 back to `Settings.UNPRICED_GRACE_USD` once an account's total is known to be a floor: a bound on
 the blindness, never a price invented for it.
 
+*Admitted whole, or refused.* A launch that declares more than the account can cover is refused —
+it is **not** clamped down to the remainder, because a clamped launch starts, spends and halts
+mid-campaign, which is the outcome the ceiling exists to prevent rather than to cause. So what a
+run is admitted at is what it runs to, and no account ceiling moves under a campaign already in
+flight. Declaring nothing declares the headroom.
+
+*A run in flight holds its ceiling.* The admitted caps are stamped on the `Job`
+(`JobRegistry.set_caps`) and subtracted from the next admission's headroom for as long as that job
+runs; ending it releases them. Without the reservation, two concurrent launches are each admitted
+against the same remainder and the pair spends double the ceiling — which `MACHINE_RUN_CAPACITY`
+above 1 makes reachable.
+
+*The residue is the operator's number.* Admission bounds what a run may declare, not what a round
+boundary overshoots or what an unpriced call turns out to have cost, so `SpendCeilings.overrun`
+answers what went past the ceiling anyway. Every refusal names it, and `/quota-status` never serves
+it: the account sees its allowance, the host sees what the allowance failed to hold.
+
 *Every ceiling-setting path composes here.* `change-spend-budget` writes the file `_usd_cap`
-prefers over the launch-composed cap, so a clamp at the launch seams alone is not the gate — it is
-three quarters of one.
+prefers over the launch-composed cap, so a gate at the launch seams alone is three quarters of one.
+It **clamps** where a launch refuses (`clamp_budget_change`) — the campaign is already admitted, so
+the only question is how far the operator may move its ceiling, and lowering one must always work.
+It excludes the cycle's own reservation, or the cycle would be denied headroom it holds itself.
+That file is scoped to the run it was written in (`clear_run_control_flags` drops it like every
+other polled flag): it was clamped against the account as it stood at write time, so outliving its
+run would let a ceiling the account can no longer afford govern each later resume.
+
+**A running ceiling lives in two homes, and one function writes both.** The JOB carries what the
+account has committed while the run is in flight — the only home a mint has, since it reserves its
+slot before its cycle exists — and `spend_cap.json` carries what the run may spend right now. An
+absent arm on a change means "leave it alone", so each home needs a prior, and the two priors are
+NOT interchangeable: the job's pair is complete from admission while the file's starts empty and
+reads an untouched arm as unmetered. `quota.py::hold_ceiling` therefore takes the running job as
+the single prior and writes the file as its projection; the file's shape is spelled once, by
+`runtime_flags.py`'s `read_spend_caps` / `write_spend_caps` pair.
+
+*A request may lower a ceiling and never raise one.* A `CycleSeed`'s `config_overrides` wins over
+run-scoped values for every policy knob it carries, but the budget arms are an authority bound
+rather than a preference, so `runner/entry.py::_bound_by_admitted_caps` composes them as a `min`
+against what the wallet admitted. The seed arrives over `fork-cycle` as request input from anyone
+holding `campaign.run` — which signup grants — so an override there is a stranger naming the
+ceiling their own run halts on.
 
 **D2 — live, not a mint-time snapshot.** The per-cycle `BudgetGate`
 (`application/runner/termination.py`) reads coupon-remaining (re-summed from the host-key
@@ -271,7 +309,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | CLI seam (shipped) | `promptpotter/presentation/cli/commands/_shared.py` |
 | API seam (shipped) | `promptpotter/presentation/api/deps.py` |
 | Background job inheritance | `promptpotter/application/sweep.py` |
-| Spend resolution | `promptpotter/shared/spend.py` |
+| Spend resolution | `promptpotter/shared/pricing.py` |
 | Token emit (optimizer) | `promptpotter/application/optimization/dispatch/llm_call/call.py` |
 | Token emit (backend) | `promptpotter/application/scoring/sample_measurement.py` |
 | Token emit helper + ContextVars | `promptpotter/infrastructure/llm/telemetry.py` |

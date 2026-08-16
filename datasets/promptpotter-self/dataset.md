@@ -24,7 +24,7 @@ multiply, and an arithmetic estimate was 3× under the measured rate.
 **An absolute campaign total is not quotable** — how many inner rounds each cell runs depends on the
 `justlogic-d234` origin→target gap and on where the lives brake stops it. The per-cell rate is, and
 it comes off the ledger, never a stopwatch: group `token_usage` records by `(kind, node, cached)`
-and price them with `shared/spend.py::compute_usd`.
+and price them with `shared/pricing.py::compute_usd`.
 
 **`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed caches are
 tenant-global, so a replayed cell costs $0 while doing the same search — on the banked corpus that

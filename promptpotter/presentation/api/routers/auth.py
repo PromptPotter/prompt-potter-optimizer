@@ -13,13 +13,8 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
-from promptpotter.application.jobs.quota import lifetime_ceilings
+from promptpotter.application.jobs.quota import lifetime_ceilings, spends_the_hosts_own_key
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.jobs.spend import (
-    iter_user_token_usage,
-    record_cost_usd,
-    sum_user_spend,
-)
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.strict_model import StrictModel
@@ -34,6 +29,12 @@ from promptpotter.infrastructure.identity.google import (
 from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
+from promptpotter.infrastructure.store.account_spend import (
+    account_ledgers,
+    iter_user_token_usage,
+    record_cost_usd,
+    sum_user_spend,
+)
 from promptpotter.infrastructure.store.user_store import ConsentRecord, count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import IdentityDep, StoresDep
@@ -480,8 +481,10 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     # Lifetime usage straight from the ledger — uncapped on purpose, so an over-budget
     # account reports the true overage instead of clamping to the cap (the caps themselves
     # ride the `*_total` fields below).
-    spent = sum_user_spend(stores=stores, since=0.0, until=datetime.now(UTC).timestamp())
-    ceilings = lifetime_ceilings(user=user, stores=stores)
+    spent = sum_user_spend(
+        ledgers=account_ledgers(stores.campaigns), since=0.0, until=datetime.now(UTC).timestamp()
+    )
+    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
 
     return QuotaStatus(
         spend_used_total_usd=round(spent.used_usd, 6),
@@ -573,7 +576,7 @@ def activity(
     `campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose
     `timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced
     bins. ``cost_usd`` may be null on disk (Groq doesn't return wire
-    cost); we fall back to ``shared.spend.lookup_rate`` × tokens so
+    cost); we fall back to ``shared.pricing.lookup_rate`` × tokens so
     historical spend isn't silently zero.
 
     ``group_by`` selects the colour axis: ``model`` = exact model string,
@@ -602,7 +605,9 @@ def activity(
     total_requests = 0
     label_order: dict[str, int] = {}  # insertion-order set
 
-    for rec in iter_user_token_usage(stores=stores, since=since, until=until):
+    for rec in iter_user_token_usage(
+        ledgers=account_ledgers(stores.campaigns), since=since, until=until
+    ):
         idx = min(_N_BUCKETS - 1, max(0, int((rec["ts"] - since) / bucket_width)))
         b = buckets[idx]
         tokens = rec["tokens"]

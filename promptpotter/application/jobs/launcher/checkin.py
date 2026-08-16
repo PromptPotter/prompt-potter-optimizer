@@ -29,7 +29,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     persist_origin_candidate_library,
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
-from promptpotter.application.jobs.quota import check_launch_quotas, effective_launch_caps
+from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
@@ -206,12 +206,14 @@ async def start_checkin_campaign(
     try:
         await _run_preflight(draft.connector, backend_url)
         spend_budget_usd, token_budget = await asyncio.to_thread(
-            effective_launch_caps,
+            admit_launch,
             requested_cap_usd=spend_budget_usd,
             requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
+            job_registry=job_registry,
         )
+        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
 
         async def make_session(dataset_name: str) -> Session:
             return await init_services(
