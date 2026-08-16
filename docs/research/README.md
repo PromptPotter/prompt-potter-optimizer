@@ -4,8 +4,8 @@ Publication-facing material: methodology, metrics, competitive positioning, and 
 
 | Page | Purpose |
 |------|---------|
-| [benchmarks.md](benchmarks.md) | Datasets, splits, evaluation protocol, origins, result tables + the PEvol-Bench AC-grade bench definition |
+| [benchmarks.md](benchmarks.md) | Datasets, splits, evaluation protocol, and the origin-screening roster (no results yet — the gate is stated at the top of that page) + the PEvol-Bench AC-grade bench definition |
 | [metrics.md](metrics.md) | Beyond absolute accuracy: Headroom Captured, Sample Efficiency, R₉₀ |
-| [related-work.md](related-work.md) | The algorithm-configuration umbrella — head-to-head matchups from the literature, key papers: AlphaEvolve, PromptWizard, MIPROv2, GEPA; § Algorithm configuration: the classical lineage covers the AutoML ancestry (F-Race → irace → SMAC) the LLM-era literature has not cited |
+| [related-work.md](related-work.md) | The algorithm-configuration umbrella — head-to-head matchups from the literature, key papers: AlphaEvolve, PromptWizard, MIPROv2, GEPA; § Algorithm configuration: the classical lineage covers the AutoML ancestry (F-Race → irace → SMAC) the LLM-era literature has not cited; § Agent-harness evolution registers the SkillOpt / DarwinX / AutoDesign cluster and what it leaves standing |
 | [bbeh-comparison/](bbeh-comparison/) | Head-to-head infrastructure — CAPO, GEPA, MIPROv2, BootstrapFewShot vs. PromptPotter on BBEH mini |
 

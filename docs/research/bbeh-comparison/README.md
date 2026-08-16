@@ -12,6 +12,8 @@ else may restate them.
 | Split | Per task: `TRAIN_PER_TASK` train, `TEST_PER_TASK` test, shuffled under `SPLIT_SEED` — the constants in `shared_config.py`, which is the executable owner |
 | Metric | Exact match (case-insensitive), macro-averaged across the 23 tasks |
 | Export | `shared_config.py::export_results`, one schema for every method |
+| Budget | **Unpinned — the second hole in this protocol, beside the model.** See below |
+| Opponents | CAPO (promptolution) is the fixed opponent; GEPA / MIPROv2 / BootstrapFewShot ride the same DSPy notebook behind `RUN_*` flags |
 
 Every method is scored on the **same held-out rows**. PromptPotter pools the per-task train halves
 into one list because it optimizes a single global prompt; the peers keep them per task. That changes
@@ -19,6 +21,16 @@ how the prompt is *searched*, never what it is *scored on*.
 
 The wider non-mini evaluation (~4,060 rows) is deliberately deferred — it costs a full re-run of
 every peer optimizer and buys nothing before a release worth spending it on.
+
+**Optimization budget is not yet held constant, and for this project it is not a nuisance variable.**
+Every method here spends a different currency by default — CAPO takes a token budget, the DSPy
+optimizers take trial counts, PromptPotter takes rounds × variants under PoBB — so a comparison that
+pins only the model still lets one method buy its win. The field's convention is to match the budget
+explicitly and say so. Two things follow. Match it: pick one currency the harness can express for
+every method (spent tokens is the honest one, since it is what a user pays) and hold it. Then
+**report it as a dimension rather than a constant** — the claim this project actually makes is
+fitness *per dollar*, so a result at a single budget hides the axis the argument lives on, and a
+curve over budget is the stronger form of the same experiment.
 
 > ⚠️ **The model is not yet held constant, and no number may be published until it is.** The peers
 > call `gpt-oss-120b` via Groq (`shared_config.py::MODEL_ID`); PromptPotter calls whatever

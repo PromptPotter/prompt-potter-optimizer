@@ -8,6 +8,13 @@ The BBEH head-to-head protocol →
 [`bbeh-comparison/README.md`](bbeh-comparison/README.md). Peer systems and their published numbers →
 [`related-work.md`](related-work.md).
 
+> **Nothing here is a result, and that is a gate rather than an omission.** Every figure below is a
+> 25-sample admission screen — what an *origin* scored, used to decide whether a dataset is worth
+> wiring at all. No head-to-head number is published because the optimizer is still being tuned to
+> produce lift a benchmark could measure, and because the peers and PromptPotter do not yet call the
+> same model ([`bbeh-comparison/README.md`](bbeh-comparison/README.md) owns both blockers). Read the
+> roster as a screening log with a date, not as a scoreboard.
+
 ## The admission bar — `gpt-oss-20b` must not already solve it
 
 Every candidate is screened against **`openai/gpt-oss-20b @ reasoning_effort: low`**: the cheapest
@@ -33,11 +40,11 @@ Two ways to misread the bar:
 
 | # | Dataset | Role |
 |---|---|---|
-| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% at the bar. |
+| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% **at the bar (`gpt-oss-20b @ low`), which is no longer what the dataset runs**: `datasets/bbeh/pipeline.yaml` admits only `mistralai/mistral-small-3.2-24b-instruct` and `campaign.yaml` overrides nothing. The 28% predates that repin — re-measure before quoting it against anything. |
 | 2 | **HotpotQA** | Queued. Most valuable head-to-head addition after BBEH (MIPROv2/GEPA/adv-CoT all use it), but **not wired** — no loader, no `hotpotqa_f1` scorer. Unmeasured, and deliberately unprojected. |
 | 3 | **AIME 2025** | In band at 30%, wired. Limited by size (30 problems, no split), not by headroom. |
 | — | **`justlogic-d234`** | Not a publication benchmark — the **focus instrument**, where the optimizer's own behaviour is measured round over round. By far the most-measured dataset here. |
-| — | **GSM8K** | Saturated (~78%). Retained for citation reproducibility only. |
+| — | **GSM8K** | **Verdict withdrawn — pilot candidate.** Was rejected as saturated on a ~78% *literature* number never measured at the bar; CAPO's published run moves the same task 78.1 → 93.7 from a near-identical origin, so 78% is an origin, not a ceiling. Needs one measured origin pass before it is admitted or re-rejected. It is also the opponent's home turf, which makes it the strongest form of the comparison rather than the weakest. |
 
 BBEH is the headline but the wrong *iteration* target: at the bar every cycle ties at noise and PoBB
 cannot separate candidates. That is why the focus role exists separately, and why it collapses back
@@ -70,7 +77,7 @@ upward before trusting it.
 | FOLIO | **80%** | ❌ saturated; reproduced across two providers |
 | MuSR | **81%** | ❌ ceiling — B-skewed binary golds, frequency-bias coast |
 | SATBench | **100%** | ❌ saturated at every filter the schema exposes |
-| GSM8K | **~78%** (literature) | ❌ saturated |
+| GSM8K | **~78%** (literature — the one row here never measured at the bar) | ⏳ verdict withdrawn, see § Order of use |
 | BBEH @ `high` | ~25% naïve | ❌ the *effort* is rejected, not the dataset — the reasoning trace exhausts the visible-token budget |
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 

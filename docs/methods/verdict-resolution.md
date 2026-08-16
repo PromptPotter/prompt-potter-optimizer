@@ -26,6 +26,18 @@ to score them in* is a within-round question answered from the seed's own
 outcomes. The second one does **not** need to be adaptive, and making it adaptive
 made it worse.
 
+**Separability is the precondition both mechanisms assume.** A dataset rewards optimization only
+where **between-candidate** variance (hold the sample, vary the candidate — the signal) exceeds
+**within-candidate** variance (one candidate re-run — generation noise). Where the noise half
+dominates, a round cannot rank its arms however good the proposals are, so an unusable instrument
+reads as a stalled optimizer. The between half *is* discrimination `aₛ`, which makes
+[arXiv:2604.08801](https://arxiv.org/abs/2604.08801) (its *system prompt* / *user prompt* are our
+*candidate* / *sample*) published justification for the open `aₛ`-weighted subset pick below —
+not a second mechanism. Two protocol findings travel with it: a small high-separation subset
+beats a large one, and a temporally later edition of a dated benchmark makes a
+contamination-resistant held-out set. L4 calls the same property **informative width**
+([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md) § Finish line).
+
 ---
 
 ## The acquisition score — `pick_value`, and it has two terms
