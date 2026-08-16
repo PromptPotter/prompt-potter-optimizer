@@ -40,6 +40,7 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     CycleScopedKind,
     LifecycleKind,
     WorkspaceScopedKind,
+    optional_bounded_number,
 )
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -125,29 +126,17 @@ def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") ->
         raise PayloadInvalidError(f"payload.{key}: {exc}") from exc
 
 
-def _optional_bounded_float(
-    payload: dict[str, Any], key: str, *, lo: float, hi: float | None = None
-) -> float | None:
-    """A bounded float, or ``None`` when absent. Out of range is a 422, never a silent omission: dropping the key let a run
-    start with no spend cap and no halt threshold while the client got a 202."""
-    raw = payload.get(key)
-    if raw is None:
-        return None
-    if isinstance(raw, bool) or not isinstance(raw, int | float):
-        raise PayloadInvalidError(f"payload.{key} must be a number")
-    if raw < lo or (hi is not None and raw > hi):
-        bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
-        raise PayloadInvalidError(f"payload.{key} must be {bound}")
-    return float(raw)
-
-
 def _run_limits(payload: dict[str, Any]) -> dict[str, float]:
     """The two operator-set run limits, shared by ``mint-campaign`` and ``start-run``."""
     limits: dict[str, float] = {}
-    halt = _optional_bounded_float(payload, "halt_at_accuracy", lo=0.0, hi=1.0)
+    halt = optional_bounded_number(
+        payload.get("halt_at_accuracy"), field="halt_at_accuracy", lo=0.0, hi=1.0
+    )
     if halt is not None:
         limits["halt_at_accuracy"] = halt
-    spend = _optional_bounded_float(payload, "spend_budget_usd", lo=0.0)
+    spend = optional_bounded_number(
+        payload.get("spend_budget_usd"), field="spend_budget_usd", lo=0.0
+    )
     if spend is not None:
         limits["spend_budget_usd"] = spend
     return limits

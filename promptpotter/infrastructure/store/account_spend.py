@@ -31,8 +31,10 @@ def account_ledgers(campaigns: CampaignStore) -> list[Path]:
 def _iter_dated_records(
     ledgers: Iterable[Path], *, since: float, until: float
 ) -> Iterator[dict[str, Any]]:
-    """Every record in ``[since, until)`` across the given ledgers, raw and undiscriminated. An
-    unreadable ledger RAISES: a zero here fails open into a full budget."""
+    """Every record in ``[since, until)`` across the given ledgers, raw and undiscriminated. A
+    corrupt or half-written line degrades to "not there" (``iter_jsonl``), so a torn tail
+    UNDER-counts and the gate above this fails OPEN. An unreadable FILE still raises — only
+    malformed CONTENT is skipped."""
     for ledger_path in ledgers:
         for rec in iter_jsonl(ledger_path):
             ts_str = rec.get("timestamp", "")

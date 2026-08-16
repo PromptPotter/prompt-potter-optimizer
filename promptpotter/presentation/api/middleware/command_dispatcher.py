@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import uuid
 from collections.abc import Awaitable, Callable
@@ -56,7 +57,9 @@ from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
     SCORING_SAMPLE_LOOKAHEAD_CAP,
+    acting_principal_id,
     has_capability,
+    require_capability,
 )
 
 
@@ -76,6 +79,30 @@ def _optional_float(raw: object) -> float | None:
     if isinstance(raw, int | float):
         return float(raw)
     return None
+
+
+def optional_bounded_number(
+    value: object, *, field: str, lo: float, hi: float | None = None
+) -> float | None:
+    """A finite bounded number, or ``None`` when absent — **the one spelling of "a limit off the
+    wire"**, for the router's ``mint-campaign`` / ``start-run`` arms and the dispatcher's
+    ``change-spend-budget`` alike. Out of range is a 422, never a silent omission: dropping the key
+    let a run start with no spend cap and no halt threshold while the client got a 202.
+
+    Finiteness is checked SEPARATELY from the range because a range test cannot see it. ``NaN``
+    compares False against every bound, so it passes a check written as two rejections, becomes the
+    admitted cap, and disarms the ``BudgetGate`` — whose probe is ``spent >= cap``, false forever.
+    ``+inf`` does the same wherever the bound is one-sided."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise PayloadInvalidError(f"payload.{field} must be a number")
+    if not math.isfinite(value):
+        raise PayloadInvalidError(f"payload.{field} must be a finite number")
+    if value < lo or (hi is not None and value > hi):
+        bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
+        raise PayloadInvalidError(f"payload.{field} must be {bound}")
+    return float(value)
 
 
 def _parse_cycle_seed(raw: object) -> CycleSeed:
@@ -496,7 +523,7 @@ class CommandDispatcher:
                 kind=kind,
                 payload=payload,
                 idempotency_key=idempotency_key,
-                issued_by_user_id=self._acting_principal_id(),
+                issued_by_user_id=acting_principal_id(self._stores.identity),
             )
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""
@@ -570,7 +597,7 @@ class CommandDispatcher:
             ):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
-                    self._acting_principal_id(),
+                    acting_principal_id(self._stores.identity),
                     CAMPAIGN_BABYSIT_CAP,
                 )
                 raise NotFoundError("Not found", code="not_found")
@@ -628,24 +655,21 @@ class CommandDispatcher:
                 )
             return lambda: self._apply_origin_gate_decision(hop, decision)
         if kind == "change-spend-budget":
-            max_usd = payload_extras.get("max_usd")
-            max_tokens = payload_extras.get("max_tokens")
             # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is non-numeric
             # or negative is a typo, not a no-op. Coercing it to None drops that ceiling while
             # the other applies, so the operator believes both landed when only one did.
-            if max_usd is not None and (
-                not isinstance(max_usd, int | float) or isinstance(max_usd, bool) or max_usd < 0
-            ):
-                raise PayloadInvalidError("change-spend-budget max_usd must be a number >= 0.")
+            usd_val = optional_bounded_number(
+                payload_extras.get("max_usd"), field="max_usd", lo=0.0
+            )
+            max_tokens = payload_extras.get("max_tokens")
             if max_tokens is not None and (
                 not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0
             ):
-                raise PayloadInvalidError("change-spend-budget max_tokens must be an int >= 0.")
-            if max_usd is None and max_tokens is None:
+                raise PayloadInvalidError("payload.max_tokens must be an int >= 0.")
+            if usd_val is None and max_tokens is None:
                 raise PayloadInvalidError(
                     "change-spend-budget requires at least one of max_usd / max_tokens."
                 )
-            usd_val = float(max_usd) if max_usd is not None else None
             tok_val = int(max_tokens) if max_tokens is not None else None
 
             async def _apply_budget() -> None:
@@ -888,26 +912,15 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _acting_principal_id(self) -> str:
-        """For a delegated sub-principal (ADR-0005) this is its own ``claims["principal"]``, not
-        the delegator whose tenant it acts in — so the audit trail names the real actor."""
-        principal = self._stores.identity.claims.get("principal")
-        if isinstance(principal, str) and principal:
-            return principal
-        return str(self._stores.identity.user_id)
-
     def _require_capability_for(self, kind: str) -> None:
-        """Absence raises 404, never 403 — the existence-hiding posture cross-user reads use.
-        A tenant owner holds every tier; a delegated sub-principal an attenuated subset."""
+        """Map the kind to its one tier, then defer to the shared denial. An UNMAPPED kind is
+        unwritable — ``CAP_FOR_KIND`` is exhaustive over the dispatched set at import, so reaching
+        here with no cap means a verb slipped past that raise, and refusing it is the safe read."""
         cap = CAP_FOR_KIND.get(kind)
-        if cap is None or not has_capability(self._stores.identity, cap):
-            logger.warning(
-                "command %r denied for principal %s (missing %s)",
-                kind,
-                self._acting_principal_id(),
-                cap,
-            )
+        if cap is None:
+            logger.warning("command %r has no capability and is unwritable", kind)
             raise NotFoundError("Not found", code="not_found")
+        require_capability(self._stores.identity, cap, subject=f"command {kind!r}")
 
     def _load_owned_campaign(self, campaign_id: str) -> Any:
         campaign = self._stores.campaigns.load_owned(

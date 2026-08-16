@@ -55,7 +55,7 @@ async def run_round_loop(
     diag: bool = False,
     halt_at_accuracy: float | None = None,
     stop_after_rounds: int | None = None,
-    budget_gate: BudgetGate | None = None,
+    budget_gate: BudgetGate,
 ) -> tuple[StopReason, ErrorRecord | None]:
     """The round loop. The budget gate re-reads its caps every clean round, so ``change-spend-budget`` mutates a ceiling
     mid-flight. Returns ``(stop_reason, error)`` — ``error`` is set so the caller need not re-read the ledger."""
@@ -210,10 +210,9 @@ async def run_round_loop(
 
             if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
                 return StopReason.TARGET_HIT, None
-            if budget_gate is not None:
-                budget_stop = budget_gate.tripped()
-                if budget_stop is not None:
-                    return budget_stop, None
+            budget_stop = budget_gate.tripped()
+            if budget_stop is not None:
+                return budget_stop, None
 
             if sweep and clean_rounds >= 1:
                 await run_sweep_generation_only(cycle, session, cb, round_num)

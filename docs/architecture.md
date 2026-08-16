@@ -833,7 +833,7 @@ the PR description.
   tiers already see it and a second walk of `.inner/` double-counts. The
   rollup rides the SUCCESS return only — a cell that dies leaves its spend on
   the sandbox ledger alone.
-  Spend is summed one way (`jobs/account_spend.py::account_ledgers` — every
+  Spend is summed one way (`store/account_spend.py::account_ledgers` — every
   cycle ledger, archived included, plus the workspace ledger's
   `SpendTombstone` rows) and priced one way
   (`shared/pricing.py::compute_usd`, which returns `None` for a call it

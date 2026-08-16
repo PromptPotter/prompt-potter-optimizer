@@ -192,7 +192,9 @@ not backend-supplied.
   at `quota.py::admit_launch`). **Both units, because the USD one can go blind** — a billed
   call with no resolvable rate leaves the money total a floor, so the token ceiling is what still
   holds and the USD arm falls back to `Settings.UNPRICED_GRACE_USD`. A launch is **admitted at what
-  it declares or refused**, never clamped to the remainder, and holds that ceiling as a reservation
+  it declares or refused**, never clamped to the remainder — a delegated sub-principal's grant is
+  the one read-down, and [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) §5
+  owns why — and holds that ceiling as a reservation
   while it runs — [ADR-0003](../adr/0003-spend-and-tenancy.md)'s D1 owns why, including the overrun
   the account never sees. Every path that sets a ceiling composes there,
   `change-spend-budget` included: it writes the file `_usd_cap` prefers over the launch-composed

@@ -135,9 +135,11 @@ _ZERO_ROUND_TRIGGERS = frozenset(ForkTrigger) - _REBASE_TRIGGERS
 
 
 def _fork_suffix(*parts: str) -> str:
-    """8-hex id suffix over *parts* + the wall clock, which is what separates two forks cut
-    from one parent in the same second."""
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    """8-hex id suffix over *parts* + the wall clock, which is what separates two forks cut from one
+    parent — the *parts* alone cannot, since every rebase of a given parent passes the same tuple.
+    The stamp is therefore read at MICROSECOND resolution: at the second resolution it carried, two
+    forks cut inside one second hashed identically and the later one landed on the earlier one's id."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return hashlib.sha256("|".join((*parts, stamp)).encode()).hexdigest()[:8]
 
 

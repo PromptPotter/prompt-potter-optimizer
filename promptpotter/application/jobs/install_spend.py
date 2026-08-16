@@ -25,6 +25,7 @@ from promptpotter.infrastructure.store.user_store import User, UserStore
 class AccountUsage(NamedTuple):
     """One account's row: who, what they spent, and what they produced. ``ceilings`` reads ``None``
     for the host, who spends their own money; ``ceilings.overrun(spent)`` is how far past it went.
+    ``cycles`` counts ledger FILES, so a cycle that died before its first append is not among them.
     ``unreadable`` set means the row could not be summed and every other field is a placeholder."""
 
     user_id: str
@@ -43,18 +44,25 @@ def read_install_spend(projects_root: Path, *, until: float) -> list[AccountUsag
     if not projects_root.is_dir():
         return rows
     for tenant_dir in sorted(projects_root.iterdir()):
-        user = UserStore(tenant_dir).load() if tenant_dir.is_dir() else None
-        if user is None:
+        if not tenant_dir.is_dir():
             continue
         try:
+            user = UserStore(tenant_dir).load()
+            if user is None:
+                continue
             rows.append(_account_row(user, tenant_dir, until=until))
         except Exception as exc:
-            # One torn ledger must not blind the operator to every OTHER account: a raise here is
-            # `/spend` answering nothing at all, which is how the report stops being read.
+            # One torn file must not blind the operator to every OTHER account: a raise here is
+            # `/spend` answering nothing at all, which is how the report stops being read. The
+            # `user.json` READ is inside the guard for the same reason — it is a strict-model
+            # validate, so a stale-schema file raises before there is a row to place. The dir name
+            # is the account id (the first web sign-in renames `projects/default/` to
+            # `projects/{user_id}/`), which is the one identifier still readable when `user.json`
+            # is itself the torn file.
             rows.append(
                 AccountUsage(
-                    user_id=user.user_id,
-                    email=user.email,
+                    user_id=tenant_dir.name,
+                    email=None,
                     spent=UserSpend(0.0, 0, 0),
                     ceilings=SpendCeilings(None, None),
                     campaigns=0,

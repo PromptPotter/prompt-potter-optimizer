@@ -30,16 +30,25 @@ def is_sample_lookahead(cycle_dir: Path) -> bool:
     return CycleLayout(cycle_dir).sample_lookahead_flag.is_file()
 
 
-def clear_run_control_flags(cycle_dir: Path) -> None:
+def clear_run_control_flags(cycle_dir: Path) -> tuple[float | None, int | None]:
     """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
-    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one."""
+    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one.
+
+    **Returns the spend ceiling it dropped, and the caller must compose it.** Alone among these
+    flags, ``spend_cap.json`` can carry a decision the run has not acted on yet:
+    ``change-spend-budget`` applies to a PAUSED cycle too, and swept like the rest, a lowering the
+    operator was acked ``applied`` for simply stopped existing at resume. Reading it HERE rather
+    than at the call site is what stops the read and the sweep drifting apart into the wrong order,
+    which loses the ceiling with nothing raising."""
     layout = CycleLayout(cycle_dir)
+    dropped = read_spend_caps(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
     layout.sample_lookahead_flag.unlink(missing_ok=True)
     # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
     # clamped against a richer account governs every later resume unless it goes with the run.
     layout.spend_cap.unlink(missing_ok=True)
+    return dropped
 
 
 def write_spend_caps(cycle_dir: Path, *, usd: float | None, tokens: int | None) -> None:

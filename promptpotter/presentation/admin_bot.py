@@ -307,7 +307,13 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 if not isinstance(update, dict):
                     continue
                 offset = int(update["update_id"]) + 1
-                _process_update(update, client, chat_id, passphrase)
+                try:
+                    _process_update(update, client, chat_id, passphrase)
+                except Exception:
+                    # This loop IS the ADR-0004 channel, so one handler's raise ending it takes
+                    # the operator's only admin surface down until someone restarts the service by
+                    # hand. The offset has already advanced: the failing update is not retried.
+                    logger.exception("admin command failed; channel stays up")
 
 
 def main() -> int:

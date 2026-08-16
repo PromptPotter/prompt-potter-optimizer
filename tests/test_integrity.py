@@ -2640,7 +2640,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     That is what happened. ``call.py`` read ``response.usage["cost"]`` while the client built
     ``usage`` from four token keys and never copied it, so every optimizer row on disk carried
     ``cost_usd: null``, ``spend.loop.used_usd`` read $0.00 in every cycle ever run, and
-    ``jobs/account_spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
+    ``store/account_spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
     see the half of the bill it was capping. Nothing raised; the numbers were simply absent.
 
     Silent because the shape is right and only the value is missing: an unpriced call and a

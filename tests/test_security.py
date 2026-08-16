@@ -319,6 +319,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     from promptpotter.shared.identity import (
         CAMPAIGN_STEP_CAP,
         OWNER_COMMAND_CAPABILITIES,
+        acting_principal_id,
     )
 
     grants = tmp_path / "grants.json"
@@ -364,7 +365,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     disp._require_capability_for("skip-searchpoint")  # holds campaign.step → no raise
     with pytest.raises(NotFoundError):
         disp._require_capability_for("start-run")  # lacks campaign.run
-    assert disp._acting_principal_id() == "sub-1", "audit must name the delegate, not the delegator"
+    assert acting_principal_id(ident) == "sub-1", "audit must name the delegate, not the delegator"
 
     # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
     write_json(grants, {"grants": {"sub-2": {"capabilities": ["campaign.run"]}}})
@@ -534,6 +535,56 @@ def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) 
 
     after = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
     assert after == before
+
+
+async def test_resetting_an_install_does_not_un_spend_what_it_spent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`reset` removes each tenant's whole `campaigns/` tree without going through either
+    destroyer, which makes it the one path that can take every ledger on the box in a single
+    gesture — it accepts `--all-tenants`, and the per-tenant classification simply runs N times.
+    Unbanked, a free-tier ceiling is re-earnable by running a dev verb, for every account at once,
+    and nothing errors: the accounts just read empty again and the host's key is open a second time.
+    """
+    import json
+    import types
+
+    from promptpotter.domain.cycle_paths import WorkspaceDir
+    from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.presentation.cli.commands import reset as reset_cmd
+
+    campaign_dir = tmp_path / "t1" / "campaigns" / "camp-1"
+    ledger = campaign_dir / "cycles" / "cyc-1" / ".runtime" / "ledger.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    (campaign_dir / "campaign.json").write_text(json.dumps({"campaign_id": "camp-1"}), "utf-8")
+    ledger.write_text(
+        json.dumps(
+            {
+                "record_type": "token_usage",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "kind": "optimizer",
+                "model": "openai/gpt-4o",
+                "provider": "openrouter",
+                "input_tokens": 1_000,
+                "output_tokens": 500,
+                "cost_usd": 0.25,
+            }
+        )
+        + "\n",
+        "utf-8",
+    )
+
+    store = CampaignStore(WorkspaceDir(tmp_path / "t1"))
+    before = sum_user_spend(ledgers=account_ledgers(store), since=0.0, until=2e9)
+    assert before.used_usd == pytest.approx(0.25) and before.used_tokens == 1_500
+
+    monkeypatch.setattr(reset_cmd, "DEFAULT_PROJECTS_ROOT", tmp_path)
+    await reset_cmd.cmd_reset(
+        types.SimpleNamespace(tenant="t1", yes=True, dry_run=False, all_tenants=False)
+    )
+    assert not ledger.exists(), "reset did not drop the tree it is for"
+    assert sum_user_spend(ledgers=account_ledgers(store), since=0.0, until=2e9) == before
 
 
 def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> None:
@@ -724,6 +775,166 @@ def test_a_rejected_command_does_not_burn_its_idempotency_key(tmp_path: Path) ->
     assert match is not None and match.command_id == "c3"
 
 
+def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
+    """``NaN`` compares False against every bound, so a range check written as two REJECTIONS
+    (``raw < lo or raw > hi``) lets it through. It then survives admission for the same reason —
+    ``NaN > headroom`` is False — becomes the run's cap, and the ``BudgetGate`` probe ``spent >=
+    cap`` is false forever, leaving only the token arm to bind a stranger on the host's key.
+    ``+inf`` does the same wherever the bound is one-sided. Both then serialize into
+    ``spend_cap.json`` as literals no strict JSON reader accepts. Nothing raises at any step: the
+    USD ceiling simply stops existing, on a run the client was told 202 for.
+
+    Pinned at BOTH seams that turn a wire number into a ceiling — the router's launch limits and
+    the dispatcher's ``change-spend-budget`` — because a guard on one leaves the other open.
+    """
+    import types
+
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        CommandDispatcher,
+        optional_bounded_number,
+    )
+    from promptpotter.presentation.api.routers.commands import _run_limits
+    from promptpotter.shared.errors import PayloadInvalidError
+    from promptpotter.shared.identity import default_identity
+
+    hop = CycleHop(campaign_id="camp-nan", cycle_id="cycle_nan000000")
+    disp = CommandDispatcher(types.SimpleNamespace(identity=default_identity()))
+
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(PayloadInvalidError):
+            optional_bounded_number(bad, field="spend_budget_usd", lo=0.0)
+        with pytest.raises(PayloadInvalidError):
+            _run_limits({"spend_budget_usd": bad})
+        with pytest.raises(PayloadInvalidError):
+            _run_limits({"halt_at_accuracy": bad})
+        with pytest.raises(PayloadInvalidError):
+            disp._build_cycle_applier("change-spend-budget", None, hop, {"max_usd": bad})
+
+    # And the guard rejects only what it names: the bounds themselves still admit, or a launch
+    # that CAN be metered is refused instead — the same ceiling gone, the other direction.
+    assert _run_limits({"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0}) == {
+        "halt_at_accuracy": 1.0,
+        "spend_budget_usd": 0.0,
+    }
+
+
+async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Path) -> None:
+    """The capability gate runs BEFORE the idempotency short-circuit, and that ORDER is the whole
+    protection. A delegate whose grant was revoked still knows the ``Idempotency-Key`` of a command
+    that once applied for it, and the dedupe path answers 200 off the ledger without asking anyone
+    anything. Inverting the two — the natural "skip the work early" move, since a replay does no
+    work — turns a revoked principal into a reader of the tenant's command results, with no error,
+    no ack and no log line to find it by.
+    """
+    import dataclasses
+    import types
+
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        CommandDispatcher,
+        _find_idempotent_command,
+    )
+    from promptpotter.shared.errors import NotFoundError
+    from promptpotter.shared.identity import default_identity
+
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
+    ledger.append(CommandRecord(command_id="c1", kind="pause-cycle", idempotency_key="k1"))
+    ledger.append(CommandAckRecord(command_id="c1", status="applied"))
+    assert _find_idempotent_command(ledger, "k1") is not None, "the replay must be there to skip"
+
+    revoked = dataclasses.replace(default_identity(), capabilities=frozenset())
+    touched: list[str] = []
+    with pytest.raises(NotFoundError):
+        await CommandDispatcher(types.SimpleNamespace(identity=revoked))._record_and_apply(
+            ledger=ledger,
+            kind="pause-cycle",
+            payload={},
+            idempotency_key="k1",
+            applier=lambda: touched.append("applied"),
+            on_replay=lambda: touched.append("replayed"),
+        )
+    assert touched == [], "the dedupe short-circuit answered before the capability gate"
+
+
+def test_a_capability_less_principal_cannot_mint_a_checkin_campaign(built_stores: Any) -> None:
+    """A check-in campaign is durable disk from the moment it exists, and THREE ingresses mint one
+    — ``/datasets/ingest``, ``/datasets/{name}/draft``, ``/origins/{id}/draft`` — none of which is a
+    ``/commands/{kind}`` verb, so the dispatcher's ladder could not see any of them. A blocked
+    account (ADR-0002: authenticated, EMPTY capability set) could therefore keep writing campaign
+    trees onto the host's disk after being revoked, indefinitely, because a durable mint answers
+    exactly like a permitted one — the revoke reads as effective on every surface an operator
+    checks. The gate sits at the MINT rather than on each route for the same reason the ladder does
+    at one seam: a per-route one is three copies and leaves the fourth door open.
+    """
+    import dataclasses
+
+    from promptpotter.application.datasets.ingest import ingest_draft
+    from promptpotter.shared.errors import NotFoundError
+
+    revoked = dataclasses.replace(
+        built_stores, identity=dataclasses.replace(built_stores.identity, capabilities=frozenset())
+    )
+    with pytest.raises(NotFoundError):
+        ingest_draft(
+            stores=revoked,
+            blob=b"query,ground_truth\nwhat,answer\n",
+            filename="blocked.csv",
+        )
+    assert list(built_stores.campaigns.iter_campaign_dirs()) == [], "a revoked mint reached disk"
+
+    # The same call under the owner set mints — or the gate is refusing everyone, which reads as
+    # "secure" right up until nobody can ingest anything.
+    ingest_draft(
+        stores=built_stores, blob=b"query,ground_truth\nwhat,answer\n", filename="allowed.csv"
+    )
+    assert len(list(built_stores.campaigns.iter_campaign_dirs())) == 1
+
+
+def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path) -> None:
+    """``change-spend-budget`` acks ``applied`` the moment the ledger takes the record — it cannot
+    see whether anything will ever READ the ceiling it wrote, so every way of writing one nothing
+    polls is a lie the operator has no way to catch. Two existed. A run launched declaring nothing
+    got no ``BudgetGate`` at all, so the file was written and read by no one for the life of the
+    campaign. And a ceiling set while a cycle was PAUSED was swept with the other polled flags at
+    the next launch, before the resume could read it. Both end the same way: the number is on the
+    dashboard, the command returned 202, and the run spends past it to completion.
+
+    The sweep is pinned by CONSTRUCTION rather than by a second assertion here — it hands the
+    dropped ceiling back, so losing it is a visible omission at the call site instead of an
+    ordering nobody re-checks.
+    """
+    import types
+
+    from promptpotter.application.runner.entry import _build_budget_gate
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.infrastructure.runtime_flags import (
+        clear_run_control_flags,
+        write_spend_caps,
+    )
+
+    cycle_dir = tmp_path / "cyc"
+    observers = types.SimpleNamespace(
+        dashboard=types.SimpleNamespace(spend_total_used_usd=1.0, spend_total_tokens=9_000)
+    )
+
+    # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
+    gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None)
+    assert gate.tripped() is None
+    write_spend_caps(cycle_dir, usd=0.50, tokens=None)
+    assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
+
+    # The token arm binds on its own, in the unit that survives an unpriced model.
+    write_spend_caps(cycle_dir, usd=None, tokens=5_000)
+    assert gate.tripped() == StopReason.TOKEN_BUDGET
+
+    # And the launch sweep returns what it dropped, so a paused-cycle change cannot be lost silently.
+    assert clear_run_control_flags(cycle_dir) == (None, 5_000)
+    assert gate.tripped() is None, "the swept file must stop governing the next run"
+
+
 def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     """A `CycleSeed` arrives over `fork-cycle` as REQUEST INPUT from anyone holding `campaign.run`
     — which every OIDC signup holds — and its `config_overrides` carry `spend_budget_usd` /
@@ -734,7 +945,7 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     `spend_ceiling_usd`, which is consulted only inside `admit_launch`.
     """
     from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.runner.entry import _bound_by_admitted_caps
+    from promptpotter.application.runner.entry import _tighten_budgets
 
     config = load_campaign_config(
         {"optimization": {"improvement_threshold": 0.02, "degradation_threshold": 0.05}}
@@ -747,7 +958,7 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
         }
     )
 
-    bounded = _bound_by_admitted_caps(attacker, 0.30, 5_000_000)
+    bounded = _tighten_budgets(attacker, 0.30, 5_000_000)
     assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
     assert bounded.optimization.token_budget == 5_000_000
 
@@ -759,12 +970,12 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
             )
         }
     )
-    frugal = _bound_by_admitted_caps(thrifty, 0.30, 5_000_000)
+    frugal = _tighten_budgets(thrifty, 0.30, 5_000_000)
     assert frugal.optimization.spend_budget_usd == pytest.approx(0.05)
     assert frugal.optimization.token_budget == 1_000
 
     # The unmetered operator imposes nothing, so the config stands untouched.
-    assert _bound_by_admitted_caps(attacker, None, None) is attacker
+    assert _tighten_budgets(attacker, None, None) is attacker
 
 
 def test_host_wallet_ceilings_hold_in_both_units(

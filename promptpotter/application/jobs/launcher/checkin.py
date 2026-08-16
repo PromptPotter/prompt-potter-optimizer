@@ -35,7 +35,11 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import claim_email
+from promptpotter.shared.identity import (
+    CAMPAIGN_CREATE_CAP,
+    claim_email,
+    require_capability,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -55,7 +59,14 @@ def create_checkin_campaign(
     headers: tuple[str, ...] = (),
 ) -> tuple[str, str, DraftCampaign]:
     """Transition (a) — mint the CHECKIN skeleton, re-key ``draft`` to the new ``campaign_id``, persist
-    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one."""
+    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
+
+    **The capability gate is HERE, at the mint, not on the routes above it.** A check-in campaign is
+    durable disk the moment it exists, and four ingresses reach this one function — `/datasets/ingest`,
+    `/datasets/{name}/draft`, `/origins/{id}/draft` and CLI `new <file>`. Gating each of them spells
+    the same rule four times and leaves the fifth unguarded; `mint-campaign` already answers to
+    `campaign.create` at the dispatcher, so a second door onto the same act answers to it too."""
+    require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
     _session_id, campaign_id, cycle_id = mint_checkin_skeleton(stores, slug=draft.slug)
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers

@@ -350,6 +350,22 @@ class CampaignStore:
         self.update_campaign(campaign_id, self._lifecycle_updates("active", changed_at, reason))
         return True
 
+    def bank_all_before_removal(self) -> None:
+        """Bank EVERY campaign's spend, for a caller about to remove this workspace's campaign tree
+        wholesale instead of campaign by campaign — the host-only CLI `reset`, which is the third
+        path that can take a ledger. The name states the precondition because banking a subject
+        that KEEPS its rows counts the money twice; only a removal may call this.
+
+        It lives here beside the two destroyers' own calls so all three pair ledgers with a
+        campaign_id one way. A caller doing that walk itself is a third spelling of the pairing,
+        free to drift from how a delete does it."""
+        for campaign_dir in self.iter_campaign_dirs():
+            bank_spend(
+                workspace=self._base_dir,
+                ledgers=self.campaign_cycle_ledgers(campaign_dir.name),
+                campaign_id=campaign_dir.name,
+            )
+
     def delete_campaign(
         self,
         campaign_id: str,

@@ -244,6 +244,14 @@ mid-campaign, which is the outcome the ceiling exists to prevent rather than to 
 run is admitted at is what it runs to, and no account ceiling moves under a campaign already in
 flight. Declaring nothing declares the headroom.
 
+*The one read-down is a delegate's grant.* A sub-principal's `spend_ceiling_usd` claim (ADR-0005
+§5) is composed into the declaration rather than refused against it, and that IS a clamp with the
+mid-campaign halt this rule otherwise forbids. It is accepted because the two ceilings answer
+different questions: the account remainder is a wallet, which the operator can top up, while a
+grant is an **authority bound** the delegate cannot argue with — refusing instead would leave a
+delegate whose habit exceeds their grant unable to launch anything at all. Attenuation is the
+point; the halt is its price.
+
 *A run in flight holds its ceiling.* The admitted caps are stamped on the `Job`
 (`JobRegistry.set_caps`) and subtracted from the next admission's headroom for as long as that job
 runs; ending it releases them. Without the reservation, two concurrent launches are each admitted
@@ -260,9 +268,20 @@ prefers over the launch-composed cap, so a gate at the launch seams alone is thr
 It **clamps** where a launch refuses (`clamp_budget_change`) — the campaign is already admitted, so
 the only question is how far the operator may move its ceiling, and lowering one must always work.
 It excludes the cycle's own reservation, or the cycle would be denied headroom it holds itself.
-That file is scoped to the run it was written in (`clear_run_control_flags` drops it like every
-other polled flag): it was clamped against the account as it stood at write time, so outliving its
-run would let a ceiling the account can no longer afford govern each later resume.
+
+*And every path that composes one is READ by something.* Two ways of writing a ceiling nothing
+would ever poll both ended in the same silence — the command acked `applied`, the number reached
+the dashboard, and the run spent past it to completion. So the per-cycle gate is armed
+**unconditionally** (`entry.py::_build_budget_gate`): a run that declared no ceiling may still be
+given one mid-flight, and an unset arm costs nothing because `tripped` skips a `None` cap.
+And the file is scoped to the run it was written in — `clear_run_control_flags` drops it with the
+other polled flags, since it was clamped against the account as it stood at write time and
+outliving its run would let a ceiling the account can no longer afford govern each later resume —
+but it is the one polled flag that can carry a decision the run has not acted on yet, because
+`change-spend-budget` applies to a PAUSED cycle too. The sweep therefore **returns what it
+dropped** and the launch composes it through `_tighten_budgets` as a second `min`: it may tighten
+the run and never raise it, the same bound a `CycleSeed` answers to. Reading it inside the sweep
+rather than beside it is what stops the two drifting into the wrong order.
 
 **A running ceiling lives in two homes, and one function writes both.** The JOB carries what the
 account has committed while the run is in flight — the only home a mint has, since it reserves its
@@ -275,8 +294,8 @@ the single prior and writes the file as its projection; the file's shape is spel
 
 *Deleting the data does not un-spend the money.* The per-cycle ledgers ARE the lifetime record, and
 `delete_campaign` takes them under both `keep_results` arms, so the ceiling was re-earnable by
-deleting whatever you spent it on. `jobs/account_spend.py::bank_campaign_spend` sums the campaign first and
-writes a `SpendTombstoneRecord` to the workspace ledger, which `account_ledgers` folds back in.
+deleting whatever you spent it on. `bank_spend` sums the subject first and writes a
+`SpendTombstoneRecord` to the workspace ledger, which `account_ledgers` folds back in.
 Totals, not rows: the rows are a chronology nobody can act on once their cycle is gone, and a
 synthetic `TokenUsageRecord` standing in for them would be a fabricated measurement.
 
@@ -292,6 +311,16 @@ decides the delete will proceed and BEFORE the rows go: after the `rmtree` a cra
 outright, and before the guard every refused sweep banks a cycle that keeps its rows. The residual
 crash window therefore double-counts, which is the safe direction, and the re-bank guard closes it
 — a subject (`campaign_id`, `cycle_id`) already carrying a tombstone is never banked twice.
+
+**`reset` is the third path, and the bank stays inside the store.** The host-only CLI verb removes
+each tenant's whole `campaigns/` tree without going through either destroyer, so it asks the store
+to bank first — `bank_all_before_removal`, which states its precondition in its own name, because
+banking a subject that KEEPS its rows counts the money twice. The walk sits beside the destroyers'
+own calls rather than in the CLI: a caller pairing ledgers with a campaign_id its own way is a third
+spelling of that pairing, free to drift from how a delete does it. This is the worst path to forget
+on — it takes `--all-tenants`, which walks every tenant on the box, so an unbanked reset re-earns
+every account's ceiling in one gesture — and the re-bank guard is what makes running it twice safe.
+`reset` drops the data, never the money.
 
 *A request may lower a ceiling and never raise one.* A `CycleSeed`'s `config_overrides` wins over
 run-scoped values for every policy knob it carries, but the budget arms are an authority bound

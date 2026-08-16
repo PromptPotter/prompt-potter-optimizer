@@ -3,11 +3,15 @@ Stage-0 framing in ADR-0003. Stage 1 replaces only the resolver, never this type
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
+from promptpotter.shared.errors import NotFoundError
+
+logger = logging.getLogger(__name__)
 
 # ── Tier 1a: host-admin ────────────────────────────────────────────────────
 # The sole definition of "what the HOST admin (the person who runs the box) can
@@ -128,6 +132,31 @@ def has_capability(identity: IdentityContext, capability: str) -> bool:
     return capability in identity.capabilities
 
 
+def require_capability(identity: IdentityContext, capability: str, *, subject: str) -> None:
+    """ENFORCE what :func:`has_capability` answers — the one denial, so a gated surface outside the
+    command dispatcher refuses identically to one inside it. Absence raises 404, never 403: the
+    existence-hiding posture of ADR-0005, which is why the message names nothing. ``subject`` names
+    the act for the audit line only."""
+    if has_capability(identity, capability):
+        return
+    logger.warning(
+        "%s denied for principal %s (missing %s)",
+        subject,
+        acting_principal_id(identity),
+        capability,
+    )
+    raise NotFoundError("Not found", code="not_found")
+
+
+def acting_principal_id(identity: IdentityContext) -> str:
+    """WHO is acting. For a delegated sub-principal (ADR-0005) this is its own ``claims["principal"]``,
+    not the delegator whose tenant it acts in — so an audit trail names the real actor."""
+    principal = identity.claims.get("principal")
+    if isinstance(principal, str) and principal:
+        return principal
+    return str(identity.user_id)
+
+
 def claim_email(identity: IdentityContext) -> str | None:
     raw = identity.claims.get("email")
     return raw if isinstance(raw, str) else None
@@ -156,9 +185,11 @@ __all__ = [
     "SCORING_SAMPLE_LOOKAHEAD_CAP",
     "TERMINAL_IDENTITY_ID",
     "IdentityContext",
+    "acting_principal_id",
     "capabilities_from_tiers",
     "claim_access_state",
     "claim_email",
     "default_identity",
     "has_capability",
+    "require_capability",
 ]
