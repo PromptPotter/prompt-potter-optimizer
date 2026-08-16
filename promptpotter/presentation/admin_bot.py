@@ -13,7 +13,9 @@ from typing import Any
 
 import httpx
 
+from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.config.logging import setup_logging
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.identity.blocklist import (
     block_email,
@@ -35,7 +37,7 @@ _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
-    "/grant <sub_user_id> <tiers>\n/revoke <sub_user_id>\n/grants"
+    "/grant <sub_user_id> <tiers>\n/revoke <sub_user_id>\n/grants\n/spend"
 )
 
 
@@ -80,7 +82,45 @@ def handle_command(command: str, argument: str, actor: str) -> str:
         return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
     if command in ("grant", "revoke", "grants"):
         return _handle_grant_command(command, argument, actor, paths)
+    if command == "spend":
+        return _render_install_spend()
     return _USAGE
+
+
+def _render_install_spend() -> str:
+    """Cost and data per account, costliest first — the half of metering the account itself never
+    sees."""
+    rows = read_install_spend(DEFAULT_PROJECTS_ROOT, until=time.time())
+    if not rows:
+        return "No accounts on this install."
+    # An unreadable account contributes nothing to the totals, so the header SAYS so — a headline
+    # figure quietly missing an account is worse than one that names what it could not read.
+    torn = sum(1 for r in rows if r.unreadable)
+    lines = [
+        f"{len(rows)} account{'' if len(rows) == 1 else 's'}, "
+        f"${sum(r.spent.used_usd for r in rows):.4f} / "
+        f"{sum(r.spent.used_tokens for r in rows):,} tokens"
+        + (f" (excludes {torn} unreadable)" if torn else "")
+    ]
+    for r in rows:
+        who = r.email or r.user_id
+        if r.unreadable:
+            lines.append(f"{who}: unreadable — {r.unreadable}")
+            continue
+        over_usd, over_tokens = r.ceilings.overrun(r.spent)
+        flags = []
+        if r.ceilings.usd is None:
+            flags.append("host, unmetered")
+        if r.spent.unpriced_tokens:
+            flags.append(f"{r.spent.unpriced_tokens:,} unpriced")
+        if over_usd or over_tokens:
+            flags.append(f"⚠ ${over_usd:.4f}/{over_tokens:,} past ceiling")
+        lines.append(
+            f"{who}: ${r.spent.used_usd:.4f} / {r.spent.used_tokens:,} tok · "
+            f"{r.campaigns} campaigns / {r.cycles} cycles"
+            + (f" · {'; '.join(flags)}" if flags else "")
+        )
+    return "\n".join(lines)
 
 
 def _handle_grant_command(command: str, argument: str, actor: str, paths: IdentityPaths) -> str:

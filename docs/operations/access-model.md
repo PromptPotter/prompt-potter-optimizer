@@ -231,6 +231,7 @@ not backend-supplied.
 | Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
 | Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
 | Who is exempt from free-tier metering (one definition, two readings) | `quota.py::_is_host` — the terminal, or the identity that claimed the box. `spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `is_host_tenant_dir` off a DIRECTORY walk (the un-renamed `projects/default/`), which has no session to ask. Only the terminal DETECTOR differs, and merging the two is what would let an identity that merely omits an issuer resolve as the operator — the anonymous-tier trap |
+| What every account spent + produced (cross-tenant, ADR-0004 channel only) | `jobs/install_spend.py::read_install_spend`, rendered by `admin_bot.py`'s `/spend` — never an inbound route |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
