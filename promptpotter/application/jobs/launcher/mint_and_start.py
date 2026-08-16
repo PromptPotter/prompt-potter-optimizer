@@ -65,6 +65,22 @@ def launch_interrupted(exc: BaseException) -> bool:
     return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
 
 
+def _release_slot(
+    job_registry: JobRegistry, job_id: str, exc: BaseException, *, admitted: bool = True
+) -> None:
+    """Hand the machine slot back so a failed launch never wedges the box at capacity. EVERY launch
+    failure answers for the job; only one that already bound the cycle answers for the cycle too.
+
+    A launch that never got past ADMISSION is ``stopped``, not ``failed`` — the account's ceiling, a
+    dark backend and a busy machine each REFUSE it before anything runs or spends."""
+    if launch_interrupted(exc):
+        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_interrupted")
+    elif not admitted:
+        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_not_admitted")
+    else:
+        job_registry.mark_finished(job_id, status="failed", stop_reason="launch_aborted")
+
+
 def _record_launch_stop(
     *,
     stores: Stores,
@@ -221,11 +237,7 @@ async def mint_campaign_command(
         job_registry.reserve(user_id=str(stores.identity.user_id), dataset_name=dataset_name)
     )
 
-    # Everything below holds a slot — release it on any pre-launch failure so a crashed
-    # preflight/init never wedges the machine at capacity. The ids bind only once the mint
-    # resolves; init them so the failure handler can tell "crashed before a cycle existed"
-    # (nothing to mark) from "crashed after mint" (mark the cycle terminal).
-    campaign_id = cycle_id = ""
+    # ADMISSION — nothing here touches a cycle, so a refusal answers for the machine slot alone.
     try:
         # Pre-202 phase timing — the synchronous init is what the operator waits on
         # (round-0 scoring is already backgrounded), so the dominant cost lands on disk.
@@ -244,7 +256,14 @@ async def mint_campaign_command(
         )
         job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
         _t_spendcap = time.perf_counter()
+    except BaseException as exc:
+        _release_slot(job_registry, job.job_id, exc, admitted=False)
+        raise
 
+    # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
+    # "crashed before a cycle existed" (nothing to mark) from "crashed after mint" (mark it).
+    campaign_id = cycle_id = ""
+    try:
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
@@ -278,12 +297,7 @@ async def mint_campaign_command(
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
 
     except BaseException as exc:
-        stopped = launch_interrupted(exc)
-        job_registry.mark_finished(
-            job.job_id,
-            status="stopped" if stopped else "failed",
-            stop_reason="launch_interrupted" if stopped else "launch_aborted",
-        )
+        _release_slot(job_registry, job.job_id, exc)
         if campaign_id and cycle_id:
             _record_launch_stop(
                 stores=stores,
@@ -395,9 +409,9 @@ async def start_run_command(
         )
     )
 
+    # ADMISSION — this seam shares ``mint_campaign_command``'s preflight + spend-cap prologue and
+    # its instrumentation, including the rule that a refusal here leaves the cycle untouched.
     try:
-        # This seam shares ``mint_campaign_command``'s preflight + spend-cap + init prologue,
-        # and its instrumentation.
         _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
@@ -411,7 +425,11 @@ async def start_run_command(
         )
         job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
         _t_spendcap = time.perf_counter()
+    except BaseException as exc:
+        _release_slot(job_registry, job.job_id, exc, admitted=False)
+        raise
 
+    try:
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
@@ -450,18 +468,9 @@ async def start_run_command(
             raise LaunchError(f"cycle {hop.cycle_id} in {hop.campaign_id} has no parent_session_id")
         session.session_id = session_id
     except BaseException as exc:
-        stopped = launch_interrupted(exc)
-        job_registry.mark_finished(
-            job.job_id,
-            status="stopped" if stopped else "failed",
-            stop_reason="launch_interrupted" if stopped else "launch_aborted",
-        )
-        _record_launch_stop(
-            stores=stores,
-            hop=hop,
-            session_id="",
-            exc=exc,
-        )
+        # No cycle stamp — everything above resolves services and builds config in memory, so the
+        # cycle is untouched, and a launch failure is recorded where it happened: the job.
+        _release_slot(job_registry, job.job_id, exc)
         raise
 
     task = asyncio.create_task(

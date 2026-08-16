@@ -21,10 +21,10 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     _admit,
     _assert_origin_ready,
     _record_launch_stop,
+    _release_slot,
     _run_in_background,
     _run_preflight,
     build_cycle_config,
-    launch_interrupted,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
@@ -203,6 +203,8 @@ async def start_checkin_campaign(
         )
     )
 
+    # ADMISSION — nothing here touches the check-in cycle, so a refusal answers for the machine
+    # slot alone and leaves the campaign re-startable once the account has room again.
     try:
         await _run_preflight(draft.connector, backend_url)
         spend_budget_usd, token_budget = await asyncio.to_thread(
@@ -214,12 +216,16 @@ async def start_checkin_campaign(
             job_registry=job_registry,
         )
         job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
+    except BaseException as exc:
+        _release_slot(job_registry, job.job_id, exc, admitted=False)
+        raise
 
-        async def make_session(dataset_name: str) -> Session:
-            return await init_services(
-                backend_url=backend_url, dataset_name=dataset_name, identity=stores.identity
-            )
+    async def make_session(dataset_name: str) -> Session:
+        return await init_services(
+            backend_url=backend_url, dataset_name=dataset_name, identity=stores.identity
+        )
 
+    try:
         prepared = await prepare_checkin_run(
             stores,
             hop=hop,
@@ -230,12 +236,7 @@ async def start_checkin_campaign(
         # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
         # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
         # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
-        stopped = launch_interrupted(exc)
-        job_registry.mark_finished(
-            job.job_id,
-            status="stopped" if stopped else "failed",
-            stop_reason="launch_interrupted" if stopped else "launch_aborted",
-        )
+        _release_slot(job_registry, job.job_id, exc)
         _record_launch_stop(
             stores=stores,
             hop=hop,
