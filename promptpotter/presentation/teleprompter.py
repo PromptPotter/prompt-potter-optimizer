@@ -77,6 +77,9 @@ class Loop:
     elimination_n_min: int = 4
     pobb_epsilon: float = 0.2
     spend_budget_usd: float | None = None
+    # Rides the run-scoped seam rather than ``_optimization`` below, so ``None`` keeps the
+    # campaign's armed default instead of disarming the ceiling the way its USD neighbour does.
+    token_budget: int | None = None
 
     def _optimization(self) -> dict[str, Any]:
         return {
@@ -200,6 +203,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                 config,
                 session=session,
                 spend_budget_usd=self.loop.spend_budget_usd,
+                token_budget=self.loop.token_budget,
             )
         finally:
             reset_dspy_program(token)

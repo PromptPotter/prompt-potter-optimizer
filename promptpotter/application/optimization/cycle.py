@@ -126,8 +126,9 @@ def _calibrate_delta_ruler(
     enable_2pl: bool,
     archive_obs: list[Observation],
 ) -> tuple[dict[int, RulerEntry], tuple[float, float] | None, CalibrationModel | None]:
-    """The per-cycle FIXED ruler every later θ readout is measured against — slice 2 of
-    ``docs/specs/fitness-comparability.md``. Cold start returns a FLAT ruler and a ``None`` model."""
+    """The per-cycle FIXED ruler every later θ readout is measured against
+    (``docs/methods/exploration-exploitation.md``). Cold start returns a FLAT ruler and a
+    ``None`` model."""
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,
         Observation,

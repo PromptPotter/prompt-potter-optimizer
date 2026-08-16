@@ -220,15 +220,27 @@ coupon on provider Y unless the coupon is voided.
 remaining coupon dies the moment they go self-serve); otherwise it persists as spendable free
 credit. Entirely the host's policy.
 
-**D1 — ONE host-wallet gate, and today it is the free-tier ceiling.** Two mechanisms guarding
-one concern is the "no redundant mechanism" rule (root `CLAUDE.md`), so there is exactly one:
-`effective_spend_cap_usd` composing `Settings.FREE_TIER_SPEND_CAP_USD` (overridable per account
-at `User.spend_budget_usd_total`) against what the account has spent over its WHOLE ledger.
-It became load-bearing when signup stopped requiring approval — it is now the only thing
-standing between a stranger and the host's provider key, which is why it is a lifetime
-allowance rather than the per-day one it replaced: a daily cap resets, and a stranger with a
-resetting cap is unbounded given patience. If the coupon below is ever built it **replaces**
-this path rather than joining it; whichever exists is the host ceiling, never both.
+**D1 — ONE host-wallet gate, expressed in two units; whichever trips first.** Two *mechanisms*
+guarding one concern is the "no redundant mechanism" rule (root `CLAUDE.md`), so there is exactly
+one: `effective_launch_caps` composing `Settings.FREE_TIER_SPEND_CAP_USD` /
+`FREE_TIER_TOKEN_CAP` (overridable per account at `User.spend_budget_usd_total` /
+`token_budget_total`) against what the account has used over its WHOLE ledger. It became
+load-bearing when signup stopped requiring approval — it is now the only thing standing between a
+stranger and the host's provider key, which is why it is a lifetime allowance rather than the
+per-day one it replaced: a daily cap resets, and a stranger with a resetting cap is unbounded
+given patience. If the coupon below is ever built it **replaces** this path rather than joining
+it; whichever exists is the host ceiling, never both.
+
+*Two units, not two gates.* A price needs a rate on file and a token count never does, so the USD
+arm alone cannot answer for a call `compute_usd` returns `None` for — it reads $0.00 for real
+spend, and a gate that under-counts admits more. The token arm is the same ceiling asked in the
+unit that survives, which is why the per-cycle `BudgetGate` has always run both. The USD arm falls
+back to `Settings.UNPRICED_GRACE_USD` once an account's total is known to be a floor: a bound on
+the blindness, never a price invented for it.
+
+*Every ceiling-setting path composes here.* `change-spend-budget` writes the file `_usd_cap`
+prefers over the launch-composed cap, so a clamp at the launch seams alone is not the gate — it is
+three quarters of one.
 
 **D2 — live, not a mint-time snapshot.** The per-cycle `BudgetGate`
 (`application/runner/termination.py`) reads coupon-remaining (re-summed from the host-key

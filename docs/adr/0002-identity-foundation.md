@@ -9,7 +9,6 @@ relates:
   - docs/adr/0003-spend-and-tenancy.md
   - docs/adr/0004-operator-admin-channels.md
   - docs/specs/roadmap.md
-  - docs/specs/roadmap.md
 supersedes: []
 superseded-by: []
 tags: [identity, oidc, rls, scim, multi-tenancy, foundation]
@@ -19,7 +18,7 @@ tags: [identity, oidc, rls, scim, multi-tenancy, foundation]
 
 ## Context and Problem Statement
 
-The codebase ships today as a single-operator CLI plus a read-only webapp. Every downstream multi-tenant spec ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md), [`../specs/roadmap.md`](../specs/roadmap.md), [`../specs/roadmap.md`](../specs/roadmap.md)) sits on top of *some* identity contract. Without a foundation pick, each consumer invents its own — "thread `TenantContext` everywhere, we'll figure out auth later" is the path that produces every rewrite-the-identity-layer story in the industry.
+The codebase ships today as a single-operator CLI plus a read-only webapp. Every downstream multi-tenant spec ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md), [`../specs/roadmap.md`](../specs/roadmap.md)) sits on top of *some* identity contract. Without a foundation pick, each consumer invents its own — "thread `TenantContext` everywhere, we'll figure out auth later" is the path that produces every rewrite-the-identity-layer story in the industry.
 
 How do we shape the codebase's identity + data-isolation seams now so the same application code runs unchanged from one operator on a laptop (Stage 0) through small-SaaS multi-user (Stage 1) all the way to Facebook / Netflix-shape (Stage 2)?
 

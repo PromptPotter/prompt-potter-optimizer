@@ -4,19 +4,7 @@
 
 A trace records what the pipeline did (query, prediction, ground truth, node rankings, timeouts). A score judges *over* a trace; the answer changes with what you're optimizing for. Traces are written once and never edited; scores are a view produced by applying the active policy on demand.
 
-```
-MeasurementArchive   ← facts (append-only, persisted at measurements/runs/{run_id}.jsonl)
-   │
-   ├── SampleIndex   ← per-sample derived view; its per-run fold is persisted beside the
-   │                   archive and replayed at start, so a process re-reads only NEW runs
-   └── AxisIndex     ← axis-keyed derived view, folded from the index rows each refresh
-```
-
-The fold is revalidated all-or-nothing against the active scoring formula and each detail's
-signature; either failing rebuilds it from the details. Derived, so deleting it costs only
-the rebuild.
-
-One row = one **measurement** = `(sample × config → outcome)`. Two natural keys, both first-class: `measurements_for_sample(sample_id)` and `measurements_for_config(predicate)`. Files are content-addressed by `JobSearchPoint.content_hash(dataset)` — same config + same dataset upserts the same file. This is what makes the archive cross-cycle.
+**The archive's shape — the fold, its two derived views, its two retrieval keys, and the content-addressing that makes it cross-cycle** — owned by [`../developer/README.md`](../developer/README.md#4-cross-run-memory). One row there is one **measurement**, `(sample × config → outcome)`; this page owns only what a *score* over that row means.
 
 ## Score ledger + rescore-on-load
 
@@ -48,7 +36,7 @@ Two-tier decision records: **replayable** (which candidate won, parameters that 
 
 Round-winner selection compares candidates on difficulty-adjusted ability (θ on the cycle's fixed δ ruler — subset-invariant, so candidates scored on different adaptive subsets stay comparable); **accuracy** and the **composite** (per-round accuracy + health + latency + recall + verbosity) display alongside as subset-relative numbers so a win that came with hidden costs surfaces in the leaderboard. **Changing the composite forks the cycle rather than swapping inside it** — owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite formula — fork, never swap.
 
-θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. Today it's 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-dataset only when it beats 1PL out-of-sample. Rationale: [`../specs/fitness-comparability.md`](../specs/fitness-comparability.md).
+θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. Today it's 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-dataset only when it beats 1PL out-of-sample. The model itself is owned by [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md).
 
 ## Pointers
 

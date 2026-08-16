@@ -61,7 +61,7 @@ round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_w
    {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE}
 ```
 
-Default rules in `escalation/rules.py` (highest priority first): `perfect_accuracy` (100), `l1_generate_unusable` (70 — mandatory placeholder dropped or zero candidates parsed), `l1_evidence_starved` (65 — node failed across ~all of a round's samples), `l2_axis_yield_drought` (60 — L1 stalled ≥1 round AND AxisIndex shows no productive axes; quiet until AxisIndex initialises), `l1_continue` (50), `l1_to_l2` (10 — fall-through on patience exhaustion).
+**Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
 Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
 
@@ -107,7 +107,7 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 **Read paths** (both return `list[Measurement]`):
 
-- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_views.measurements_for_sample()`; **no caller today** — its one consumer was the sweep toolkit, deleted 2026-07-17. Kept because architecture.md §0 declares both keys first-class read surfaces of the archive.
+- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_views.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md §0 declares both keys first-class read surfaces of the archive.
 - `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
@@ -131,7 +131,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
-2. [`l2-internals.md`](l2-internals.md) — trigger, inputs, layout + overrides edits.
+2. [`dispatch-hub.md`](dispatch-hub.md) § Outputs — what L2 writes, and the layout edits it makes.
 3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
@@ -143,19 +143,16 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 |------|--------|
 | [Adding a surface](adding-a-surface.md) | Golden-path recipes per expansion point (record/injection/view-field/decision-kind/connector/node) + the guard that catches each half-wiring |
 | [Dispatch hub + L1 layout](dispatch-hub.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub`, mermaid flow + per-placeholder source map |
-| [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
-| [Node standard](node-standard.md) | Node JSON declaration format |
-| [Pipeline JSON contract](pipeline-contract.md) | Strict field-level `pipeline.yaml` shape |
+| [Node standard + `pipeline.yaml` contract](node-standard.md) | The node model, the JSON declaration format, and the strict field-level wire shape |
 | [Stable API v1](stable-api.md) | Fork-readiness surface |
 | [Whitelabel](whitelabel.md) **(draft)** | Running the unit under another name — the four rename tiers, what each breaks, what must never be renamed. Parked: wired and gate-green, never walked end to end |
-| [DSPy optimizer](dspy-optimizer.md) **(draft)** | Driving the loop from inside someone else's DSPy program via the separate `promptpotteropt` package — what that trades away, the `compile()` swap, `Loop` / `Node`, and why it asks for a dataset name. Spec: [`../specs/dspy-adapter.md`](../specs/dspy-adapter.md) |
+| [DSPy optimizer](dspy-optimizer.md) **(draft)** | Driving the loop from inside someone else's DSPy program via the separate `promptpotteropt` package — what that trades away, the `compile()` swap, `Loop` / `Node`, and why it asks for a dataset name. Packaging boundary: [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md) |
 | [Run initialization](run-initialization.md) | The INIT phase: the four-step chain `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop` with pre/postconditions and an ASCII diagram |
 | [Concept map](concept-map.md) | "Where does concept X live" table |
 | [Event stream](event-stream.md) | SSE Profile-A contract |
-| [Cycle fixtures](cycle-fixtures.md) | Freezing a buggy cycle as a webapp test fixture |
 | [L1 candidate analysis checklist](l1-candidate-analysis-checklist.md) | Round-trace review checklist + the self-optimizing campaign parallel-use lookup |
-| [Local OIDC](local-oidc.md) | Dex harness for the auth-on dashboard |
+| [Local repro harnesses](cycle-fixtures.md) | Freezing a buggy cycle as a test fixture, and the Dex harness for the auth-on dashboard |
 | [Conventions](conventions.md) | Style + code-shape rules + the six situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock) |
 
-For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/`](../concepts/README.md).
+For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/the-loop.md`](../concepts/the-loop.md).

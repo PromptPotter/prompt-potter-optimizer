@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The AI-facing doc layer is 12 files smaller** — 73 → 61 files, 11,982 → 11,235 lines (2026-08-15, over `docs/` minus buyer-facing, every `CLAUDE.md`, `.claude/`). Three shipped specs deleted, seven pages merged into the sibling read beside them. **The maintenance unit is the FILE, not the line**: a prior trim-only pass moved −116 lines and correctly counted as not shrinking anything.
+- **Root `CLAUDE.md` no longer inlines `README.md`** — the buyer-facing page (badges, BibTeX, ~30% absolute URLs) rode every session. **Unconditional floor ~10.4k → ~5.8k tokens, −44%.** That win was one-time; `docs/` loads on demand, so shrinking it again will not repeat it. The floor is root `CLAUDE.md` (~5.8k) plus whichever per-layer `CLAUDE.md` loads by proximity — eleven totalling ~40k, led by `application/optimization/` (7.6k), `webapp/` (7.3k), `infrastructure/` (6.1k). Aim there.
+- **The doc-drift hook nudges both ways** — it fired only when code outran docs, so sessions were pushed to add prose and never to remove it. That one-way ratchet caused the growth above.
+
 ## [0.8.11] — 2026-08-14
 
 > The release that makes `pip install promptpotter` real: the name is claimed, the wheel is less than half the size, a plain install is the engine rather than a web server, and publishing a GitHub Release is what puts it on the index. 42 commits since `v0.8.10`.

@@ -165,9 +165,8 @@ def build_l1_score_block(
             {
                 "idx": idx,
                 "label": label,
-                # Per-candidate value-inlined short formula. The legend for short
-                # codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) lives in
-                # ``docs/operations/improvement-tracking.md``.
+                # Per-candidate value-inlined short formula; the short codes are
+                # the evaluator keys ``inline_short_formula_values`` substitutes.
                 "composite_fitness_formula_short": inline_short_formula_values(
                     short_formula_template, dict(served.get("evaluators") or {})
                 ),

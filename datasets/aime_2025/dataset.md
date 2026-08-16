@@ -1,46 +1,21 @@
 # AIME 2025 — Dataset Context
 
-## Status
+30 competition math problems (AIME I + II 2025) from HuggingFace `MathArena/aime_2025`, integer
+answer in [0, 999]. Loader `load_aime_2025`; scorer `aime_match` extracts `\boxed{N}` (the standard
+math-benchmark convention) or falls back to the last number, then compares as `int` — matching
+MathArena's own methodology.
 
-Routed through TermNorm `/matches` with the `llm_only` pipeline (M9 LLM-Only
-Unification, 2026-04-14). Requires a TermNorm instance with the `llm_only`
-node enabled.
+**In band, not saturated** — measured origin and the five-route model A/B behind the pin are owned by
+[`../../docs/operations/dataset-reasoning-matrix.md`](../../docs/operations/dataset-reasoning-matrix.md)
+§ AIME 2025 model A/B/C tests. Its limit is **size**: 30 problems cannot carry a config/test split,
+so it serves as a head-to-head citation point, never as a population-grade instance.
 
-## Init Flags
+## Why `max_tokens` is overridden here
 
-```
---backend-url http://127.0.0.1:8000
---backend-id aime_2025
---dataset-name aime_2025
---config datasets/aime_2025/campaign.yaml
-```
-
-## Data
-
-- Source: HuggingFace `MathArena/aime_2025` (30 problems from AIME I and II 2025)
-- Format: competition math problem → integer answer in [0, 999]
-- `campaign.yaml` uses `sp_budget_ttest: 20` (20 of 30 problems per eval round)
-
-## Scoring
-
-`aime_match(predicted, ground_truth)` — extracts answer from `\boxed{N}`
-(primary, standard math benchmark convention) or last number in text
-(fallback), then compares as integer. Matches MathArena evaluation
-methodology. Registered in
-`promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`.
-
-## Pipeline Notes
-
-- Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`
-- Default target: `openrouter:mistralai/mistral-small-3.2-24b-instruct`
-  (fast, no reasoning_effort knob). Switch to `groq:openai/gpt-oss-120b`
-  with `reasoning_effort: "high"` when chasing accuracy on harder problems
-- Optimization target: prompt template (reasoning strategy, verification
-  steps, answer formatting), `temperature`
-- Prompts should instruct the model to put the final answer in `\boxed{N}` format
-- `max_tokens` override at 16384 in `campaign.yaml::pipeline_overrides.llm_only`:
-  Groq's gpt-oss-120b default output ceiling (~3072 tokens) truncates
-  AIME-difficulty reasoning chains, causing `finish_reason=length` deprecations
-  on the same handful of problems across every candidate (sample #8 parabola,
-  #10 piecewise linear, #6 twelve-letter combinatorics). Raise the cap so
-  deeper-reasoning candidates can actually finish.
+`campaign.yaml::pipeline_overrides.llm_only` raises the cap — the one dataset that does. AIME-depth
+reasoning chains hit the provider's default output ceiling and return `finish_reason=length`, and
+the failure is not spread evenly: the *same* handful of problems truncate across every candidate
+(sample #8 parabola, #10 piecewise linear, #6 twelve-letter combinatorics). Left capped, those rows
+score zero for every arm and the deeper-reasoning candidate is punished for reasoning. Re-check the
+cap against whatever model is pinned — the ceiling is per-model, so the override is a floor for the
+hardest rows, not a constant.

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-15
 deciders: [maintainer]
 consulted: [identity-foundation, spend-and-tenancy, operator-admin-channels, m12-control-plane]
@@ -39,7 +39,7 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 > channel (`admin_bot.py`: `/grant`, `/revoke`, `/grants`) — the identity zone a
 > delegate cannot write. Security test in `tests/test_security.py`.
 > **Also shipped (2026-07-15):** §5 per-grant spend-ceiling *enforcement*
-> (`effective_spend_cap_usd` folds the claim ceiling into its `min`); §4 babysit
+> (`effective_launch_caps` folds the claim ceiling into its `min`); §4 babysit
 > *minimal* (a fork seed whose `pipeline_overlay` sets a locked axis — model/provider —
 > requires `campaign.babysit`, stamps the cycle babysat, and forces its runs to grade
 > `C` via `grade_run(human_intervened=…)`; the trigger is the overlay edit, not any
@@ -261,7 +261,7 @@ degenerate case of the subtree tag, underbuilt not contradicted. No edit-kind sp
 ### 5. Per-grant spend ceiling — SHIPPED
 
 Each grant carries a spend ceiling, enforced by the existing spend-cap probe (ADR-0003):
-`effective_spend_cap_usd` now folds `min(requested_cap, lifetime_remaining, grant_ceiling)`,
+`effective_launch_caps` now folds `min(requested_cap, lifetime_remaining, grant_ceiling)`,
 reading the ceiling from the identity claims a delegated sub-principal carries. No new spend
 machinery — a narrower input to the one that exists. (Per-*channel* ceilings await §2.)
 

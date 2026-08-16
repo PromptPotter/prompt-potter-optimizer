@@ -13,7 +13,7 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
-from promptpotter.application.jobs.quota import lifetime_ceiling_usd
+from promptpotter.application.jobs.quota import lifetime_ceilings
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import (
     iter_user_token_usage,
@@ -74,13 +74,18 @@ class QuotaStatus(StrictModel):
     Drives the Security pane's quota card. ``*_max`` mirrors `user.json`
     so the operator can hand-edit limits; ``*_used`` is the live count
     that ``check_launch_quotas`` would gate against on the next launch.
-    The spend pair is LIFETIME — spent-ever against the account's total
-    ceiling — while the campaign pair stays per-day, because one is an
-    allowance and the other an abuse limit.
+    The spend and token pairs are LIFETIME — used-ever against the account's
+    total ceilings — while the campaign pair stays per-day, because one is an
+    allowance and the other an abuse limit. ``spend_unpriced_tokens`` is what
+    the USD pair CANNOT see: billed tokens with no resolvable rate, which make
+    ``spend_used_total_usd`` a floor and leave the token pair as the binding one.
     """
 
     spend_used_total_usd: float
     spend_budget_usd_total: float | None
+    spend_unpriced_tokens: int
+    tokens_used_total: int
+    token_budget_total: int | None
     concurrent_running: int
     max_concurrent_cycles: int
     campaigns_today: int
@@ -169,12 +174,27 @@ class MeResponse(StrictModel):
     terms_accepted_version: str | None
 
 
-def _is_declared_host_admin(email: str | None) -> bool:
-    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL` alone. Unset means nobody may,
-    which is a refusal rather than a fallback — the alternative, "first one in wins", is the thing that
-    stopped being safe the moment signing up became the grant."""
+def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
+    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL`, and from `HOST_ADMIN_ISSUER`
+    when that is set too. Unset email means nobody may, which is a refusal rather than a fallback —
+    the alternative, "first one in wins", is the thing that stopped being safe the moment signing up
+    became the grant.
+
+    The issuer half is why the email half is not enough on its own: an email is a CLAIM a provider
+    makes, and two providers are wired. Whichever has the weaker email handling would otherwise be
+    able to grant the box by asserting the declared address — so the pin bounds this to the one
+    provider the operator actually signs in with, and bounds any provider added later by default.
+    An empty `HOST_ADMIN_ISSUER` accepts any issuer, which is what every existing box already does,
+    so setting it is an upgrade and never a deploy-time lockout.
+
+    `email` arriving as ``None`` is the normal answer for an address the issuer would not vouch for
+    (`verifier.py`, `github.py`) — and it can never match here, which is the point.
+    """
     declared = settings.HOST_ADMIN_EMAIL.strip().lower()
-    return bool(declared) and (email or "").strip().lower() == declared
+    if not declared or (email or "").strip().lower() != declared:
+        return False
+    declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
+    return not declared_issuer or (issuer or "").strip() == declared_issuer
 
 
 def _require_bundle(request: Request) -> IdentityBundle:
@@ -292,7 +312,7 @@ async def callback(
     access_state = resolve_access_state(identity.email, bundle)
     if access_state == ACCESS_BLOCKED:
         logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
-    elif _is_declared_host_admin(identity.email):
+    elif _is_declared_host_admin(identity.email, identity.issuer):
         # The marker is what `_session_capabilities` reads to grant ADMIN_CAPABILITIES, so WHO may
         # write it must be DECLARED. Entitlement used to stand in for that and cannot any more: now
         # that signing up entitles, an inferred claim would hand the box to whoever arrived first.
@@ -437,12 +457,12 @@ _N_BUCKETS = 30
 def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     """Live quota snapshot for the Security pane.
 
-    Spend sums ``TokenUsageRecord`` cost across the account's WHOLE ledger via
+    Spend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via
     ``sum_user_spend`` — uncapped, so an over-budget account shows the true
     overage rather than clamping the display to the cap; concurrent + daily
-    counts ride the `JobRegistry`. The served ceiling is the RESOLVED one
-    (``lifetime_ceiling_usd``), never the raw nullable override, so the browser
-    is not left joining a null against an install default to learn its own cap.
+    counts ride the `JobRegistry`. The served ceilings are the RESOLVED ones
+    (``lifetime_ceilings``), never the raw nullable overrides, so the browser
+    is not left joining a null against an install default to learn its own caps.
     """
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
@@ -457,14 +477,18 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     running = job_registry.list_running(user_id=user.user_id)
     today = job_registry.list_created_today(user_id=user.user_id)
 
-    # Lifetime spend straight from the ledger — uncapped on purpose, so an over-budget
-    # account reports the true overage instead of clamping to the cap (the cap itself
-    # rides `spend_budget_usd_total` below).
+    # Lifetime usage straight from the ledger — uncapped on purpose, so an over-budget
+    # account reports the true overage instead of clamping to the cap (the caps themselves
+    # ride the `*_total` fields below).
     spent = sum_user_spend(stores=stores, since=0.0, until=datetime.now(UTC).timestamp())
+    ceilings = lifetime_ceilings(user=user, stores=stores)
 
     return QuotaStatus(
-        spend_used_total_usd=round(spent, 6),
-        spend_budget_usd_total=lifetime_ceiling_usd(user=user, stores=stores),
+        spend_used_total_usd=round(spent.used_usd, 6),
+        spend_budget_usd_total=ceilings.usd,
+        spend_unpriced_tokens=spent.unpriced_tokens,
+        tokens_used_total=spent.used_tokens,
+        token_budget_total=ceilings.tokens,
         concurrent_running=len(running),
         max_concurrent_cycles=user.max_concurrent_cycles,
         campaigns_today=len(today),
@@ -584,7 +608,9 @@ def activity(
         tokens = rec["tokens"]
         model = rec.get("model") or "unknown"
         kind = rec.get("kind") or "optimizer"
-        cost = record_cost_usd(rec)
+        # A chart's policy for an unpriced row: contribute nothing to the money axis, still count
+        # on the token and request ones. The quota gate answers the same `None` differently.
+        cost = record_cost_usd(rec) or 0.0
         # Tag backend rows so optimizer + backend never collide in the legend
         # even when they share a provider slug (Groq-hosted openai/gpt-oss-* +
         # OpenRouter-backed TermNorm both prefix with provider names).

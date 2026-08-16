@@ -2,7 +2,7 @@
 
 PromptPotter finds better prompts automatically. You give it a dataset and a pipeline endpoint — it tries variations of your prompt and pipeline configuration, measures accuracy on each one, and iterates. An AI [critique layer](../concepts/the-loop.md) analyzes what worked and what didn't. The result is a better-performing prompt and configuration, found without manual trial and error.
 
-The pipeline can be a single LLM call or a [multi-step pipeline](../concepts/nodes-and-pipelines.md) with caching, retrieval, and ranking. PromptPotter treats it as a black box: it sends inputs, reads outputs, scores results, and adjusts.
+The pipeline can be a single LLM call or a [multi-step pipeline](../developer/node-standard.md) with caching, retrieval, and ranking. PromptPotter treats it as a black box: it sends inputs, reads outputs, scores results, and adjusts.
 
 ---
 
@@ -10,7 +10,7 @@ The pipeline can be a single LLM call or a [multi-step pipeline](../concepts/nod
 
 💰 Every evaluation costs money. PromptPotter is built to maximize accuracy per dollar:
 
-- **[Search-only-with-evidence](../methods/candidate-elimination.md).** Each candidate runs against a small handful of samples by default (~3–5). Only candidates with statistical evidence of being promising get extended.
+- **[Search-only-with-evidence](../methods/candidate-elimination.md).** Each candidate runs against a small handful of samples first. Only candidates with statistical evidence of being promising get extended.
 - **[Hard-sample leaderboard](../methods/exploration-exploitation.md).** Samples everyone aces or everyone fails carry no signal. The optimizer surfaces and scores on the samples that actually separate candidates.
 
 ---

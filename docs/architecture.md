@@ -18,7 +18,9 @@ the ones already naming more than one thing, and
 [`developer/conventions.md`](developer/conventions.md) § Code style, which names
 the four that are banned outright.
 
-**Purpose.** Evolve a target prompt + pipeline params toward a fitness
+### Purpose
+
+Evolve a target prompt + pipeline params toward a fitness
 goal by iterating LLM-driven candidate generation against a scoring
 dataset.
 
@@ -30,7 +32,7 @@ Two architectural commitments shape every bucket on this page:
   self-description — PromptPotter has zero hardcoded knowledge of the
   target system. New backend = new `pipeline.yaml`, no PromptPotter
   code change. The `pipeline.yaml` contract is pinned in
-  [`docs/developer/pipeline-contract.md`](developer/pipeline-contract.md).
+  [`docs/developer/node-standard.md`](developer/node-standard.md).
 - **Two-layer searchpoints + self-optimization.** `JobSearchPoint` is
   the frozen target spec being measured (prompt + pipeline params,
   content-hashed). `OptSearchPoint` is the optimizer's own working
@@ -40,7 +42,9 @@ Two architectural commitments shape every bucket on this page:
   `pipeline.yaml` — so accumulated `OptSearchPoint` data is the
   dataset for **optimizing the optimizer**.
 
-**Central loop.** One round = generate → score → critique.
+### Central loop
+
+One round = generate → score → critique.
 
 - `l1_generate` produces N candidate searchpoints from the parent.
 - `l1_score` runs each candidate against the dataset via the **sole
@@ -67,10 +71,12 @@ Two architectural commitments shape every bucket on this page:
 
 Repeat until goal hit, `max_rounds`, or escalation chooses to stop.
 
-**Escalation (two layers, both lazy) — self-healing with a HITL escape
-hatch.** L2 (`l2_context`) fires when L1 stalls — or preemptively on
-`l2_axis_yield_drought` (no axis-novel candidates) or
-`l1_evidence_starved` (a node failed across ~all samples) — and steers
+### Escalation (two layers, both lazy) — self-healing with a HITL escape hatch
+
+L2 (`l2_context`) fires when L1 stalls, or earlier on one of the
+preemptor rules — **the preemptor set is owned by
+[`developer/dispatch-hub.md`](developer/dispatch-hub.md) § Trigger; read the
+membership there, never from a copy** — and steers
 what L1 *looks at* (`l1_layout`) and how hard it explores
 (`l1_overrides`). It does **not** rewrite `task_context`: the framing is
 operator-authored and frozen for the run, so no layer edits it. L3
@@ -86,7 +92,9 @@ reason; the operator fixes it and `resume`s). Deterministic rules stay
 function: `decide_escalation(EscalationInputs)` — priority-sorted
 first-match-wins, once per round.
 
-**Errors heal upward, tolerantly.** Default assumption: any single
+### Errors heal upward, tolerantly
+
+Default assumption: any single
 failed measurement (validation failure on L1 output, runtime failure
 mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
@@ -110,7 +118,9 @@ useful direction returns naturally. Trust the loop's self-healing
 plus passage of time over hand-coded recovery logic. The default
 posture is "ignore and continue"; aborting requires evidence.
 
-**Dispatch hub.** Every optimizer LLM call composes its prompt by the
+### Dispatch hub
+
+Every optimizer LLM call composes its prompt by the
 same path: `build_bundle(cycle) → DispatchHub.fill(template, layout, bundle)
 → compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
@@ -133,7 +143,9 @@ grows — and **the response JSON Schema is prompt text**, riding
 `response_format` on every call, so its field names and `description`
 prose are bounded on the same rule.
 
-**Four entities (outermost → innermost).** PromptPotter's persisted
+### Four entities (outermost → innermost)
+
+PromptPotter's persisted
 world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and **queryable
@@ -180,7 +192,9 @@ world is a strict containment hierarchy:
   `(campaign_id, cycle_id)`. Path helpers:
   `promptpotter/infrastructure/store/layout.py`.
 
-**A campaign has one root cycle — there is no Session tier.** A campaign
+### A campaign has one root cycle — there is no Session tier
+
+A campaign
 owns a root cycle plus its fork/diag/sweep descendants, and that is the
 whole containment story — `campaign → cycle → fork` would be two tiers
 wearing three names. What survives is *not* an entity:
@@ -200,7 +214,9 @@ cycle id (content-addressed) and origin score (the dataset-scoped archive
 cache-hits every sample) — cross-campaign evidence pooling on a declaration
 rides the `measurements/` layer, not campaign identity.
 
-**`unit_kind` taxonomy.** An operator-facing label, computed
+### `unit_kind` taxonomy
+
+An operator-facing label, computed
 server-side from `(sibling_kind, fork_trigger)`, used by the webapp
 sidebar: `session` (a session root run — `resume` extends it),
 `divergent_resume` (a `resume --fork-on-divergence` branch),
@@ -208,7 +224,9 @@ sidebar: `session` (a session root run — `resume` extends it),
 sweep — these three fold into one kind), `auto_rebase` (an automatic
 L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 
-**Three data scopes — campaign / dataset / workspace.** The
+### Three data scopes — campaign / dataset / workspace
+
+The
 Workspace datastore is queryable at three named, consistently-used
 scopes: **campaign** (one campaign's own cycles — the campaign dir),
 **dataset** (every campaign for one dataset — `measurements/` filtered by
@@ -218,7 +236,9 @@ the heatmap artifacts, the `scope` API param, and the webapp toggle,
 so the operator always distinguishes "this campaign" vs "this
 dataset" vs "everything" identically.
 
-**The loop is embeddable, and that bounds what may sit in core.** Two ways in, pulling
+### The loop is embeddable, and that bounds what may sit in core
+
+Two ways in, pulling
 opposite ways: an operator installs the whole product, while a *host program* — a DSPy
 module, an agent, a harness — runs the loop inside a dependency tree it did not choose to
 merge with ours. So the **core install is the engine and nothing else**; every surface above
@@ -230,7 +250,9 @@ non-installer would hit it, naming the extra. A capability that seems to need a 
 package is a design question first — the answer is usually that the capability is an extra.
 Contract: [`adr/0006-embeddable-core-and-extras.md`](adr/0006-embeddable-core-and-extras.md).
 
-**State + persistence.** The entry points (CLI, webapp, REST API, and the embedded library
+### State + persistence
+
+The entry points (CLI, webapp, REST API, and the embedded library
 entry a host program drives) share **one** orchestration layer and **one** set of data types
 — no per-entry-point copies. **Five I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
@@ -387,7 +409,9 @@ dataset-lifecycle operation that predates the facade
 Together the two pins capture event-sourcing's reasoning-clarity gain
 without paying replay-on-every-read.
 
-**Everything material lives on disk, in human-readable form.** The
+### Everything material lives on disk, in human-readable form
+
+The
 project file tree IS the operator's primary interface — `campaign.json`,
 `dashboard.json`, `index.json`, `log.md`, per-round caches, the ledger
 itself. The webapp polls the same files; the CLI emits transient logs
@@ -423,7 +447,9 @@ human file-tree included, consults it; "the webapp no longer needs it" is
 not "no one needs it." This is the read-side corollary of the single-writer
 ledger: many readers, two read cadences, one source.
 
-**The file tree is read-out, not write-in.** `dashboard.json`,
+### The file tree is read-out, not write-in
+
+`dashboard.json`,
 `campaign.json`, `index.json`, `round_NNNN.json`, the ledger — all are
 projections written by sole-writer subscribers under the single-writer
 invariant (pinned above). Operator hand-edits to these files are not
@@ -460,7 +486,9 @@ streams, without descending into per-cycle round detail.
 `measurements/` stays a peer of `campaigns/` — dataset-scoped,
 cross-campaign by design (see "Measurement archive" below).
 
-**Entry-point scope rules.** A notebook is a thin UI shell — every
+### Entry-point scope rules
+
+A notebook is a thin UI shell — every
 non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
 Convention (not CI-enforced — the structural scan was cut; see
@@ -480,7 +508,9 @@ run; audit for accumulated cruft but don't delete the underlying
 mechanism. New webapp panels arrive as ordinary sub-specs, not
 silent additions.
 
-**Tracing, Langfuse-shaped, lightweight by default.** Optimizer LLM
+### Tracing, Langfuse-shaped, lightweight by default
+
+Optimizer LLM
 calls and backend matches emit structured events in
 **Langfuse-compatible shape** (spans / traces / metadata) — wrapped
 via the `observed_node()` context manager. Every optimizer LLM call
@@ -513,7 +543,9 @@ with no external sink wired, events conform to it, so importing later
 Tracing is fan-out only — the optimizer never reads it, so it can never
 become load-bearing for the loop.
 
-**Measurement archive (the actual database).** Beyond the per-cycle
+### Measurement archive (the actual database)
+
+Beyond the per-cycle
 ledger, a cross-cycle persistence layer lives at
 `measurements/runs/{run_id}.jsonl` — an append-only log per run,
 content-addressed by `JobSearchPoint.content_hash`, indexed by
@@ -582,7 +614,7 @@ the PR description.
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
 - **Hexagonal layer separation** (fails loud at import; see `tests/CLAUDE.md`)
-  — without the discipline, the three entry points drift.
+  — without the discipline, the entry points drift apart.
 - **The core/extra split in `pyproject.toml`** — moving a package back into core is not
   tidying; it is a cost charged to every program that embeds the loop, and nothing fails
   when it happens. The `[api]` set in particular looks like it belongs in core, because

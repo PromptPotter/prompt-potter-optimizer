@@ -38,7 +38,7 @@ Every measurement costs money, so the whole design is **most fitness per dollar*
 
 ## Common questions
 
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`state-record.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/state-record.md).
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`the-loop.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md#the-state-record--what-one-round-carries-forward).
 - **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.yaml`). Walkthrough: [manual ch. 03](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md).
 - **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run).
 - **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/scoring-and-memory.md).
@@ -117,11 +117,11 @@ Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against D
 | 🧠 Concepts | ⚙ Operations | 🔬 Research |
 |---|---|---|
 | [Three-layer loop](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md) | [Install & env](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/02-install.md) | [Benchmarks](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md) |
-| [State record](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/state-record.md) | [Backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/metrics.md) |
+| [State record](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md#the-state-record--what-one-round-carries-forward) | [Backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/metrics.md) |
 | [Self-healing](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md) | [Persistence, state, recovery](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/persistence-and-state.md) | [Related work](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md) |
 | [Scoring and memory](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/scoring-and-memory.md) | [Observability](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/observability.md) | |
 | [Campaign tree](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/campaign-tree.md) | [Whitelabel — run it under your own name](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/whitelabel.md) *(draft)* | |
-| [Nodes and pipelines](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/nodes-and-pipelines.md) | [Use it as a DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) *(draft)* | |
+| [Nodes and pipelines](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/node-standard.md) | [Use it as a DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) *(draft)* | |
 
 Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md). Statistical foundations under [`docs/methods/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/README.md).
 

@@ -8,9 +8,7 @@ Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt
 
 ## Sample iteration order — the shared round order
 
-Every candidate in a round walks **one deterministic shared order**, built once from the seed's per-sample outcomes (`build_round_order`, `promptpotter/application/intelligence/adaptive_queue_mechanism.py`): seed-MISS samples first (ascending δ — the only place a candidate can *win*, so both futility evidence and the deterministic-exhaustion bound accrue fastest), a seed-HIT regression probe every 4th slot (descending δ — likeliest regression points first, feeding losses to the gates early), unknowns riding the MISS stratum. The order is a pure function of (seed grades, δ ruler, sample ids) — resume re-derives it exactly; shared prefixes keep the paired stats comparable across candidates.
-
-**The order is shared, never re-ranked per candidate** — owned by [`verdict-resolution.md`](verdict-resolution.md) § The round order — `build_round_order`, one static order per round. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
+**How the order is built** — owned by [`verdict-resolution.md`](verdict-resolution.md) § The round order. This page depends on one property of it: the order is **shared, never re-ranked per candidate**, so shared prefixes keep the paired stats below comparable. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
 
 ## Bayesian PoBB
 

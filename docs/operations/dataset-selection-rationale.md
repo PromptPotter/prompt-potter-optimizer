@@ -1,8 +1,8 @@
-# Dataset Selection Rationale — Self-Optimizing Campaign Signal Density
+# Datasets — which ones, why, and how to add one
 
-> **How to add a dataset:** [`adding-a-dataset.md`](adding-a-dataset.md) — research the canonical train/test split *before* writing the loader. This doc is *which* datasets and *why*; the add-doc is *the process for wiring one*.
+Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-dataset model defaults). This doc captures *which* datasets we trial during L1 optimizer prompt evolution and *why* — same operator-driven format, evidence + verdicts + dates — and, at the end, **the process for wiring a new one**.
 
-Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-dataset model defaults). This doc captures *which* datasets we trial during L1 optimizer prompt evolution and *why* — same operator-driven format, evidence + verdicts + dates.
+**The measurement roster and the saturation bar** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured and § The admission bar; this page adds only the recon detail and the selection decision standing behind each score.
 
 ## Frame — BBEH is the headline; self-optimizing campaign needs signal
 
@@ -178,4 +178,26 @@ When a shortlisted dataset is trialed:
 3. If it works, leave it shortlisted — several datasets can serve as L4 inner cells at once.
 4. Once a dataset is wired as an L4 inner benchmark, record its model + reference accuracy in [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) — the canonical table.
 
-See also: [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) for per-dataset model defaults once a candidate graduates from shortlist to wired.
+## Adding a dataset — the wiring process
+
+For any new dataset under `datasets/{name}/`, public benchmark or private task. **Research before code.**
+
+**1. Research the canonical protocol — first, always.** Before writing the loader, find the **author-recommended train/test split and evaluation protocol** in the published literature. For public benchmarks: the dataset card, the parent repo README, the paper's evaluation section, and any leaderboard methodology — look for "evaluation protocol", "splits", "train/test", "held-out". For private / operator tasks, ask the operator *"What slice have you reserved as test, or do you want to cut one now?"* before defining the optimization pool; don't assume the whole file is fair game.
+
+If the canonical answer isn't obvious in 5 minutes, delegate it to a fresh agent with no project context — the fastest path to an uncontaminated read. Template:
+
+> Research the canonical train/test split and evaluation protocol used in the published literature for *&lt;DATASET&gt;* (HuggingFace: *&lt;path&gt;*, paper: *&lt;arxiv URL&gt;*, repo: *&lt;github URL&gt;*).
+>
+> Specifically:
+> - What split, if any, do the authors recommend in the README, paper, or dataset card?
+> - What split do published papers actually score against — full set, a subset, a held-out cut?
+> - Is there a sister training dataset that papers use, and if so, which one and at what sample size?
+> - Cite every claim (URL + section/line).
+>
+> Report findings only. Do not write code. Do not propose an implementation. Under 400 words.
+
+**2. Report findings in `dataset.md`.** The new `datasets/{name}/dataset.md` must have a **Data** section quoting the authors' protocol verbatim, with citations (URL + section). State sample counts and any sister training dataset.
+
+**3. Operator confirms the cut — before any wire.** The cut + protocol decision is operator-directed once the canonical protocol is on the table. **Never invent a split. Never consume a canonical test set as an optimization pool** without the operator explicitly accepting that the resulting number is not leaderboard-comparable. Any deviation from the canonical protocol gets said out loud in `dataset.md`, with the reason.
+
+**4. Then wire.** Only after 1–3: the loader, the scorer, and the `datasets/{name}/` config tree (`pipeline.yaml`, `campaign.yaml`, `task_description.md`, `prompts/{node}.yaml`, `dataset.md`). Selection criteria are above; per-dataset model defaults go in [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) once the candidate graduates from shortlist to wired.

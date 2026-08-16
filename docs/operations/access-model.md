@@ -103,7 +103,7 @@ read**, so a hand-edited over-grant is clamped, and a malformed/no-delegator gra
 not the delegator it acts as. Provisioned only through the operator-admin channel
 (`admin_bot.py`: `/grant`, `/revoke`, `/grants`); the grant writer rejects a delegator that is
 itself a sub-principal (**one-level delegation**, enforced). A grant's **spend ceiling** is
-enforced — `effective_spend_cap_usd` folds it into `min(requested, daily_remaining, ceiling)`.
+enforced — `effective_launch_caps` folds it into `min(requested, lifetime_remaining, ceiling)`.
 The **`campaign.babysit`** cap gates a direct edit of an engine-locked value: unlocking the
 model/provider axis in a `fork-cycle` seed requires it, stamps the cycle babysat, and forces
 its runs to grade `C` (excluded from digest / reuse / L4). The **`campaign.step`** rung gates
@@ -150,14 +150,19 @@ This is the genuinely-partial boundary; the honest state:
   shares the API's process, `.env`, and every provider key.
 
 **Shipped wall (3a) — the hardened service unit** (`deploy-linux/install-service.sh`): the
-systemd unit drops all capabilities, `ProtectSystem=strict` (whole FS read-only except
-`$INSTALL_DIR`), a `@system-service` syscall filter, the kernel-protection set, and an optional
-`MemoryMax`. This is kernel-enforced and bounds **both** the API and the in-process loop it hosts.
+systemd unit drops all capabilities, `ProtectSystem=strict`, a `@system-service` syscall filter,
+the kernel-protection set, and an optional `MemoryMax`. This is kernel-enforced and bounds
+**both** the API and the in-process loop it hosts. The writable surface is `DATA_DIR` when set,
+else `$INSTALL_DIR` — and only the first takes away the service's ability to rewrite its own
+source, its venv and its `.env`, which is persistence rather than disclosure. Unset warns.
 
-**Not yet applied (3b) — the dedicated loop principal:** a `promptpotter-loop` service user, a
-`.env` **secret split** (loop gets provider keys, *not* the admin-bot/OIDC secrets), and
-`ReadWritePaths` scoped to the cycle tree only. This is what makes "loop below user" a real
-boundary rather than a label — but it only bites CLI-launched runs until 3c, so it is gated on 3c.
+**Partly applied (3b) — the dedicated loop principal.** The `.env` **secret split** is available
+now (`BOT_ENV_FILE`): the admin bot is already its own unit, so its `ADMIN_BOT_PASSPHRASE` — the
+second factor on inbound `/block` and `/grant` — leaves the API's environment, and a read of that
+process stops conferring command authority. The bot's token and chat id must stay in both, since
+`auth.py` imports `notify_operator` and sends on them. Still absent: a `promptpotter-loop` service
+user and `ReadWritePaths` scoped to the cycle tree alone — that half only bites CLI-launched runs
+until 3c, so it stays gated on 3c.
 
 **Deferred (3c), named honestly — the web-launch split:** making the web-launched loop a separate
 sandboxed process. It fights the current single-process design (a few hundred LOC + delicate
@@ -176,19 +181,29 @@ not backend-supplied.
 - **One public port behind Cloudflare Tunnel** (outbound-only; no inbound router port). uvicorn
   binds `127.0.0.1` with `--proxy-headers --forwarded-allow-ips=127.0.0.1`. TermNorm binds
   `127.0.0.1:8000`, never tunneled.
-- **AuthN:** Google OIDC. Missing session → 401 at `resolve_identity` (`deps.py`). Session cookie is
+- **AuthN:** Google OIDC — RS256 pinned, signature verified, `iss`/`aud`/`exp`/`iat`/`sub` checked,
+  and an `email` returned only where the issuer vouched for it. Missing session → 401 at
+  `resolve_identity` (`deps.py`). Session cookie is
   httponly / secure / samesite=lax, opaque id (no JWT past the middleware — ADR-0002).
 - **Sign-up is open AND signing up is the grant.** Anyone completing OIDC gets an account holding
   `OWNER_COMMAND_CAPABILITIES` over their own tenant. What bounds them is money, not approval: the
-  free-tier lifetime ceiling (`Settings.FREE_TIER_SPEND_CAP_USD`, composed at
-  `quota.py::effective_spend_cap_usd`). `oidc.py::resolve_access_state` (re-read live) answers
+  free-tier lifetime ceilings (`Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed
+  at `quota.py::effective_launch_caps`). **Both units, because the USD one can go blind** — a billed
+  call with no resolvable rate leaves the money total a floor, so the token ceiling is what still
+  holds and the USD arm falls back to `Settings.UNPRICED_GRACE_USD`. Every path that sets a ceiling
+  composes there, `change-spend-budget` included: it writes the file `_usd_cap` prefers over the
+  launch-composed cap, so an unclamped one is the way around this whole section.
+  `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
   capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
   gets. Nothing else re-checks.
 - **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
   writes is what grants `ADMIN_CAPABILITIES`, and entitlement can no longer stand in front of it now
-  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`
-  and nothing else. Unset means no browser identity ever claims the box. Inferring it would hand a
+  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`,
+  and `HOST_ADMIN_ISSUER` too where that is set (empty accepts any issuer, so no deployed box
+  changes until an operator sets it). An email is a CLAIM a provider makes and two providers are
+  wired, so the address alone would let whichever has the weaker email handling assert the declared
+  one. Unset EMAIL means no browser identity ever claims the box. Inferring it would hand a
   fresh public box to whichever stranger signed in first.
 - **Blocklist edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
@@ -209,7 +224,8 @@ not backend-supplied.
 | Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
 | Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
-| Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` |
+| Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
+| Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
 | Who is exempt from free-tier metering (one predicate) | `quota.py::_spends_the_hosts_own_key` — no issuer (terminal) or the claimed identity |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
@@ -268,10 +284,62 @@ Run on the box for the next test-linux update; each is idempotent.
 
 ---
 
+## Running it securely — the one admin task you repeat
+
+Signing up **is** the grant. Anyone completing OIDC gets an account that can act immediately, bounded by `Settings.FREE_TIER_SPEND_CAP_USD` rather than by your approval ([ADR-0003](../adr/0003-spend-and-tenancy.md) § Spend). There is no queue to work through, so the only recurring admin action is the reverse one — **taking access away**.
+
+**The one rule: a control-plane change never has an inbound door open to the internet.** The blocklist is the front-door lock, so its edit never sits behind a public endpoint. The edit happens **on the box**, which reaches *out* to your phone — nothing new is exposed. Exposing an admin endpoint instead would put that lock on the public internet behind a single token, and a token living in a cloud tool (n8n, Zapier, CI) turns a breach there into your auth gate. If an external tool genuinely must drive an admin action, gate it behind an edge broker (Cloudflare Access service token) **plus** an app token — never a bare public route ([ADR-0004](../adr/0004-operator-admin-channels.md) § "When option C is the right escalation").
+
+### Blocking an account from Telegram
+
+`.promptpotter/identity/blocklist.json` is re-read on every request, so **edits take effect instantly — no restart, no re-login**. An on-box admin bot long-polls Telegram (outbound only — it opens no port).
+
+It is a courtesy control, not a boundary: a blocked person can sign up again from another address into a fresh account with a fresh ceiling. The ceiling is what bounds a stranger; this is what stops one you have already met.
+
+**One-time setup.** Create a bot via [@BotFather](https://t.me/BotFather) (`/newbot`) and copy the token. Message the bot, then read `message.chat.id` from `https://api.telegram.org/bot<TOKEN>/getUpdates` — that number locks the bot to you. Put the secrets in the env file (on a box, `$ENV_FILE` from `deploy.config` — default `$INSTALL_DIR/.env`, `0600`, never committed). Every key is a `Settings` field, so it resolves from the process environment *or* the install's own `.env` (`config/paths.py::env_file_path`); a laptop needs no `$ENV_FILE` at all, but on a box use it anyway — one home is what keeps the two from drifting.
+
+```bash
+ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
+ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
+ADMIN_BOT_PASSPHRASE=optional-extra-word         # optional 2nd factor
+HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
+HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
+```
+
+**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: `auth.py` imports `notify_operator` and announces new sign-ins on the same bot. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting the host-admin tier. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
+
+**Daily use** — message your bot:
+
+| You send | Effect |
+|---|---|
+| `/block alice@example.com` | Withdraws access. She stays signed in and keeps her account; every command she sends is refused from the next request on. |
+| `/unblock alice@example.com` | Gives it back. |
+| `/blocked` | Replies with everyone currently blocked. |
+| `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capability tiers. |
+| `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
+| `/grants` | Replies with the current delegations. |
+
+With `ADMIN_BOT_PASSPHRASE` set, prefix the command with it: `my-word /block alice@example.com`. Messages from any chat id other than yours are silently ignored. Delegation tiers are the ladder above; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). The grant lives in the sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities are clamped to yours at every use — a grant can never exceed what you hold. Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` beside it, an audit trail you can `cat` on the box.
+
+### New accounts into your CRM (optional)
+
+Signing in *is* signing up, so a new account is a contact worth keeping the moment it arrives. Set `N8N_SIGNUP_WEBHOOK_URL=https://<your-n8n>/webhook/<path>` in the same env file and the app POSTs `{email, name, use_case, signup_source, account_count}` there the first time a new account calls `/auth/me`. Leave it unset and nothing is sent — the forward is best-effort and never fails a sign-in (`admin_bot.py::forward_new_account_to_crm`).
+
+**Copy the path from the workflow's webhook node, not from its file name** — the two drift, and a `POST`-only webhook answers *"not registered"* to the browser GET you would naturally test it with, so a wrong path and a live-but-unreachable one look identical. Confirm with the receiving side's own API rather than by probing the URL.
+
+This does not contradict the one rule: the traffic is outbound-only and carries contact details, never a credential. n8n cannot call back and holds no token of yours, so a breach there reaches your mailing list, not your auth gate. What stays fixed is the direction of travel — nothing external may *drive* an admin action.
+
+### Secret hygiene
+
+- `.env` is `chmod 600` and **never committed** (it holds the bot token + API keys).
+- Rotate `ADMIN_BOT_TELEGRAM_TOKEN` (re-issue via @BotFather) if it leaks; paste the new value into every env file carrying it — the app's *and* the bot's, if you split them — then restart both units. The unit is `promptpotter-admin-bot`; the `-allowlist-bot` this line named for a while is the retired pre-blocklist service.
+- Don't stack Cloudflare Access in front of the app *and* the OIDC gate — that's a double-gate; pick one. (The bot is independent of either.)
+- Verify no surprise listener after install: `ss -tlnp` should show **no new port** for the bot — it is outbound-only.
+
+---
+
 ## See also
 
-- [`secure-hosting.md`](secure-hosting.md) — the operator's repeated task: managing the sign-in
-  allowlist via the on-box bot.
 - [ADR-0002](../adr/0002-identity-foundation.md) — identity foundation (OIDC, RLS staging).
 - [ADR-0003](../adr/0003-spend-and-tenancy.md) — spend + tenancy.
 - [ADR-0004](../adr/0004-operator-admin-channels.md) — the operator-admin channel threat model.

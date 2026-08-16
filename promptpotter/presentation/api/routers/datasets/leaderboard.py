@@ -472,6 +472,11 @@ class SampleSeries(StrictModel):
 class MeasurementSeriesResponse(StrictModel):
     name: str
     scope: HeatmapScope
+    order: HardSampleOrder = Field(
+        description="The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on "
+        "BOTH responses because they are one page read twice: a client holding only one of them "
+        "would otherwise have to name the order from the other, or guess the default.",
+    )
     items: list[SampleSeries]
     total_measurements: int = Field(
         description="Measurements across every series in `items` — the denominator of the "
@@ -558,6 +563,7 @@ def get_dataset_measurement_series(
     return MeasurementSeriesResponse(
         name=page.raw["name"],
         scope=scope,
+        order=page.order,
         items=items,
         total_measurements=n_meas,
         total_hits=sum(it.n_hits for it in items),

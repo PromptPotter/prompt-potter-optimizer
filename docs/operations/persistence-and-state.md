@@ -5,16 +5,16 @@ Your work lives in `.promptpotter/`, in two trees:
 - `sessions/{session_id}/` — your operator workspace (journal, notes).
 - `campaigns/{campaign_id}/` — one campaign per directory; every cycle (session roots + forks + diags + sweeps) sits flat under `cycles/`.
 
-## Four entities
+## Four entities — where each one lands on disk
 
-A strict containment hierarchy: **Workspace → Dataset → Campaign → Cycle**.
+**Workspace → Dataset → Campaign → Cycle** — owned by [`../architecture.md`](../architecture.md) § Four entities (outermost → innermost). This page adds only the on-disk shape.
 
-- **Workspace** (`projects/{tenant}/`) — the tenant's datastore: every dataset, every campaign, and the two shared content-addressed caches. Every directory in it is named for what it holds, and the root partitions by lifecycle — which is how you answer "what survives a delete?" by looking.
-- **Dataset** — the optimization target plus its config. Resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
-- **Campaign** — one declared optimization effort: a dataset, a pipeline origin, context text. `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash` (an audit join key — optimizer drift is asked per ROUND, where it can name one and fork at it). Neither is the id. Dataset is embedded, so "campaigns for dataset X" is a prefix scan.
-- **Cycle** — one node in a campaign's lineage tree: root | fork | diag | sweep. Id is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
+- **Workspace** — `projects/{tenant}/`. Every directory is named for what it holds, and the root partitions by lifecycle, which is how "what survives a delete?" is answered by looking.
+- **Dataset** — resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
+- **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash`; neither is the id.
+- **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
-A **Session** is one `new` invocation; a campaign holds one. `resume` extends it; `resume --fork-on-divergence` adds sibling cycles. Each session is a tree: a root cycle plus its fork descendants.
+**There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle. What `sessions/{session_id}/` and `active_session.json` hold is the operator's workspace and pointer, never a container for cycles.
 
 ## Active session pointer
 
@@ -88,6 +88,70 @@ The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tab
 Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 **Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
+
+## Diagnosing a live or stuck run
+
+A run that looks frozen is usually one of five things, and they are distinguishable in a fixed order. Follow it. Guessing from file timestamps first is how a healthy pause gets read as a crash.
+
+**Ledger tail → `dashboard.json::declared_phase` → `.runtime/` flags → process table by command line → only then mtimes.** Each step answers a question the next cannot:
+
+1. **Ledger tail** (`.runtime/ledger.jsonl`) — the append-only chronology. What the loop last actually did, and in what order. The only surface that can say *against which rival* and *in what sequence*.
+2. **`dashboard.json::declared_phase`** — what the runner last *declared* about itself. A declaration, not the answer; see below.
+3. **`.runtime/` flags** — what the operator asked for. A `pause.flag` present means the run is stopping on purpose.
+4. **Process table, by command line** — is a producer actually attached. Match the command line, not the image name; several python processes are normal.
+5. **Mtimes** — last, and only to date something the four steps above already explained.
+
+**The trap this order exists to avoid:** control flags are consumed at the next **per-sample** checkpoint, not at the round close. A pause written mid-candidate takes effect within seconds — and to anyone watching file timestamps, a deliberate, clean, resumable stop is indistinguishable from a freeze.
+
+### `declared_phase` is not `run_phase`
+
+Two different facts, and conflating them is the costliest mistake here.
+
+- **`declared_phase`** is written into `dashboard.json` by the runner's own process — the process that dies. Served raw it reports `running` forever after a `kill -9`.
+- **`run_phase`** is **derived**, in exactly one place (`derive_run_phase`, `infrastructure/runtime_flags.py`), for every reader. It is never written to disk.
+
+The declaration is one *input* to that derivation, consulted for `paused` and `gate` only. Everything else is computed.
+
+### The phase vocabulary
+
+`RunPhase` (`domain/phases.py`) composes two orthogonal facts — lifecycle (active or finished) and control + liveness. Derivation is a first-match ladder, which is why a check-in cycle never reads as detached:
+
+| Phase | Means | Derived from |
+|---|---|---|
+| `checkin` | Still authoring its origin — pre-loop, resumable, holds no machine slot | `.runtime/checkin.flag` |
+| `terminal` | Finished; the reason is the cycle's `StopReason` | `index.json::finished_at` |
+| `paused` | Worker exited cleanly, cycle stays **active and resumable** | `pause.flag` **or** the runner's declaration |
+| `gate` | Alive, holding at the round-0 origin gate for an operator decision | declaration, freshness-gated |
+| `running` | A process is attached and driving | producer is fresh |
+| `detached` | Active lifecycle, **no live producer** | producer is stale — the one phase using the freshness heuristic |
+
+**Three ways into `paused`** — the pause button (writes the flag), Ctrl+C, and an `asyncio.CancelledError` (typically an L4 outer sample deadline cancelling its inner campaign). Only the first writes a flag; the other two are derived off the runner's declaration at the finalize seam. Leaving that to each raise site is what once let a deliberately-cancelled inner cycle read `detached` and get stamped `producer_vanished`.
+
+**`detached` ≠ `paused` ≠ wedged.** `paused` is a clean, deliberate, resumable exit; `detached` means nobody is driving (the CLI exited, or `kill -9` left no terminal record); **wedged** is a producer attached and heartbeating but no longer *progressing* — `run_phase` cannot express that one, and it is derived separately from non-heartbeat ledger appends ([`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md)).
+
+### Silence means dead, not thinking
+
+A live cycle heartbeats its ledger through to `dashboard.json`. If that file goes untouched longer than `RUN_FRESH_S` (`infrastructure/runtime_flags.py`), an active cycle's producer is treated as vanished and the liveness reaper (`application/jobs/reaper.py`) stamps it `terminal` with `producer_vanished`.
+
+**So an await that can outlast `RUN_FRESH_S` and writes nothing MUST heartbeat** (`optimization/dispatch/llm_call/heartbeat.py`) — this obligates every long await, not just LLM calls. The L4 outer cycle heartbeats its own ledger while awaiting each inner run for exactly this reason; without it a healthy outer round looks dead for the whole multi-minute inner campaign. The reaper never reaps a paused, check-in or origin-gated cycle — none of those is a dead producer.
+
+### The `.runtime/` flags
+
+Polled per checkpoint and consumed at the next **sample** boundary — transient, never to be confused with a durable ledger fact.
+
+| Flag | Meaning |
+|---|---|
+| `pause.flag` | The single operator-interrupt flag. **There is no `stop.flag`.** The loop exits at the next checkpoint; the cycle stays resumable. |
+| `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
+| `sample_lookahead.flag` | The operator's *request* that the walk hold a second sample in flight. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
+| `skip.flag` | Skip the current unit at the next checkpoint. |
+| `spend_cap` | Live `(usd, tokens)` ceilings. |
+
+A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one.
+
+### Where the error text is
+
+Error prefixes — `[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]` — land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log` above. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
 ## Recovery: resume, rewind, fork, sweep
 
@@ -258,19 +322,26 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    carry the campaign id too; a lookup by bare `cycle_id` would cross-wire siblings.
 
 4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the
-   origin.** `connectors/promptpotter.py::_identity_config` fingerprints the optimizer
-   manifest (`promptpotter/assets/optimizer/pipeline.yaml`) and its generated response-schema
-   sibling — which is prompt text, riding every optimizer call as `response_format` — plus the
-   per-node information-flow layouts, **the injection renderers' own source**
-   (`injection_source_digest`, normalized through the AST so a comment or docstring costs
-   nothing and a panel's prose or render condition voids the origin),
-   `APP_VERSION`, the dataset's whole `inner_tasks.yaml`, and the node configs of the
-   inner benchmark that file names — the worker model included, since swapping it changes what
-   every cell measures. Fact 2 does not cover
+   origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner
+   optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its
+   resolved response schema, which is prompt text riding every call as `response_format`, and
+   its config), plus the per-node information-flow layouts, **the injection renderers' own
+   source** (`injection_source_digest`), **the estimator's own source**
+   (`_measurement_source_digest`), the dataset's whole `inner_tasks.yaml`, and the inner
+   benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the
+   scoring formula included, since either changes what every cell measures. Both source digests
+   are normalized through the AST, so a comment or docstring costs nothing while an expression
+   voids the origin. Fact 2 does not cover
    these — they are read live, not snapshotted into `campaign.json` — so an edit lands on the
    *running* campaign: the banked outer origin stops joining and the next round pays to score
    it again. The function's docstring carries why a stale join would be the worse outcome.
    **Land config fixes before an origin is measured, never between its rounds.**
+
+   **What is deliberately NOT in it, because a corpus that cannot survive them cannot
+   accumulate:** the manifest's non-inner nodes (`checkin`, descriptions, `available_models`)
+   and `APP_VERSION`. The version constant voided every banked cell on every release while
+   saying nothing about whether the measurement had changed; `_measurement_source_digest` hashes
+   the four modules that actually decide the number instead.
 
 ## Changing the composite formula — fork, never swap
 

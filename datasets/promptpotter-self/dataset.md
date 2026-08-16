@@ -1,94 +1,37 @@
 # PromptPotter-self — Optimizer-of-the-Optimizer
 
-## What this is
+A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts** that drive the
+inner PromptPotter cycle. Connector boundary: `promptpotter/connectors/promptpotter.py`. Spec:
+[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md). Concept:
+[`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
 
-A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts**
-that drive the inner PromptPotter cycle. Connector boundary:
-`promptpotter/connectors/promptpotter.py`. Spec:
-[`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md).
-Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
+Each outer "sample" is one entry in `inner_tasks.yaml`: it mints and runs a full inner campaign on
+`justlogic-d234`. Each inner run reports a vector of proxy measurements
+(`domain/l4/proxies.py::OuterSampleProxies`); the outer formula in `campaign.yaml::scoring`
+re-anchors **one** of them — `mean_round_delta` — into [0,1] and nothing else, the quality terms
+having carried more SEED variance than arm variance while holding authority over the ordering. The
+rationale lives on `OuterSampleProxies`.
 
-Each outer "sample" is one entry in `inner_tasks.yaml`: it mints and runs a full
-inner PromptPotter campaign on **`justlogic-d234`** (3-class deductive reasoning over an
-iid mix of depths 2-4 — chosen because the inner model is far from what prompting can get
-out of it there, so the inner loop has room to climb and outer candidates score
-differently. No target score is declared: the panel says what an inner cycle may SPEND,
-never what it is expected to REACH). Each inner run reports a vector of proxy
-measurement (`domain/l4/proxies.py::OuterSampleProxies`): `mean_round_delta`, the mean
-over rounds of the ability the inner search ADOPTED, minus its origin, in logits on one
-difficulty-adjusted ruler. It averages that staircase rather than reading its last step
-because the mean is the quieter instrument at the same ranking — and because it rewards
-lifting early.
+**Status and remaining work** — owned by
+[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § Finish line.
 
-The outer scoring formula in `campaign.yaml::scoring` re-anchors that one term into
-[0,1] and nothing else: it is the only proxy that discriminated between optimizer prompts,
-the quality terms having carried more SEED variance than arm variance while holding
-authority over the ordering. The rationale lives on `OuterSampleProxies`.
+**The panel geometry, its per-cell cost and why it is 6 cells** — owned by `inner_tasks.yaml`, whose
+figures come off the banked cycle ledgers. Do not re-derive a cost from the knob values: the factors
+multiply, and an arithmetic estimate was 3× under the measured rate.
 
-## Status
+## Reading a cost figure
 
-Status + remaining work live in ONE place —
-[`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § Finish line.
+**An absolute campaign total is not quotable** — how many inner rounds each cell runs depends on the
+`justlogic-d234` origin→target gap and on where the lives brake stops it. The per-cell rate is, and
+it comes off the ledger, never a stopwatch: group `token_usage` records by `(kind, node, cached)`
+and price them with `shared/spend.py::compute_usd`.
 
-## Files
+**`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed caches are
+tenant-global, so a replayed cell costs $0 while doing the same search — on the banked corpus that
+was roughly half the bill. All records give the cold-equivalent (incurred) figure, `cached=False`
+alone gives what was billed; a clock cannot say which it measured, and the last figure taken that
+way was an order of magnitude optimistic. One trap: the duration distribution of *completing* cells
+is censored, since a cell that hits its wall-clock deadline emits no record at all.
 
-Knob values live in the files, not here — read them there.
-
-- `pipeline.yaml` — optimizer prompt node schema (`l1_generate` / `l1_critique` /
-  `l2_context` / `l3_plan`) + the outer optimizer's model/provider.
-- `campaign.yaml` — outer campaign config: the composite scoring formula,
-  `optimizer_set: "self_optimizing"`, the USD budget (`token_budget` is `null` on purpose —
-  see Cost shape).
-- `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic-d234` bank +
-  the `inner_benchmark_config` ladder (a REQUIRED file; all four ladder keys
-  must be present or the inner cycle is unscoreable).
-- `task_description.md` / `task_context.yaml` — outer L1 framing.
-- The outer optimizer prompt *rewrites* live in `promptpotter/assets/optimizer/sets/self_optimizing.yaml`
-  (selected by `optimizer_set: "self_optimizing"`), not in a local `prompts/` dir.
-
-## Run
-
-```
-python -m promptpotter new promptpotter-self
-```
-
-Actively supervise every run (2-minute ticks; never fire-and-wait) — see
-[`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md)
-§ Running & supervising.
-
-## Cost shape
-
-Cost is **geometric, not additive** — the factors multiply. One outer round,
-worst case before PoBB elimination prunes:
-
-```
-inner campaigns/round = (1 origin + n_variants) × n_inner_tasks
-inner rounds/campaign ≤ max_inner_rounds   (the lives brake may stop sooner)
-```
-
-(plug in the current values from `campaign.yaml` + `inner_tasks.yaml`). The
-origin is measured once and cached across outer rounds, so steady state after
-round 0 is `n_variants × n_inner_tasks` fresh inner campaigns/round, and PoBB
-elimination prunes trailing candidates before all tasks complete — actual <
-worst case. The **USD budget governs** (`spend_budget_usd`); `token_budget` is
-`null` on purpose — the inner-spend rollup counts real inner tokens onto the
-outer ledger, so a token cap would trip after a couple of inner campaigns while
-USD budget remains (see l4-outer-loop § Live-run learnings).
-
-**An absolute campaign total is not quotable** — how many inner rounds each cell runs
-depends on the `justlogic-d234` origin→target gap and on where the lives brake stops it.
-The per-cell rate is, and it comes off the ledger, never a stopwatch: group `token_usage`
-records by `(kind, node, cached)` and price them with `shared/spend.py::compute_usd`.
-
-**`TokenUsageRecord.cached` is what makes such a figure honest.** The content-addressed
-caches are tenant-global, so a replayed cell costs $0 while doing the same search — on the
-banked corpus that was roughly half the bill. All records give the cold-equivalent
-(incurred) figure, `cached=False` alone gives what was billed; a clock cannot say which it
-measured, and the last figure taken that way was an order of magnitude optimistic. One
-trap: the duration distribution of *completing* cells is censored, since a cell that hits
-its wall-clock deadline emits no record at all.
-
-**Do not thin below the floor.** The θ winner-election needs **≥6 inner tasks** to
-crown a winner on signal rather than noise (l4-outer-loop § Live-run learnings), and
-the shipped task count sits just above that — cut samples or rounds to save money,
-not tasks.
+**Cut samples or rounds to save money, never tasks** — the panel width is what makes elimination and
+the winner election work, and `inner_tasks.yaml` states the floor and its reason.

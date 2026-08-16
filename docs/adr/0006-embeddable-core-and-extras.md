@@ -6,7 +6,7 @@ consulted: [m12-control-plane]
 informed: []
 relates:
   - docs/adr/0001-m12-control-plane.md
-  - docs/specs/dspy-adapter.md
+  - docs/developer/dspy-optimizer.md
 supersedes: []
 superseded-by: []
 tags: [packaging, distribution, embedding, dependencies, extras]

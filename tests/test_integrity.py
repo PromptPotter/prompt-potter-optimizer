@@ -1830,6 +1830,12 @@ _CLAUDE_SECTION = re.compile(
     re.M,
 )
 _CLAUDE_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.M)
+# The published front page cannot use relative links — it renders off-repo (GitHub, PyPI) —
+# so it pins doc paths as absolute blob URLs, which the relative-link arm above skips by
+# design. Same claim, different spelling: resolve the path half against the repo.
+_GITHUB_BLOB = re.compile(
+    r"https://github\.com/[^/\s)]+/[^/\s)]+/(?:blob|tree)/main/([^)\s#]+)(?:#([^)\s]+))?"
+)
 _CLAUDE_CARD = re.compile(r"^##\s+Load-bearing\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
 _CLAUDE_CARD_TARGET = re.compile(r"→\s*§\s*(.+?)\s*$", re.M)
 # Each entry is a shape that reads as a fact but silently decays into a false one.
@@ -1880,8 +1886,25 @@ def test_claude_md_claims_resolve() -> None:
     (`.claude/skills/potter-dev/rules.md`, gone 2026-06-18). The `.md`-only scope that
     replaced it then let the control-plane spec keep three refs into routes that had been
     migrated away entirely — `active.py:236` and `:254` now point at an unrelated handler,
-    `backends.py:58` at another. Each now says the thing by name instead. The other three
-    assertions stay CLAUDE.md-scoped.
+    `backends.py:58` at another. Each now says the thing by name instead.
+
+    (1) and (2) run over the same wide scope, for the third instance of that one failure: a
+    pointer between two `docs/` pages is the same claim as a pointer out of a CLAUDE.md, and
+    checking only the latter meant a page could be renamed, folded or deleted while every
+    sibling that linked it kept a dead link with the gate green. Only (3) stays CLAUDE.md-
+    scoped, because the `## Load-bearing` card is a contract-file shape and nothing else has
+    one.
+
+    Two more spellings of the same claim, both found unscanned while the tree was being
+    consolidated. `.claude/**/*.md` joins (1) and (2) because a skill file is read by exactly
+    the reader this test exists for — `potter-self/SKILL.md` carried a link out through an
+    absolute home-directory path that resolved inside the repo to nothing, and said so twice.
+    And (5): a published-front-page link cannot be relative, because README renders off-repo,
+    so `README.md` spells its doc pointers as `github.com/…/blob/main/<path>` — twenty-six of
+    them, which the relative arm skips on the `http` guard. That is the same claim as `](…)`
+    wearing a hostname, and it is the one nothing could catch: rename a doc and the buyer-
+    facing page 404s while every gate stays green. (5) runs over every tracked `.md`, since
+    any file may cite the published spelling.
 
     What it cannot catch, so nobody reads a green as more than it is: a count that is
     simply wrong, semantic drift in a claim about behaviour, two plausible owners for one
@@ -1897,7 +1920,12 @@ def test_claude_md_claims_resolve() -> None:
         return re.sub(r"[^a-z0-9\- ]", "", heading.lower()).replace(" ", "-")
 
     broken: list[str] = []
-    for rel in (p for p in tracked if p.endswith("CLAUDE.md")):
+    for rel in (
+        p
+        for p in tracked
+        if p.endswith("CLAUDE.md")
+        or ((p.startswith("docs/") or p.startswith(".claude/")) and p.endswith(".md"))
+    ):
         path = root / rel
         text = path.read_text(encoding="utf-8")
 
@@ -1922,19 +1950,33 @@ def test_claude_md_claims_resolve() -> None:
             if not any(h.lower().startswith(name.lower()) for h in _claude_headings(dest)):
                 broken.append(f"{rel}: § {name!r} is not a heading in {target or '(self)'}")
 
-        own = _claude_headings(path)
-        for card in _CLAUDE_CARD.findall(text):
-            for entry in _CLAUDE_CARD_TARGET.findall(card):
-                if re.sub(r"[`*]", "", entry).strip() not in own:
-                    broken.append(f"{rel}: Load-bearing -> § {entry!r} is not a heading here")
+        if rel.endswith("CLAUDE.md"):
+            own = _claude_headings(path)
+            for card in _CLAUDE_CARD.findall(text):
+                for entry in _CLAUDE_CARD_TARGET.findall(card):
+                    if re.sub(r"[`*]", "", entry).strip() not in own:
+                        broken.append(f"{rel}: Load-bearing -> § {entry!r} is not a heading here")
 
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
 
-    for rel in (p for p in tracked if p.startswith("docs/") and p.endswith((".md", ".yaml"))):
+    for rel in (p for p in tracked if p.startswith("docs/") and p.endswith(".yaml")):
         text = (root / rel).read_text(encoding="utf-8")
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
+
+    for rel in (p for p in tracked if p.endswith(".md")):
+        text = (root / rel).read_text(encoding="utf-8")
+        for target, anchor in _GITHUB_BLOB.findall(text):
+            dest = root / target
+            if not dest.exists():
+                broken.append(f"{rel}: blob url -> {target}")
+            elif (
+                anchor
+                and dest.is_file()
+                and slug(anchor) not in {slug(h) for h in _claude_headings(dest)}
+            ):
+                broken.append(f"{rel}: blob anchor -> {target}#{anchor}")
 
     assert not broken, (
         "CLAUDE.md claim(s) that do not resolve:\n  " + "\n  ".join(sorted(broken)) + "\n"

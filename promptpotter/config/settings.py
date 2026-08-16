@@ -174,6 +174,17 @@ class Settings(BaseSettings):
     # no admin identity until it is set. A hosted deployment must declare it.
     HOST_ADMIN_EMAIL: str = ""
 
+    # ...and WHICH ISSUER must have vouched for that address. An email is a claim a provider makes,
+    # so the box's most privileged decision should not rest on one provider's word alone: with two
+    # providers wired, matching on the address by itself lets whichever of them has the weakest
+    # email handling grant the box. Pinning the issuer means a provider added later cannot
+    # re-open that by default.
+    #
+    # Empty accepts any issuer, which is the behaviour every existing box already has — so this
+    # never locks an operator out on deploy. Set it to the `iss` of the provider you actually sign
+    # in with (Google: "https://accounts.google.com").
+    HOST_ADMIN_ISSUER: str = ""
+
     # The ADR-0004 operator-admin channel: the bot's own Telegram credentials, plus the n8n door a
     # new account is announced to. Declared here rather than read from `os.environ` so there is ONE
     # answer to "where does a key live" — pydantic consults the process environment AND
@@ -189,6 +200,15 @@ class Settings(BaseSettings):
     # signing up is now the grant. A per-user override lives on `user.json::spend_budget_usd_total`;
     # the operator of the box is exempt (`quota.py::_spends_the_hosts_own_key`).
     FREE_TIER_SPEND_CAP_USD: float = 0.30
+
+    # The same ceiling in the unit a missing rate cannot blind (ADR-0003 D1). Sized ABOVE what the
+    # USD one buys on the cheapest configured model, so it binds only once that one has; re-derive
+    # it whenever the USD ceiling moves. Per-user override: `user.json::token_budget_total`.
+    FREE_TIER_TOKEN_CAP: int = 5_000_000
+
+    # What a metered account may still spend once its USD total is known to be understated. A
+    # CEILING on the remainder, never a bonus added to it: an exhausted account gets nothing.
+    UNPRICED_GRACE_USD: float = 0.10
 
     # How many campaigns the server admits at once; 1 = strictly sequential, and a launch
     # while a run is in flight gets 409 `machine_busy`. This is the concurrent-serving lever,

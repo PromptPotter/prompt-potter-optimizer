@@ -278,7 +278,7 @@ def main() -> int:
     if not token or not chat_id:
         logger.error(
             "ADMIN_BOT_TELEGRAM_TOKEN and ADMIN_BOT_CHAT_ID must be set "
-            "(see docs/operations/secure-hosting.md)."
+            "(see docs/operations/access-model.md)."
         )
         return 1
     try:

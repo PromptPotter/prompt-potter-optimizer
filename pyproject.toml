@@ -25,7 +25,8 @@ requires-python = ">=3.13"
 # measured, not asserted: `application/embedded_run.py` and the CLI entry each import to
 # exactly this closure and no further. Everything a SERVER needs is `[api]`, because the
 # fourth distribution tier is PromptPotter running inside someone else's program
-# (`docs/specs/dspy-adapter.md`), and a library that drags a web server in is one nobody adds.
+# (`docs/adr/0006-embeddable-core-and-extras.md`), and a library that drags a web server in is
+# one nobody adds.
 dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM

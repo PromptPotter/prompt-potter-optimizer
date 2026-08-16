@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { DatasetItem, HardSamplesScope, SampleSeries } from "@/lib/api";
+import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -47,6 +47,8 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
+  // Passed to BOTH consumers, so the pane and the run card cannot name different orders.
+  datasetOrder: HardSampleOrder | null;
   archivePerSample: Map<number, SampleSeries>;
   datasetTotals: SeriesTotals | null;
   // True while the displayed dataset slice is from a prior (unit, scope) and
@@ -55,6 +57,8 @@ interface Props {
   datasetError: string | null;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
+  hardSampleOrder: HardSampleOrder | null;
+  onHardSampleOrderChange: (o: HardSampleOrder) => void;
   // Bumped by the shell's "New campaign" button while this tab is in view —
   // each change resets the thread to its empty first-run state (compose mode),
   // suppressing the bound cycle's live feed until a fresh campaign is minted.
@@ -96,12 +100,15 @@ export function ChatPane({
   datasetMeasuredCount,
   datasetUnmeasuredCount,
   datasetSplitTest,
+  datasetOrder,
   archivePerSample,
   datasetTotals,
   datasetStale,
   datasetError,
   hardSamplesScope,
   onHardSamplesScopeChange,
+  hardSampleOrder,
+  onHardSampleOrderChange,
   newCampaignTick,
   onMinted,
 }: Props) {
@@ -345,12 +352,15 @@ export function ChatPane({
             datasetMeasuredCount={datasetMeasuredCount}
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
+            datasetOrder={datasetOrder}
             archivePerSample={archivePerSample}
             datasetTotals={datasetTotals}
             datasetStale={datasetStale}
             datasetError={datasetError}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={onHardSamplesScopeChange}
+            hardSampleOrder={hardSampleOrder}
+            onHardSampleOrderChange={onHardSampleOrderChange}
           />
         )}
       </div>
@@ -372,12 +382,15 @@ export function ChatPane({
                   datasetMeasuredCount={datasetMeasuredCount}
                   datasetUnmeasuredCount={datasetUnmeasuredCount}
                   datasetSplitTest={datasetSplitTest}
+                  datasetOrder={datasetOrder}
                   archivePerSample={archivePerSample}
                   datasetTotals={datasetTotals}
                   datasetStale={datasetStale}
                   datasetError={datasetError}
                   hardSamplesScope={hardSamplesScope}
                   onHardSamplesScopeChange={onHardSamplesScopeChange}
+                  hardSampleOrder={hardSampleOrder}
+                  onHardSampleOrderChange={onHardSampleOrderChange}
                   sampleOrder={live.sampleOrder}
                 />
               )

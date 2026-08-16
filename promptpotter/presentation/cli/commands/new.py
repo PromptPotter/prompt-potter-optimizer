@@ -441,10 +441,6 @@ async def _run_loop(
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
     produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
-    from promptpotter.shared.spend import refresh_rates_in_background
-
-    refresh_rates_in_background()
-
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
         session, campaign_config, dataset_name, _sid = await _ingest_and_prepare_checkin(args)
     else:

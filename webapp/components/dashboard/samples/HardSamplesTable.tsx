@@ -1,11 +1,22 @@
 "use client";
 import { useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type DatasetItem, type HardSamplesScope, type SampleSeries } from "@/lib/api";
+import {
+  type DatasetItem,
+  type HardSampleOrder,
+  type HardSamplesScope,
+  type SampleSeries,
+} from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
-import { cellFor, RANK_HINT, type CellValue, type HeatDot } from "./columns";
+import {
+  cellFor,
+  headerTitle,
+  ORDER_COLUMN,
+  type CellValue,
+  type HeatDot,
+} from "./columns";
 import { HardSamplesFooter } from "./HardSamplesFooter";
 import { HardSamplesHeatTip, HardSamplesPopover } from "./HardSamplesPopover";
 import { useHardSamplesTableModel, wrappable } from "./useHardSamplesTableModel";
@@ -26,6 +37,13 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
+  // The key the server ranked by, off its echo; `null` while the read is in flight, and the
+  // table then claims none. Not `order` — `sampleOrder` in this tree is the scoring WALK.
+  rankedBy: HardSampleOrder | null;
+  // The operator's PICK, null until they make one. Separate from `rankedBy`: the control
+  // moves on click, while every LABEL keeps naming the served order until the rows land.
+  rankedByPick: HardSampleOrder | null;
+  onRankedByChange: (o: HardSampleOrder) => void;
   scope?: HardSamplesScope;
   onScopeChange?: (s: HardSamplesScope) => void;
   // Displayed roster is from a prior (unit, scope) and a fresh fetch is in
@@ -42,6 +60,9 @@ export function HardSamplesTable({
   datasetMeasuredCount,
   datasetUnmeasuredCount,
   datasetSplitTest,
+  rankedBy,
+  rankedByPick,
+  onRankedByChange,
   scope,
   onScopeChange,
   datasetStale,
@@ -82,6 +103,8 @@ export function HardSamplesTable({
     resetLayout,
   } = m;
 
+  const liveOrder = liveSortActive && rankedBy ? ORDER_COLUMN[rankedBy] : null;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 26;
   const virtualizer = useVirtualizer({
@@ -114,28 +137,17 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              // Under live-sort the rows follow the queue mechanism's blended
-              // pick-value ranking — which is the "Pick" column descending;
-              // mark it so the operator can see what the order is. Otherwise
-              // the manual header-click sort owns the marker.
+              // The marker follows the SERVED ranking, and names none until it lands:
+              // which key the rows are in is not knowable before then.
               const sorted = liveSortActive
-                ? col.id === "pick_score"
+                ? col.id === liveOrder?.col
                   ? "desc"
                   : null
                 : sortBy?.col === col.id
                   ? sortBy.dir
                   : null;
               const isRank = col.id === "rank";
-              const headerTitle = folded
-                ? "Unfold column"
-                : col.id === "pick_score"
-                  ? "Info gain — expected decision-information-gain from one " +
-                    "measurement. Auto-sort ranks every row by this, highest first."
-                  : liveSortActive
-                    ? "Auto-sort is ranking by Info gain — toggle it off to sort by this column."
-                    : isRank
-                      ? RANK_HINT
-                      : `Sort by ${col.label}`;
+              const title = headerTitle(col, { folded, liveSortActive, liveOrder });
               return (
                 <div
                   key={col.id}
@@ -146,7 +158,7 @@ export function HardSamplesTable({
                     type="button"
                     className="hs-header-label"
                     onClick={() => handleHeaderClick(col.id, folded)}
-                    title={headerTitle}
+                    title={title}
                   >
                     {folded ? "⟩" : col.label}
                     {sorted && !folded && (
@@ -330,6 +342,9 @@ export function HardSamplesTable({
           scope={scope}
           onScopeChange={onScopeChange}
           syncLive={persisted.syncLive}
+          rankedBy={rankedBy}
+          rankedByPick={rankedByPick}
+          onRankedByChange={onRankedByChange}
           onToggleSyncLive={() => setPersisted((p) => ({ ...p, syncLive: !p.syncLive }))}
           hideUnmeasured={persisted.hideUnmeasured}
           onToggleHideUnmeasured={() =>

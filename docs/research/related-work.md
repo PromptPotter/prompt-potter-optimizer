@@ -318,7 +318,7 @@ Three design choices, each dictated by a different need:
 
 - **Population-aware over pairwise** — the question is "is this the round winner?", not "is it worse than each prior?"; only the joint posterior across all candidates answers it.
 - **Bayesian over frequentist** — `P(c is best)` is one operator-readable number ("c042 73% probability of winning round"); a Holm-corrected p-value or Hoeffding bound is not.
-- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop in 3–5 queries (early high-signal regime), indistinguishable ones run to the cap (late low-signal regime); phased fixed-budget algorithms can't do the first.
+- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop as soon as the evidence floor is met (early high-signal regime), indistinguishable ones run to the cap (late low-signal regime); phased fixed-budget algorithms can't do the first.
 
 For the implementation, two-regime analysis, tunable knobs, open questions, and the rationale for replacing Wilcoxon, see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
 

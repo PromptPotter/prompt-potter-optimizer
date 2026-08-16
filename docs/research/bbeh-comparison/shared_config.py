@@ -18,45 +18,49 @@ API_BASE = "https://api.groq.com/openai/v1"
 # ── Dataset ────────────────────────────────────────────────────────
 HF_DATASET = "BBEH/bbeh"
 SPLIT_SEED = 42
+# BBEH mini ships 20 examples per task. Every method — PromptPotter and every peer optimizer —
+# trains on the first 10 and tests on the second 10, so the comparison is on ONE test set.
+# The wider non-mini eval (~4,060 rows) is deliberately deferred: it costs a full re-run of every
+# peer and buys nothing until there is a release worth spending it on.
+TRAIN_PER_TASK = 10
+TEST_PER_TASK = 10
 
 
 # ── Dataset loading & splitting ────────────────────────────────────
 def load_and_split() -> tuple[list[Record], dict[str, list[Record]]]:
-    """Load full BBEH and split by HF `mini` flag.
+    """Load BBEH mini and split it per task at ``TRAIN_PER_TASK``.
 
-    Train pool = all mini examples (460 total), pooled across tasks — used as
-    a single flat list for global prompt optimization.
-    Test set = all non-mini examples (~4,060 total), grouped by task for the
-    per-task accuracy breakdown in results.json.
-
-    The mini/non-mini partition is disjoint by construction (HF flags each
-    example), so there is zero leakage between train and test.
+    Mini only (460 rows, 23 tasks x 20). Each task's rows are shuffled under the SAME
+    ``SPLIT_SEED`` permutation, then cut: train = first 10, test = next 10. Train and test are
+    disjoint by construction.
 
     Returns (train_pool, test_by_task):
-      train_pool: list[dict] with keys "input", "target", "task"
-      test_by_task: dict[str, list[dict]] mapping task -> list of same shape
+      train_pool:   the train halves pooled into one flat list, for global prompt optimization
+      test_by_task: task -> held-out rows, for the per-task accuracy breakdown in results.json
+
+    The pooling is a PromptPotter-side convenience — the rows are the same ones the per-task
+    peers train on, so pooling changes how the prompt is searched, never what it is scored on.
     """
+    import random
+
     from datasets import load_dataset
 
-    ds = load_dataset(HF_DATASET)["train"]
+    by_task: dict[str, list[Record]] = {}
+    for ex in load_dataset(HF_DATASET)["train"]:
+        if ex["mini"] != 1:
+            continue
+        record = {"input": ex["input"], "target": ex["target"], "task": ex["task"]}
+        by_task.setdefault(ex["task"], []).append(record)
 
     train_pool: list[Record] = []
     test_by_task: dict[str, list[Record]] = {}
+    for task in sorted(by_task):
+        shuffled = list(by_task[task])
+        random.Random(SPLIT_SEED).shuffle(shuffled)
+        train_pool += shuffled[:TRAIN_PER_TASK]
+        test_by_task[task] = shuffled[TRAIN_PER_TASK : TRAIN_PER_TASK + TEST_PER_TASK]
 
-    for ex in ds:
-        record = {"input": ex["input"], "target": ex["target"], "task": ex["task"]}
-        if ex["mini"] == 1:
-            train_pool.append(record)
-        else:
-            test_by_task.setdefault(ex["task"], []).append(record)
-
-    # Deterministic ordering
-    import random
-
-    rng = random.Random(SPLIT_SEED)
-    rng.shuffle(train_pool)
-    test_by_task = {k: test_by_task[k] for k in sorted(test_by_task.keys())}
-
+    random.Random(SPLIT_SEED).shuffle(train_pool)
     return train_pool, test_by_task
 
 
@@ -67,8 +71,15 @@ def export_results(
     config: Record,
     optimized_prompts: dict[str, str],
     output_path: str = "results.json",
+    model: str | None = None,
 ) -> Record:
-    """Write standardized JSON results file."""
+    """Write standardized JSON results file.
+
+    ``model`` names the model the run ACTUALLY reached. It is a parameter rather than the
+    ``MODEL_ID`` constant because PromptPotter resolves its target from
+    ``datasets/bbeh/pipeline.yaml``, not from this file — stamping the constant reported a model
+    the run never called on the single most load-bearing field in the results.
+    """
     import json
     from datetime import datetime
 
@@ -77,8 +88,8 @@ def export_results(
 
     result = {
         "method": method,
-        "model": MODEL_ID,
-        "dataset": "bbeh-full (train=mini 460, test=non-mini ~4060)",
+        "model": model or MODEL_ID,
+        "dataset": f"bbeh-mini (train={TRAIN_PER_TASK}/task, test={TEST_PER_TASK}/task)",
         "split_seed": SPLIT_SEED,
         "timestamp": datetime.now(UTC).isoformat(),
         "config": config,

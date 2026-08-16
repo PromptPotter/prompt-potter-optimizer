@@ -58,6 +58,7 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
+from promptpotter.shared.spend import refresh_rates_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,10 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # It gets its own sandbox dir, whose pause flag nobody writes, so alone it would run to
     # completion while the outer sat "pausing" — COMPOSE the inherited predicate, never
     # overwrite it. Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
-    inherited = get_abort_check()
+    # The parent comes off the SESSION, never `get_abort_check()`: this runs again per rebase
+    # in the SAME task, so the ContextVar holds the predicate this task bound last time round —
+    # composing against that chains one per rebase, keeping retired forks' flags live in it.
+    inherited = session.inherited_pause_check
     if inherited is None:
         session.pause_check = own_pause
     else:
@@ -216,19 +220,21 @@ async def _prepare_run(
     observers: RunObservers,
     origin: CampaignOrigin | None,
     spend_budget_usd: float | None,
+    token_budget: int | None,
 ) -> _PreparedRun:
     cb = observers.callbacks
 
-    # Fold the run-scoped cap (CLI `--spend-budget`, the API's launch field) into the config
-    # BEFORE the seed block, so precedence stays seed > run-scoped > campaign default and every
-    # reader — the gate, `run_limits`, the webapp — sees the number that actually binds.
-    if spend_budget_usd is not None:
+    # Fold the run-scoped caps into the config BEFORE the seed block, so precedence stays
+    # seed > run-scoped > campaign default and every reader — the gate, `run_limits`, the
+    # webapp — sees the numbers that actually bind.
+    caps = {
+        k: v
+        for k, v in (("spend_budget_usd", spend_budget_usd), ("token_budget", token_budget))
+        if v is not None
+    }
+    if caps:
         campaign_config = campaign_config.model_copy(
-            update={
-                "optimization": campaign_config.optimization.model_copy(
-                    update={"spend_budget_usd": spend_budget_usd}
-                )
-            }
+            update={"optimization": campaign_config.optimization.model_copy(update=caps)}
         )
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
@@ -651,14 +657,20 @@ async def run_optimization(
     mode: RunMode | None = None,
     fork_payload: ForkSpec | None = None,
     spend_budget_usd: float | None = None,
+    token_budget: int | None = None,
 ) -> CycleResult:
     """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     mode = mode or RunMode()
     started_at = utcnow_iso()
+    # Every launch path reaches here; bolted onto one entry point instead, it leaves the others
+    # pricing off whatever table shipped. No-op on a fresh cache.
+    refresh_rates_in_background()
     # Unconditional (the runner cannot know a child will recurse) and re-entrant (each level
     # publishes its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session, campaign_config)
+    # Read here, before anything binds, so it is still a parent's and not our own.
+    session.inherited_pause_check = get_abort_check()
     # Bound through the same per-node override channel the inner runner uses — task-isolated,
     # so an outer binding and the inner mutations of the cycles it spawns never collide. An
     # empty set is a no-op and must NOT clear an inner runner's already-bound mutations.
@@ -679,6 +691,7 @@ async def run_optimization(
             observers=observers,
             origin=origin,
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest. An

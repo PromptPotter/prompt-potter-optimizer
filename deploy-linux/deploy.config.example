@@ -31,6 +31,14 @@ APP_MODULE="myapp.main:app"
 # Optional admin bot module (only needed for install-admin-bot.sh).
 ADMIN_BOT_MODULE="myapp.presentation.admin_bot"
 
+# The bot's OWN env file. Unset = it shares the app's, which is where it started.
+# Set it and the two units stop sharing one secret file: the bot is the zero-trust channel
+# (no inbound door), so its token is the one credential an attacker cannot reach through the
+# app — and the API worker holds it today for no reason, since it never sends a message.
+# After splitting, delete ADMIN_BOT_* from the app's ENV_FILE; install-admin-bot.sh warns
+# while a copy is still there.
+#BOT_ENV_FILE="/etc/$APP_NAME-admin-bot.env"
+
 # --- source + install ---------------------------------------------------
 # git clone source — REQUIRED, edit before running bootstrap.sh.
 REPO_URL="https://github.com/CHANGE-ME/your-repo.git"
@@ -40,6 +48,14 @@ INSTALL_DIR="$HOME/$APP_NAME/your-repo"
 
 # systemd User= (the account the service runs as).
 RUN_USER="$USER"
+
+# The ONE directory the service may write — campaigns, measurements, the run readout.
+# Leave unset and the service may write INSTALL_DIR itself, which is the repo, the venv and
+# .env: a read-or-exec bug in the app can then rewrite its own code and secrets and outlive a
+# restart. Set it OUTSIDE INSTALL_DIR and the checkout goes read-only to the service.
+# install-service.sh refuses a path inside INSTALL_DIR and warns if the state tree is not there
+# yet — migrate before switching, the note in that script has the exact commands.
+#DATA_DIR="/var/lib/$APP_NAME"
 
 # --- runtime ------------------------------------------------------------
 BIND_HOST="127.0.0.1"          # uvicorn host (keep loopback behind the tunnel)

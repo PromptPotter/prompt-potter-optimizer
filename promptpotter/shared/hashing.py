@@ -3,16 +3,48 @@ searchpoint modules."""
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 # SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
 # deduplication across campaigns.  Birthday-bound collision probability stays
 # negligible up to ~280 billion items.
 HASH_TRUNCATE = 24
 
-__all__ = ["HASH_TRUNCATE", "content_hash", "dataset_hash"]
+__all__ = ["HASH_TRUNCATE", "content_hash", "dataset_hash", "module_source_digest"]
+
+
+def module_source_digest(*modules: ModuleType) -> str:
+    """Hash what a set of modules DOES, for the identity of a measurement they decide.
+
+    AST-normalized with docstrings stripped, so documenting or reformatting a module costs
+    nothing while a changed expression voids the measurements taken under the old one. Two
+    callers hash disjoint module sets for the same reason — some code is prompt text and some
+    code is the estimator, and both change what a banked number means without changing any
+    file the fingerprint would otherwise read.
+    """
+    parts: list[str] = []
+    for module in modules:
+        tree = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(
+                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ) and (body := getattr(node, "body", None)):
+                head = body[0]
+                if (
+                    isinstance(head, ast.Expr)
+                    and isinstance(head.value, ast.Constant)
+                    and isinstance(head.value.value, str)
+                ):
+                    del body[0]
+        parts.append(ast.unparse(tree))
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:

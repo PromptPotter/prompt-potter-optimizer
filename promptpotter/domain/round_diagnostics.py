@@ -1,5 +1,9 @@
 """Typed post-scoring deterministics, computed once per round and attached to ``RoundResult``. Pure data — rendering lives in the
-dispatch hub's ``diagnostics`` signal, which is layer-agnostic."""
+dispatch hub's ``diagnostics`` signal, which is layer-agnostic.
+
+**Tolerance is scoped by what a payload is FOR** — owned by
+[`CLAUDE.md`](CLAUDE.md) § Tolerance is scoped by what a payload is FOR. Everything here is
+reporting, so every field defaults and producers pass them all explicitly anyway."""
 
 from __future__ import annotations
 
@@ -15,32 +19,32 @@ TrajectoryClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
 class NearMiss:
     """A query whose ground truth landed in candidates rank 2-10."""
 
-    query: str
-    ground_truth: str
-    rank: int
-    predicted: str
+    query: str = ""
+    ground_truth: str = ""
+    rank: int = 0
+    predicted: str = ""
 
 
 @dataclass(frozen=True)
 class EvolutionRow:
-    round: int
-    accuracy: float
-    delta: float
-    degraded: int
-    n_candidates: int
+    round: int = 0
+    accuracy: float = 0.0
+    delta: float = 0.0
+    degraded: int = 0
+    n_candidates: int = 0
 
 
 @dataclass(frozen=True)
 class SampleDiag:
-    query: str
-    ground_truth: str
-    predicted: str
-    rank: int | None
-    terminal_node: str
-    gt_in_source: bool | None
-    gt_in_ranked: bool | None
-    warnings: list[str]
-    fitness: float
+    query: str = ""
+    ground_truth: str = ""
+    predicted: str = ""
+    rank: int | None = None
+    terminal_node: str = ""
+    gt_in_source: bool | None = None
+    gt_in_ranked: bool | None = None
+    warnings: list[str] = field(default_factory=list)
+    fitness: float = 0.0
 
 
 @dataclass(frozen=True)

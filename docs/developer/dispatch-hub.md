@@ -1,6 +1,6 @@
-# Dispatch hub + L1 layout
+# Dispatch hub + L1 layout + L2 internals
 
-Visual + reference for `promptpotter/application/optimization/dispatch/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. Pairs with [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
+Visual + reference for `promptpotter/application/optimization/dispatch/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. **L2_CONTEXT firing lives here too**, from § Trigger down: L2 is one entry in this hub — same `LayerStrategy` shape as L3, same `fill` path (from its `NODE_LAYOUTS["l2_context"].floor`), same `Bundle` per-call state, and the hub is what stops it accumulating its own renderers, surface object and escape hatches. Concept role: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → str`, a `char_cap`, a `citable` flag, and a `description` string, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
@@ -255,6 +255,76 @@ L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layou
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
 **File-line anchors** — `INJECTIONS`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
+
+## Trigger — when L2 fires
+
+`Cycle.escalation` tracks per-layer counters. After every L1 round: improved best fitness → counters reset; otherwise `l1_stall_count++`, and when it hits `l1_patience`, L2 fires.
+
+Three preemptors fire L2 *before* patience (rules in `escalation/rules.py`): `l1_mandatory_breach` (a dropped mandatory placeholder), `l2_axis_yield_drought` (no axis yields above noise), and `l1_evidence_starved` (a node failed across ~all of a round's samples — `evidence_starved_node` ≥ `EVIDENCE_STARVED_RATE`). The last is the self-heal-vs-HITL fork: a starved round routes to L2 not to chase it, but so L2 can read the `evidence_health` panel and either refine or **terminate** (§ Outputs → `terminate_proposal`). Deterministic rules only route; they never diagnose or stop — termination authority belongs to the most-general reader, and a backend-coupled deterministic check only WARNS.
+
+Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheckpointKind.L2_ESCALATION_TRIGGER`, gated **ARCHIVAL** — the trigger is a fold over the cycle's escalation history (counters bump once per escalation *request* and reset on each fire), not a function of one round's measurements, which is what a replayer is pure over. On resume the counters are rebuilt by `EscalationFSM.from_ledger`, not re-derived; the trigger's scorer-dependence rides `improved`, hence the round measurements, whose own decisions are `REPLAYED`.
+
+## Inputs — L2 via the hub
+
+L2's injection set **is** `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`) — read the membership there, never from a copy on this page, because the copy is what went stale when the capability directives were wired in. It lives in that layout rather than as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. No L2-only surface object exists. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+
+One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rule, which `l1_layout`'s schema cannot express. The vocabulary itself (legal slots, signal enum) is on that schema, not here: while it was prose-only, L2 answered the gap by inventing a shape and the edit rolled back. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
+
+## Outputs — what L2 writes
+
+```json
+{
+  "axis_targeted": "...",
+  "l1_layout": {"persona": [...], "task_intent": [...], ...},
+  "l1_overrides": {...},
+  "rationale": "...",
+  "fork_proposal": null,
+  "terminate_proposal": {"reason": "..."} | null
+}
+```
+
+Every field is optional at the PARSE boundary — a missing one leaves the corresponding OSP state untouched, so an omission never costs the rest of the fire. Only the two LEVERS are optional to *write*: `l1_layout` (what L1 looks at) and `l1_overrides` (how hard it explores), and a fire touching neither is a wasted escalation, scored as one by `l2_targets_l1_surface`. The REASON — `axis_targeted` + `rationale` — rides every fire including a no-lever one, which is what `l2_rationale_substantive` and `l2_evidence_anchored` grade. `terminate_proposal` is the HITL exit: on evidence-starvation L2 emits it with an operator-actionable reason (the dead node + what to fix) and the cycle halts (`StopReason.ABORT`); the operator fixes the backend and resumes. Both control outputs are gated by their `OptimizationConfig` capability bit — see [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) § L2/L3 layer-control channel.
+
+**Two fields this schema deliberately does not have.** `task_context` — the operator's framing is frozen for the run; L2 steers what L1 *looks at*, never rewrites what the operator wrote about the task. `action` (`normal_round` / `probe_round`) — probe rounds are not wired; the lever was removed rather than guarded because it selected samples by a warned-query set that is empty on every healthy run, so choosing it measured nothing. Both are stated on `L2ContextOutput` itself (`dispatch/schemas.py`), with the full history in [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) § Probe rounds.
+
+`_parse_l2` (`escalation/firing.py`) constructs a `TransitionResult`:
+
+- `axis_targeted`: prose naming the axis this fire routed the failure cluster to — its evidence anchor, read by `l2_evidence_anchored`. Deliberately **not** a steering surface: L1 reads its axes from `axis_memory`, which is derived from measurement.
+- `rationale`: the diagnosis behind the fire, and the only thing separating a steer from a guess. Carried forward as `changes_description`; an absent one is REPORTED there, never replaced by a stand-in sentence, because the placeholder that once stood in its place made an undiagnosed fire read exactly like a diagnosed one and left the empty state visible only as a decimal in `review.md`.
+- `l1_layout`: **a per-slot EDIT, not a replacement layout** — `coerce_l1_layout(raw, base=opt_sp.memory.l1_layout)` applies the named slots and keeps the rest, the same rule `resolve_node_layout` gives L4's `layout` param. The two seams ran opposite rules while sharing one schema sentence, so L2 changed the slots it meant to and silently lost every signal it had not restated; `mutation_memory` went that way on all 13 banked edits, which is how a round-4 candidate re-proposes round 1's measured failure with nothing to object. Then validated per § Validation above — HARD failures roll back to the prior, SOFT outcomes ride along on `opt_sp.memory.wounds.l2_guard_breaches`.
+- `l1_overrides`: merged onto a `mutate()`-derived child OSP.
+
+### How L2 steers L1
+
+Two channels, both via OSP fields the hub reads:
+
+| Channel | OSP field | L1 effect |
+|---------|-----------|-----------|
+| Attention | `memory.l1_layout` | `DispatchHub.fill` walks the layout and appends each named injection's rendering to its slot. Mutating the layout reshapes which injections L1 sees and where. |
+| Exploration | `memory.l1_overrides` | Optimizer params for L1's next call — `n_variants` (in-prompt directive via the `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt). |
+
+`task_context` is **not** a channel: it is operator-authored framing that L2 reads as evidence and cannot write. L2 also cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered injection (from `L1_POSSIBLE`).
+
+### Side effects — `_apply_l2`
+
+```python
+if result.l1_layout is not None:
+    osp.memory.l1_layout = result.l1_layout
+osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+cycle.escalation.record_l2_fired(...)
+```
+
+That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in place. `l1_layout` lives on `OptSearchPoint.memory` (an `L2L3Memory` bundle), so L3-spawned children inherit in-flight L2 edits via `copy_memory_to`. `task_context` is on the same bundle and is forwarded by `mutate()` to L1 children (along with `l1_overrides`); the other two memory fields (`wounds`, `l1_layout`) reset to defaults in `mutate()` and instead carry forward when a child is **adopted** as the cycle's incumbent — the one `Cycle.adopt` seam (an L1 win and an L2/L3 transition alike) runs `copy_memory_to` from the outgoing incumbent, then overlays only the surface the adoption owns.
+
+**No decision is recorded per L2 fire.** There was one — `PROBE_ROUND_COMMITMENT`, outcome `True` if probe — and it left with the probe lever; `ResumeCheckpointKind` no longer declares it. The L2 fire itself is on the ledger as `L2_ESCALATION_TRIGGER`; layout and exploration content are not separate decisions and ride on the round file.
+
+## Wound 4 — L2 self-healing via L3
+
+`l2_guard_breaches` holds L2's HARD layout breaches — the § Validation set above, plus `l1_layout_unparseable`, which `_parse_l2` emits when a non-empty edit coerces to no slot at all and the validator therefore never runs — and **any** breach after `_apply_l2` force-triggers L3 to heal. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+
+**Every breach is hard — there is no soft-reject tier, and no `task_context` validator.** `task_context` framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so a stale-repeat breach is not representable and there is nothing inert to except: `escalation/firing.py` is an unconditional `if breaches:`. Do not add a tier to re-admit one.
+
+**L2 file-line anchors** — `_parse_l2`, `_apply_l2`, `escalate_l2`, `TransitionResult`: `escalation/firing.py` (trigger gates in `escalation/decide.py`) · L2 prompt template: `assets/optimizer/pipeline.yaml::resolved_prompts['l2_context/1']` · OSP mutation surface: `domain/opt_search_point.py` (`task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`).
 
 ## Future — diagnostics vs l1_wounds
 

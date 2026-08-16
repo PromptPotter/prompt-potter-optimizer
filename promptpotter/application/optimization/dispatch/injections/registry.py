@@ -4,12 +4,9 @@ warns: a backstop so a deep-stall round can't balloon the optimizer prompt past 
 
 from __future__ import annotations
 
-import ast
 import functools
-import hashlib
 import inspect
 from collections.abc import Mapping
-from pathlib import Path
 
 from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
@@ -26,6 +23,7 @@ from promptpotter.application.optimization.dispatch.injections import (
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, L1Layout
+from promptpotter.shared.hashing import module_source_digest
 
 INJECTIONS: dict[str, _Injection] = injection_registry()
 
@@ -38,23 +36,8 @@ STALL_EXPLORATION = "stall_exploration"
 @functools.cache
 def injection_source_digest() -> str:
     """The panels' text is code, so it sits outside ``_identity_config``'s prompt templates and
-    layouts. AST-normalized: documenting a renderer costs nothing, its prose or condition does not."""
-    parts: list[str] = []
-    for module in (catalogues, layer_state, panels, wounds):
-        tree = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(
-                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-            ) and (body := getattr(node, "body", None)):
-                head = body[0]
-                if (
-                    isinstance(head, ast.Expr)
-                    and isinstance(head.value, ast.Constant)
-                    and isinstance(head.value.value, str)
-                ):
-                    del body[0]
-        parts.append(ast.unparse(tree))
-    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+    layouts. Its estimator-side twin is ``measurement_source_digest``."""
+    return module_source_digest(catalogues, layer_state, panels, wounds)
 
 
 def citable_fields(

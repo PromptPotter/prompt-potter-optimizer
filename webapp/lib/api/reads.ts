@@ -45,39 +45,33 @@ import type {
   WorkspaceStorageResponse,
 } from "./types";
 
-// Server health + the single-source app version (`APP_VERSION`, surfaced by the `/health` route
-// in `main.py`). Hand-written because that route declares no response model.
-export interface HealthResponse {
-  status: string;
-  service: string;
-  timestamp: string;
-  version: string;
-}
-
 // Derived, never re-declared: the closed sets live on the server's own response model
 // (`auth.py::ActivityWindow` / `ActivityGroupBy`, `datasets/index.py::DatasetIndexEntry.tier`),
 // and these read them back off the generated interface so a member added there arrives here.
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];
 export type DatasetTier = DatasetIndexEntry["tier"];
+// `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by. Both hard-sample
+// responses echo it, so either one can be read back for the alias.
+export type HardSampleOrder = DatasetPreviewResponse["order"];
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
 }
 
-// Server health + the single-source app version (`APP_VERSION`, surfaced by
-// the `/health` route in `main.py`). The About pane reads version from here
-// rather than carrying a build-time copy that could drift.
+// Server health + the single-source app version (`APP_VERSION`, surfaced by the `/health` route
+// in `main.py`). Hand-written because that route declares no response model, and the About pane
+// reads the version from here rather than carrying a build-time copy that could drift.
 export interface HealthResponse {
   status: string;
   service: string;
   timestamp: string;
   version: string;
 }
+
 export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return jget<HealthResponse>(`${API}/health`, signal);
 }
-
 
 export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
   return jget<MeResponse>(`${API}/auth/me`, signal);
@@ -206,14 +200,19 @@ export function fetchFiles(
 // scope artifact from the inner `.inner/` sandbox instead of the outer archive.
 // It only walks from the ROOT hop, so when descend is set both root ids ride
 // along regardless of scope. Empty/absent → byte-identical to a top-level read.
+// `order` overrides the ranking key for this read; absent → the server resolves the
+// dataset's `CampaignConfig.hard_sample_order`. A label is drawn from the response's echo,
+// never from this argument.
 function hardSamplesParams(
   limit: number,
   scope: HardSamplesScope,
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): URLSearchParams {
   const params = new URLSearchParams({ limit: String(limit), scope });
+  if (order) params.set("order", order);
   if ((scope === "campaign" || scope === "cycle") && campaignId) {
     params.set("campaign_id", campaignId);
   }
@@ -234,8 +233,9 @@ export function fetchDatasetPreview(
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): Promise<DatasetPreviewResponse> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
   return jget<DatasetPreviewResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
@@ -250,8 +250,9 @@ export function fetchMeasurementSeries(
   campaignId?: string,
   cycleId?: string,
   descend?: string,
+  order?: HardSampleOrder,
 ): Promise<MeasurementSeriesResponse> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
   return jget<MeasurementSeriesResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
     signal,

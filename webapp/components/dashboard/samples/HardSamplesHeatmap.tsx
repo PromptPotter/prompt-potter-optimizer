@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import {
   type DatasetItem,
+  type HardSampleOrder,
   type HardSamplesScope,
   type SampleSeries,
 } from "@/lib/api";
@@ -21,6 +22,11 @@ interface Props {
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
+  // The key the server ranked by, off its echo. Not `order` — `sampleOrder` here is the
+  // scoring WALK.
+  datasetOrder: HardSampleOrder | null;
+  hardSampleOrder: HardSampleOrder | null;
+  onHardSampleOrderChange: (o: HardSampleOrder) => void;
   // Per-sample archive measurement series, fetched server-side from
   // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
   // all campaigns on the dataset) is owned by AppShell and re-fetches
@@ -91,6 +97,9 @@ export function HardSamplesHeatmap({
   datasetMeasuredCount,
   datasetUnmeasuredCount,
   datasetSplitTest,
+  datasetOrder,
+  hardSampleOrder,
+  onHardSampleOrderChange,
   archivePerSample,
   datasetTotals,
   datasetStale,
@@ -231,6 +240,9 @@ export function HardSamplesHeatmap({
                 datasetMeasuredCount={datasetMeasuredCount}
                 datasetUnmeasuredCount={datasetUnmeasuredCount}
                 datasetSplitTest={datasetSplitTest}
+                rankedBy={datasetOrder}
+                rankedByPick={hardSampleOrder}
+                onRankedByChange={onHardSampleOrderChange}
                 datasetStale={datasetStale}
                 scope={hardSamplesScope}
                 onScopeChange={onHardSamplesScopeChange}

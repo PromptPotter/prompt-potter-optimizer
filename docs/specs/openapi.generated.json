@@ -2447,6 +2447,15 @@
             "title": "Name",
             "type": "string"
           },
+          "order": {
+            "description": "The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on BOTH responses because they are one page read twice: a client holding only one of them would otherwise have to name the order from the other, or guess the default.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
           "scope": {
             "enum": [
               "cycle",
@@ -2470,6 +2479,7 @@
         "required": [
           "name",
           "scope",
+          "order",
           "items",
           "total_measurements",
           "total_hits",
@@ -2805,7 +2815,7 @@
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend pair is LIFETIME — spent-ever against the account's total\nceiling — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit.",
+        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
         "properties": {
           "campaigns_today": {
             "title": "Campaigns Today",
@@ -2834,14 +2844,36 @@
             ],
             "title": "Spend Budget Usd Total"
           },
+          "spend_unpriced_tokens": {
+            "title": "Spend Unpriced Tokens",
+            "type": "integer"
+          },
           "spend_used_total_usd": {
             "title": "Spend Used Total Usd",
             "type": "number"
+          },
+          "token_budget_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget Total"
+          },
+          "tokens_used_total": {
+            "title": "Tokens Used Total",
+            "type": "integer"
           }
         },
         "required": [
           "spend_used_total_usd",
           "spend_budget_usd_total",
+          "spend_unpriced_tokens",
+          "tokens_used_total",
+          "token_budget_total",
           "concurrent_running",
           "max_concurrent_cycles",
           "campaigns_today",
@@ -3588,7 +3620,7 @@
     },
     "/api/v1/auth/quota-status": {
       "get": {
-        "description": "Live quota snapshot for the Security pane.\n\nSpend sums ``TokenUsageRecord`` cost across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceiling is the RESOLVED one\n(``lifetime_ceiling_usd``), never the raw nullable override, so the browser\nis not left joining a null against an install default to learn its own cap.",
+        "description": "Live quota snapshot for the Security pane.\n\nSpend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceilings are the RESOLVED ones\n(``lifetime_ceilings``), never the raw nullable overrides, so the browser\nis not left joining a null against an install default to learn its own caps.",
         "operationId": "quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {

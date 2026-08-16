@@ -79,6 +79,23 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
 inheritance, so a subclass adds `frozen=True` without restating `extra`. A model that
 must stay lax says so on itself and states why; the ledger's `models_lax` counts them.
 
+## Tolerance is scoped by what a payload is FOR
+
+The round document is read back off disk, and `RoundResult`'s `extra="ignore"` forgives an
+extra key but not a missing one — nor does it reach the `extra="forbid"` models nested inside
+it. A renamed field is therefore fatal in one direction or the other, and which outcome is
+CORRECT depends on what the payload carries:
+
+- **Reporting** — `round_diagnostics.py`'s rows. Nothing gates, scores or escalates on them, so
+  every field defaults: a lost name degrades instead of killing a paid measurement.
+- **Scoring** — `ScoredCandidate`, `EscalationSignal`, `OptSearchPoint` and its subtree. These
+  stay required. A missing field means the record cannot be vouched for, and a tolerant read
+  hands back a winner prompt with a silently defaulted field — a wrong answer beats an
+  unreadable one only until someone believes it.
+
+`application/restamp.py::check_round_documents` reports which side has drifted; nothing repairs
+a round document, because pruning cannot restore a renamed field's value.
+
 ## Conventions
 
 - Frozen models by default; lineage via `derive()`, never mutation.

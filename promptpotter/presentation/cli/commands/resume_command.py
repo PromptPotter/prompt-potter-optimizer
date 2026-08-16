@@ -411,10 +411,6 @@ async def _run_loop(
 
 
 async def cmd_resume(args: argparse.Namespace) -> CommandResult:
-    from promptpotter.shared.spend import refresh_rates_in_background
-
-    refresh_rates_in_background()
-
     ctx = load_session(args)
     if not ctx.cycle_id:
         raise SystemExit(

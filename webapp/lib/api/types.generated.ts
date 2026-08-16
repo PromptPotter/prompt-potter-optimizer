@@ -571,6 +571,11 @@ export interface SampleSeries {
 export interface MeasurementSeriesResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
+  /** The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on
+   * BOTH responses because they are one page read twice: a client holding
+   * only one of them would otherwise have to name the order from the other,
+   * or guess the default. */
+  order: 'info_gain' | 'difficulty';
   items: SampleSeries[];
   /** Measurements across every series in `items` — the denominator of the roster's
    * headline, served so the reader adds nothing up. */
@@ -1044,6 +1049,9 @@ export interface MeResponse {
 export interface QuotaStatus {
   spend_used_total_usd: number;
   spend_budget_usd_total: number | null;
+  spend_unpriced_tokens: number;
+  tokens_used_total: number;
+  token_budget_total: number | null;
   concurrent_running: number;
   max_concurrent_cycles: number;
   campaigns_today: number;

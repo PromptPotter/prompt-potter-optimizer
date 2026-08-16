@@ -23,6 +23,7 @@ Success is one line — a check prints only when it fails (or under
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -213,6 +214,48 @@ def _eslint(sel: Sel) -> Outcome:
     return _run(_node("npm", "run", "lint"), _WEBAPP)
 
 
+def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
+    """npm walks node_modules up from the requirer, so a copy nested under an UNRELATED package
+    does not satisfy it — which is exactly the shape that reaches CI looking present."""
+    prefix = requirer
+    while True:
+        if (f"{prefix}/node_modules/{dep}" if prefix else f"node_modules/{dep}") in entries:
+            return True
+        if not prefix:
+            return False
+        cut = prefix.rfind("/node_modules/")
+        prefix = prefix[:cut] if cut != -1 else ""
+
+
+def _lockfile(_: Sel) -> Outcome:
+    """Every requirement in the lock has a package satisfying it.
+
+    A lock resolved on Windows keeps the win32 optional variants and prunes the rest, so the
+    requirements survive and the packages that answer them do not. `npm ci` ACCEPTS that on
+    Windows and rejects it on Linux, which makes CI the first thing to notice and leaves no local
+    command able to. This is the platform-free equivalent, and it is why the repair must run on
+    Linux (`npm install --package-lock-only`) rather than here.
+    """
+    packages = json.loads((_WEBAPP / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+    entries = frozenset(packages)
+    unsatisfied = sorted(
+        f"  {requirer or '<root>'} requires {dep}@{rng}"
+        for requirer, body in packages.items()
+        # A nested package's devDependencies are never installed; the root's always are.
+        for block in ("dependencies", "optionalDependencies", "devDependencies")
+        if block != "devDependencies" or not requirer
+        for dep, rng in (body.get(block) or {}).items()
+        if not _lock_satisfies(requirer, dep, entries)
+    )
+    if unsatisfied:
+        return 1, (
+            "package-lock.json carries requirements no package satisfies — regenerate it on "
+            "LINUX (`cd webapp && npm install --package-lock-only`), never on Windows:\n"
+            + "\n".join(unsatisfied)
+        )
+    return 0, ""
+
+
 @dataclass(frozen=True)
 class Check:
     name: str
@@ -271,6 +314,7 @@ CHECKS: tuple[Check, ...] = (
     # pure display on every run. `pytest --cov` still works when the number is
     # wanted deliberately.
     Check("pytest", "py", lambda _: _run(_py("pytest", "tests/"), _REPO)),
+    Check("lockfile", "web", _lockfile, staged=True),
     Check("eslint", "web", _eslint, staged=True),
     Check("tsc", "web", _tsc, staged=True),
     Check("anti-rot", "web", _anti_rot, staged=True),

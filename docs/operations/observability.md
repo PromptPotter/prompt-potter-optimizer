@@ -76,4 +76,4 @@ In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
 `opt_search_point.task_context` is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
 
-Deep dive: [`../developer/l2-internals.md`](../developer/l2-internals.md).
+Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).

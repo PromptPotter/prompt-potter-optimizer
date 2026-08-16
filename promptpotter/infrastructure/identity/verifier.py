@@ -96,8 +96,19 @@ async def verify_id_token(
     if not isinstance(sub, str) or not sub:
         raise IDTokenInvalidError("sub claim missing or empty")
 
+    # The email is only returned when the issuer VOUCHES for it. Downstream it is an identity key
+    # — the sign-in blocklist matches on it, and so does the host-admin claim — so an address the
+    # issuer will not stand behind must not travel as one. Absent counts as unverified, not as
+    # verified: this client is generic over any OIDC-conformant IdP (Dex, Keycloak, Auth0), and an
+    # IdP that never sends the claim is exactly the one whose addresses cannot be trusted. Google
+    # always sends it, so a Google deployment sees no change.
+    #
+    # Dropped to ``None`` rather than raising: the subject is the real account key, so an
+    # unverified address costs the user nothing but the email-keyed features, and refusing the
+    # whole sign-in would turn an IdP misconfiguration into a lockout.
+    email_verified = payload.get("email_verified")
     email_raw = payload.get("email")
-    email = str(email_raw) if isinstance(email_raw, str) else None
+    email = str(email_raw) if isinstance(email_raw, str) and email_verified is True else None
 
     return VerifiedIDToken(
         issuer=iss,

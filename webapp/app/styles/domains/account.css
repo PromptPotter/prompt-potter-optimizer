@@ -70,6 +70,7 @@
 .quota-cell-label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .quota-cell-value{font-size:var(--text-2xl);font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .quota-cell-sub{font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.quota-cell-sub.quota-cell-warn{color:var(--color-warn);cursor:help}
 
 /* Activity pane (Phase 6 round 3 — 3 stacked time-bucket charts) */
 .activity-window-row{display:flex;align-items:center;gap:var(--space-10);padding-bottom:14px;border-bottom:0.5px solid var(--color-border);margin-bottom:12px}

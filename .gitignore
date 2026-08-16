@@ -92,6 +92,8 @@ logs/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/potter-run/
+!.claude/skills/potter-self/
+!.claude/skills/potter-box/
 !.claude/hooks/
 .claude/hooks/doc_drift_ratio.py
 tools
