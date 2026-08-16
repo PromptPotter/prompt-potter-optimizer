@@ -8,12 +8,9 @@ import re
 from typing import Annotated, Any, cast, get_args
 
 from fastapi import APIRouter, Header, Path, Request
+from fastapi.routing import APIRoute
 from pydantic import Field
 
-from promptpotter.application.datasets.dataset_replace import (
-    NothingToReplaceError,
-    version_and_repoint,
-)
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, OptimizationOverrides
 from promptpotter.application.datasets.origin_readiness import (
     origin_delta,
@@ -35,12 +32,14 @@ from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.middleware.command_dispatcher import (
+    ALL_DISPATCHED_KINDS,
     CampaignConfigKind,
+    CheckinScopedKind,
     CommandAcceptedBody,
     CommandDispatcher,
     CycleScopedKind,
     LifecycleKind,
-    WorkspaceBackendKind,
+    WorkspaceScopedKind,
 )
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -59,11 +58,15 @@ commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 # kind reaches the router the moment it joins its Literal.
 _LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
-_WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset(get_args(WorkspaceBackendKind))
+_WORKSPACE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(WorkspaceScopedKind))
 _CAMPAIGN_CONFIG_KINDS: frozenset[str] = frozenset(get_args(CampaignConfigKind))
-_WIRED_KINDS: frozenset[str] = (
-    _LIFECYCLE_KINDS | _CYCLE_SCOPED_KINDS | _WORKSPACE_BACKEND_KINDS | _CAMPAIGN_CONFIG_KINDS
-)
+# A kind answering a domain object rather than a 202 keeps its own typed route and stays off
+# the generic one; `replace-dataset` is the one such kind outside `CheckinScopedKind`.
+_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {"replace-dataset"}
+# SUBTRACTED from the dispatched set rather than re-authored as a union of the four Literals,
+# because a union silently omits whatever it forgets to name — so a new kind is wired by
+# default and going unwired is the thing you have to write down.
+_WIRED_KINDS: frozenset[str] = ALL_DISPATCHED_KINDS - _TYPED_ROUTE_KINDS
 
 
 class CommandEnvelope(StrictModel):
@@ -498,17 +501,17 @@ async def replace_dataset(
     freed name is re-ingested in a separate ``/datasets/ingest`` call.
     """
     _require_kind(envelope, "replace-dataset")
-    ensure_idempotency_key(idempotency_key)
+    idemp = ensure_idempotency_key(idempotency_key)
     raw_slug = _require_dataset_name(envelope.payload, "slug")
-    try:
-        result = version_and_repoint(stores=stores, slug=raw_slug)
-    except NothingToReplaceError as exc:
-        raise ConflictError(
-            str(exc), code="nothing_to_replace", details={"slug": exc.slug}
-        ) from exc
+    dispatcher = CommandDispatcher(stores)
+    outcome = await dispatcher.dispatch_workspace_command(
+        kind="replace-dataset",
+        payload={"slug": raw_slug},
+        idempotency_key=idemp,
+    )
     # Echo the subject, nothing more — `version_and_repoint` records the counts + the
     # versioned slug itself, and no caller reads them off the wire.
-    return {"slug": result.slug}
+    return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)
@@ -539,9 +542,9 @@ async def post_command(
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
-    if kind in _WORKSPACE_BACKEND_KINDS:
+    if kind in _WORKSPACE_SCOPED_KINDS:
         workspace_payload = _build_workspace_payload(kind, payload)
-        workspace_kind: WorkspaceBackendKind = kind  # type: ignore[assignment]
+        workspace_kind: WorkspaceScopedKind = kind  # type: ignore[assignment]
         workspace_outcome = await dispatcher.dispatch_workspace_command(
             kind=workspace_kind,
             payload=workspace_payload,
@@ -635,6 +638,22 @@ async def post_command(
         expected_version=expected_version,
     )
     return cycle_outcome.accepted
+
+
+# Import-time closure of the command surface: every typed route must name a DISPATCHED kind, so
+# it inherits `_require_capability_for` and its `CommandRecord`. A route is the only way to add a
+# verb here, and a verb that dispatches nothing is authorized by nothing and recorded nowhere —
+# which `replace-dataset` was, invisibly, because the cap ladder can only check what dispatches.
+_ROUTED_KINDS: frozenset[str] = frozenset(
+    route.path.removeprefix("/commands/")
+    for route in commands_router.routes
+    if isinstance(route, APIRoute) and route.path != "/commands/{kind}"
+)
+if _ROUTED_KINDS - ALL_DISPATCHED_KINDS:
+    raise RuntimeError(
+        "command route with no dispatched kind — it is gated by no capability and lands on no "
+        f"ledger: {sorted(_ROUTED_KINDS - ALL_DISPATCHED_KINDS)}"
+    )
 
 
 __all__ = ["CommandEnvelope", "commands_router"]

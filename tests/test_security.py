@@ -695,6 +695,35 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     assert caps.tokens == 1_000
 
 
+def test_a_rejected_command_does_not_burn_its_idempotency_key(tmp_path: Path) -> None:
+    """Dedupe keyed on the ``CommandRecord`` alone let a REJECTED attempt satisfy its key forever.
+    The 429 at the account ceiling is the canonical case: the client is told to retry, the retry
+    matches the burned key, and the dispatcher answers 200 with a replay body nothing ever wrote —
+    so an origin turn that never ran reads as one that did, and no surface says otherwise.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        _find_idempotent_command,
+    )
+
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
+    ledger.append(CommandRecord(command_id="c1", kind="resolve-origin", idempotency_key="k1"))
+    ledger.append(CommandAckRecord(command_id="c1", status="rejected", detail="quota"))
+    assert _find_idempotent_command(ledger, "k1") is None
+
+    # A record whose ack never landed (the process died mid-apply) is not a replay either.
+    ledger.append(CommandRecord(command_id="c2", kind="resolve-origin", idempotency_key="k2"))
+    assert _find_idempotent_command(ledger, "k2") is None
+
+    # The retry of the refused key applies, and THAT is what replays from then on.
+    ledger.append(CommandRecord(command_id="c3", kind="resolve-origin", idempotency_key="k1"))
+    ledger.append(CommandAckRecord(command_id="c3", status="applied"))
+    match = _find_idempotent_command(ledger, "k1")
+    assert match is not None and match.command_id == "c3"
+
+
 def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     """A `CycleSeed` arrives over `fork-cycle` as REQUEST INPUT from anyone holding `campaign.run`
     — which every OIDC signup holds — and its `config_overrides` carry `spend_budget_usd` /

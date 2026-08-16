@@ -13,13 +13,17 @@ from typing import Any, Literal, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
+from promptpotter.application.datasets.dataset_replace import (
+    NothingToReplaceError,
+    version_and_repoint,
+)
 from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
-from promptpotter.domain.run_records import CommandRecord, CycleSeed
+from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -94,12 +98,23 @@ def _slugify_backend_id(name: str) -> str:
 def _find_idempotent_command(
     ledger: CycleEventLog, idempotency_key: str
 ) -> _IdempotentMatch | None:
-    """O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
+    """Only an APPLIED command replays. On the ``CommandRecord`` alone a REJECTED attempt satisfies
+    its key forever, so the 429 at the account ceiling burns the very retry the client is told to
+    make and answers it 200 off a body nothing wrote. A match whose ack never landed (the process
+    died mid-apply) is not a replay either.
+
+    O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
     commands are operator-paced."""
+    keyed: dict[str, int] = {}
+    applied: _IdempotentMatch | None = None
     for offset, record in enumerate(ledger.iter()):
         if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
-            return _IdempotentMatch(command_id=record.command_id, offset=offset)
-    return None
+            keyed[record.command_id] = offset
+        elif isinstance(record, CommandAckRecord) and record.status == "applied":
+            at = keyed.get(record.command_id)
+            if at is not None:
+                applied = _IdempotentMatch(command_id=record.command_id, offset=at)
+    return applied
 
 
 logger = logging.getLogger(__name__)
@@ -121,7 +136,7 @@ CycleScopedKind = Literal[
     "start-run",
     "step-cycle",
 ]
-WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
+WorkspaceScopedKind = Literal["register-backend", "mint-campaign", "replace-dataset"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
 # `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
@@ -159,6 +174,10 @@ CAP_FOR_KIND: dict[str, str] = {
     # Renaming is how every OTHER surface addresses the campaign to a human, so it sits
     # with the verbs that decide the campaign's existence rather than with the run tiers.
     "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
+    # A dataset slug is part of the measurement cache key, so repointing one re-addresses
+    # every campaign that already measured against it — stronger authority than creating a
+    # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
+    "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
     # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
     # bucket rather than the campaign's own budget, so no tenant tier carries it — see
     # `shared/identity.py::SCORING_SAMPLE_LOOKAHEAD_CAP`.
@@ -166,18 +185,21 @@ CAP_FOR_KIND: dict[str, str] = {
 }
 
 # Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.
-# Derived from the Literal types themselves, so the map cannot drift from the wire.
-_ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
+# Derived from the Literal types themselves, so the map cannot drift from the wire. Public
+# because the router subtracts its typed routes from this to wire the generic one: a verb
+# reachable over HTTP but absent HERE is gated by nothing, which is how `replace-dataset`
+# ran unguarded — it was in no Literal, so this raise could not see it.
+ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     get_args(LifecycleKind)
     + get_args(CycleScopedKind)
-    + get_args(WorkspaceBackendKind)
+    + get_args(WorkspaceScopedKind)
     + get_args(CheckinScopedKind)
     + get_args(CampaignConfigKind)
 )
-if set(CAP_FOR_KIND) != _ALL_DISPATCHED_KINDS:
+if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
     raise RuntimeError(
         "CAP_FOR_KIND out of sync with the dispatched command set: "
-        f"{_ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
+        f"{ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
     )
 
 
@@ -201,7 +223,7 @@ class CommandDispatcher:
     """One per request, carrying the request-scoped ``Stores``. ``job_registry`` is the
     process-wide singleton stashed on ``app.state.job_registry`` at startup."""
 
-    def __init__(self, stores: Stores, job_registry: Any | None = None) -> None:
+    def __init__(self, stores: Stores, job_registry: JobRegistry | None = None) -> None:
         self._stores = stores
         self._job_registry = job_registry
 
@@ -370,14 +392,20 @@ class CommandDispatcher:
     async def dispatch_workspace_command(
         self,
         *,
-        kind: WorkspaceBackendKind,
+        kind: WorkspaceScopedKind,
         payload: dict[str, Any],
         idempotency_key: str,
     ) -> CommandOutcome:
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         applier: Applier
+        # A deduped retry must not re-run the migration — it would version the slug a second
+        # time — and the body echoes the subject, so it replays without touching disk.
+        on_replay: Callable[[], Any] | None = None
         if kind == "register-backend":
             applier = lambda: self._apply_register_backend(payload)  # noqa: E731
+        elif kind == "replace-dataset":
+            applier = lambda: self._apply_replace_dataset(payload)  # noqa: E731
+            on_replay = lambda: {"slug": str(payload["slug"])}  # noqa: E731
         else:
             assert kind == "mint-campaign"
 
@@ -390,6 +418,7 @@ class CommandDispatcher:
             payload=payload,
             idempotency_key=idempotency_key,
             applier=applier,
+            on_replay=on_replay,
         )
 
     # ------------------------------------------------------------------
@@ -658,6 +687,15 @@ class CommandDispatcher:
                 reason=reason,
                 inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
+
+    def _apply_replace_dataset(self, payload: dict[str, Any]) -> dict[str, str]:
+        try:
+            result = version_and_repoint(stores=self._stores, slug=str(payload["slug"]))
+        except NothingToReplaceError as exc:
+            raise ConflictError(
+                str(exc), code="nothing_to_replace", details={"slug": exc.slug}
+            ) from exc
+        return {"slug": result.slug}
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
         name = str(payload["name"])
