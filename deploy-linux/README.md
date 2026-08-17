@@ -123,7 +123,9 @@ deps, rebuilds the webapp, restarts the app — and does the same for the backen
 when `BACKEND_DIR` is set in `deploy.config`. Re-runnable; never stalls on a
 diverged box (tracked files are force-matched to origin; `.env`/runtime survive).
 The sync can replace the script mid-run, so it re-execs the new copy once and says
-so — a fix to `update.sh` itself takes effect on the deploy that ships it.
+so — a fix to `update.sh` itself takes effect on the deploy that ships it. It
+restarts the admin bot but never rewrites its unit: a change to that unit (its data
+root, its env file) needs `./install-admin-bot.sh`.
 It needs `deploy.config` (same one from setup) and aborts with the fix if it's
 missing — without it there's no real `INSTALL_DIR` to act on.
 

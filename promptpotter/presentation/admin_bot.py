@@ -183,10 +183,8 @@ def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
     except httpx.HTTPError:
         logger.warning("sendMessage failed", exc_info=True)
         return
-    # Telegram refuses in the BODY, not the transport — a 400 (text too long, chat gone) is no
-    # `httpx.HTTPError`, so catching only that dropped every refused reply without a trace. A command
-    # that ran and then answered nothing is indistinguishable from one that never arrived, which is
-    # the same silence the gate used to keep.
+    # Telegram refuses in the BODY, not the transport, so a 400 is no `httpx.HTTPError` — without
+    # this a refused reply drops silently and reads as a command that never arrived.
     if resp.status_code != 200:
         logger.warning("sendMessage refused: HTTP %d %s", resp.status_code, resp.text[:300])
 
@@ -210,9 +208,8 @@ def notify_operator(text: str) -> bool:
     except httpx.HTTPError:
         logger.warning("Operator notice failed to send", exc_info=True)
         return False
-    # The return value is the CLAIM that a notice was delivered, and a refusal arrives as a non-200
-    # body rather than an exception — so this said True for notices Telegram never sent. A sign-in
-    # nobody was told about, reported as told, is the one answer this must never give.
+    # This bool IS the claim the operator was told, and a refusal arrives as a non-200 body rather
+    # than an exception — so returning True on one reports a sign-in nobody heard about as heard.
     if resp.status_code != 200:
         logger.warning("Operator notice refused: HTTP %d %s", resp.status_code, resp.text[:300])
         return False
@@ -277,11 +274,8 @@ def _process_update(
         return
     parsed = parse_command(text, passphrase)
     if parsed is None:
-        # A rejected message logged NOTHING, so a message the gate refused and a message that never
-        # arrived were the same silence — in the journal and in Telegram alike. That is the one
-        # distinction an operator debugging this channel has to be able to make, and its absence is
-        # what made a working gate indistinguishable from a deaf bot. The text stays OUT of the
-        # journal: it carries the passphrase attempt, and this file's whole job is to not leak that.
+        # A refused message and one that never arrived are the same silence to Telegram; this log is
+        # the only place they differ. The text stays out of it — it carries the passphrase attempt.
         logger.info("Ignoring message (%d chars, gated=%s)", len(text), passphrase is not None)
         return
     command, argument = parsed

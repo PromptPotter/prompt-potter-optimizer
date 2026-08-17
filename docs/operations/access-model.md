@@ -326,7 +326,7 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 | `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
 | `/grants` | Replies with the current delegations. |
 
-With `ADMIN_BOT_PASSPHRASE` set, prefix the command with it: `my-word /block alice@example.com`. Messages from any chat id other than yours are silently ignored. Delegation tiers are the ladder above; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). The grant lives in the sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities are clamped to yours at every use — a grant can never exceed what you hold. Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` beside it, an audit trail you can `cat` on the box.
+With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not a session, so a bare `/spend` is refused like any other: `my-word /block alice@example.com`. A refused message and one that never arrived look identical in Telegram; `journalctl -u <service>-admin-bot` is where they differ (`Ignoring message (N chars, gated=…)`). Messages from any chat id other than yours are ignored the same way. Delegation tiers are the ladder above; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). The grant lives in the sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities are clamped to yours at every use — a grant can never exceed what you hold. Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` beside it, an audit trail you can `cat` on the box.
 
 ### New accounts into your CRM (optional)
 

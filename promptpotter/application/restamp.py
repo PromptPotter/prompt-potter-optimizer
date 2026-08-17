@@ -262,10 +262,8 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
     """Scan every surface; report, and rewrite the rows that rewrite. Roots come from
     ``config/paths.py``, so the verb addresses the trees the engine reads from any CWD."""
     root = DEFAULT_PROJECTS_ROOT
-    # Name the root on EVERY path, not only the absent one. A root that exists but is the wrong
-    # TREE reports a clean bill of health over data nobody asked about, and nothing says which tree
-    # answered — which is how a deploy reading $INSTALL_DIR/.promptpotter instead of the box's
-    # $DATA_DIR looked like a successful re-stamp. The reader has to be able to see the subject.
+    # A root that exists but is the WRONG tree reports a clean bill of health over data nobody
+    # asked about, so the subject is named on every path, not only the absent one.
     print(f"Workspace: {root}")
     if not root.is_dir():
         # Nothing to re-stamp is not a failure and not an unreadable file — a fresh
