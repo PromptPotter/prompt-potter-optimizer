@@ -5,11 +5,10 @@ control **must do**, per state. Companion to `webapp/CLAUDE.md` (implementation
 invariants) and `BRAND.md` / `VOICE.md` (brand/copy). This file owns *behavior*: the
 contract a PR is measured against, and the source of truth when reality drifts.
 
-**How to read.** Humans: skim the invariants, then the `status:` tags (`ok` /
-`gap` / `broken`) per control. Machines: each surface is one fenced `yaml` block;
-parse `controls[]`. `do` = the contract (target behavior, already correct even
-where unbuilt). `gap` = current divergence (omit when `ok`). State keys appear
-only where behavior is non-obvious.
+**How to read.** Each surface is one fenced `yaml` block; parse `controls[]`. `do` = the contract —
+target behavior, already correct even where unbuilt. **Every control below is built and conformant
+unless it carries a `gap:` line**, which states the current divergence; `note:` carries a caveat that
+is not a divergence. State keys appear only where behavior is non-obvious.
 
 ## State vocabulary
 
@@ -115,30 +114,24 @@ controls:
         non-empty, off the SAME set the desktop jobs dock reads (I6), with the count in
         its aria-label so the state is never colour alone. It replaces the dock on a
         phone rather than adding a second one.
-    status: ok
   - id: title
     do: The viewed campaign's display label (falling back to its dataset name, then the
         brand). Truncates; never pushes the trailing controls off a 375px screen.
-    status: ok
   - id: view_segment
     do: Chat | Dashboard, the two primary views (lib/view-tab.ts::PRIMARY_TABS), as the
         shared SegmentedControl. While a DEMOTED view is active it renders as a third
         segment, so "exactly one is always on" stays true and the active view is never
         unrepresented; it disappears again on return to a primary view.
-    status: ok
   - id: overflow
     do: The campaign ⋯ — the SAME CampaignMenu the sidebar rows use (variant=standalone,
         so it takes focus, unlike the in-row copy), with Verify / Files folded in above
         its lifecycle verbs. One campaign-verb menu in the app, never two that drift.
         Absent when no campaign is resolved.
-    status: ok
   - id: new_campaign
     do: Open the New campaign modal. Absent when anon.
-    status: ok
   - id: auth.{login,signup}
     do: Replace ⋯ + new when anon (I4) — the Chat pane behind this bar IS the public
         landing surface, so the entry chips must not be buried in a menu.
-    status: ok
 ```
 
 ### Sidebar chrome — the desktop's only nav surface
@@ -149,7 +142,6 @@ controls:
   - id: view_nav.{chat,dashboard}
     do: Switch the main pane. A vertical nav, not a tab strip — the active row carries
         aria-current="page" (there is no role=tabpanel on any pane for a tablist to name).
-    status: ok
   - id: view_nav.more
     do: A muted disclosure holding Verify + Files (lib/view-tab.ts::MORE_TABS) — real but
         rarely opened, so rationed for attention rather than hidden. Persists to
@@ -158,24 +150,19 @@ controls:
         returning to a primary view restores the operator's own preference unchanged.
         While a demoted view is active the toggle is DISABLED and says which one — a
         collapse that would hide the pane in front of you is not offered (I3).
-    status: ok
   - id: view_nav.collapsed
     do: The 36px rail keeps ALL FOUR views as icons and drops the disclosure. The
         hierarchy rations horizontal TEXT and a rail has none; more importantly this is
         now the only way to switch views, so hiding it would strand a collapsed sidebar.
-    status: ok
   - id: search.analytics
     do: Disabled until analytics ships; label states "coming soon". Sidebar footer.
-    status: ok
   - id: theme.toggle
     do: Swap light<->dark register; persist to localStorage promptpotter.theme; restore on load.
-    status: ok
   - id: auth.{login,signup}
     do: Open the auth modal. Rendered only when anon (I4). The modal itself is mounted ONCE
         (app/page.tsx) and every trigger opens it through auth-context::openAuthPrompt —
         including the OIDC ?auth_error= bounce-back, which is a callback result and so
         belongs with identity rather than with whatever chrome happens to hold a chip.
-    status: ok
   - id: jobs.dock
     do: The OS-style dock of open units — Potter glyph when one unit is in flight, glyph + count
         badge when several; ABSENT when idle (absence IS the "all quiet" signal). It FLOATS on
@@ -188,26 +175,21 @@ controls:
         gate is distinguishable from a healthy run in the single-unit case too. Clicking an entry
         jumps the view to that cycle's dashboard. Reads server run_phase only — a client connection
         blip never changes the count. Desktop only; the phone's equivalent is mobile_appbar::back.
-    status: ok
   - id: remote_bar
     do: The ONE surface answering "what is this run doing and costing" — play/pause, skip,
         look-ahead, round/spend, babysat tag, a Lift / ETA / Δ-per-$ readout, an upward-opening
         panel carrying identity, spend and the finishing criteria, and an inner/outer drill
-        toggle (the hop INTO the running inner cycle while a self-optimizing outer is viewed,
-        addressed by path off the served tree; the hop back out while an inner is viewed).
-        Unit identity and selection live in the run masthead's picker — ONE header shared by
-        the Chat and Dashboard tabs — NOT here: the strip carries no second copy of the label. Mounted for the VIEWED cycle whenever
-        its server run_phase exists and is not `checkin` (I6) — including `terminal` and
-        `detached`, where run-phase.ts maps the action to "start" and this is
-        RunControlButton's only mount, so gating on in-flight left both arms unreachable and a
-        budget-halted cycle with no way to restart. Those are also the states where the readout
-        is the answer rather than decoration, so ETA yields its slot to the stop reason there.
+        toggle. Unit identity and selection live in the run masthead's picker (ONE header shared
+        by Chat and Dashboard), never a second copy here.
+        Mounted for the VIEWED cycle whenever its server run_phase exists and is not `checkin`
+        (I6) — INCLUDING `terminal` and `detached`, where the action maps to "start": this is
+        RunControlButton's only mount, so gating on in-flight left a budget-halted cycle with no
+        way to restart. Those are also the states where the readout is the answer rather than
+        decoration, so ETA yields its slot to the stop reason.
         Client connection loss dims/labels it stale — it never unmounts while a last-known server
         phase stands. While the viewed path is DEEPER than one hop the controls are inert with
         the reason as their tooltip, never re-targeted: the command highway addresses one
-        CycleHop with no `descend`, so an inner run cannot be commanded and firing anyway hit
-        the outer cycle instead (I3).
-    status: ok
+        CycleHop with no `descend`, so firing anyway hit the OUTER cycle instead (I3).
   - id: remote_sample_lookahead_arm
     do: Arms sample look-ahead for the next round of scoring (2 samples in flight, ~half the
         wall clock). An ARM button, not a switch — the arming is spent by one round and the
@@ -217,7 +199,6 @@ controls:
         title reports sample_lookahead_discards, the arming's running cost. Host-admin only: a
         non-admin identity 404s at the dispatcher, so the button is present but its press
         reports a failure rather than being hidden — the surface does not encode authority.
-    status: ok
 ```
 
 ### Auth modal
@@ -228,19 +209,15 @@ controls:
   - id: google.oidc
     do: GET /api/v1/auth/login/google -> 307 to Google with state+nonce. redirect_uri origin MUST
         match the served origin (localhost vs 127.0.0.1 mismatch breaks the session cookie locally).
-    status: ok
     gap: local redirect_uri is 127.0.0.1:8001 while preview is served on localhost:8001 — env-specific.
   - id: no_request_access
     do: There is NO request-access affordance and no invite framing — signing in IS signing up, so
         this surface has no rejection to explain. Whether the new account may act is resolved after
         sign-in and shown by access_gate below. No editable field that discards input.
-    status: ok
   - id: legal.{privacy,terms,imprint}
     do: External links to brand legal pages; must resolve 200.
-    status: ok
   - id: close
     do: Close modal, restore focus, close on ESC + backdrop.
-    status: ok
 ```
 
 ### Access gate — blocking, post-auth, ahead of consent
@@ -252,7 +229,6 @@ controls:
   - id: sign_out
     do: POST /api/v1/auth/logout, then hard-navigate to /login. Navigates even when the logout
         call fails — a dead button on a non-dismissable overlay strands the user.
-    status: ok
 invariants:
   - anon NEVER sees this (no account yet) — I4.
   - it PRECEDES consent_gate and the two are mutually exclusive: consent attaches when someone is
@@ -273,16 +249,13 @@ shows_when: status==='authed' AND me.access_state === 'active'
 controls:
   - id: checkbox
     do: Unticked on open (no pre-tick — GDPR/FADP affirmative consent). Gates the accept button.
-    status: ok
   - id: accept
     do: POST /api/v1/auth/accept-terms {version: me.terms_version} → server records the provable
         record (version + stamped timestamp) in user.json → refresh() re-probes /me → gate clears.
         Disabled until the box is ticked. A 409 (terms_version_stale) re-probes /me so the gate
         re-renders against current text.
-    status: ok
   - id: legal.{terms,privacy}
     do: External links to the brand legal pages (the prose the checkbox refers to); must resolve 200.
-    status: ok
 invariants:
   - anon NEVER sees this (read-only preview submits no data → no consent needed) — I4.
   - NO dismiss: no ×, no backdrop-close, no ESC (a11y onClose is a no-op). Accept is the only exit.
@@ -297,79 +270,60 @@ surface: sidebar
 controls:
   - id: collapse
     do: Toggle collapsed/expanded; label flips Collapse<->Expand.
-    status: ok
   - id: resize
     do: Drag the right-edge handle (or ←/→ when focused) to set sidebar width;
         clamped [160,480], persisted, default 200. Hidden when collapsed, and on a
         phone, where the sidebar is a whole screen with no edge to drag.
-    status: ok
   - id: filter
     do: Header sliders button opens a popover with the Active/Archived segment +
         a type-to-filter dataset picker; a dot marks a non-default filter and a
         summary line in the body clears it. Dataset picker shown only with 2+ datasets.
-    status: ok
   - id: new_campaign
     do: On the chat tab, reset the thread in place to its empty first-run state
         (no modal). On any other tab, open the New campaign modal (see surface:
         new_campaign).
-    status: ok
   - id: campaign_list
     do: List the forest as alternating COURSE → CANDIDATE tiers, at any depth.
-        ORIGIN == C0, said ONCE. The campaign row and its ROOT course are one row (a
-        campaign mints exactly one root; drawn apart, a fork-less campaign rendered as
-        two rows with one score). The merge STOPS there — a root course's C0 stays an
-        ordinary candidate row, first in its list. Folding it in too left the origin's
-        own measurements with nowhere to live, and badged every course `C0`, which says
-        nothing: every course is its own origin.
-        Campaign chrome (⋯ menu, size hover) sits on the course row — archiving is a
-        campaign verb.
+        ORIGIN == C0, said ONCE. The campaign row and its ROOT course are ONE row (a campaign
+        mints exactly one root; drawn apart, a fork-less campaign showed two rows with one
+        score). The merge STOPS there — a root course's C0 stays an ordinary candidate row,
+        first in its list, or the origin's own measurements have nowhere to live. Campaign
+        chrome (⋯ menu, size hover) sits on the course row; archiving is a campaign verb.
         A course lists what it produced — `C0`, then `C1.1`, `C1.2`, … from the round
-        trajectory (`/tree`, one conditional fetch per campaign; lazy on course-open,
-        since every campaign wears a course row).
-        A FORK IS A SIBLING COURSE, beside the candidates — not inside the one it was cut
-        from. Borrowing an origin is not being contained by it, and nesting buried the
-        fork a level too deep. The cut is a BADGE (`from C0`), never the name (it sits
-        beside that candidate, so the name would double the neighbouring row); the label
-        is its id tail. Only a steered cut names `from_candidate_id`; a round-level cut
-        (divergence/rebase/sweep/diag) wears no badge rather than claim a candidate.
-        A FORK WEARS NO C0 ROW — its badge already names the origin it borrowed, and it
-        replays rather than re-derives it, so the row would restate the row above it and
-        hold nothing.
-        At L4 a candidate opens the inner campaigns that measured it — the recursion, and
-        what makes a root's C0 the home of the origin's own runs. One candidate has as
-        many as the panel has cells, identical but for `spawned_by.task`
-        (`{dataset}/seed-N`), so an inner run wears its TASK; its candidate is the row it
-        hangs under. A run only nests under a candidate row that EXISTS: `C0` on a fork,
-        or a label whose round never closed, has none, so the run sits directly on the
-        course rather than rendering nowhere at all.
-        `won` needs a CONTESTED round — round 0 runs one candidate, so C0 beats nobody
-        and wears no badge.
-        NO per-tier framing: the tree is its indent rail and its labels. Boxing/colouring
-        the tiers nested boxes inside boxes; the visual design is deferred, not half-done.
-        A candidate has a row whether or not it spawned anything (a cache-hit candidate
-        ran nothing). Filing is `spawned_by` only — never by order.
-        The ● dot is PER-FOREST: green = this cycle's own `run_phase`; accent = its
-        store's active pointer. Each depth resolves its own pointer (the session up top,
-        the inner loop in a sandbox), so an inner row's dot answers for the sandbox — a
-        global pointer names no cycle down there and the dot never lit.
-        Clicking a candidate INSPECTS it, never navigates: a candidate is a tier, not a
-        path hop, so it has no address. The row drives its COURSE's path plus the shared
-        candidate axis (`setSelectionForCandidate` — the channel a fitness bar uses), and
-        the inspector / samples / round axis follow it.
+        trajectory (`/tree`, one conditional fetch per campaign, lazy on course-open).
+        A FORK IS A SIBLING COURSE, beside the candidates, never inside the one it was cut
+        from — borrowing an origin is not being contained by it. The cut is a BADGE
+        (`from C0`), never the name; the label is its id tail. Only a steered cut names
+        `from_candidate_id`; a round-level cut (divergence/rebase/sweep/diag) wears no badge
+        rather than claim a candidate. A FORK WEARS NO C0 ROW — it replays that origin rather
+        than re-deriving it, so the row would restate the one above it.
+        At L4 a candidate opens the inner campaigns that measured it. One candidate has as
+        many as the panel has cells, identical but for `spawned_by.task` (`{dataset}/seed-N`),
+        so an inner run wears its TASK. A run only nests under a candidate row that EXISTS —
+        `C0` on a fork, or a label whose round never closed, has none, so the run sits
+        directly on the course rather than rendering nowhere.
+        `won` needs a CONTESTED round — round 0 runs one candidate, so C0 wears no badge.
+        A candidate has a row whether or not it spawned anything. Filing is `spawned_by`
+        only — never by order. NO per-tier framing: the tree is its indent rail and its
+        labels; the visual design is deferred, not half-done.
+        The ● dot is PER-FOREST: green = this cycle's own `run_phase`, accent = its store's
+        active pointer. Each depth resolves its OWN pointer, so an inner row's dot answers
+        for the sandbox — a global pointer names no cycle down there and never lit.
+        Clicking a candidate INSPECTS it, never navigates: a candidate is a tier, not a path
+        hop, so it has no address. The row drives its COURSE's path plus the shared candidate
+        axis (`setSelectionForCandidate`), and the inspector / samples / round axis follow it.
         Active/Archived + dataset narrow via the filter popover.
         anon: "Sign in to see your campaigns." (SignInPrompt).
         auth_empty: "No campaigns yet — start one."
-    status: ok
   - id: support
     do: Always-live link to help. Visible in every auth state.
-    status: ok   # supportUrl overridable via NEXT_PUBLIC_SUPPORT_URL
+    note: supportUrl overridable via NEXT_PUBLIC_SUPPORT_URL
   - id: logout
     do: Call the logout endpoint, clear session, return to /login. Rendered ONLY when authed (I4).
-    status: ok   # the same verb also lives in Account → Security (see surface: account)
+    note: the same verb also lives in Account → Security (see surface: account)
   - id: account_button
     do: Sidebar-footer button (aria-label "Open account") opening AccountModal. Rendered ONLY
         when authed (I4) — see surface: account.
-    status: ok
   - id: mobile_list_screen
     do: Below --bp-md the sidebar IS a screen, at full viewport width, reached and left by
         mobile_appbar::back. There is no drawer, no backdrop and no slide-over: one screen
@@ -378,7 +332,6 @@ controls:
         nav (the app bar's segments own that axis on a phone) and the collapse chevron
         (meaningless when the sidebar is either the whole screen or absent). A sidebar
         collapsed on a desktop must not become an empty list screen.
-    status: ok
 ```
 
 ### Chat surface
@@ -391,11 +344,10 @@ controls:
         (aria-pressed/aria-label "Show|Hide project preview"). They flank the ANCHOR level
         only, so there is exactly one pair at any zoom. The pipeline strip itself is NOT
         toggleable — it renders unconditionally.
-    status: ok
   - id: preview.connector
     do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
         "no backend selected" (nothing is being probed). Resolved + probed → reachable / unreachable.
-    status: ok   # idle when connector==null; "probing…" only during a real probe
+    note: idle when connector==null; "probing…" only during a real probe
   - id: preview.zoom
     do: A strip sharing the anchor's row, ahead of its Input end — ONE button per stack
         level that is NOT drawn, each drawing that level and every ancestor
@@ -410,50 +362,43 @@ controls:
         so it drops its node labels and renders as a strip about a third the height, filled
         from a two-tone alternation counted OUTWARD from the anchor. Nodes below the
         campaign's own pipeline render read-only (no detail panel owns them).
-    status: ok
   - id: preview.node.nest
     do: A node that runs a whole nested pipeline draws a frame glyph instead of a lock —
         neither tunable here nor paramless, since its knobs live in another cycle. Clicking
         it ISOLATES: the level is already on screen, so the click drops every level above
         it. The inward half of the zoom whose outward half is preview.zoom.
-    status: ok
   - id: preview.node.llm
     do: Expand to model & params; "declares no configurable params" when none.
-    status: ok
   - id: composer.{attach,input,send}
     do: Gated on the INGEST FLOW phase, not on campaign+auth. input/send enabled only while
         flow.awaitingContext (send also needs non-empty text); attach disabled while flow.busy.
         Chat input is disabled outside ingest — selecting an active campaign does NOT enable it.
-    status: ok
   - id: settings.{extended_thinking,web_search,code_execution,optimize_switch}
     do: Coming-soon features — render as a disabled ui/Switch (role=switch, aria-disabled,
         aria-label "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
-    status: ok   # optimize_switch is deliberately locked like its three neighbours —
-                 # do not "restore" it to a live-looking toggle (I3)
+    note: optimize_switch is deliberately locked like its three neighbours — do not
+          "restore" it to a live-looking toggle (I3)
   - id: welcome_illustration
     do: Empty chat (no thread yet) shows the welcome illustration, not a scripted fake
         conversation. There is no demo thread. Suppressed once ANY tail content exists —
         the live activity segment or the run card — never drawn over a bound campaign.
-    status: ok
   - id: run_card
     do: Last item in the thread; renders only with a cycle bound and something measured.
         TWO untitled boxes — what the run cost and changed, then where it is in the data.
-        LIVE it pins to the bottom of the scrollport and is height-capped (a tall card must
-        not eat the conversation); stopped it un-pins and stays put. On the live→stopped
-        edge the thread also gains ONE frozen `run` record per cycle, holding captured
-        values — a `resume` must leave it saying what the finished run ended at. Every
-        number is served (runSummary). The visible lift is the PERCENT pair — the shown
-        candidate and matched_parent_accuracy on its own rows, "from X" absent when
-        unstamped and an absent floor never drawn as 0. θ is jargon, so it rides the hover
-        card behind that pair and only while `best` is shown: ability_delta is the
-        incumbent's, per cycle, so captioning another candidate with it would be a lie.
-        With no measured rate at all, θ takes the visible slot rather than vanishing.
-        A panel CUT SHORT (scored_samples &lt; expected_samples — elimination or an
-        escalation abort) trails the pair as `23/28` in the card's quietest weight, and
-        the hover names it a partial panel, NOT a verdict. Silent when the panel is
-        whole, and silent mid-round: expected_samples lands at round close, so this
-        never doubles as a progress bar.
-    status: ok
+        LIVE it pins to the bottom of the scrollport and is height-capped; stopped it un-pins
+        and stays put. On the live→stopped edge the thread gains ONE frozen `run` record per
+        cycle holding captured values — a `resume` must leave it saying what the finished run
+        ended at. Every number is served (runSummary).
+        The visible lift is the PERCENT pair — the shown candidate and matched_parent_accuracy
+        on their own rows; "from X" is absent when unstamped and an absent floor is NEVER drawn
+        as 0. θ is jargon, so it rides the hover card behind that pair and only while `best` is
+        shown: `ability_delta` is the incumbent's, per cycle, so captioning another candidate
+        with it would be a lie. With no measured rate at all θ takes the visible slot rather
+        than vanishing.
+        A panel CUT SHORT (scored_samples &lt; expected_samples) trails the pair as `23/28` in
+        the quietest weight, and the hover names it a partial panel, NOT a verdict. Silent when
+        the panel is whole, and silent mid-round — `expected_samples` lands at round close, so
+        this never doubles as a progress bar.
   - id: run_card.flips
     do: ONE line, and it is a partition that CLOSES — the reference NAMED, rows both sides
         measured, then origin-missed→shown-hits, then its regression twin, then the
@@ -471,7 +416,6 @@ controls:
         says the round elected nobody. Only the COUNTS are on the line; the ids and their
         before→after answers are in the hover card behind them, untruncated. Rows joined on
         sample_id only.
-    status: ok
   - id: run_card.samples
     do: THREE rows, always, and they are a window on an axis — not a top-N list. Running,
         the axis is the declared scoring order and the cursor is the sample in flight
@@ -483,7 +427,6 @@ controls:
         never/partly/always counts stack beside the rows and are themselves the control
         that opens the full table. Colour is a second carrier only — every bucket keeps its
         word, every row its label.
-    status: ok
   - id: run_card.searchpoint
     do: best | latest | selected — same picker, same resolution, as the pipeline node
         detail (one hook). An UNAVAILABLE state is DROPPED, never rendered disabled, and a
@@ -491,7 +434,6 @@ controls:
         is shown). `selected` appears only while a candidate is picked on another surface.
         The three absences read differently: loading / scoring-in-progress / nothing
         measured — an empty config table would read as "this program has no params".
-    status: ok
 ```
 
 ### Account surface
@@ -506,25 +448,20 @@ controls:
     do: AccountModal opens from the sidebar footer (aria-label "Open account"); tabbed —
         Profile / Security / Preferences / Activity / About / Storage. Traps focus,
         restores on close, closes on ESC. Rendered ONLY when authed (I4).
-    status: ok
   - id: preferences.demo_mode
     do: Real toggle — PATCH /auth/user-settings via patchUserSettings({demo_mode_enabled}).
         Reflect the SERVED value, never optimistic-only; on failure revert + surface the error
         (I2 — no raw transport string).
-    status: ok
   - id: security.logout
     do: POST /auth/logout via postLogout, clear session, return to /login. The account modal's
         Security tab is the primary affordance; the sidebar carries the same verb (I4 — both
         rendered ONLY when authed).
-    status: ok
   - id: about_unit
     do: Read brand identity from lib/brand.ts; version is SERVER-owned, read live from
         /api/v1/health — never hardcode it. Provenance renders "self-declared" until a signed
         credential exists; never render "verified" while BRAND.verification says otherwise.
-    status: ok
   - id: storage_panel
     do: WorkspaceStoragePanel — resolve to live | empty | error (I1).
-    status: ok
 ```
 
 ### Dashboard surface
@@ -535,7 +472,6 @@ data_source: dashboard.json (poll 2s); round_NNNN.json lazy on drill-in. One sou
 controls:
   - id: topstrip.best_last
     do: Best/Last fitness from dashboard.json. "—" placeholders in auth_empty/warming.
-    status: ok
   - id: candidates.card
     do: Fitness bars = the CHILDREN of the VIEWED lineage-tree node, the same rows the
         sidebar draws under it. The viewed node is NAVIGATION (`viewedPath` +
@@ -551,17 +487,14 @@ controls:
         measured thing, so a click lights it, lights its dendrogram dot, and scopes the
         inspector/samples; none of them move the chart. The bracket dendrogram sits beneath
         the course view on the SAME x-axis.
-    status: ok
   - id: lineage.forest
     do: Its OWN card, revealed by the toggle beside the dendrogram (and by a ⑂ fork mark, which
         opens it with that sibling expanded). The multi-cycle cladogram — the only surface that
         draws siblings. Empty note before round 1. Separate card because it shares no axis with
         the bars, so it must not be bound to their width.
-    status: ok
   - id: candidates.metric
     do: ONE multi-select (Acc/Comp/θ) driving the bar series AND every node label in both views.
         Never empty. θ rides a right-hand axis and stays sparse (a missing θ is never a 0 bar).
-    status: ok
   - id: candidates.menu
     do: The ⋯ overflow, lit while any member is active. Lens re-projects under an alternative
         criterion (served); What-If reveals evaluator checkboxes and becomes the master lens;
@@ -569,7 +502,6 @@ controls:
         is not a scored row); Loaded from cache draws the dashed replayed-share line, off by
         default and NEVER disabled — a banked C0 is the usual replay, so greying out on it
         hides the case the control exists for.
-    status: ok
   - id: samples
     do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a
         standalone card. Empty note before scoring.
@@ -583,26 +515,21 @@ controls:
         The HIT/MISS tally + filter are HIDDEN here: nulls counted as misses read
         "HIT 0 / MISS 7" beside a 39% headline. Reads `leafIsL4` (the LEAF's backend_type), so a
         pp-self fork is in and a drilled-into inner run is out.
-    status: ok
   - id: scoring.inspector
     do: Candidate drill-in. PRIMARY element is the one runnable-spec surface (NodeSurface, values
         mode, read-only) for the selected searchpoint — live round from dashboard.json, completed
         round from round_NNNN.json (no stitch); scalar stats + per-sample rows below; Steer & fork
         opens the editable twin. Loading note until the spec's round data lands.
-    status: ok
   - id: optimizer.round_axis
     do: One circle per closed round + a LIVE pill, in the optimizer card's toolbar — the optimizer
         can only depict ONE round, so this is its scope, not a free-floating axis. Writes
         selection.round; the canvas, the node inspector and the samples view all follow it.
-    status: ok
   - id: optimizer.node_strip
     do: checkin/l3_plan/l2_context/l1_generate/l1_score/l1_critique nodes for the VIEWED round
         (live -> dashboard.json; historical -> the audit twin, via the one useRoundNodes resolver).
         A historical round never pulses. Click opens the inspector. Idle when no campaign.
-    status: ok
   - id: live_state.disclosure
     do: Collapsible raw dashboard.json + trend + score-frequency. "Waiting for first poll…" until data.
-    status: ok
 ```
 
 ### Verify surface
@@ -616,7 +543,6 @@ controls:
         loading: spinner while status resolves.
         empty: "No runs yet."
         error (authed): "Couldn't load diagnostic runs — retry shortly." (never raw).
-    status: ok
 ```
 
 ### Files surface
@@ -626,13 +552,10 @@ surface: files
 controls:
   - id: tree
     do: Campaign file tree; clean empty state "No active campaign — pick one or start in a terminal."
-    status: ok
   - id: preview_pane
     do: Render selected file (JSON formatted, .md as markdown, round files as scoreboard+table).
-    status: ok
   - id: raw_dashboard_disclosure
     do: Collapsible raw dashboard.json; "Waiting for first poll…" until data.
-    status: ok
 ```
 
 ### New campaign modal
@@ -645,10 +568,8 @@ controls:
         anon: "Sign in to start a campaign." + Sign-in CTA (→/login).
         loading: "Loading your collection…"
         error (authed): "Couldn't load your collection — retry shortly." (never raw).
-    status: ok
   - id: close
     do: Close, restore focus, ESC + backdrop.
-    status: ok
 ```
 
 ## Coverage

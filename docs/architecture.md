@@ -12,9 +12,7 @@ If a request doesn't fit a §0 bucket, that's a flag — propose an answer that 
 
 ## §0 — PromptPotter on one page
 
-**Before coining a domain word here:** search the repo for it. Then check
-[`developer/concept-map.md`](developer/concept-map.md) § Bare words, which lists
-the ones already naming more than one thing, and
+**Before coining a domain word here:** search the repo for it, then check
 [`developer/conventions.md`](developer/conventions.md) § Code style, which names
 the four that are banned outright.
 

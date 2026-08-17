@@ -32,7 +32,7 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   about the optimizer prompt that ran it — the floor / exclude / measure trichotomy, plus
   `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
   and every term the panel retired, is argued in
-  [`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
+  [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § The measurand.
   `verdict.py`: what a ROUND of
   them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
   is what stops it growing a file read or a session dep, which is exactly how it drifted before.

@@ -4,9 +4,13 @@
 
 </p>
 
+<p align="center">
+  <a href="https://promptpotter.com"><b>promptpotter.com</b></a> — <b>$0.30 of free credit</b> to try a real run in the browser, hosted and paid for by me. Offer runs until <b>15 Sept 2026</b>; bring-your-own-key is in the works.
+</p>
+
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
-**PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early on statistical confidence (*Posterior-of-Being-Best — [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
+**PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early on statistical confidence (*Posterior-of-Being-Best — [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, the `/potter-run` Claude Code skill, or as a [**DSPy optimizer**](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) where you would reach for GEPA.
 
 ## How to Optimize LLM Prompts in 3 Steps
 
@@ -20,10 +24,10 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 Every measurement costs money, so the whole design is **most fitness per dollar**. The capabilities PromptPotter shares with the rest of the field are in the [comparison table](#scientific-framing) below; these are the ones it doesn't:
 
 - **💬 Chat-first** — talk to the Potter and watch it work inline, Perplexity-style: the searches, the tool calls, each round as it lands, and a button whenever a decision is yours. Ships as a reusable **chat-app template** — keep the chat core, delete the optimizer panes. [spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/chat-foundation.md)
-- **Searches a tree, not a trail** — every round's result flows back to each ancestor it descends from, so a spent branch rewinds to whichever ancestor the evidence favours and climbs a different ridge instead of stalling. Branches are kept and compared rather than discarded, and an ancestor's score reflects what re-expanding from it actually yielded — including in branches it never ran itself.
+- **Searches a tree, not a trail** — every round's result flows back to each ancestor it descends from, so a spent branch rewinds to whichever ancestor the evidence favours and ***climbs a different hill*** instead of stalling. Branches are kept and compared rather than discarded, and an ancestor's score reflects what re-expanding from it actually yielded — including in branches it never ran itself.
 - **Hard-sample leaderboard** — score preferentially on the samples that actually separate variants; the ones everyone aces or fails are noise.
-- **Guards against self-validation** — the loop can't grade itself into a false win: scores are ability-based and subset-invariant (Rasch θ), constant-answer and other degenerate candidates are caught before they count, and the layer that *validates* a fix is never the one that proposed it.
-- **Optimizes itself** — point the optimizer at its own optimizer prompts. [L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/optimizer-of-the-optimizer.md)
+- **🛡️ Guards against self-validation** — an optimizer that picks its own winner is the easiest thing in this field to fake, and the loop is built so it can't grade itself into a false win. Three independent guards: scores are **subset-invariant ability** (Rasch θ), so a candidate that drifted onto easier samples cannot out-rank an honest one; **degenerate candidates** — a constant answer, a shape that games the scorer — are caught before they count; and the layer that **validates** a fix is never the layer that proposed it. What a winner's number is allowed to claim: [`verdict-resolution.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/verdict-resolution.md).
+- **Optimizes itself** — point the optimizer at its own optimizer prompts. [L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)
 - **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
 ## Five ways to run it
@@ -34,7 +38,7 @@ Every measurement costs money, so the whole design is **most fitness per dollar*
 4. **REST API**.
 5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
 
-**Direction — the sixth way: a tool another agent calls.** The aim is parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — can invoke PromptPotter as its *try-harness-first* move before reaching for fine-tuning. Why + a same-dataset head-to-head: [related-work § PromptPotter × NVIDIA AutoResearch](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md); tracked as [roadmap § Agent-tool parity](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md) (C5, MCP server mode).
+**Direction — the sixth way: a tool another agent calls.** Parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — reaches for PromptPotter as its *try-harness-first* move before spending on fine-tuning. [Why, plus a same-dataset head-to-head](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md) · [roadmap § Agent-tool parity](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md).
 
 ## Common questions
 
@@ -57,10 +61,12 @@ Status and the full forward plan live in one place: [`docs/specs/roadmap.md`](ht
 
 PromptPotter belongs to the **LLM-driven evolution** family: an LLM proposes variants, an evaluator scores them, and the winners breed. The peer systems — full comparison + benchmark notes in [`docs/research/related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella):
 
+- **Prompt evolution** — [**GEPA**](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [MIPROv2](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [PromptWizard](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · **PromptPotter**
 - **Code evolution** — [AlphaEvolve](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [OpenEvolve](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [AlgoTuner](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [AutoResearch](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella)
-- **Prompt evolution** — [PromptWizard](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [MIPROv2](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · [GEPA](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#systems-under-the-umbrella) · **PromptPotter**
 
-The code-evolution systems mutate source; the prompt-evolution systems mutate a prompt. PromptPotter evolves **both the prompt and the pipeline parameters around it**, jointly.
+The Python line behind them: [APE](https://arxiv.org/abs/2211.01910) and OPRO (2022–23) established that a language model can author its own instruction; [DSPy](https://github.com/stanfordnlp/dspy) (2023–) made the prompt a *compiled artifact*, [MIPROv2](https://arxiv.org/abs/2406.11695) searching its instructions and demonstrations; [PromptWizard](https://arxiv.org/abs/2405.18369) (2024) added critique-guided refinement; [CAPO](https://arxiv.org/abs/2504.16005) (2025) added racing and an explicit token budget. [GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 Oral) is the one most people now compare against — though CAPO outscored it on both tasks of the promptolution paper's own head-to-head, so the reference point is not automatically the best result.
+
+The code-evolution systems mutate source; every prompt-evolution system above mutates one artifact, the prompt. PromptPotter evolves **both the prompt and the pipeline parameters around it**, jointly.
 
 *Background: Asankhaya Sharma on [OpenEvolve](https://www.youtube.com/watch?v=mWBT-szUutI) (talk).*
 
@@ -68,29 +74,45 @@ The code-evolution systems mutate source; the prompt-evolution systems mutate a 
 
 PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZero-shaped MCTS over the lineage**: [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#best-arm-identification--sequential-testing) prunes losers *within* a round, each round's ability backpropagates to its ancestors, and a UCB rule picks the ancestor to re-expand once a branch is spent. Rollouts give way to deterministic evaluation on your dataset, as in AlphaZero. [Comparison](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#comparison-to-mcts).
 
+**Test-time compute, moved out of the request.** The popular way to spend compute at inference is to search inside the request — sample many answers, verify, pick ([Snell et al.](https://arxiv.org/abs/2408.03314) · [survey](https://arxiv.org/abs/2406.16838)). PromptPotter is that same search run as **tuning infrastructure instead**: you run it, it finds a configuration, and from then on that configuration is simply *used on demand* — an ordinary call, with no search in the path and nothing learning at request time. The test-time budget is itself one of the things it can tune (`reasoning_effort`, `max_tokens`, the model), so the inference bill is something it optimizes rather than something it grows.
+
 ### The loop
 
 Each round is **generate → score → critique**: L1 proposes candidates, they're scored against your dataset, and the critique steers the next round. When the inner layer stalls, an outer layer (L2, then L3) redirects it; when the branch itself is spent, the search rewinds. Full mechanics: [the-loop.md](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md).
 
-**AlphaEvolve** is the closest published peer — same loop, same memory across runs; read row one as scope (a different target, not a missing feature), the rest as capability.
+### Compared to GEPA, and to AlphaEvolve
 
-| | AlphaEvolve | PromptPotter |
-|---|---|---|
-| **What it evolves** | Source code | Prompts **and** pipeline parameters, jointly |
+**GEPA** ([arXiv:2507.19457](https://arxiv.org/abs/2507.19457), ICLR 2026 Oral) is the reference point for prompt optimization today, and ships inside DSPy as `dspy.GEPA`; **AlphaEvolve** is the closest published peer on the code-evolution side. Same family and the same reflective core — a critique of what failed drives the next proposal. GEPA evolves the instruction text of a DSPy program, AlphaEvolve evolves source code, PromptPotter evolves prompts **and** the pipeline parameters around them, jointly. That is scope — a different target, not a missing feature; the table below is capability.
 
-| Capability | AlphaEvolve | PromptPotter |
-|---|:--:|:--:|
-| **Open & inspectable** — the code is on GitHub, and the statistical model (PoBB) is documented and yours to tune; AlphaEvolve is a closed hosted service | 🔴 | 🟢 |
-| **Evolutionary search** — a population breeds, the weak die | 🟢 | 🟢 |
-| **Automatic scoring** — define the formula once; it wires itself into every eval path, no glue code | 🟢 | 🟢 |
-| **Statistical pruning** — drop losers after a handful of queries, not the full budget ([PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)) | 🟢 | 🟢 |
-| **Memory across runs** — parameter impact, query difficulty and failure patterns carry into the next run | 🟢 | 🟢 |
-| **A library of building blocks** — proven personas, thinking styles and answer formats, reused and recombined | 🟢 | 🟢 |
-| **Multi-step pipelines** — tune a chain of calls, not a single one | 🟡 | 🟢 |
-| **Self-healing** — an invalid proposal is caught and taught, not just discarded ([internals](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)) | 🟡 | 🟢 |
-| **Runs in your editor** — drive a whole campaign from the terminal (`/potter-run`) | 🔴 | 🟢 |
+| Capability | GEPA | AlphaEvolve | PromptPotter |
+|---|:--:|:--:|:--:|
+| **Evolutionary tree search** — a population breeds and the weak die; branches are kept and compared rather than replaced | 🟢 | 🟢 | 🟢 |
+| **Automatic scoring** — define the formula once; it wires itself into every eval path, no glue code | 🟢 | 🟢 | 🟢 |
+| **Statistical pruning** — drop losers after a handful of queries, not the full budget ([PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)) | 🟡 | 🟢 | 🟢 |
+| **Carries knowledge forward** — parameter impact, query difficulty and failure patterns across runs, plus a library of proven personas, thinking styles and answer formats to recombine | 🔴 | 🟢 | 🟢 |
+| **Multi-step pipelines** — tune a chain of calls, not a single one | 🟢 | 🟡 | 🟢 |
+| **Prompt + pipeline parameters** — model, temperature and node thresholds evolve alongside the prompt | 🔴 | 🟡 | 🟢 |
+| **Guards against self-validation** — subset-invariant ability scoring (Rasch θ) + degenerate-candidate detection, so the winner's number is not merely its own selection score | 🔴 | 🟡 | 🟢 |
+| **Self-healing** — an invalid proposal is caught and taught to a *different* layer, not just discarded ([internals](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)) | 🟡 | 🟡 | 🟢 |
+| **Pause, resume, rewind, fork** — a run is an object on disk you steer, not a `compile()` you must finish | 🟡 | — | 🟢 |
+| **A replay is not free** — a cache-served measurement stays on the cost ledger instead of reporting zero spend | 🔴 | — | 🟢 |
+| **Open & inspectable** — the code is on GitHub and the statistical model (PoBB) is documented and yours to tune | 🟢 | 🔴 | 🟢 |
+| **Runs in your editor** — drive a whole campaign from the terminal (`/potter-run`) | 🔴 | 🔴 | 🟢 |
 
-The one place AlphaEvolve is unambiguously stronger is **code optimization** — its search reaches into source, which is not what PromptPotter is pointed at. The 🟡s are partial versions of the same capability. Full grading, including the prompt-tooling neighbours: [`related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#feature-highlights).
+🟡 is a partial version of the same capability — GEPA gates on a minibatch where PromptPotter runs a sequential test, and its checkpointing lives in the standalone `gepa` package rather than on the DSPy path; AlphaEvolve's are that capability expressed at the code level. A `—` is a closed hosted service whose behaviour is not publicly documented. **Where each is ahead of us:** GEPA on **reach** — it sits inside DSPy, with that ecosystem's adapters, tracing and audience, which is why PromptPotter ships as a DSPy optimizer rather than asking anyone to leave it; AlphaEvolve on **code optimization**, its search reaching into source, which is not what PromptPotter is pointed at. Full grading: [`related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#feature-highlights) — and DSPy's own engine, read from its source, in [§ What a DSPy source study settles](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#what-a-dspy-source-study-settles).
+
+### Use it as a DSPy optimizer
+
+`pip install promptpotter[dspy]`, then — where you would write `dspy.GEPA(…)`:
+
+```python
+from promptpotter.presentation.teleprompter import PromptPotterOpt
+
+optimizer = PromptPotterOpt(metric=my_metric, dataset_name="my-task")
+compiled = optimizer.compile(my_program, trainset=trainset)
+```
+
+Your metric stays the scorer, and `compile()` returns a copy of your program with the winning prompt applied. It mints a real campaign on disk, so PoBB pruning, Rasch scoring, the block library, the measurement cache, the spend ceiling and the CLI verbs (`pause`, `resume --from N`, fork) all come along — what you trade away is the operator surfaces, not the search. [Full guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md).
 
 ## Citation
 
@@ -110,7 +132,7 @@ The one place AlphaEvolve is unambiguously stronger is **code optimization** —
 [![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
 [![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
 
-A head-to-head against DSPy's optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO on *BIG-Bench Extra Hard (BBEH)*, held to a standard this literature mostly does not hold itself to: every method scored on the same held-out rows, one published split seed, one export schema for every method, and no cross-paper number mixing. Split, seed, metric and export schema are pinned in [`docs/research/bbeh-comparison/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/) — Colab notebooks for the peers, local for PromptPotter — and numbers publish once the target model and the optimization budget are held constant across every method too. What we measure on, what we refuse to measure on, and why: [`docs/research/benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
+A head-to-head against DSPy's optimizers (**GEPA**, MIPROv2, BootstrapFewShot) and CAPO on *BIG-Bench Extra Hard (BBEH)*, held to a standard this literature mostly does not hold itself to: every method scored on the same held-out rows, one published split seed, one export schema for every method, and no cross-paper number mixing. Split, seed, metric and export schema are pinned in [`docs/research/bbeh-comparison/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/) — Colab notebooks for the peers, local for PromptPotter — and numbers publish once the target model and the optimization budget are held constant across every method too. What we measure on, what we refuse to measure on, and why: [`docs/research/benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
 
 ## Documentation
 

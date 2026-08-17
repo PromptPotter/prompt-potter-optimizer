@@ -48,7 +48,27 @@ Reads happen by opening files. There is no read CLI. The file tree is the dashbo
 
 ## Live-run supervision
 
-**Every ~2-minute checkup reads the ACTUAL LLM I/O of every tier — a checkup that only greps the log tail is NOT a checkup** (operator-mandated 2026-07-02). The five reads, the STOP-AND-DIAGNOSE red flags and the cross-run comparability rules are owned by [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § Running & supervising. Open it when a run is in flight; the cadence must be self-firing, never a passive log monitor.
+**The infrastructure is done; the optimizer *application* is not.** The loop, seams, recursion and scoring gateway all exist and are green. What remains is making the optimizer *behave well*, and that is found empirically: run it, collect the data, read what the loop actually produced, fix the bug at its ROOT, re-run. Expect several restarts; that is the loop, not a failure.
+
+**Run `new promptpotter-self` ONCE, in the FOREGROUND, to completion — never as a killable background task.** A harness/OS kill orphans whatever inner run is open; the reaper stamps it `producer_vanished` (a `FAILED` outcome — correctly excluded from scoring, so the headline is not corrupted, but NOT cached). A relaunch lands back on the *same* inner campaign and continues from the rounds already banked, because an inner campaign is keyed on the cell it runs, the overrides it runs under, and what it is FOR — a panel cell or a PoBB backfill (`runner/inner/spawn.py::inner_campaign_id`). What a kill costs is the round it interrupted, not the cell. And because the outer `cycle_id` is a hash of optimizer prompts + benchmark, every re-`new` with unchanged prompts collides on ONE `cycle_id` and ONE `.inner/` sandbox — the lineage tree then renders the same inner seed-runs under N campaign headers, so "N campaigns, identical stats" is one measurement shown N times, not N runs. **To iterate a live run, `resume` it;** only `new` again after a prompt/config change, which mints a fresh `cycle_id`.
+
+**The cadence is SELF-FIRING, and the interval is WORK rather than a wait.** Schedule your own wake-ups the moment a run starts, and each wake IS a full pass over the reading list below. Between ticks keep investigating — fan out over the fresh dashboards and measurement files, chase the newest anomaly. An idle wait is the wasted-run failure mode this guards against: the bugs show themselves *while it runs*, and catching one early buys a kill-fix-restart before the whole spend drains. **A passive log Monitor does NOT count as supervision** — it fires only on patterns you predicted, and every real bug so far (estimator inconsistency, evidence starvation, proxy annihilation) came from reading the run's own measurement files, not from a grep hit. Role split: the operator is the developer/user; you own everything else.
+
+**Default the fix to the prompts** (`promptpotter/assets/optimizer/` — `pipeline.yaml::resolved_prompts` for the inner set, `sets/self_optimizing.yaml` for the outer one). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow, a missing analysis, a wiring gap. Name that cause before touching code; do not add infrastructure to paper over a prompt problem.
+
+### The per-checkup reading list — every tick reads ALL of these, not just the log tail
+
+**A checkup that only greps the run-readout tail is NOT a checkup** (operator-mandated 2026-07-02). Each tick, open the newest outer `{cycle}/.runtime/cache/rounds/round_NNNN.json` and read every LLM tier's actual I/O:
+
+1. **`l1_generate`** — rendered input (are the panels populated or empty? for the OUTER generator, is `inner_narratives` present with one story per seed — the primary evidence an optimizer-prompt edit must ground on, not the scalar per-seed delta?), raw output, parsed variants: `evidence_grounding.field` in the real enum? citations quoting text that EXISTS in the rendered input? hypotheses distinct, not one idea relocated? `changes_description` actually REPORTING the override emitted beside it? any hallucinated node/param?
+2. **`l1_critique`** — the input carries the evidence, and WHICH panel is the evidence depends on the level: inner reads SAMPLE TRANSCRIPTS + MODEL REASONING, outer reads INNER RUN NARRATIVES. The two are a matched pair, each silent where the other fires (`panels.py::_inner_narrated`), because transcripts are selected by a MISS and one level up a miss is a placeholder artifact. Output `priority_fix` / `failure_highlights` must quote CONCRETE evidence — a reasoning step, a premise — not recycled labels, and `priority_fix` must name a steer the generator is ALLOWED to make: an edit to the inner optimizer's own job, never one naming the benchmark's vocabulary or answer labels.
+3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `mean_fitness_ci_lo`), the **matched-origin** comparison (never the cross-subset round-0 origin — subset drift reads as lift), the PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, on the right arm?).
+4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`, `dangling_trigger`), whether the `task_context` delta is evidence-anchored, plan text sane and within its render cap.
+5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down, under `.inner/<key>/…/campaigns/`.
+
+**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `matched_parent_*` / `improved`.
+
+A quiet outer round is normal — it is awaiting a multi-minute inner campaign, and the cycle heartbeats its own ledger ("inner rX/Y · best Z%") while it waits. General hang triage: [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run.
 
 ## Why experiments did not accumulate — and what changed
 
@@ -64,7 +84,7 @@ Read this before proposing any new run. It is the reason a year of panels produc
 - **Variance structure.** Seed effect SD **0.198**, arm effect **0.109** (both shrunk by their own estimation error), residual **0.170** — so seed variance is ~3.3x arm variance, and pairing every arm across the same cells is what makes the comparison possible at all. A typical two-arm gap (0.154 logits) resolves at **~10 paired cells**; the panel runs 6. Un-paired it would take **22.9**. The earlier "~35 cells/arm" figure came from a 39-cell read where the arm effect measured 0.077; it roughly doubled as the corpus grew, so **the panel is closer to working than it used to look** — and 6 → 10 cells is the cheapest move on the board.
 - **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict (a *within-round* paired comparison against the matched origin on the same samples), so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars. Rendered per cell by `application/runner/inner/spawn.py::_lift_shape`.
 - **Target shape:** most cells lift in round 1 (most headroom, cleanest evidence), about half again in round 2, stragglers in round 3, thinning as they saturate. **Measured: `r1 3/6 · r2 1/5 · r3 2/3 · r4 1/3`** — rounds 3-4 behave; round 1 lifts only half the time and round 2 nearly flatlines. **That is the live defect and it is an `l1_generate` problem** — diagnose it from candidates already on disk, not from a new run.
-- **The scored term is `mean_round_delta`** — the MEAN of the adopted levels, not the last one (−26% residual at identical spend, arm agreement r = +0.941), taken over the round BUDGET. It rewards lifting **early**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4. Edits that make L1 find its hypothesis sooner are worth more than edits that make it find a better one later.
+- **The scored term is `mean_round_delta`**, and what it rewards is lifting **early**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4. So edits that make L1 find its hypothesis sooner are worth more than edits that make it find a better one later. (Why that term and not another: [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § The measurand.)
 - **Validate any cheap proxy at the ARM level, never per-cell.** Truncating cells to round 1 is 2.2x cheaper per verdict and *wrong*: per-cell correlation 0.663 (passes the usual `proxy_lift_corr >= 0.6` bar) but **arm-effect correlation 0.371**, ordering 13 of 21 pairs against 10.5 for a coin. Put the bar where the decision is made.
 - **Widen candidates semantically — that is the lever with no measurement cost.** L1 emits incremental edits, so arms differ by less than the instrument can see. Different evidence framing, a different node targeted, a different edit vocabulary — not a reworded instruction — raises the arm SD for free. (A quieter instrument is *also* worth buying now; see the plan below. The two are complements, not alternatives.)
 - **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the incumbent, every round. The raw floor is the wrong reading; the *gap* is. Of the first six seeds, three were retired and only **one** on this criterion — `inner_tasks.yaml` records the grounds per seat and explicitly forbids citing the collapse verdict for seed-5.
@@ -163,6 +183,51 @@ Critique says A is best, composite says B. **Not an L1 problem.** Route to `data
 
 Parse failure, no-ops and verbatim duplicates: **zero** over 6 inner campaigns / 17 L1 rounds, `l1_yield` 1.00. Do not spend an edit here without fresh evidence that one has returned; the candidates are well-formed, they just restate rather than explore.
 
+### 5b. The round-trace checklist — walk it before reporting findings
+
+Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
+is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
+the registry itself (`optimization/validators/l1_strict.py`) plus `validate_overrides()`, which locks
+`model` / `provider` unconditionally — read the registry before assuming a check is unenforced.
+
+- **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
+  carry the signals a candidate claims to consult? `axis_memory` is present iff `AxisIndex.ensure_for`
+  found ≥1 prior archive measurement (empty on a backend's first cycle). `runtime_failures` is present
+  iff this cycle produced one OR `Cycle.start` inherited from sibling forks — **empty in round 1 while
+  siblings DID produce failures means the inheritance path is broken** (`sibling_wounds.py`,
+  `_rf_matches_current_config`). `critique` / `escalation_panel` are empty in round 1 by design.
+- **Re-proposal of known-failing configs.** `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` catches EXACT
+  `(param, value)` matches only — a *near* value is legitimate exploration, so flag one proposed near a
+  known-failing value without justification rather than expecting a rejection.
+- **The generator's standing constraints** — PEAKED-axis discipline, param-field axes as a last resort,
+  the numeric envelopes. **Read them off `resolved_prompts['l1_generate/1']` at review time, never off
+  any doc:** it is an L4-searched surface, so a quoted constraint is one that has already moved. For
+  every candidate that crosses one, read its `evidence_grounding.citation` and ask whether the evidence
+  the prompt demands is actually quoted; if not, flag it by the constraint's own name.
+- **Grounding actually grounds.** A citation must be a real quote from the named `field`, and the field
+  must be one the round's layout rendered (`citable_fields`). `field=stall_exploration` is valid only
+  at `exploration_budget ∈ {normal, wide}`. Not a strict validator by operator direction — the model may
+  read all input as evidence — but a citation naming a field absent from the rendered input is a
+  fabrication.
+- **Intra-round paraphrase.** Jaccard of word-sets (lowercase, `\w+`, len > 2) over `changes_description`
+  for each pair; ≥ 0.5 → `intra_round_paraphrase`. Below threshold, watch shared THEME words (verify,
+  check, restate, validate) — ≥ N/2 candidates carrying one → `theme_mode_collapse`. Nothing enforces
+  either, and `idea_fingerprint` is blind to both (see § semantic restatement).
+- **Format integrity.** LaTeX escapes survive (`\boxed{N}`, not `oxed{N}`); no template placeholders
+  (`{x}`, `[insert]`, `<query>`) in prompt-field values; `pipeline_params_override` keys are real node
+  `param_keys` (`L1_SCHEMA_COMPLIANCE` catches invalid ones).
+
+**Report violations as a checklist at the TOP of the reply, before any narrative** — the glyph makes it
+scannable and the parenthetical lets the operator verify in the trace:
+
+```
+L1 violations on round N (cycle <id>):
+  ✗ peaked_axis_violation (C1.1: target_axis=llm_only.max_tokens, axis marked PEAKED, no critique rebut)
+  ✗ unjustified_param_mutation (C1.1: critique didn't name max_tokens, runtime_failures empty)
+  ✓ schema_compliance (no forbidden-axis or type-mismatch issues)
+  ⚠ intra_round_paraphrase (C1.2 ↔ C1.4 Jaccard 0.58 — verify/proof theme)
+```
+
 ### 6. Propose the edit, predict, re-run one round
 
 Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. State the prediction in one line. Then advance one round (`python -m promptpotter resume`; `new` only after a config/prompt change, which mints a fresh `cycle_id`), open `round_(N+1).json`, and compare. If the prediction held, lock it in. If not, classify again — the failure mode was different than thought.
@@ -191,7 +256,7 @@ Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 
 - **L1/L2/L3 agent contracts** — `promptpotter/CLAUDE.md` (read first: what each layer reads/writes).
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
-- **L4 finish line + live-run supervision** — `docs/specs/l4-outer-loop.md`. The SoT for what remains; § Finish line and § Running & supervising.
+- **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).
 - **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults, the reasoning doctrines.
 

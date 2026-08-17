@@ -2,8 +2,7 @@
 
 A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts** that drive the
 inner PromptPotter cycle. Connector boundary: `promptpotter/connectors/promptpotter.py`. Spec:
-[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md). Concept:
-[`../../docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
+[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md).
 
 Each outer "sample" is one entry in `inner_tasks.yaml`: it mints and runs a full inner campaign on
 `justlogic-d234`. Each inner run reports a vector of proxy measurements
@@ -12,8 +11,8 @@ re-anchors **one** of them — `mean_round_delta` — into [0,1] and nothing els
 having carried more SEED variance than arm variance while holding authority over the ordering. The
 rationale lives on `OuterSampleProxies`.
 
-**Status and remaining work** — owned by
-[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § Finish line.
+**What remains** — owned by
+[`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § Open.
 
 **The panel geometry, its per-cell cost and why it is 6 cells** — owned by `inner_tasks.yaml`, whose
 figures come off the banked cycle ledgers. Do not re-derive a cost from the knob values: the factors

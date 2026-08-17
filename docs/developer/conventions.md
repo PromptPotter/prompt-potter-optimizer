@@ -28,9 +28,8 @@ collects everything else.
   evidence lives in another subsystem, compressed to **≤2 lines**, present
   tense — a prohibition, a trap, a sentinel's absence semantics, a tiebreak, a
   security asymmetry. **An `__init__.py` gets none at all** — the path already
-  names the namespace, the module map is one `ls`, and
-  [`concept-map.md`](concept-map.md) is the single orientation index. A `#` is
-  for a non-obvious *why* **inside** a body, aimed at the next editor.
+  names the namespace and the module map is one `ls`. A `#` is for a
+  non-obvious *why* **inside** a body, aimed at the next editor.
   **Past tense is a smell** — "used to", "its predecessor", a date, a
   percentage, a run id, an `A -> B` tally: how the code got that way is git's
   job (commit body, `CHANGELOG.md`).
@@ -168,7 +167,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 3. **Delegate any search spanning more than three files.** A sub-agent reads in a window that is thrown away and hands back a conclusion; direct searching leaves every hit resident. This is measured, not stylistic: sub-agents were 3.3% of spend while direct `Grep` + shell `grep` was ten times that. Ask for the verdict and the paths, never the excerpts.
 4. **Make a command assert, not display.** Header scaffolding and unconditional dumps around a check are pure cost — print on failure, and let success be silent. Same rule as rule 3 in miniature: return the conclusion, not the evidence for it.
 
-**And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the row in [`concept-map.md`](concept-map.md) that should have answered it, in the same session, while you still know what you were looking for. A row earns its place only where search lands you somewhere plausible and wrong — a definition search already answers is not a missing row.
+**And the cheapest read is the one a correct pointer removes.** Half of all lookups in that corpus missed on the first hop and turned into a hunt — a search *plus* the reads it drags behind it. When a lookup fails, the debt is the navigation surface, not the search: fix the pointer that should have answered it — the owning `CLAUDE.md` row or doc index — in the same session, while you still know what you were looking for.
 </read-once>
 
 **When you reach for the shell, a sub-agent, or a wait → `<wall-clock>`:**

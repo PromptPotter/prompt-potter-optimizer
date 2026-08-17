@@ -46,12 +46,10 @@ Each emitted variant declares an `evidence_grounding: {field, citation}` naming 
 
 Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill` (`dispatch/facade.py` — the hub has no `hub.py`) walking `opt_sp.memory.l1_layout` (l1_generate's per-node layout from `NODE_LAYOUTS`, `domain/l1_layout.py`) over the `INJECTIONS` registry (`dispatch/injections/registry.py`).
 
-**Reviewing an L1 round trace.** Load
-[`../../../docs/developer/l1-candidate-analysis-checklist.md`](../../../docs/developer/l1-candidate-analysis-checklist.md)
-before reporting findings on any operator-pasted round dump or
-self-optimizing campaign cycle review. It enumerates the checks that
-historically slipped past and says which are validator-enforced today
-versus pure analysis responsibility.
+**Reviewing an L1 round trace.** Walk the checklist in the `potter-self` skill (§ The round-trace
+checklist) before reporting findings on any operator-pasted round dump or cycle review — it enumerates
+the checks that historically slipped past, and which are validator-enforced versus pure analysis
+responsibility.
 
 ## L2-layer — l2_context
 
@@ -146,7 +144,7 @@ Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives fro
 
 **There is no `l4_*.py` in this package and there will not be one.** The ban is derived, not arbitrary, which is why naming a file `l4_recursion.py` breaks it just as surely: L4 is the same PromptPotter applied to itself via the `promptpotter` connector — an outer cycle whose *backend* is an inner cycle, mutating the inner's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`. A driver here would mean the ladder grew a rung; it did not. The ladder is closed at L1 / L2 / L3.
 
-Conceptually L2 / L3 / L4 are one family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../CLAUDE.md`](../../CLAUDE.md) § Where L4 lives. Spec: [`../../../docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Connectors + L4 inner-cycle execution. Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
+Conceptually L2 / L3 / L4 are one family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../CLAUDE.md`](../../CLAUDE.md) § Where L4 lives. Spec: [`../../../docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md).
 
 ## checkin — the fifth optimizer node (decomposition + origin resolution)
 

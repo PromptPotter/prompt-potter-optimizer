@@ -36,7 +36,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
 - **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset.
-- **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Which prompts live where → the **prompt homes** row of [`../docs/developer/concept-map.md`](../docs/developer/concept-map.md). Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
+- **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
 ## Re-cutting a dataset needs a NEW name
 
@@ -50,7 +50,7 @@ L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to i
 
 **The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name`, so a measurement taken on one cut shares no cache key with another's — comparing "bands" across cuts reads a keying difference as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 
-Status + the remaining work live in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Finish line (don't restate it here; it re-goes-stale every slice). Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
+The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Open (don't restate it here; it re-goes-stale every slice).
 
 ## Reference points — consult on every dataset question
 

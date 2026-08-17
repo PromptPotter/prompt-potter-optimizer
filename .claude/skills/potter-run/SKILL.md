@@ -106,9 +106,8 @@ full reading pass — a log-tail grep is not a checkup, and a passive Monitor is
 every real bug so far was found by reading the run's own measurement files, not by a pattern hit.
 The interval is for *fanning out and researching*, not for idling.
 
-For `promptpotter-self`, the per-tick reading list is
-[`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § THE PER-CHECKUP READING LIST
-— read it there; it is the source of truth and is not restated here.
+For `promptpotter-self`, the per-tick reading list is the `potter-self` skill
+(§ The per-checkup reading list) — read it there; it is the source of truth and is not restated here.
 
 **Check node health before calling a round healthy.** Accuracy and critique are not enough. From
 `round_NNNN.json` (or `dashboard.json::rounds[-1]`): `health.grade` / `health.reasons` /
@@ -229,5 +228,5 @@ leaderboard picks.
 - [reference/onboarding.md](reference/onboarding.md) — new-dataset flow (web + CLI), Claude-simulated check-in, cold-machine bootstrap
 - [`promptpotter/application/optimization/CLAUDE.md`](../../../promptpotter/application/optimization/CLAUDE.md) — the L1/L2/L3 agent contracts: what each layer reads, writes and decides
 - [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order when a run is stuck; stop-reason recovery
-- [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) — running + supervising `promptpotter-self`
+- `/potter-self` — running + supervising `promptpotter-self`; [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) for what its numbers may claim
 - [`docs/concepts/the-loop.md`](../../../docs/concepts/the-loop.md) · [`docs/developer/self-healing-internals.md`](../../../docs/developer/self-healing-internals.md) · [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md)

@@ -1,12 +1,11 @@
 # Methods
 
-The statistical model and the two spend-control procedures that read it.
+Two pages, split by the question they answer — **which samples** vs **which candidate**.
 
 | Page | Covers |
 |------|--------|
-| [Verdict resolution](verdict-resolution.md) | The single statistical model behind the live adaptive queue + the persisted `hard_samples.json` ranking — the model both procedures below draw from, and the separability precondition it assumes. |
-| [Mid-round elimination (PoBB)](candidate-elimination.md) | Search-only-with-evidence: every variant runs the `elimination_n_min` floor before it may be cut at all; only those with statistical evidence of being the round's best get extended. Bayesian Posterior-of-Being-Best, joint-posterior MC. |
-| [Hard-sample leaderboard (Rasch + KG)](exploration-exploitation.md) | Between rounds, swap understood samples for high-information ones. Same posterior feeds the standalone hard-sample sorter. |
+| [Verdict resolution](verdict-resolution.md) | The Rasch θ/δ model everything here is expressed in (incl. the graded response and its `√φ` SE correction), the separability precondition it assumes, and the two sample-selection mechanisms: the between-round acquisition score that feeds `hard_samples.json`, and the static within-round order. |
+| [Candidate elimination (PoBB)](candidate-elimination.md) | Which candidate is winning, mid-round: the paired-sample fix that makes PoBB valid on a non-iid order, the θ stop rule, the five-mechanism ladder, and the on-disk shape replay reads. |
 
 Hand-tuning the optimizer's own optimizer prompts, and measuring whether an edit helped: [`../manual/06-going-deeper.md`](../manual/06-going-deeper.md) § Iterating on prompts manually.
 

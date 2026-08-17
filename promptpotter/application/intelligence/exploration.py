@@ -87,7 +87,7 @@ def adopted_level_trajectory(
     delta_scale: Ruler | None,
 ) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
     """Origin ability plus the per-round ability of the incumbent the search ADOPTED, in logits on
-    the locked ruler. Why the incumbent: ``concepts/optimizer-of-the-optimizer.md``."""
+    the locked ruler. Why the incumbent: ``specs/l4-outer-loop.md`` § The measurand."""
     if origin is None or not delta_scale:
         return None, []
     prev = origin
