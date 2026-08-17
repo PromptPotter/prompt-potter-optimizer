@@ -244,7 +244,7 @@ non-functional controls" sweep.
 
 | Placeholder | File | Future surface |
 |---|---|---|
-| Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx` | analytics search (C4-adjacent) |
+| Sidebar-footer search icon (disabled) | `webapp/components/shell/Sidebar.tsx` | analytics search (C4-adjacent) |
 | ChatPane attach + textarea + send (disabled) | `webapp/components/chat/ChatPane.tsx` | **C1** chat-first front door ([`chat-foundation.md`](chat-foundation.md)) |
 | ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | assistant tool-use — deferred past **C1** (asyncapi-first; [`chat-foundation.md`](chat-foundation.md) §7) |
 | AccountModal "Update profile" (disabled) | `webapp/components/account/AccountModal.tsx` | profile editing |

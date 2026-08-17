@@ -1,6 +1,7 @@
 import { AccessGate } from "@/components/onboarding/AccessGate";
 import { AppShell } from "@/components/shell/AppShell";
 import { ConsentGate } from "@/components/onboarding/ConsentGate";
+import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
 import { ErrorBoundary } from "@/components/ui";
 import { ViewMemoryProvider } from "@/lib/view-memory";
 import { WorkspaceProvider } from "@/lib/workspace";
@@ -18,12 +19,14 @@ export default function Home() {
         <ViewMemoryProvider>
           <AppShell />
         </ViewMemoryProvider>
-        {/* Two blocking overlays, mutually exclusive by construction. AccessGate
-            holds an account the operator has blocked; ConsentGate holds an entitled
-            one that hasn't accepted the current Terms. Both self-hide for anon
-            (read-only preview). */}
+        {/* Three overlays, all reading auth state and none of them chrome. The two
+            gates are blocking (a blocked account, an unaccepted Terms) and mutually
+            exclusive by construction; the sign-in prompt is dismissable and fires
+            from any Log in / Sign up chip, of which there are several. All three
+            self-hide for anon-with-nothing-to-say. */}
         <AccessGate />
         <ConsentGate />
+        <WelcomeLockoutModal />
       </WorkspaceProvider>
     </ErrorBoundary>
   );

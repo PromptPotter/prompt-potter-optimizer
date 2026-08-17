@@ -59,7 +59,8 @@ invariants:
                       (failed poll, offline, hidden tab) is presented as connection state (offline /
                       stale affordance) and MUST NOT impersonate a run phase or unmount run controls
                       while the last-known server phase is in-flight. Every "running" surface — the
-                      topbar jobs dock, the RemoteControl, workspace liveCycles — reads this one set AND
+                      sidebar-edge jobs dock (and its phone stand-in, the app bar's back-arrow
+                      dot), the RemoteControl, workspace liveCycles — reads this one set AND
                       one shared ordering (executing before suspended). A surface that RENDERS the
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
                       testing `=== "running"` renders half the vocabulary as nothing, which is how
@@ -96,32 +97,97 @@ invariants:
 
 ## Surfaces
 
-### Topbar — chrome, every tab
+### Mobile app bar — chrome, ≤bp-md only
+
+**There is no top bar on a desktop.** The sidebar is the only primary nav surface
+above `--bp-md`; below it the phone gets two full-screen screens, one at a time,
+and this bar is the CAMPAIGN screen's chrome. The LIST screen is the sidebar at
+full width — it carries its own brand, CTA, filter and footer, so it has no bar
+of its own and this surface renders nothing there.
 
 ```yaml
-surface: topbar
+surface: mobile_appbar   # components/shell/MobileAppBar.tsx; renders iff !listScreen
 controls:
-  - id: search.analytics
-    do: Disabled until analytics ships; label states "coming soon".
+  - id: back
+    do: Leave the campaign screen for the LIST screen. Touches nothing else — the viewed
+        address, the tab and every pane's state survive, so re-entering returns to what
+        was open. Carries the live-run DOT: an accent mark whenever liveCycles is
+        non-empty, off the SAME set the desktop jobs dock reads (I6), with the count in
+        its aria-label so the state is never colour alone. It replaces the dock on a
+        phone rather than adding a second one.
     status: ok
-  - id: tabs.{chat,dashboard,verify,files}
-    do: Switch the main pane. Selected tab is the only [selected] one.
+  - id: title
+    do: The viewed campaign's display label (falling back to its dataset name, then the
+        brand). Truncates; never pushes the trailing controls off a 375px screen.
+    status: ok
+  - id: view_segment
+    do: Chat | Dashboard, the two primary views (lib/view-tab.ts::PRIMARY_TABS), as the
+        shared SegmentedControl. While a DEMOTED view is active it renders as a third
+        segment, so "exactly one is always on" stays true and the active view is never
+        unrepresented; it disappears again on return to a primary view.
+    status: ok
+  - id: overflow
+    do: The campaign ⋯ — the SAME CampaignMenu the sidebar rows use (variant=standalone,
+        so it takes focus, unlike the in-row copy), with Verify / Files folded in above
+        its lifecycle verbs. One campaign-verb menu in the app, never two that drift.
+        Absent when no campaign is resolved.
+    status: ok
+  - id: new_campaign
+    do: Open the New campaign modal. Absent when anon.
+    status: ok
+  - id: auth.{login,signup}
+    do: Replace ⋯ + new when anon (I4) — the Chat pane behind this bar IS the public
+        landing surface, so the entry chips must not be buried in a menu.
+    status: ok
+```
+
+### Sidebar chrome — the desktop's only nav surface
+
+```yaml
+surface: sidebar_chrome   # workspace-level controls, not per-campaign; see also surface: sidebar
+controls:
+  - id: view_nav.{chat,dashboard}
+    do: Switch the main pane. A vertical nav, not a tab strip — the active row carries
+        aria-current="page" (there is no role=tabpanel on any pane for a tablist to name).
+    status: ok
+  - id: view_nav.more
+    do: A muted disclosure holding Verify + Files (lib/view-tab.ts::MORE_TABS) — real but
+        rarely opened, so rationed for attention rather than hidden. Persists to
+        localStorage promptpotter.sidebar.more. The RENDERED state is derived: a view
+        inside the group forces it open, so the active view can never be invisible, and
+        returning to a primary view restores the operator's own preference unchanged.
+        While a demoted view is active the toggle is DISABLED and says which one — a
+        collapse that would hide the pane in front of you is not offered (I3).
+    status: ok
+  - id: view_nav.collapsed
+    do: The 36px rail keeps ALL FOUR views as icons and drops the disclosure. The
+        hierarchy rations horizontal TEXT and a rail has none; more importantly this is
+        now the only way to switch views, so hiding it would strand a collapsed sidebar.
+    status: ok
+  - id: search.analytics
+    do: Disabled until analytics ships; label states "coming soon". Sidebar footer.
     status: ok
   - id: theme.toggle
     do: Swap light<->dark register; persist to localStorage promptpotter.theme; restore on load.
     status: ok
   - id: auth.{login,signup}
-    do: Open the auth modal. Rendered only when anon (I4).
+    do: Open the auth modal. Rendered only when anon (I4). The modal itself is mounted ONCE
+        (app/page.tsx) and every trigger opens it through auth-context::openAuthPrompt —
+        including the OIDC ?auth_error= bounce-back, which is a callback result and so
+        belongs with identity rather than with whatever chrome happens to hold a chip.
     status: ok
   - id: jobs.dock
     do: The OS-style dock of open units — Potter glyph when one unit is in flight, glyph + count
-        badge when several; ABSENT when idle (absence IS the "all quiet" signal). Lists liveCycles
+        badge when several; ABSENT when idle (absence IS the "all quiet" signal). It FLOATS on
+        the sidebar's outer edge, straddling the hairline and tracking --sidebar-width, so it
+        rides a resize drag and the collapsed rail alike; it is mounted outside the sidebar
+        because that element clips its overflow and the popover is not portaled. Lists liveCycles
         (I6 membership + ordering). Ordered by WHAT NEEDS YOU, not by what is busy —
         gate > running > paused (lib/run-phase.ts::dockPriority): a gated unit makes no progress
         until the operator decides, so it leads. Both branches carry the phase class, so a held
         gate is distinguishable from a healthy run in the single-unit case too. Clicking an entry
         jumps the view to that cycle's dashboard. Reads server run_phase only — a client connection
-        blip never changes the count.
+        blip never changes the count. Desktop only; the phone's equivalent is mobile_appbar::back.
     status: ok
   - id: remote_bar
     do: Play/pause/skip remote for the VIEWED cycle; mounted iff its server run_phase is in-flight
@@ -222,8 +288,8 @@ controls:
     status: ok
   - id: resize
     do: Drag the right-edge handle (or ←/→ when focused) to set sidebar width;
-        clamped [160,480], persisted, default 200. Hidden when collapsed or in
-        the mobile drawer.
+        clamped [160,480], persisted, default 200. Hidden when collapsed, and on a
+        phone, where the sidebar is a whole screen with no edge to drag.
     status: ok
   - id: filter
     do: Header sliders button opens a popover with the Active/Archived segment +
@@ -289,11 +355,17 @@ controls:
     do: Call the logout endpoint, clear session, return to /login. Rendered ONLY when authed (I4).
     status: ok   # the same verb also lives in Account → Security (see surface: account)
   - id: account_button
-    do: Topbar button (aria-label "Open account") opening AccountModal. Rendered ONLY when
-        authed (I4) — see surface: account.
+    do: Sidebar-footer button (aria-label "Open account") opening AccountModal. Rendered ONLY
+        when authed (I4) — see surface: account.
     status: ok
-  - id: campaign_menu_toggle
-    do: Mobile-only (aria-label "Open campaign menu") — opens the sidebar drawer.
+  - id: mobile_list_screen
+    do: Below --bp-md the sidebar IS a screen, at full viewport width, reached and left by
+        mobile_appbar::back. There is no drawer, no backdrop and no slide-over: one screen
+        shows at a time, so nothing has to be dimmed. It keeps its own brand, CTA, filter
+        and footer there — which is why it needs no bar of its own — and it drops the view
+        nav (the app bar's segments own that axis on a phone) and the collapse chevron
+        (meaningless when the sidebar is either the whole screen or absent). A sidebar
+        collapsed on a desktop must not become an empty list screen.
     status: ok
 ```
 
@@ -412,14 +484,14 @@ controls:
 
 ### Account surface
 
-`components/account/` — opened from the topbar account button. Holds the app's two
+`components/account/` — opened from the sidebar-footer account button. Holds the app's two
 non-campaign mutations, so it is measured against I3/I4 like any other surface.
 
 ```yaml
 surface: account
 controls:
   - id: modal
-    do: AccountModal opens from topbar (aria-label "Open account"); tabbed —
+    do: AccountModal opens from the sidebar footer (aria-label "Open account"); tabbed —
         Profile / Security / Preferences / Activity / About / Storage. Traps focus,
         restores on close, closes on ESC. Rendered ONLY when authed (I4).
     status: ok

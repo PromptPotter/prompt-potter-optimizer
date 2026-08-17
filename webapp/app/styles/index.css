@@ -16,7 +16,6 @@
 
 /* ── Domains (authored cascade order) ───────────────────────── */
 @import "./domains/shell.css";
-@import "./domains/topbar.css";
 @import "./domains/dashboard.css";
 @import "./domains/cycle-picker.css";
 @import "./domains/lineage.css";

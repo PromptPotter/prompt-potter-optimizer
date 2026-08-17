@@ -7,9 +7,13 @@ import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
+import type { Tab } from "@/lib/view-tab";
+import { applyTheme, readStoredTheme } from "@/lib/theme";
+import { AccountModal } from "@/components/account/AccountModal";
 import { buildForest, nodeKey } from "./sidebar/grouping";
 import type { TreeCtx } from "./sidebar/ForestRows";
 import { SidebarContent } from "./SidebarContent";
+import { ViewNav } from "./sidebar/ViewNav";
 
 interface Props {
   // Selection carries the whole CyclePath — a cycle_id is ambiguous across
@@ -19,6 +23,12 @@ interface Props {
   onNewCycle: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  // The per-campaign view axis. It lives here rather than in a bar of its own:
+  // this is the app's only primary nav surface on a desktop.
+  tab: Tab;
+  onSelectTab: (tab: Tab) => void;
+  moreOpen: boolean;
+  onToggleMore: () => void;
 }
 
 // The sidebar is a FOREST, and the shape repeats at every depth:
@@ -44,7 +54,22 @@ interface Props {
 // Only the tenant's own store is polled here; a course's subtree fetches on expand
 // via `useLineageTree` (one keyed store — a collapsed row subscribes to nothing).
 
-export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse }: Props) {
+// The theme switch reads the stored value at click time rather than holding state:
+// `applyTheme` writes the attribute + localStorage and broadcasts to the canvases.
+function flipTheme() {
+  applyTheme(readStoredTheme() === "light" ? "dark" : "light");
+}
+
+export function Sidebar({
+  onSelectPath,
+  onNewCycle,
+  collapsed,
+  onToggleCollapse,
+  tab,
+  onSelectTab,
+  moreOpen,
+  onToggleMore,
+}: Props) {
   // Cycle list + campaign registry + active pointer + current selection all
   // come from the shared workspace context — one poll for the whole app.
   const {
@@ -65,11 +90,13 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
   // Dataset filter — null = all datasets. Not persisted; resets per visit.
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
-  // Auth drives the footer (Log out is authed-only — anon sees the Topbar's
-  // Log in / Sign up instead; frontend-surface-contract.md § I4) and the
-  // campaign-list resting state (anon → sign-in prompt, not perpetual loading).
-  const { status } = useAuth();
+  // Auth drives the footer — the two control sets are mutually exclusive
+  // (frontend-surface-contract.md § I4): authed gets the account button + Log
+  // out, anon gets Log in / Sign up. It also drives the campaign-list resting
+  // state (anon → sign-in prompt, not perpetual loading).
+  const { status, openAuthPrompt } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const handleSignOut = useCallback(async () => {
     setSigningOut(true);
     try {
@@ -183,6 +210,13 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
           + New campaign
         </button>
       </div>
+      <ViewNav
+        tab={tab}
+        onSelect={onSelectTab}
+        collapsed={collapsed}
+        moreOpen={moreOpen}
+        onToggleMore={onToggleMore}
+      />
       <SidebarContent
         status={status}
         loaded={loaded}
@@ -195,6 +229,68 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
         ctx={ctx}
       />
       <div className="sidebar-footer">
+        <div className="sidebar-footer-chrome">
+          {/* Search — a disabled placeholder (analytics, M13+). It stays in the
+              DOM and stays honestly inert; see code-debt-cleanup.md § placeholders. */}
+          <button
+            type="button"
+            className="sidebar-search"
+            aria-label="Search analytics (coming soon)"
+            title="Search analytics"
+            disabled
+          >
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+              <circle cx="8" cy="8" r="5" />
+              <line x1="12" y1="12" x2="15" y2="15" />
+            </svg>
+          </button>
+          <button
+            className="theme-toggle"
+            type="button"
+            onClick={flipTheme}
+            title="Toggle bright / dark theme"
+            aria-label="Toggle theme"
+          >
+            <svg className="sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+              <circle cx="8" cy="8" r="3" />
+              <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M3.05 12.95l1.4-1.4M11.55 4.45l1.4-1.4" />
+            </svg>
+            <svg className="moon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M6 1.5A6.5 6.5 0 1 0 14.5 10 5 5 0 0 1 6 1.5z" />
+            </svg>
+          </button>
+          {status === "authed" ? (
+            <button
+              type="button"
+              className="account-trigger"
+              aria-label="Open account"
+              onClick={() => setAccountOpen(true)}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                <circle cx="8" cy="5.5" r="2.5" />
+                <path d="M2.5 14c.8-2.5 3-4 5.5-4s4.7 1.5 5.5 4" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+        {status === "unauthed" && (
+          <div className="sidebar-footer-auth">
+            <button
+              type="button"
+              className="auth-chip auth-chip-gold"
+              onClick={openAuthPrompt}
+            >
+              Log in
+            </button>
+            <button
+              type="button"
+              className="auth-chip auth-chip-rust"
+              onClick={openAuthPrompt}
+            >
+              Sign up for free
+            </button>
+          </div>
+        )}
         <a
           className="sidebar-footer-item"
           href={BRAND.supportUrl}
@@ -214,6 +310,7 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
           </button>
         )}
       </div>
+      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
     </nav>
   );
 }

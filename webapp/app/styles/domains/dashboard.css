@@ -13,21 +13,20 @@
    `transform` desync mid-animation and the stripe wobbles. Snap is
    exact in a single frame. */
 .dash-spine-narrow{max-width:var(--dash-narrow-max);transform:translateX(calc(var(--sidebar-width, 0px) / -2))}
-/* Sweep-Group-B: tighten content padding + drop the sidebar-offset
-   transform when the sidebar is a fixed drawer (≤bp-md). The spine
-   centers itself by translating left half the sidebar width — but in
-   drawer mode the sidebar is out of flow, so that offset just pushes
-   content off-screen left. Zero it. Source-order matters: this block
-   sits AFTER the unconditional transform so the cascade resolves
-   correctly at equal specificity. */
+/* Tighten content padding + drop the sidebar-offset transform below --bp-md.
+   The spine centers itself by translating left half the sidebar width — but on a
+   phone the sidebar is the OTHER screen (`display:none` while the dashboard is
+   visible), so that offset just pushes content off-screen left. Zero it.
+   Source-order matters: this block sits AFTER the unconditional transform so the
+   cascade resolves correctly at equal specificity. */
 @media (max-width:880px){
   .content{padding:var(--space-12)}
   .dash-spine-narrow{transform:none}
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 
-/* CriticalAlertBanner — the loud, can't-miss failure surface. Sticky bar
-   pinned under the Topbar on every tab, above all content. `critical` =
+/* CriticalAlertBanner — the loud, can't-miss failure surface. Sticky bar at the
+   top of the main column on every tab, above all content. `critical` =
    blocking (server gone / crash) in danger tone + a weak blink; `warn` =
    producer went silent in warn tone, no blink. The blink is decoration —
    colour + icon + text carry the state, and reduced-motion neutralises it. */

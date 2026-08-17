@@ -2,31 +2,15 @@
    Chat tab doubles as the public landing surface at
    app.promptpotter.com. Every desktop rule above was written for an
    operator viewport (≥980px). This block adapts the chat-tab tree
-   (Topbar + ChatPane + WelcomeLockoutModal) for a 375px phone.
+   (ChatPane + WelcomeLockoutModal) for a 375px phone. The shell's own
+   two-screen layout is in domains/shell.css at ≤bp-md, not here.
    The other tabs are no longer excepted: they carry no phone fork at all,
    because the fluid --space-* / --text-* scales contract them from
    foundation/tokens.css and their fixed grid tracks wrap on their own. */
 @media (max-width:640px){
-  /* The shell pins min-height:700px desktop-wide; on mobile the
-     viewport height itself bounds the layout. Drop the floor so a
-     phone in landscape (~375h) doesn't get a vertical scrollbar
-     forced by the shell itself. */
-  .shell{min-height:0}
-
-  /* Topbar — tighten padding + let the tabs scroll. The search is a
-     single magnifying-glass placeholder at all widths now (topbar.css),
-     so no input collapse/expand handling is needed here. */
-  .topbar{padding:0 var(--space-8);gap:var(--space-6)}
-  .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-  .tabs::-webkit-scrollbar{display:none}
-  .tab{padding:0 var(--space-10);font-size:var(--text-base);height:52px}
-
-  /* Account/auth chips — keep them touch-sized but compact. Auth
-     chips at 30h are just under the 44px touch target so bump padding
-     to compensate. The standalone theme toggle drops off the phone
-     navbar so the account button is the single user control; theme
-     moves into Account → Preferences (PreferencesTab). */
-  .theme-toggle{display:none}
+  /* Auth chips — keep them touch-sized but compact. At 30h they sit just
+     under the 44px touch target, so bump the padding to compensate. Both
+     mount points (the sidebar footer, the phone app bar) share this. */
   .auth-chip{height:32px;padding:0 var(--space-12);font-size:var(--text-sm)}
 
   /* Chat job bar — only rendered for authed-with-cycle. The head already
@@ -116,35 +100,6 @@
      stalest numbers); Best + Budget are the headline. Only fires
      for the authed-with-cycle code path where the bar is rendered. */
   .chat-job-toggle .chip-row .chip:nth-child(n+3){display:none}
-}
-
-/* ── Sidebar mobile drawer (Sweep-Group-A) ─────────────────────────
-   Below --bp-md the 200px fixed-flex sidebar becomes an overlay drawer
-   triggered by the topbar hamburger. The sidebar leaves the flex flow
-   (position:fixed) so main reclaims the full width; the backdrop sits
-   between sidebar and main z-axis-wise and catches a tap to close. */
-.sidebar-backdrop{display:none}
-@media (max-width:880px){
-  .shell > .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(280px,86vw);max-width:280px;transform:translateX(-100%);transition:transform 220ms ease;z-index:200;box-shadow:0 0 24px rgba(0,0,0,0.4);padding-top:max(8px,var(--safe-top))}
-  .shell.sidebar-mobile-open > .sidebar{transform:translateX(0)}
-  .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:199;opacity:0;pointer-events:none;transition:opacity 180ms ease}
-  .shell.sidebar-mobile-open > .sidebar-backdrop{opacity:1;pointer-events:auto}
-  /* The on-sidebar collapse toggle is desktop-only — operator hides the
-     full sidebar from the topbar hamburger in mobile mode instead. A
-     `sidebar-collapsed` state persisted from desktop is meaningless in
-     drawer mode: the drawer is full-width or off-screen, never the 36px
-     rail. Neutralise it so the drawer always renders its contents —
-     otherwise a desktop-collapsed operator opens an empty drawer with no
-     New-campaign CTA. Displays match each element's base rule. */
-  .sidebar > .sidebar-toggle{display:none}
-  .shell.sidebar-collapsed .sidebar > .brand,
-  .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:block}
-  .shell.sidebar-collapsed .sidebar > .sidebar-primary,
-  .shell.sidebar-collapsed .sidebar > .unit-library{display:flex}
-}
-@media (max-width:880px) and (prefers-reduced-motion:reduce){
-  .shell > .sidebar,
-  .sidebar-backdrop{transition:none}
 }
 
 /* ── Touch hover-affordance reveal (Sweep-Group-B/C) ──────────────

@@ -2,10 +2,8 @@
 import { useCallback, useRef, type PointerEvent, type KeyboardEvent } from "react";
 
 // Drag handle straddling the sidebar's right edge. Pointer-drag (or ←/→ when
-// focused) rewrites the persisted --sidebar-width; AppShell clamps + stores it.
-// Rendered only while the sidebar is expanded and above the mobile-drawer
-// breakpoint (CSS hides it ≤880px), so it never fights the collapsed rail or
-// the overlay drawer.
+// focused) rewrites the persisted --sidebar-width; AppShell clamps + stores it and
+// mounts this only while the sidebar is expanded, so it never fights the rail.
 
 interface Props {
   width: number;

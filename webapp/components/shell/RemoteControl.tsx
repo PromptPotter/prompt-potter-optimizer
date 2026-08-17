@@ -39,7 +39,7 @@ const SKIP_ICON = (
 
 interface Props {
   // Called after the operator follows the active run, so the shell can switch to
-  // the Dashboard view — same contract as RunningJobsButton's `onPicked`.
+  // the Dashboard view — same contract as the JobsDock's `onPicked`.
   onFollowed?: () => void;
 }
 
