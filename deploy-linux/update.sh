@@ -82,6 +82,12 @@ fi
 # migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
 # leaves that cycle's ledger untouched and picks it up on the next one.
 say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
+# A configured DATA_DIR whose tree is absent is a misconfiguration, not an empty install — and
+# `restamp` answers that with "nothing to re-stamp" and exit 0, so the deploy prints success over
+# data it never opened. Reporting the root is what catches a wrong one; the step below cannot.
+if [[ -n "$DATA_DIR" && ! -d "$DATA_DIR/projects" ]]; then
+  bad "DATA_DIR=$DATA_DIR holds no projects/ — the re-stamp below will no-op; check deploy.config"
+fi
 # PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
 # without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
 # root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
