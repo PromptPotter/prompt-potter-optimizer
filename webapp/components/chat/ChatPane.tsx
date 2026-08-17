@@ -7,23 +7,19 @@ import { useWorkspace } from "@/lib/workspace";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
-import { TERMS } from "@/lib/terms";
 import { isInFlight } from "@/lib/run-phase";
-import { headlineStats, isSelfOptimization, readSpend, runSummary } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
+import { isSelfOptimization, runSummary } from "@/lib/derivations";
 import { Switch } from "@/components/ui";
-import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
-import { CyclePicker } from "@/components/shell/CyclePicker";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
-import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
 import { deriveDecision } from "@/lib/chat/decision";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard } from "@/components/chat/RunCard";
+import { RunMasthead } from "@/components/shell/RunMasthead";
 
 // Fireflies orbiting the wand frame. Offset, phase and size are all that differ
 // between them, so they are data rather than eight near-identical CSS rules.
@@ -40,8 +36,6 @@ const SPARKLES: SparkleStyle[] = [
 ];
 
 interface Props {
-  datasetTitle: string | null;
-  cycleStartedAt: string | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetMeasuredCount: number;
@@ -69,32 +63,11 @@ interface Props {
   onMinted: OnMinted;
 }
 
-// ETA to budget — burn rate = used / cycle_age, ETA = remaining_budget / burn.
-// A plain module-level helper (not a component/hook) so the wallclock read is
-// allowed; returns "—" until spend is wired or when budget is uncapped / spent.
-function etaToBudget(
-  usedUsd: number | null,
-  budgetUsd: number | null,
-  cycleStartedAt: string | null,
-): string {
-  if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
-  const startedMs = Date.parse(cycleStartedAt);
-  if (!Number.isFinite(startedMs)) return "—";
-  const ageSec = (Date.now() - startedMs) / 1000;
-  if (ageSec <= 0 || usedUsd <= 0) return "—";
-  if (usedUsd >= budgetUsd) return "spent";
-  const burn = usedUsd / ageSec; // $/sec
-  const remainingSec = (budgetUsd - usedUsd) / burn;
-  return fmtDuration(remainingSec);
-}
-
-// The Chat surface. The job-bar + pipeline hero + settings card are display-only
-// (control plane lands in M12). The live interactive path is dataset ingest,
-// rendered by the shared `IngestConversation` (same surface as the "New
-// campaign" modal): drop/pick → ask context if missing → one check-in → Start.
+// The Chat surface. The pipeline hero + settings card are display-only. The live
+// interactive path is dataset ingest, rendered by the shared `IngestConversation` (same
+// surface as the "New campaign" modal): drop/pick → ask context if missing → one check-in
+// → Start. Run status and control live on the shell's RemoteControl, not here.
 export function ChatPane({
-  datasetTitle,
-  cycleStartedAt,
   datasetName,
   datasetItems,
   datasetMeasuredCount,
@@ -112,7 +85,7 @@ export function ChatPane({
   newCampaignTick,
   onMinted,
 }: Props) {
-  // Self-sourced live state + identity for the job bar + spend chips.
+  // Self-sourced live state — the thread's freeze-on-stop edge and the live feed.
   const { dash, isLive } = useDashboard();
   // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
   // hop the dashboard shows) — drilling into an L4 inner campaign tails that inner
@@ -120,15 +93,13 @@ export function ChatPane({
   // is derived from `dash` (already leaf), so firing it must target the leaf too.
   // Root identity (session, ingest compose) stays on the root exports. Both hops
   // are derived once in the workspace context.
-  const { viewedPath, cycleId, leafCampaignId, leafCycleId, sessionId } =
-    useWorkspace();
-  const [jobOpen, setJobOpen] = useState(false);
+  const { viewedPath, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
   // Compose mode — entered by the shell's "New campaign" button (newCampaignTick).
-  // While composing, the bound cycle's live feed + job bar are suppressed so the
-  // thread shows its empty first-run state; minting a campaign clears it.
+  // While composing, the bound cycle's live feed is suppressed so the thread shows
+  // its empty first-run state; minting a campaign clears it.
   const [composing, setComposing] = useState(false);
 
   // The dataset-ingest conversation, run inline on the chat tab. Same state
@@ -218,113 +189,13 @@ export function ChatPane({
     }
   }, [cycleId]);
 
-  // Headline KPIs + spend — both read through the shared derivations so the
-  // chat job-bar can't disagree with the console telemetry strip.
-  const { best, abilityDelta } = headlineStats(dash);
-  const bestPctOnly = fmtPct0(best);
-  // Lead the job-bar with the running winner's LIFT over origin — the meaningful
-  // number for a live run; absolute best rides as secondary context (the log keeps
-  // absolute). `abilityDelta` is SERVED and is in LOGITS, so it is formatted as θ and
-  // never as a percent — the two are different bases, not different renderings.
-  const deltaTheta =
-    abilityDelta != null ? `θ ${abilityDelta >= 0 ? "+" : ""}${abilityDelta.toFixed(2)}` : "—";
-
-  const {
-    backendUsd,
-    loopUsd,
-    usedUsd,
-    budgetUsd,
-    budgetTokens,
-    rateKnown,
-    backendTokens,
-    loopTokens,
-    totalTokens,
-  } = readSpend(dash);
-  // Lift per dollar, on the same LOGIT basis as the chip above — "pp/$" named percentage
-  // points and would have quietly relabelled logits as points.
-  const deltaPerSpend =
-    abilityDelta != null && usedUsd != null && usedUsd > 0 ? abilityDelta / usedUsd : null;
-  const effChip = deltaPerSpend != null ? `${deltaPerSpend.toFixed(2)} θ/$` : "—";
-
-  // ETA to budget — pure client-side derivation. The wallclock read lives in
-  // the module-level `etaToBudget` helper (not the component body) so React's
-  // purity rule stays satisfied; the re-render cadence is driven by dash polling
-  // so the value never goes stale visibly.
-  const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
-
   return (
     <div className="content chat-content" id="content-chat">
-      {/* One anchor on top of the chat: the pipeline hero, with the job-bar
-          (cycle picker + KPI chips + status/spend dropdown) folded in as its
-          header row — not a separate strip stacked above it. */}
+      <RunMasthead />
+      {/* One anchor on top of the chat: the pipeline hero. The job-bar that used to sit in
+          its header row is gone — cycle picker, KPI chips and the status/spend panel are all
+          on the shell's RemoteControl now, which renders on every tab rather than this one. */}
       <div className="wf-hero">
-      {cycleId && !composing ? (
-      <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
-        <div className="chat-job-head">
-          <svg className="grid" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <rect x="1" y="1" width="5" height="5" rx="1" />
-            <rect x="8" y="1" width="5" height="5" rx="1" opacity=".55" />
-            <rect x="1" y="8" width="5" height="5" rx="1" opacity=".55" />
-            <rect x="8" y="8" width="5" height="5" rx="1" opacity=".35" />
-          </svg>
-          <CyclePicker variant="standalone" />
-          <button
-            type="button"
-            className="chat-job-toggle"
-            aria-expanded={jobOpen}
-            onClick={() => setJobOpen((v) => !v)}
-            aria-label="Job status and configuration"
-          >
-            <span className="chip-row">
-              <span className="chip" title={TERMS.newjob_bar_best}>
-                <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
-                {best != null && <span className="chip-origin"> · best {bestPctOnly}</span>}
-              </span>
-              <span className="chip" title={TERMS.newjob_bar_eta}>
-                <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
-              </span>
-              <span className="chip" title={TERMS.newjob_bar_eff}>
-                <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
-              </span>
-            </span>
-            <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m3 4.5 3 3 3-3" />
-            </svg>
-          </button>
-        </div>
-        {jobOpen && (
-          <div className="chat-job-dropdown" role="region" aria-label="Job status and configuration">
-            <div className="job-section">
-              <div className="section-title">Identity</div>
-              <div className="row"><span className="lbl">Unit</span><span className="val">{fmtText(cycleId)}</span></div>
-              <div className="row"><span className="lbl">Session</span><span className="val">{fmtText(sessionId)}</span></div>
-              <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(datasetTitle)}</span></div>
-              <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
-              <div className="section-title" style={{ marginTop: 12 }}>Spend</div>
-              <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}</span></div>
-              <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}</span></div>
-              <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
-              <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
-              <div className="row"><span className="lbl">Spend cap</span><span className="val">{budgetUsd != null ? fmtUsd(budgetUsd) : "Uncapped"}</span></div>
-              <div className="row"><span className="lbl">Token cap</span><span className="val">{budgetTokens != null ? fmtTokens(budgetTokens) : "Uncapped"}</span></div>
-            </div>
-            <div className="job-whatif">
-              <CandidatesCard />
-            </div>
-            <div className="job-section" title={TERMS.newjob_bar_adjust}>
-              <div className="section-title">Finishing criteria</div>
-              <SpendBudgetControl
-                currentBudgetUsd={budgetUsd}
-                currentBudgetTokens={budgetTokens}
-                usedUsd={usedUsd}
-                usedTokens={totalTokens}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-      ) : null}
-
         {/* One frame over the nesting this campaign sits in — the corner buttons are the
             zoom axis and belong to the stack, which is the only thing that knows how many
             levels there are to zoom to. Ingest keeps its node list always-on: there you
@@ -449,13 +320,12 @@ export function ChatPane({
                   </svg>
                 </span>
                 <div className="row-body">
-                  <div className="name">Optimize prompt while using<span className="soon-tag">Soon</span></div>
+                  <div className="name">Optimize prompt while using</div>
                   <div className="desc">Quietly evolves parameters across your project</div>
                 </div>
               </div>
-              {/* Locked until a backend wires it, like its three neighbours. It read as
-                  operable and toggled nothing — the one affordance-honesty (I3) breach. */}
-              <Switch checked={false} locked label="Optimize prompt while using" />
+              {/* No switch and no SOON tag: this is what the engine DOES, not a feature to
+                  turn on, so a control here would offer a choice the product does not have. */}
               {SPARKLES.map((style, i) => (
                 <span key={i} className="sparkle" style={style} />
               ))}

@@ -3,8 +3,7 @@
    surface, and the phone's app bar (components/shell/MobileAppBar) is the
    campaign screen's chrome, revealed by the ≤bp-md block at the foot of this
    file.
-   --sidebar-width drives both the sidebar's flex slot and the
-   viewport-centering compensation on .dash-spine-narrow below.
+   --sidebar-width drives the sidebar's flex slot.
    Toggle the .sidebar-collapsed class on .shell to switch widths. */
 .shell{--sidebar-width:200px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
 /* The right-hand column: the app bar (phone only), the alert banner, the pane. */

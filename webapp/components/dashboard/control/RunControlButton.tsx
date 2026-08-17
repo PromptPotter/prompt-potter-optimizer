@@ -29,7 +29,7 @@ const PAUSE_ICON = (
 // affordance is the Scoring inspector's "Endorse / Steer & fork" — select a
 // candidate, then endorse-as-is or edit-and-steer. No blind "fork from the
 // current leader" parallel write path.
-export function RunControlButton() {
+export function RunControlButton({ disabledReason }: { disabledReason?: string }) {
   // `dash.run_phase` (declared by the runner, projected to dashboard.json) is
   // the run-state for the VIEWED cycle — no separate /runstate poll.
   const { dash } = useDashboard();
@@ -56,6 +56,26 @@ export function RunControlButton() {
   }
 
   if (!campaignId || !cycleId) return null;
+
+  // Inert form — the button mirrors the leaf's phase but fires nothing, and the
+  // tooltip carries why (I3: disabled with the reason stated, never re-targeted).
+  // Checked before the phase branches: an inner run's gate or check-in copy would
+  // name the wrong hop's surfaces.
+  if (disabledReason) {
+    const mirroring = action === "pause";
+    return (
+      <div className="run-ctl" role="group" aria-label="Run control" title={disabledReason}>
+        <button
+          type="button"
+          className={`run-ctl-primary ${mirroring ? "is-pause" : "is-play"}`}
+          disabled
+          aria-label={`Run control unavailable — ${disabledReason}`}
+        >
+          {mirroring ? PAUSE_ICON : PLAY_ICON}
+        </button>
+      </div>
+    );
+  }
 
   // Nothing this control can do from here — say which state it is, rather than
   // offering a button that misfires. At the origin gate the run is alive but

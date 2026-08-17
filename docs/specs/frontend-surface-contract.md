@@ -190,11 +190,23 @@ controls:
         blip never changes the count. Desktop only; the phone's equivalent is mobile_appbar::back.
     status: ok
   - id: remote_bar
-    do: Play/pause/skip remote for the VIEWED cycle; mounted iff its server run_phase is in-flight
-        (I6). Client connection loss dims/labels it stale — it never unmounts while the last-known
-        server phase is in-flight. While the viewed path is DEEPER than one hop the controls are
-        inert and say why: the command highway addresses one CycleHop with no `descend`, so an
-        inner run cannot be commanded and firing anyway hit the outer cycle instead (I3).
+    do: The ONE surface answering "what is this run doing and costing" — play/pause, skip,
+        look-ahead, round/spend, babysat tag, a Lift / ETA / Δ-per-$ readout, an upward-opening
+        panel carrying identity, spend and the finishing criteria, and an inner/outer drill
+        toggle (the hop INTO the running inner cycle while a self-optimizing outer is viewed,
+        addressed by path off the served tree; the hop back out while an inner is viewed).
+        Unit identity and selection live in the run masthead's picker — ONE header shared by
+        the Chat and Dashboard tabs — NOT here: the strip carries no second copy of the label. Mounted for the VIEWED cycle whenever
+        its server run_phase exists and is not `checkin` (I6) — including `terminal` and
+        `detached`, where run-phase.ts maps the action to "start" and this is
+        RunControlButton's only mount, so gating on in-flight left both arms unreachable and a
+        budget-halted cycle with no way to restart. Those are also the states where the readout
+        is the answer rather than decoration, so ETA yields its slot to the stop reason there.
+        Client connection loss dims/labels it stale — it never unmounts while a last-known server
+        phase stands. While the viewed path is DEEPER than one hop the controls are inert with
+        the reason as their tooltip, never re-targeted: the command highway addresses one
+        CycleHop with no `descend`, so an inner run cannot be commanded and firing anyway hit
+        the outer cycle instead (I3).
     status: ok
   - id: remote_sample_lookahead_arm
     do: Arms sample look-ahead for the next round of scoring (2 samples in flight, ~half the

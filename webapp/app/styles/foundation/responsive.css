@@ -70,14 +70,11 @@
   .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
 
   /* Settings card — wand-row has `margin:0 -12px` for its overhang
-     glow; on a narrow card that pushes content past the panel edge.
-     Tighten + let the desc line wrap instead of clipping. */
+     glow; on a narrow card that pushes content past the panel edge. */
   .chat-settings-card{padding:var(--space-14)}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
   .toggle-row .name{font-size:var(--text-base)}
   .toggle-row.wand-row{margin:0 -6px;padding:var(--space-10)}
-  .toggle-row.wand-row .name{white-space:normal}
-  .toggle-row.wand-row .desc{max-width:none}
 
   /* Welcome lockout modal — now class-driven (no inline overrides),
      so !important is unnecessary. Drop overlay padding (24px eats
