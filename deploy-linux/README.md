@@ -122,6 +122,8 @@ curl -I https://$PUBLIC_HOSTNAME/api/v1/health
 deps, rebuilds the webapp, restarts the app — and does the same for the backend
 when `BACKEND_DIR` is set in `deploy.config`. Re-runnable; never stalls on a
 diverged box (tracked files are force-matched to origin; `.env`/runtime survive).
+The sync can replace the script mid-run, so it re-execs the new copy once and says
+so — a fix to `update.sh` itself takes effect on the deploy that ships it.
 It needs `deploy.config` (same one from setup) and aborts with the fix if it's
 missing — without it there's no real `INSTALL_DIR` to act on.
 

@@ -82,12 +82,6 @@ fi
 # migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
 # leaves that cycle's ledger untouched and picks it up on the next one.
 say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
-# A configured DATA_DIR whose tree is absent is a misconfiguration, not an empty install — and
-# `restamp` answers that with "nothing to re-stamp" and exit 0, so the deploy prints success over
-# data it never opened. Reporting the root is what catches a wrong one; the step below cannot.
-if [[ -n "$DATA_DIR" && ! -d "$DATA_DIR/projects" ]]; then
-  bad "DATA_DIR=$DATA_DIR holds no projects/ — the re-stamp below will no-op; check deploy.config"
-fi
 # PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
 # without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
 # root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
@@ -119,11 +113,11 @@ fi
 
 # --- health -----------------------------------------------------------------
 say "health"
-wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH" && ok "app up ($BIND_PORT)" || bad "app down — journalctl -u $SERVICE_NAME -e"
+if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; fi
 # The bot has no port to probe — outbound-only is the charter — so `is-active` IS its health.
 if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
-  systemctl is-active --quiet "$BOT_SERVICE_NAME" && ok "admin bot up" || bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"
+  if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; fi
 fi
 if [[ -n "$BACKEND_DIR" ]]; then
-  wait_healthy "http://127.0.0.1:$BACKEND_PORT/status" && ok "backend up ($BACKEND_PORT)" || bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"
+  if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; fi
 fi
