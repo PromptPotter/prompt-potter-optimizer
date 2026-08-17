@@ -40,6 +40,15 @@ _WEBAPP = _REPO / "webapp"
 _PINNED = _REPO / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
 
+# One parallelism budget, divided: _POOL checks run at once and each check that
+# parallelises internally takes _SLICE, so peak demand is bounded by construction.
+# Sized independently, three of them each assumed the whole box — vitest forked
+# `availableParallelism() - 1`, Turbopack claims every core — and the contention
+# starved a vitest worker's own startup mid-gate. Every parallel check reads this.
+_JOBS = os.cpu_count() or 2
+_POOL = 4
+_SLICE = max(1, _JOBS // _POOL)
+
 # (returncode, output to show if it failed).
 Outcome = tuple[int, str]
 
@@ -195,23 +204,22 @@ def _ruff_check(sel: Sel) -> Outcome:
     return _run(_py("ruff", "check", "promptpotter/", "tests/"), _REPO)
 
 
-def _tsc(sel: Sel) -> Outcome:
+def _tsc(_sel: Sel) -> Outcome:
     # Whole-program either way: a staged file can break a type in a file nobody
     # staged. `next build` checks neither this nor eslint — next.config sets
     # `typescript.ignoreBuildErrors` and Next 16 dropped build-time linting.
-    if sel.staged:
-        argv = _node("npx", "tsc", "--noEmit", "--incremental", "--tsBuildInfoFile", ".tsbuildinfo")
-    else:
-        argv = _node("npx", "tsc", "--noEmit")
-    return _run(argv, _WEBAPP)
+    # The staged mode used to pass its own --tsBuildInfoFile, which bought a
+    # SECOND incremental store neither mode ever warmed; tsconfig already sets
+    # `incremental`, so one script serves both and `npx` stops re-resolving.
+    return _run(_node("npm", "run", "typecheck"), _WEBAPP)
 
 
 def _eslint(sel: Sel) -> Outcome:
-    # A full-tree lint is ~73s against ~21s staged-only, so the hook pays the
-    # narrow one and CI pays the whole.
-    if sel.staged:
-        return _run(_node("npx", "eslint", *sel.web_files), _WEBAPP)
-    return _run(_node("npm", "run", "lint"), _WEBAPP)
+    # Empty outside --staged, where bare `eslint` means the whole tree — so the
+    # scoped and full runs are one call. `npm run lint` carries --cache: a warm
+    # full-tree lint is ~11s against ~30s cold, and a staged run pays eslint's
+    # ~10s startup either way, cache or none.
+    return _run(_node("npm", "run", "lint", "--", *sel.web_files), _WEBAPP)
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -312,22 +320,33 @@ CHECKS: tuple[Check, ...] = (
     ),
     # No `--cov`: `fail_under = 0`, so the coverage table asserts nothing and is
     # pure display on every run. `pytest --cov` still works when the number is
-    # wanted deliberately.
-    Check("pytest", "py", lambda _: _run(_py("pytest", "tests/"), _REPO)),
+    # wanted deliberately. `-n` lives here rather than in `addopts` so an ad-hoc
+    # single-test run does not pay worker startup for one assertion.
+    Check("pytest", "py", lambda _: _run(_py("pytest", "tests/", "-n", str(_SLICE)), _REPO)),
     Check("lockfile", "web", _lockfile, staged=True),
     Check("eslint", "web", _eslint, staged=True),
     Check("tsc", "web", _tsc, staged=True),
     Check("anti-rot", "web", _anti_rot, staged=True),
-    Check("vitest", "web", lambda _: _run(_node("npm", "run", "test"), _WEBAPP)),
+    # vitest.config.ts keeps its own `maxWorkers` for a standalone `npm run test`;
+    # under the gate the budget decides, because here it shares the box.
+    Check(
+        "vitest",
+        "web",
+        lambda _: _run(_node("npm", "run", "test", "--", f"--maxWorkers={_SLICE}"), _WEBAPP),
+    ),
     # DEPLOY_BUILD=1 validates the shipped artifact: React Compiler pass + source
     # maps. Bare `npm run build` is the local preview path, and skips both. The env
     # var is set here rather than through the `build:deploy` script, whose bash
     # inline-env prefix makes it unrunnable on Windows — so the check could not fire
-    # on the one machine that runs it before CI does.
+    # on the one machine that runs it before CI does. GATE_JOBS rides the same
+    # channel to cap Turbopack, which otherwise takes every core beside three
+    # other checks; the operator's bare preview build sets neither and stays whole.
     Check(
         "next-build",
         "web",
-        lambda _: _run(_node("npm", "run", "build"), _WEBAPP, DEPLOY_BUILD="1"),
+        lambda _: _run(
+            _node("npm", "run", "build"), _WEBAPP, DEPLOY_BUILD="1", GATE_JOBS=str(_SLICE)
+        ),
     ),
 )
 
@@ -414,7 +433,7 @@ def main() -> int:
         _reexec_pinned()
 
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=min(4, (os.cpu_count() or 2))) as pool:
+    with ThreadPoolExecutor(max_workers=_POOL) as pool:
         results = list(pool.map(lambda c: _execute(c, sel), checks))
     total = time.monotonic() - started
     failed = [r for r in results if r.rc]
@@ -430,7 +449,11 @@ def main() -> int:
     if failed:
         print(f"\ngate[{scope}]: {len(results)} checks, {len(failed)} failed, {total:.1f}s")
         return 1
-    print(f"gate[{scope}]: {len(results)} checks green in {total:.1f}s")
+    # The total is max(slowest check, sum of work / _POOL), so naming the slowest is
+    # naming the wall — without it a green run reports a number nobody can act on.
+    slowest = max(results, key=lambda r: r.secs, default=None)
+    wall = f" (slowest {slowest.check.name} {slowest.secs:.1f}s)" if slowest else ""
+    print(f"gate[{scope}]: {len(results)} checks green in {total:.1f}s{wall}")
     return 0
 
 

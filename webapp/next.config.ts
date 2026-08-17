@@ -7,6 +7,11 @@ import type { NextConfig } from "next";
 // needs the React Compiler pass + full-bundle source maps; folding them into
 // every build is what turned the ~5s preview build into ~20s.
 const deployBuild = process.env.DEPLOY_BUILD === "1";
+// `scripts/gate.py` exports its per-check slice of the machine. Turbopack otherwise
+// claims every core while three other checks run beside it, and that contention —
+// not the compiler — is what the build's gate timing mostly measures. Unset for the
+// operator's own build, which owns the box and keeps every core.
+const gateJobs = Number(process.env.GATE_JOBS) || 0;
 
 const nextConfig: NextConfig = {
   output: "export",
@@ -37,6 +42,7 @@ const nextConfig: NextConfig = {
   // Pin the workspace root so a stray ~/package-lock.json doesn't confuse
   // Turbopack's workspace inference.
   turbopack: { root: path.resolve(__dirname) },
+  ...(gateJobs ? { experimental: { cpus: gateJobs } } : {}),
   async rewrites() {
     // Dev-mode only — `next build` with `output: "export"` strips rewrites.
     // In production we serve at the root on the same FastAPI origin as /api,

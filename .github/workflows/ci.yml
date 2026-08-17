@@ -90,6 +90,18 @@ jobs:
         run: npm ci
         working-directory: webapp
 
+      # `npm run lint` carries --cache, and WRITING that cache costs more than
+      # linting without one — ~15s against ~10s on a cold full tree, against ~4s
+      # warm. A runner that never restores it pays the write every run and
+      # collects the read never, so the flag would be a regression here. Keyed
+      # per commit with a prefix restore: each run reads the newest cache and
+      # saves its own, and eslint re-lints whatever content actually moved.
+      - uses: actions/cache@v4
+        with:
+          path: webapp/.eslintcache
+          key: eslint-${{ github.sha }}
+          restore-keys: eslint-
+
       # Same one list as the `check` job — the webapp half of it. Runs from the
       # repo root, and needs no uv: these checks drive node, so the interpreter
       # they are launched from cannot change their answer.
