@@ -32,12 +32,22 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.store.account_spend import (
+    ZERO_SPEND,
+    BilledSpend,
+    billed_spend,
+    forwarded_mark,
+)
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandbox_dir,
     sandbox_owner_path,
+    tenant_workspace,
 )
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
@@ -50,7 +60,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.spend import SpendRollup
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
@@ -343,6 +352,52 @@ def _banked_inner_rounds(ctx: InnerSpawnContext, campaign_id: str) -> int:
     )
 
 
+def _forward_inner_spend(
+    ctx: InnerSpawnContext,
+    campaign_id: str,
+    spec: InnerTaskSpec,
+    start: float,
+    cycle_dir_box: dict[str, Path],
+) -> None:
+    """Roll what this cell has spent since the last forward onto the OUTER ledger, then raise its
+    high-water mark. Runs at teardown on EVERY terminal outcome, because a cell that dies has still
+    spent its money; carries a DELTA, because a continued cell's own rollup is cumulative across
+    attempts and billing that whole would charge its history again.
+
+    Emit-then-mark is the crash policy: interrupted between the two, the next attempt re-forwards
+    and the run halts early, which is recoverable. The other order loses the money silently."""
+    if "dir" not in cycle_dir_box:
+        # This caller never opened the campaign — it was refused because ANOTHER producer owns it,
+        # or it died before the mint. Forwarding here would bill that producer's in-flight spend to
+        # this sample and raise a mark it did not earn.
+        return
+    store = CampaignStore(tenant_workspace(ctx.inner_sandbox_root, str(ctx.identity.tenant_id)))
+    pending: list[tuple[CycleHop, BilledSpend]] = []
+    total = ZERO_SPEND
+    for cycle_dir in store.campaign_cycle_dirs(campaign_id):
+        held = billed_spend([CycleLayout(cycle_dir).ledger])
+        delta = held.since(forwarded_mark(cycle_dir))
+        if delta == ZERO_SPEND:
+            continue
+        pending.append((CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name), held))
+        total = total.plus(delta)
+    if not pending:
+        return
+    # `l1_critique` names no call this made — a whole campaign ran here. It is the node the outer
+    # sample's `step_timings` already keys, so the two spend surfaces agree on one attribution.
+    emit_token_usage(
+        node="l1_critique",
+        kind="backend",
+        input_tokens=total.input_tokens,
+        output_tokens=total.output_tokens,
+        duration_s=time.monotonic() - start,
+        model=f"inner:{spec.inner_dataset}",
+        cost_usd=total.used_usd,
+    )
+    for hop, held in pending:
+        store.mark_spend_forwarded(hop, held)
+
+
 def _open_inner_campaign(
     session: Session,
     campaign_config: CampaignConfig,
@@ -576,15 +631,44 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     spec = resolve_inner_task(ctx, query)
     overrides = payload.get("optimizer_prompt_overrides") or {}
 
+    # A FAILED outcome surfaces as a returned ``stop_reason``; the runner does not raise, so it
+    # is classified below with every other no-evidence shape rather than caught here. A run that
+    # merely failed to improve is a SUCCESS with poor proxies — measured, so a bad mutation is
+    # still penalised. `spawn_role` is captured in the OUTER task, like `spawned_by` below.
+    spawn_role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
+    campaign_id = inner_campaign_id(spec, overrides, spawn_role)
     start = time.monotonic()
-    # ``run_inner_cycle`` runs in the OUTER task, so ``_CYCLE_LEDGER`` still holds the outer
-    # ledger. The heartbeat below appends to it, because the inner campaign emits only to its
-    # OWN sandbox ledger and the outer surfaces would read the silence as a vanished producer.
+    # Filled by the inner task once the campaign is open; the forwarder reads it as the proof that
+    # this caller — not a concurrent one — owns what the sandbox holds.
+    cycle_dir_box: dict[str, Path] = {}
+    try:
+        return await _measure_inner_cell(
+            ctx, spec, query, campaign_id, overrides, spawn_role, start, cycle_dir_box
+        )
+    finally:
+        # Every exit — measured, unscoreable, cancelled — spent the money either way. `graceful`
+        # keeps a forwarding failure from replacing the outcome the caller is already carrying.
+        with graceful(f"could not forward inner spend for {campaign_id}"):
+            _forward_inner_spend(ctx, campaign_id, spec, start, cycle_dir_box)
+
+
+async def _measure_inner_cell(
+    ctx: InnerSpawnContext,
+    spec: InnerTaskSpec,
+    query: str,
+    campaign_id: str,
+    overrides: dict[str, dict[str, Any]],
+    spawn_role: MeasurementRole,
+    start: float,
+    cycle_dir_box: dict[str, Path],
+) -> dict[str, Any]:
+    # This runs in the OUTER task, so ``_CYCLE_LEDGER`` still holds the outer ledger. The
+    # heartbeat below appends to it, because the inner campaign emits only to its OWN sandbox
+    # ledger and the outer surfaces would read the silence as a vanished producer.
     from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
     from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 
     outer_ledger = _CYCLE_LEDGER.get()
-    cycle_dir_box: dict[str, Path] = {}
     # Captured in the OUTER task and handed over explicitly: the inner task gets a COPY of this
     # context and rebinds `_CURRENT_ROUND`, so a read over there attributes the campaign to
     # itself.
@@ -612,11 +696,6 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             lift = "best —"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
-    # A FAILED outcome surfaces as a returned ``stop_reason``; the runner does not raise, so it
-    # is classified below with every other no-evidence shape rather than caught here. A run that
-    # merely failed to improve is a SUCCESS with poor proxies — measured, so a bad mutation is
-    # still penalised. `spawn_role` is captured in the OUTER task, like `spawned_by` above.
-    spawn_role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
     inner_task = asyncio.create_task(
         _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
     )
@@ -627,7 +706,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # Budget the rounds that REMAIN — charging a continued cell the full budget for its tail
     # leaves the wall bounding almost nothing. `max(1, …)` grants a fully-banked cycle the one
     # round it needs to replay its priors and finalize.
-    banked = _banked_inner_rounds(ctx, inner_campaign_id(spec, overrides, spawn_role))
+    banked = _banked_inner_rounds(ctx, campaign_id)
     deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
     # Constructed here, not inline in the `async with`, so the suspend hook below can close over
     # it: `asyncio.timeout` fixes its absolute `when` at CALL time.
@@ -711,7 +790,6 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"{spec.n_rounds} + origin, {banked} already banked, at "
             f"{OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) and was cancelled"
         )
-    inner_spend: SpendRollup | None = result.spend
     elapsed = time.monotonic() - start
     # No exclusion decision here: `compute_outer_proxies` raises `InnerCycleUnscoreableError`,
     # which `measure_sample`'s catch-all turns into this sample's EXCLUDED row.
@@ -741,18 +819,10 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         "terminal_node": "l3_plan",
         "total_time": elapsed,
         "step_timings": {"l1_critique": elapsed},
+        # No `step_tokens`: spend rides `_forward_inner_spend` at teardown instead. Returning it
+        # HERE would bill only the cells that succeed, bill a continued cell's whole history
+        # again, and re-bill the lot whenever the archive replays this row.
     }
-    # The inner cost IS this outer sample's backend cost, so it rolls up the existing channel,
-    # keyed by the terminal node so it fans onto one TokenUsageRecord.
-    if inner_spend and (inner_spend.input_tokens or inner_spend.total_used_usd):
-        data["step_tokens"] = {
-            "l1_critique": {
-                "input": inner_spend.input_tokens,
-                "output": inner_spend.output_tokens,
-                "cost_usd": inner_spend.total_used_usd,
-                "model": f"inner:{spec.inner_dataset}",
-            }
-        }
     return {"data": data}
 
 

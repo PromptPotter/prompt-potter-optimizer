@@ -44,8 +44,9 @@ rebuilt both layers as never-fired and re-spent budget already spent — no erro
 They are fields on `L2RefineExitView` / `PlanExitView` now. When a shape moves like that,
 `application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across:
 it CALLS the writer's projections rather than restating them, preserves the line count (the line
-index IS `sequence`), tmp + `os.replace` (`append` is not crash-atomic), and skips any cycle with
-a live producer.
+index IS `sequence`), tmp + `os.replace` (`append` is not crash-atomic), and compacts only
+`_COMPACTABLE_PHASES` — a fresh producer and a pre-loop check-in are both skipped, and
+counted apart, because only the first one clears on its own.
 
 **Newtype-guarded projections** under `projections/`:
 
@@ -266,8 +267,13 @@ also the archive's single-writer facade). `store/account_spend.py` is the
 same shape over the ledgers: it sums an account's lifetime spend, and it
 BANKS that spend as a `SpendTombstoneRecord` before a delete takes the rows
 carrying it. It sits here rather than in `application/` for exactly that
-reason — the two destroyers (`delete_campaign`, `try_delete_stub_cycle`) call
-it themselves, so no caller can destroy a ledger and skip the bank.
+reason — the three destroyers (`delete_campaign`, `try_delete_stub_cycle`,
+`delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger
+and skip the bank. **`bank_spend` banks what a subject still HOLDS, not what
+its rows say:** an L4 inner cycle forwards onto its outer ledger as it runs and
+records how far it got in `index.json::forwarded_spend`, so banking the rows
+whole would bill that money twice. Absent mark ⇒ nothing forwarded, which is
+every cycle outside a sandbox.
 **`store/__init__.py` re-exports
 nothing** — import each leaf directly. It aggregated all ten eagerly, so any
 leaf import dragged in `CampaignStore` and cycled back through `runtime_flags`

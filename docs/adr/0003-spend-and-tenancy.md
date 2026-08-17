@@ -299,12 +299,21 @@ deleting whatever you spent it on. `bank_spend` sums the subject first and write
 Totals, not rows: the rows are a chronology nobody can act on once their cycle is gone, and a
 synthetic `TokenUsageRecord` standing in for them would be a fabricated measurement.
 
-**Two destroyers, one bank, and it lives INSIDE them.** The stub delete takes a cycle tree the same
+**Three destroyers, one bank, and it lives INSIDE them.** The stub delete takes a cycle tree the same
 way — and a stub is deletable at `n_rounds == inherited`, which an origin-scored fork reaches having
 already paid for round 0 — so `delete_campaign` and `try_delete_stub_cycle` each call `bank_spend`
 themselves (`infrastructure/store/account_spend.py`, which is why that module sits in the store
-layer rather than above it). No caller can take a ledger without banking it, and none is asked to
-remember: `cleanup-empty-cycles`, `delete-cycle` and the runner's own cleanup all just delete.
+layer rather than above it). The third is `delete_inner_sandbox`, which the campaign delete, the
+orphan reaper and `reset` all route through: an L4 sandbox is a SIBLING of the tenant tree, so no
+account-wide walk reaches it and nothing else would ever bank what it holds. No caller can take a ledger without
+banking it, and none is asked to remember: `cleanup-empty-cycles`, `delete-cycle` and the runner's
+own cleanup all just delete.
+
+**A subject may hold money that already reached another ledger, so the bank takes the RESIDUE.** An
+inner cycle forwards onto its outer cycle as it runs and records how far it got; summing its rows
+whole on the way out would bill that money a second time, and a tombstone is indistinguishable from
+spend that reached nowhere else. Absent mark ⇒ nothing forwarded, so every ordinary cycle banks
+exactly as before.
 
 The ordering inside each destroyer is the rest of the design. Banking runs AFTER the guard that
 decides the delete will proceed and BEFORE the rows go: after the `rmtree` a crash loses the money
@@ -312,12 +321,17 @@ outright, and before the guard every refused sweep banks a cycle that keeps its 
 crash window therefore double-counts, which is the safe direction, and the re-bank guard closes it
 — a subject (`campaign_id`, `cycle_id`) already carrying a tombstone is never banked twice.
 
-**`reset` is the third path, and the bank stays inside the store.** The host-only CLI verb removes
-each tenant's whole `campaigns/` tree without going through either destroyer, so it asks the store
+**`reset` takes TWO trees, and the bank stays inside the store for both.** The host-only CLI verb
+removes each tenant's whole `campaigns/` tree without going through a destroyer, so it asks the store
 to bank first — `bank_all_before_removal`, which states its precondition in its own name, because
 banking a subject that KEEPS its rows counts the money twice. The walk sits beside the destroyers'
 own calls rather than in the CLI: a caller pairing ledgers with a campaign_id its own way is a third
-spelling of that pairing, free to drift from how a delete does it. This is the worst path to forget
+spelling of that pairing, free to drift from how a delete does it. Its second tree is the off-tree
+sandboxes, routed through `delete_inner_sandbox` rather than re-spelled: a per-tenant walk cannot
+reach a sibling of `projects/`, and a sandbox left standing is silently CONTINUED by the next
+content-addressed run instead of re-minted, so the reset that looked clean was not. A sandbox whose
+`owner.json` names no valid workspace is KEPT and reported — there is nothing to bank it into, and
+this verb acts on a fact. This is the worst path to forget
 on — it takes `--all-tenants`, which walks every tenant on the box, so an unbanked reset re-earns
 every account's ceiling in one gesture — and the re-bank guard is what makes running it twice safe.
 `reset` drops the data, never the money.

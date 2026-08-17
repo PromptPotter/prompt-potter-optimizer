@@ -826,13 +826,17 @@ the PR description.
   anyone holding `campaign.run`. Only the cycle tier halts a run
   (`termination.py::BudgetGate`, both units, whichever trips first); the
   account tier admits or refuses and never interrupts a campaign in flight.
-  **An L4 inner cycle needs no fourth source:** it rolls its whole spend back
-  onto the OUTER cycle's ledger as one `backend` `TokenUsageRecord` per outer
-  sample (`inner/spawn.py` returns `step_tokens`;
-  `scoring/sample_measurement.py::emit_step_token_usage` writes it), so both
-  tiers already see it and a second walk of `.inner/` double-counts. The
-  rollup rides the SUCCESS return only — a cell that dies leaves its spend on
-  the sandbox ledger alone.
+  **An L4 inner cycle needs no fourth source:** it forwards its spend onto the
+  OUTER cycle's ledger as a `backend` `TokenUsageRecord`
+  (`inner/spawn.py::_forward_inner_spend`), so both tiers already see it and
+  the account walk must not reach `.inner/` — a sandbox is a SIBLING of the
+  tenant tree, and summing it too counts the forwarded half twice. The forward
+  fires at cell TEARDOWN on every terminal outcome, because a cell that dies
+  has still spent its money, and it carries the DELTA past that inner cycle's
+  own high-water mark (`index.json::forwarded_spend`), because a continued
+  cell's rollup is cumulative across attempts. So a destroyer taking a sandbox
+  banks the RESIDUE rather than the whole
+  (`store/account_spend.py::bank_spend`).
   Spend is summed one way (`store/account_spend.py::account_ledgers` — every
   cycle ledger, archived included, plus the workspace ledger's
   `SpendTombstone` rows) and priced one way

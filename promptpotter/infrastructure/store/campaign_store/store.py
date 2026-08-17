@@ -16,7 +16,12 @@ from promptpotter.domain.results import RoundResult, best_round_by_measured_accu
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
-from promptpotter.infrastructure.store.account_spend import bank_spend
+from promptpotter.infrastructure.store.account_spend import (
+    FORWARDED_SPEND_KEY,
+    BilledSpend,
+    bank_spend,
+    sandbox_cycle_dirs,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
@@ -33,6 +38,7 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.layout import (
+    ROUND_GLOB,
     CycleLayout,
     campaign_cycles_dir,
     campaign_root_dir_for,
@@ -41,6 +47,7 @@ from promptpotter.infrastructure.store.layout import (
     cycle_dir_for,
     inner_sandbox_key,
     root_cycle_id,
+    round_number,
     sibling_kind,
 )
 from promptpotter.infrastructure.store.session_pointer import (
@@ -203,11 +210,19 @@ class CampaignStore:
             return []
         return sorted(p.parent for p in root.glob("*/campaign.json"))
 
-    def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
-        """One campaign's cycle ledgers — the enumeration `bank_spend` reads before
-        `delete_campaign` destroys them."""
+    def campaign_cycle_dirs(self, campaign_id: str) -> list[Path]:
+        """One campaign's cycle directories — the enumeration `bank_spend` reads before
+        `delete_campaign` destroys them, and the grain the L4 roll-up's forwarded mark sits at."""
         cycles = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
-        return sorted(cycles.glob("*/.runtime/ledger.jsonl"))
+        return sorted(p for p in cycles.glob("*") if p.is_dir())
+
+    def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
+        """One campaign's cycle ledgers. Derived from the dirs so the tree is spelled once."""
+        return [
+            ledger
+            for cycle_dir in self.campaign_cycle_dirs(campaign_id)
+            if (ledger := CycleLayout(cycle_dir).ledger).is_file()
+        ]
 
     def iter_cycle_ledgers(self) -> list[Path]:
         """Every cycle ledger, archived included — archiving must not free daily spend-cap budget."""
@@ -362,7 +377,7 @@ class CampaignStore:
         for campaign_dir in self.iter_campaign_dirs():
             bank_spend(
                 workspace=self._base_dir,
-                ledgers=self.campaign_cycle_ledgers(campaign_dir.name),
+                cycle_dirs=self.campaign_cycle_dirs(campaign_dir.name),
                 campaign_id=campaign_dir.name,
             )
 
@@ -376,7 +391,8 @@ class CampaignStore:
         inner_sandbox_root: Path | None = None,
     ) -> bool:
         """Destructive. The cross-campaign ``measurements/`` cache is NEVER touched, and
-        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes (delete only).
+        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes, which bank their
+        own residue on the way out.
 
         Both arms take the cycle ledgers — ``.runtime/ledger.jsonl`` is not a keepsake, so
         ``keep_results`` does not spare it — and those ledgers ARE the account's lifetime spend
@@ -388,7 +404,7 @@ class CampaignStore:
         self._guard_and_release(campaign_id, "delete")
         bank_spend(
             workspace=self._base_dir,
-            ledgers=self.campaign_cycle_ledgers(campaign_id),
+            cycle_dirs=self.campaign_cycle_dirs(campaign_id),
             campaign_id=campaign_id,
         )
         # Enumerate cycle_ids BEFORE the tree is stripped/removed — the inner
@@ -411,9 +427,43 @@ class CampaignStore:
                 inner_dir = inner_sandbox_root / inner_sandbox_key(
                     tenant_id, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
                 )
-                if inner_dir.exists():
-                    rmtree_robust(inner_dir)
+                self.delete_inner_sandbox(inner_dir, campaign_id=campaign_id)
         return True
+
+    def delete_inner_sandbox(self, sandbox: Path, *, campaign_id: str) -> None:
+        """The third destroyer. An inner sandbox is off the account walk — it is a SIBLING of the
+        tenant tree — so nothing else banks what its ledgers still hold, and every cycle inside it
+        has already forwarded part of that onto its outer cycle. Banking the residue is what makes
+        the delete safe in both directions.
+
+        The tombstone is keyed on the sandbox DIRECTORY, whose name hashes the full owner triple;
+        keying it on the inner cycle would collide, because inner cycle ids are content-addressed
+        and repeat across sandboxes."""
+        if not sandbox.exists():
+            return
+        bank_spend(
+            workspace=self._base_dir,
+            cycle_dirs=sandbox_cycle_dirs(sandbox),
+            campaign_id=campaign_id,
+            cycle_id=sandbox.name,
+        )
+        rmtree_robust(sandbox)
+
+    def mark_spend_forwarded(self, hop: CycleHop, spent: BilledSpend) -> None:
+        """Raise this cycle's forwarded high-water mark. Sole writer of the key `bank_spend` reads
+        — written AFTER the spend reached the other ledger, so a crash between the two re-forwards
+        rather than losing the money."""
+        self.update(
+            hop,
+            {
+                FORWARDED_SPEND_KEY: {
+                    "used_usd": spent.used_usd,
+                    "input_tokens": spent.input_tokens,
+                    "output_tokens": spent.output_tokens,
+                    "unpriced_tokens": spent.unpriced_tokens,
+                }
+            },
+        )
 
     # ------------------------------------------------------------------
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate
@@ -526,19 +576,13 @@ class CampaignStore:
 
         survivors: list[Path] = []
         displaced: list[Path] = []
-        for p in sorted(rounds_dir.glob("round_*.json")):
-            try:
-                n = int(p.stem.removeprefix("round_"))
-            except ValueError:
+        for p in sorted(rounds_dir.glob(ROUND_GLOB)):
+            if (n := round_number(p)) is None:
                 continue
             (displaced if n > after_round else survivors).append(p)
         if candidates_dir.exists():
-            for p in sorted(candidates_dir.glob("round_*.json")):
-                try:
-                    n = int(p.stem.removeprefix("round_"))
-                except ValueError:
-                    continue
-                if n > after_round:
+            for p in sorted(candidates_dir.glob(ROUND_GLOB)):
+                if (n := round_number(p)) is not None and n > after_round:
                     displaced.append(p)
 
         if displaced:
@@ -771,7 +815,7 @@ class CampaignStore:
         cycle_dir = self.cycle_dir(hop)
         bank_spend(
             workspace=self._base_dir,
-            ledgers=[CycleLayout(cycle_dir).ledger],
+            cycle_dirs=[cycle_dir],
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
         )

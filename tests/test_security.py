@@ -608,7 +608,6 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
         sum_user_spend,
     )
     from promptpotter.infrastructure.store.io import write_json
-    from promptpotter.infrastructure.store.layout import CycleLayout
 
     stores = built_stores
     root = "cycle_root0000"
@@ -677,7 +676,7 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
     for _crashed_attempt in range(2):
         bank_spend(
             workspace=stores.campaigns.workspace,
-            ledgers=[CycleLayout(stores.campaigns.cycle_dir(retried_hop)).ledger],
+            cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
             campaign_id="camp-2",
             cycle_id=retried,
         )

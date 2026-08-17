@@ -6,15 +6,15 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import threading
+import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from promptpotter.config.paths import user_data_root
-from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -56,29 +56,16 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _wrap(models: dict[str, Any]) -> dict[str, Any]:
-    return {"fetched_at": utcnow_iso(), "models": models}
-
-
 def _cache_fresh() -> bool:
-    if not CACHE_PATH.exists():
-        return False
+    """Age off the file's own mtime, which the atomic replace below stamps at write time. The table
+    is ~1 MB and this fires on every launch, so parsing it to read a timestamp inside it cost a
+    second full parse for a number the filesystem already had — and left the age readable by nothing
+    but this function, where ``ls -l`` now answers it."""
     try:
-        raw = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        age_s = time.time() - CACHE_PATH.stat().st_mtime
+    except OSError:
         return False
-    if not isinstance(raw, dict):
-        return False
-    fetched_at = raw.get("fetched_at")
-    if not isinstance(fetched_at, str):
-        return False
-    try:
-        dt = datetime.fromisoformat(fetched_at)
-    except ValueError:
-        return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - dt).total_seconds() < _TTL_SECONDS
+    return age_s < _TTL_SECONDS
 
 
 def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> bool:
@@ -106,10 +93,15 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
     stripped = _strip_upstream(raw)
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(
-        json.dumps(_wrap(stripped), indent=0, separators=(",", ":")),
+    # tmp + ``os.replace``: a torn write used to be caught downstream by the freshness check
+    # parsing the file, and that check no longer parses. Hand-rolled rather than through
+    # ``store/io.py::write_json`` because this module is stdlib-only and one layer below it.
+    tmp = CACHE_PATH.with_name(f"{CACHE_PATH.name}.tmp")
+    tmp.write_text(
+        json.dumps({"models": stripped}, indent=0, separators=(",", ":")),
         encoding="utf-8",
     )
+    os.replace(tmp, CACHE_PATH)
     load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True
@@ -117,7 +109,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
 def refresh_rates_in_background() -> None:
     """Start :func:`refresh_rates` on a daemon thread and return at once — nothing on the run path
-    consumes it. A half-written cache fails ``json.loads``, reports stale, and refetches."""
+    consumes it. The write is atomic, so a reader either sees the prior table or the new one."""
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
