@@ -39,7 +39,7 @@ export function SpendBudgetControl({
   // Re-seed the edit buffers whenever the committed cap changes — render-phase
   // guarded reset (webapp/CLAUDE.md "State reset on prop change"), the same recipe
   // as useAppliableField. Without it the buffers keep their first-mount value: this
-  // control lives in ChatPane's persistent (un-keyed) job dropdown, so a soft unit
+  // control lives in the RemoteControl's persistent (un-keyed) panel, so a soft unit
   // switch never remounts it, and `apply()` (posting to the now-updated workspace ids)
   // would write the prior cycle's cap onto the newly-viewed one.
   const [prevUsd, setPrevUsd] = useState(currentBudgetUsd);
@@ -87,13 +87,15 @@ export function SpendBudgetControl({
         maxTokens: nextTok,
       });
       bumpRevalidation();
-      const parts: string[] = [];
-      if (nextUsd != null) parts.push(nextUsd === 0 ? "$0" : fmtUsd(nextUsd));
-      if (nextTok != null) parts.push(nextTok === 0 ? "0 tok" : fmtTokens(nextTok));
+      // The note quotes NO number, deliberately. `quota.py::clamp_budget_change` silently mins
+      // the request against the account's remaining allowance, so composing this text from the
+      // draft told a spent free-tier account "Cap set to 8.0M tok" while 0 was written. The two
+      // rows above already show the ARMED ceiling as the server reports it, so the honest report
+      // is to point at them rather than to restate — or re-derive — what landed.
       setNote(
         isHalt
-          ? `Cap set to ${parts.join(" / ")} — halting after this round.`
-          : `Cap set to ${parts.join(" / ")} — takes at the next round.`,
+          ? "Applied — halting after this round."
+          : "Applied — the armed cap is shown above; it takes at the next round.",
       );
     } catch (e) {
       setErr(IngestApiError.toOperatorMessage(e));
@@ -173,10 +175,14 @@ export function SpendBudgetControl({
           {pending ? "Setting…" : "Set caps"}
         </button>
       </div>
+      {/* Two ceilings can stop a run and only ONE of them is editable here. Naming the other
+          and where it lives beats inferring which one bound from a raise that did not move:
+          that inference is a derivation the browser has no authority to make, and the account
+          pane already serves the lifetime pair. */}
       <small className="spend-control-hint">
         {isHalt
           ? "Halts the run after the current round."
-          : "Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins."}
+          : "Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. A raise is also clamped by your account allowance (Account → Security)."}
       </small>
       {note ? <small className="spend-control-note">{note}</small> : null}
       {err ? <small className="new-campaign-error">{err}</small> : null}

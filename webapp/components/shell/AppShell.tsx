@@ -183,7 +183,6 @@ function AppShellInner() {
   // ChatPane watches it and resets the thread to its empty first-run state
   // (the inline entry point, distinct from the modal the other tabs open).
   const [newCampaignTick, setNewCampaignTick] = useState(0);
-  const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   // Hard-sample view scope — campaign = only the current campaign's cycles
   // (the default view), dataset = every campaign on this dataset, which is
@@ -278,10 +277,11 @@ function AppShellInner() {
   // via `useDashboard()`/`useCycleStream()`, so nothing is threaded from here.
   const dashState = useDashboard();
 
-  // Cycle title (dataset name) from index.json. Hand-rolled on purpose: it
-  // fans one fetch into two state slots (title + started-at) AND must KEEP the
-  // prior title across a unit switch — useFetch blanks data on a deps change,
-  // which would flash the raw cycle-id hash before the new index.json lands.
+  // The cycle's start stamp from index.json — the burn-rate denominator behind the remote
+  // strip's ETA. Hand-rolled on purpose: it must KEEP the prior value across a unit switch,
+  // where useFetch blanks data on a deps change and the ETA would flash "—" every time.
+  // It used to fan into a second slot for a dataset title; the only reader of that was the
+  // chat job-bar, and the remote strip reads the served `dataset_name` off the cycle list.
   useEffect(() => {
     if (!campaignId || !cycleId) return;
     let cancelled = false;
@@ -290,13 +290,10 @@ function AppShellInner() {
         const r = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json");
         const idx = r.content ? JSON.parse(r.content) : {};
         if (!cancelled) {
-          setDatasetTitle(
-            idx.header?.dataset_name || idx.dataset_name || idx.cycle_id || cycleId,
-          );
           setCycleStartedAt(typeof idx.created_at === "string" ? idx.created_at : null);
         }
       } catch {
-        if (!cancelled) setDatasetTitle(cycleId);
+        // Leave the prior stamp standing — a failed read is not a new cycle.
       }
     })();
     return () => {
@@ -467,8 +464,6 @@ function AppShellInner() {
           <CheckinReopenPane campaignId={campaignId} onStarted={selectAndOpen} />
         ) : tab === "chat" ? (
           <ChatPane
-            datasetTitle={datasetTitle}
-            cycleStartedAt={leafCreatedAt ?? cycleStartedAt}
             datasetName={leafDatasetName}
             datasetItems={datasetItems}
             datasetMeasuredCount={datasetMeasuredCount}
@@ -494,12 +489,17 @@ function AppShellInner() {
           <VerifyPane />
         )}
       </main>
-      {/* Global remote — a bottom-fixed hovering pill, present on every tab while
-          a cycle is live (play/pause/skip + round/spend + babysat tag).
-          Self-sources identity + live state; renders null when idle/terminal.
-          Following the active run lands on its dashboard, same as the sidebar's
-          jobs dock. */}
-      <RemoteControl onFollowed={() => openView("dashboard")} />
+      {/* Global remote — a bottom-fixed hovering strip on every tab, and the ONE surface
+          answering "what is this run doing and costing": cycle picker, play/pause/skip,
+          round/spend, babysat tag, the Lift/ETA/Δ-per-$ readout, and an upward panel with
+          identity, spend and the finishing criteria. It deliberately survives `terminal` and
+          `detached` — that is where the restart control and the outcome numbers matter — and
+          renders null only for check-in and a cycle with no phase yet. Following the active
+          run lands on its dashboard, same as the sidebar's jobs dock. */}
+      <RemoteControl
+        onFollowed={() => openView("dashboard")}
+        cycleStartedAt={leafCreatedAt ?? cycleStartedAt}
+      />
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}

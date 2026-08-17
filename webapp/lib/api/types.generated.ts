@@ -410,7 +410,7 @@ export interface DashboardError {
   stop_reason: string;
 }
 
-/** ``state.run_limits`` — the cycle's declared run-limit ceilings, written */
+/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:exit`` so a fork's */
 export interface RunLimits {
   max_rounds: number | null;
   l1_patience: number;

@@ -54,6 +54,7 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     roll_p_best_at_round_complete,
 )
+from promptpotter.infrastructure.runtime_flags import read_spend_caps
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
 from promptpotter.shared.clock import utcnow_iso
@@ -828,6 +829,19 @@ class LiveDashboardView(DerivedView):
             nodes=self._current_round_nodes(),
             pobb=build_pobb_block(self._core, self._buffer.p_best_top),
         )
+        # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
+        # `spend_cap.json` over the launch-composed cap, so serving the stamped value left every
+        # reader — the budget control's prefill, the run strip — quoting a number nothing would
+        # enforce. Overlaid at the single write, so no reader has to join two sources.
+        if s.run_limits is not None:
+            armed_usd, armed_tokens = read_spend_caps(self.cycle_dir)
+            armed: dict[str, float | int] = {}
+            if armed_usd is not None:
+                armed["spend_budget_usd"] = armed_usd
+            if armed_tokens is not None:
+                armed["token_budget"] = armed_tokens
+            if armed:
+                s.run_limits = s.run_limits.model_copy(update=armed)
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

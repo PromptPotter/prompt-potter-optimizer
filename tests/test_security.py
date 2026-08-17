@@ -980,6 +980,47 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     assert _tighten_budgets(attacker, None, None) is attacker
 
 
+def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:
+    """A budget-halted cycle can only be continued if the ceiling ``change-spend-budget`` wrote may
+    RAISE the config — it was composed as a second ``min`` before, so a cap lifted to 500k was cut
+    back to the config default on the very next launch and the run re-tripped inside its first
+    sample. Making it settable is the fix; making it settable *after* the wallet bound would be a
+    leak of exactly the class above, and the two differ by the order of two lines.
+
+    That is why the composition is one function rather than two calls at the seam: reversed, an
+    operator-typed number arms ``BudgetGate`` while ``admit_launch`` and ``JobRegistry.set_caps``
+    both still read the account as bounded, and nothing anywhere reports it.
+    """
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner.entry import _compose_run_ceilings
+
+    config = load_campaign_config(
+        {
+            "optimization": {
+                "improvement_threshold": 0.02,
+                "degradation_threshold": 0.05,
+                "spend_budget_usd": 0.10,
+                "token_budget": 210_000,
+            }
+        }
+    )
+
+    # The raise the fix exists for: above the config, under an unmetered wallet.
+    raised = _compose_run_ceilings(config, operator=(0.50, 500_000), wallet=(None, None))
+    assert raised.optimization.spend_budget_usd == pytest.approx(0.50)
+    assert raised.optimization.token_budget == 500_000
+
+    # ...and the wallet still bounds it, in both units, however large the operator typed.
+    bounded = _compose_run_ceilings(config, operator=(1e9, 10**12), wallet=(0.30, 5_000_000))
+    assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
+    assert bounded.optimization.token_budget == 5_000_000
+
+    # One arm set leaves the other at what the config declared — a raise is not a reset.
+    tokens_only = _compose_run_ceilings(config, operator=(None, 400_000), wallet=(None, None))
+    assert tokens_only.optimization.token_budget == 400_000
+    assert tokens_only.optimization.spend_budget_usd == pytest.approx(0.10)
+
+
 def test_host_wallet_ceilings_hold_in_both_units(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

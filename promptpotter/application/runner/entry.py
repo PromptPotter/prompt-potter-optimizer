@@ -54,7 +54,11 @@ from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
-from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
+from promptpotter.infrastructure.runtime_flags import (
+    clear_run_control_flags,
+    read_spend_caps,
+    write_spend_caps,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
@@ -217,11 +221,16 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
 def _tighten_budgets(
     config: CampaignConfig, usd: float | None, tokens: int | None
 ) -> CampaignConfig:
-    """Impose a ceiling that may LOWER what the config declares and never raise it; ``None`` imposes
-    nothing. Two sources compose through here and neither may be trusted upward: what the host
-    wallet ADMITTED (`jobs/quota.py::admit_launch`), which BOUNDS rather than defaults because a
-    `CycleSeed` arrives over `fork-cycle` as request input; and the ceiling `change-spend-budget`
-    left in ``spend_cap.json``, which the launch's flag sweep is about to drop."""
+    """Impose the WALLET's ceiling: it may LOWER what the config declares and never raise it;
+    ``None`` imposes nothing. One source composes through here and it may not be trusted upward —
+    what the host wallet ADMITTED (`jobs/quota.py::admit_launch`), which BOUNDS rather than defaults
+    because a `CycleSeed` arrives over `fork-cycle` as request input. Re-read against the CURRENT
+    account at every launch, which is what keeps the ADR-0003 guard at the layer that owns it.
+
+    The operator's own ceiling does NOT come through here — see :func:`_impose_operator_ceiling`.
+    Bounding it downward too was one guard doing two jobs, and it silently destroyed every
+    legitimate raise: a cap lifted to 500k was min'd back to the config's default on the very next
+    launch, so a budget-halted cycle re-tripped inside its first sample."""
     opt = config.optimization
     bounded: dict[str, float | int] = {}
     if usd is not None:
@@ -235,6 +244,37 @@ def _tighten_budgets(
     if not bounded:
         return config
     return config.model_copy(update={"optimization": opt.model_copy(update=bounded)})
+
+
+def _compose_run_ceilings(
+    config: CampaignConfig,
+    *,
+    operator: tuple[float | None, int | None],
+    wallet: tuple[float | None, int | None],
+) -> CampaignConfig:
+    """``config → operator override → wallet bound``, in that order, as one call — **the order is a
+    security property and must not be expressible as two swappable lines at the call site.**
+
+    The **operator** ceiling (what ``change-spend-budget`` left in ``spend_cap.json``, handed back
+    by the launch sweep) SETS: it may RAISE as well as lower, which is the only way a budget-halted
+    cycle is ever continued. Trusting it upward is safe because ``quota.py::clamp_budget_change``
+    already clamped it against the account when it was written.
+
+    The **wallet** ceiling then BOUNDS whatever came out, re-read against the account as it stands
+    now — so a raise can never escape it, and the ADR-0003 guard stays at the layer that owns it.
+    Reverse these two and an operator-typed number spends the host's provider key with every
+    surface reporting a healthy account."""
+    usd, tokens = operator
+    updates: dict[str, float | int] = {}
+    if usd is not None:
+        updates["spend_budget_usd"] = usd
+    if tokens is not None:
+        updates["token_budget"] = tokens
+    if updates:
+        config = config.model_copy(
+            update={"optimization": config.optimization.model_copy(update=updates)}
+        )
+    return _tighten_budgets(config, *wallet)
 
 
 async def _prepare_run(
@@ -253,6 +293,7 @@ async def _prepare_run(
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
     # after it makes the origin pass below pausable like every other phase.
     carried: tuple[float | None, int | None] = (None, None)
+    launch_cycle_dir: Path | None = None
     if session.state.cycle_id:
         launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
         # The sweep HANDS BACK the ceiling it drops — see the function for why it is the one
@@ -286,11 +327,23 @@ async def _prepare_run(
             )
             session.human_intervened = True
 
-    # LAST, and a bound rather than a default — see the function. The carried ceiling composes as a
-    # second `min`, so it can only tighten: it was clamped against the account as it stood when it
-    # was written, and ADR-0003 keeps such a ceiling from outliving its run by RAISING anything.
-    campaign_config = _tighten_budgets(campaign_config, spend_budget_usd, token_budget)
-    campaign_config = _tighten_budgets(campaign_config, *carried)
+    # LAST, and one call because the composition ORDER is the security property — see the function.
+    # Composing the operator's carried ceiling as a second `min` is what made a raise unsurvivable:
+    # a cap lifted to 500k was min'd back to the config default here, on the very next launch.
+    campaign_config = _compose_run_ceilings(
+        campaign_config, operator=carried, wallet=(spend_budget_usd, token_budget)
+    )
+    if launch_cycle_dir is not None and carried != (None, None):
+        # Re-land what the sweep dropped, so the raise outlives THIS launch too — otherwise it is
+        # the same dead end one relaunch further out. Composed, not raw: `_build_budget_gate`
+        # prefers this file over the cap just composed, so writing the unbounded intent would let
+        # it escape the wallet. Only the arms the operator actually set are written.
+        opt = campaign_config.optimization
+        write_spend_caps(
+            launch_cycle_dir,
+            usd=opt.spend_budget_usd if carried[0] is not None else None,
+            tokens=opt.token_budget if carried[1] is not None else None,
+        )
 
     if origin is None:
         # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
