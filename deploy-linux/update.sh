@@ -49,7 +49,17 @@ fi
 
 # --- app: sync → deps → webapp → restart ------------------------------------
 say "app: $INSTALL_DIR"
+self_sha() { sha256sum "$HERE/update.sh" 2>/dev/null | cut -d' ' -f1; }
+self_before="$(self_sha)"
 sync "$INSTALL_DIR"
+# `sync` can replace THIS script, and bash keeps reading the descriptor it already opened — so the
+# remainder of the run is the PRE-sync copy, and every fix to this file lands one deploy late while
+# printing the old behaviour's output. Re-exec the new copy once, guarded against a loop.
+if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_before" ]]; then
+  ok "update.sh changed in this sync — re-running the new copy"
+  export UPDATE_REEXECED=1
+  exec bash "$HERE/update.sh" "$@"
+fi
 # Install the exact pinned graph from uv.lock — same source of truth as CI.
 # uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
 command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
@@ -75,7 +85,10 @@ say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
 # PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
 # without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
 # root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
-if ! ( cd "$INSTALL_DIR" && ${DATA_DIR:+PROMPTPOTTER_HOME="$DATA_DIR"} .venv/bin/python -m promptpotter restamp --apply ); then
+# The prefix is spelled LITERALLY and defaulted rather than as `${DATA_DIR:+VAR=…}`: bash decides
+# what is an assignment while parsing, so one arriving from an expansion is taken as the command
+# NAME instead, and the line dies 127 on a box that had the root set all along.
+if ! ( cd "$INSTALL_DIR" && PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
