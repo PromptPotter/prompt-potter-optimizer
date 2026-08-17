@@ -10,6 +10,7 @@ from pathlib import Path
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import rmtree_robust, unlink_robust
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
@@ -184,7 +185,11 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             )
 
     dropped: list[str] = []
-    for _td, drop, _preserve, _surprise in classified:
+    for tenant_dir, drop, _preserve, _surprise in classified:
+        # Money first — every ledger lives inside `campaigns/`, so banking after the drop banks
+        # nothing at all. Without it an account's ceiling is re-earnable by running a dev verb, and
+        # `--all-tenants` re-earns it for every tenant on the box in one gesture.
+        CampaignStore(WorkspaceDir(tenant_dir)).bank_all_before_removal()
         for p in drop:
             _remove(p)
             dropped.append(str(p))
@@ -199,6 +204,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         human=(
             f"reset: dropped {len(dropped)} path(s).\n"
             "preserved: measurements/ (DB core) + optimizer_reuse/ — the two paid caches.\n"
+            "banked: each campaign's spend, onto the workspace ledger — a reset drops the data, "
+            "never the money.\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."
         ),
     )

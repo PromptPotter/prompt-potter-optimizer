@@ -41,6 +41,10 @@ class Job:
     started_at: str | None
     finished_at: str | None
     stop_reason: str | None
+    # The ceilings this run was admitted at — until it finishes they are the account's outstanding
+    # reservation, which is what stops two concurrent launches sharing one remainder.
+    cap_usd: float | None = None
+    cap_tokens: int | None = None
 
     @property
     def hop(self) -> CycleHop:
@@ -143,6 +147,16 @@ class JobRegistry:
             )
             return ReserveResult(job=job, holder=None)
 
+    def set_caps(self, job_id: str, *, cap_usd: float | None, cap_tokens: int | None) -> None:
+        """Stamp what the launch was admitted at, once composed — the reservation the NEXT admission
+        counts against, so it must land before the run reaches an LLM."""
+        job = self.get(job_id)
+        if job is None:
+            return
+        job.cap_usd = cap_usd
+        job.cap_tokens = cap_tokens
+        self._persist(job)
+
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
         job = self.get(job_id)
         if job is None:
@@ -225,6 +239,11 @@ class JobRegistry:
                 out.append(j)
         return out
 
+    def running_job_for(self, hop: CycleHop) -> Job | None:
+        """The in-flight job running this cycle — how a mid-flight ceiling change reaches the
+        reservation that job holds, which would otherwise keep quoting the launch's number."""
+        return next((j for j in self.list_running() if j.hop == hop), None)
+
     def machine_holder(self, *, exclude_user_id: str) -> Job | None:
         """The oldest still-running job owned by another user — the single "is the machine busy, and by
         whom" query, so the 409 a blocked user gets and the banner everyone sees cannot disagree."""
@@ -260,6 +279,8 @@ class JobRegistry:
             started_at=_optional_str(raw.get("started_at")),
             finished_at=_optional_str(raw.get("finished_at")),
             stop_reason=_optional_str(raw.get("stop_reason")),
+            cap_usd=_optional_float(raw.get("cap_usd")),
+            cap_tokens=_optional_int(raw.get("cap_tokens")),
         )
 
     def _mark_stale_on_startup(self) -> None:
@@ -298,6 +319,14 @@ def _optional_str(raw: object) -> str | None:
     if raw is None:
         return None
     return str(raw)
+
+
+def _optional_float(raw: object) -> float | None:
+    return float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
+
+
+def _optional_int(raw: object) -> int | None:
+    return int(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
 
 
 __all__ = ["Job", "JobRegistry", "JobStatus", "ReserveResult", "default_jobs_dir"]

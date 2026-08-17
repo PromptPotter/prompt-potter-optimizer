@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import uuid
 from collections.abc import Awaitable, Callable
@@ -13,11 +14,17 @@ from typing import Any, Literal, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
+from promptpotter.application.datasets.dataset_replace import (
+    NothingToReplaceError,
+    version_and_repoint,
+)
+from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
-from promptpotter.domain.run_records import CommandRecord, CycleSeed
+from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -26,7 +33,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -50,7 +57,9 @@ from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
     SCORING_SAMPLE_LOOKAHEAD_CAP,
+    acting_principal_id,
     has_capability,
+    require_capability,
 )
 
 
@@ -70,6 +79,30 @@ def _optional_float(raw: object) -> float | None:
     if isinstance(raw, int | float):
         return float(raw)
     return None
+
+
+def optional_bounded_number(
+    value: object, *, field: str, lo: float, hi: float | None = None
+) -> float | None:
+    """A finite bounded number, or ``None`` when absent — **the one spelling of "a limit off the
+    wire"**, for the router's ``mint-campaign`` / ``start-run`` arms and the dispatcher's
+    ``change-spend-budget`` alike. Out of range is a 422, never a silent omission: dropping the key
+    let a run start with no spend cap and no halt threshold while the client got a 202.
+
+    Finiteness is checked SEPARATELY from the range because a range test cannot see it. ``NaN``
+    compares False against every bound, so it passes a check written as two rejections, becomes the
+    admitted cap, and disarms the ``BudgetGate`` — whose probe is ``spent >= cap``, false forever.
+    ``+inf`` does the same wherever the bound is one-sided."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise PayloadInvalidError(f"payload.{field} must be a number")
+    if not math.isfinite(value):
+        raise PayloadInvalidError(f"payload.{field} must be a finite number")
+    if value < lo or (hi is not None and value > hi):
+        bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
+        raise PayloadInvalidError(f"payload.{field} must be {bound}")
+    return float(value)
 
 
 def _parse_cycle_seed(raw: object) -> CycleSeed:
@@ -92,12 +125,23 @@ def _slugify_backend_id(name: str) -> str:
 def _find_idempotent_command(
     ledger: CycleEventLog, idempotency_key: str
 ) -> _IdempotentMatch | None:
-    """O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
+    """Only an APPLIED command replays. On the ``CommandRecord`` alone a REJECTED attempt satisfies
+    its key forever, so the 429 at the account ceiling burns the very retry the client is told to
+    make and answers it 200 off a body nothing wrote. A match whose ack never landed (the process
+    died mid-apply) is not a replay either.
+
+    O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
     commands are operator-paced."""
+    keyed: dict[str, int] = {}
+    applied: _IdempotentMatch | None = None
     for offset, record in enumerate(ledger.iter()):
         if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
-            return _IdempotentMatch(command_id=record.command_id, offset=offset)
-    return None
+            keyed[record.command_id] = offset
+        elif isinstance(record, CommandAckRecord) and record.status == "applied":
+            at = keyed.get(record.command_id)
+            if at is not None:
+                applied = _IdempotentMatch(command_id=record.command_id, offset=at)
+    return applied
 
 
 logger = logging.getLogger(__name__)
@@ -119,7 +163,7 @@ CycleScopedKind = Literal[
     "start-run",
     "step-cycle",
 ]
-WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
+WorkspaceScopedKind = Literal["register-backend", "mint-campaign", "replace-dataset"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
 # `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
@@ -157,6 +201,10 @@ CAP_FOR_KIND: dict[str, str] = {
     # Renaming is how every OTHER surface addresses the campaign to a human, so it sits
     # with the verbs that decide the campaign's existence rather than with the run tiers.
     "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
+    # A dataset slug is part of the measurement cache key, so repointing one re-addresses
+    # every campaign that already measured against it — stronger authority than creating a
+    # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
+    "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
     # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
     # bucket rather than the campaign's own budget, so no tenant tier carries it — see
     # `shared/identity.py::SCORING_SAMPLE_LOOKAHEAD_CAP`.
@@ -164,18 +212,21 @@ CAP_FOR_KIND: dict[str, str] = {
 }
 
 # Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.
-# Derived from the Literal types themselves, so the map cannot drift from the wire.
-_ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
+# Derived from the Literal types themselves, so the map cannot drift from the wire. Public
+# because the router subtracts its typed routes from this to wire the generic one: a verb
+# reachable over HTTP but absent HERE is gated by nothing, which is how `replace-dataset`
+# ran unguarded — it was in no Literal, so this raise could not see it.
+ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     get_args(LifecycleKind)
     + get_args(CycleScopedKind)
-    + get_args(WorkspaceBackendKind)
+    + get_args(WorkspaceScopedKind)
     + get_args(CheckinScopedKind)
     + get_args(CampaignConfigKind)
 )
-if set(CAP_FOR_KIND) != _ALL_DISPATCHED_KINDS:
+if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
     raise RuntimeError(
         "CAP_FOR_KIND out of sync with the dispatched command set: "
-        f"{_ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
+        f"{ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
     )
 
 
@@ -199,7 +250,7 @@ class CommandDispatcher:
     """One per request, carrying the request-scoped ``Stores``. ``job_registry`` is the
     process-wide singleton stashed on ``app.state.job_registry`` at startup."""
 
-    def __init__(self, stores: Stores, job_registry: Any | None = None) -> None:
+    def __init__(self, stores: Stores, job_registry: JobRegistry | None = None) -> None:
         self._stores = stores
         self._job_registry = job_registry
 
@@ -368,14 +419,20 @@ class CommandDispatcher:
     async def dispatch_workspace_command(
         self,
         *,
-        kind: WorkspaceBackendKind,
+        kind: WorkspaceScopedKind,
         payload: dict[str, Any],
         idempotency_key: str,
     ) -> CommandOutcome:
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         applier: Applier
+        # A deduped retry must not re-run the migration — it would version the slug a second
+        # time — and the body echoes the subject, so it replays without touching disk.
+        on_replay: Callable[[], Any] | None = None
         if kind == "register-backend":
             applier = lambda: self._apply_register_backend(payload)  # noqa: E731
+        elif kind == "replace-dataset":
+            applier = lambda: self._apply_replace_dataset(payload)  # noqa: E731
+            on_replay = lambda: {"slug": str(payload["slug"])}  # noqa: E731
         else:
             assert kind == "mint-campaign"
 
@@ -388,6 +445,7 @@ class CommandDispatcher:
             payload=payload,
             idempotency_key=idempotency_key,
             applier=applier,
+            on_replay=on_replay,
         )
 
     # ------------------------------------------------------------------
@@ -465,7 +523,7 @@ class CommandDispatcher:
                 kind=kind,
                 payload=payload,
                 idempotency_key=idempotency_key,
-                issued_by_user_id=self._acting_principal_id(),
+                issued_by_user_id=acting_principal_id(self._stores.identity),
             )
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""
@@ -539,7 +597,7 @@ class CommandDispatcher:
             ):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
-                    self._acting_principal_id(),
+                    acting_principal_id(self._stores.identity),
                     CAMPAIGN_BABYSIT_CAP,
                 )
                 raise NotFoundError("Not found", code="not_found")
@@ -597,24 +655,21 @@ class CommandDispatcher:
                 )
             return lambda: self._apply_origin_gate_decision(hop, decision)
         if kind == "change-spend-budget":
-            max_usd = payload_extras.get("max_usd")
-            max_tokens = payload_extras.get("max_tokens")
             # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is non-numeric
             # or negative is a typo, not a no-op. Coercing it to None drops that ceiling while
             # the other applies, so the operator believes both landed when only one did.
-            if max_usd is not None and (
-                not isinstance(max_usd, int | float) or isinstance(max_usd, bool) or max_usd < 0
-            ):
-                raise PayloadInvalidError("change-spend-budget max_usd must be a number >= 0.")
+            usd_val = optional_bounded_number(
+                payload_extras.get("max_usd"), field="max_usd", lo=0.0
+            )
+            max_tokens = payload_extras.get("max_tokens")
             if max_tokens is not None and (
                 not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0
             ):
-                raise PayloadInvalidError("change-spend-budget max_tokens must be an int >= 0.")
-            if max_usd is None and max_tokens is None:
+                raise PayloadInvalidError("payload.max_tokens must be an int >= 0.")
+            if usd_val is None and max_tokens is None:
                 raise PayloadInvalidError(
                     "change-spend-budget requires at least one of max_usd / max_tokens."
                 )
-            usd_val = float(max_usd) if max_usd is not None else None
             tok_val = int(max_tokens) if max_tokens is not None else None
 
             async def _apply_budget() -> None:
@@ -656,6 +711,15 @@ class CommandDispatcher:
                 reason=reason,
                 inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
+
+    def _apply_replace_dataset(self, payload: dict[str, Any]) -> dict[str, str]:
+        try:
+            result = version_and_repoint(stores=self._stores, slug=str(payload["slug"]))
+        except NothingToReplaceError as exc:
+            raise ConflictError(
+                str(exc), code="nothing_to_replace", details={"slug": exc.slug}
+            ) from exc
+        return {"slug": result.slug}
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
         name = str(payload["name"])
@@ -712,26 +776,27 @@ class CommandDispatcher:
         write_json(gate_path, {"decision": decision})
 
     def _clamp_to_account_ceilings(
-        self, max_usd: float | None, max_tokens: int | None
+        self,
+        hop: CycleHop,
+        job_registry: JobRegistry,
+        max_usd: float | None,
+        max_tokens: int | None,
     ) -> tuple[float | None, int | None]:
         """Only a SUPPLIED arm is clamped — composing an absent one would write a ceiling the
         caller asked to leave alone."""
-        from promptpotter.application.jobs.quota import effective_launch_caps
-
         user = self._stores.users.get_or_create(
             user_id=str(self._stores.identity.user_id),
             tenant_id=str(self._stores.identity.tenant_id),
         )
-        caps = effective_launch_caps(
-            requested_cap_usd=max_usd,
-            requested_cap_tokens=max_tokens,
+        caps = clamp_budget_change(
+            max_usd=max_usd,
+            max_tokens=max_tokens,
             user=user,
             stores=self._stores,
+            job_registry=job_registry,
+            hop=hop,
         )
-        return (
-            caps.usd if max_usd is not None else None,
-            caps.tokens if max_tokens is not None else None,
-        )
+        return caps.usd, caps.tokens
 
     async def _apply_change_spend_budget(
         self,
@@ -740,24 +805,25 @@ class CommandDispatcher:
         max_usd: float | None,
         max_tokens: int | None,
     ) -> None:
-        """The round loop's BudgetGate re-reads this every clean round. A ``None`` arg leaves that
-        ceiling untouched; ``0`` halts at the next round boundary. Both arms compose against the
-        account first, because ``entry.py::_usd_cap`` prefers this file over the cap the launch
-        composed — unclamped, raising one here is the way around the host-wallet gate."""
+        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arg
+        leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
+        against the account first, because ``entry.py::_usd_cap`` prefers this file over the cap the
+        launch composed — unclamped, raising one here is the way around the host-wallet gate."""
+        registry = self._job_registry
+        if registry is None:
+            raise ServiceUnavailableError(
+                "job registry not initialised", code="job_registry_unavailable"
+            )
         max_usd, max_tokens = await asyncio.to_thread(
-            self._clamp_to_account_ceilings, max_usd, max_tokens
+            self._clamp_to_account_ceilings, hop, registry, max_usd, max_tokens
         )
-        cap_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).spend_cap
-        cap_path.parent.mkdir(parents=True, exist_ok=True)
-        caps: dict[str, float | int] = {}
-        existing = read_json_tolerant(cap_path, {})  # missing/malformed → start clean
-        if isinstance(existing, dict):
-            caps.update(existing)
-        if max_usd is not None:
-            caps["max_usd"] = max_usd
-        if max_tokens is not None:
-            caps["max_tokens"] = max_tokens
-        write_json(cap_path, caps)
+        hold_ceiling(
+            job_registry=registry,
+            hop=hop,
+            cycle_dir=self._stores.campaigns.cycle_dir(hop),
+            max_usd=max_usd,
+            max_tokens=max_tokens,
+        )
 
     async def _apply_mint_campaign(self, payload: dict[str, Any]) -> None:
         """The 202 returns once the manifest + root cycle index are written; the run proceeds via
@@ -808,6 +874,10 @@ class CommandDispatcher:
         )
 
     def _apply_cleanup_empty(self, hop: CycleHop) -> None:
+        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+            cleanup_stub_fork_if_empty,
+        )
+
         root_id = root_cycle_id(hop.cycle_id)
         _, active_cmp, active_cid = read_active_pointer(self._stores.base_dir)
         deleted_ids: list[str] = []
@@ -826,8 +896,12 @@ class CommandDispatcher:
                     continue
                 if hop.campaign_id == active_cmp and cid == active_cid:
                     continue
-                deleted, _reason = self._stores.campaigns.try_delete_stub_cycle(
-                    CycleHop(campaign_id=hop.campaign_id, cycle_id=cid)
+                # THE stub-deletion path, the same one `delete-cycle` takes — pointer discipline
+                # and the store's spend banking are not things a sweep may route around.
+                deleted, _reason = cleanup_stub_fork_if_empty(
+                    campaign_store=self._stores.campaigns,
+                    hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=cid),
+                    parent_cycle_id=root_id,
                 )
                 if deleted:
                     deleted_ids.append(cid)
@@ -838,26 +912,15 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _acting_principal_id(self) -> str:
-        """For a delegated sub-principal (ADR-0005) this is its own ``claims["principal"]``, not
-        the delegator whose tenant it acts in — so the audit trail names the real actor."""
-        principal = self._stores.identity.claims.get("principal")
-        if isinstance(principal, str) and principal:
-            return principal
-        return str(self._stores.identity.user_id)
-
     def _require_capability_for(self, kind: str) -> None:
-        """Absence raises 404, never 403 — the existence-hiding posture cross-user reads use.
-        A tenant owner holds every tier; a delegated sub-principal an attenuated subset."""
+        """Map the kind to its one tier, then defer to the shared denial. An UNMAPPED kind is
+        unwritable — ``CAP_FOR_KIND`` is exhaustive over the dispatched set at import, so reaching
+        here with no cap means a verb slipped past that raise, and refusing it is the safe read."""
         cap = CAP_FOR_KIND.get(kind)
-        if cap is None or not has_capability(self._stores.identity, cap):
-            logger.warning(
-                "command %r denied for principal %s (missing %s)",
-                kind,
-                self._acting_principal_id(),
-                cap,
-            )
+        if cap is None:
+            logger.warning("command %r has no capability and is unwritable", kind)
             raise NotFoundError("Not found", code="not_found")
+        require_capability(self._stores.identity, cap, subject=f"command {kind!r}")
 
     def _load_owned_campaign(self, campaign_id: str) -> Any:
         campaign = self._stores.campaigns.load_owned(

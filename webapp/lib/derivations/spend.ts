@@ -1,7 +1,7 @@
 // Single parser for the dashboard `spend` block. The block is written by
 // LiveDashboardProjection from per-sample step_tokens (backend bucket) +
 // ledger TokenUsageRecord (loop bucket); OpenRouter ships USD on the wire,
-// other providers resolve through shared/spend.py's rate table.
+// other providers resolve through shared/pricing.py's rate table.
 //
 // ChatPane (efficiency + ETA chips) consumes this. The *extraction* — the
 // bucket defaults, the `used_usd` type-guards, the total/fallback rule — lives

@@ -3,11 +3,15 @@ Stage-0 framing in ADR-0003. Stage 1 replaces only the resolver, never this type
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
+from promptpotter.shared.errors import NotFoundError
+
+logger = logging.getLogger(__name__)
 
 # ── Tier 1a: host-admin ────────────────────────────────────────────────────
 # The sole definition of "what the HOST admin (the person who runs the box) can
@@ -77,6 +81,10 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
 
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
+# The id the terminal identity carries in BOTH slots, and so the name of the tenant dir it writes
+# (`projects/default/`) until a browser claim renames it — the only terminal marker a walk can read.
+TERMINAL_IDENTITY_ID = "default"
+
 # ── Entitlement: authenticated, but may it act? ────────────────────────────
 # Completing OIDC mints an account AND entitles it — signing up IS the grant, and
 # the free-tier spend ceiling is what bounds the stranger who takes it. The
@@ -104,7 +112,9 @@ def _admin_caps_from_env() -> frozenset[str]:
     return frozenset()
 
 
-def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
+def default_identity(
+    tenant_id: str = TERMINAL_IDENTITY_ID, user_id: str = TERMINAL_IDENTITY_ID
+) -> IdentityContext:
     """Stage-0 identity factory. A REGISTERED operator gets ``user_id == tenant_id``, so a terminal run
     lands in the same single workspace the authenticated web reads — one tenant per operator."""
     return IdentityContext(
@@ -120,6 +130,31 @@ def has_capability(identity: IdentityContext, capability: str) -> bool:
     """The one predicate for "does this identity hold *capability*", so every capability decision has one
     shape. Dataset READS are not a capability decision — see ``infrastructure.store.dataset_access``."""
     return capability in identity.capabilities
+
+
+def require_capability(identity: IdentityContext, capability: str, *, subject: str) -> None:
+    """ENFORCE what :func:`has_capability` answers — the one denial, so a gated surface outside the
+    command dispatcher refuses identically to one inside it. Absence raises 404, never 403: the
+    existence-hiding posture of ADR-0005, which is why the message names nothing. ``subject`` names
+    the act for the audit line only."""
+    if has_capability(identity, capability):
+        return
+    logger.warning(
+        "%s denied for principal %s (missing %s)",
+        subject,
+        acting_principal_id(identity),
+        capability,
+    )
+    raise NotFoundError("Not found", code="not_found")
+
+
+def acting_principal_id(identity: IdentityContext) -> str:
+    """WHO is acting. For a delegated sub-principal (ADR-0005) this is its own ``claims["principal"]``,
+    not the delegator whose tenant it acts in — so an audit trail names the real actor."""
+    principal = identity.claims.get("principal")
+    if isinstance(principal, str) and principal:
+        return principal
+    return str(identity.user_id)
 
 
 def claim_email(identity: IdentityContext) -> str | None:
@@ -148,10 +183,13 @@ __all__ = [
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
     "SCORING_SAMPLE_LOOKAHEAD_CAP",
+    "TERMINAL_IDENTITY_ID",
     "IdentityContext",
+    "acting_principal_id",
     "capabilities_from_tiers",
     "claim_access_state",
     "claim_email",
     "default_identity",
     "has_capability",
+    "require_capability",
 ]

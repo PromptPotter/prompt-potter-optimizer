@@ -3439,7 +3439,7 @@
     },
     "/api/v1/auth/activity": {
       "get": {
-        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins. ``cost_usd`` may be null on disk (Groq doesn't return wire\ncost); we fall back to ``shared.spend.lookup_rate`` × tokens so\nhistorical spend isn't silently zero.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
+        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins. ``cost_usd`` may be null on disk (Groq doesn't return wire\ncost); we fall back to ``shared.pricing.lookup_rate`` × tokens so\nhistorical spend isn't silently zero.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
         "operationId": "activity_api_v1_auth_activity_get",
         "parameters": [
           {

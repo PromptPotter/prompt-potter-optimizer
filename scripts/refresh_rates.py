@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from promptpotter.shared.spend import CACHE_PATH, UPSTREAM_URL, refresh_rates
+from promptpotter.shared.pricing import CACHE_PATH, UPSTREAM_URL, refresh_rates
 
 
 def main() -> int:

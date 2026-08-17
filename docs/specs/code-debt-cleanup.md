@@ -23,6 +23,25 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+- **A dead L4 inner cycle leaves its spend unrolled.** *The earlier entry here claimed inner spend
+  was invisible to `sum_user_spend` entirely. That was wrong, and acting on it double-counts:*
+  `inner/spawn.py` returns the finished cycle's `SpendRollup` as `step_tokens`, and
+  `scoring/sample_measurement.py::emit_step_token_usage` writes it to the OUTER cycle's ledger as
+  one `backend` `TokenUsageRecord`, so the account tier and `BudgetGate` both already see it.
+  Measured on the dev box: 27 inner cycles reaching a normal terminal stop (`max_rounds`,
+  `lives_exhausted`) accounted for $1.6187 / 8,195,851 tokens on the sandbox ledgers and
+  $1.6187 / 8,195,851 in outer rollup rows — exact in both units. What does NOT roll up is the
+  cell that dies: 5 cycles (`producer_vanished` ×2, `crashed`, no stop stamped ×2) held
+  $0.2215 / 1,112,746 tokens with no outer row, because `step_tokens` rides the SUCCESS return and
+  a failed cell raises `InnerCycleUnscoreableError` before `_compute_step_tokens`. **Two fixes, not
+  one, because the two causes differ:** a deadline-cancelled cell can emit from `run_inner_cycle`
+  itself (`outer_ledger` and `cycle_dir_box["dir"]` are both in scope at the `result is None`
+  arm); a cell whose PRODUCER died cannot, since nothing outer is alive to emit — that one belongs
+  to the reaper, which already reads each sandbox's `owner.json` to decide orphanhood and is the
+  only component that can attribute a dead sandbox to its owner. Banking it as a
+  `SpendTombstoneRecord` on the owner's workspace ledger reuses the delete path's mechanism whole.
+  Exposure is bounded while L4 runs are the operator's, who is unmetered.
+
 **From the 2026-08-06 JustLogic model bake-off.** Each carries its measurement; the four
 root fixes that arc DID land (reasoning-token share on the ledger, provider-aware pricing,
 `answer_modal_share`, the `reasoning_only_response` arm) are in `git log`, not here.
@@ -211,8 +230,8 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
 - **Backend fix isn't observable without clearing a cache** — PP's measurement cache + TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a co-owned backend fix replays stale results. Fold the connector revision-pin into the measurement-cache key (or add a `--fresh` flag); confirm the TermNorm `/matches` short-circuit only fires on `verified` aliases. Workaround: clear `measurements/`.
 
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon):**
-- **Adopt-in-new-code for the coupon/BYO build:** the new `grant.json` / `api_keys.json` stores MUST ride `read_json_optional`/`write_json` (the `UserStore` template, `store/io.py`) from day one — don't add hand-rolled readers. `shared/spend.py` still hand-rolls `json.loads(...)` at three sites (one of them decoding a fetched payload — same pattern, not previously filed); held separately from the JSON-read sweep (SHIPPED elsewhere) because `shared/` importing `infrastructure/store/io` is an unresolved layer-direction question — resolve it before or alongside this build. (`store/io.py` is now safe to import from anywhere: the eager `store/__init__` that made any leaf import drag in `CampaignStore` is gone, so this is a layer-*direction* question only, no longer an import-cycle one.)
-- **Two host-wallet mechanisms** — `application/jobs/quota.py::effective_launch_caps` + the `User.spend_budget_usd_total` / `token_budget_total` ceilings (lifetime, mint-time snapshot) vs the new coupon (`grant.json`, ledger-derived, live). Two guards on one concern (host's wallet) = the no-redundant-mechanism rule. The snapshot is also concurrency-blind: two mints while spend is low each receive the full remainder and never re-aggregate mid-run, so combined spend can reach ~2× the ceiling (the capacity-1 `JobRegistry` slot doesn't bind — it's a per-process in-memory lock). Action: **delete the free-tier path**; coupon-remaining becomes the single host ceiling, read by the per-cycle `BudgetGate` every tick (D1/D2 in ADR-0003), which also closes the concurrency hole. Blocker: lands *with* the coupon, not before — deleting first leaves the wallet unguarded. ⚠️ The coupon must carry BOTH units or it is a regression: an all-USD replacement re-opens the unpriced-model blindness D1's token arm exists to cover.
+- **Adopt-in-new-code for the coupon/BYO build:** the new `grant.json` / `api_keys.json` stores MUST ride `read_json_optional`/`write_json` (the `UserStore` template, `store/io.py`) from day one — don't add hand-rolled readers. `shared/pricing.py` still hand-rolls `json.loads(...)` at three sites (one of them decoding a fetched payload — same pattern, not previously filed); held separately from the JSON-read sweep (SHIPPED elsewhere) because `shared/` importing `infrastructure/store/io` is an unresolved layer-direction question — resolve it before or alongside this build. (`store/io.py` is now safe to import from anywhere: the eager `store/__init__` that made any leaf import drag in `CampaignStore` is gone, so this is a layer-*direction* question only, no longer an import-cycle one.)
+- **Two host-wallet mechanisms** — `application/jobs/quota.py::admit_launch` + the `User.spend_budget_usd_total` / `token_budget_total` ceilings (lifetime, mint-time snapshot) vs the new coupon (`grant.json`, ledger-derived, live). Two guards on one concern (host's wallet) = the no-redundant-mechanism rule. Action: **delete the free-tier path**; coupon-remaining becomes the single host ceiling, read by the per-cycle `BudgetGate` every tick (D1/D2 in ADR-0003). Blocker: lands *with* the coupon, not before — deleting first leaves the wallet unguarded. ⚠️ Two things the replacement must carry or it is a regression: BOTH units (an all-USD coupon re-opens the unpriced-model blindness D1's token arm exists to cover), and the per-run **reservation** (`Job.cap_usd` / `cap_tokens`) — without it two concurrent launches are each admitted against the same remainder and the pair spends ~2× the ceiling.
 - `domain/run_records.py::TokenUsageRecord` lacks `key_source` → `/auth/activity` `group_by=api_key` (`routers/auth.py`) fakes a *provider slug* as the key id. Once real `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
 
 ## Standing — long-lived design holds

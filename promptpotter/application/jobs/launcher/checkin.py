@@ -21,21 +21,25 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     _admit,
     _assert_origin_ready,
     _record_launch_stop,
+    _release_slot,
     _run_in_background,
     _run_preflight,
     build_cycle_config,
-    launch_interrupted,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
-from promptpotter.application.jobs.quota import check_launch_quotas, effective_launch_caps
+from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import claim_email
+from promptpotter.shared.identity import (
+    CAMPAIGN_CREATE_CAP,
+    claim_email,
+    require_capability,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -55,7 +59,14 @@ def create_checkin_campaign(
     headers: tuple[str, ...] = (),
 ) -> tuple[str, str, DraftCampaign]:
     """Transition (a) — mint the CHECKIN skeleton, re-key ``draft`` to the new ``campaign_id``, persist
-    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one."""
+    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
+
+    **The capability gate is HERE, at the mint, not on the routes above it.** A check-in campaign is
+    durable disk the moment it exists, and four ingresses reach this one function — `/datasets/ingest`,
+    `/datasets/{name}/draft`, `/origins/{id}/draft` and CLI `new <file>`. Gating each of them spells
+    the same rule four times and leaves the fifth unguarded; `mint-campaign` already answers to
+    `campaign.create` at the dispatcher, so a second door onto the same act answers to it too."""
+    require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
     _session_id, campaign_id, cycle_id = mint_checkin_skeleton(stores, slug=draft.slug)
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
@@ -203,21 +214,29 @@ async def start_checkin_campaign(
         )
     )
 
+    # ADMISSION — nothing here touches the check-in cycle, so a refusal answers for the machine
+    # slot alone and leaves the campaign re-startable once the account has room again.
     try:
         await _run_preflight(draft.connector, backend_url)
         spend_budget_usd, token_budget = await asyncio.to_thread(
-            effective_launch_caps,
+            admit_launch,
             requested_cap_usd=spend_budget_usd,
             requested_cap_tokens=token_budget,
             user=user,
             stores=stores,
+            job_registry=job_registry,
+        )
+        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
+    except BaseException as exc:
+        _release_slot(job_registry, job.job_id, exc, admitted=False)
+        raise
+
+    async def make_session(dataset_name: str) -> Session:
+        return await init_services(
+            backend_url=backend_url, dataset_name=dataset_name, identity=stores.identity
         )
 
-        async def make_session(dataset_name: str) -> Session:
-            return await init_services(
-                backend_url=backend_url, dataset_name=dataset_name, identity=stores.identity
-            )
-
+    try:
         prepared = await prepare_checkin_run(
             stores,
             hop=hop,
@@ -228,12 +247,7 @@ async def start_checkin_campaign(
         # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
         # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
         # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
-        stopped = launch_interrupted(exc)
-        job_registry.mark_finished(
-            job.job_id,
-            status="stopped" if stopped else "failed",
-            stop_reason="launch_interrupted" if stopped else "launch_aborted",
-        )
+        _release_slot(job_registry, job.job_id, exc)
         _record_launch_stop(
             stores=stores,
             hop=hop,

@@ -58,7 +58,7 @@ from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import has_pipeline_warnings
-from promptpotter.shared.spend import compute_usd
+from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView

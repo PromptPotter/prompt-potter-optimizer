@@ -3,6 +3,7 @@ running the same ``checkin`` node CLI ``new`` does. ``origin_readiness`` decides
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from promptpotter.application.datasets.origin_readiness import (
     resolution_block,
 )
 from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
+from promptpotter.application.jobs.quota import admit_llm_turn
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
@@ -155,6 +157,10 @@ async def resolve_origin_turn(
     message: str | None = None,
 ) -> OriginResolutionResult:
     """Persists the mutated draft + resolution block under the draft's ``draft_id``."""
+    # The one optimizer call reachable before a campaign exists, so no launch admission has run
+    # and no `BudgetGate` is watching — an exhausted account would otherwise keep spending the
+    # host's key here indefinitely. Offloaded: admission globs every cycle ledger.
+    await asyncio.to_thread(admit_llm_turn, stores=stores)
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
     # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,

@@ -62,7 +62,7 @@ def main() -> int:
     ):
         assert value.is_relative_to(home_path), f"{name} = {value}, expected under {home_path}"
 
-    from promptpotter.shared.spend import CACHE_PATH
+    from promptpotter.shared.pricing import CACHE_PATH
 
     assert CACHE_PATH.is_relative_to(home_path), (
         f"rates cache = {CACHE_PATH}, expected under {home_path}"

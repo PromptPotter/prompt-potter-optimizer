@@ -58,7 +58,7 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
-from promptpotter.shared.spend import refresh_rates_in_background
+from promptpotter.shared.pricing import refresh_rates_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +90,12 @@ def _build_budget_gate(
     *,
     usd_cap: float | None,
     token_cap: int | None,
-) -> BudgetGate | None:
-    """A ceiling is armed iff its starting cap is non-``None``; both disarmed ⇒ no gate at all. The
-    probes re-read ``.runtime/spend_cap.json`` each tick, so a ceiling moves without a restart."""
-    if usd_cap is None and token_cap is None:
-        return None
+) -> BudgetGate:
+    """**Always armed**, because a run's ceiling is not settled at launch: the probes re-read
+    ``.runtime/spend_cap.json`` each tick, so ``change-spend-budget`` can bind a run that declared
+    nothing. Returning no gate for a launch with no starting caps is what let that command ack
+    ``applied`` against a ceiling that could never trip — set by the operator, served to the
+    webapp, enforced by nothing. An unset arm still costs nothing: `tripped` skips a ``None`` cap."""
     dashboard = observers.dashboard
 
     def _usd_cap() -> float | None:
@@ -106,10 +107,10 @@ def _build_budget_gate(
         return saved if saved is not None else token_cap
 
     return BudgetGate(
-        usd_spent=(lambda: dashboard.spend_total_used_usd) if usd_cap is not None else None,
-        usd_cap=_usd_cap if usd_cap is not None else None,
-        tokens_spent=(lambda: dashboard.spend_total_tokens) if token_cap is not None else None,
-        tokens_cap=_token_cap if token_cap is not None else None,
+        usd_spent=lambda: dashboard.spend_total_used_usd,
+        usd_cap=_usd_cap,
+        tokens_spent=lambda: dashboard.spend_total_tokens,
+        tokens_cap=_token_cap,
     )
 
 
@@ -212,6 +213,29 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     session.sample_lookahead_consume = partial(sample_lookahead_flag.unlink, missing_ok=True)
 
 
+def _tighten_budgets(
+    config: CampaignConfig, usd: float | None, tokens: int | None
+) -> CampaignConfig:
+    """Impose a ceiling that may LOWER what the config declares and never raise it; ``None`` imposes
+    nothing. Two sources compose through here and neither may be trusted upward: what the host
+    wallet ADMITTED (`jobs/quota.py::admit_launch`), which BOUNDS rather than defaults because a
+    `CycleSeed` arrives over `fork-cycle` as request input; and the ceiling `change-spend-budget`
+    left in ``spend_cap.json``, which the launch's flag sweep is about to drop."""
+    opt = config.optimization
+    bounded: dict[str, float | int] = {}
+    if usd is not None:
+        bounded["spend_budget_usd"] = (
+            usd if opt.spend_budget_usd is None else min(usd, opt.spend_budget_usd)
+        )
+    if tokens is not None:
+        bounded["token_budget"] = (
+            tokens if opt.token_budget is None else min(tokens, opt.token_budget)
+        )
+    if not bounded:
+        return config
+    return config.model_copy(update={"optimization": opt.model_copy(update=bounded)})
+
+
 async def _prepare_run(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
@@ -224,25 +248,15 @@ async def _prepare_run(
 ) -> _PreparedRun:
     cb = observers.callbacks
 
-    # Fold the run-scoped caps into the config BEFORE the seed block, so precedence stays
-    # seed > run-scoped > campaign default and every reader — the gate, `run_limits`, the
-    # webapp — sees the numbers that actually bind.
-    caps = {
-        k: v
-        for k, v in (("spend_budget_usd", spend_budget_usd), ("token_budget", token_budget))
-        if v is not None
-    }
-    if caps:
-        campaign_config = campaign_config.model_copy(
-            update={"optimization": campaign_config.optimization.model_copy(update=caps)}
-        )
-
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
     # after it makes the origin pass below pausable like every other phase.
+    carried: tuple[float | None, int | None] = (None, None)
     if session.state.cycle_id:
         launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
-        clear_run_control_flags(launch_cycle_dir)
+        # The sweep HANDS BACK the ceiling it drops — see the function for why it is the one
+        # polled flag a launch may not simply discard.
+        carried = clear_run_control_flags(launch_cycle_dir)
         _bind_run_controls(session, launch_cycle_dir)
 
     # Read HERE — the single runner seam every launch path funnels through — never threaded
@@ -270,6 +284,12 @@ async def _prepare_run(
                 at=utcnow_iso(),
             )
             session.human_intervened = True
+
+    # LAST, and a bound rather than a default — see the function. The carried ceiling composes as a
+    # second `min`, so it can only tighten: it was clamped against the account as it stood when it
+    # was written, and ADR-0003 keeps such a ceiling from outliving its run by RAISING anything.
+    campaign_config = _tighten_budgets(campaign_config, spend_budget_usd, token_budget)
+    campaign_config = _tighten_budgets(campaign_config, *carried)
 
     if origin is None:
         # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
@@ -496,7 +516,7 @@ async def _run_single_cycle(
         )
         # Same gate, two cadences — the round boundary and the per-sample checkpoint — bound as
         # ONE object, so a ceiling moved mid-flight moves both and both name one reason.
-        session.budget_tripped = budget_gate.tripped if budget_gate is not None else None
+        session.budget_tripped = budget_gate.tripped
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,

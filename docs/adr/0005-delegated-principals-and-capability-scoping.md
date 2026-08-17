@@ -39,7 +39,7 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 > channel (`admin_bot.py`: `/grant`, `/revoke`, `/grants`) — the identity zone a
 > delegate cannot write. Security test in `tests/test_security.py`.
 > **Also shipped (2026-07-15):** §5 per-grant spend-ceiling *enforcement*
-> (`effective_launch_caps` folds the claim ceiling into its `min`); §4 babysit
+> (`admit_launch` reads the declaration down to the claim ceiling); §4 babysit
 > *minimal* (a fork seed whose `pipeline_overlay` sets a locked axis — model/provider —
 > requires `campaign.babysit`, stamps the cycle babysat, and forces its runs to grade
 > `C` via `grade_run(human_intervened=…)`; the trigger is the overlay edit, not any
@@ -182,7 +182,7 @@ routes reach it too). As-shipped tiers over the *real* verb set:
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin` | autonomous |
 | `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-spend-budget` (raise a ceiling) | budget |
-| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-allowed-models`, `set-campaign-label` | destructive |
+| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-allowed-models`, `set-campaign-label`, `replace-dataset` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4, SHIPPED) | privileged / provenance-tainting |
 | `scoring.lookahead` | `set-sample-lookahead` (SHIPPED) — **host-admin, not a campaign tier**: it spends the BOX's shared provider rate bucket, not the campaign's budget, so no delegate can hold it. Not `babysit` either — it taints nothing, because the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a | host privilege |
 
@@ -190,13 +190,22 @@ The ladder is the point: a delegate with `campaign.step` but **not** `campaign.r
 advance the search one bounded action at a time (each a small, checkable spend) but
 cannot fire an autonomous loop.
 
-Two deltas from the original strawman, both deliberate: `fork-cycle` sits at **run**, not
+Three deltas from the original strawman, all deliberate: `fork-cycle` sits at **run**, not
 step — an operator fork mints *and launches* an autonomous continuation (the babysit grant
 that gates *unlocking a locked axis in the fork seed* is a distinct future concern, §4);
-and `register-backend` folds into `campaign.create` rather than a separate `backend.register`
+`register-backend` folds into `campaign.create` rather than a separate `backend.register`
 cap (one fewer tier; a delegate that may author campaigns may register the backend they
-run against). `replace-dataset` is **not** gated here — it bypasses the dispatcher
-(`version_and_repoint` direct), a pre-existing charter gap noted for the create tier.
+run against); and `replace-dataset` sits at **lifecycle**, not create, because a dataset
+slug is part of the measurement cache key — repointing one re-addresses every campaign that
+already measured against it, which is strictly stronger than authoring a new dataset.
+
+**A route is the only way to add a verb, so the route set is what the ladder is checked
+against.** `CAP_FOR_KIND`'s exhaustiveness raise can only see kinds that dispatch, so it
+read as total while `replace-dataset` called `version_and_repoint` directly — gated by
+nothing, recorded nowhere, and named as an open gap in this section for as long as it
+lasted. `routers/commands.py` now raises at import when a typed route names a kind outside
+`ALL_DISPATCHED_KINDS`, which is the assertion that makes the gap unwritable rather than
+merely known.
 
 ### 4. Babysat — a lineage-subtree tag, escapable by forking clean
 
@@ -261,9 +270,17 @@ degenerate case of the subtree tag, underbuilt not contradicted. No edit-kind sp
 ### 5. Per-grant spend ceiling — SHIPPED
 
 Each grant carries a spend ceiling, enforced by the existing spend-cap probe (ADR-0003):
-`effective_launch_caps` now folds `min(requested_cap, lifetime_remaining, grant_ceiling)`,
-reading the ceiling from the identity claims a delegated sub-principal carries. No new spend
-machinery — a narrower input to the one that exists. (Per-*channel* ceilings await §2.)
+`admit_launch` reads a sub-principal's declaration down to `grant_ceiling` — the grant bounds what
+it may DECLARE — and the host wallet then admits or refuses that declaration whole. The ceiling
+comes from the identity claims the sub-principal carries; no new spend machinery, a narrower input
+to the one that exists. (Per-*channel* ceilings await §2.)
+
+**The grant is a bound, never a declaration, and both directions of that were wrong once.** A
+launch declaring NOTHING declares the account's headroom bounded by the grant — composed the other
+way the grant became the declaration, and a delegate whose headroom had fallen below its grant was
+refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an
+arm the request SUPPLIED: folded into an absent one it wrote a ceiling the caller asked to leave
+alone, which the `spend_cap` file merge then made stick for the rest of the run.
 
 ### 6. The bounded step verb — SHIPPED as `step-cycle`
 

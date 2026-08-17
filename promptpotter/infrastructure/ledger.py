@@ -51,13 +51,20 @@ class CycleEventLog:
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
         return cls(ledger_path)
 
+    @staticmethod
+    def workspace_path(workspace_dir: WorkspaceDir) -> Path:
+        """Where the workspace ledger lives, resolved WITHOUT creating it — so a read (the account
+        spend walk, the cross-tenant install report) never mints a ``.workspace/`` in a tenant that
+        has yet to write one."""
+        return Path(workspace_dir) / ".workspace" / "events.jsonl"
+
     @classmethod
     def open_workspace(cls, workspace_dir: WorkspaceDir) -> CycleEventLog:
         """Open the workspace ledger at ``{workspace_dir}/.workspace/events.jsonl`` — same single-writer
         discipline, no ``inherit_from`` (the workspace has no fork tree)."""
-        workspace_subdir = Path(workspace_dir) / ".workspace"
-        workspace_subdir.mkdir(parents=True, exist_ok=True)
-        return cls(workspace_subdir / "events.jsonl")
+        path = cls.workspace_path(workspace_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return cls(path)
 
     @property
     def path(self) -> Path:

@@ -103,7 +103,8 @@ read**, so a hand-edited over-grant is clamped, and a malformed/no-delegator gra
 not the delegator it acts as. Provisioned only through the operator-admin channel
 (`admin_bot.py`: `/grant`, `/revoke`, `/grants`); the grant writer rejects a delegator that is
 itself a sub-principal (**one-level delegation**, enforced). A grant's **spend ceiling** is
-enforced — `effective_launch_caps` folds it into `min(requested, lifetime_remaining, ceiling)`.
+enforced — `admit_launch` reads a sub-principal's declaration down to its grant before the wallet
+admits or refuses that declaration whole.
 The **`campaign.babysit`** cap gates a direct edit of an engine-locked value: unlocking the
 model/provider axis in a `fork-cycle` seed requires it, stamps the cycle babysat, and forces
 its runs to grade `C` (excluded from digest / reuse / L4). The **`campaign.step`** rung gates
@@ -188,11 +189,16 @@ not backend-supplied.
 - **Sign-up is open AND signing up is the grant.** Anyone completing OIDC gets an account holding
   `OWNER_COMMAND_CAPABILITIES` over their own tenant. What bounds them is money, not approval: the
   free-tier lifetime ceilings (`Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed
-  at `quota.py::effective_launch_caps`). **Both units, because the USD one can go blind** — a billed
+  at `quota.py::admit_launch`). **Both units, because the USD one can go blind** — a billed
   call with no resolvable rate leaves the money total a floor, so the token ceiling is what still
-  holds and the USD arm falls back to `Settings.UNPRICED_GRACE_USD`. Every path that sets a ceiling
-  composes there, `change-spend-budget` included: it writes the file `_usd_cap` prefers over the
-  launch-composed cap, so an unclamped one is the way around this whole section.
+  holds and the USD arm falls back to `Settings.UNPRICED_GRACE_USD`. A launch is **admitted at what
+  it declares or refused**, never clamped to the remainder — a delegated sub-principal's grant is
+  the one read-down, and [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) §5
+  owns why — and holds that ceiling as a reservation
+  while it runs — [ADR-0003](../adr/0003-spend-and-tenancy.md)'s D1 owns why, including the overrun
+  the account never sees. Every path that sets a ceiling composes there,
+  `change-spend-budget` included: it writes the file `_usd_cap` prefers over the launch-composed
+  cap, so an unclamped one is the way around this whole section.
   `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
   capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
@@ -226,7 +232,8 @@ not backend-supplied.
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
 | Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
 | Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
-| Who is exempt from free-tier metering (one predicate) | `quota.py::_spends_the_hosts_own_key` — no issuer (terminal) or the claimed identity |
+| Who is exempt from free-tier metering (one definition, two readings) | `quota.py::_is_host` — the terminal, or the identity that claimed the box. `spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `is_host_tenant_dir` off a DIRECTORY walk (the un-renamed `projects/default/`), which has no session to ask. Only the terminal DETECTOR differs, and merging the two is what would let an identity that merely omits an issuer resolve as the operator — the anonymous-tier trap |
+| What every account spent + produced (cross-tenant, ADR-0004 channel only) | `jobs/install_spend.py::read_install_spend`, rendered by `admin_bot.py`'s `/spend` — never an inbound route |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
