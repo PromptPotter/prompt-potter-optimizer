@@ -179,9 +179,16 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
 
 def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
     try:
-        client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
+        resp = client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
     except httpx.HTTPError:
         logger.warning("sendMessage failed", exc_info=True)
+        return
+    # Telegram refuses in the BODY, not the transport — a 400 (text too long, chat gone) is no
+    # `httpx.HTTPError`, so catching only that dropped every refused reply without a trace. A command
+    # that ran and then answered nothing is indistinguishable from one that never arrived, which is
+    # the same silence the gate used to keep.
+    if resp.status_code != 200:
+        logger.warning("sendMessage refused: HTTP %d %s", resp.status_code, resp.text[:300])
 
 
 def notify_operator(text: str) -> bool:
@@ -199,9 +206,15 @@ def notify_operator(text: str) -> bool:
         return False
     try:
         with httpx.Client(base_url=f"https://api.telegram.org/bot{token}", timeout=10) as client:
-            client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
+            resp = client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
     except httpx.HTTPError:
         logger.warning("Operator notice failed to send", exc_info=True)
+        return False
+    # The return value is the CLAIM that a notice was delivered, and a refusal arrives as a non-200
+    # body rather than an exception — so this said True for notices Telegram never sent. A sign-in
+    # nobody was told about, reported as told, is the one answer this must never give.
+    if resp.status_code != 200:
+        logger.warning("Operator notice refused: HTTP %d %s", resp.status_code, resp.text[:300])
         return False
     return True
 
