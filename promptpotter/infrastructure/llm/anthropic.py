@@ -104,7 +104,13 @@ class AnthropicClient(LLMClientBase):
         raw = await client.messages.with_raw_response.create(**request_params)
         response = raw.parse()
 
-        total = response.usage.input_tokens + response.usage.output_tokens
+        # Anthropic reports its cache counts BESIDE ``input_tokens``; the OpenAI-compat wire
+        # reports its own INSIDE ``prompt_tokens``. Normalize to the latter, so no reader
+        # downstream has to know which provider answered.
+        cache_read = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
+        cache_write = int(getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
+        prompt_tokens = response.usage.input_tokens + cache_read + cache_write
+        total = prompt_tokens + response.usage.output_tokens
         if reservation is not None:
             reservation.close(total)
         apply_discovered_caps(
@@ -121,9 +127,11 @@ class AnthropicClient(LLMClientBase):
             content=content,
             model=response.model,
             usage={
-                "prompt_tokens": response.usage.input_tokens,
+                "prompt_tokens": prompt_tokens,
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": total,
+                "cache_read_tokens": cache_read,
+                "cache_write_tokens": cache_write,
             },
             parsed=parsed,
         )

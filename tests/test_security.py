@@ -1089,9 +1089,11 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # A rate belongs to the (provider, model) PAIR, so the record handed to the pricer must carry
     # the provider. Dropped, every namespaced model reads UNPRICED: the USD total stays $0.00 for
     # real spend and the grace renews on each launch, which is the ceiling silently not existing.
+    from promptpotter.shared.pricing import Rate
+
     monkeypatch.setattr(
         "promptpotter.shared.pricing.load_rates",
-        lambda: {"openrouter/openai/gpt-4o": (1e-6, 2e-6)},
+        lambda: {"openrouter/openai/gpt-4o": Rate(1e-6, 2e-6)},
     )
     priced = sum_user_spend(
         ledgers=_ledger("priced.jsonl", model="openai/gpt-4o"), since=0.0, until=2e9

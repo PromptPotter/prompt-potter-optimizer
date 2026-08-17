@@ -72,6 +72,8 @@ def iter_user_token_usage(
                 "provider": rec.get("provider"),
                 "kind": rec.get("kind"),
                 "cached": bool(rec.get("cached", False)),
+                "cache_read_tokens": int(rec.get("cache_read_tokens", 0)),
+                "cache_write_tokens": int(rec.get("cache_write_tokens", 0)),
             }
         )
     return out
@@ -89,6 +91,8 @@ def record_cost_usd(rec: dict[str, Any]) -> float | None:
         int(rec.get("output_tokens", 0)),
         override_usd=float(raw) if isinstance(raw, int | float) else None,
         provider=rec.get("provider"),
+        cache_read_tokens=int(rec.get("cache_read_tokens", 0)),
+        cache_write_tokens=int(rec.get("cache_write_tokens", 0)),
     )
 
 
@@ -109,6 +113,10 @@ class BilledSpend(NamedTuple):
     input_tokens: int
     output_tokens: int
     unpriced_tokens: int
+    # Subsets of ``input_tokens``, carried so an L4 inner campaign forwards the BREAKDOWN with its
+    # spend — dropped here, the outer bucket reports no cache activity for most of a pp-self run.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     @property
     def used_tokens(self) -> int:
@@ -120,6 +128,8 @@ class BilledSpend(NamedTuple):
             self.input_tokens + other.input_tokens,
             self.output_tokens + other.output_tokens,
             self.unpriced_tokens + other.unpriced_tokens,
+            self.cache_read_tokens + other.cache_read_tokens,
+            self.cache_write_tokens + other.cache_write_tokens,
         )
 
     def since(self, mark: BilledSpend) -> BilledSpend:
@@ -131,6 +141,8 @@ class BilledSpend(NamedTuple):
             max(0, self.input_tokens - mark.input_tokens),
             max(0, self.output_tokens - mark.output_tokens),
             max(0, self.unpriced_tokens - mark.unpriced_tokens),
+            max(0, self.cache_read_tokens - mark.cache_read_tokens),
+            max(0, self.cache_write_tokens - mark.cache_write_tokens),
         )
 
     def as_user_spend(self) -> UserSpend:
@@ -147,10 +159,12 @@ def _billed_of(rec: dict[str, Any]) -> BilledSpend:
     the rate is not, so the tokens land in the residue and the USD stays at zero."""
     inp = int(rec.get("input_tokens", 0))
     out = int(rec.get("output_tokens", 0))
+    cache_read = int(rec.get("cache_read_tokens", 0))
+    cache_write = int(rec.get("cache_write_tokens", 0))
     usd = record_cost_usd(rec)
     if usd is None:
-        return BilledSpend(0.0, inp, out, inp + out)
-    return BilledSpend(usd, inp, out, 0)
+        return BilledSpend(0.0, inp, out, inp + out, cache_read, cache_write)
+    return BilledSpend(usd, inp, out, 0, cache_read, cache_write)
 
 
 def billed_spend(ledgers: Iterable[Path]) -> BilledSpend:
@@ -177,6 +191,8 @@ def forwarded_mark(cycle_dir: Path) -> BilledSpend:
         int(raw.get("input_tokens", 0)),
         int(raw.get("output_tokens", 0)),
         int(raw.get("unpriced_tokens", 0)),
+        int(raw.get("cache_read_tokens", 0)),
+        int(raw.get("cache_write_tokens", 0)),
     )
 
 

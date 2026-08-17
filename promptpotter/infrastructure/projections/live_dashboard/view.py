@@ -632,12 +632,16 @@ class LiveDashboardView(DerivedView):
         out_tok = int(record.output_tokens)
         if record.model and not bucket.model:
             bucket.model = record.model
+        cache_read = int(record.cache_read_tokens)
+        cache_write = int(record.cache_write_tokens)
         usd = compute_usd(
             record.model,
             in_tok,
             out_tok,
             override_usd=record.cost_usd,
             provider=record.provider,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
 
         if usd is not None:
@@ -649,6 +653,10 @@ class LiveDashboardView(DerivedView):
             bucket.input_tokens += in_tok
             bucket.output_tokens += out_tok
             bucket.reasoning_tokens += int(record.reasoning_tokens)
+            # Only the billed side: a reuse-cache hit reached no provider, so counting its
+            # replayed cache tokens would report a prefix holding on calls never made.
+            bucket.cache_read_tokens += cache_read
+            bucket.cache_write_tokens += cache_write
             if usd is not None:
                 bucket.used_usd = round(bucket.used_usd + usd, 6)
                 bucket.rate_known = True

@@ -2591,12 +2591,13 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
         # OpenRouter's model id, and OpenRouter has NO key of its own here — which is
         # exactly the shipped table's shape for this model, and why the old chain's
         # cross-provider match had something wrong to reach for.
-        "deepseek/deepseek-v4-flash": (0.00000014, 0.00000028),
-        "openrouter/openai/gpt-oss-20b": (0.00000004, 0.00000015),
+        "deepseek/deepseek-v4-flash": spend_mod.Rate(0.00000014, 0.00000028),
+        "openrouter/openai/gpt-oss-20b": spend_mod.Rate(0.00000004, 0.00000015),
         # Groq answers a provider-less model id while the table keys it prefixed.
-        "groq/openai/gpt-oss-120b": (0.00000015, 0.0000006),
-        # The bare namespace the table keeps first-party OpenAI/Anthropic in.
-        "gpt-4o": (0.0000025, 0.00001),
+        "groq/openai/gpt-oss-120b": spend_mod.Rate(0.00000015, 0.0000006),
+        # The bare namespace the table keeps first-party OpenAI/Anthropic in, and the only row
+        # here carrying cache tiers — reads at 0.1x input, writes at 1.25x.
+        "gpt-4o": spend_mod.Rate(0.0000025, 0.00001, 0.000003125, 0.00000025),
     }
     monkeypatch.setattr(spend_mod, "load_rates", lambda: table)
     lookup_rate, compute_usd = spend_mod.lookup_rate, spend_mod.compute_usd
@@ -2623,6 +2624,19 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
+
+    # 5. A cache read is a SUBSET of the input count, so it is re-priced OUT of it rather than
+    #    added on top — 1000 input of which 800 cached bills 200 cold + 800 at the read tier.
+    cold = compute_usd("gpt-4o", 1000, 0, provider="openai")
+    hit = compute_usd("gpt-4o", 1000, 0, provider="openai", cache_read_tokens=800)
+    assert cold == pytest.approx(1000 * 0.0000025)
+    assert hit == pytest.approx(200 * 0.0000025 + 800 * 0.00000025)
+    assert hit < cold
+    #    A model whose table row carries no cache tier bills the read at the INPUT price, so the
+    #    number is UNCHANGED rather than silently discounted by a rate nobody sourced.
+    assert compute_usd(
+        "openai/gpt-oss-20b", 1000, 0, provider="openrouter", cache_read_tokens=800
+    ) == pytest.approx(compute_usd("openai/gpt-oss-20b", 1000, 0, provider="openrouter"))
 
 
 def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> None:

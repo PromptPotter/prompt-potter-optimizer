@@ -138,6 +138,13 @@ class TokenUsageRecord(StrictModel):
     It sits here rather than beside the cost because the question it answers is *latency*,
     not money: most of an optimizer call's wall clock is the hidden trace, and only this
     field makes that share legible on a SUCCEEDING call."""
+    cache_read_tokens: int = 0
+    """The part of ``input_tokens`` the PROVIDER served from its own prompt cache — a SUBSET, at a
+    fraction of the input price. Not ``cached`` below, which says the call never reached a wire at
+    all; and 0 also means "reported no breakdown", never "this prefix did not cache"."""
+    cache_write_tokens: int = 0
+    """The part of ``input_tokens`` billed at a premium to POPULATE that cache. A write is what
+    makes the next read cheap, so all writes and no reads is paying for a prefix nothing collects."""
     duration_s: float = 0.0
     cost_usd: float | None = None
     cached: bool = False

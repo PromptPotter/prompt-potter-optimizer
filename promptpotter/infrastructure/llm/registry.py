@@ -21,6 +21,10 @@ class ProviderSpec:
     base_url: str | None = None  # None ⇒ SDK default (OpenAI)
     max_retries: int = 5
     timeout: float | None = None
+    # Whether this provider answers OpenRouter's `usage: {include: true}` body field, which
+    # itemizes what the call cost and how much of the prompt its cache served. False by
+    # default: an unknown body key is a 400 on the providers that lack the extension.
+    usage_accounting: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,7 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "OpenRouter",
         "OPENROUTER_API_KEY",
         base_url="https://openrouter.ai/api/v1",
+        usage_accounting=True,
     ),
 }
 
@@ -111,6 +116,7 @@ def _make_openai_compat(provider: str, spec: ProviderSpec) -> OpenAICompatibleCl
         timeout=spec.timeout,
         provider_name=spec.display_name,
         rate_limiter=build_rate_limiter(rpm, tpm),
+        usage_accounting=spec.usage_accounting,
     )
 
 

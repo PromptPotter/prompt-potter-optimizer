@@ -390,6 +390,8 @@ def _forward_inner_spend(
         kind="backend",
         input_tokens=total.input_tokens,
         output_tokens=total.output_tokens,
+        cache_read_tokens=total.cache_read_tokens,
+        cache_write_tokens=total.cache_write_tokens,
         duration_s=time.monotonic() - start,
         model=f"inner:{spec.inner_dataset}",
         cost_usd=total.used_usd,

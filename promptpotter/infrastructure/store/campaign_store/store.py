@@ -453,17 +453,7 @@ class CampaignStore:
         """Raise this cycle's forwarded high-water mark. Sole writer of the key `bank_spend` reads
         — written AFTER the spend reached the other ledger, so a crash between the two re-forwards
         rather than losing the money."""
-        self.update(
-            hop,
-            {
-                FORWARDED_SPEND_KEY: {
-                    "used_usd": spent.used_usd,
-                    "input_tokens": spent.input_tokens,
-                    "output_tokens": spent.output_tokens,
-                    "unpriced_tokens": spent.unpriced_tokens,
-                }
-            },
-        )
+        self.update(hop, {FORWARDED_SPEND_KEY: dict(spent._asdict())})
 
     # ------------------------------------------------------------------
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate

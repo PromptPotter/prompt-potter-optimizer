@@ -38,7 +38,7 @@ NO_RESULT: str = "NO_RESULT"
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
 
-# Fields that render() assembles into the prompt string.
+# The decomposition field SET; the render ORDER is per class (`PromptTemplate.RENDER_ORDER`).
 PROMPT_STRING_FIELDS: list[str] = [
     "persona",
     "task_intent",

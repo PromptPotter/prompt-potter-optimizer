@@ -24,6 +24,11 @@ class SpendBucket(StrictModel):
     # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a SUBSET of
     # it, never added into a total. It answers latency, not money.
     reasoning_tokens: int = 0
+    # How much of ``input_tokens`` the PROVIDER served from, and wrote to, its own prompt cache —
+    # both SUBSETS of it, never added into a total. Distinct from a cached CALL, which reached no
+    # provider at all: these price part of a call that did.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     rate_known: bool = False
     model: str | None = None
     # Billed tokens whose USD cost could not be resolved (no wire cost AND no rate on file).

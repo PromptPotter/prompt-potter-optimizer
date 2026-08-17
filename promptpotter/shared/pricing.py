@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,12 +23,25 @@ __all__ = [
     "BUNDLED_PATH",
     "CACHE_PATH",
     "UPSTREAM_URL",
+    "Rate",
     "compute_usd",
     "load_rates",
     "lookup_rate",
     "refresh_rates",
     "refresh_rates_in_background",
 ]
+
+
+@dataclass(frozen=True)
+class Rate:
+    """Per-token prices for one ``(provider, model)`` pair. An input token bills at one of THREE
+    rates — written to the provider's prompt cache, read back from it, or neither. A cache rate is
+    ``None`` where upstream lists no tier, which :func:`compute_usd` bills at ``input``."""
+
+    input: float
+    output: float
+    cache_write: float | None = None
+    cache_read: float | None = None
 
 
 UPSTREAM_URL = (
@@ -39,7 +53,14 @@ UPSTREAM_URL = (
 # misses ``%LOCALAPPDATA%`` where every other user file lands.
 CACHE_PATH = user_data_root() / "rates.json"
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
-_KEEP_FIELDS = ("input_cost_per_token", "output_cost_per_token", "litellm_provider", "mode")
+_KEEP_FIELDS = (
+    "input_cost_per_token",
+    "output_cost_per_token",
+    "cache_creation_input_token_cost",
+    "cache_read_input_token_cost",
+    "litellm_provider",
+    "mode",
+)
 _FETCH_TIMEOUT_S = 30.0
 _MAX_BODY_BYTES = 8 * 1024 * 1024  # upstream is ~1 MB; cap defends against runaway payload
 _TTL_SECONDS = 24 * 60 * 60
@@ -127,8 +148,13 @@ def _read_models(path: Path) -> dict[str, Any] | None:
     return models if isinstance(models, dict) else None
 
 
-def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
-    rates: dict[str, tuple[float, float]] = {}
+def _optional_cost(body: dict[str, Any], key: str) -> float | None:
+    value = body.get(key)
+    return float(value) if value is not None else None
+
+
+def _models_to_rates(models: dict[str, Any]) -> dict[str, Rate]:
+    rates: dict[str, Rate] = {}
     for name, body in models.items():
         if not isinstance(body, dict):
             continue
@@ -136,12 +162,17 @@ def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
         out_c = body.get("output_cost_per_token")
         if in_c is None and out_c is None:
             continue
-        rates[name.lower()] = (float(in_c or 0.0), float(out_c or 0.0))
+        rates[name.lower()] = Rate(
+            input=float(in_c or 0.0),
+            output=float(out_c or 0.0),
+            cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
+            cache_read=_optional_cost(body, "cache_read_input_token_cost"),
+        )
     return rates
 
 
 @functools.lru_cache(maxsize=1)
-def load_rates() -> dict[str, tuple[float, float]]:
+def load_rates() -> dict[str, Rate]:
     """Rates from the cache, else the bundled floor, else ``{}`` — on which callers leave
     ``rate_known=False`` and the spend chip shows a token count instead of a price."""
     models = _read_models(CACHE_PATH)
@@ -159,8 +190,8 @@ def load_rates() -> dict[str, tuple[float, float]]:
     return {}
 
 
-def lookup_rate(model: str | None, provider: str | None = None) -> tuple[float, float] | None:
-    """``(input, output)`` per-token rate as billed by *provider*, or ``None``. **A price belongs to the
+def lookup_rate(model: str | None, provider: str | None = None) -> Rate | None:
+    """The per-token :class:`Rate` as billed by *provider*, or ``None``. **A price belongs to the
     (provider, model) PAIR** — a bare key is another vendor's list; ``:nitro`` is unpriceable by design."""
     if not model:
         return None
@@ -199,13 +230,24 @@ def compute_usd(
     *,
     override_usd: float | None = None,
     provider: str | None = None,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> float | None:
     """USD for one call; ``override_usd`` short-circuits the lookup. ``None`` when no rate is on file,
-    and *provider* is who billed it — without one only an exact key resolves."""
+    and *provider* is who billed it — without one only an exact key resolves. The two cache counts
+    are SUBSETS of *input_tokens* (every client normalizes to that), so they are re-priced OUT of
+    it rather than added on top, and an absent tier reproduces the pre-cache number exactly."""
     if override_usd is not None:
         return float(override_usd)
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
-    in_per_tok, out_per_tok = rate
-    return input_tokens * in_per_tok + output_tokens * out_per_tok
+    cached_read = max(0, int(cache_read_tokens))
+    cached_write = max(0, int(cache_write_tokens))
+    uncached = max(0, input_tokens - cached_read - cached_write)
+    return (
+        uncached * rate.input
+        + cached_read * (rate.cache_read if rate.cache_read is not None else rate.input)
+        + cached_write * (rate.cache_write if rate.cache_write is not None else rate.input)
+        + output_tokens * rate.output
+    )

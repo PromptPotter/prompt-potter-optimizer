@@ -363,6 +363,8 @@ export interface SpendBucket {
   input_tokens: number;
   output_tokens: number;
   reasoning_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   rate_known: boolean;
   model: string | null;
   unpriced_tokens: number;

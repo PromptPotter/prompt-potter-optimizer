@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
@@ -44,15 +45,41 @@ def _strip_titles(node: object) -> object:
     return node
 
 
-def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
-    """Usage for ONE round-trip, per-attempt on purpose. ``reasoning_tokens`` is the tell — a reasoning model can spend its
+@dataclass(frozen=True)
+class AttemptUsage:
+    """What ONE round-trip consumed. ``reasoning`` is a subset of ``completion``; ``cache_read`` and
+    ``cache_write`` are subsets of ``prompt``. Summed, never averaged — a repaired call is two of these."""
+
+    prompt: int = 0
+    completion: int = 0
+    reasoning: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+    def __add__(self, other: AttemptUsage) -> AttemptUsage:
+        return AttemptUsage(
+            prompt=self.prompt + other.prompt,
+            completion=self.completion + other.completion,
+            reasoning=self.reasoning + other.reasoning,
+            cache_read=self.cache_read + other.cache_read,
+            cache_write=self.cache_write + other.cache_write,
+        )
+
+
+def _attempt_usage(response: ChatCompletion) -> AttemptUsage:
+    """Usage for ONE round-trip, per-attempt on purpose. ``reasoning`` is the tell — a reasoning model can spend its
     whole budget thinking and emit nothing — but only if read off the attempt that actually failed."""
     usage = getattr(response, "usage", None)
-    details = getattr(usage, "completion_tokens_details", None)
-    return (
-        usage.prompt_tokens if usage else 0,
-        usage.completion_tokens if usage else 0,
-        int(getattr(details, "reasoning_tokens", 0) or 0),
+    if usage is None:
+        return AttemptUsage()
+    out_details = getattr(usage, "completion_tokens_details", None)
+    in_details = getattr(usage, "prompt_tokens_details", None)
+    return AttemptUsage(
+        prompt=usage.prompt_tokens,
+        completion=usage.completion_tokens,
+        reasoning=int(getattr(out_details, "reasoning_tokens", 0) or 0),
+        cache_read=int(getattr(in_details, "cached_tokens", 0) or 0),
+        cache_write=int(getattr(in_details, "cache_write_tokens", 0) or 0),
     )
 
 
@@ -82,15 +109,14 @@ def _failure_diagnostics(
 ) -> dict[str, Any]:
     """The SECOND attempt's account plus the BILLED totals. The token counts are deliberately sums across both round-trips —
     that is the billing contract, and a failed call is billed the same as a good one."""
-    _, completion, reasoning_tokens = _attempt_usage(response)
-    usage = getattr(response, "usage", None)
+    attempt = _attempt_usage(response)
     message = response.choices[0].message if getattr(response, "choices", None) else None
     return {
         "model": getattr(response, "model", None),
         "finish_reason": _finish_reason(response),
-        "prompt_tokens": (usage.prompt_tokens if usage else 0) + first_prompt,
-        "completion_tokens": completion + first_completion,
-        "reasoning_tokens": reasoning_tokens,
+        "prompt_tokens": attempt.prompt + first_prompt,
+        "completion_tokens": attempt.completion + first_completion,
+        "reasoning_tokens": attempt.reasoning,
         "reasoning_chars": len(getattr(message, "reasoning", None) or "" if message else ""),
     }
 
@@ -104,6 +130,7 @@ class OpenAICompatibleClient(LLMClientBase):
         timeout: float | None = None,
         provider_name: str = "openai",
         rate_limiter: RateLimiter | None = None,
+        usage_accounting: bool = False,
     ):
         self._api_key = api_key
         self._base_url = base_url
@@ -111,6 +138,7 @@ class OpenAICompatibleClient(LLMClientBase):
         self._timeout = timeout
         self._provider_name = provider_name
         self._rate_limiter = rate_limiter
+        self._usage_accounting = usage_accounting
         self._client: AsyncOpenAI | None = None
 
     def _ensure_client(self) -> AsyncOpenAI:
@@ -161,6 +189,11 @@ class OpenAICompatibleClient(LLMClientBase):
         # still free to sample differently on identical input. Omitted when unset, same as above.
         if seed is not None:
             request_params["seed"] = seed
+        # Ask for the cost + cache breakdown rather than hoping it rides along. Via `extra_body`
+        # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
+        # never a request the provider gets to answer.
+        if self._usage_accounting:
+            request_params["extra_body"] = {"usage": {"include": True}}
 
         wire_schema = response_schema or (
             response_model.model_json_schema() if response_model else None
@@ -201,9 +234,7 @@ class OpenAICompatibleClient(LLMClientBase):
         # The failed first attempt still burned tokens; carry them so the returned usage
         # meters BOTH round-trips (emit_token_usage otherwise under-reports a repaired call
         # by one full call). Zero unless a repair fires below.
-        first_prompt = 0
-        first_completion = 0
-        first_reasoning = 0
+        first = AttemptUsage()
         first_cost: float | None = None
         if validation_err is not None:
             # The FAILING attempt's own account. Captured here because `response` is about
@@ -211,7 +242,7 @@ class OpenAICompatibleClient(LLMClientBase):
             # rejected — `finish_reason="length"` here is the difference between "the
             # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
             # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
-            first_prompt, first_completion, first_reasoning = _attempt_usage(response)
+            first = _attempt_usage(response)
             first_cost = _attempt_cost(response)
             first_finish_reason = _finish_reason(response)
             schema_name = response_model.__name__ if response_model else "<schema>"
@@ -285,10 +316,16 @@ class OpenAICompatibleClient(LLMClientBase):
             if isinstance(result, LLMResponse):
                 result.schema_repair_attempts = schema_repair_attempts
                 # Fold the failed first attempt's tokens onto the salvaged repair response.
-                result.usage["prompt_tokens"] += first_prompt
-                result.usage["completion_tokens"] += first_completion
+                result.usage["prompt_tokens"] += first.prompt
+                result.usage["completion_tokens"] += first.completion
                 result.usage["reasoning_tokens"] = (
-                    result.usage.get("reasoning_tokens", 0) + first_reasoning
+                    result.usage.get("reasoning_tokens", 0) + first.reasoning
+                )
+                result.usage["cache_read_tokens"] = (
+                    result.usage.get("cache_read_tokens", 0) + first.cache_read
+                )
+                result.usage["cache_write_tokens"] = (
+                    result.usage.get("cache_write_tokens", 0) + first.cache_write
                 )
                 result.usage["total_tokens"] = (
                     result.usage["prompt_tokens"] + result.usage["completion_tokens"]
@@ -308,10 +345,10 @@ class OpenAICompatibleClient(LLMClientBase):
                     attempts=2,
                     first_finish_reason=first_finish_reason,
                     first_content_chars=content_len,
-                    first_completion_tokens=first_completion,
-                    first_reasoning_tokens=first_reasoning,
+                    first_completion_tokens=first.completion,
+                    first_reasoning_tokens=first.reasoning,
                     retry_kind=retry_kind,
-                    **_failure_diagnostics(response, first_prompt, first_completion),
+                    **_failure_diagnostics(response, first.prompt, first.completion),
                 )
                 # The cause names the FIRST attempt's failure — the repair's own emptiness
                 # is downstream of it and is already in `diagnosis()`.
@@ -335,9 +372,7 @@ class OpenAICompatibleClient(LLMClientBase):
         usage = response.usage
         if reservation is not None and usage is not None:
             reservation.close(usage.total_tokens)
-        attempt_prompt, attempt_completion, attempt_reasoning = _attempt_usage(response)
-        prompt_tokens = attempt_prompt + first_prompt
-        completion_tokens = attempt_completion + first_completion
+        billed = _attempt_usage(response) + first
         # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, not a fourth total — the
         # provider bills the thinking as output. It rides the success path because that is the
         # only path on which the share is worth anything: until now it survived only on
@@ -346,7 +381,6 @@ class OpenAICompatibleClient(LLMClientBase):
         # billed 4790 completion tokens for a 1044-character answer — ~94% of the call, and of
         # its 108 s, spent thinking, at ``reasoning_effort: low``. That is the fact behind the
         # optimizer owning a third of every L4 cell's wall-clock, and no surface could say it.
-        reasoning_tokens = attempt_reasoning + first_reasoning
         return LLMResponse(
             content=content,
             reasoning=(
@@ -356,10 +390,12 @@ class OpenAICompatibleClient(LLMClientBase):
             ),
             model=response.model,
             usage={
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-                "reasoning_tokens": reasoning_tokens,
+                "prompt_tokens": billed.prompt,
+                "completion_tokens": billed.completion,
+                "total_tokens": billed.prompt + billed.completion,
+                "reasoning_tokens": billed.reasoning,
+                "cache_read_tokens": billed.cache_read,
+                "cache_write_tokens": billed.cache_write,
             },
             cost_usd=_billed_cost(first_cost, _attempt_cost(response)),
             parsed=parsed,
