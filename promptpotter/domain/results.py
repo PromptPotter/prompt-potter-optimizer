@@ -125,9 +125,7 @@ class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
     ``model_dump()`` IS the wire format; ``accuracy`` IS mean fitness, so there is no ``hits``."""
 
-    # `extra="ignore"`: round files written before `hits`/`ci_lo`/`ci_hi` were dropped
-    # still carry them, and a stale key must not make a paid measurement unreadable.
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, extra="ignore")
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     candidate_id: str
     label: str

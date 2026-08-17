@@ -27,7 +27,8 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"{counts['failed']} still invalid, {counts['skipped']} unreadable. "
         f"Ledgers: {ledgers['cycles']} cycle(s), "
         f"{ledgers['bytes_saved'] / (1024 * 1024):.1f} MB reclaimed "
-        f"({ledgers['skipped_live']} live, left alone). "
+        f"({ledgers['skipped_producing']} producing + "
+        f"{ledgers['skipped_checkin']} pre-loop, left alone). "
         f"Rounds: {rounds['rounds_checked'] - rounds['rounds_unreadable']}"
         f"/{rounds['rounds_checked']} load."
     )

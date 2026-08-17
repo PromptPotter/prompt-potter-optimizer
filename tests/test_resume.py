@@ -46,7 +46,6 @@ def _round(**kw: Any) -> RoundResult:
         {
             "label": "C0",
             "accuracy": 0.0,
-            "hits": 0,
             "total": 0,
             "improved": False,
             "prompt_fields": {},
@@ -183,7 +182,6 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
             round=1,
             label="C1.1",
             accuracy=0.4,
-            hits=4,
             total=10,
             improved=True,
             candidate_scores=[
@@ -193,7 +191,6 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
                     "prompt_fields": prompt,
                     "accuracy": 0.2,
                     "composite_fitness": 0.2,
-                    "hits": 2,
                     "total": 10,
                 },
             ],

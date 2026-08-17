@@ -7,7 +7,7 @@ PromptPotter can optimize **its own optimizer prompts**. The four optimizer LLM 
 Most prompt-optimization work treats the *optimizer prompt* as fixed — written by humans and frozen. But optimizer prompts are prompts; they are as optimizable as any task prompt.
 Connector: `promptpotter/connectors/promptpotter.py`. 
 Demo dataset: `datasets/promptpotter-self/`. 
-Spec: [`../specs/roadmap.md`](../specs/roadmap.md) § Connectors + L4 inner-cycle execution.
+Spec: [`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md) § Finish line — the single owner of L4 status, and the only place to read what has shipped.
 
 ## What stays the same on the outer cycle
 
@@ -24,7 +24,7 @@ change the outer cycle.
 
 Each outer "sample" runs an inner PromptPotter cycle on proxy benchmarks. 
 
-**Still under exploration is the tuning of the measure (fitness) that quantifies the performance of the inner rounds.** A rudimentary measure could be improvements per searchpoint collected, or something derived from lift × quality × efficiency + the candidate-gradient law.
+**Still under exploration is the tuning of the measure (fitness) that quantifies the performance of the inner rounds.** What is no longer open is its SHAPE: a `lift × quality × efficiency` composition was put to a full panel and every factor beside the lift core failed the candidate-gradient bar — see *One term, not a basket* below, which any proposal to reintroduce one has to answer first.
 
 We are currently working with `mean_round_delta`, because for the inner campaign we use seeds and do not evolve the inner optimization prompts in the current setting; once the setting no longer needs that hack for statistics, I want to retire it.
 - **`mean_round_delta`** — the MEAN, over the inner rounds, of the incumbent each round ADOPTED, minus the origin, in LOGITS on one ability ruler (`exploration.py::adopted_level_trajectory` builds the series). The field's `±4` rail is a plausibility bound, not a structural one, and says so at `domain/l4/proxies.py::OuterSampleProxies`.

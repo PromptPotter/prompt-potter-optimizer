@@ -40,6 +40,7 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     CycleScopedKind,
     LifecycleKind,
     WorkspaceScopedKind,
+    optional_bounded_int,
     optional_bounded_number,
 )
 from promptpotter.shared.errors import (
@@ -126,9 +127,12 @@ def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") ->
         raise PayloadInvalidError(f"payload.{key}: {exc}") from exc
 
 
-def _run_limits(payload: dict[str, Any]) -> dict[str, float]:
-    """The two operator-set run limits, shared by ``mint-campaign`` and ``start-run``."""
-    limits: dict[str, float] = {}
+def _run_limits(payload: dict[str, Any]) -> dict[str, float | int]:
+    """The three operator-set run limits, shared by ``mint-campaign`` and ``start-run`` and declared
+    on both payloads in ``m12-api-openapi.yaml`` (`RunLimits`). Both budget arms ride, because the
+    USD one goes blind on a model with no rate on file and the token one is what still holds —
+    serving only USD is the same half-gate the account tier already refuses to be."""
+    limits: dict[str, float | int] = {}
     halt = optional_bounded_number(
         payload.get("halt_at_accuracy"), field="halt_at_accuracy", lo=0.0, hi=1.0
     )
@@ -139,6 +143,9 @@ def _run_limits(payload: dict[str, Any]) -> dict[str, float]:
     )
     if spend is not None:
         limits["spend_budget_usd"] = spend
+    tokens = optional_bounded_int(payload.get("token_budget"), field="token_budget", lo=0)
+    if tokens is not None:
+        limits["token_budget"] = tokens
     return limits
 
 

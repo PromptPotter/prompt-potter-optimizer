@@ -19,6 +19,10 @@ HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+# The data root, which the unit carries as `Environment=PROMPTPOTTER_HOME` (install-service.sh) and
+# every command run BY HAND from the checkout must be handed explicitly. Unset = the tree still
+# lives under $INSTALL_DIR and the default resolves to it.
+DATA_DIR="${DATA_DIR:-}"
 # The file systemd actually loads — see deploy.config.example. Branding any other one repaints
 # nothing.
 ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
@@ -68,7 +72,10 @@ fi
 # migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
 # leaves that cycle's ledger untouched and picks it up on the next one.
 say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
-if ! ( cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter restamp --apply ); then
+# PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
+# without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
+# root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
+if ! ( cd "$INSTALL_DIR" && ${DATA_DIR:+PROMPTPOTTER_HOME="$DATA_DIR"} .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes

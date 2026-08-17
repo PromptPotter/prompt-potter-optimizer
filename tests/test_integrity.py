@@ -152,7 +152,6 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             label=label,
             accuracy=comp,
             composite_fitness=comp,
-            hits=round(comp * 10),
             total=10,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
             matched_origin_composite=0.50,
@@ -464,7 +463,6 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
             round=n,
             label=f"C{n}.1" if n else "C0",
             accuracy=0.458,
-            hits=11,
             total=24,
             improved=False,
             prompt_fields={},
@@ -479,7 +477,6 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
                         changes_description=desc,
                         accuracy=0.5,
                         composite_fitness=0.5,
-                        hits=12,
                         total=24,
                         matched_origin_accuracy=0.458,
                         theta=0.31,
@@ -1429,7 +1426,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
             label=reason,
             accuracy=0.0,
             composite_fitness=0.0,
-            hits=0,
             total=0,
             invalid=True,
             validation_failures=[
@@ -1444,7 +1440,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
             label="C1.9",
             accuracy=0.6,
             composite_fitness=0.6,
-            hits=6,
             total=10,
         )
 
@@ -1452,7 +1447,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
         round=1,
         label="r1",
         accuracy=0.6,
-        hits=6,
         total=10,
         improved=False,
         prompt_fields={},

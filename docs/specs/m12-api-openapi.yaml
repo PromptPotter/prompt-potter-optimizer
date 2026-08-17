@@ -2918,11 +2918,40 @@ components:
             resolves it to its root and sweeps every empty stub under that
             root (matching `cleanup_empty_stubs` semantics).
 
+    # The three operator-set launch ceilings. Written out on BOTH payloads rather than $ref'd as
+    # one branch: `additionalProperties: false` only sees `properties` in its own schema object,
+    # so folding these in via `allOf` would close the payload against the very fields it declares.
+    # One validator serves both (`commands.py::_run_limits`) — keep the two copies identical.
     MintCampaignPayload:
       type: object
       required: [dataset_name]
       additionalProperties: false
       properties:
+        halt_at_accuracy:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Stop once the best measured accuracy reaches this. Omitted leaves the
+            campaign's configured value. Must be FINITE — `NaN` satisfies a
+            `minimum`/`maximum` pair and then never compares true, so a halt that
+            can never fire looks identical to no halt at all.
+        spend_budget_usd:
+          type: number
+          minimum: 0
+          description: |
+            USD ceiling for this run, composed as a `min` against what the host
+            wallet admits (ADR-0003 § D1) — a request may lower a ceiling, never
+            raise one. Must be FINITE, for the reason above: the `BudgetGate`
+            probe is `spent >= cap`.
+        token_budget:
+          type: integer
+          minimum: 0
+          description: |
+            Cumulative-token ceiling (optimizer + backend, input + output), the
+            model-portable twin of `spend_budget_usd` and the one that still binds
+            when a model has no rate on file. Whichever ceiling is met first halts
+            the cycle.
         dataset_name:
           type: string
           minLength: 1
@@ -2950,18 +2979,46 @@ components:
                 `new` re-mints root state (stub cycle only). `resume` attaches
                 to the cycle's current ledger tail. Matches CLI `new` /
                 `resume` verbs hoisted onto the wire surface.
+            halt_at_accuracy:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: |
+                Stop once the best measured accuracy reaches this. Omitted leaves
+                the campaign's configured value. Must be FINITE — `NaN` satisfies a
+                `minimum`/`maximum` pair and then never compares true.
+            spend_budget_usd:
+              type: number
+              minimum: 0
+              description: |
+                USD ceiling for this run, composed as a `min` against what the host
+                wallet admits (ADR-0003 § D1) — a request may lower a ceiling, never
+                raise one. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+            token_budget:
+              type: integer
+              minimum: 0
+              description: |
+                Cumulative-token ceiling (optimizer + backend, input + output), the
+                model-portable twin of `spend_budget_usd` and the one that still binds
+                when a model has no rate on file. Whichever ceiling is met first halts
+                the cycle. The CLI's `--token-budget`, hoisted onto the wire.
 
     ChangeSpendBudgetPayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
           additionalProperties: false
-          minProperties: 1
+          anyOf:
+            - required: [max_usd]
+            - required: [max_tokens]
           description: |
-            At least one of `max_usd` / `max_tokens` must be present. A field
-            that is omitted leaves that ceiling unchanged (the applier merges
-            into the existing `.runtime/spend_cap.json`). Whichever ceiling is
-            met first halts the cycle.
+            At least one of `max_usd` / `max_tokens` must be present — expressed as
+            `anyOf`, because the `minProperties: 1` this carried was satisfied by
+            `campaign_id` alone and so asserted nothing (the handler enforced the
+            real rule by itself). A field that is omitted leaves that ceiling
+            unchanged; the applier composes against the RUNNING JOB's pair, not the
+            file's, and writes both homes from it. Whichever ceiling is met first
+            halts the cycle.
           properties:
             max_usd:
               type: number

@@ -812,11 +812,14 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
             disp._build_cycle_applier("change-spend-budget", None, hop, {"max_usd": bad})
 
     # And the guard rejects only what it names: the bounds themselves still admit, or a launch
-    # that CAN be metered is refused instead — the same ceiling gone, the other direction.
-    assert _run_limits({"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0}) == {
-        "halt_at_accuracy": 1.0,
-        "spend_budget_usd": 0.0,
-    }
+    # that CAN be metered is refused instead — the same ceiling gone, the other direction. All
+    # THREE limits ride: a dropped arm is a ceiling the caller declared and the run never had.
+    assert _run_limits(
+        {"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0, "token_budget": 5_000}
+    ) == {"halt_at_accuracy": 1.0, "spend_budget_usd": 0.0, "token_budget": 5_000}
+    # The token arm is counted, not priced — a float is a typo, not a rounding instruction.
+    with pytest.raises(PayloadInvalidError):
+        _run_limits({"token_budget": 5_000.5})
 
 
 async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Path) -> None:

@@ -414,14 +414,16 @@ def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
 
 def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     """Re-project every finished cycle's ``.runtime/ledger.jsonl`` onto today's record shape."""
-    total_before = total_after = touched = skipped_live = 0
+    total_before = total_after = touched = 0
+    skipped: Counter[RunPhase] = Counter()
     rows: list[tuple[int, str]] = []
     for ledger_path in _iter_cycle_ledgers():
         cycle_dir = ledger_path.parent.parent
         manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
         finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-        if derive_run_phase(cycle_dir, is_terminal=finished) not in _COMPACTABLE_PHASES:
-            skipped_live += 1
+        phase = derive_run_phase(cycle_dir, is_terminal=finished)
+        if phase not in _COMPACTABLE_PHASES:
+            skipped[phase] += 1
             continue
         before, after, rewritten = _compact_one(ledger_path, apply=apply)
         total_before += before
@@ -432,7 +434,12 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
 
     mb = 1024 * 1024
     verb = "compacted" if apply else "would compact"
-    print(f"\nLedger compaction — {verb} {touched} cycle ledger(s); {skipped_live} still live")
+    print(f"\nLedger compaction — {verb} {touched} cycle ledger(s)")
+    # Name the phase rather than calling every exclusion "live": a CHECKIN skip clears only when
+    # the operator Starts that campaign, a RUNNING one on the next deploy, so one word for both
+    # sends the reader hunting a producer that was never there.
+    for phase, n in sorted(skipped.items()):
+        print(f"  {n:>6} skipped — {phase}")
     print(f"  {'before':>12}: {total_before / mb:8.2f} MB")
     print(f"  {'after':>12}: {total_after / mb:8.2f} MB")
     if total_before:
@@ -444,7 +451,8 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
         "cycles": touched,
-        "skipped_live": skipped_live,
+        "skipped_checkin": skipped.get(RunPhase.CHECKIN, 0),
+        "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
         "bytes_saved": total_before - total_after,
     }
 
