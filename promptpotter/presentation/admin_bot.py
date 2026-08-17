@@ -264,6 +264,12 @@ def _process_update(
         return
     parsed = parse_command(text, passphrase)
     if parsed is None:
+        # A rejected message logged NOTHING, so a message the gate refused and a message that never
+        # arrived were the same silence — in the journal and in Telegram alike. That is the one
+        # distinction an operator debugging this channel has to be able to make, and its absence is
+        # what made a working gate indistinguishable from a deaf bot. The text stays OUT of the
+        # journal: it carries the passphrase attempt, and this file's whole job is to not leak that.
+        logger.info("Ignoring message (%d chars, gated=%s)", len(text), passphrase is not None)
         return
     command, argument = parsed
     reply = handle_command(command, argument, actor=f"telegram:{chat_id}")
