@@ -22,7 +22,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
     origin_rows_from_disk,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import (
     paired_diff_posterior,
@@ -156,7 +156,7 @@ def rank_optimizer_prompts(stores: Stores) -> OptimizerPromptRanking:
             if not origin_cells:
                 continue
             n_cycles += 1
-            for round_file in sorted(rounds_dir.glob("round_*.json")):
+            for round_file in sorted(rounds_dir.glob(ROUND_GLOB)):
                 if round_file.name == "round_0000.json":
                     continue
                 _accumulate_round(
@@ -262,7 +262,7 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
     anchor, anchor_se, n_cells = paired_diff_posterior(cell_cand, cell_orig)
     # Student-t on the CELL count, not z: the SE is estimated from the same handful of
     # cells it widens (≈7 cells → 2.45, not 1.96). Same rule as the per-round interval
-    # (`scoring/selection.py::matched_origin_lift`), so a corpus leader and a round verdict
+    # (`scoring/selection.py::matched_parent_lift`), so a corpus leader and a round verdict
     # cannot disagree by bracketing the same evidence two ways.
     crit = t_critical(max(n_cells - 1, 1))
     return RankedOptimizerPrompt(

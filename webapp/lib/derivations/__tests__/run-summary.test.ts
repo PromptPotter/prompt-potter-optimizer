@@ -21,7 +21,7 @@ describe("runSummary", () => {
           summaryCandidate({
             candidate_id: "b",
             accuracy: 0.74,
-            matched_origin_accuracy: 0.6,
+            matched_parent_accuracy: 0.6,
             changes_description: "step-by-step thinking style",
             is_winner: true,
           }),

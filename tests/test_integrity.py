@@ -136,7 +136,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     so it rides the SAME serialization a round file carries (the earlier fabricated
     ``prompt_fields_override`` shape the model never emits made this test green while the feature
     mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
-    against the round's parent ``prompt_fields``, kept only when ``composite_ci_lo`` clears the
+    against the round's parent ``prompt_fields``, kept only when ``mean_fitness_ci_lo`` clears the
     matched origin, keyed by the run's answer-space signature so a logic block never reaches a
     ranking run."""
     from collections import defaultdict
@@ -154,9 +154,9 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             composite_fitness=comp,
             total=10,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
-            matched_origin_composite=0.50,
-            composite_ci_lo=ci_lo,
-            composite_ci_hi=ci_lo + 0.1,
+            matched_parent_composite=0.50,
+            mean_fitness_ci_lo=ci_lo,
+            mean_fitness_ci_hi=ci_lo + 0.1,
         ).model_dump()
 
     logic_run = {
@@ -478,7 +478,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
                         accuracy=0.5,
                         composite_fitness=0.5,
                         total=24,
-                        matched_origin_accuracy=0.458,
+                        matched_parent_accuracy=0.458,
                         theta=0.31,
                         theta_se=0.42,
                     )
@@ -693,7 +693,7 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
         accuracy=0.75,
         composite_fitness=0.81,
         total=28,
-        matched_origin_lift=0.1,
+        matched_parent_lift=0.1,
         cumulative_theta=0.42,
         prompt_fields={
             "persona": "P",
@@ -720,7 +720,7 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
 
     m = export.measurement
     assert (m.round, m.accuracy, m.composite_fitness, m.n) == (3, 0.75, 0.81, 28)
-    assert (m.matched_origin_lift, m.theta) == (0.1, 0.42)
+    assert (m.matched_parent_lift, m.theta) == (0.1, 0.42)
 
     # `steps` is wire scaffold and the rendered prompt is `prompt_fields` again — neither is a
     # tunable, and one artifact does not state a fact twice.

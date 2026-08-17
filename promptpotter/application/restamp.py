@@ -33,7 +33,11 @@ from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.io import read_json_optional, write_yaml
-from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
+from promptpotter.infrastructure.store.layout import (
+    ROUND_GLOB,
+    CycleLayout,
+    inner_sandboxes_dir,
+)
 from promptpotter.infrastructure.store.user_store import User
 
 __all__ = ["check_round_documents", "compact_cycle_ledgers", "restamp_campaign_configs"]
@@ -63,7 +67,7 @@ def _iter_round_documents() -> list[pathlib.Path]:
     return [
         p
         for tree in _workspace_trees()
-        for p in sorted(tree.glob("**/rounds/round_*.json"))
+        for p in sorted(tree.glob(f"**/rounds/{ROUND_GLOB}"))
         if ".runtime" not in p.parts
     ]
 

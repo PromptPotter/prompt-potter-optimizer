@@ -69,9 +69,9 @@ class ExportMeasurement(StrictModel):
     n: int
     # ``None`` on a round that crowned nobody, and on the origin round, whose lift over itself is
     # not a measurement. A consumer reading a lift must be able to tell "zero" from "not asked".
-    matched_origin_lift: float | None = None
-    matched_origin_lift_ci_lo: float | None = None
-    matched_origin_lift_ci_hi: float | None = None
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
     # Subset-invariant ability on the cycle's fixed ruler, with the precision it was fit to.
     # Both ``None`` while the ruler is cold — a level with no precision is not a reading.
     theta: float | None = None
@@ -172,9 +172,9 @@ def build_prompt_export(
             composite_fitness=winner.composite_fitness,
             accuracy=winner.accuracy,
             n=winner.total,
-            matched_origin_lift=winner.matched_origin_lift,
-            matched_origin_lift_ci_lo=winner.matched_origin_lift_ci_lo,
-            matched_origin_lift_ci_hi=winner.matched_origin_lift_ci_hi,
+            matched_parent_lift=winner.matched_parent_lift,
+            matched_parent_lift_ci_lo=winner.matched_parent_lift_ci_lo,
+            matched_parent_lift_ci_hi=winner.matched_parent_lift_ci_hi,
             theta=winner.cumulative_theta,
             theta_se=winner.cumulative_theta_se,
             calibration_model=winner.calibration_model,

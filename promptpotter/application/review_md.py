@@ -375,7 +375,7 @@ def _score_cells(c: ScoredCandidate | None) -> str:
     with no MATCHED origin, where ``None`` is deliberate: a 0.0 there reads as beating it whole."""
     if c is None:
         return "— | — | — | —"
-    mo = c.matched_origin_composite
+    mo = c.matched_parent_composite
     if mo is None:
         return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | — | —"
     delta = c.composite_fitness - mo

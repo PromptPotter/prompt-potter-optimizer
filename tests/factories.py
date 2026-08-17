@@ -27,9 +27,8 @@ from promptpotter.domain.results import (
     DegradationHealth,
     RoundResult,
     ScoredCandidate,
-    SpendBucket,
-    SpendRollup,
 )
+from promptpotter.domain.spend import SpendBucket, SpendRollup
 
 # Repeated as the ground truth of every row a factory-built round measures. Deliberately
 # only two labels: with as many distinct truths as rows the answer space reads as
@@ -194,7 +193,7 @@ def lost_round(
     round_num: int, field: str, value: str, *, total: int = 20, acc: float = 0.3
 ) -> RoundResult:
     """A prior round holding one candidate that was MEASURED and LOST — the history the
-    repeat detector reads. ``matched_origin_accuracy`` is the bar ``acc`` is judged against."""
+    repeat detector reads. ``matched_parent_accuracy`` is the bar ``acc`` is judged against."""
     return RoundResult(
         round=round_num,
         label=f"round_{round_num}",
@@ -208,7 +207,7 @@ def lost_round(
                 "c0",
                 accuracy=acc,
                 total=total,
-                matched_origin_accuracy=0.5,
+                matched_parent_accuracy=0.5,
                 prompt_fields={field: value},
             )
         ],

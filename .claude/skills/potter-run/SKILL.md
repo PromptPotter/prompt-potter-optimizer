@@ -158,12 +158,12 @@ incumbent that also wins those rows it carries no information.
 ruler — `headline_metric` is DISPLAY config, never what the gate compares. They can legitimately
 disagree without either being broken. Read both, name both.
 
-**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_origin_*` strata
+**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_parent_*` strata
 are defined by the *incumbent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
-`⌊n/4⌋/n`). `scoring/metrics.py::matched_origin_stats` now returns `None` unless the candidate
+`⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
 covered the origin's panel, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `matched_origin_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
+**A `matched_parent_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
 artifact — do not quote it, and do not compare it across arms.**
 
 What the ordering does **not** do is starve the posterior — `p_best` moves across most of the

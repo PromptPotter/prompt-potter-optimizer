@@ -20,7 +20,7 @@
    >
    > **What the screen deliberately does NOT measure: INFORMATIVE width** — rows that are neither impossible nor free, the only ones that separate two optimizer prompts. It cannot be bought in advance (a fresh bank shares too few rows with history to inherit it, and one extra probe separates too few rows for a between-seed difference to clear its own noise), so it stays an after-the-fact read off the measurement archive this loop already fills. **NEXT — give it a formal reading and characterize the bank by it.** The variance decomposition and its estimator `aₛ` are owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § What this is for.
 2. **Outer mutations actually reach the inner optimizer prompts — done** (§3 below). The number stays because code cites these positions.
-3. **Spend is visible — done.** Each inner campaign's total rides its `CycleResult.spend` and returns as that outer sample's `step_tokens`, fanning onto the outer ledger through the existing backend-cost channel. The inner cost IS the outer sample's backend cost, so "spend is the headline" holds at the outer level without a second mechanism (`runner/inner/spawn.py::run_inner_cycle`).
+3. **Spend is visible — done.** Each inner campaign forwards onto the outer ledger through the existing backend-cost channel, so the inner cost IS the outer sample's backend cost and "spend is the headline" holds at the outer level without a second mechanism (`runner/inner/spawn.py::_forward_inner_spend`). The forward fires at cell teardown on **every** terminal outcome and carries only what is new since that inner cycle's high-water mark — the shape is owned by [`../architecture.md`](../architecture.md) §0.5. **Expect the outer `BudgetGate` to bind sooner than it used to:** a dead cell's spend is now visible, and the committed `spend_budget_usd` was set when it was not.
 4. **A bounded, cheap default config.** The committed `inner_tasks.yaml` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow. So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator. The **stall brake** is what keeps the geometry honest: `inner_lives` (+1 per improving round, −1 per stall, stop at 0 → `LIVES_EXHAUSTED`) ends a stalling inner campaign early, so a dead optimizer prompt is cheap and only a compounding one buys depth. **INVARIANT: `lives.start` must sit well below `max_inner_rounds`.** Set near it, the bank cannot drain before the calendar cap — every inner then runs full-length regardless of quality, and that also removes the geometry's only brake, since an optimizer prompt that finds nothing then burns the same rounds as one that compounds (a term with no candidate gradient earns nothing — the governing law is the type, `domain/l4/proxies.py::OuterSampleProxies`; `inner_tasks.yaml` is a typed declaration now, not a place to write prose). **The brake is only free because the measurand divides by the BUDGET** (§4): `mean_round_delta` holds the last adopted level forward over the rounds a stopped cell never ran (`held_levels`), so ending early saves the money without moving the score.
 5. **A run that demonstrably improves.** The validation gate (`proxy_lift_corr ≥ 0.6` over ≥4 paired branches) PLUS at least one real `new promptpotter-self` whose outer best beats its outer origin — the proof the cheap proxy predicts real lift and the loop climbs. **Read item 7 before reading this one:** "outer best beats outer origin" is satisfied by noise whenever the winning arm's own interval spans zero, so clearing it proves nothing on its own. Ask for the interval, not the ordering.
 
@@ -30,7 +30,7 @@
    - **What the corpus reports, at zero spend.** Each arm's anchor-to-origin paired effect with its own interval, plus `OuterSpread` — how far apart those effects are across arms — off the same walk (`application/optimizer_prompt_ranking.py`, served by `python -m promptpotter rank-optimizer-prompts` and `GET /optimizer-prompt-ranking`). Its per-round peer `PanelPrecision` (on every `rounds[]`) reports ONE round's estimation noise beside its observed between-cell spread, off `mean_adopted_level_se` — the arm's OWN half of the paired diff, the shared origin level excluded because it cancels rather than adding twice. Two bars, never their ratio: the ratio was served once as `estimation_share`, and `min(1.0, …)` rendered a raw 5.55 — noise claiming to exceed the spread it is a component of — as a tidy "100% measurement noise". An interval that excludes zero is the evidence; the ordering alone is not.
    - **There is no within-cell noise term, by design.** Reading one (state, cell) twice is not a second measurement: the inner instrument is content-addressed end to end — the campaign key, the `shared_root` caches, the seeded bank draw, CRN, the optimizer clamp — so the second ask replays the first and its spread is zero by construction, which reads as a perfect instrument. Manufacturing one (numbering the draw so it misses every cache) measures how noisy an LLM is on an identical request, which is not a quantity the loop can act on. **Depth on a specific candidate is `verify`'s job** — it re-scores one candidate on MORE samples and records the result without touching the cycle, which tightens the estimate of the thing being compared instead of sampling the same question twice.
    - **So the levers are the operator's.** Variance reduction (more cells, more samples, or a low-variance one-step proxy in place of the high-variance full-trajectory measurement) and deliberately diverse hand-authored optimizer prompts. A loop cannot grow a signal it cannot yet distinguish, which is why this stays operator-driven until the arms separate on their own intervals.
-   - **One way the instrument can still lie, and it is refused.** A cell that failed is not a cell that scored zero (`scoring/selection.py::_scoreable`, shared by `composite_ci` and the lift interval). The ELECTION grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not, because at L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".
+   - **One way the instrument can still lie, and it is refused.** A cell that failed is not a cell that scored zero (`scoring/selection.py::_scoreable`, shared by `mean_fitness_ci` and the lift interval). The ELECTION grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not, because at L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".
 
 ## Running & supervising a live `promptpotter-self`
 
@@ -64,7 +64,7 @@
    optimizer's own job, never one naming the benchmark's vocabulary or answer labels. It once
    prescribed the `justlogic-d234` modus-tollens idea, which is both forbidden there and already
    measured and lost, and the generator spent all three candidates rebutting it.
-3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `composite_ci_lo`), the
+3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `mean_fitness_ci_lo`), the
    **matched-origin** comparison (NEVER the cross-subset round-0 origin — subset drift reads as
    lift), PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, and on the right arm?).
 4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`,
@@ -75,7 +75,7 @@
 
 Red flags that mean STOP-AND-DIAGNOSE, not keep-watching: `raw_chars: 0` / empty candidate list;
 an outer sample returning in ~0.0s (stale-cache reuse); off-enum grounding fields;
-any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*` / `improved`.
+any optimizer call > 2 min; a headline Δ that disagrees with `matched_parent_*` / `improved`.
 
 ### Cross-run comparability — rules that always hold
 
@@ -130,8 +130,8 @@ Standing invariants (verified — don't re-chase):
   (`no_op_variant` → L2 heals). The noise-floor capability is the on-demand
   `python -m promptpotter noise-floor --k N` diagnostic, never wired into the loop. The
   per-round verdict is the ENGINE's, not L4's: every candidate carries its blocked lift over
-  the origin and that lift's interval (`ScoredCandidate.matched_origin_lift*`, from
-  `scoring/selection.py::matched_origin_lift`), stamped at the same site as the matched floor
+  the origin and that lift's interval (`ScoredCandidate.matched_parent_lift*`, from
+  `scoring/selection.py::matched_parent_lift`), stamped at the same site as the matched floor
   and read identically at both levels. When no electable arm's interval excludes 0 the round
   emits `round_not_separable` — the winner stands, but its margin is not a result.
   `panel_precision` is read off the round's winner, else the best arm the round admitted to

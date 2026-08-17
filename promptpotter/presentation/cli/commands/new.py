@@ -30,8 +30,12 @@ from promptpotter.presentation.views.startup_checklist import checkin_line
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.application.datasets.origin_readiness import FieldGap
+    from promptpotter.application.datasets.origin_resolve import OriginResolutionResult
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
@@ -116,7 +120,7 @@ def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
     return draft
 
 
-def _raise_incomplete(gaps: Any, last: Any) -> NoReturn:
+def _raise_incomplete(gaps: Sequence[FieldGap], last: OriginResolutionResult | None) -> NoReturn:
     """Print the still-open gaps + the resolver's questions and exit non-zero, rather than minting a
     half-specified origin."""
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]

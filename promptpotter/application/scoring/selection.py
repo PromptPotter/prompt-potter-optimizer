@@ -3,7 +3,7 @@ posterior, and the paired-cell substrate both stand on. ONE rule, two callers: t
 (``l1_score``) and the resume divergence replayer, so a resumed run can never re-elect a different
 winner under an unchanged scorer.
 
-``composite_ci`` lives here rather than with the fitness gateway because it reads
+``mean_fitness_ci`` lives here rather than with the fitness gateway because it reads
 ``_mean_fitness_by_cell``, whose docstring forbids adding the scoreable filter that
 ``elect_round_winner`` relies on being absent."""
 
@@ -12,41 +12,29 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.shared.errors import is_error_result
-
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior, Ruler
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
-    "composite_ci",
     "elect_round_winner",
     "elimination_p_best",
-    "matched_origin_lift",
+    "matched_parent_lift",
+    "mean_fitness_ci",
     "paired_fitness",
 ]
 
 
-def _scoreable(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
-    """The rows a PUBLISHED INTERVAL may bracket."""
-    # Deliberately NOT pushed into `_mean_fitness_by_cell`, which the overlap guard and the
-    # election need un-predicated: a DECISION grades an errored row 0.0 (the arm was asked and
-    # produced nothing), while an interval drawn beside a point estimate must bracket the same
-    # population that estimate came from. Load-bearing at L4, where a cell is a whole inner
-    # campaign and fitness re-anchors `mean_round_delta` — a floored 0.0 there does not read as
-    # "scored nothing", it reads as "drove the inner loop maximally DOWN". Refusing to convict an
-    # arm of that on a cell that crashed is the one thing the retired outer verdict got right.
+def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
+    """Brackets the scoreable population, since that is the number it is drawn beside. A DECISION
+    grades an errored row 0.0 (the arm was asked and produced nothing); an interval drawn beside a
+    point estimate must bracket the population that estimate came from — hence the filter here and
+    deliberately not inside ``_mean_fitness_by_cell``."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
-
-    return [r for r in results if not is_deprecated(r) and not is_error_result(r)]
-
-
-def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
-    """Brackets the scoreable population, since that is the number it is drawn beside."""
+    from promptpotter.application.optimization.pobb.classification import scoreable_rows
     from promptpotter.shared.statistics import mean_ci
 
-    per_cell = list(_mean_fitness_by_cell(_scoreable(results)).values())
+    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results)).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -82,15 +70,9 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
 def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
     """Counted per CELL, not per row, so replicate rows can never falsely satisfy
     ``coverage_floor``; a cell with one errored and one clean row still counts."""
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import scoreable_rows
 
-    return len(
-        {
-            r.get("sample_id")
-            for r in results
-            if not is_deprecated(r) and not is_error_result(r) and r.get("sample_id") is not None
-        }
-    )
+    return len({sid for r in scoreable_rows(results) if (sid := r.get("sample_id")) is not None})
 
 
 def paired_fitness(
@@ -109,22 +91,26 @@ def paired_fitness(
     return cand_fit, origin_fit
 
 
-def matched_origin_lift(
+def matched_parent_lift(
     candidate_results: list[QueryMeasurement],
-    origin_results: list[QueryMeasurement],
+    parent_results: list[QueryMeasurement],
 ) -> tuple[float, float, float] | None:
-    """``(lift, ci_lo, ci_hi)`` against the origin ON THE CELLS BOTH MEASURED — the blocked
-    comparison, sharper than ``composite_ci`` on the same rows. ``None`` below two shared cells."""
+    """``(lift, ci_lo, ci_hi)`` against the PARENT ON THE CELLS BOTH MEASURED — the blocked comparison,
+    sharper than ``mean_fitness_ci`` on the same rows. The parent is the origin only at round 0 and the
+    prior winner after it, which is what the name states. ``None`` below two shared cells."""
     # One pair has no spread, and an interval drawn from it claims a precision nobody bought.
+    # ``scoreable_rows`` on both arms, matching ``mean_fitness_ci`` — the two intervals sit on one
+    # row and must bracket one population. A cell either arm errored on drops the PAIR, which is what
+    # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
+    from promptpotter.application.optimization.pobb.classification import scoreable_rows
     from promptpotter.shared.statistics import paired_diff_posterior, t_critical
 
-    # ``_scoreable`` on both arms, matching ``composite_ci`` — the two intervals sit on one row and
-    # must bracket one population. A cell either arm errored on drops the PAIR, which is what makes
-    # the panel a narrowed comparison rather than a smaller one; ``n_cells`` alone cannot say which.
-    cand_fit, origin_fit = paired_fitness(_scoreable(candidate_results), _scoreable(origin_results))
+    cand_fit, parent_fit = paired_fitness(
+        scoreable_rows(candidate_results), scoreable_rows(parent_results)
+    )
     if len(cand_fit) < 2:
         return None
-    lift, se, n = paired_diff_posterior(cand_fit, origin_fit)
+    lift, se, n = paired_diff_posterior(cand_fit, parent_fit)
     # Student-t, not z: the SE is estimated from the same handful of cells it widens (~7 cells ⇒
     # 2.45, not 1.96). At the outer level those cells are whole inner campaigns and there are six.
     crit = t_critical(n - 1)

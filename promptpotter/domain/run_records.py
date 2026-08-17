@@ -469,8 +469,8 @@ class LedgerCandidate(StrictModel):
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
     cached_samples: int | None = None
     # THE whisker, over this candidate's own rows — one band, one writer, no override.
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
+    mean_fitness_ci_lo: float | None = None
+    mean_fitness_ci_hi: float | None = None
 
 
 class LedgerAbility(StrictModel):

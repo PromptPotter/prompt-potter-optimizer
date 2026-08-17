@@ -86,7 +86,7 @@ def individual_summary_from_dict(
     # The served composite interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
     delta = acc - origin_acc
-    tag = f"{acc:.1%} {fmt_ci(scores.get('composite_ci_lo'), scores.get('composite_ci_hi'))}"
+    tag = f"{acc:.1%} {fmt_ci(scores.get('mean_fitness_ci_lo'), scores.get('mean_fitness_ci_hi'))}"
 
     aborted = bool(scores.get("escalation_aborted"))
     if aborted:

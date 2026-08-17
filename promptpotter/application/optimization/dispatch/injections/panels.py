@@ -697,11 +697,11 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
                 continue
             mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed]
             # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can
-            # still carry a `matched_origin_accuracy` (the origin was scored even though the
+            # still carry a `matched_parent_accuracy` (the origin was scored even though the
             # candidate was not), and would otherwise render a comparison out of nothing.
             scored = (
-                f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%}"
-                if cand.total and cand.matched_origin_accuracy is not None
+                f"{cand.accuracy:.0%} vs origin {cand.matched_parent_accuracy:.0%}"
+                if cand.total and cand.matched_parent_accuracy is not None
                 else _candidate_fate(cand)
             )
             attempts.append(

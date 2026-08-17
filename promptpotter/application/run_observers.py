@@ -12,6 +12,7 @@ from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import RoundResult, is_round_winner
 from promptpotter.domain.run_records import (
+    CycleRecord,
     ElectionRecord,
     LedgerAbility,
     PhaseRecord,
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
+    from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live.display import LiveDisplay
 
@@ -103,11 +105,11 @@ class RunCallbacks:
     _current_round: int = 0
     _round_token: Token[int | None] | None = field(default=None, init=False, repr=False)
 
-    def _emit(self, record: Any) -> None:
+    def _emit(self, record: CycleRecord) -> None:
         with graceful("ledger append failed"):
             self.ledger.append(record)
 
-    def on_phase(self, event: Any) -> None:
+    def on_phase(self, event: PhaseEvent) -> None:
         view = from_phase_event(event, self._phase_ctx)
         # ``data`` rides the in-memory-only field, so the on-disk dump stays clean JSON
         # (the SSE tail re-reads it verbatim) without a key filter deciding which of the
@@ -172,7 +174,7 @@ class RunCallbacks:
         )
 
     def on_round_complete(
-        self, round_result: Any, l1_stall_count: int, hearts: int | None = None
+        self, round_result: RoundResult, l1_stall_count: int, hearts: int | None = None
     ) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
         # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for

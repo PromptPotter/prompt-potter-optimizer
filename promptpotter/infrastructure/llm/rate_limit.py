@@ -111,7 +111,7 @@ def _parse_duration_seconds(s: str) -> float | None:
     return float(h or 0) * 3600 + float(mn or 0) * 60 + float(sc or 0)
 
 
-def diagnose_rate_limit_scope(headers: Any, body: str | None) -> str:
+def diagnose_rate_limit_scope(headers: object | None, body: str | None) -> str:
     """Classify the 429 window (TPD/RPD/TPH/RPH/TPM/RPM/…). Reads body first (Groq/OpenAI name
     the bucket), then `x-ratelimit-reset-*` magnitude. Returns `"429"` on no signal.
     """
@@ -250,7 +250,7 @@ async def acquire_reservation(
 
 def apply_discovered_caps(
     rate_limiter: RateLimiter | None,
-    headers: Any,
+    headers: object | None,
     *,
     rpm_header: str,
     tpm_header: str,

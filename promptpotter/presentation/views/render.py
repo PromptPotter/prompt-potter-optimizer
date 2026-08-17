@@ -163,8 +163,8 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # short has no such floor and gets no "(was …)" clause: the full-set origin is a different
     # sample basis, and subtracting it from a prefix accuracy publishes lift nobody measured.
     versus = (
-        f"was {v.matched_origin_accuracy:.1%}, {_fmt_delta(v.delta)}"
-        if v.matched_origin_accuracy is not None and v.delta is not None
+        f"was {v.matched_parent_accuracy:.1%}, {_fmt_delta(v.delta)}"
+        if v.matched_parent_accuracy is not None and v.delta is not None
         else "no matched origin — winner stopped before covering the panel"
     )
 
@@ -194,8 +194,8 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         # Composite block also compares against matched-pair origin composite
         # so the displayed Δcomposite agrees with the gate.
         origin_composite_for_display = (
-            v.matched_origin_composite
-            if v.matched_origin_composite is not None
+            v.matched_parent_composite
+            if v.matched_parent_composite is not None
             else v.origin_composite_fitness
         )
         for line in render_composite_fitness_block(

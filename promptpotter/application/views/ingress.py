@@ -203,10 +203,10 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
     # winners. Absent when the winner did not cover the origin's panel, and it stays absent —
     # falling back to ``origin_acc`` publishes a prefix accuracy minus a full-panel rate.
-    raw_matched = d.get("winner_matched_origin_accuracy")
-    matched_origin_acc = None if raw_matched is None else float(raw_matched)
-    matched_origin_composite = d.get("winner_matched_origin_composite")
-    delta = None if matched_origin_acc is None else w_acc - matched_origin_acc
+    raw_matched = d.get("winner_matched_parent_accuracy")
+    matched_parent_acc = None if raw_matched is None else float(raw_matched)
+    matched_parent_composite = d.get("winner_matched_parent_composite")
+    delta = None if matched_parent_acc is None else w_acc - matched_parent_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
         ctx.origin_accuracy = w_acc
@@ -230,8 +230,8 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         origin_composite_fitness=ctx.origin_composite_fitness,
-        matched_origin_accuracy=matched_origin_acc,
-        matched_origin_composite=matched_origin_composite,
+        matched_parent_accuracy=matched_parent_acc,
+        matched_parent_composite=matched_parent_composite,
     )
 
 
@@ -340,10 +340,10 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         accuracy=sc.accuracy,
         composite_fitness=sc.composite_fitness,
         total=sc.total,
-        composite_ci_lo=sc.composite_ci_lo,
-        composite_ci_hi=sc.composite_ci_hi,
+        mean_fitness_ci_lo=sc.mean_fitness_ci_lo,
+        mean_fitness_ci_hi=sc.mean_fitness_ci_hi,
         escalation_aborted=sc.escalation_aborted,
         invalid_reason=invalid_reason,
-        matched_origin_accuracy=sc.matched_origin_accuracy,
-        matched_origin_composite=sc.matched_origin_composite,
+        matched_parent_accuracy=sc.matched_parent_accuracy,
+        matched_parent_composite=sc.matched_parent_composite,
     )

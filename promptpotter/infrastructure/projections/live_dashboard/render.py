@@ -112,10 +112,10 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 # Absent until the round's election fit runs — it needs two arms.
                 theta=served.get("theta"),
                 theta_se=served.get("theta_se"),
-                composite_ci_lo=served.get("composite_ci_lo"),
-                composite_ci_hi=served.get("composite_ci_hi"),
-                matched_origin_accuracy=served.get("matched_origin_accuracy"),
-                matched_origin_composite=served.get("matched_origin_composite"),
+                mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
+                mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
+                matched_parent_accuracy=served.get("matched_parent_accuracy"),
+                matched_parent_composite=served.get("matched_parent_composite"),
                 # Set at `l1_score:exit` by `RoundBuffer.mark_winner`, so the crown is live from
                 # the election rather than from the round close.
                 is_winner=bool(cand.get("is_winner")),

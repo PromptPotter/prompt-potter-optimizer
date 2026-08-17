@@ -137,7 +137,7 @@ def _r_guard_breaches(b: InjectionBundle) -> str:
     return "\n".join(blocks)
 
 
-def _format_runtime_failure_lines(rf: Any) -> list[str]:
+def _format_runtime_failure_lines(rf: RuntimeFailure) -> list[str]:
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in rf.observed_config.items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
@@ -151,10 +151,10 @@ def _format_runtime_failure_lines(rf: Any) -> list[str]:
     return [head, f"      cfg: {cfg_str}"]
 
 
-def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
+def _format_runtime_failure_group(rfs: list[RuntimeFailure]) -> list[str]:
     """Cluster by (warning, provider, model). N failures with the same backend on a varying param axis are ONE discovery,
     not N — collapsed to a single line with the varying params enumerated."""
-    clusters: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    clusters: dict[tuple[str, str, str], list[RuntimeFailure]] = defaultdict(list)
     for rf in rfs:
         cfg = rf.observed_config
         key = (

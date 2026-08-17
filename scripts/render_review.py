@@ -13,6 +13,7 @@ from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 
 def main(argv: list[str]) -> int:
@@ -28,7 +29,7 @@ def main(argv: list[str]) -> int:
     index = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
     rounds = [
         RoundResult.model_validate(json.loads(f.read_text(encoding="utf-8")))
-        for f in sorted((cycle_dir / "rounds").glob("round_*.json"))
+        for f in CycleLayout(cycle_dir).round_files()
     ]
     audits = load_round_audits(cycle_dir, [r.round for r in rounds])
 

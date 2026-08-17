@@ -2362,8 +2362,8 @@ components:
           type: object
           additionalProperties: { type: number }
           description: The candidate's stored evaluator namespace — what a `score:` lens re-scores.
-        composite_ci_lo: { type: [number, "null"] }
-        composite_ci_hi: { type: [number, "null"] }
+        mean_fitness_ci_lo: { type: [number, "null"] }
+        mean_fitness_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
         expected_samples: { type: [integer, "null"] }
         cached_samples:

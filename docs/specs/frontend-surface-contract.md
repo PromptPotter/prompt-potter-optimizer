@@ -359,7 +359,7 @@ controls:
         edge the thread also gains ONE frozen `run` record per cycle, holding captured
         values — a `resume` must leave it saying what the finished run ended at. Every
         number is served (runSummary). The visible lift is the PERCENT pair — the shown
-        candidate and matched_origin_accuracy on its own rows, "from X" absent when
+        candidate and matched_parent_accuracy on its own rows, "from X" absent when
         unstamped and an absent floor never drawn as 0. θ is jargon, so it rides the hover
         card behind that pair and only while `best` is shown: ability_delta is the
         incumbent's, per cycle, so captioning another candidate with it would be a lie.
@@ -374,7 +374,7 @@ controls:
     do: ONE line, and it is a partition that CLOSES — the reference NAMED, rows both sides
         measured, then origin-missed→shown-hits, then its regression twin, then the
         UNCHANGED remainder that makes them add up. The reference is stated because it is
-        NOT the percent pair's: that floor is served matched_origin_accuracy, computed off
+        NOT the percent pair's: that floor is served matched_parent_accuracy, computed off
         RoundParent.results, so it is the candidate's parent (the origin at round 1, the
         prior winner after). These rows are the campaign origin — the only per-sample panel
         this app is served, since a round document's `results` carries the elected winner's

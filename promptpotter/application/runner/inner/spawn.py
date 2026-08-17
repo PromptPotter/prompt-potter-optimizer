@@ -48,8 +48,9 @@ from promptpotter.shared.instrument import (
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.results import CycleResult, SpendRollup
+    from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import SpendRollup
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
@@ -269,8 +270,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             top = max(
                 scored,
                 key=lambda c: (
-                    c.accuracy - c.matched_origin_accuracy
-                    if c.matched_origin_accuracy is not None
+                    c.accuracy - c.matched_parent_accuracy
+                    if c.matched_parent_accuracy is not None
                     else float("-inf"),
                     c.composite_fitness,
                 ),
@@ -281,8 +282,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 else ""
             )
             versus = (
-                f" vs matched-origin {top.matched_origin_accuracy:.3f}"
-                if top.matched_origin_accuracy is not None
+                f" vs matched-origin {top.matched_parent_accuracy:.3f}"
+                if top.matched_parent_accuracy is not None
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(

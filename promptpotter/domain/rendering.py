@@ -126,9 +126,9 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
         advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
     if not advisories and is_error_result(result):
-        advisories.add(f"{pd.get('terminal_node', 'unknown')}:error")
+        advisories.add(f"{terminal_node(result)}:error")
     if _is_refusal(result):
-        advisories.add(f"{_terminal_node(result)}:model_refusal")
+        advisories.add(f"{terminal_node(result)}:model_refusal")
     return advisories
 
 
@@ -143,7 +143,7 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
     return keys
 
 
-def _terminal_node(result: Mapping[str, Any]) -> str:
+def terminal_node(result: Mapping[str, Any]) -> str:
     """The deepest node this result reached, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
     classification keys on this result's terminal node and fires for a multi-node terminal LLM too."""
     pd = result.get("pipeline_data") or {}
@@ -154,7 +154,7 @@ def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
     """(finish_reason, reasoning_tokens) from the terminal LLM node's step_tokens;
     (None, 0) if missing."""
     pd = result.get("pipeline_data") or {}
-    st = (pd.get("step_tokens") or {}).get(_terminal_node(result)) or {}
+    st = (pd.get("step_tokens") or {}).get(terminal_node(result)) or {}
     fr = st.get("finish_reason")
     reasoning = int(st.get("reasoning") or 0)
     return (fr, reasoning)
@@ -168,7 +168,7 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     infra: set[str] = set()
     fatals: set[str] = set()
 
-    node = _terminal_node(result)
+    node = terminal_node(result)
     # ``content_empty`` describes ONE ATTEMPT, not the result: the backend raises it and
     # retries (``llm_retry`` beside it, both stamped transient), and that retry can answer.
     # A result carrying a real prediction is not an empty response whatever the advisory
@@ -280,4 +280,5 @@ __all__ = [
     "display_rank_key",
     "extract_display_answer",
     "format_l1_critique_for_prompt",
+    "terminal_node",
 ]

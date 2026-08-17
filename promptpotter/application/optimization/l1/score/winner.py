@@ -20,10 +20,10 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
-from promptpotter.application.scoring.metrics import _compute_accuracy, matched_origin_stats
+from promptpotter.application.scoring.metrics import _compute_accuracy, matched_parent_stats
 from promptpotter.application.scoring.selection import (
     elect_round_winner,
-    matched_origin_lift,
+    matched_parent_lift,
     paired_fitness,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -55,22 +55,22 @@ def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> 
     # Deliberately not a decision: the winner stands, and this only says the reader may not
     # treat the margin as a result. Silent when no arm carries an interval — below two shared
     # cells there is nothing to be inconclusive ABOUT.
-    bracketed = [c for c in electable if c.matched_origin_lift_ci_lo is not None]
+    bracketed = [c for c in electable if c.matched_parent_lift_ci_lo is not None]
     if not bracketed or any(
-        (c.matched_origin_lift_ci_lo or 0.0) > 0.0 or (c.matched_origin_lift_ci_hi or 0.0) < 0.0
+        (c.matched_parent_lift_ci_lo or 0.0) > 0.0 or (c.matched_parent_lift_ci_hi or 0.0) < 0.0
         for c in bracketed
     ):
         return
-    widest = max(bracketed, key=lambda c: c.matched_origin_lift_ci_hi or 0.0)
+    widest = max(bracketed, key=lambda c: c.matched_parent_lift_ci_hi or 0.0)
     emit_round_warning(
         kind="round_not_separable",
         message=(
             f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
-            f"has a lift interval spanning 0 (best reaches {widest.matched_origin_lift_ci_hi:+.3f} "
+            f"has a lift interval spanning 0 (best reaches {widest.matched_parent_lift_ci_hi:+.3f} "
             "at its upper bound). A winner was still elected — read it as the best of what this "
             "round saw, not as a measured improvement over the origin"
         ),
-        detail={"arms": len(bracketed), "best_ci_hi": widest.matched_origin_lift_ci_hi},
+        detail={"arms": len(bracketed), "best_ci_hi": widest.matched_parent_lift_ci_hi},
     )
 
 
@@ -139,7 +139,7 @@ async def l1_score(
     ]
     # The parent floor, scored on the round's WHOLE panel — the samples this round drew, not
     # the union the candidates reached before elimination truncated them. Election comparisons
-    # are unaffected either way (``matched_origin_stats`` restricts these rows per candidate);
+    # are unaffected either way (``matched_parent_stats`` restricts these rows per candidate);
     # what the narrow set corrupted is the round's published HEADLINE, which on a held round IS
     # this re-score, so it inherited the denominator of whatever PoBB cut. A round's headline
     # denominates over the round's panel or it is not a series.
@@ -167,8 +167,8 @@ async def l1_score(
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
-    best_matched_origin_acc: float | None = parent.report.accuracy
-    best_matched_origin_composite: float | None = parent.report.composite_fitness
+    best_matched_parent_acc: float | None = parent.report.accuracy
+    best_matched_parent_composite: float | None = parent.report.composite_fitness
     # Not seeded from the parent like its two neighbours: the parent's lift over ITSELF is 0 by
     # construction, and a round that crowned nobody publishing "+0.000" reads as a measured tie.
     best_lift: tuple[float | None, float | None, float | None] = (None, None, None)
@@ -193,7 +193,7 @@ async def l1_score(
         # ``None`` unless this candidate covered the origin's whole panel: the round order is
         # stratified on the incumbent's grades, so the origin's rate on a truncated prefix is
         # decided by where PoBB stopped it, not by the data. A cut candidate's standing is its θ.
-        matched = matched_origin_stats(
+        matched = matched_parent_stats(
             cast("list[QueryMeasurement]", parent.results),
             cand_results,
             schema,
@@ -204,14 +204,14 @@ async def l1_score(
         # without its error bar is what lets a six-cell panel read as a verdict. Unconditional
         # on ``matched``: the lift is defined on the cells both reached, so a truncated arm gets
         # an honest (wider) interval instead of nothing.
-        lift = matched_origin_lift(cand_results, cast("list[QueryMeasurement]", parent.results))
+        lift = matched_parent_lift(cand_results, cast("list[QueryMeasurement]", parent.results))
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
-                "matched_origin_accuracy": matched["accuracy"] if matched else None,
-                "matched_origin_composite": matched["composite_fitness"] if matched else None,
-                "matched_origin_lift": lift[0] if lift else None,
-                "matched_origin_lift_ci_lo": lift[1] if lift else None,
-                "matched_origin_lift_ci_hi": lift[2] if lift else None,
+                "matched_parent_accuracy": matched["accuracy"] if matched else None,
+                "matched_parent_composite": matched["composite_fitness"] if matched else None,
+                "matched_parent_lift": lift[0] if lift else None,
+                "matched_parent_lift_ci_lo": lift[1] if lift else None,
+                "matched_parent_lift_ci_hi": lift[2] if lift else None,
             }
         )
         # The admission rule, spelled once in the domain so the election and the ruler cannot
@@ -280,12 +280,12 @@ async def l1_score(
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
         best_scores = dict(winner_cs.evaluators)
-        best_matched_origin_acc = matched["accuracy"] if matched else None
-        best_matched_origin_composite = matched["composite_fitness"] if matched else None
+        best_matched_parent_acc = matched["accuracy"] if matched else None
+        best_matched_parent_composite = matched["composite_fitness"] if matched else None
         best_lift = (
-            winner_cs.matched_origin_lift,
-            winner_cs.matched_origin_lift_ci_lo,
-            winner_cs.matched_origin_lift_ci_hi,
+            winner_cs.matched_parent_lift,
+            winner_cs.matched_parent_lift_ci_lo,
+            winner_cs.matched_parent_lift_ci_hi,
         )
 
     base = _compute_accuracy(best_results)
@@ -316,7 +316,7 @@ async def l1_score(
     # being comparable.
     # Linearize at the ORIGIN's operating point on this round's panel: a full-panel measurement
     # and a property of the origin, not of whichever candidate won. Reading the winner's
-    # ``matched_origin_accuracy`` instead moves the bar with wherever PoBB stopped it.
+    # ``matched_parent_accuracy`` instead moves the bar with wherever PoBB stopped it.
     slope = max(parent.report.accuracy * (1.0 - parent.report.accuracy), _GATE_SLOPE_FLOOR)
     gate_bar = improvement_threshold / slope
     theta_lift: float | None = None
@@ -362,11 +362,11 @@ async def l1_score(
         p_value=p_value,
         improved_reason=improved_reason,
         origin_accuracy=best_origin_accuracy,
-        matched_origin_accuracy=best_matched_origin_acc,
-        matched_origin_composite=best_matched_origin_composite,
-        matched_origin_lift=best_lift[0],
-        matched_origin_lift_ci_lo=best_lift[1],
-        matched_origin_lift_ci_hi=best_lift[2],
+        matched_parent_accuracy=best_matched_parent_acc,
+        matched_parent_composite=best_matched_parent_composite,
+        matched_parent_lift=best_lift[0],
+        matched_parent_lift_ci_lo=best_lift[1],
+        matched_parent_lift_ci_hi=best_lift[2],
         prompt_fields={
             **best_opt_sp.prompt_field_dict(),
             "lineage": best_opt_sp.lineage.model_dump(),

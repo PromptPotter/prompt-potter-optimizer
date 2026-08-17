@@ -57,7 +57,7 @@ from promptpotter.infrastructure.projections.live_state import (
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import has_pipeline_warnings
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
@@ -599,7 +599,12 @@ class LiveDashboardView(DerivedView):
         query_time = float(pd.get("total_time", 0.0) or 0.0)
         is_cached = bool(result.get("cached", False))
 
-        if result.get("error") or pd.get("error"):
+        # First arm through the single owner of "this sample errored" — the measurement path sets
+        # ``error`` and ``error_category`` together, so reading the human message was a second
+        # spelling of the typed channel that every other error number here already reads.
+        # The second arm is NOT redundant with it and stays: ``pipeline_data.error`` is the
+        # BACKEND reporting a fault on a row PP classified clean, which no PP-side category covers.
+        if is_error_result(result) or pd.get("error"):
             s.error_count += 1
         if has_pipeline_warnings(result):
             s.degraded_count += 1

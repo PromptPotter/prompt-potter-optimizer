@@ -49,7 +49,7 @@ from promptpotter.application.scoring.formula.matchers import (
 )
 from promptpotter.application.scoring.metrics import (
     compute_composite_fitness,
-    matched_origin_stats,
+    matched_parent_stats,
     value_with_mask_applied,
 )
 from promptpotter.domain.cycle_paths import CycleHop
@@ -405,7 +405,7 @@ def test_composite_fitness_matches_default_formula():
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
 
-def test_matched_origin_stats_refuses_a_prefix_it_cannot_measure():
+def test_matched_parent_stats_refuses_a_prefix_it_cannot_measure():
     """A wrong number carried forward with no error — this file's own bar.
 
     ``build_round_order`` stratifies the round on the INCUMBENT's grades: every 4th slot is
@@ -432,9 +432,9 @@ def test_matched_origin_stats_refuses_a_prefix_it_cannot_measure():
         {**_eval_result(hit=i < 13, score=1.0 if i < 13 else 0.0), "sample_id": i}
         for i in range(10, 18)
     ]
-    assert matched_origin_stats(origin_results, truncated, schema) is None
+    assert matched_parent_stats(origin_results, truncated, schema) is None
     # Covered the whole panel → a real comparison, on the origin's own measured set.
-    full = matched_origin_stats(origin_results, origin_results, schema)
+    full = matched_parent_stats(origin_results, origin_results, schema)
     assert full is not None
     assert full["total"] == 20
     assert full["accuracy"] == pytest.approx(0.5)
@@ -444,7 +444,7 @@ def test_matched_origin_stats_refuses_a_prefix_it_cannot_measure():
     disjoint_candidate = [
         {**_eval_result(hit=True, score=1.0), "sample_id": i} for i in range(100, 108)
     ]
-    assert matched_origin_stats(origin_results, disjoint_candidate, schema) is None
+    assert matched_parent_stats(origin_results, disjoint_candidate, schema) is None
 
 
 def test_value_with_mask_applied_reproduces_the_retired_client_whatif_math():
@@ -3192,7 +3192,7 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
 
 
 def test_panel_precision_names_the_lever_the_panel_needs() -> None:
-    # A candidate's `matched_origin_lift` interval is computed from the spread of the per-cell
+    # A candidate's `matched_parent_lift` interval is computed from the spread of the per-cell
     # diffs and nothing else, so it cannot distinguish two opposite problems: cells that each
     # measured themselves badly, versus cells that genuinely disagree. They take opposite levers —
     # sharpen the instrument, or widen the panel/candidates — and the operator picks from these two
@@ -3270,9 +3270,9 @@ def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
     def arm(cid: str, lo: float, hi: float):
         return scored_candidate(cid, accuracy=0.5).model_copy(
             update={
-                "matched_origin_lift": (lo + hi) / 2,
-                "matched_origin_lift_ci_lo": lo,
-                "matched_origin_lift_ci_hi": hi,
+                "matched_parent_lift": (lo + hi) / 2,
+                "matched_parent_lift_ci_lo": lo,
+                "matched_parent_lift_ci_hi": hi,
             }
         )
 
@@ -3387,15 +3387,15 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
     assert "-1.000 (unpriced)" in floored
 
 
-def test_matched_origin_lift_drops_the_cell_that_measured_nothing() -> None:
+def test_matched_parent_lift_drops_the_cell_that_measured_nothing() -> None:
     # An ERRORED cell measured nothing, and here "nothing" is not a low score: outer fitness
     # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the inner
     # loop maximally DOWN. The ELECTION grades it 0.0 on purpose (`_mean_fitness_by_cell` is
     # un-predicated so the overlap guard works); a published interval must not, because it is drawn
     # beside a point estimate and has to bracket that estimate's own population — the rule
-    # `composite_ci` already follows on the same row. SILENT: the row looks like any other, the
+    # `mean_fitness_ci` already follows on the same row. SILENT: the row looks like any other, the
     # interval still prints, and the arm is convicted on a cell that never ran.
-    from promptpotter.application.scoring.selection import matched_origin_lift
+    from promptpotter.application.scoring.selection import matched_parent_lift
 
     clean = [{"query": q, "sample_id": i, "fitness": 0.9} for i, q in enumerate("abc")]
     origin = [{"query": q, "sample_id": i, "fitness": 0.5} for i, q in enumerate("abc")]
@@ -3410,14 +3410,14 @@ def test_matched_origin_lift_drops_the_cell_that_measured_nothing() -> None:
         },
     ]
 
-    lift = matched_origin_lift(errored, [*origin, {"query": "d", "sample_id": 3, "fitness": 0.5}])
+    lift = matched_parent_lift(errored, [*origin, {"query": "d", "sample_id": 3, "fitness": 0.5}])
     assert lift is not None
     assert lift[0] == pytest.approx(0.4)  # not dragged toward the floor by cell d
     assert lift[1] < lift[0] < lift[2]
 
     # Below two shared cells there is no spread, so no interval — reported as absence rather than
     # as the `_normal_posterior` n=1 fallback, which invents an SE of 0.5 out of one reading.
-    assert matched_origin_lift(clean[:1], origin[:1]) is None
+    assert matched_parent_lift(clean[:1], origin[:1]) is None
 
 
 def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:

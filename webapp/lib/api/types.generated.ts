@@ -16,13 +16,13 @@ export interface DashboardCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
-  composite_ci_lo: number | null;
-  composite_ci_hi: number | null;
-  matched_origin_accuracy: number | null;
-  matched_origin_composite: number | null;
-  matched_origin_lift: number | null;
-  matched_origin_lift_ci_lo: number | null;
-  matched_origin_lift_ci_hi: number | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
+  matched_parent_accuracy: number | null;
+  matched_parent_composite: number | null;
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -40,13 +40,13 @@ export interface RoundSummaryCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
-  composite_ci_lo: number | null;
-  composite_ci_hi: number | null;
-  matched_origin_accuracy: number | null;
-  matched_origin_composite: number | null;
-  matched_origin_lift: number | null;
-  matched_origin_lift_ci_lo: number | null;
-  matched_origin_lift_ci_hi: number | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
+  matched_parent_accuracy: number | null;
+  matched_parent_composite: number | null;
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -199,15 +199,15 @@ export interface ScoredCandidate {
   runtime_failures: RuntimeFailure[];
   elimination_context: unknown;
   degradation_context: unknown;
-  matched_origin_accuracy: number | null;
-  matched_origin_composite: number | null;
-  matched_origin_lift: number | null;
-  matched_origin_lift_ci_lo: number | null;
-  matched_origin_lift_ci_hi: number | null;
+  matched_parent_accuracy: number | null;
+  matched_parent_composite: number | null;
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
-  composite_ci_lo: number | null;
-  composite_ci_hi: number | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
 }
 
 /** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
@@ -219,10 +219,10 @@ export interface ScoreboardRow {
   composite_fitness: number;
   total: number;
   escalation_aborted: boolean;
-  matched_origin_accuracy: number | null;
-  matched_origin_composite: number | null;
-  composite_ci_lo: number | null;
-  composite_ci_hi: number | null;
+  matched_parent_accuracy: number | null;
+  matched_parent_composite: number | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -318,11 +318,11 @@ export interface RoundResult {
   degraded_samples: number;
   deprecated: number;
   escalation_signal: unknown | null;
-  matched_origin_accuracy: number | null;
-  matched_origin_composite: number | null;
-  matched_origin_lift: number | null;
-  matched_origin_lift_ci_lo: number | null;
-  matched_origin_lift_ci_hi: number | null;
+  matched_parent_accuracy: number | null;
+  matched_parent_composite: number | null;
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   cumulative_theta: number | null;
   cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;
@@ -911,8 +911,8 @@ export interface LineageNode {
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
   evaluators: Record<string, number>;
-  composite_ci_lo: number | null;
-  composite_ci_hi: number | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather

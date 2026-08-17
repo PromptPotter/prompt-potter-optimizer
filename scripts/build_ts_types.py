@@ -48,9 +48,8 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoreboardRow,
     ScoredCandidate,
-    SpendBucket,
-    SpendRollup,
 )
+from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,

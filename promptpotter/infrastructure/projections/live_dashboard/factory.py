@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from promptpotter.domain.results import best_round_by_measured_accuracy
 from promptpotter.infrastructure.projections.live_dashboard.state import LiveDashboardState
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, round_number
 
 __all__ = ["resolve_resume_state"]
 
@@ -21,12 +21,10 @@ logger = logging.getLogger(__name__)
 def _max_round_on_disk(rounds_dir: Path) -> int:
     if not rounds_dir.is_dir():
         return 0
-    highest = 0
-    for path in rounds_dir.glob("round_*.json"):
-        suffix = path.stem[len("round_") :]  # ``round_0003`` → ``0003``
-        if suffix.isdigit():
-            highest = max(highest, int(suffix))
-    return highest
+    return max(
+        (n for path in rounds_dir.glob(ROUND_GLOB) if (n := round_number(path)) is not None),
+        default=0,
+    )
 
 
 def resolve_resume_state(

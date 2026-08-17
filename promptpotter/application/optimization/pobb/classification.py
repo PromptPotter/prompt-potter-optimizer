@@ -7,9 +7,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.rendering import classify_result
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.scoring import QueryMeasurement
 
 
 def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
@@ -58,10 +60,25 @@ def is_deprecated(result: Mapping[str, Any]) -> bool:
     return classify_result(result).is_fatal
 
 
+def scoreable_rows(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
+    """The EVIDENCE population — rows that carry a verdict. Deprecated is already penalized through
+    ``runtime_failure_rate`` and an errored row never happened, so neither belongs in a denominator.
+
+    **One definition, because every published rate needs its ``n`` and its mean drawn from the same
+    filter** — spelled per call site, a third exclusion added to one leaves the count describing a
+    different population than the value beside it, with nothing raised. Load-bearing at L4, where a
+    cell is a whole inner campaign: a floored 0.0 there does not read as "scored nothing", it reads
+    as "drove the inner loop maximally DOWN". Deliberately NOT applied inside
+    ``selection.py::_mean_fitness_by_cell``, whose own docstring says why.
+    """
+    return [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+
+
 __all__ = [
     "extract_warning_types",
     "get_ranked_items",
     "is_deprecated",
     "ranked_item_keys_from_schema",
+    "scoreable_rows",
     "terminal_ranking",
 ]

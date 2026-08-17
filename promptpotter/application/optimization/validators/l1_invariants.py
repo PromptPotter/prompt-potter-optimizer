@@ -68,8 +68,8 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
             if cand.elimination_stopped:
                 if cand.elimination_context.get("leader_locked"):
                     continue
-            elif cand.matched_origin_accuracy is None or (
-                cand.accuracy > cand.matched_origin_accuracy
+            elif cand.matched_parent_accuracy is None or (
+                cand.accuracy > cand.matched_parent_accuracy
             ):
                 continue
             if fp := candidate_idea(

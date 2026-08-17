@@ -10,7 +10,8 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, SpendBucket, SpendRollup
+from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -24,8 +25,6 @@ __all__ = [
     "LoopWarning",
     "PobbBlock",
     "RunLimits",
-    "SpendBucket",
-    "SpendRollup",
     "warming_payload",
 ]
 

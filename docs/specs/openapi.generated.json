@@ -1832,28 +1832,6 @@
             "title": "Children",
             "type": "array"
           },
-          "composite_ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Ci Hi"
-          },
-          "composite_ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Ci Lo"
-          },
           "composite_fitness": {
             "anyOf": [
               {
@@ -2041,6 +2019,28 @@
               }
             ],
             "title": "Lives Cap"
+          },
+          "mean_fitness_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Fitness Ci Hi"
+          },
+          "mean_fitness_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Fitness Ci Lo"
           },
           "origin_accuracy": {
             "anyOf": [

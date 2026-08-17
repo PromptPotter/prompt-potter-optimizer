@@ -41,7 +41,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
-from promptpotter.domain.results import CycleResult, RoundResult, SpendRollup
+from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
@@ -51,6 +51,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
@@ -819,7 +820,7 @@ def _finalize_run(
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            # On the origin's OWN samples — never `rounds[0].matched_origin_composite`, which
+            # On the origin's OWN samples — never `rounds[0].matched_parent_composite`, which
             # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
             # The formula EVERY number above was computed under, resolved by the same call the
