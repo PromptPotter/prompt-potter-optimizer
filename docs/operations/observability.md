@@ -53,13 +53,14 @@ Line 1 names the observation, line 2 the repair or consequence. A finding withou
   ↳ scored 0; L2 brief will name this value
 ```
 
-The structured finding lives in `dashboard.json::last_scoring_metadata` — one source, per-surface rendering.
+The structured finding is written to the round audit file (`AuditTrailView`) and read back via `useRoundFile` when an operator drills in.
 
 **Per-sample annotation order** — one `⚠ {step}: {message}` per diagnostic warning (always), then exactly one status annotation from this exclusive set:
 
-- `🔄 cache had warnings → reran`
-- `🔬 rerun still degraded → resampled N fresh calls`
+- `🔄 cache had pipeline warnings → reran`
+- `🔬 cache had warnings + rerun still degraded → re-measured fresh on pipeline defaults; result accepted`
 - `🔀 query degrades ≥50% historically → using cached answer`
+- `⚠ cached failure was token-budget exhaustion + rerun max_tokens ≤ cached output → skipped LLM rerun; marked fatal`
 - `⚠ stale-data ladder exhausted → still degraded`
 - `↩ pipeline warning observed; X/Y toward rerun trigger` — only when no fatal warning fired
 

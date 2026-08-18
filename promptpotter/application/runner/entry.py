@@ -419,7 +419,7 @@ def _build_cycle_result(
         round_adopted_levels=[t for t, _ in levels],
         round_adopted_level_ses=[se for _, se in levels],
         round_budget=(cycle.config.optimization.max_rounds if cycle is not None else 0),
-        winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
+        winner_prompt_fields=best_sp.prompt_fields if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,

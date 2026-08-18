@@ -73,7 +73,7 @@ class OptimizerPromptParseError(RuntimeError):
     @property
     def raw_chars(self) -> int:
         """Stripped content length — the number every consumer reports."""
-        return len((self.raw or "").strip())
+        return len(self.raw.strip())
 
     @property
     def failing_chars(self) -> int:

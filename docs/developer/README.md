@@ -38,14 +38,14 @@ persona → task_intent → problem_description → instruction
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
 | `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.memory.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative; inherits through `mutate()` |
+| `OSP.memory.task_context` | operator (frozen for the run) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent; set at run init, never overwritten by any layer |
 | `OSP.memory.l1_layout` | L2 | L1 generate (`fill`) | persistent (on `L2L3Memory`, copied on adopt) |
 | `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
 | `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
 | `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
 | `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
-**Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
+**Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. `task_context` is operator-authored framing, frozen for the run; every prompt reads it via the same `_r_task_context` renderer, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.)
 
 ---
 
@@ -76,7 +76,7 @@ Self-healing fires through a different door: failures route directly to the laye
 - Runs a frozen `JobSearchPoint` (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
 - Loops over the scoring dataset, calls the backend per sample, applies the scorer formula.
 - Handles two-tier caching, deprecated-prior eviction, and PoBB elimination stops mid-loop.
-- Returns `(list[QueryMeasurement], stats, completed, escalation_signal)`.
+- Returns `(list[QueryMeasurement], stats, escalation_signal)`.
 
 It's the **bridge between optimizer and target system**. Everything above it generates prompts and pipeline params; the scoring node is the only place those land in the real backend and produce a fitness number. The measurement archive is its output stream.
 
@@ -95,11 +95,10 @@ ON DISK (the database)                DERIVED (folded from disk)
 ──────────────────────────            ─────────────────────────────
 measurements/                       MeasurementArchive
   index.jsonl        ← append-only                   │
-  runs/                                     ┌────────┼────────┐
-    {run_id}.jsonl   ← one run's log         ▼        ▼        ▼
-                                        SampleIdx  CfgIdx  AxisIdx
-                                       (per       (per     (folds
-                                        sample)    config)  both)
+  runs/                                     ┌─────────┴─────────┐
+    {run_id}.jsonl   ← one run's log         ▼                   ▼
+                                        SampleIdx            AxisIdx
+                                       (per sample)    (folds both axes)
 ```
 
 Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `content_hash`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
