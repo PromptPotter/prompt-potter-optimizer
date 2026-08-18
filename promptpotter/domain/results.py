@@ -350,6 +350,11 @@ class RoundResult(StrictModel):
     # None = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model, and the
     # state a hardcoded "1PL" would misreport.
     calibration_model: CalibrationModel | None = None
+    # WHICH δ scale the θs above were read on (`intelligence/exploration.py::ruler_id`). Every
+    # cycle refits its ruler from an archive that grows between runs, so a θ is only comparable
+    # to one carrying the same id — without it, incomparability is un-derivable and cross-campaign
+    # readings silently mix scales. `None` on a round written before the stamp existed.
+    ruler_id: str | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None

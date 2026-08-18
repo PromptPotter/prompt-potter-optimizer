@@ -32,9 +32,7 @@ COMMANDS = {
     "verify": "promptpotter.presentation.cli.commands.verify:cmd_verify",
     "noise-floor": "promptpotter.presentation.cli.commands.noise_floor:cmd_noise_floor",
     "seed-screen": "promptpotter.presentation.cli.commands.seed_screen:cmd_seed_screen",
-    "rank-optimizer-prompts": (
-        "promptpotter.presentation.cli.commands.rank_optimizer_prompts:cmd_rank_optimizer_prompts"
-    ),
+    "evidence": "promptpotter.presentation.cli.commands.evidence:cmd_evidence",
     "archive": "promptpotter.presentation.cli.commands.lifecycle:cmd_archive",
     "delete": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete",
     "unarchive": "promptpotter.presentation.cli.commands.lifecycle:cmd_unarchive",

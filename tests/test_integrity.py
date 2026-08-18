@@ -2369,7 +2369,7 @@ def test_every_persisted_timestamp_is_canonical_utc() -> None:
     assert min(same_instant) != max(same_instant), "the two spellings do not sort equal"
 
     # Scoped to ONE file, this could not see the two sites that were actually wrong:
-    # `optimizer_prompt_ranking.py` and `files.py` both minted `+00:00`. The rule is
+    # `dataset_evidence.py` and `files.py` both minted `+00:00`. The rule is
     # about the SPELLING, so the check is `.isoformat()` on a datetime anywhere in the
     # package — `strftime` (id suffixes, explicit `Z`) and `.timestamp()` (epoch floats)
     # are different jobs and stay legal.
@@ -2709,15 +2709,32 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
 
 class _OrderedFakeBackend:
     """Finishes LATER samples FIRST. With uniform latency two slots complete in submission order
-    anyway, so the test would pass without the loop ordering anything."""
+    anyway, so the test would pass without the loop ordering anything.
 
-    def __init__(self, n: int) -> None:
+    ``slowest_last`` inverts that, and the barrier check needs it: when the FIRST sample is the
+    last to finish, its group-mates have already drained by the time it is absorbed, so a sliding
+    refill and a group barrier are indistinguishable. Absorbing the first while the rest still run
+    is the only arrangement in which the two differ."""
+
+    def __init__(self, n: int, *, slowest_last: bool = False) -> None:
+        self.slowest_last = slowest_last
         self.n = n
         self.calls: list[int] = []
+        self._inflight = 0
+        # How many were ALREADY running as each call began. Depth alone cannot tell a barrier
+        # from a sliding window — both peak at the armed number — but only a barrier lets the
+        # count fall back to 1 at a group boundary.
+        self.entries: list[int] = []
 
     async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
         self.calls.append(sample.id)
-        await asyncio.sleep((self.n - sample.id + 1) * 0.01)
+        self._inflight += 1
+        self.entries.append(self._inflight)
+        rank = sample.id if self.slowest_last else (self.n - sample.id + 1)
+        try:
+            await asyncio.sleep(rank * 0.01)
+        finally:
+            self._inflight -= 1
         return {
             "sample_id": sample.id,
             "query": sample.query,
@@ -2755,11 +2772,15 @@ class _CutAfter:
 async def _walk(
     dataset: list[Sample],
     *,
-    armed: bool,
+    armed: int,
     cut_at: int | None,
-    execution: str = "remote_http",
+    max_cells: int = 2,
+    arming: str = "round",
+    hold: bool = False,
+    slowest_last: bool = False,
 ) -> dict[str, Any]:
-    backend = _OrderedFakeBackend(len(dataset))
+    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
+    request = {"cells": armed}
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", backend.measure):
         session = types.SimpleNamespace(
@@ -2770,9 +2791,17 @@ async def _walk(
             skip_check=None,
             skip_consume=None,
             budget_tripped=None,
-            sample_lookahead_check=(lambda: armed),
-            sample_lookahead_consume=None,
-            backend_client=types.SimpleNamespace(execution=execution),
+            # The flag's real behaviour: consuming it removes the file, so the next read is 1.
+            # A constant would let a `batch` walk re-arm itself group after group and hide the
+            # one thing that arming promises — that a press buys exactly the group it released.
+            sample_lookahead_check=(lambda: request["cells"]),
+            # `hold` is the operator pressing again while a group runs — the arming is back the
+            # instant it is spent, which is the only condition under which the group BARRIER is
+            # observable at all (spent-and-left-alone drains identically either way).
+            sample_lookahead_consume=(lambda: request.update(cells=armed if hold else 1)),
+            backend_client=types.SimpleNamespace(
+                max_cells_in_flight=max_cells, concurrency_arming=arming
+            ),
         )
         depths: list[int] = []
         result = await query_loop.run_query_loop(
@@ -2795,6 +2824,8 @@ async def _walk(
         "rows": result.results,
         "stop_reason": result.stop_reason,
         "calls": list(backend.calls),
+        "entries": list(backend.entries),
+        "depths": depths,
         "max_depth": max(depths) if depths else 0,
     }
 
@@ -2808,8 +2839,8 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     dataset = [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
 
     # 1. A candidate that runs to completion records byte-identical rows, and costs the same.
-    d1 = await _walk(dataset, armed=False, cut_at=None)
-    d2 = await _walk(dataset, armed=True, cut_at=None)
+    d1 = await _walk(dataset, armed=1, cut_at=None)
+    d2 = await _walk(dataset, armed=2, cut_at=None)
     assert d2["max_depth"] == 2, "arming did not open the window — the rest proves nothing"
     assert d1["max_depth"] == 1
     assert d1["rows"] == d2["rows"]
@@ -2820,8 +2851,8 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
 
     # 3. A candidate cut mid-walk is cut at the same sample and records the same rows — the
     #    in-flight acquisition is discarded, not appended, and not error-filled twice.
-    c1 = await _walk(dataset, armed=False, cut_at=4)
-    c2 = await _walk(dataset, armed=True, cut_at=4)
+    c1 = await _walk(dataset, armed=1, cut_at=4)
+    c2 = await _walk(dataset, armed=2, cut_at=4)
     assert c2["max_depth"] == 2, "window never opened on the cut walk"
     assert c1["stop_reason"] == c2["stop_reason"] == "escalation"
     assert c1["rows"] == c2["rows"]
@@ -2831,7 +2862,172 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     #    out). Equality here would pin a scheduling accident; two would mean the window overgrew.
     assert 0 <= len(c2["calls"]) - len(c1["calls"]) <= 1
 
-    # 5. An in-process connector ignores the arming: there a "sample" is a whole nested campaign.
-    inproc = await _walk(dataset, armed=True, cut_at=None, execution="in_process")
-    assert inproc["max_depth"] == 1
-    assert inproc["rows"] == d1["rows"]
+    # 5. The BACKEND's ceiling binds, not the request: a connector declaring 1 has nothing to
+    #    overlap, and the operator cannot arm past what one declaring 2 will hold. This is the
+    #    half that used to be answered by `execution != "remote_http"` — a transport fact
+    #    standing in for a cost one, which pinned every in-process backend to 1 including the
+    #    one whose sample is a whole nested campaign.
+    assert (await _walk(dataset, armed=4, cut_at=None, max_cells=1))["max_depth"] == 1
+    assert (await _walk(dataset, armed=4, cut_at=None, max_cells=2))["max_depth"] == 2
+
+    # 6. `batch` arming buys exactly the group it released — the operator's whole reason for
+    #    picking a number where a round runs hours and cannot bound the press. Three launch
+    #    together, the walk drains them before releasing anything, and the arming is spent, so
+    #    the remaining five run alone. A sliding window would keep re-filling behind each
+    #    absorption and leave "which samples did my press pay for" unanswerable.
+    b = await _walk(dataset, armed=3, cut_at=None, max_cells=4, arming="batch")
+    assert b["depths"] == [3, 3, 3, 1, 1, 1, 1, 1]
+    assert b["rows"] == d1["rows"]
+
+    # 7. Pressing again while a group runs QUEUES the next group; it does not slide one in.
+    #    "Only after all finished is the next released" is the operator's own contract, and it
+    #    is what makes "which samples did my press pay for" answerable. Entry counts fall back
+    #    to 1 at each boundary — under a sliding window they would never come down.
+    held = await _walk(
+        dataset, armed=3, cut_at=None, max_cells=4, arming="batch", hold=True, slowest_last=True
+    )
+    assert held["entries"] == [1, 2, 3, 1, 2, 3, 1, 2]
+    assert held["rows"] == d1["rows"]
+
+    # 8. …and `round` arming does NOT self-consume here: it is spent by the round that scored
+    #    under it (`l1/score/winner.py`), so the walk holds the depth to its own end.
+    r = await _walk(dataset, armed=2, cut_at=None, max_cells=4, arming="round")
+    assert r["depths"] == [2] * len(dataset)
+
+
+def _write_campaign(
+    stores: Any,
+    campaign_id: str,
+    dataset_name: str,
+    *,
+    created_at: str,
+    origin_cells: dict[str, float],
+    candidate_cells: dict[str, float] | None = None,
+) -> None:
+    """A minimal campaign tree: manifest + one cycle whose round 0 holds ORDINARY origin rows —
+    a `query` and a `fitness`, no `pipeline_data`. That is what every non-L4 campaign on disk
+    looks like, and there is none in the dev store to read."""
+    from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+
+    root = stores.campaigns._campaigns_root() / campaign_id
+    (root / "cycles" / "cycle_0" / "rounds").mkdir(parents=True, exist_ok=True)
+    (root / "campaign.json").write_text(
+        json.dumps(
+            {"created_at": created_at, "campaign_config": {"dataset_name": dataset_name}},
+        ),
+        encoding="utf-8",
+    )
+    acr: dict[str, list[dict[str, Any]]] = {
+        "origin": [{"query": q, "fitness": v} for q, v in origin_cells.items()]
+    }
+    rounds = campaign_cycles_dir(root) / "cycle_0" / "rounds"
+    (rounds / "round_0000.json").write_text(
+        json.dumps({"round": 0, "accuracy": 0.5, "all_candidate_results": acr}), encoding="utf-8"
+    )
+    if candidate_cells is not None:
+        (rounds / "round_0001.json").write_text(
+            json.dumps(
+                {
+                    "round": 1,
+                    "candidate_scores": [
+                        {
+                            "candidate_id": "c1",
+                            "label": "C1.1",
+                            "pipeline_params_override": {"llm_only": {"temperature": "0.7"}},
+                        }
+                    ],
+                    "all_candidate_results": {
+                        "c1": [{"query": q, "fitness": v} for q, v in candidate_cells.items()]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_evidence_reads_an_ordinary_campaign_with_no_l4_anywhere(built_stores: Any) -> None:
+    """The non-L4 path has no data in any dev store, so nothing else exercises it. If the level
+    fallback broke, every ordinary comparison would render an empty chart and no error."""
+    from promptpotter.application.evidence import campaign_evidence
+
+    cells_a = {"q1": 0.2, "q2": 0.8, "q3": 0.5}
+    _write_campaign(
+        built_stores, "gsm8k__aaaaaa", "gsm8k", created_at="2026-01-01", origin_cells=cells_a
+    )
+    _write_campaign(
+        built_stores,
+        "gsm8k__bbbbbb",
+        "gsm8k",
+        created_at="2026-01-02",
+        origin_cells={"q1": 0.4, "q2": 0.9, "q3": 0.6},
+    )
+
+    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
+
+    # Levels come off each row's own `fitness` — the L4 proxy is simply absent here.
+    assert [o.origin_level for o in ev.origins] == [
+        pytest.approx(1.5 / 3),
+        pytest.approx(1.9 / 3),
+    ]
+    assert ev.shared_cells == ["q1", "q2", "q3"]
+    assert {c.campaign_id for c in ev.cells} == {"gsm8k__aaaaaa", "gsm8k__bbbbbb"}
+    # Two campaigns, three shared cells — the decomposition answers, on fitness cells.
+    assert ev.variance is not None and ev.variance.n_cells == 3
+    assert ev.power is not None
+    assert ev.comparability.reason == "ruler_unstamped"  # no round doc carries a stamp yet
+    assert "mean_round_delta" not in json.dumps(ev.model_dump())
+
+
+def test_evidence_refuses_to_pool_levels_across_datasets(built_stores: Any) -> None:
+    """Different datasets measure different things, so the levels are not one quantity — and the
+    cells never intersect, which is what makes the decomposition ABSENT rather than empty."""
+    from promptpotter.application.evidence import campaign_evidence
+
+    _write_campaign(
+        built_stores,
+        "gsm8k__aaaaaa",
+        "gsm8k",
+        created_at="2026-01-01",
+        origin_cells={"q1": 0.2, "q2": 0.8},
+    )
+    _write_campaign(
+        built_stores,
+        "bbeh__cccccc",
+        "bbeh",
+        created_at="2026-01-02",
+        origin_cells={"z1": 0.3, "z2": 0.7},
+    )
+
+    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "bbeh__cccccc"])
+
+    assert ev.comparability.reason == "datasets_differ"
+    assert ev.comparability.verdict is False
+    assert ev.comparability.datasets == ["bbeh", "gsm8k"]
+    # Absent, not zeroed: there is no cell both measured, so there is nothing to decompose.
+    assert ev.variance is None
+    assert ev.power is None
+    assert ev.shared_cells == []
+
+
+def test_ranking_is_opt_in_and_opens_no_later_round_until_asked(built_stores: Any) -> None:
+    """The one expensive walk. Off, a round-1 document on disk must not reach the response at
+    all — a flag that merely hides the result would still have paid for the walk."""
+    from promptpotter.application.evidence import campaign_evidence
+
+    _write_campaign(
+        built_stores,
+        "gsm8k__aaaaaa",
+        "gsm8k",
+        created_at="2026-01-01",
+        origin_cells={"q1": 0.2, "q2": 0.4},
+        candidate_cells={"q1": 0.6, "q2": 0.9},
+    )
+
+    off = campaign_evidence(built_stores, ["gsm8k__aaaaaa"])
+    assert off.ranking_computed is False and off.edits == []
+
+    on = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True)
+    assert on.ranking_computed is True and len(on.edits) == 1
+    # Paired candidate − origin on the cells both measured: (0.6-0.2 + 0.9-0.4) / 2.
+    assert on.edits[0].anchor_effect == pytest.approx(0.45)
+    assert on.edits[0].n_cells == 2

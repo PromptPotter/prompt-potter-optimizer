@@ -411,18 +411,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="Rewrite the files (default: report only)."
     )
 
-    p_rank_l4 = sub.add_parser(
-        "rank-optimizer-prompts",
-        help="Rank every L4 optimizer prompt state on disk by its paired candidate-minus-origin "
-        "effect, pooling every cell past runs already paid for. Read-only, zero spend, "
-        "no LLM calls; naming a winner, never adopting one.",
+    p_evidence = sub.add_parser(
+        "evidence",
+        help="What a SET of campaigns jointly says: the roster, whether their levels are "
+        "comparable at all, the cell/arm/residual decomposition, what the selection can resolve "
+        "at its current width, the run-order confound, and (with --ranking) the measured edits. "
+        "Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
     )
-    p_rank_l4.add_argument(
+    p_evidence.add_argument(
+        "dataset",
+        nargs="?",
+        default="",
+        help="Pool every campaign on this dataset. Omit it and pass --campaign instead.",
+    )
+    p_evidence.add_argument(
+        "--campaign",
+        dest="campaign",
+        action="append",
+        default=[],
+        help="Campaign id to pool; repeat for a set. May span datasets, which the comparability "
+        "line then reports on. Overrides the dataset argument.",
+    )
+    p_evidence.add_argument(
+        "--ranking",
+        dest="ranking",
+        action="store_true",
+        help="Also rank the measured edits. OFF by default: it is the only half that opens a "
+        "round document past round 0, so it walks every round of every campaign selected.",
+    )
+    p_evidence.add_argument(
         "--top",
         dest="top",
         type=int,
         default=10,
-        help="Rows to print (default 10). The full ranking is always in --json.",
+        help="Ranking rows to print (default 10). The full read is always in --json.",
     )
 
     _add_seed_screen_args(

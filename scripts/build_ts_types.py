@@ -17,12 +17,19 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.optimizer_prompt_ranking import (
+from promptpotter.application.evidence import (
+    ArmReplicate,
+    CampaignCells,
+    CampaignOrigin,
     CellEffect,
+    Comparability,
+    EditSpread,
     EffectProvenance,
-    OptimizerPromptRanking,
-    OuterSpread,
-    RankedOptimizerPrompt,
+    Evidence,
+    EvidencePower,
+    EvidenceVariance,
+    OrderConfound,
+    RankedEdit,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -184,12 +191,19 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
-    # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---
+    # --- cross-campaign evidence (application/evidence) — nested types first ---
     CellEffect,
     EffectProvenance,
-    OuterSpread,
-    RankedOptimizerPrompt,
-    OptimizerPromptRanking,
+    EditSpread,
+    RankedEdit,
+    CampaignOrigin,
+    CampaignCells,
+    Comparability,
+    ArmReplicate,
+    EvidenceVariance,
+    EvidencePower,
+    OrderConfound,
+    Evidence,
     # --- campaigns/files router ---
     FileEntry,
     FilesResponse,

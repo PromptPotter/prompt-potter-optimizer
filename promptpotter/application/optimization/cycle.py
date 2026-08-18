@@ -49,6 +49,7 @@ def _origin_round(
     results: list[dict[str, Any]],
     theta: tuple[float, float] | None,
     calibration_model: CalibrationModel | None,
+    ruler_id: str,
 ) -> RoundResult:
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
     add: its θ on the cycle's δ ruler, and a matched origin that is itself. Nothing re-derived."""
@@ -85,6 +86,7 @@ def _origin_round(
         cumulative_theta=theta[0] if theta is not None else None,
         cumulative_theta_se=theta[1] if theta is not None else None,
         calibration_model=calibration_model,
+        ruler_id=ruler_id,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
         # C0's measurement is optimizer-independent but its critique is not, and a campaign
@@ -306,6 +308,7 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
+        from promptpotter.application.intelligence.exploration import ruler_id
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -347,6 +350,7 @@ class Cycle:
                     results=list(origin_results or []),
                     theta=origin_theta,
                     calibration_model=calibration_model,
+                    ruler_id=ruler_id(delta_scale),
                 )
             ],
             tracking=CycleRoundState(
@@ -370,6 +374,14 @@ class Cycle:
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
 
+    @property
+    def ruler_id(self) -> str:
+        """DERIVED from the ruler, never stored beside it — a stamp that could disagree with the
+        scale it names is worse than none."""
+        from promptpotter.application.intelligence.exploration import ruler_id
+
+        return ruler_id(self.delta_scale)
+
     def restamp_origin_round(self, parent: RoundParent) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
         the run before the fix. θ is carried, not re-fit: the ruler is locked."""
@@ -387,6 +399,7 @@ class Cycle:
             results=list(parent.results),
             theta=carried,
             calibration_model=self.calibration_model,
+            ruler_id=self.ruler_id,
         )
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
@@ -486,6 +499,10 @@ class Cycle:
             o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
             self.origin_round.cumulative_theta = o_theta
             self.origin_round.cumulative_theta_se = o_se
+            # The scale stamps follow the θ they describe. C0 was built cold, so leaving them
+            # behind reports a warm ability as unfitted — the exact confusion the ids exist to end.
+            self.origin_round.calibration_model = calibration_model
+            self.origin_round.ruler_id = self.ruler_id
             self.origin_round.candidate_scores = [
                 c.model_copy(update={"theta": o_theta, "theta_se": o_se})
                 for c in self.origin_round.candidate_scores
@@ -503,6 +520,7 @@ class Cycle:
                         restamped if restamped is not None else (None, None)
                     )
                     rr.calibration_model = calibration_model
+                    rr.ruler_id = self.ruler_id
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
         """The ONE adoption seam for an L1 win and an L2/L3 transition alike: persistent memory
@@ -561,5 +579,6 @@ class Cycle:
 
         rr.cumulative_theta, rr.cumulative_theta_se = cur if cur is not None else (None, None)
         rr.calibration_model = self.calibration_model
+        rr.ruler_id = self.ruler_id
         rr.opt_sp = self.opt_sp
         return rr

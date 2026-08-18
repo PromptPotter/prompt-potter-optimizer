@@ -22,10 +22,6 @@ from promptpotter.application.knobs import (
     check_couplings,
     resolve_knob_states,
 )
-from promptpotter.application.optimizer_prompt_ranking import (
-    OptimizerPromptRanking,
-    rank_optimizer_prompts,
-)
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -385,17 +381,3 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
         for c in COUPLINGS
     ]
     return ConfigMapResponse(groups=groups, couplings=couplings)
-
-
-# The L4 read surface is tenant-scoped (a tenant sees only its own pp-self cycles) and
-# consumed by the outer-loop dashboard box, which renders only when the operator is
-# viewing their own self-optimizing campaign — so the read is self-gating on data. No
-# capability gate: whitelabeled users never run a pp-self campaign, so it returns empty
-# for them, and there is nothing to hide.
-@campaigns_router.get("/optimizer-prompt-ranking", response_model=OptimizerPromptRanking)
-def get_optimizer_prompt_ranking(stores: StoresDep) -> OptimizerPromptRanking:
-    """The L4 prompt ranking — every candidate optimizer prompt state on disk, ranked by
-    anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
-    fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
-    with no pp-self cycles."""
-    return rank_optimizer_prompts(stores)

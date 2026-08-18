@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
+from collections.abc import Mapping
 
 
 def warm_stats_backend() -> None:
@@ -94,10 +95,59 @@ def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, flo
     return (mean, mean - z * se, mean + z * se)
 
 
+def two_way_effect_sds(
+    cells_by_arm: Mapping[str, Mapping[str, float]],
+) -> tuple[float, float, float] | None:
+    """Additive arm + cell decomposition, returning ``(cell_sd, arm_sd, residual_sd)``.
+
+    Restricted to the cells EVERY arm measured, because an arm scored on an easier subset would
+    otherwise carry that subset's difficulty as its own effect. ``None`` below two arms or two
+    shared cells, where there is nothing to separate.
+
+    The arm SD alone decides nothing: under the null an arm MEAN still scatters by
+    ``residual_sd / sqrt(n_cells)``, so an arm SD at or below that is noise, not a ranking.
+    """
+    arms = sorted(cells_by_arm)
+    if len(arms) < 2:
+        return None
+    shared = sorted(set.intersection(*(set(cells_by_arm[a]) for a in arms)))
+    if len(shared) < 2:
+        return None
+
+    grand = sum(cells_by_arm[a][c] for a in arms for c in shared) / (len(arms) * len(shared))
+    arm_mean = {a: sum(cells_by_arm[a][c] for c in shared) / len(shared) for a in arms}
+    cell_mean = {c: sum(cells_by_arm[a][c] for a in arms) / len(arms) for c in shared}
+    # df = (arms-1)(cells-1): both margins are estimated from the same table.
+    ss = sum(
+        (cells_by_arm[a][c] - arm_mean[a] - cell_mean[c] + grand) ** 2 for a in arms for c in shared
+    )
+    residual = math.sqrt(ss / ((len(arms) - 1) * (len(shared) - 1)))
+    return (_sd(list(cell_mean.values())), _sd(list(arm_mean.values())), residual)
+
+
+def _sd(xs: list[float]) -> float:
+    mean = sum(xs) / len(xs)
+    return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
+
+
+def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
+    """Spearman ρ. ``None`` below three pairs, or where either side is constant and no ranking
+    exists to correlate."""
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+
+    from scipy.stats import spearmanr
+
+    rho = float(spearmanr(xs, ys).statistic)
+    return None if math.isnan(rho) else rho
+
+
 __all__ = [
     "mean_ci",
     "min_detectable_effect",
     "paired_diff_posterior",
+    "rank_correlation",
     "t_critical",
+    "two_way_effect_sds",
     "warm_stats_backend",
 ]

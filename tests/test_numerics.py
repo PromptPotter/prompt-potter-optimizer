@@ -15,7 +15,9 @@ import numpy as np
 import pytest
 import yaml
 
+from promptpotter.application.evidence import CampaignOrigin, _comparability
 from promptpotter.application.intelligence.exploration import (
+    FLAT_RULER_ID,
     Observation,
     adopted_level_trajectory,
     fit_rasch,
@@ -23,6 +25,7 @@ from promptpotter.application.intelligence.exploration import (
     fit_theta_given_delta,
     graduate_ruler_model,
     ruler_expected_accuracy,
+    ruler_id,
     select_round_subset,
 )
 from promptpotter.application.mask.backprop import accumulate_node_stats, select_rewind_round
@@ -64,7 +67,7 @@ from promptpotter.domain.rendering import display_fitness, extract_display_answe
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
-from promptpotter.shared.statistics import mean_ci
+from promptpotter.shared.statistics import mean_ci, two_way_effect_sds
 from tests.factories import cycle_result, lost_round, round_result
 
 # 1. Scorer matcher formulas — one parametrized family
@@ -3494,3 +3497,75 @@ def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
     # Every arm refused — the round measured nothing it can attribute, so there is no instrument
     # reading. Reported as absence, never off the least-bad arm.
     assert summarize(hot).panel_precision is None
+
+
+def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
+    """Comparability is a machine-checkable fact or it is nothing. The cold ruler shares ONE id
+    everywhere — flat δ makes θ plain logit-accuracy, which depends on no fit — while any refit
+    gets its own, because δ estimates move with the archive the fit saw."""
+    assert ruler_id(None) == ruler_id({}) == FLAT_RULER_ID
+
+    fitted = {1: 0.5, 2: -0.25, 3: 0.0}
+    # Key order is not part of the scale.
+    assert ruler_id(fitted) == ruler_id({3: 0.0, 2: -0.25, 1: 0.5})
+    # A 1PL entry and its explicit-discrimination spelling ARE one scale.
+    assert ruler_id(fitted) == ruler_id({1: (0.5, 1.0), 2: -0.25, 3: 0.0})
+    # …and a genuinely different δ is a different scale, however small the move.
+    assert ruler_id(fitted) != ruler_id({1: 0.5, 2: -0.2500001, 3: 0.0})
+    assert ruler_id(fitted) != FLAT_RULER_ID
+
+
+def test_two_way_decomposition_reads_only_the_cells_every_arm_measured() -> None:
+    """An arm scored on an easier subset would otherwise carry that subset's difficulty as its own
+    effect, and the number would be wrong with nothing raising."""
+    shared = {
+        "a": {"c1": 0.0, "c2": 1.0},
+        "b": {"c1": 0.5, "c2": 1.5},
+    }
+    cell_sd, arm_sd, residual = two_way_effect_sds(shared)
+    # A pure additive table: arms differ by exactly 0.5, cells by exactly 1.0, nothing left over.
+    assert arm_sd == pytest.approx(0.5 / 2**0.5)
+    assert cell_sd == pytest.approx(1.0 / 2**0.5)
+    assert residual == pytest.approx(0.0, abs=1e-12)
+
+    # `b` also measured a third, much easier cell. It is EXCLUDED, so the reading is unchanged —
+    # were it pooled in, `b`'s arm effect would inherit that cell's difficulty.
+    widened = {"a": dict(shared["a"]), "b": {**shared["b"], "c3": 9.0}}
+    assert two_way_effect_sds(widened) == (cell_sd, arm_sd, residual)
+
+    # Below two arms or two shared cells there is nothing to separate — absence, never a 0.0
+    # that would read as a perfectly precise instrument.
+    assert two_way_effect_sds({"a": {"c1": 1.0, "c2": 2.0}}) is None
+    assert two_way_effect_sds({"a": {"c1": 1.0}, "b": {"c1": 2.0}}) is None
+
+
+def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
+    """The one reading that must not degrade quietly: a `None` here says "we cannot tell", and
+    collapsing it to `len(ids) == 1` would answer YES for a roster where nothing is stamped."""
+
+    def origin(ruler: str | None) -> CampaignOrigin:
+        return CampaignOrigin(
+            campaign_id="c",
+            cycle_id="y",
+            dataset_name="d",
+            created_at="",
+            arm_id="a",
+            ruler_id=ruler,
+            calibration_model=None,
+            n_cells=1,
+            origin_level=0.0,
+            origin_accuracy=0.0,
+            spend_usd=None,
+            rounds_scored=0,
+            stop_reason=None,
+        )
+
+    def verdict(*rulers: str | None) -> tuple[bool | None, str]:
+        c = _comparability([origin(r) for r in rulers])
+        return c.verdict, c.reason
+
+    assert verdict("r1", "r1") == (True, "one_ruler")
+    assert verdict("r1", "r2") == (False, "rulers_differ")
+    # Unstamped, and mixed-with-stamped: neither is a yes.
+    assert verdict(None, None) == (None, "ruler_unstamped")
+    assert verdict("r1", None) == (None, "ruler_unstamped")

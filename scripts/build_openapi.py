@@ -12,7 +12,7 @@ the code by ``tests/test_integrity.py::test_declared_command_kinds_match_the_wir
 This file is its opposite number: a pure **description of what the running app
 actually serves**, generated, never hand-edited. It exists because the hand-written
 spec covers the command surface plus six reads, while the app serves ~35 more
-endpoints — the whole ``/auth`` surface, ``/backends``, ``/optimizer-prompt-ranking``,
+endpoints — the whole ``/auth`` surface, ``/backends``, ``/datasets/{name}/evidence``,
 ``/optimizer-pipeline``, ``/workspace/storage*``, the SSE stream, the file reads —
 that no document mentioned. An integrator reading only the hand-written file would
 conclude they do not exist.

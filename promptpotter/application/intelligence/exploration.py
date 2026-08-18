@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import expected_order
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -29,7 +30,12 @@ ORIGIN_ABILITY_ID = "__origin__"
 RulerEntry = float | tuple[float, float]
 Ruler = Mapping[int, RulerEntry]
 
+# The identity a COLD ruler shares everywhere: flat δ means θ is plain logit-accuracy, which
+# depends on no fit and is therefore comparable across cycles. A fitted ruler is not.
+FLAT_RULER_ID = "flat"
+
 __all__ = [
+    "FLAT_RULER_ID",
     "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
@@ -46,6 +52,7 @@ __all__ = [
     "graduate_ruler_model",
     "ruler_entry",
     "ruler_expected_accuracy",
+    "ruler_id",
     "select_round_subset",
     "theta_lift_over_origin",
 ]
@@ -70,6 +77,15 @@ def ruler_entry(value: RulerEntry) -> tuple[float, float]:
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])
     return float(value), 1.0
+
+
+def ruler_id(delta_scale: Ruler | None) -> str:
+    """The scale a θ was read ON. Two θ readings are comparable iff these match — a cycle fits its
+    own ruler from an archive that grows between runs, so identical grades on identical rows still
+    move θ, and nothing downstream could say so while the scale went unrecorded."""
+    if not delta_scale:
+        return FLAT_RULER_ID
+    return stable_hash([[sid, ruler_entry(delta_scale[sid])] for sid in sorted(delta_scale)])
 
 
 def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> float | None:

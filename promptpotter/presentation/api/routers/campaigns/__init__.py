@@ -1,6 +1,7 @@
 from promptpotter.presentation.api.routers.campaigns import (
     cycles,
     events,
+    evidence,
     files,
     manifests,
     ray,
@@ -12,6 +13,7 @@ __all__ = [
     "campaigns_router",
     "cycles",
     "events",
+    "evidence",
     "files",
     "manifests",
     "ray",
