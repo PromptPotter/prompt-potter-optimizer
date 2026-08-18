@@ -6,7 +6,7 @@
 #
 # THIS FILE IS NOT THE SERVED SURFACE, and never was. It owns the command
 # contract plus six reads; the app serves ~35 more endpoints (all of /auth,
-# /backends, /optimizer-prompt-ranking, /optimizer-pipeline, /workspace/storage*, the
+# /backends, /datasets/{name}/evidence, /optimizer-pipeline, /workspace/storage*, the
 # SSE stream, the file reads). Those are described by the generated companion
 # `openapi.generated.json` — reality, emitted from the FastAPI app by
 # `scripts/build_openapi.py` and gated in CI. Read that one to learn what the
@@ -162,27 +162,38 @@ paths:
   /commands/set-sample-lookahead:
     post:
       operationId: setSampleLookahead
-      summary: Arm or disarm sample look-ahead on the scoring walk — host-admin only.
+      summary: Set how many samples the scoring walk holds in flight — host-admin only.
       description: |
-        Writes or removes `.runtime/sample_lookahead.flag`. While armed, the scoring walk holds
-        **two** samples in flight instead of one, roughly halving the wall clock of a
-        candidate's sample walk. Depth is fixed at 2 and is deliberately not a parameter.
+        Writes `.runtime/sample_lookahead.json` (`cells: 1` removes it). While armed, the walk
+        holds that many of one candidate's samples at once instead of one, cutting the wall
+        clock of its sample walk roughly in proportion.
 
-        **Armed for ONE round of scoring**, then it disarms itself: the flag is consumed
-        when a round's scoring completes, so a press landing outside a scoring phase waits
-        for the next one rather than expiring unused. `dashboard.json::sample_lookahead`
-        reports the depth the loop actually ran at — this flag is only the request.
+        **The request is recorded unclamped; the walk clamps it** to the backend's declared
+        `Connector.max_cells_in_flight`, which is where the connector being walked is known.
+        Both halves are served on `dashboard.json` — `max_cells_in_flight` (the ceiling, `1`
+        meaning the control does not apply to this backend) and `sample_lookahead` (what the
+        loop actually held, which is not the request: it lags a press by up to one group and
+        reflects the clamp).
 
-        **The measurement is unchanged.** Samples are acquired in parallel but absorbed in
-        walk order, and an acquisition still in flight when the walk stops is discarded
-        rather than recorded, so the rows a candidate persists and the sample it is cut at
-        are identical at either depth. The cost is at most one billed-then-discarded backend
-        call per cut candidate — zero when the cut lands before that request went out.
-        Because nothing measured changes, this does **not** set `human_intervened` — unlike
-        `skip-searchpoint`, which does.
+        **What SPENDS the press is the backend's to declare** (`Connector.concurrency_arming`):
 
-        Ignored (depth stays 1) when the campaign's connector declares
-        `execution: in_process`, where one "sample" is an entire nested campaign.
+        - `round` — the wire shape. Armed for ONE round of scoring, consumed when that round's
+          scoring completes, so a press landing outside a scoring phase waits for the next one
+          rather than expiring unused.
+        - `batch` — for a backend whose sample is an entire nested campaign. A round there runs
+          hours across dozens of samples and is too coarse to bound the press, so the operator
+          names the number instead: that many samples are released together, the walk waits for
+          all of them before releasing the next group, and the arming is spent when the group
+          launches.
+
+        **The measurement is unchanged, at any depth and under either arming.** Samples are
+        acquired in parallel but absorbed in walk order, and an acquisition still in flight when
+        the walk stops is discarded rather than recorded — so the rows a candidate persists and
+        the sample it is cut at do not depend on how many were in flight. Because nothing
+        measured changes, this does **not** set `human_intervened` — unlike `skip-searchpoint`,
+        which does. The cost is at most one discarded acquisition per cut candidate; for a
+        nested-campaign backend even that is recovered, since a cancelled cell resumes from the
+        rounds it had already banked.
 
         Requires the host-admin `scoring.sample_lookahead` capability — it spends the box's shared
         provider rate bucket, so no tenant tier carries it. Deliberately has **no CLI verb**:
@@ -2722,15 +2733,19 @@ components:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
-          required: [enabled]
+          required: [cells]
           properties:
-            enabled:
-              type: boolean
+            cells:
+              type: integer
+              minimum: 1
               description: >
-                True arms look-ahead (depth 2) for the next round that scores; false
-                disarms it before it is spent. Armed look-ahead also expires on its own
-                once that round's scoring completes, so `false` is a cancel, not the
-                normal way it ends.
+                How many of one candidate's samples the walk may hold in flight. `1` disarms —
+                one on-disk state for "never armed" and "cancelled", so the two cannot read
+                alike. Recorded as sent and clamped by the walk to the backend's declared
+                ceiling (`dashboard.json::max_cells_in_flight`), so a value above it arms the
+                ceiling rather than being rejected. An arming also ends on its own — after the
+                round that scores under it, or the group it released — so `1` is a cancel, not
+                the normal way it ends.
 
     StepCyclePayload:
       allOf:

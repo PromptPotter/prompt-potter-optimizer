@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.connectors.protocol import ConcurrencyArming
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
@@ -226,10 +227,15 @@ class LiveDashboardState(StrictModel):
     current_sample_id: int | None = None
 
     # What the LOOP held in flight, never what the operator asked for (that is
-    # `.runtime/sample_lookahead.flag`); the two differ for up to one sample.
+    # `.runtime/sample_lookahead.json`); the two differ for up to one sample.
     sample_lookahead: int = 1
     # Samples launched then discarded unabsorbed — the arming's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
+    # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
+    # browser's only available guess — "is this self-optimization?" — is not the question. `1`
+    # says the control does not apply, and went unserved before, so the button took dead presses.
+    max_cells_in_flight: int = 1
+    concurrency_arming: ConcurrencyArming = "round"
 
     last_query_elapsed_s: float = 0.0
     wallclock_serialized_at: str | None = None

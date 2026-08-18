@@ -246,8 +246,11 @@ class CycleLayout:
         return self.runtime / "checkin.flag"
 
     @property
-    def sample_lookahead_flag(self) -> Path:
-        return self.runtime / "sample_lookahead.flag"
+    def sample_lookahead(self) -> Path:
+        # Not a `.flag`: it carries the COUNT the operator armed, so presence alone no longer
+        # answers what the walk should do. Peer of `spend_cap` — same write / poll / consume
+        # shape, same JSON body.
+        return self.runtime / "sample_lookahead.json"
 
     @property
     def gate_decision(self) -> Path:

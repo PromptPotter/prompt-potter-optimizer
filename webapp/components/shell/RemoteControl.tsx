@@ -192,6 +192,18 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   const lookahead = dash?.sample_lookahead ?? 1;
   const sampleLookaheadArmed = lookahead > 1;
   const discards = dash?.sample_lookahead_discards ?? 0;
+  // SERVED, because the browser cannot answer either: what one sample costs is the connector's
+  // declaration, not "is this self-optimization?". `1` disables the control WITH ITS REASON —
+  // it used to accept presses the engine silently pinned to depth 1.
+  const maxCells = dash?.max_cells_in_flight ?? 1;
+  const perGroup = dash?.concurrency_arming === "batch";
+  // The command already addresses the root hop; what an inner view breaks is the READOUT, since
+  // `dash` is then the inner run's and carries its own backend's ceiling.
+  const concurrencyReason = inner
+    ? "Concurrency belongs to the outer campaign — this readout is the inner run's. Use ↑ outer."
+    : maxCells <= 1
+      ? "This backend runs one sample at a time — a single call has no latency to overlap."
+      : undefined;
 
   const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
     setPending(which);
@@ -314,31 +326,45 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
       </button>
-      {/* An ARM button, not a switch: it spends itself after one round of scoring. */}
+      {/* An ARM control, not a switch: it spends itself. `batch` swaps the label for a spinner,
+          because only there does the operator pick the number. */}
       <button
         type="button"
         className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
         onClick={() =>
           void act("sample-lookahead", () =>
-            postSetSampleLookahead(campaignId, cycleId, !sampleLookaheadArmed),
+            postSetSampleLookahead(campaignId, cycleId, sampleLookaheadArmed ? 1 : maxCells),
           )
         }
-        disabled={inner || runPhase !== "running" || pending !== null}
+        disabled={Boolean(concurrencyReason) || runPhase !== "running" || pending !== null}
         aria-pressed={sampleLookaheadArmed}
-        aria-label={
-          sampleLookaheadArmed
-            ? "Cancel sample look-ahead (currently 2 samples in flight)"
-            : "Arm sample look-ahead for the next round of scoring"
-        }
+        aria-label={`Samples in flight, up to ${maxCells}`}
         title={
-          innerReason ??
-          (sampleLookaheadArmed
-            ? `Look-ahead armed — 2 samples in flight, about half the wall clock. Expires when this round finishes scoring. Costs at most one discarded backend call per eliminated candidate${discards > 0 ? ` (${discards} so far)` : ""}; the measurement is unchanged and the cycle is NOT marked babysat.`
-            : "Run the next round's scoring with 2 samples in flight instead of 1 — roughly half the wall clock. Expires after that one round. The measurement is unchanged.")
+          concurrencyReason ??
+          `${perGroup ? `Release this many samples together and wait for all of them; one press buys one group.` : `Run the next round's scoring ${maxCells} samples in flight instead of 1, then it disarms.`} Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${discards > 0 ? ` (${discards} discarded)` : ""}.`
         }
       >
         <span aria-hidden="true">⇉</span>
-        <span className="remote-btn-label">{sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}</span>
+        {perGroup ? (
+          <input
+            type="number"
+            className="remote-cells"
+            min={1}
+            max={maxCells}
+            // SERVED, so the field falls back on its own once a group spends the arming.
+            value={lookahead}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) =>
+              void act("sample-lookahead", () =>
+                postSetSampleLookahead(campaignId, cycleId, Number(e.target.value)),
+              )
+            }
+          />
+        ) : (
+          <span className="remote-btn-label">
+            {sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}
+          </span>
+        )}
       </button>
       <span className="remote-status" aria-live="off">
         {/* The candidate label ("C2.3") already encodes the round (the 2), so

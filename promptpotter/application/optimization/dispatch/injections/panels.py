@@ -351,10 +351,20 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     rows = _misses(b)
     if not rows:
         return ""
+    # Freshest first. The pool is cumulative and stable-ordered, so a plain head slice served the
+    # same two or three rows for a cycle's whole life while the loop moved underneath it.
+    latest = {
+        sid
+        for r in (b.prior_rounds[-1].results if b.prior_rounds else [])
+        if (sid := r.get("sample_id")) is not None
+    }
+    rows.sort(key=lambda r: r.get("sample_id") not in latest)
     shown = rows[:TRANSCRIPT_RENDER_CAP]
     header = (
-        f"SAMPLE TRANSCRIPTS ({len(shown)}/{len(rows)} current misses shown complete — "
-        "quote the broken reasoning step, not just the label):"
+        f"SAMPLE TRANSCRIPTS ({len(shown)}/{len(rows)} still-unsolved samples, shown complete — "
+        "each trace is the LAST configuration to miss that sample, not necessarily the parent, so "
+        "read it as a live failure mode rather than this round's score. Quote the broken reasoning "
+        "step, not just the label):"
     )
     sections = [header]
     for r in shown:
@@ -620,7 +630,8 @@ def _r_failing_samples(b: InjectionBundle) -> str:
         shown.append(line)
 
     header = (
-        f"FAILING SAMPLES ({len(shown)}/{len(rows)} current misses — "
+        f"FAILING SAMPLES ({len(shown)}/{len(rows)} still unsolved — latest outcome per sample "
+        "across the configurations tried so far, not one round's score; "
         + (f"{ruled}winnable ones" if graded else cold)
         + "):"
     )

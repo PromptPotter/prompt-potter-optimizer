@@ -88,6 +88,8 @@
   color:var(--color-background);
 }
 .remote-sample-lookahead.armed:hover:not(:disabled){filter:brightness(1.08)}
+/* The spinner form. Fixed width so the strip doesn't reflow when a spent group drops the value. */
+.remote-cells{width:3.4ch;border:none;background:none;color:inherit;font:inherit;font-weight:600}
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */

@@ -177,19 +177,22 @@ export async function postSkipSearchpoint(
 ): Promise<CommandAcceptedBody> {
   return _postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
-// Arm (or cancel) sample look-ahead — two samples in flight instead of one, for ONE round
-// of scoring, then it disarms itself, so `enabled: false` is a cancel. Unlike skip it does
-// NOT mark the cycle babysat: the in-flight acquisition is discarded, so the measurement is
-// identical at either depth. Host-admin only. Per `m12-api-openapi.yaml::setSampleLookahead`.
+// Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
+// so it is a cancel rather than a second verb. The request is sent unclamped and the walk
+// clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on
+// its own — after the round that scored under it, or the group it released, per that backend's
+// `concurrency_arming`. Unlike skip it does NOT mark the cycle babysat: the in-flight
+// acquisition is discarded, so the measurement is identical at any depth. Host-admin only.
+// Per `m12-api-openapi.yaml::setSampleLookahead`.
 export async function postSetSampleLookahead(
   campaignId: string,
   cycleId: string,
-  enabled: boolean,
+  cells: number,
 ): Promise<CommandAcceptedBody> {
   return _postCommand("set-sample-lookahead", {
     campaign_id: campaignId,
     cycle_id: cycleId,
-    enabled,
+    cells,
   });
 }
 // Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes

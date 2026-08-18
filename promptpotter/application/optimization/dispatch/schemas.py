@@ -128,6 +128,12 @@ class L1Variant(OptimizerResponseModel):
     # schema also carried the `| None`, `null` was a legal answer to a mandatory question, and 2 of
     # 19 live rounds gave it — for every variant in the call, one response being one decision.
     evidence_grounding: VariantEvidenceGrounding | None = None
+    # The batch's SPREAD, made structural. Prose asking for distinct hypotheses is inert — one round
+    # re-proposed both of the previous round's measured losses while `l1_n_repeat` read 0. `l1_critique`
+    # already emits one entry per DISTINCT root cause, so binding a variant to one NAMES the spread
+    # instead of requesting it. Optional here for the reason `evidence_grounding` is — a provider
+    # omitting it must not empty a round — and required on the wire, where duplicates are scored.
+    targets_cluster: str = ""
     pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(

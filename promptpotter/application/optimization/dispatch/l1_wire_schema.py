@@ -231,6 +231,9 @@ def build_l1_response_schema(
     required = variant_items.setdefault("required", [])
     if "evidence_grounding" not in required:
         required.insert(0, "evidence_grounding")
+    # Same split as above: tolerated missing at the parse boundary, never OFFERED as skippable.
+    if "targets_cluster" not in required:
+        required.append("targets_cluster")
 
     # 5. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
     # reader observes the wire name. (The `description` lever no longer touches THIS schema:

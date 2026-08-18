@@ -22,6 +22,11 @@
                 ],
                 "default": null
               },
+              "targets_cluster": {
+                "default": "",
+                "title": "Targets Cluster",
+                "type": "string"
+              },
               "pipeline_params_override": {
                 "additionalProperties": {
                   "additionalProperties": true,

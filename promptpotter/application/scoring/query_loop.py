@@ -48,9 +48,9 @@ MAX_CONSECUTIVE_ERRORS: int = 3
 """Abort the per-sample loop after this many consecutive client/pipeline
 errors — a runaway backend shouldn't burn the round's compute budget."""
 
-SAMPLE_LOOKAHEAD_DEPTH: int = 2
-"""Samples one walk holds in flight once the operator arms look-ahead — FIXED, not a knob: the cost
-is one billed-then-discarded call per cut candidate, and it scales with depth."""
+# How many samples a walk may hold in flight is the BACKEND's to declare
+# (`Connector.max_cells_in_flight`), not a constant here. It was a fixed 2 while the depth was
+# pinned off `execution` — a transport fact answering a cost question, wrongly.
 
 
 @dataclass
@@ -174,13 +174,12 @@ class _SampleOutcome:
     escalation: EscalationSignal | None = None
 
 
-def _sample_lookahead_depth(session: Session) -> int:
-    """An in-process backend is pinned to 1: look-ahead overlaps NETWORK latency, and there a
-    "sample" is an entire nested campaign. Asked of the declared mode, never the connector's name."""
-    if session.backend_client.execution != "remote_http":
-        return 1
+def _armed_cells(session: Session) -> int:
+    """What the operator ASKED for, clamped to what the backend declares it can hold — the request
+    alone would let the browser outrun the box, the ceiling alone would widen every walk unbidden."""
     check = session.sample_lookahead_check
-    return SAMPLE_LOOKAHEAD_DEPTH if (check is not None and check()) else 1
+    requested = check() if check is not None else 1
+    return max(1, min(requested, session.backend_client.max_cells_in_flight))
 
 
 async def _maybe_recover_degraded(
@@ -365,16 +364,15 @@ async def run_query_loop(
     def _remaining_ids() -> list[int]:
         return [sid for sid in walk_order if sid not in scored_ids]
 
-    def _launch() -> None:
+    def _launch(depth: int) -> None:
         nonlocal submitted
         sample = by_id[walk_order[submitted]]
         if on_sample_starting is not None:
             # The depth the walk is RUNNING at, not how many happen to be in flight this
             # instant: a window is empty at the start of every candidate, so reporting the
-            # latter unlights the operator's armed indicator once per candidate.
-            on_sample_starting(
-                sample.query, submitted, n, sample.id, _sample_lookahead_depth(session)
-            )
+            # latter unlights the operator's armed indicator once per candidate. Passed in, so a
+            # press consumed mid-fill cannot make its own group's tail report depth 1.
+            on_sample_starting(sample.query, submitted, n, sample.id, depth)
         window.append(
             _Slot(
                 sample_id=sample.id,
@@ -385,11 +383,19 @@ async def run_query_loop(
         )
         submitted += 1
 
+    # `batch` releases a GROUP and refills only once the window is empty; `round` keeps the
+    # established sliding window, spent at `l1/score/winner.py`. Read once — a connector cannot
+    # change mid-walk.
+    batch = session.backend_client.concurrency_arming == "batch"
+
     try:
         while True:
+            # A partly-drained `batch` window is left alone: refilling it would slide, and sliding
+            # makes "which samples did my press pay for" unanswerable.
+            depth = 1 if (batch and window) else _armed_cells(session)
             # Checkpoints poll once per LAUNCH, and the depth is re-read here so arming binds
             # on the next sample rather than the next candidate.
-            while submitted < n and len(window) < _sample_lookahead_depth(session):
+            while submitted < n and len(window) < depth:
                 # Checked FIRST, so a one-shot skip never falls through to the sticky pause
                 # path. It cuts this searchpoint's remaining samples and consumes the flag, and
                 # the gateway takes the partial — no PAUSED phase, no cycle exit.
@@ -424,7 +430,13 @@ async def run_query_loop(
                         stop.value,
                     )
                     raise StopLoop(stop)
-                _launch()
+                _launch(depth)
+
+            # Spent by the group it released, not at the round close — hours away for this shape.
+            # A press that armed nothing consumes nothing, so one landing between groups survives.
+            if batch and depth > 1 and session.sample_lookahead_consume is not None:
+                logger.info("Released a group of %d sample(s); the arming is spent.", depth)
+                session.sample_lookahead_consume()
 
             if not window:
                 break

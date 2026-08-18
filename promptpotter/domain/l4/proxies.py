@@ -126,9 +126,9 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
     # unbounded quantities. The only divisor is the round budget the mean is taken over;
     # nothing normalizes for difficulty.
-    levels = held_levels(result)
+    adopted = held_levels(result)
     return OuterSampleProxies(
-        mean_round_delta=sum(levels) / len(levels) - result.origin_level,
+        mean_round_delta=sum(adopted) / len(adopted) - result.origin_level,
     )
 
 

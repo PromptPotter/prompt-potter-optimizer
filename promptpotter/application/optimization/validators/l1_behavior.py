@@ -245,6 +245,32 @@ def _check_changes_description_english(
     )
 
 
+def _check_distinct_clusters(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
+    """Two variants on ONE failure cluster are one hypothesis wearing two edits, and the round pays a
+    full measurement per copy — at L4 a copy is a whole panel arm. Reads `targets_cluster`, which the
+    schema requires, rather than the citation: a shared citation was the wrong proxy, passing 2/2 on a
+    round that re-proposed both of the previous round's measured losses. SCORED, never rejected —
+    rejecting the duplicate would leave the round measuring one arm, which is the worse failure."""
+    variants = extract_l1_variants(round_dict)
+    if not variants:
+        return CheckResult("distinct_clusters", True, "no variants emitted")
+    seen: dict[str, int] = {}
+    for v in variants:
+        cluster = str(v.get("targets_cluster") or "").strip().lower()
+        if cluster and cluster != "none":
+            seen[cluster] = seen.get(cluster, 0) + 1
+    shared = sum(n for n in seen.values() if n > 1)
+    if shared:
+        return CheckResult(
+            "distinct_clusters",
+            False,
+            f"{shared}/{len(variants)} variants target a cluster another already took",
+        )
+    return CheckResult(
+        "distinct_clusters", True, f"{len(variants)}/{len(variants)} target distinct clusters"
+    )
+
+
 # --- registry --------------------------------------------------------------
 
 CHECK_REGISTRY: dict[str, CheckFn] = {
@@ -253,6 +279,7 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
     "not_only_param_variants": _check_not_only_param_variants,
     "evidence_grounding_present": _check_evidence_grounding_present,
     "changes_description_english": _check_changes_description_english,
+    "distinct_clusters": _check_distinct_clusters,
 }
 
 

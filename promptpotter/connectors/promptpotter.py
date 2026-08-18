@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # tunable — the adapter strips it before building ``optimizer_prompt_overrides``.
 INNER_ORIGIN_KEY = "inner_origin"
 
+# Most inner campaigns the operator may set running at once — a RESOURCE ceiling (peak RSS and
+# one shared provider key), never a scientific one: rows absorb in walk order at any depth.
+MAX_CELLS_IN_FLIGHT = 4
+
 
 def _revision_key(family: str | None, version: str | int | None) -> str | None:
     """``None`` where the node names no family — a distinct input from any real key, rather than
@@ -253,6 +257,10 @@ CONNECTOR = Connector(
     session_factory=PromptPotterSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
+    # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
+    # provider — and a round is hours, so the group is the only unit that can bound a press.
+    max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
+    concurrency_arming="batch",
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",

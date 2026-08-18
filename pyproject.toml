@@ -86,11 +86,11 @@ benchmarks = [
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
-    "mlflow>=3.1.0",    # why kept: peer optional sink alongside Langfuse,
+    "mlflow>=3.15.0",   # why kept: peer optional sink alongside Langfuse,
                         # gated on settings.MLFLOW_ENABLED (off by default).
                         # Per §0 dormant-but-named — the import path stays
                         # so flipping the flag works without a code change.
-                        # Floor raised onto 3.x to clear the long 2.16 CVE tail.
+                        # Floor raised onto 3.15 to clear GHSA-7gwp-5pfp-969j (SSRF).
 ]
 anthropic = [
     "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
@@ -111,7 +111,7 @@ all = [
     "ipython>=8.0",
     "scipy>=1.12.0",
     "langfuse>=2.0.0",
-    "mlflow>=3.1.0",
+    "mlflow>=3.15.0",
     "anthropic>=0.18.0",
 ]
 dev = [

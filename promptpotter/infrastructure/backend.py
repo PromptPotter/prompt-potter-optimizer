@@ -20,7 +20,12 @@ from promptpotter.infrastructure.llm.rate_limit import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import Connector, ConnectorExecution, InProcessRun
+    from promptpotter.connectors.protocol import (
+        ConcurrencyArming,
+        Connector,
+        ConnectorExecution,
+        InProcessRun,
+    )
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
 
 logger = logging.getLogger(__name__)
@@ -40,6 +45,8 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
         session=connector.session_factory(),
         execution=connector.execution,
         in_process_run=connector.in_process_run,
+        max_cells_in_flight=connector.max_cells_in_flight,
+        concurrency_arming=connector.concurrency_arming,
         auth_token=connector.auth_token() if connector.auth_token else None,
     )
 
@@ -72,6 +79,8 @@ class BackendClient:
         session: SessionProtocol,
         execution: ConnectorExecution = "remote_http",
         in_process_run: InProcessRun | None = None,
+        max_cells_in_flight: int = 2,
+        concurrency_arming: ConcurrencyArming = "round",
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -85,6 +94,10 @@ class BackendClient:
         self._execution: ConnectorExecution = execution
         # The non-HTTP execution arm, supplied by an ``in_process`` connector.
         self._in_process_run: InProcessRun | None = in_process_run
+        # What one sample COSTS, which the transport above does not answer — two `in_process`
+        # connectors want opposite depths.
+        self._max_cells_in_flight = max_cells_in_flight
+        self._concurrency_arming: ConcurrencyArming = concurrency_arming
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
@@ -105,6 +118,14 @@ class BackendClient:
         """The connector's declared transport — asked by callers that must know whether a query is a
         network round trip or work this process does itself."""
         return self._execution
+
+    @property
+    def max_cells_in_flight(self) -> int:
+        return self._max_cells_in_flight
+
+    @property
+    def concurrency_arming(self) -> ConcurrencyArming:
+        return self._concurrency_arming
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"params": params} if params else {}

@@ -56,6 +56,7 @@ from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abor
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
+    read_armed_cells,
     read_spend_caps,
     write_spend_caps,
 )
@@ -213,9 +214,8 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # Deliberately NOT composed with the inherited predicate the way `pause_check` is: a stop
     # must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
     # multiply concurrency at every nested level at once.
-    sample_lookahead_flag = layout.sample_lookahead_flag
-    session.sample_lookahead_check = sample_lookahead_flag.is_file
-    session.sample_lookahead_consume = partial(sample_lookahead_flag.unlink, missing_ok=True)
+    session.sample_lookahead_check = partial(read_armed_cells, cycle_dir)
+    session.sample_lookahead_consume = partial(layout.sample_lookahead.unlink, missing_ok=True)
 
 
 def _tighten_budgets(

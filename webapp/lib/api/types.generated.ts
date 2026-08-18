@@ -326,6 +326,7 @@ export interface RoundResult {
   cumulative_theta: number | null;
   cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;
+  ruler_id: string | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
   origin_accuracy: number;
@@ -492,6 +493,8 @@ export interface LiveDashboardState {
   current_sample_id: number | null;
   sample_lookahead: number;
   sample_lookahead_discards: number;
+  max_cells_in_flight: number;
+  concurrency_arming: 'round' | 'batch';
   last_query_elapsed_s: number;
   wallclock_serialized_at: string | null;
   n_variants: number;
@@ -767,14 +770,14 @@ export interface CampaignListResponse {
   total: number;
 }
 
-/** One environment cell's paired (candidate − origin) effect for a state. */
+/** One environment cell's paired (candidate − origin) effect for an edit. */
 export interface CellEffect {
   cell: string;
   mean_d: number;
   n: number;
 }
 
-/** Where one occurrence of a candidate state was measured on disk. */
+/** Where one occurrence of an edit was measured on disk. */
 export interface EffectProvenance {
   campaign_id: string;
   cycle_id: string;
@@ -782,14 +785,14 @@ export interface EffectProvenance {
   candidate_id: string;
 }
 
-/** How far apart the ranked arms actually are — the SD of ``anchor_effect`` across states. */
-export interface OuterSpread {
-  arm_effect_sd: number | null;
-  n_states: number;
+/** How far apart the ranked edits actually are — the SD of ``anchor_effect`` across them. */
+export interface EditSpread {
+  edit_effect_sd: number | null;
+  n_edits: number;
 }
 
-/** One unique optimizer prompt state, aggregated across every occurrence in the corpus. */
-export interface RankedOptimizerPrompt {
+/** One unique candidate state — a ``pipeline_params_override`` — aggregated across every */
+export interface RankedEdit {
   state_hash: string;
   label: string;
   prompt_state: Record<string, Record<string, string>>;
@@ -802,12 +805,87 @@ export interface RankedOptimizerPrompt {
   n_measurements: number;
 }
 
-/** The ranking — recomputed from disk on every read, never persisted. */
-export interface OptimizerPromptRanking {
+/** One campaign's origin panel — the roster row and the comparability check in one shape. */
+export interface CampaignOrigin {
+  campaign_id: string;
+  cycle_id: string;
+  dataset_name: string;
+  created_at: string;
+  arm_id: string;
+  ruler_id: string | null;
+  calibration_model: '1PL' | '2PL' | null;
+  n_cells: number;
+  origin_level: number | null;
+  origin_accuracy: number | null;
+  spend_usd: number | null;
+  rounds_scored: number;
+  stop_reason: string | null;
+}
+
+/** One campaign's per-cell origin levels, served so the browser can plot them without */
+export interface CampaignCells {
+  campaign_id: string;
+  levels: Record<string, number>;
+}
+
+/** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a */
+export interface Comparability {
+  verdict: boolean | null;
+  reason: 'one_ruler' | 'rulers_differ' | 'ruler_unstamped' | 'datasets_differ';
+  datasets: string[];
+  n_rulers: number;
+}
+
+/** One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns */
+export interface ArmReplicate {
+  arm_id: string;
+  campaign_ids: string[];
+  level_spread: number;
+}
+
+/** The additive cell + arm decomposition over the cells every campaign measured. */
+export interface EvidenceVariance {
+  cell_effect_sd: number;
+  arm_effect_sd: number;
+  residual_sd: number;
+  null_arm_scatter: number;
+  arm_sd_below_noise: boolean;
+  n_cells: number;
+  n_arms: number;
+}
+
+/** What this instrument can and cannot resolve, at the width it is currently run. */
+export interface EvidencePower {
+  paired_se: number;
+  min_detectable_effect: number;
+  largest_arm_gap: number;
+  cells_per_arm: number;
+  cells_for_largest_gap: number | null;
+}
+
+/** Run order against outcome. A campaign-at-a-time comparison confounds the arm with WHEN it */
+export interface OrderConfound {
+  level_vs_order: number | null;
+  spend_vs_order: number | null;
+  n_campaigns: number;
+  order_confounded: boolean;
+}
+
+/** The whole read for one selection of campaigns — recomputed on every fetch. */
+export interface Evidence {
   generated_at: string;
   n_cycles_scanned: number;
-  candidates: RankedOptimizerPrompt[];
-  spread: OuterSpread;
+  origins: CampaignOrigin[];
+  comparability: Comparability;
+  cells: CampaignCells[];
+  shared_cells: string[];
+  replicates: ArmReplicate[];
+  variance: EvidenceVariance | null;
+  power: EvidencePower | null;
+  order_confound: OrderConfound | null;
+  ranking_computed: boolean;
+  edits: RankedEdit[];
+  spread: EditSpread;
 }
 
 export interface FileEntry {

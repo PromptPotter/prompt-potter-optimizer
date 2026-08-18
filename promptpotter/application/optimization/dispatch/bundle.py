@@ -26,16 +26,15 @@ SAMPLE_RENDER_CAP = 2
 # plus the model's own reasoning. Kept small: critique-input growth is what pushes a small
 # model into long-tail latencies.
 #
-# These three are NOT balanced against what the panel is for, and the archive says so: over
-# 7,767 banked samples the QUERY cap clips 1% (median 1,004) while the REASONING cap clips
-# **73%** (median 2,007) — so the panel spends its budget on the question, which is never
-# short of room, and elides the model's own reasoning, which is the half its header orders the
-# critique to quote. Correcting that means SPENDING (a wider reasoning cap grows every
-# `l1_critique` prompt), so it is a deliberate call and not a shrink — left to the operator,
-# with the numbers, rather than taken here.
+# Each cap sits just above its OWN median, which is what balances them against what the panel
+# is for. Measured over 7,767 banked samples: query median 1,004, reasoning median 2,007. The
+# previous 2200/1200 ran one at 2.2x its median and the other at 0.6x, so the QUERY cap clipped
+# 1% while the REASONING cap clipped 73% — the panel spent its budget on the question, which is
+# never short of room, and elided the model's own reasoning, the half its header orders the
+# critique to quote. Rebalancing is budget-NEUTRAL per transcript; widening would be spending.
 TRANSCRIPT_RENDER_CAP = 3
-TRANSCRIPT_QUERY_CAP = 2200
-TRANSCRIPT_REASONING_CAP = 1200
+TRANSCRIPT_QUERY_CAP = 1200
+TRANSCRIPT_REASONING_CAP = 2200
 # 200 was never a bound: the widest `predicted` in the whole archive is 36 chars and the median
 # is 9, because this slot holds a label, not prose. Sized to the measurement, so an answer that
 # suddenly runs long is CLIPPED and visible rather than silently widening every transcript.

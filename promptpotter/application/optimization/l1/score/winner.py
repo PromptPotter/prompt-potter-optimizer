@@ -147,7 +147,12 @@ async def l1_score(
     # The round's scoring ends here, so an armed look-ahead is spent HERE rather than at the
     # round boundary — a press landing during critique waits for the next round instead of being
     # consumed having sped up nothing. Not in a `finally`: an unwound round did not score.
-    if session.sample_lookahead_consume is not None:
+    # ONLY under `round` arming: a `batch` backend spends the press by the group it released, and
+    # a second spender here would silently swallow one pressed after this round's last group.
+    if (
+        session.sample_lookahead_consume is not None
+        and session.backend_client.concurrency_arming == "round"
+    ):
         session.sample_lookahead_consume()
     # The shared comparison anchor for the θ election + paired diff. Its single-draw noise is
     # correlated across arms, so it floods every comparison equally rather than favouring one.

@@ -33,6 +33,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
+from promptpotter.infrastructure.runtime_flags import write_armed_cells
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -661,12 +662,14 @@ class CommandDispatcher:
         if kind == "pause-cycle":
             return lambda: self._apply_pause_cycle(hop)
         if kind == "set-sample-lookahead":
-            enabled = payload_extras.get("enabled")
-            # Strictly boolean: this verb both arms and cancels, so a coerced value picks one of
-            # two opposite acts.
-            if not isinstance(enabled, bool):
-                raise PayloadInvalidError("set-sample-lookahead requires a boolean `enabled`.")
-            return lambda: self._apply_set_sample_lookahead(hop, enabled=enabled)
+            cells = payload_extras.get("cells")
+            # Strictly int, and `bool` is an int in Python — a coerced `True` would read as 1 and
+            # silently disarm the very press that meant to arm.
+            if not isinstance(cells, int) or isinstance(cells, bool) or cells < 1:
+                raise PayloadInvalidError(
+                    "set-sample-lookahead requires an integer `cells` >= 1 (1 disarms)."
+                )
+            return lambda: self._apply_set_sample_lookahead(hop, cells=cells)
         if kind == "origin-gate-decision":
             decision = str(payload_extras.get("decision", ""))
             if decision not in ("rescore", "proceed", "abort"):
@@ -778,16 +781,12 @@ class CommandDispatcher:
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
-    def _apply_set_sample_lookahead(self, hop: CycleHop, *, enabled: bool) -> None:
-        """Arm/disarm the walk's second in-flight sample; the next round that scores spends it.
+    def _apply_set_sample_lookahead(self, hop: CycleHop, *, cells: int) -> None:
+        """Arm the walk to hold ``cells`` samples in flight; ``1`` disarms. Recorded UNCLAMPED —
+        the walk clamps to the connector's ceiling, and clamping twice lets the two disagree.
         Pointedly does NOT ``mark_human_intervened`` as its neighbour above does — skip changes what
         was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
-        flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).sample_lookahead_flag
-        if not enabled:
-            flag.unlink(missing_ok=True)
-            return
-        flag.parent.mkdir(parents=True, exist_ok=True)
-        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
+        write_armed_cells(self._stores.campaigns.cycle_dir(hop), cells)
 
     def _apply_origin_gate_decision(self, hop: CycleHop, decision: str) -> None:
         """The one decision channel all three surfaces write; ``run_origin_gate`` polls it, acts

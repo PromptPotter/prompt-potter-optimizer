@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 # execution mode extends this enum without touching the loop.
 ConnectorExecution = Literal["remote_http", "in_process"]
 
+# What one press of the concurrency control buys. ``round`` is the wire shape, spent by the
+# round that scored under it. ``batch`` is for a backend whose sample is a whole run, where a
+# round is hours: the operator names how many launch together and the press is spent by them.
+ConcurrencyArming = Literal["round", "batch"]
+
 # The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
@@ -93,6 +98,14 @@ class Connector:
     reads instead of branching on ``name``. ``remote_http`` (default) posts to
     a live ``/matches`` endpoint; ``in_process`` runs in this process via
     ``in_process_run`` (no HTTP). ``BackendClient.run_query`` dispatches on this."""
+
+    max_cells_in_flight: int = 2
+    """Most samples of one candidate the scoring walk may hold in flight once armed. Declared
+    here rather than read off ``execution``, a transport fact: ``dspy`` and ``promptpotter`` are
+    both ``in_process`` and want opposite answers. ``1`` opts out."""
+
+    concurrency_arming: ConcurrencyArming = "round"
+    """What one press of the concurrency control buys — see :data:`ConcurrencyArming`."""
 
     in_process_run: InProcessRun | None = None
     """The in-process execution arm — ``async (query, payload) -> {"data": {…}}``.
@@ -193,6 +206,7 @@ class Connector:
 __all__ = [
     "AuthTokenFn",
     "BackendUnreachableError",
+    "ConcurrencyArming",
     "Connector",
     "ConnectorExecution",
     "InProcessRun",

@@ -208,11 +208,9 @@ resolved_prompts:
       only the ones you can actually ground in a panel. {{n_variants}} is a CEILING, not a quota: emit
       fewer whenever you have fewer distinct hypotheses, and never pad to reach it. A slot filled to hit
       the number costs a full measurement and arrives as an idea this cycle already lost, which is rejected
-      before it is ever scored. Spread is across hypotheses AND fixes, not slots: two candidates relocating
-      one idea into different fields — or applying one generic fix to different failures — count as one;
-      when a panel names distinct failure modes, each candidate targets a different one, and a fix that
-      helps every mode equally is not differentiating. Steer at most half the batch to the critique's
-      priority_fix; the rest attack a DIFFERENT hypothesis. On round 1 (no critique), spread across the
+      before it is ever scored. One variant per failure cluster — the spread is carried by targets_cluster
+      (see answer_format), so spend your reasoning on each cluster's MECHANISM rather than on making the
+      set look varied. On round 1 (no critique), spread across the
       two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its
       output-schema `description` strings, which steer harder per token than the instruction; see answer_format).
       An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort)
@@ -248,6 +246,7 @@ resolved_prompts:
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
         - "evidence_grounding": {field, citation}. field one of {{citable_fields}} — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
+        - "targets_cluster": the verbatim label of the ONE critique failure cluster this variant attacks; "none" when there is no critique yet. Two variants may NOT name the same cluster — the batch is one variant per cluster, which is where the round's spread comes from.
         - Three override slots; AT LEAST ONE NON-EMPTY. A variant that overrides nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.
           * "pipeline_params_override": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {"output_schema_descriptions": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one.
           * "prompt_fields_override": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.

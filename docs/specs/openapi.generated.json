@@ -197,6 +197,34 @@
         "title": "ActivityResponse",
         "type": "object"
       },
+      "ArmReplicate": {
+        "additionalProperties": false,
+        "description": "One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns\nalready paid for — the cheapest one on the board, and invisible to a roster that lists\ncampaigns rather than arms.",
+        "properties": {
+          "arm_id": {
+            "title": "Arm Id",
+            "type": "string"
+          },
+          "campaign_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Campaign Ids",
+            "type": "array"
+          },
+          "level_spread": {
+            "title": "Level Spread",
+            "type": "number"
+          }
+        },
+        "required": [
+          "arm_id",
+          "campaign_ids",
+          "level_spread"
+        ],
+        "title": "ArmReplicate",
+        "type": "object"
+      },
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -336,6 +364,29 @@
         "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "type": "object"
       },
+      "CampaignCells": {
+        "additionalProperties": false,
+        "description": "One campaign's per-cell origin levels, served so the browser can plot them without\nre-deriving one. Keyed by the cell's QUERY, the identity that survives across campaigns.",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "levels": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Levels",
+            "type": "object"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "levels"
+        ],
+        "title": "CampaignCells",
+        "type": "object"
+      },
       "CampaignDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -446,6 +497,127 @@
           "total"
         ],
         "title": "CampaignListResponse",
+        "type": "object"
+      },
+      "CampaignOrigin": {
+        "additionalProperties": false,
+        "description": "One campaign's origin panel — the roster row and the comparability check in one shape.",
+        "properties": {
+          "arm_id": {
+            "title": "Arm Id",
+            "type": "string"
+          },
+          "calibration_model": {
+            "anyOf": [
+              {
+                "enum": [
+                  "1PL",
+                  "2PL"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Model"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "origin_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Accuracy"
+          },
+          "origin_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Level"
+          },
+          "rounds_scored": {
+            "title": "Rounds Scored",
+            "type": "integer"
+          },
+          "ruler_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ruler Id"
+          },
+          "spend_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Usd"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "dataset_name",
+          "created_at",
+          "arm_id",
+          "ruler_id",
+          "calibration_model",
+          "n_cells",
+          "origin_level",
+          "origin_accuracy",
+          "spend_usd",
+          "rounds_scored",
+          "stop_reason"
+        ],
+        "title": "CampaignOrigin",
         "type": "object"
       },
       "CampaignStorageResponse": {
@@ -582,7 +754,7 @@
       },
       "CellEffect": {
         "additionalProperties": false,
-        "description": "One environment cell's paired (candidate − origin) effect for a state.",
+        "description": "One environment cell's paired (candidate − origin) effect for an edit.",
         "properties": {
           "cell": {
             "title": "Cell",
@@ -655,6 +827,52 @@
           "kind"
         ],
         "title": "CommandEnvelope",
+        "type": "object"
+      },
+      "Comparability": {
+        "additionalProperties": false,
+        "description": "Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a\nreader must be able to tell them apart.\n\n``verdict`` is ``None`` for UNKNOWN, which is not ``True`` and must never render as it.\n``datasets_differ`` dominates: campaigns on different datasets measure different things, so no\nruler agreement could rescue the comparison. Their cells never intersect either, which is why\nthe variance decomposition is correctly absent rather than empty.",
+        "properties": {
+          "datasets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "n_rulers": {
+            "title": "N Rulers",
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "one_ruler",
+              "rulers_differ",
+              "ruler_unstamped",
+              "datasets_differ"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "reason",
+          "datasets",
+          "n_rulers"
+        ],
+        "title": "Comparability",
         "type": "object"
       },
       "ConfigCoupling": {
@@ -1583,9 +1801,33 @@
         "title": "DiagnosticRunRecord",
         "type": "object"
       },
+      "EditSpread": {
+        "additionalProperties": false,
+        "description": "How far apart the ranked edits actually are — the SD of ``anchor_effect`` across them.\n\n**Not a signal-to-noise ratio, and deliberately not one.** The noise half would be repeated\nreadings of ONE (edit, cell), and the instrument cannot produce them: measurements are\ncontent-addressed, so a second ask replays the first answer and its spread is zero by\nconstruction, which reads as a perfect instrument. A replicate ARM is the honest noise reading\n(see :class:`ArmReplicate`); measuring one candidate HARDER is ``verify``'s job. ``None`` when\nfewer than two edits have been measured.",
+        "properties": {
+          "edit_effect_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edit Effect Sd"
+          },
+          "n_edits": {
+            "default": 0,
+            "title": "N Edits",
+            "type": "integer"
+          }
+        },
+        "title": "EditSpread",
+        "type": "object"
+      },
       "EffectProvenance": {
         "additionalProperties": false,
-        "description": "Where one occurrence of a candidate state was measured on disk.",
+        "description": "Where one occurrence of an edit was measured on disk.",
         "properties": {
           "campaign_id": {
             "title": "Campaign Id",
@@ -1611,6 +1853,191 @@
           "candidate_id"
         ],
         "title": "EffectProvenance",
+        "type": "object"
+      },
+      "Evidence": {
+        "additionalProperties": false,
+        "description": "The whole read for one selection of campaigns — recomputed on every fetch.",
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignCells"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "comparability": {
+            "$ref": "#/components/schemas/Comparability"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/RankedEdit"
+            },
+            "title": "Edits",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "n_cycles_scanned": {
+            "title": "N Cycles Scanned",
+            "type": "integer"
+          },
+          "order_confound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderConfound"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origins": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignOrigin"
+            },
+            "title": "Origins",
+            "type": "array"
+          },
+          "power": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidencePower"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ranking_computed": {
+            "default": false,
+            "title": "Ranking Computed",
+            "type": "boolean"
+          },
+          "replicates": {
+            "items": {
+              "$ref": "#/components/schemas/ArmReplicate"
+            },
+            "title": "Replicates",
+            "type": "array"
+          },
+          "shared_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Cells",
+            "type": "array"
+          },
+          "spread": {
+            "$ref": "#/components/schemas/EditSpread"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceVariance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generated_at",
+          "n_cycles_scanned",
+          "origins",
+          "comparability"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "EvidencePower": {
+        "additionalProperties": false,
+        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per arm it\nwould take to resolve the biggest gap the roster already shows.",
+        "properties": {
+          "cells_for_largest_gap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cells For Largest Gap"
+          },
+          "cells_per_arm": {
+            "title": "Cells Per Arm",
+            "type": "integer"
+          },
+          "largest_arm_gap": {
+            "title": "Largest Arm Gap",
+            "type": "number"
+          },
+          "min_detectable_effect": {
+            "title": "Min Detectable Effect",
+            "type": "number"
+          },
+          "paired_se": {
+            "title": "Paired Se",
+            "type": "number"
+          }
+        },
+        "required": [
+          "paired_se",
+          "min_detectable_effect",
+          "largest_arm_gap",
+          "cells_per_arm",
+          "cells_for_largest_gap"
+        ],
+        "title": "EvidencePower",
+        "type": "object"
+      },
+      "EvidenceVariance": {
+        "additionalProperties": false,
+        "description": "The additive cell + arm decomposition over the cells every campaign measured.\n\n``arm_effect_sd`` alone decides nothing: under the null an arm mean still scatters by\n``null_arm_scatter``, so an arm SD at or below it is noise wearing a ranking.",
+        "properties": {
+          "arm_effect_sd": {
+            "title": "Arm Effect Sd",
+            "type": "number"
+          },
+          "arm_sd_below_noise": {
+            "title": "Arm Sd Below Noise",
+            "type": "boolean"
+          },
+          "cell_effect_sd": {
+            "title": "Cell Effect Sd",
+            "type": "number"
+          },
+          "n_arms": {
+            "title": "N Arms",
+            "type": "integer"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "null_arm_scatter": {
+            "title": "Null Arm Scatter",
+            "type": "number"
+          },
+          "residual_sd": {
+            "title": "Residual Sd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cell_effect_sd",
+          "arm_effect_sd",
+          "residual_sd",
+          "null_arm_scatter",
+          "arm_sd_below_noise",
+          "n_cells",
+          "n_arms"
+        ],
+        "title": "EvidenceVariance",
         "type": "object"
       },
       "FileContentResponse": {
@@ -2670,36 +3097,48 @@
         "title": "NodeOutputSchema",
         "type": "object"
       },
-      "OptimizerPromptRanking": {
+      "OrderConfound": {
         "additionalProperties": false,
-        "description": "The ranking — recomputed from disk on every read, never persisted.",
+        "description": "Run order against outcome. A campaign-at-a-time comparison confounds the arm with WHEN it\nran — the archive grows between runs, so the ruler and the caches both move with the calendar.",
         "properties": {
-          "candidates": {
-            "items": {
-              "$ref": "#/components/schemas/RankedOptimizerPrompt"
-            },
-            "title": "Candidates",
-            "type": "array"
+          "level_vs_order": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level Vs Order"
           },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "n_cycles_scanned": {
-            "title": "N Cycles Scanned",
+          "n_campaigns": {
+            "title": "N Campaigns",
             "type": "integer"
           },
-          "spread": {
-            "$ref": "#/components/schemas/OuterSpread"
+          "order_confounded": {
+            "title": "Order Confounded",
+            "type": "boolean"
+          },
+          "spend_vs_order": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Vs Order"
           }
         },
         "required": [
-          "generated_at",
-          "n_cycles_scanned",
-          "candidates",
-          "spread"
+          "level_vs_order",
+          "spend_vs_order",
+          "n_campaigns",
+          "order_confounded"
         ],
-        "title": "OptimizerPromptRanking",
+        "title": "OrderConfound",
         "type": "object"
       },
       "OriginEntry": {
@@ -2789,30 +3228,6 @@
         "title": "OriginListResponse",
         "type": "object"
       },
-      "OuterSpread": {
-        "additionalProperties": false,
-        "description": "How far apart the ranked arms actually are — the SD of ``anchor_effect`` across states.\n\n**Not a signal-to-noise ratio, and deliberately not one.** The noise half would be\nrepeated readings of ONE (state, cell), and the inner instrument cannot produce them: it\nis content-addressed end to end — the campaign key, the ``shared_root`` caches, the seeded\nbank draw, CRN, the optimizer clamp — so a second ask replays the first answer and its\nspread is zero by construction, which reads as a perfect instrument. Manufacturing a\nsecond reading (numbering the draw to miss every cache) measures how noisy an LLM is,\nwhich is not a quantity the loop can optimise against.\n\nMeasuring a candidate HARDER is ``verify``'s job: it re-scores one candidate on MORE\nsamples, tightening the estimate of the thing being compared instead of sampling the same\nquestion twice. So the error bar on a comparison is the paired one this module already\nreports across cells, and this is the other half a reader needs — how much the arms differ\nat all. ``None`` when fewer than two states have been measured.",
-        "properties": {
-          "arm_effect_sd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Arm Effect Sd"
-          },
-          "n_states": {
-            "default": 0,
-            "title": "N States",
-            "type": "integer"
-          }
-        },
-        "title": "OuterSpread",
-        "type": "object"
-      },
       "QuotaStatus": {
         "additionalProperties": false,
         "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
@@ -2882,9 +3297,9 @@
         "title": "QuotaStatus",
         "type": "object"
       },
-      "RankedOptimizerPrompt": {
+      "RankedEdit": {
         "additionalProperties": false,
-        "description": "One unique optimizer prompt state, aggregated across every occurrence in the corpus.",
+        "description": "One unique candidate state — a ``pipeline_params_override`` — aggregated across every\noccurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an\noptimizer-prompt edit on the recursion; the arithmetic does not care which.\n\nIt pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.\nThat is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's\ncells and an interval to match.",
         "properties": {
           "anchor_effect": {
             "title": "Anchor Effect",
@@ -2951,7 +3366,7 @@
           "n_cells",
           "n_measurements"
         ],
-        "title": "RankedOptimizerPrompt",
+        "title": "RankedEdit",
         "type": "object"
       },
       "RayItem": {
@@ -5584,6 +5999,67 @@
         ]
       }
     },
+    "/api/v1/evidence": {
+      "get": {
+        "description": "Roster, comparability, replicates, the cell/arm/residual decomposition, what the selection\ncan resolve, and the run-order confound — reduced fresh from disk on each fetch (on-demand,\nnot the 2 s poll); zero LLM, nothing persisted.",
+        "operationId": "get_evidence_api_v1_evidence_get",
+        "parameters": [
+          {
+            "description": "Campaign ids to pool. Repeat the parameter; may span datasets.",
+            "in": "query",
+            "name": "campaign",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "Campaign ids to pool. Repeat the parameter; may span datasets.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Campaign",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the only half that opens a round document past round 0: the rest reads one origin per campaign, this walks every round of every campaign.",
+            "in": "query",
+            "name": "ranking",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the only half that opens a round document past round 0: the rest reads one origin per campaign, this walks every round of every campaign.",
+              "title": "Ranking",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Evidence"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health_check_api_v1_health_get",
@@ -5633,7 +6109,7 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (``rank-optimizer-prompts``\nnames a winner and writes nothing); model/provider are always optimizer-locked.",
+        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (``dataset-evidence``\nnames a winner and writes nothing); model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "responses": {
           "200": {
@@ -5652,28 +6128,6 @@
         "summary": "Get Optimizer Pipeline",
         "tags": [
           "Optimizer"
-        ]
-      }
-    },
-    "/api/v1/optimizer-prompt-ranking": {
-      "get": {
-        "description": "The L4 prompt ranking — every candidate optimizer prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
-        "operationId": "get_optimizer_prompt_ranking_api_v1_optimizer_prompt_ranking_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OptimizerPromptRanking"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Optimizer Prompt Ranking",
-        "tags": [
-          "Campaigns"
         ]
       }
     },

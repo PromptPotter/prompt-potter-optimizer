@@ -144,6 +144,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # where it means something: a miss selects `sample_transcripts`, while one level up a miss
     # is a placeholder-label artifact and the raw source is `inner_narratives`. A critique
     # shown neither prescribes steers the inner loops have already measured and lost.
+    # `failing_samples` carries the BREADTH both lack — the deep panels reach ~5 misses of ~20,
+    # and clusters ranked "largest first, share of the misses" cannot be read off a sample.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -151,6 +153,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
+                "failing_samples",
                 "inner_narratives",
                 "l1_wounds",
                 "rare_hit_samples",
@@ -165,6 +168,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
+                "failing_samples",
                 "inner_narratives",
                 "l1_wounds",
                 "rare_hit_samples",

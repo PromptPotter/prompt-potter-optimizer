@@ -217,6 +217,9 @@ CONNECTOR = Connector(
     session_factory=DspySession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
+    # One call into the caller's module — no latency to hide behind, so overlapping two
+    # buys nothing and only doubles peak memory in the host's own process.
+    max_cells_in_flight=1,
     default_pipeline=(PROGRAM_NODE,),
 )
 

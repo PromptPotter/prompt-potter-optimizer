@@ -46,26 +46,41 @@ def _valid_axis_set(schema: PipelineSchema) -> set[str]:
     return out
 
 
+def _priority_fix_axis(priority_fix: str) -> str:
+    """The axis a ``<axis>: <change>`` steer names, so the menu beside it cannot omit it."""
+    head, sep, _ = priority_fix.partition(":")
+    axis = head.strip()
+    return axis if sep and axis.isidentifier() else ""
+
+
 def format_l1_critique_for_prompt(
     critique: CritiqueReadout | None, pipeline_schema: PipelineSchema | None = None
 ) -> str:
     if not critique:
         return ""
     parts: list[str] = []
-    if pf := critique.get("priority_fix"):
+    pf = critique.get("priority_fix") or ""
+    if pf:
         parts.append(f"Fix: {pf}")
-    sa = critique.get("suggested_axes") or []
+    sa = list(critique.get("suggested_axes") or [])
+    # The steer's own axis leads its menu: a `Fix:` naming an axis `Axes:` omitted told the
+    # generator two different things about one round, and it was the steer that got followed.
+    if lead := _priority_fix_axis(pf):
+        sa = [lead, *(a for a in sa if a != lead)]
+    if pipeline_schema is not None:
+        valid = _valid_axis_set(pipeline_schema)
+        sa = [a for a in sa if a in valid]
     if sa:
-        if pipeline_schema is not None:
-            valid = _valid_axis_set(pipeline_schema)
-            sa = [a for a in sa if a in valid]
-        if sa:
-            parts.append(f"Axes: {', '.join(sa)}")
+        parts.append(f"Axes: {', '.join(sa)}")
     if fh := critique.get("failure_highlights"):
         parts.append("Failures:")
         for h in fh[:3]:
             parts.append(f"  {h}")
-    return "\n".join(parts)
+    if not parts:
+        return ""
+    # Titled like every panel beside it. `critique` is offered in the citation enum, but the block
+    # rendered untitled, so variants grounding on it named whichever heading rendered above.
+    return "\n".join(["CRITIQUE (last round's failures, distilled):", *parts])
 
 
 # --------------------------------------------------------------------------- #

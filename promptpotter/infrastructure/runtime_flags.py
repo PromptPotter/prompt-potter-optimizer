@@ -23,11 +23,27 @@ def is_checkin(cycle_dir: Path) -> bool:
     return CycleLayout(cycle_dir).checkin_flag.is_file()
 
 
-def is_sample_lookahead(cycle_dir: Path) -> bool:
-    """``.runtime/sample_lookahead.flag`` present — the operator's REQUEST that the walk hold a second
-    sample in flight. What the loop ran at is ``dashboard.json::sample_lookahead``; never serve
-    this as that."""
-    return CycleLayout(cycle_dir).sample_lookahead_flag.is_file()
+def write_armed_cells(cycle_dir: Path, cells: int) -> None:
+    """The operator's REQUEST — how many samples the walk may hold in flight. ``cells <= 1``
+    removes it, so disarmed and never-armed are one on-disk state rather than two that read alike."""
+    path = CycleLayout(cycle_dir).sample_lookahead
+    if cells <= 1:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, {"cells": int(cells), "requested_at": time.time()})
+
+
+def read_armed_cells(cycle_dir: Path) -> int:
+    """``1`` when absent, unreadable or malformed — the failure direction is "run as normal",
+    never "stall". The REQUEST; what the loop ran at is ``dashboard.json::sample_lookahead``."""
+    data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
+    if not isinstance(data, dict):
+        return 1
+    cells = data.get("cells")
+    if not isinstance(cells, int) or isinstance(cells, bool):
+        return 1
+    return max(1, cells)
 
 
 def clear_run_control_flags(cycle_dir: Path) -> tuple[float | None, int | None]:
@@ -44,7 +60,7 @@ def clear_run_control_flags(cycle_dir: Path) -> tuple[float | None, int | None]:
     dropped = read_spend_caps(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
-    layout.sample_lookahead_flag.unlink(missing_ok=True)
+    layout.sample_lookahead.unlink(missing_ok=True)
     # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
     # clamped against a richer account governs every later resume unless it goes with the run.
     layout.spend_cap.unlink(missing_ok=True)
@@ -192,7 +208,9 @@ __all__ = [
     "derive_run_phase",
     "is_checkin",
     "is_paused",
+    "read_armed_cells",
     "read_spend_caps",
     "run_phase_validator_epoch",
+    "write_armed_cells",
     "write_spend_caps",
 ]

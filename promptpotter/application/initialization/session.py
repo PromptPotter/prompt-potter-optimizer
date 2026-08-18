@@ -128,10 +128,10 @@ class Session:
     # one searchpoint is cut, not the whole round.
     skip_check: Callable[[], bool] | None = None
     skip_consume: Callable[[], None] | None = None
-    # `sample_lookahead_check`: the operator armed the walk to hold a second sample in flight. Same
-    # read-and-consume pair as skip, spent a phase later — skip by the searchpoint it cuts,
-    # look-ahead by the ROUND that scores under it.
-    sample_lookahead_check: Callable[[], bool] | None = None
+    # `sample_lookahead_check`: how many samples the operator armed the walk to hold in flight, 1
+    # when nothing is armed. Same read-and-consume pair as skip, spent a phase later — by the ROUND
+    # that scored under it or the GROUP the press released, per `Connector.concurrency_arming`.
+    sample_lookahead_check: Callable[[], int] | None = None
     sample_lookahead_consume: Callable[[], None] | None = None
     # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
     # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one

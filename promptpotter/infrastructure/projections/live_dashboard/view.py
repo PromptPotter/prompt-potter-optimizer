@@ -547,6 +547,11 @@ class LiveDashboardView(DerivedView):
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
             config = data["config"]
+            # Off the live backend client, beside the config read above — the connector declares
+            # both, and neither can change once the run is wired.
+            backend = data["env"].backend_client
+            s.max_cells_in_flight = backend.max_cells_in_flight
+            s.concurrency_arming = backend.concurrency_arming
             # The formula is stamped once at INIT:enter and origin accuracy rides round 0 via
             # the standard ``close_round`` path, so INIT:exit carries only the run limits.
             opt = config.optimization
