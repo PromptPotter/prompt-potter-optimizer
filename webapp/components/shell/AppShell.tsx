@@ -19,6 +19,7 @@ import { SidebarResizer } from "@/components/shell/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
 import { MobileAppBar } from "@/components/shell/MobileAppBar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
+import { ComparePane } from "@/components/compare/ComparePane";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
@@ -483,6 +484,8 @@ function AppShellInner() {
           />
         ) : tab === "dashboard" ? (
           <DashboardTab />
+        ) : tab === "compare" ? (
+          <ComparePane />
         ) : tab === "files" ? (
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
         ) : (

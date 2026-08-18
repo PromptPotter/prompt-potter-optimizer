@@ -1,0 +1,141 @@
+/* The Compare tab — a picker beside the read. Shares the `l4-*` table/lede vocabulary
+   (imported just above this file) rather than restating it; only what is genuinely new to
+   this surface lives here. Theme-aware, operator-dense. */
+
+/* Per-campaign series palette. On :root because a canvas paint cannot resolve `var()` —
+   `theme.ts::getCss` reads these off the root at paint time, so the DOM swatch and the chart
+   line are one palette and a theme flip moves both. */
+:root {
+  --cmp-series-1: #4f8ef7;
+  --cmp-series-2: #e8833a;
+  --cmp-series-3: #3fb27f;
+  --cmp-series-4: #c9639e;
+  --cmp-series-5: #d4b02c;
+  --cmp-series-6: #6f6bd8;
+  --cmp-series-7: #4bb3c4;
+  --cmp-series-8: #b5603f;
+}
+
+.cmp-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: var(--space-16);
+  align-items: start;
+}
+@media (max-width: 60rem) {
+  .cmp-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cmp-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0; /* a chart in a grid track must be allowed to shrink, or it forces the page wide */
+}
+
+/* ── Picker ─────────────────────────────────────────────────── */
+.cmp-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+.cmp-group {
+  border: 0;
+  margin: 0 0 var(--space-12);
+  padding: 0;
+}
+.cmp-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 0;
+  color: var(--color-text-tertiary);
+  font-size:var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cmp-group-name {
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cmp-option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) 0;
+  font-size:var(--text-sm);
+  cursor: pointer;
+}
+.cmp-option-id {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp-link,
+.cmp-button {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--color-accent);
+  font-size:var(--text-sm);
+  cursor: pointer;
+  padding: 0;
+}
+.cmp-button {
+  border-color: var(--color-border);
+  border-radius: 6px;
+  padding: var(--space-4) var(--space-10);
+}
+.cmp-link[disabled] {
+  color: var(--color-text-tertiary);
+  cursor: default;
+}
+
+/* ── Charts ─────────────────────────────────────────────────── */
+.cmp-canvas {
+  position: relative;
+  height: 18rem;
+}
+.cmp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-16);
+  list-style: none;
+  margin: var(--space-12) 0;
+  padding: 0;
+  font-size:var(--text-xs);
+}
+.cmp-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--color-text-secondary);
+}
+.cmp-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* The forest's axis: one track per campaign, the dot placed by served level. */
+.cmp-forest-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 0.75rem;
+  min-width: 6rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.cmp-forest-dot {
+  position: absolute;
+  top: 0.125rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  transform: translateX(-50%);
+}

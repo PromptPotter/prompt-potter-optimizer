@@ -3,15 +3,43 @@
    the outer loop. Theme-aware (reads tokens); leans operator/dense. Not shown to
    whitelabeled end-users (they never run a self-optimizing campaign). */
 
-.l4-lede {
+.l4-lede,
+.l4-note,
+.l4-warn {
   margin: 0 0 var(--space-12);
   color: var(--color-text-secondary);
   font-size:var(--text-base);
   line-height: 1.5;
   max-width: 78ch;
 }
-.l4-lede strong {
+.l4-lede strong,
+.l4-note strong {
   color: var(--color-text-primary);
+}
+/* A comparability or confound flag: the reading that decides whether the numbers above may be
+   compared at all, so it must not skim like prose. */
+.l4-warn,
+.l4-warn strong {
+  color: var(--color-danger);
+}
+
+/* The variance strip — four served SDs read side by side. */
+.l4-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+  margin: var(--space-12) 0;
+}
+.l4-readings dt {
+  color: var(--color-text-tertiary);
+  font-size:var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.l4-readings dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .l4-subtle {

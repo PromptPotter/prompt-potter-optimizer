@@ -64,9 +64,9 @@ IS the mean logit lift — a number to read, not merely to order by.
 arms still prints a leader, and reading that leader as a finding is the failure mode this phase is most
 exposed to.
 
-- **Served at zero spend** by `application/dataset_evidence.py` (`python -m promptpotter
-  dataset-evidence promptpotter-self`, `GET /datasets/{name}/evidence`): each arm's anchor-to-origin paired
-  effect with its own interval, plus `OuterSpread` — how far apart those effects are. Beside them, and
+- **Served at zero spend** by `application/evidence.py` (`python -m promptpotter
+  evidence promptpotter-self --ranking`, `GET /evidence?campaign=…&ranking=`): each arm's anchor-to-origin paired
+  effect with its own interval, plus `EditSpread` — how far apart those effects are. Beside them, and
   answering at round 0 where the ranking cannot: whether the campaigns' levels are comparable at all
   (`ruler_id`), which arms are replicates, the cell/arm/residual decomposition against the scatter an arm
   mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`

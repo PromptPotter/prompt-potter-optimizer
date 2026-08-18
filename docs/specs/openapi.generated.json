@@ -6109,7 +6109,7 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (``dataset-evidence``\nnames a winner and writes nothing); model/provider are always optimizer-locked.",
+        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (``evidence``\nnames a winner and writes nothing); model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "responses": {
           "200": {

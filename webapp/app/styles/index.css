@@ -35,6 +35,7 @@
 @import "./domains/account.css";
 @import "./domains/auth.css";
 @import "./domains/l4.css";
+@import "./domains/compare.css";
 
 /* ── Cross-cutting a11y + responsive tail (must win) ────────── */
 @import "./foundation/reduced-motion.css";

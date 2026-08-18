@@ -37,7 +37,7 @@ import type {
   MeasurementSeriesResponse,
   MechanismSchemaResponse,
   MeResponse,
-  OptimizerPromptRanking,
+  Evidence,
   OriginListResponse,
   QuotaStatus,
   RayResponse,
@@ -361,18 +361,27 @@ export function fetchConfigMap(
   );
 }
 
-// --- Optimizer-prompt ranking (outer-loop dashboard box) --------------------------
-// The ranked table of candidate optimizer prompt states, reduced fresh from the
-// tenant's on-disk pp-self cycles. Empty (n_cycles_scanned=0) for every tenant
-// with no pp-self campaigns — i.e. every whitelabeled end-user; the dashboard
-// renders the box only when viewing the outer pp-self loop, so the read is
-// self-gating on data.
-// The four shapes are GENERATED from the Pydantic source (`OptimizerPromptRanking` &c in
-// `application/optimizer_prompt_ranking/reducer.py`) — they were hand-mirrored here and bypassed
-// `build_ts_types.py` entirely, the same setup that let the resource-matrix types drift
-// two fields behind their model before that arc was retired.
-export function fetchOptimizerPromptRanking(signal?: AbortSignal): Promise<OptimizerPromptRanking> {
-  return jget<OptimizerPromptRanking>(`${API}/optimizer-prompt-ranking`, signal);
+// --- Cross-campaign evidence (the Compare tab) ------------------------------------
+// What an arbitrary SET of campaigns jointly says: the roster, whether their levels are
+// comparable at all, the per-cell levels to plot, the cell/arm/residual decomposition, what the
+// selection can resolve, and the run-order confound. The selection may span datasets, and there
+// is no L4 gate — an ordinary campaign and a self-optimizing one take the same path.
+//
+// `ranking` is the ONLY expensive half and is off by default: the rest opens one round-0
+// document per campaign, while the ranking walks every round of every campaign selected. That is
+// why the pane puts it behind a press instead of a poll.
+//
+// Every shape is GENERATED from the Pydantic source (`Evidence` &c in
+// `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`,
+// the same setup that let the resource-matrix types drift two fields behind their model.
+export function fetchEvidence(
+  campaignIds: readonly string[],
+  opts: { ranking?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<Evidence> {
+  const qs = campaignIds.map((id) => `campaign=${encodeURIComponent(id)}`);
+  if (opts.ranking) qs.push("ranking=true");
+  return jget<Evidence>(`${API}/evidence?${qs.join("&")}`, signal);
 }
 
 // THE lineage read — one recursive tree rooted at a COURSE, nodes alternating

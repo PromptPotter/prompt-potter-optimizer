@@ -4,7 +4,6 @@ import { fetchPipeline } from "@/lib/api";
 import type { PipelineDoc } from "@/components/workflow";
 import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
-import { useOptimizerPromptRanking } from "@/lib/hooks/useOptimizerPromptRanking";
 import { DashSpine } from "./DashSpine";
 import { RunMasthead } from "@/components/shell/RunMasthead";
 import { RunErrorBanner } from "./RunErrorBanner";
@@ -14,7 +13,6 @@ import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
-import { OptimizerPromptRankingPanel } from "@/components/dashboard/scoring/OptimizerPromptRanking";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
@@ -41,8 +39,6 @@ export function DashboardTab() {
   const { viewedPath, campaignId, campaigns } = useWorkspace();
   const rootBackendType = campaigns.find((c) => c.campaign_id === campaignId)?.backend_type;
   const isOuterSelfOpt = viewedPath?.length === 1 && isSelfOptimization(rootBackendType);
-  // Fetch fires only when gated in (one-shot, not the 2 s poll).
-  const { registry } = useOptimizerPromptRanking(isOuterSelfOpt);
 
   return (
     <div className="content" id="content-dashboard">
@@ -104,22 +100,6 @@ export function DashboardTab() {
           <ConfigMapPanel />
         </DashSpine>
       </Lane>
-      {isOuterSelfOpt && (
-        <Lane
-          id="l4-lab"
-          title="L4 lab"
-          subtitle="Every edit to the optimizer's own prompts, ranked against the unedited original"
-          defaultOpen={false}
-        >
-          <DashSpine>
-            {registry ? (
-              <OptimizerPromptRankingPanel registry={registry} />
-            ) : (
-              <p className="l4-empty">Loading the ranking…</p>
-            )}
-          </DashSpine>
-        </Lane>
-      )}
     </div>
   );
 }

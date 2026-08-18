@@ -233,7 +233,7 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     knobs (model / provider / reasoning_effort / temperature / …) through the same
     canonical config element the steer panel uses, not a hand-rolled chip + JSON
     dump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a
-    hand-edit, never a fork and never a write path from here (``dataset-evidence``
+    hand-edit, never a fork and never a write path from here (``evidence``
     names a winner and writes nothing); model/provider are always optimizer-locked."""
     # The manifest is already parsed + cached one layer down; re-reading the file here
     # was a second opinion on the same bytes. Copied because the response is mutated below.

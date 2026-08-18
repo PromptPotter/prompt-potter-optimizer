@@ -2369,7 +2369,7 @@ def test_every_persisted_timestamp_is_canonical_utc() -> None:
     assert min(same_instant) != max(same_instant), "the two spellings do not sort equal"
 
     # Scoped to ONE file, this could not see the two sites that were actually wrong:
-    # `dataset_evidence.py` and `files.py` both minted `+00:00`. The rule is
+    # `evidence.py` and `files.py` both minted `+00:00`. The rule is
     # about the SPELLING, so the check is `.isoformat()` on a datetime anywhere in the
     # package — `strftime` (id suffixes, explicit `Z`) and `.timestamp()` (epoch floats)
     # are different jobs and stay legal.

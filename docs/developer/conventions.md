@@ -113,6 +113,20 @@ collects everything else.
   commit-and-fix-later.
 - **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. Two pre-convention commits marked it in the subject instead (`docs: manual edit…`, `docs: maunal pass`); don't copy that — `manual` collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
 
+## Paid corrections
+
+Bought by getting it wrong. Tells, not theory.
+
+- **One grep is not absence** — a second spelling, a second tool, a second channel.
+- **A green suite after a signature change is a zero.** Break it on purpose and watch it fail.
+- **A rename done twice leaves the MIDDLE name.** `anti-rot` checks that a claim resolves, not that a name exists.
+- **A glob skips `.inner/`** — dot-directories are absent, not empty. `os.walk`.
+- **Ask what CHOSE the rows.** Pairing does not rescue an outcome-selected subset.
+- **Ledger first, mtimes last.** From outside, a deliberate pause looks exactly like a crash.
+- **Nothing scopes a commit to your edits** — `add` ships the INDEX, `--only` the WORKTREE. `git diff` every path.
+- **Never `git checkout --` uncommitted work.** No reflog holds what was never committed.
+- **Never regenerate `package-lock.json` on Windows** — it prunes the optional-platform graph and Linux CI dies.
+
 ## Reasoning doctrine
 
 Six situational guardrails against recurring AI blind spots — unlike the
