@@ -181,6 +181,7 @@ and where the HuggingFace `datasets` library lives.
 | `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
 | `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
 | `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X. |
+| `new` / `resume` | `--token-budget <int>` | The model-portable twin of `--spend-budget`; whichever trips first halts. |
 | `resume` | `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
 | `resume` | `--no-check` | Skip the rescore-and-replay divergence check at boot. |
 | `resume` | `--fork-on-divergence` | On divergence, mint a sibling cycle rooted at the divergence point. |
@@ -202,7 +203,8 @@ session = await open_session(dataset_name, *, backend_url=…, backend_id=…, o
 observers, dataset, origin = await mint_and_score_origin(
     session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
 result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
-                            langfuse_session_id=None, spend_budget_usd=None, mode=None)
+                            langfuse_session_id=None, spend_budget_usd=None, token_budget=None,
+                            mode=None)
 ```
 
 Three steps rather than one because every caller does its own work between them. It mints through

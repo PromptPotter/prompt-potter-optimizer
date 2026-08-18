@@ -349,6 +349,8 @@ async def llm_call(
         input_tokens=response.usage.get("prompt_tokens", 0),
         output_tokens=response.usage.get("completion_tokens", 0),
         reasoning_tokens=response.usage.get("reasoning_tokens", 0),
+        cache_read_tokens=response.usage.get("cache_read_tokens", 0),
+        cache_write_tokens=response.usage.get("cache_write_tokens", 0),
         provider=merged["provider"],
         duration_s=duration_s,
         model=response.model,

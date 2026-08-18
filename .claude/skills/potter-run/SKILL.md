@@ -72,6 +72,17 @@ max — ask before exceeding.
 | `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. |
+| `set-budget` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens`. |
+
+**A budget halt is not the end of a run — it is two verbs.** `SPEND_BUDGET` / `TOKEN_BUDGET` mean
+the cycle hit *its own declared ceiling*, not that the work is done; the default `token_budget` is
+~a 5-round run, so a campaign that declared nothing stops there every time. Continue it with
+`set-budget --max-tokens <higher>` then `resume` — the ceiling is composed over the config at the
+next launch and the wallet still bounds it, so a raise sticks rather than being reset. Two things
+to check before assuming it worked: the ceiling is clamped against the account allowance, so read
+the ARMED value back off `dashboard.json::run_limits` rather than trusting the number you sent;
+and the token counter is CUMULATIVE across resume, so the new ceiling must exceed the total
+already spent, not the work remaining.
 
 Flags come from `datasets/{name}/dataset.md § Init Flags`, verbatim — never guessed. `new`
 overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
@@ -95,9 +106,8 @@ full reading pass — a log-tail grep is not a checkup, and a passive Monitor is
 every real bug so far was found by reading the run's own measurement files, not by a pattern hit.
 The interval is for *fanning out and researching*, not for idling.
 
-For `promptpotter-self`, the per-tick reading list is
-[`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § THE PER-CHECKUP READING LIST
-— read it there; it is the source of truth and is not restated here.
+For `promptpotter-self`, the per-tick reading list is the `potter-self` skill
+(§ The per-checkup reading list) — read it there; it is the source of truth and is not restated here.
 
 **Check node health before calling a round healthy.** Accuracy and critique are not enough. From
 `round_NNNN.json` (or `dashboard.json::rounds[-1]`): `health.grade` / `health.reasons` /
@@ -158,12 +168,12 @@ incumbent that also wins those rows it carries no information.
 ruler — `headline_metric` is DISPLAY config, never what the gate compares. They can legitimately
 disagree without either being broken. Read both, name both.
 
-**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_origin_*` strata
+**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_parent_*` strata
 are defined by the *incumbent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
-`⌊n/4⌋/n`). `scoring/metrics.py::matched_origin_stats` now returns `None` unless the candidate
+`⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
 covered the origin's panel, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `matched_origin_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
+**A `matched_parent_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
 artifact — do not quote it, and do not compare it across arms.**
 
 What the ordering does **not** do is starve the posterior — `p_best` moves across most of the
@@ -218,5 +228,5 @@ leaderboard picks.
 - [reference/onboarding.md](reference/onboarding.md) — new-dataset flow (web + CLI), Claude-simulated check-in, cold-machine bootstrap
 - [`promptpotter/application/optimization/CLAUDE.md`](../../../promptpotter/application/optimization/CLAUDE.md) — the L1/L2/L3 agent contracts: what each layer reads, writes and decides
 - [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order when a run is stuck; stop-reason recovery
-- [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) — running + supervising `promptpotter-self`
+- `/potter-self` — running + supervising `promptpotter-self`; [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) for what its numbers may claim
 - [`docs/concepts/the-loop.md`](../../../docs/concepts/the-loop.md) · [`docs/developer/self-healing-internals.md`](../../../docs/developer/self-healing-internals.md) · [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md)

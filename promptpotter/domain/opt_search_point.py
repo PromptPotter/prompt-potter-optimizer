@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator
 
@@ -56,6 +56,11 @@ class PromptTemplate(SearchPoint):
     """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
     (``PROMPT_STRING_FIELDS``), plus ``few_shot_examples`` and ``plan``, which render separately."""
 
+    RENDER_ORDER: ClassVar[tuple[str, ...]] = tuple(PROMPT_STRING_FIELDS)
+    """Order ``render()`` concatenates the decomposition fields in, for the OPTIMIZER prompt
+    (`dispatch/llm_call`). Apart from the SET, so shaping a cache prefix here cannot re-cut the
+    target prompt below."""
+
     persona: str = ""
     task_intent: str = ""
     problem_description: str = ""
@@ -73,7 +78,7 @@ class PromptTemplate(SearchPoint):
     )
 
     def render_fields(self) -> list[tuple[str, str]]:
-        pairs = [(f, v) for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
+        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := self._field_value(f))]
         if block := self._render_few_shot_block():
             pairs.append(("few_shot_examples", block))
         return pairs
@@ -222,6 +227,11 @@ class OptSearchPoint(PromptTemplate):
 
     model_config = ConfigDict(extra="forbid")
 
+    RENDER_ORDER: ClassVar[tuple[str, ...]] = tuple(PROMPT_STRING_FIELDS)
+    """Order for the TARGET prompt, so it sits inside the measurement archive's ``node_configs``
+    key and moving it re-cuts every banked cell. Restated, not inherited: inheriting is the
+    coupling."""
+
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
     memory: L2L3Memory = Field(default_factory=L2L3Memory)
 
@@ -303,3 +313,12 @@ class OptSearchPoint(PromptTemplate):
         )
         data.update(changes)
         return OptSearchPoint(**data)
+
+
+for _rendering_cls in (PromptTemplate, OptSearchPoint):
+    # A field the order omits renders nowhere — silently, in a prompt.
+    if sorted(_rendering_cls.RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS):
+        raise RuntimeError(
+            f"{_rendering_cls.__name__}.RENDER_ORDER must be a permutation of "
+            f"PROMPT_STRING_FIELDS: an order chooses SEQUENCE, never membership."
+        )

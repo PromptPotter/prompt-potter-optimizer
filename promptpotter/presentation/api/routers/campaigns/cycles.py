@@ -3,7 +3,8 @@ is per-cycle, so a fork's chart shows the fork's trajectory; the tree is rooted 
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from pathlib import Path
+from typing import Any, NamedTuple
 
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -19,6 +20,7 @@ from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
+    read_spend_caps,
     run_phase_validator_epoch,
 )
 from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
@@ -84,8 +86,13 @@ def serve_dashboard_response(
     # runner's last declaration, written only by that process, so a kill / restart /
     # orphan reap left it claiming "running" forever while `/cycles` and `/tree` —
     # which have always re-derived — said terminal. One authority, every surface.
-    # The spend cap still rides ``dashboard.json::run_limits.spend_budget_usd``
-    # (the single authoritative budget source).
+    #
+    # ``run_limits``' two spend arms are re-read for the SAME reason. The writer that
+    # projects them into the file (`live_dashboard/view.py::_persist`) lives in the
+    # runner's process, so on a HALTED cycle — precisely the one an operator raises a
+    # cap on to continue — nothing re-persists and the raise would never reach the
+    # browser. The `.runtime` dir mtime is already in the 304 validator, and
+    # `spend_cap.json` is its child, so a change expires the cached answer on its own.
     body = read_json_tolerant(path) if present else None
     declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
     run_phase = str(derive_run_phase(cycle_path, declared=declared))
@@ -98,7 +105,21 @@ def serve_dashboard_response(
             body["reason"] = "dashboard_unreadable"
     else:
         body["run_phase"] = run_phase
+        _overlay_armed_ceilings(body, cycle_path)
     return JSONResponse(body, headers=headers)
+
+
+def _overlay_armed_ceilings(body: dict[str, Any], cycle_path: Path) -> None:
+    """Serve ``run_limits``' spend arms as what ``BudgetGate`` will actually enforce. Mutates in
+    place; a body carrying no ``run_limits`` (warming) is left alone."""
+    limits = body.get("run_limits")
+    if not isinstance(limits, dict):
+        return
+    armed_usd, armed_tokens = read_spend_caps(cycle_path)
+    if armed_usd is not None:
+        limits["spend_budget_usd"] = armed_usd
+    if armed_tokens is not None:
+        limits["token_budget"] = armed_tokens
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")

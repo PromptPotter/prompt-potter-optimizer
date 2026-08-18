@@ -3,7 +3,7 @@
 //
 // Every field is lifted VERBATIM off `dashboard.json` — a label, a stop reason, a
 // count of served rows, and four served numbers. Nothing is computed: the accuracy
-// is the champion's own, the floor beside it is `matched_origin_accuracy` (the
+// is the champion's own, the floor beside it is `matched_parent_accuracy` (the
 // origin restricted to the samples that candidate actually measured, which is the
 // only honest "was X" under elimination), and the lift is the served
 // `ability_delta` in LOGITS — never a percent, and never `best − origin`.
@@ -60,7 +60,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     rounds: closed.length,
     championLabel: target?.courseLabel ?? null,
     accuracy: champion?.accuracy ?? null,
-    originAccuracy: champion?.matched_origin_accuracy ?? null,
+    originAccuracy: champion?.matched_parent_accuracy ?? null,
     abilityDelta,
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",

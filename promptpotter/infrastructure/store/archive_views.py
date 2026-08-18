@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.io import append_jsonl, read_json_tolerant, write_jsonl
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import instrument_mode
@@ -284,7 +284,7 @@ def cycle_measurement_series(
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     if not rounds_dir.is_dir():
         return out
-    for round_path in sorted(rounds_dir.glob("round_*.json")):
+    for round_path in sorted(rounds_dir.glob(ROUND_GLOB)):
         doc = read_json_tolerant(round_path)
         if not isinstance(doc, dict):
             continue

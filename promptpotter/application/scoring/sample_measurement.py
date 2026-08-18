@@ -510,13 +510,12 @@ def _rerun_would_repeat_token_budget_failure(
 ) -> bool:
     """Skip the rerun when the cached failure was a binding token budget and the rerun's cap is no
     larger: the ladder exists for TRANSIENT failures, and a config-fundamental one will not recover."""
-    from promptpotter.domain.rendering import classify_result
+    from promptpotter.domain.rendering import classify_result, terminal_node
 
-    # The terminal LLM node is read off the cached result itself, so the infra-code / token
-    # lookups key on the SAME node classify_result stamped. The trailing `or "llm_only"` is a
-    # literal coupling to the single-node sentinel, fired when the row carries no
-    # `terminal_node` — folding it into a declared constant is an open design call.
-    node = ((cached_result.get("pipeline_data") or {}).get("terminal_node")) or "llm_only"
+    # Through the same helper ``classify_result`` stamps its codes with, never re-derived: these
+    # membership tests are string matches on ``f"{node}:…"``, so a second spelling of the node
+    # makes them MISS silently and the ladder pays for a rerun guaranteed to fail identically.
+    node = terminal_node(cached_result)
     cl = classify_result(cached_result)
     budget_exhausted = (
         f"{node}:reasoning_budget_exhausted" in cl.infra_codes

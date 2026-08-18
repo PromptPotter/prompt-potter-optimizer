@@ -54,10 +54,11 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     roll_p_best_at_round_complete,
 )
+from promptpotter.infrastructure.runtime_flags import read_spend_caps
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import has_pipeline_warnings
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
@@ -599,7 +600,12 @@ class LiveDashboardView(DerivedView):
         query_time = float(pd.get("total_time", 0.0) or 0.0)
         is_cached = bool(result.get("cached", False))
 
-        if result.get("error") or pd.get("error"):
+        # First arm through the single owner of "this sample errored" — the measurement path sets
+        # ``error`` and ``error_category`` together, so reading the human message was a second
+        # spelling of the typed channel that every other error number here already reads.
+        # The second arm is NOT redundant with it and stays: ``pipeline_data.error`` is the
+        # BACKEND reporting a fault on a row PP classified clean, which no PP-side category covers.
+        if is_error_result(result) or pd.get("error"):
             s.error_count += 1
         if has_pipeline_warnings(result):
             s.degraded_count += 1
@@ -627,12 +633,16 @@ class LiveDashboardView(DerivedView):
         out_tok = int(record.output_tokens)
         if record.model and not bucket.model:
             bucket.model = record.model
+        cache_read = int(record.cache_read_tokens)
+        cache_write = int(record.cache_write_tokens)
         usd = compute_usd(
             record.model,
             in_tok,
             out_tok,
             override_usd=record.cost_usd,
             provider=record.provider,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
 
         if usd is not None:
@@ -644,6 +654,10 @@ class LiveDashboardView(DerivedView):
             bucket.input_tokens += in_tok
             bucket.output_tokens += out_tok
             bucket.reasoning_tokens += int(record.reasoning_tokens)
+            # Only the billed side: a reuse-cache hit reached no provider, so counting its
+            # replayed cache tokens would report a prefix holding on calls never made.
+            bucket.cache_read_tokens += cache_read
+            bucket.cache_write_tokens += cache_write
             if usd is not None:
                 bucket.used_usd = round(bucket.used_usd + usd, 6)
                 bucket.rate_known = True
@@ -815,6 +829,19 @@ class LiveDashboardView(DerivedView):
             nodes=self._current_round_nodes(),
             pobb=build_pobb_block(self._core, self._buffer.p_best_top),
         )
+        # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
+        # `spend_cap.json` over the launch-composed cap, so serving the stamped value left every
+        # reader — the budget control's prefill, the run strip — quoting a number nothing would
+        # enforce. Overlaid at the single write, so no reader has to join two sources.
+        if s.run_limits is not None:
+            armed_usd, armed_tokens = read_spend_caps(self.cycle_dir)
+            armed: dict[str, float | int] = {}
+            if armed_usd is not None:
+                armed["spend_budget_usd"] = armed_usd
+            if armed_tokens is not None:
+                armed["token_budget"] = armed_tokens
+            if armed:
+                s.run_limits = s.run_limits.model_copy(update=armed)
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

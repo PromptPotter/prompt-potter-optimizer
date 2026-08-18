@@ -9,6 +9,7 @@ consulting the schema at all are `l1_invariants.py`."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
@@ -154,7 +155,7 @@ def validate_overrides(
 
 
 def _check_l1_schema_compliance(
-    source_output: Any,
+    source_output: dict[str, dict[str, Any]],
     *,
     pipeline_schema: PipelineSchema,
     **_: Any,
@@ -177,7 +178,7 @@ L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
 
 
 def _check_l1_prompt_blocks_in_library(
-    source_output: Any,
+    source_output: Mapping[str, Any],
     *,
     prompt_block_catalogue: str = "guidance",
     **_: Any,
@@ -214,7 +215,7 @@ L1_PROMPT_BLOCKS_IN_LIBRARY: LLMOutputValidator = LLMOutputValidator(
 
 
 def _check_l1_config_in_runtime_failures(
-    source_output: Any,
+    source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
     **_: Any,
@@ -288,7 +289,7 @@ def _optimizer_template_failures(pipeline_params: dict[str, Any]) -> list[Valida
 
 
 def _check_l1_prompt_placeholders_intact(
-    source_output: Any,
+    source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
     pipeline_schema: PipelineSchema | None = None,

@@ -118,6 +118,7 @@ dev = [
     "pytest>=8.0.0",          # why kept: test runner
     "pytest-asyncio>=0.24.0", # why kept: async fixtures for LLM call tests
     "pytest-cov>=6.0",        # why kept: coverage instrumentation
+    "pytest-xdist>=3.6",      # why kept: the suite is the gate's longest check, and single-process it left 15 cores idle
     "ruff>=0.3.0",            # why kept: lint + format
     "mypy>=1.10.0",           # why kept: static type-check (CI gate)
     "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
@@ -300,6 +301,7 @@ DEP002 = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-xdist",
     "ruff",
     "mypy",
     "deptry",

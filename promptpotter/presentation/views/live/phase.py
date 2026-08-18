@@ -118,15 +118,15 @@ def render_round_stats(
     # other line reads the same on a round that resolved nothing as on one that resolved
     # something; this is the line that separates them. Silent when the round crowned nobody or the
     # panel held under two shared cells, where the absence is the honest answer.
-    lo, hi = round_result.matched_origin_lift_ci_lo, round_result.matched_origin_lift_ci_hi
-    if round_result.matched_origin_lift is not None and lo is not None and hi is not None:
+    lo, hi = round_result.matched_parent_lift_ci_lo, round_result.matched_parent_lift_ci_hi
+    if round_result.matched_parent_lift is not None and lo is not None and hi is not None:
         spans_zero = lo <= 0.0 <= hi
         verdict = (
             f"{YELLOW}spans 0 — not separable from the parent{RESET}" if spans_zero else "clears 0"
         )
         lines.append(
             _node_line(
-                f"lift vs matched parent: {round_result.matched_origin_lift:+.3f} "
+                f"lift vs matched parent: {round_result.matched_parent_lift:+.3f} "
                 f"[{lo:+.3f}, {hi:+.3f}]  |  {verdict}"
             )
         )

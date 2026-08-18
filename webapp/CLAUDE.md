@@ -158,7 +158,9 @@ Reach for a component-render test only for a regression class that compile + smo
 
 **Two build modes (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview: compile only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns behind `DEPLOY_BUILD=1` — the gate sets that env var directly, and `npm run build:deploy` sets it for a shell. **The maps serve the deployed box only** — `scripts/build_release.py::stage_webapp` strips them, so the wheel is not a consumer. Type-check and lint run inside *neither*; they are separate gate checks, so repeating them in `next build` would be duplication. From PowerShell, preview compiler-on behaviour with `$env:DEPLOY_BUILD=1; npm run build`.
 
-`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to the API via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).
+**For visual work, run `npm run dev` — not a rebuild per change.** It serves :3000 with Turbopack HMR (the default in Next 16, no flag) and proxies `/api/*` to the API at :8001 via `next.config.ts::rewrites`, which exists for this and nothing else. `output: "export"` means every `npm run build` prerenders every route instead, so the rebuild→hard-reload loop pays that per change. **The port is what picks your harness:** :3000 covers the anon and `PROMPTPOTTER_AUTH=off` surfaces — most visual work — while the OIDC redirect is bound to :8001, so a real login round-trip needs the built app. Production has no proxy (same FastAPI origin).
+
+`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`), so that is what a built change reaches — rebuild and hard-reload for anything the dev server cannot answer.
 
 ## Stack-drift warning
 

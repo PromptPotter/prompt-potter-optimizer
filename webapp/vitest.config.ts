@@ -20,5 +20,11 @@ export default defineConfig({
       "components/**/__tests__/**/*.test.{ts,tsx}",
     ],
     environment: "node",
+    // `scripts/gate.py` runs four checks at once, so this suite must not size its pool to
+    // the whole machine: unbounded it forks `availableParallelism() - 1` workers, each
+    // paying jsdom setup, and one starved its own startup mid-gate. Four is the gate's own
+    // concurrency. Costs ~8s standalone and nothing in the gate, where eslint is the
+    // critical path and this check finishes inside its shadow.
+    maxWorkers: 4,
   },
 });

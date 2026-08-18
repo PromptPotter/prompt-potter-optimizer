@@ -69,6 +69,8 @@ def emit_token_usage(
     cost_usd: float | None = None,
     cached: bool = False,
     reasoning_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> None:
     """Build ``TokenUsageRecord`` and append it. ``cached`` marks a call served from the content-addressed
     cache: it consumed the recorded tokens but spent no money, and the rollup keeps the two apart."""
@@ -81,6 +83,8 @@ def emit_token_usage(
             input_tokens=int(input_tokens),
             output_tokens=int(output_tokens),
             reasoning_tokens=int(reasoning_tokens),
+            cache_read_tokens=int(cache_read_tokens),
+            cache_write_tokens=int(cache_write_tokens),
             duration_s=float(duration_s),
             cost_usd=cost_usd,
             cached=cached,

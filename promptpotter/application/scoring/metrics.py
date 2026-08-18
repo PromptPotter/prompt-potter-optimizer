@@ -20,7 +20,6 @@ from promptpotter.application.scoring.formula import (
     ScoringTermMissingError,
     compile_round_scorer,
 )
-from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compute_composite_fitness",
-    "matched_origin_stats",
+    "matched_parent_stats",
     "value_with_mask_applied",
 ]
 
@@ -39,14 +38,19 @@ __all__ = [
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
     carries no verdict, so neither belongs in the denominator a rate is read against."""
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import (
+        is_deprecated,
+        scoreable_rows,
+    )
 
     deprecated = sum(1 for r in results if is_deprecated(r))
-    valid = [r for r in results if not is_deprecated(r)]
-    errors = sum(1 for r in valid if is_error_result(r))
-    scoreable = [r for r in valid if not is_error_result(r)]
+    scoreable = scoreable_rows(results)
     total = len(scoreable)
-    # Single source for the mean-fitness-over-scoreable formula.
+    # Derived from the ONE filter rather than re-walked: the three counts must partition `results`,
+    # and a second `is_error_result` pass is a second place for them to stop doing so.
+    errors = len(results) - deprecated - total
+    # Same filter behind the mean — `compute_accuracy` calls `scoreable_rows` too, so `total` and
+    # `accuracy` can no longer describe different populations.
     accuracy = compute_accuracy(results=results)
     return {
         "total": total,
@@ -118,23 +122,24 @@ def compute_composite_fitness(
     }
 
 
-def matched_origin_stats(
-    origin_results: list[QueryMeasurement],
+def matched_parent_stats(
+    parent_results: list[QueryMeasurement],
     candidate_results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
     *,
     round_scorer: RoundScorer | str | None = None,
 ) -> dict[str, Any] | None:
-    """``None`` unless the candidate measured EVERY cell the origin did. Pairing does not rescue a truncated prefix — the
-    shared cells ARE the incumbent's failures, so both halves are conditioned on what selected the subset."""
-    origin_sids = {r.get("sample_id") for r in origin_results}
-    if not origin_sids or not origin_sids <= {r.get("sample_id") for r in candidate_results}:
+    """``None`` unless the candidate measured EVERY cell the PARENT did — the origin at round 0 and the prior winner after,
+    never the origin throughout. Pairing does not rescue a truncated prefix — the shared cells ARE the incumbent's
+    failures, so both halves are conditioned on what selected the subset."""
+    parent_sids = {r.get("sample_id") for r in parent_results}
+    if not parent_sids or not parent_sids <= {r.get("sample_id") for r in candidate_results}:
         return None
     # `compute_composite_fitness` already spreads `_compute_accuracy` into its result —
     # calling it again here was a second `is_deprecated` walk over the same rows for the same
     # numbers, and a second place for the two to disagree.
     composite = compute_composite_fitness(
-        origin_results,
+        parent_results,
         pipeline_schema,
         opt_sp=None,
         round_scorer=round_scorer,

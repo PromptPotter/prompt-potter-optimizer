@@ -608,7 +608,6 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
         sum_user_spend,
     )
     from promptpotter.infrastructure.store.io import write_json
-    from promptpotter.infrastructure.store.layout import CycleLayout
 
     stores = built_stores
     root = "cycle_root0000"
@@ -677,7 +676,7 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
     for _crashed_attempt in range(2):
         bank_spend(
             workspace=stores.campaigns.workspace,
-            ledgers=[CycleLayout(stores.campaigns.cycle_dir(retried_hop)).ledger],
+            cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
             campaign_id="camp-2",
             cycle_id=retried,
         )
@@ -812,11 +811,14 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
             disp._build_cycle_applier("change-spend-budget", None, hop, {"max_usd": bad})
 
     # And the guard rejects only what it names: the bounds themselves still admit, or a launch
-    # that CAN be metered is refused instead — the same ceiling gone, the other direction.
-    assert _run_limits({"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0}) == {
-        "halt_at_accuracy": 1.0,
-        "spend_budget_usd": 0.0,
-    }
+    # that CAN be metered is refused instead — the same ceiling gone, the other direction. All
+    # THREE limits ride: a dropped arm is a ceiling the caller declared and the run never had.
+    assert _run_limits(
+        {"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0, "token_budget": 5_000}
+    ) == {"halt_at_accuracy": 1.0, "spend_budget_usd": 0.0, "token_budget": 5_000}
+    # The token arm is counted, not priced — a float is a typo, not a rounding instruction.
+    with pytest.raises(PayloadInvalidError):
+        _run_limits({"token_budget": 5_000.5})
 
 
 async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Path) -> None:
@@ -978,6 +980,47 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     assert _tighten_budgets(attacker, None, None) is attacker
 
 
+def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:
+    """A budget-halted cycle can only be continued if the ceiling ``change-spend-budget`` wrote may
+    RAISE the config — it was composed as a second ``min`` before, so a cap lifted to 500k was cut
+    back to the config default on the very next launch and the run re-tripped inside its first
+    sample. Making it settable is the fix; making it settable *after* the wallet bound would be a
+    leak of exactly the class above, and the two differ by the order of two lines.
+
+    That is why the composition is one function rather than two calls at the seam: reversed, an
+    operator-typed number arms ``BudgetGate`` while ``admit_launch`` and ``JobRegistry.set_caps``
+    both still read the account as bounded, and nothing anywhere reports it.
+    """
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner.entry import _compose_run_ceilings
+
+    config = load_campaign_config(
+        {
+            "optimization": {
+                "improvement_threshold": 0.02,
+                "degradation_threshold": 0.05,
+                "spend_budget_usd": 0.10,
+                "token_budget": 210_000,
+            }
+        }
+    )
+
+    # The raise the fix exists for: above the config, under an unmetered wallet.
+    raised = _compose_run_ceilings(config, operator=(0.50, 500_000), wallet=(None, None))
+    assert raised.optimization.spend_budget_usd == pytest.approx(0.50)
+    assert raised.optimization.token_budget == 500_000
+
+    # ...and the wallet still bounds it, in both units, however large the operator typed.
+    bounded = _compose_run_ceilings(config, operator=(1e9, 10**12), wallet=(0.30, 5_000_000))
+    assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
+    assert bounded.optimization.token_budget == 5_000_000
+
+    # One arm set leaves the other at what the config declared — a raise is not a reset.
+    tokens_only = _compose_run_ceilings(config, operator=(None, 400_000), wallet=(None, None))
+    assert tokens_only.optimization.token_budget == 400_000
+    assert tokens_only.optimization.spend_budget_usd == pytest.approx(0.10)
+
+
 def test_host_wallet_ceilings_hold_in_both_units(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1087,9 +1130,11 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # A rate belongs to the (provider, model) PAIR, so the record handed to the pricer must carry
     # the provider. Dropped, every namespaced model reads UNPRICED: the USD total stays $0.00 for
     # real spend and the grace renews on each launch, which is the ceiling silently not existing.
+    from promptpotter.shared.pricing import Rate
+
     monkeypatch.setattr(
         "promptpotter.shared.pricing.load_rates",
-        lambda: {"openrouter/openai/gpt-4o": (1e-6, 2e-6)},
+        lambda: {"openrouter/openai/gpt-4o": Rate(1e-6, 2e-6)},
     )
     priced = sum_user_spend(
         ledgers=_ledger("priced.jsonl", model="openai/gpt-4o"), since=0.0, until=2e9

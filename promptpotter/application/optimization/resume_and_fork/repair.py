@@ -184,8 +184,8 @@ def _resync_round_headline(t: RoundResult) -> bool:
     t.accuracy = cs.accuracy
     t.composite_fitness = cs.composite_fitness
     t.evaluators = dict(cs.evaluators)
-    t.matched_origin_accuracy = cs.matched_origin_accuracy
-    t.matched_origin_composite = cs.matched_origin_composite
+    t.matched_parent_accuracy = cs.matched_parent_accuracy
+    t.matched_parent_composite = cs.matched_parent_composite
     t.degraded_samples = count_degraded_samples(t.results)
     return True
 

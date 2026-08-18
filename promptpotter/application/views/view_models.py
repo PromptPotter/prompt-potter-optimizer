@@ -164,17 +164,17 @@ class ScoreEntry:
     accuracy: float
     composite_fitness: float | None
     total: int
-    composite_ci_lo: float | None
-    composite_ci_hi: float | None
+    mean_fitness_ci_lo: float | None
+    mean_fitness_ci_hi: float | None
     escalation_aborted: bool = False
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
     # The origin as this row's comparison floor. ``None`` unless the row covered the origin's
     # whole panel — a prefix rate is decided by where PoBB stopped the candidate, not by its
-    # answers (`scoring/metrics.py::matched_origin_stats`) — which is NOT the same as 0.0.
-    matched_origin_accuracy: float | None = None
-    matched_origin_composite: float | None = None
+    # answers (`scoring/metrics.py::matched_parent_stats`) — which is NOT the same as 0.0.
+    matched_parent_accuracy: float | None = None
+    matched_parent_composite: float | None = None
 
 
 @dataclass(frozen=True)
@@ -190,7 +190,7 @@ class RoundCompleteView:
     winner_evaluators: dict[str, float]
     winner_total: int
     improved: bool
-    # ``None`` alongside ``matched_origin_accuracy`` — there is no Δ without a floor.
+    # ``None`` alongside ``matched_parent_accuracy`` — there is no Δ without a floor.
     delta: float | None
     p_value: float | None
     improved_reason: str | None
@@ -206,8 +206,8 @@ class RoundCompleteView:
     # different sample basis and would read as lift the winner never earned.
     # No default: the one builder resolves it, and a ``0.0`` sitting here would render
     # "was 0.0%" on any round whose payload lacked the key.
-    matched_origin_accuracy: float | None
-    matched_origin_composite: float | None = None
+    matched_parent_accuracy: float | None
+    matched_parent_composite: float | None = None
     # The elected winner's lineage id — the identity `winner_label` cannot carry (prose, optional,
     # shareable). It rides the VIEW rather than the emit kwargs because those live on
     # `PhaseRecord.data`, which is `exclude=True` and so exists only in the emitting process:

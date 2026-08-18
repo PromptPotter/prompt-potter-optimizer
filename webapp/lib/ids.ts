@@ -44,18 +44,31 @@ export function unitKey(campaignId: string, cycleId: string): string {
 //   L5+        → deeper still (the engine's `.inner/<cycle_id>` sandbox is
 //                re-entrant — this mirrors it, "never a depth-1 assumption").
 // The dashboard reads the LEAF hop; chat/selection/dataset read the ROOT hop.
-interface CycleHop {
+// Named `PathHop`, not `CycleHop`: the generated wire type of that name
+// (`lib/api/types.generated.ts`, the element of `LineageNode.path` / `RayItem.path`)
+// is snake_case and belongs to the server. This one is the BROWSER's address —
+// it is encoded into `?path=` URLs and view-memory keys, so binding it to a wire
+// shape would let a server-side field rename invalidate persisted addresses.
+interface PathHop {
   campaignId: string;
   cycleId: string;
 }
 // Non-empty by construction — every real address has at least the root hop.
-export type CyclePath = CycleHop[];
+export type CyclePath = PathHop[];
 
 // Hops are joined by `HOP_SEP`; each hop's ids by `UNIT_SEP`. Neither separator
 // can occur inside an id (ids are `_SAFE_PATH_RE = ^[a-zA-Z0-9_.-]+$` on the
 // Python side, `validate_path_component`), so encode/decode round-trips exactly.
 const HOP_SEP = "~";
 const ID_RE = /^[a-zA-Z0-9_.-]+$/;
+const ALL_DOTS_RE = /^\.+$/;
+
+// Mirrors `store/io.py::validate_path_component`, whose dot-allowing regex is paired
+// with an all-dots rejection: `.` / `..` / `...` pass ID_RE but are traversal segments
+// the server refuses, so without this the browser hands back a path Python rejects.
+function validIdComponent(s: string): boolean {
+  return ID_RE.test(s) && !ALL_DOTS_RE.test(s);
+}
 
 export function encodeCyclePath(path: CyclePath): string {
   return path.map((h) => unitKey(h.campaignId, h.cycleId)).join(HOP_SEP);
@@ -71,7 +84,7 @@ export function decodeCyclePath(s: string): CyclePath | null {
     if (i < 0) return null;
     const campaignId = seg.slice(0, i);
     const cycleId = seg.slice(i + UNIT_SEP.length);
-    if (!ID_RE.test(campaignId) || !ID_RE.test(cycleId)) return null;
+    if (!validIdComponent(campaignId) || !validIdComponent(cycleId)) return null;
     hops.push({ campaignId, cycleId });
   }
   return hops.length ? hops : null;
@@ -102,20 +115,20 @@ export function ownerOfNodeAddress(addr: string): string | null {
   const encoded = cut < 0 ? addr : addr.slice(0, cut);
   if (!encoded) {
     const nodeId = cut < 0 ? "" : addr.slice(cut + NODE_SEP.length);
-    return ID_RE.test(nodeId) ? nodeId : null;
+    return validIdComponent(nodeId) ? nodeId : null;
   }
   return decodeCyclePath(encoded)?.[0]?.campaignId ?? null;
 }
 
 // The root hop — what chat, dataset, and files bind to (the top-level cycle that
 // owns the operator conversation).
-export function pathRoot(path: CyclePath): CycleHop {
+export function pathRoot(path: CyclePath): PathHop {
   return path[0]!;
 }
 
 // The leaf hop — what the dashboard stream and the selection axes re-root to (the
 // inner cycle when drilled in, else the root).
-export function pathLeaf(path: CyclePath): CycleHop {
+export function pathLeaf(path: CyclePath): PathHop {
   return path[path.length - 1]!;
 }
 

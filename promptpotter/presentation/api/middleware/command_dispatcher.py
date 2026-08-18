@@ -81,6 +81,12 @@ def _optional_float(raw: object) -> float | None:
     return None
 
 
+def _optional_int(raw: object) -> int | None:
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw
+
+
 def optional_bounded_number(
     value: object, *, field: str, lo: float, hi: float | None = None
 ) -> float | None:
@@ -103,6 +109,20 @@ def optional_bounded_number(
         bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
         raise PayloadInvalidError(f"payload.{field} must be {bound}")
     return float(value)
+
+
+def optional_bounded_int(value: object, *, field: str, lo: int) -> int | None:
+    """The integer twin of :func:`optional_bounded_number`, for a ceiling that is COUNTED rather
+    than priced — the token arm of every budget. It needs no finiteness check and must not grow
+    one: ``NaN`` and ``inf`` are floats, so requiring ``int`` already excludes them, which is why
+    the token ceiling was never reachable by the trick that disarmed the USD one."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PayloadInvalidError(f"payload.{field} must be an integer")
+    if value < lo:
+        raise PayloadInvalidError(f"payload.{field} must be at least {lo}")
+    return value
 
 
 def _parse_cycle_seed(raw: object) -> CycleSeed:
@@ -661,16 +681,13 @@ class CommandDispatcher:
             usd_val = optional_bounded_number(
                 payload_extras.get("max_usd"), field="max_usd", lo=0.0
             )
-            max_tokens = payload_extras.get("max_tokens")
-            if max_tokens is not None and (
-                not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0
-            ):
-                raise PayloadInvalidError("payload.max_tokens must be an int >= 0.")
-            if usd_val is None and max_tokens is None:
+            tok_val = optional_bounded_int(
+                payload_extras.get("max_tokens"), field="max_tokens", lo=0
+            )
+            if usd_val is None and tok_val is None:
                 raise PayloadInvalidError(
                     "change-spend-budget requires at least one of max_usd / max_tokens."
                 )
-            tok_val = int(max_tokens) if max_tokens is not None else None
 
             async def _apply_budget() -> None:
                 await self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
@@ -678,15 +695,19 @@ class CommandDispatcher:
             return _apply_budget
         if kind == "start-run":
             run_kind = str(payload_extras.get("kind", ""))
-            halt = payload_extras.get("halt_at_accuracy")
-            spend = payload_extras.get("spend_budget_usd")
+            # Re-read leniently: the router validated these before they landed on the record, so
+            # the strict pass belongs there and a second one here would reject its own ledger.
+            halt = _optional_float(payload_extras.get("halt_at_accuracy"))
+            spend = _optional_float(payload_extras.get("spend_budget_usd"))
+            tokens = _optional_int(payload_extras.get("token_budget"))
 
             async def _apply() -> None:
                 await self._apply_start_run(
                     hop=hop,
                     kind=run_kind,
-                    halt_at_accuracy=float(halt) if isinstance(halt, int | float) else None,
-                    spend_budget_usd=float(spend) if isinstance(spend, int | float) else None,
+                    halt_at_accuracy=halt,
+                    spend_budget_usd=spend,
+                    token_budget=tokens,
                 )
 
             return _apply
@@ -843,6 +864,7 @@ class CommandDispatcher:
             job_registry=self._job_registry,
             halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
             spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
+            token_budget=_optional_int(payload.get("token_budget")),
         )
 
     async def _apply_start_run(
@@ -852,6 +874,7 @@ class CommandDispatcher:
         kind: str,
         halt_at_accuracy: float | None,
         spend_budget_usd: float | None,
+        token_budget: int | None = None,
         stop_after_rounds: int | None = None,
     ) -> None:
         """``stop_after_rounds`` bounds the run in place — the ``step-round`` verb's mechanism."""
@@ -870,6 +893,7 @@ class CommandDispatcher:
             kind=kind,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
             stop_after_rounds=stop_after_rounds,
         )
 

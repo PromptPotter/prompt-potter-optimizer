@@ -13,6 +13,18 @@ BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-$SERVICE_NAME-admin-bot}"
 ADMIN_BOT_MODULE="${ADMIN_BOT_MODULE:-myapp.presentation.admin_bot}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
 RUN_USER="${RUN_USER:-$USER}"
+# The data root, which the app's unit already carries (install-service.sh). The bot reads AND writes
+# the same identity tree, and `config/paths.py::user_data_root` falls back to the CHECKOUT's
+# `.promptpotter/` when this is unset — so a bot without it answers `/spend` with "No accounts on
+# this install" over a populated box, and lands a `/block` in a tree the app never reads, replying
+# success. Unset = the tree still lives under $INSTALL_DIR, which is where it began.
+DATA_DIR="${DATA_DIR:-}"
+# Both follow the root: the cwd because it is what the fallback above resolves from, and the write
+# surface because the identity dir the bot edits moves with the root. Keeping ReadWritePaths on the
+# checkout would grant write to the CODE and withhold it from the one directory the bot exists to
+# edit — wrong in both directions at once.
+WORK_DIR="${DATA_DIR:-$INSTALL_DIR}"
+WRITE_PATH="${DATA_DIR:-$INSTALL_DIR}"
 # Where systemd reads the environment from — NOT necessarily where you edit it. systemd loads
 # EnvironmentFile as root before dropping privileges, and on an SELinux box a file under $HOME is
 # labelled `user_home_t`, which root is denied. The unit then fails with "unavailable resources"
@@ -75,17 +87,18 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$RUN_USER
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$WORK_DIR
 EnvironmentFile=$BOT_ENV_FILE
+${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
 ExecStart=$INSTALL_DIR/.venv/bin/python -m $ADMIN_BOT_MODULE
 Restart=on-failure
 RestartSec=5s
-# Hardening — the bot only needs to read .env + write the identity dir.
+# Hardening — the bot only needs to read .env + write the identity dir under the data root.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=$INSTALL_DIR
+ReadWritePaths=$WRITE_PATH
 [Install]
 WantedBy=multi-user.target
 EOF

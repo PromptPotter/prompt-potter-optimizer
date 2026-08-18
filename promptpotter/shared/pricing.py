@@ -6,15 +6,16 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import threading
+import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from promptpotter.config.paths import user_data_root
-from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,25 @@ __all__ = [
     "BUNDLED_PATH",
     "CACHE_PATH",
     "UPSTREAM_URL",
+    "Rate",
     "compute_usd",
     "load_rates",
     "lookup_rate",
     "refresh_rates",
     "refresh_rates_in_background",
 ]
+
+
+@dataclass(frozen=True)
+class Rate:
+    """Per-token prices for one ``(provider, model)`` pair. An input token bills at one of THREE
+    rates — written to the provider's prompt cache, read back from it, or neither. A cache rate is
+    ``None`` where upstream lists no tier, which :func:`compute_usd` bills at ``input``."""
+
+    input: float
+    output: float
+    cache_write: float | None = None
+    cache_read: float | None = None
 
 
 UPSTREAM_URL = (
@@ -39,7 +53,14 @@ UPSTREAM_URL = (
 # misses ``%LOCALAPPDATA%`` where every other user file lands.
 CACHE_PATH = user_data_root() / "rates.json"
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
-_KEEP_FIELDS = ("input_cost_per_token", "output_cost_per_token", "litellm_provider", "mode")
+_KEEP_FIELDS = (
+    "input_cost_per_token",
+    "output_cost_per_token",
+    "cache_creation_input_token_cost",
+    "cache_read_input_token_cost",
+    "litellm_provider",
+    "mode",
+)
 _FETCH_TIMEOUT_S = 30.0
 _MAX_BODY_BYTES = 8 * 1024 * 1024  # upstream is ~1 MB; cap defends against runaway payload
 _TTL_SECONDS = 24 * 60 * 60
@@ -56,29 +77,16 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _wrap(models: dict[str, Any]) -> dict[str, Any]:
-    return {"fetched_at": utcnow_iso(), "models": models}
-
-
 def _cache_fresh() -> bool:
-    if not CACHE_PATH.exists():
-        return False
+    """Age off the file's own mtime, which the atomic replace below stamps at write time. The table
+    is ~1 MB and this fires on every launch, so parsing it to read a timestamp inside it cost a
+    second full parse for a number the filesystem already had — and left the age readable by nothing
+    but this function, where ``ls -l`` now answers it."""
     try:
-        raw = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        age_s = time.time() - CACHE_PATH.stat().st_mtime
+    except OSError:
         return False
-    if not isinstance(raw, dict):
-        return False
-    fetched_at = raw.get("fetched_at")
-    if not isinstance(fetched_at, str):
-        return False
-    try:
-        dt = datetime.fromisoformat(fetched_at)
-    except ValueError:
-        return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - dt).total_seconds() < _TTL_SECONDS
+    return age_s < _TTL_SECONDS
 
 
 def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> bool:
@@ -106,10 +114,15 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
     stripped = _strip_upstream(raw)
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(
-        json.dumps(_wrap(stripped), indent=0, separators=(",", ":")),
+    # tmp + ``os.replace``: a torn write used to be caught downstream by the freshness check
+    # parsing the file, and that check no longer parses. Hand-rolled rather than through
+    # ``store/io.py::write_json`` because this module is stdlib-only and one layer below it.
+    tmp = CACHE_PATH.with_name(f"{CACHE_PATH.name}.tmp")
+    tmp.write_text(
+        json.dumps({"models": stripped}, indent=0, separators=(",", ":")),
         encoding="utf-8",
     )
+    os.replace(tmp, CACHE_PATH)
     load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True
@@ -117,7 +130,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
 def refresh_rates_in_background() -> None:
     """Start :func:`refresh_rates` on a daemon thread and return at once — nothing on the run path
-    consumes it. A half-written cache fails ``json.loads``, reports stale, and refetches."""
+    consumes it. The write is atomic, so a reader either sees the prior table or the new one."""
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
@@ -135,8 +148,13 @@ def _read_models(path: Path) -> dict[str, Any] | None:
     return models if isinstance(models, dict) else None
 
 
-def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
-    rates: dict[str, tuple[float, float]] = {}
+def _optional_cost(body: dict[str, Any], key: str) -> float | None:
+    value = body.get(key)
+    return float(value) if value is not None else None
+
+
+def _models_to_rates(models: dict[str, Any]) -> dict[str, Rate]:
+    rates: dict[str, Rate] = {}
     for name, body in models.items():
         if not isinstance(body, dict):
             continue
@@ -144,12 +162,17 @@ def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
         out_c = body.get("output_cost_per_token")
         if in_c is None and out_c is None:
             continue
-        rates[name.lower()] = (float(in_c or 0.0), float(out_c or 0.0))
+        rates[name.lower()] = Rate(
+            input=float(in_c or 0.0),
+            output=float(out_c or 0.0),
+            cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
+            cache_read=_optional_cost(body, "cache_read_input_token_cost"),
+        )
     return rates
 
 
 @functools.lru_cache(maxsize=1)
-def load_rates() -> dict[str, tuple[float, float]]:
+def load_rates() -> dict[str, Rate]:
     """Rates from the cache, else the bundled floor, else ``{}`` — on which callers leave
     ``rate_known=False`` and the spend chip shows a token count instead of a price."""
     models = _read_models(CACHE_PATH)
@@ -167,8 +190,8 @@ def load_rates() -> dict[str, tuple[float, float]]:
     return {}
 
 
-def lookup_rate(model: str | None, provider: str | None = None) -> tuple[float, float] | None:
-    """``(input, output)`` per-token rate as billed by *provider*, or ``None``. **A price belongs to the
+def lookup_rate(model: str | None, provider: str | None = None) -> Rate | None:
+    """The per-token :class:`Rate` as billed by *provider*, or ``None``. **A price belongs to the
     (provider, model) PAIR** — a bare key is another vendor's list; ``:nitro`` is unpriceable by design."""
     if not model:
         return None
@@ -207,13 +230,24 @@ def compute_usd(
     *,
     override_usd: float | None = None,
     provider: str | None = None,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> float | None:
     """USD for one call; ``override_usd`` short-circuits the lookup. ``None`` when no rate is on file,
-    and *provider* is who billed it — without one only an exact key resolves."""
+    and *provider* is who billed it — without one only an exact key resolves. The two cache counts
+    are SUBSETS of *input_tokens* (every client normalizes to that), so they are re-priced OUT of
+    it rather than added on top, and an absent tier reproduces the pre-cache number exactly."""
     if override_usd is not None:
         return float(override_usd)
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
-    in_per_tok, out_per_tok = rate
-    return input_tokens * in_per_tok + output_tokens * out_per_tok
+    cached_read = max(0, int(cache_read_tokens))
+    cached_write = max(0, int(cache_write_tokens))
+    uncached = max(0, input_tokens - cached_read - cached_write)
+    return (
+        uncached * rate.input
+        + cached_read * (rate.cache_read if rate.cache_read is not None else rate.input)
+        + cached_write * (rate.cache_write if rate.cache_write is not None else rate.input)
+        + output_tokens * rate.output
+    )

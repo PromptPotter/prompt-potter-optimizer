@@ -52,7 +52,7 @@ declare module "chart.js" {
     sampleCount?: { counts: (number | null)[] };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
-    compositeCiWhisker?: {
+    meanFitnessCiWhisker?: {
       ciLo: (number | null)[];
       ciHi: (number | null)[];
     };
@@ -106,11 +106,11 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
 // label — so a band whose series was hidden drew nothing, silently, and since only arms an
 // election reached ever got relabelled, the whisker came and went by gating rather than by
 // evidence. Do not reintroduce a per-bar scale; make the one band mean one thing instead.
-const compositeCiWhiskerPlugin: Plugin<
+const meanFitnessCiWhiskerPlugin: Plugin<
   "bar",
   { ciLo: (number | null)[]; ciHi: (number | null)[] }
 > = {
-  id: "compositeCiWhisker",
+  id: "meanFitnessCiWhisker",
   afterDatasetsDraw(chart, _args, opts) {
     const ciLo = opts?.ciLo;
     const ciHi = opts?.ciHi;
@@ -133,7 +133,7 @@ const compositeCiWhiskerPlugin: Plugin<
         | undefined;
       const x = el?.getProps?.(["x"], true)?.x;
       if (typeof x !== "number") continue;
-      // Bounded to [0,1] by the server (`scoring/selection.py::composite_ci` clips to its
+      // Bounded to [0,1] by the server (`scoring/selection.py::mean_fitness_ci` clips to its
       // support), so the pixel always lands inside the fixed axis. This used to clamp to the
       // plot area, compensating here for an interval that claimed negative accuracy.
       const yLo = yScale.getPixelForValue(lo);
@@ -301,7 +301,7 @@ const CHART_PLUGINS = [
   sampleCountPlugin,
   divergenceLinePlugin,
   inFlightPulsePlugin,
-  compositeCiWhiskerPlugin,
+  meanFitnessCiWhiskerPlugin,
   xBridgePlugin,
 ];
 
@@ -637,8 +637,8 @@ export const FitnessChart = memo(function FitnessChart({
               const tail = typeof se === "number" ? ` ± ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
             }
-            const ciLo = views[idx]?.compositeCiLo;
-            const ciHi = views[idx]?.compositeCiHi;
+            const ciLo = views[idx]?.meanFitnessCiLo;
+            const ciHi = views[idx]?.meanFitnessCiHi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
@@ -656,9 +656,9 @@ export const FitnessChart = memo(function FitnessChart({
       sampleCount: { counts: views.map((v) => v.n_samples) },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
-      compositeCiWhisker: {
-        ciLo: views.map((v) => v.compositeCiLo),
-        ciHi: views.map((v) => v.compositeCiHi),
+      meanFitnessCiWhisker: {
+        ciLo: views.map((v) => v.meanFitnessCiLo),
+        ciHi: views.map((v) => v.meanFitnessCiHi),
       },
       xBridge: { onGeometry },
     },

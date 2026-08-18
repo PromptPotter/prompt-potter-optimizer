@@ -52,11 +52,11 @@ def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | No
     """Mean fitness over SCOREABLE rows. A DEPRECATED row is already penalized via
     ``runtime_failure_rate``; an ERRORED one never happened and surfaces via ``compute_error_rate``."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import scoreable_rows
 
     if not results:
         return None
-    scoreable = [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+    scoreable = scoreable_rows(results)
     if not scoreable:
         return 0.0
     return sum(r.get("fitness", 0.0) for r in scoreable) / len(scoreable)

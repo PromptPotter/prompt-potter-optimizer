@@ -28,7 +28,7 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 - `answer_distribution` — what the pipeline ANSWERS vs what is true, as label tallies, plus the score a constant single-label answer would earn. **The collapse detector:** accuracy alone cannot separate a pipeline that reasons from one emitting the same label every time, and on a skewed label set that constant *is* a respectable-looking score — without this panel a generator rewrites the instruction it is already being denied, louder, every round. Silent above `ANSWER_SPACE_CAP` (`config/settings.py`) distinct ground truths, or when every one is distinct (free-text answers have no collapse to detect).
 - `failing_samples` — the misses themselves, one line each, ordered easiest-first on the cycle's LOCKED δ ruler (`Cycle.delta_scale`, never `hard_samples.json`'s re-fitted δ). The evidence beside its own compression, so a steer can be checked against what it steers about. The ordering is the one thing here L1 cannot compute for itself, and it is what stops effort going into samples nothing can solve.
 - `inner_narratives` — L4 only: one narrative per inner campaign (each outer sample IS a whole inner run) — what it tried, the steer each round acted on, its winning edit, where it stalled. The outer generator's only raw window into inner behaviour, since `critique` compresses it to a few highlights; without it the generator re-proposes what the inner loop already measured. Weakest-lift-first; silent off the recursion.
-- `mutation_memory` — what this cycle already tried: the changed field and value, what it scored against its own **matched** origin, how it ended. Derived from the payload, never from `changes_description` (optional prose two candidates can share). A candidate PoBB-cut early has **no matched origin at all**, so its row reports where it stopped and nothing else — neither a partial accuracy nor a paired win/loss, because it ran a prefix of an order stratified on the incumbent's own grades, so the shared cells ARE the incumbent's misses and both readings are decided by where it stopped rather than what it did (`scoring/metrics.py::matched_origin_stats`). Its subset-invariant standing is the θ beside it.
+- `mutation_memory` — what this cycle already tried: the changed field and value, what it scored against its own **matched** origin, how it ended. Derived from the payload, never from `changes_description` (optional prose two candidates can share). A candidate PoBB-cut early has **no matched origin at all**, so its row reports where it stopped and nothing else — neither a partial accuracy nor a paired win/loss, because it ran a prefix of an order stratified on the incumbent's own grades, so the shared cells ARE the incumbent's misses and both readings are decided by where it stopped rather than what it did (`scoring/metrics.py::matched_parent_stats`). Its subset-invariant standing is the θ beside it.
 - `escalation_panel` — stall depth + `exploration_budget ∈ {tight, normal, wide}`.
 - `axis_memory` — cross-round AxisIndex digest (`cycle.axes.digest()`); per-axis effect_size vs noise floor.
 
@@ -46,12 +46,10 @@ Each emitted variant declares an `evidence_grounding: {field, citation}` naming 
 
 Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill` (`dispatch/facade.py` — the hub has no `hub.py`) walking `opt_sp.memory.l1_layout` (l1_generate's per-node layout from `NODE_LAYOUTS`, `domain/l1_layout.py`) over the `INJECTIONS` registry (`dispatch/injections/registry.py`).
 
-**Reviewing an L1 round trace.** Load
-[`../../../docs/developer/l1-candidate-analysis-checklist.md`](../../../docs/developer/l1-candidate-analysis-checklist.md)
-before reporting findings on any operator-pasted round dump or
-self-optimizing campaign cycle review. It enumerates the checks that
-historically slipped past and says which are validator-enforced today
-versus pure analysis responsibility.
+**Reviewing an L1 round trace.** Walk the checklist in the `potter-self` skill (§ The round-trace
+checklist) before reporting findings on any operator-pasted round dump or cycle review — it enumerates
+the checks that historically slipped past, and which are validator-enforced versus pure analysis
+responsibility.
 
 ## L2-layer — l2_context
 
@@ -146,7 +144,7 @@ Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives fro
 
 **There is no `l4_*.py` in this package and there will not be one.** The ban is derived, not arbitrary, which is why naming a file `l4_recursion.py` breaks it just as surely: L4 is the same PromptPotter applied to itself via the `promptpotter` connector — an outer cycle whose *backend* is an inner cycle, mutating the inner's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`. A driver here would mean the ladder grew a rung; it did not. The ladder is closed at L1 / L2 / L3.
 
-Conceptually L2 / L3 / L4 are one family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../CLAUDE.md`](../../CLAUDE.md) § Where L4 lives. Spec: [`../../../docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Connectors + L4 inner-cycle execution. Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
+Conceptually L2 / L3 / L4 are one family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../CLAUDE.md`](../../CLAUDE.md) § Where L4 lives. Spec: [`../../../docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md).
 
 ## checkin — the fifth optimizer node (decomposition + origin resolution)
 

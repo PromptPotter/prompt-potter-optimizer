@@ -77,44 +77,20 @@ Because the stream reads a file, it works from any process that shares the files
 
 Reads are incremental: the tail tracks a byte cursor and seeks past everything already streamed, so a long ledger is never re-scanned. The handler polls every 0.5 s and runs each file read via `asyncio.to_thread`, so the event loop never blocks on disk I/O. A trailing partial line (a write mid-flight) is left for the next poll, so a torn read never yields a malformed frame.
 
+## Client obligations
+
+A client applies the leading `stream_snapshot`, then requires each subsequent `sequence` to be exactly
+one past the last; any other value is a gap and the recovery is to close and re-subscribe for a fresh
+snapshot. Clients **MUST NOT** assume a mutation succeeded before the corresponding `command_ack` frame
+arrives — a Profile B contract enforced from this stream. The webapp's implementation is
+`webapp/lib/chat/activity.ts` + `useCycleEvents`; smoke-test with
+`curl -N http://localhost:8001/api/v1/campaigns/{cid}/cycles/{cyid}/events:subscribe`.
+
 ## Testing
 
-No standing test (the structural/contract suite was cut to the silent-harm
-core — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The event stream
-fails loud: a broken tail/snapshot/heartbeat path stops the chat activity
-updating, which is visible in use. Keep these in sync by hand —
-each drifts loud, not silent:
-- `ProjectionKind` Literal matches the AsyncAPI `kind` enum exactly (unknown kind raises on dispatch).
-- Every YAML-required envelope field exists in the Python model.
-- A FastAPI route is registered at the AsyncAPI-declared channel address.
-
-## Client integration cheatsheet
-
-```bash
-# Curl smoke test (replace ids; the cycle just has to exist):
-curl -N http://localhost:8001/api/v1/campaigns/{cid}/cycles/{cyid}/events:subscribe
-```
-
-In the webapp (Profile E target):
-
-```ts
-const es = new EventSource(`/api/v1/campaigns/${cid}/cycles/${cyid}/events:subscribe`);
-let lastSeq = -1;
-es.onmessage = (ev) => {
-  const frame = JSON.parse(ev.data);
-  if (frame.kind === "stream_snapshot") {
-    applySnapshot(frame.payload);
-    lastSeq = frame.sequence;
-    return;
-  }
-  if (lastSeq >= 0 && frame.sequence !== lastSeq + 1) {
-    // Gap — re-subscribe for a fresh snapshot.
-    es.close();
-    return reconnect();
-  }
-  applyRecord(frame);
-  lastSeq = frame.sequence;
-};
-```
-
-Clients **MUST NOT** assume a mutation succeeded before the corresponding `command_ack` frame arrives — that's a Profile B contract enforced from this stream.
+No standing test (the structural/contract suite was cut to the silent-harm core — see
+[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The stream fails loud: a broken
+tail/snapshot/heartbeat path stops chat activity updating, which is visible in use. Three things are
+kept in sync by hand, each drifting loud rather than silent — the `ProjectionKind` Literal against the
+AsyncAPI `kind` enum (an unknown kind raises on dispatch), every YAML-required envelope field against
+the Python model, and a registered FastAPI route at the declared channel address.

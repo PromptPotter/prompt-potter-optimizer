@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
 from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
@@ -57,11 +57,11 @@ def _answer_space_signature(round_doc: dict[str, Any]) -> str:
 
 
 def _credible_lift(cand: dict[str, Any]) -> float | None:
-    """A candidate's lift over its MATCHED origin, kept only when ``composite_ci_lo`` clears that origin — real signal,
+    """A candidate's lift over its MATCHED origin, kept only when ``mean_fitness_ci_lo`` clears that origin — real signal,
     not a noise win. ``None`` when uncredible or unpaired."""
-    origin = cand.get("matched_origin_composite")
+    origin = cand.get("matched_parent_composite")
     comp = cand.get("composite_fitness")
-    ci_lo = cand.get("composite_ci_lo")
+    ci_lo = cand.get("mean_fitness_ci_lo")
     if not isinstance(origin, (int, float)) or not isinstance(comp, (int, float)):
         return None
     if not isinstance(ci_lo, (int, float)) or ci_lo <= origin:
@@ -109,7 +109,7 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
             rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
                 continue
-            for round_file in sorted(rounds_dir.glob("round_*.json")):
+            for round_file in sorted(rounds_dir.glob(ROUND_GLOB)):
                 doc = read_json_optional(round_file)
                 if isinstance(doc, dict):
                     _accumulate(doc, acc)

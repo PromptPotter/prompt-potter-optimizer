@@ -34,7 +34,7 @@ export interface RoundDoc {
   // was decided against. Preferred over `origin_accuracy` below: under elimination the
   // winner may have run 8 of 20 samples, and quoting the full-set rate beside its
   // subset accuracy renders a lift that was never measured.
-  matched_origin_accuracy?: number | null;
+  matched_parent_accuracy?: number | null;
   improved?: boolean;
   p_value?: number;
   scoreboard?: ScoreboardEntry[];
@@ -52,7 +52,7 @@ export function RoundFileView({ doc, raw }: Props) {
   const scoreboard = doc.scoreboard ?? [];
   // Matched first, full-set only as the fallback, and the label says which — an
   // unlabelled "(origin 18%)" beside a subset accuracy of 58% is a lift nothing measured.
-  const matched = typeof doc.matched_origin_accuracy === "number" ? doc.matched_origin_accuracy : null;
+  const matched = typeof doc.matched_parent_accuracy === "number" ? doc.matched_parent_accuracy : null;
   const originShown = matched ?? (typeof doc.origin_accuracy === "number" ? doc.origin_accuracy : null);
   const originLabel = matched != null ? "matched origin" : "origin, full set";
 

@@ -415,15 +415,15 @@ export function CandidatesCard() {
         theta: sliced ? null : (m.theta ?? null),
         theta_se: sliced ? null : (m.theta_se ?? null),
         // From the same row as the bar above it, whichever half that was.
-        compositeCiLo: sliced ? null : (m.composite_ci_lo ?? null),
-        compositeCiHi: sliced ? null : (m.composite_ci_hi ?? null),
+        meanFitnessCiLo: sliced ? null : (m.mean_fitness_ci_lo ?? null),
+        meanFitnessCiHi: sliced ? null : (m.mean_fitness_ci_hi ?? null),
         // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR.
         // The matched origin is a per-candidate number the inspector renders for the one row it
         // selected (`ScoringInspector`, off `roundCandidates`) — so serving it a second time on
         // the tree would be a writer with no reader, which is why the election record does not
         // carry it either: `rounds/round_NNNN.json` already addresses it per candidate.
-        matchedOriginAccuracy: null,
-        matchedOriginComposite: null,
+        matchedParentAccuracy: null,
+        matchedParentComposite: null,
         evaluators: n.evaluators,
         is_winner: m.is_winner ?? false,
         n_samples: sliced ? n.sample_set_n : (m.scored_samples ?? null),

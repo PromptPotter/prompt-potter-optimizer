@@ -40,6 +40,7 @@ COMMANDS = {
     "unarchive": "promptpotter.presentation.cli.commands.lifecycle:cmd_unarchive",
     "pause": "promptpotter.presentation.cli.commands.lifecycle:cmd_pause",
     "rename": "promptpotter.presentation.cli.commands.lifecycle:cmd_rename",
+    "set-budget": "promptpotter.presentation.cli.commands.lifecycle:cmd_set_budget",
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two

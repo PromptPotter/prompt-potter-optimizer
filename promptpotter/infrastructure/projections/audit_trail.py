@@ -4,7 +4,6 @@ not end in ``.runtime/cache/rounds``. Pure ledger projection but for ``set_l1_sc
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.layout import CycleLayout, round_basename
+from promptpotter.infrastructure.store.layout import CycleLayout, round_basename, round_number
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +55,9 @@ def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
     without re-issuing the calls. ``l1_score`` is skipped, since the dashboard composes it live."""
     if not rounds_dir.is_dir():
         return {}
-    round_re = re.compile(r"^round_(\d+)\.json$")
-    candidates: list[tuple[int, Path]] = []
-    for path in rounds_dir.iterdir():
-        m = round_re.match(path.name)
-        if m:
-            candidates.append((int(m.group(1)), path))
+    candidates: list[tuple[int, Path]] = [
+        (n, path) for path in rounds_dir.iterdir() if (n := round_number(path)) is not None
+    ]
     if not candidates:
         return {}
     round_num, path = max(candidates, key=lambda c: c[0])

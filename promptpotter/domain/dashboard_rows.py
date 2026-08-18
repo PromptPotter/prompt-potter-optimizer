@@ -49,27 +49,27 @@ class DashboardCandidate(StrictModel):
     # which includes every live row: the fit is round-scoped and needs two arms.
     theta: float | None = None
     theta_se: float | None = None
-    # The whisker the chart draws (`ScoredCandidate.composite_ci_lo/hi`), stamped off the
+    # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), stamped off the
     # candidate's own rows when it finishes (`l1/population.py`) so it is present live and not
     # only at round close. ONE band per candidate from that one writer: a second estimator
     # overriding it makes the whisker come and go by gating rather than by evidence.
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
-    # The floor this candidate was JUDGED against (`ScoredCandidate.matched_origin_*`): the
+    mean_fitness_ci_lo: float | None = None
+    mean_fitness_ci_hi: float | None = None
+    # The floor this candidate was JUDGED against (`ScoredCandidate.matched_parent_*`): the
     # origin restricted to the samples it actually measured. Served because `accuracy` alone is
     # unreadable under elimination — a PoBB-locked candidate beat something that is NOT the
     # origin's full-set rate. `None` unless the candidate covered the origin's panel, since a
     # prefix rate is set by where PoBB stopped it.
-    matched_origin_accuracy: float | None = None
-    matched_origin_composite: float | None = None
+    matched_parent_accuracy: float | None = None
+    matched_parent_composite: float | None = None
     # The blocked lift over that floor and its interval — the one number saying whether this
     # candidate beat the origin or the panel merely wobbled, and the one the L4 outer level
-    # reads. Same scale as `composite_ci_*`, sharper on the same rows because pairing cancels
+    # reads. Same scale as `mean_fitness_ci_*`, sharper on the same rows because pairing cancels
     # the origin's cell-to-cell variation. `None` below two shared cells, which at a one-cell
     # panel is every round and is the honest reading rather than a missing feature.
-    matched_origin_lift: float | None = None
-    matched_origin_lift_ci_lo: float | None = None
-    matched_origin_lift_ci_hi: float | None = None
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
     # On the BASE, because the election is not a closing act: `elect_round_winner` runs at the
     # end of SCORING, two LLM calls before the round closes, and the live row is the only
     # surface that can say so then. `False` until it lands, and on every row of a round that
@@ -128,5 +128,5 @@ class RoundSummary(StrictModel):
     # How sharply the L4 panel's cells were measured against how far apart they landed — the
     # monitoring read saying which lever the round's spread calls for. ``None`` on any non-L4
     # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
-    # not here; it rides `candidates[].matched_origin_lift*` like every other level's.
+    # not here; it rides `candidates[].matched_parent_lift*` like every other level's.
     panel_precision: PanelPrecision | None = None

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ async def rescore_parent(
     force_fresh: bool = False,
 ) -> RoundParent:
     """Score the round's parent on THIS round's ``scoring_set``, so election compares on the SAME
-    samples. Without it ``matched_origin_stats`` intersects disjoint sets and returns a fake floor."""
+    samples. Without it ``matched_parent_stats`` intersects disjoint sets and returns a fake floor."""
     from promptpotter.application.optimization.l1.population import build_score_report
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -245,7 +246,7 @@ async def establish_campaign_origin(
     campaign_config: CampaignConfig,
     *,
     seed: CycleSeed | None,
-    listener: Any | None,
+    listener: RunCallbacks | None,
 ) -> CampaignOrigin:
     """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
     branches, which return the same :class:`CampaignOrigin` shape."""
@@ -282,9 +283,9 @@ async def prepare_scoring_context(
     *,
     pipeline_params: dict[str, Any] | None = None,
     pipeline_schema: PipelineSchema,
-    svc: Any = None,
-    listener: Any | None = None,
-    obs: Any | None = None,
+    svc: Session | None = None,
+    listener: RunCallbacks | None = None,
+    obs: ObservabilityBridge | None = None,
     seed: CycleSeed | None = None,
     resolved_origin: OptSearchPoint | None = None,
 ) -> tuple[CampaignOrigin, list[Sample]]:
@@ -296,9 +297,17 @@ async def prepare_scoring_context(
         from promptpotter.application.optimization.task_context import committed_task_context
 
         prompt_nodes = pipeline_schema.prompt_node_names()
+        # Resolving one HERE means reading the committed framing off the store, so this branch
+        # requires the session — a requirement it previously stated only by ``getattr``-ing the
+        # object defensively on one line and dereferencing it bare on the next.
+        if svc is None:
+            raise ValueError(
+                "prepare_scoring_context needs `svc` (the Session) to resolve an origin; "
+                "pass an already-resolved `resolved_origin=` when there is no session."
+            )
         resolved_origin = resolve_origin_opt_search_point(
             prompt_node_names=prompt_nodes,
-            dataset_dir=getattr(svc, "dataset_config_dir", None),
+            dataset_dir=svc.dataset_config_dir,
             task_context=committed_task_context(svc.store, svc.dataset_name),
             seed=seed,
         )

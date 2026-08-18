@@ -202,14 +202,14 @@ def _scoreboard(
     for i, s in enumerate(ranked, 1):
         label = (s.label or "")[:8]
         acc = s.accuracy
-        ci_str = fmt_ci(s.composite_ci_lo, s.composite_ci_hi)
+        ci_str = fmt_ci(s.mean_fitness_ci_lo, s.mean_fitness_ci_hi)
         # Per-row matched-pair origin: this candidate's accuracy against origin on the *same
         # samples it ran*. ``None`` for a row that did not cover the origin's panel, and there
         # the column stays EMPTY rather than falling back to the full-set origin — a prefix
         # accuracy measured against a full-panel rate is the mismatch the matched floor exists
         # to prevent, pointed the other way. A row whose matched origin genuinely scored 0.0
         # keeps its 0.0; the old `or` could not tell that from absence.
-        row_origin = s.matched_origin_accuracy
+        row_origin = s.matched_parent_accuracy
         delta = acc - row_origin if row_origin is not None else None
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
         aborted = s.escalation_aborted

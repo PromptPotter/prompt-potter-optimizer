@@ -60,8 +60,8 @@ def _origin_round(
             "theta_se": theta[1] if theta is not None else None,
             "prompt_fields": prompt_fields,
             "resolved_pipeline_params": sp.config_params,
-            "matched_origin_accuracy": report.accuracy,
-            "matched_origin_composite": report.composite_fitness,
+            "matched_parent_accuracy": report.accuracy,
+            "matched_parent_composite": report.composite_fitness,
         }
     )
     return RoundResult(
@@ -72,8 +72,8 @@ def _origin_round(
         total=row.total,
         improved=False,
         origin_accuracy=row.accuracy,
-        matched_origin_accuracy=row.accuracy,
-        matched_origin_composite=row.composite_fitness,
+        matched_parent_accuracy=row.accuracy,
+        matched_parent_composite=row.composite_fitness,
         prompt_fields=prompt_fields,
         pipeline_params=sp.pipeline_params,
         results=results,
@@ -127,7 +127,7 @@ def _calibrate_delta_ruler(
     archive_obs: list[Observation],
 ) -> tuple[dict[int, RulerEntry], tuple[float, float] | None, CalibrationModel | None]:
     """The per-cycle FIXED ruler every later θ readout is measured against
-    (``docs/methods/exploration-exploitation.md``). Cold start returns a FLAT ruler and a
+    (``docs/methods/verdict-resolution.md``). Cold start returns a FLAT ruler and a
     ``None`` model."""
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,

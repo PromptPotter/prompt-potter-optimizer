@@ -62,10 +62,13 @@ class LLMResponse(StrictModel):
     usage: dict[str, int] = Field(
         default_factory=dict,
         description=(
-            "Token usage: prompt_tokens, completion_tokens, total_tokens, and "
-            "reasoning_tokens — the last a SUBSET of completion_tokens (the provider "
-            "bills thinking as output), absent for a non-reasoning model or a provider "
-            "that reports no breakdown."
+            "Token usage: prompt_tokens, completion_tokens, total_tokens, "
+            "reasoning_tokens, cache_read_tokens and cache_write_tokens. The last three "
+            "are SUBSETS, never further totals — reasoning of completion_tokens (the "
+            "provider bills thinking as output), the two cache counts of prompt_tokens "
+            "(every client normalizes to that, Anthropic included, which reports them "
+            "beside its input count rather than inside it). A subset reads 0 when the "
+            "provider reports no breakdown, which is not the same as none having happened."
         ),
     )
     cost_usd: float | None = Field(

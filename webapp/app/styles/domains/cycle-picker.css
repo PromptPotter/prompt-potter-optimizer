@@ -1,6 +1,18 @@
-/* Inline cycle picker — native <select> styled as breadcrumb text so the
-   `Cycle » {id}` line stays one visual unit. Click expands the native
-   dropdown; refresh button picks up new cycles minted by the CLI. */
+/* Inline cycle picker — a native <select> whose trigger reads as text; click
+   expands the native dropdown.
+
+   Run masthead — ONE header for the Chat + Dashboard tabs
+   (components/shell/RunMasthead): the picker restyled as the title line, the
+   leaf cycle id beneath in mono. Same width tier and the same main-column
+   centering as the dashboard spine and the chat column, so all three align. */
+.run-header{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto;padding:var(--space-14) var(--space-16) var(--space-10)}
+.run-title .cycle-picker select{
+  font-size:var(--text-4xl);font-weight:700;letter-spacing:-0.015em;
+  color:var(--color-text-primary);background-color:transparent;
+  padding-left:0;max-width:min(640px,100%);
+}
+.run-title .cycle-picker select:hover{background-color:var(--color-background-hover)}
+.run-id{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .cycle-picker{display:inline-flex;align-items:center;gap:var(--space-4)}
 /* The native <select> popup itself is browser-native and not CSS-styleable
    on Windows. The trigger should read as a subtle background region — a
@@ -10,11 +22,4 @@
 .cycle-picker select{appearance:none;-webkit-appearance:none;background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;padding:3px var(--space-24) 3px var(--space-8);margin:0;cursor:pointer;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 10px center,right 6px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
 .cycle-picker select:hover{color:var(--color-text-primary);background-color:var(--color-background-hover)}
 .cycle-picker select:focus{outline:none}
-/* Standalone variant — the chat header's campaign/session location switcher.
-   Brand-accent text so "where am I" stands out; the <select>'s dropdown-arrow
-   glyphs are drawn with currentColor, so they turn accent too. The campaign
-   name and session label share one text node — one rule colours both. */
-.cycle-picker.standalone{flex:0 1 auto;min-width:0}
-.cycle-picker.standalone select{color:var(--color-accent);font-weight:600;font-size:var(--text-md);padding:var(--space-4) var(--space-24) var(--space-4) var(--space-8);max-width:340px}
-.cycle-picker.standalone select:hover{color:var(--color-accent);background-color:var(--color-background-hover)}
 .cycle-picker-err{color:var(--color-danger);font-size:var(--text-base)}

@@ -148,7 +148,7 @@ class PoBBConfig:
 
 class PoBBCheck:
     """Paired-sample PoBB stop rule; ``backfill_fn`` aligns the leader's history onto the candidate's
-    sample set so every comparison is on identical sample IDs. ``docs/concepts/paired-sample-pobb.md``."""
+    sample set so every comparison is on identical sample IDs. ``docs/methods/candidate-elimination.md``."""
 
     name = "elimination"
 

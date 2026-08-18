@@ -556,7 +556,7 @@ class LiveDisplay(DerivedView):
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                origin=round_result.matched_origin_composite,
+                origin=round_result.matched_parent_composite,
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

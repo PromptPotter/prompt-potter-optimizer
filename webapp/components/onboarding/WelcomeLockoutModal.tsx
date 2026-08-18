@@ -13,20 +13,20 @@
 // .auth-link / .auth-legal-row from the auth domain stylesheet.
 
 import { BRAND } from "@/lib/brand";
+import { useAuth } from "@/lib/auth-context";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { AuthCore } from "@/components/login/AuthCore";
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  errorCode?: string | null;
-  errorEmail?: string | null;
-}
-
-export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Props) {
+// Props-free on purpose: it is mounted ONCE (app/page.tsx) and every trigger —
+// the sidebar footer chips, the mobile app bar chips, the OIDC `?auth_error=`
+// bounce-back — opens it through `openAuthPrompt()`. Threading `open` down
+// instead would put one modal per chip mount point on screen.
+export function WelcomeLockoutModal() {
+  const { authPrompt, closeAuthPrompt } = useAuth();
+  const { open, code: errorCode, email: errorEmail } = authPrompt;
   // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
   // own tall .account-modal-auth layout rather than Dialog's confirm-card.
-  const cardRef = useDialogA11y(open, onClose);
+  const cardRef = useDialogA11y(open, closeAuthPrompt);
 
   if (!open) return null;
 
@@ -37,13 +37,13 @@ export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Pr
       aria-modal="true"
       aria-labelledby="auth-prompt-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) closeAuthPrompt();
       }}
     >
       <div ref={cardRef} className="account-modal account-modal-auth">
         <header className="account-pane-head">
           <h3 id="auth-prompt-title">Log in or sign up</h3>
-          <button type="button" className="account-close" aria-label="Close" onClick={onClose}>
+          <button type="button" className="account-close" aria-label="Close" onClick={closeAuthPrompt}>
             ×
           </button>
         </header>

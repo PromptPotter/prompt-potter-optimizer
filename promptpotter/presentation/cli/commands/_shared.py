@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import (
@@ -74,7 +75,7 @@ def log_startup_summary(
     )
 
 
-def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str | None) -> str:
+def campaign_result_human(campaign_dir: Path, *, dataset_name: str, cycle_id: str | None) -> str:
     """Operator-facing summary block for a finished ``new`` / ``resume`` run — dataset, campaign,
     cycle, and where on disk each artifact landed."""
     return (
@@ -110,7 +111,7 @@ async def init_services_cli(
     )
 
 
-def identity_from_args(args: Any) -> IdentityContext:
+def identity_from_args(args: argparse.Namespace) -> IdentityContext:
     """Build the Stage-0 :class:`IdentityContext` from CLI flags — ``--tenant``, else the registered
     operator, else anonymous. This is the seam where a flag becomes a :class:`TenantId`."""
     from promptpotter.infrastructure.identity.migration import registered_or_default_identity

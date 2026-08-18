@@ -23,51 +23,18 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
-- **A dead L4 inner cycle leaves its spend unrolled.** *The earlier entry here claimed inner spend
-  was invisible to `sum_user_spend` entirely. That was wrong, and acting on it double-counts:*
-  `inner/spawn.py` returns the finished cycle's `SpendRollup` as `step_tokens`, and
-  `scoring/sample_measurement.py::emit_step_token_usage` writes it to the OUTER cycle's ledger as
-  one `backend` `TokenUsageRecord`, so the account tier and `BudgetGate` both already see it.
-  Measured on the dev box: 27 inner cycles reaching a normal terminal stop (`max_rounds`,
-  `lives_exhausted`) accounted for $1.6187 / 8,195,851 tokens on the sandbox ledgers and
-  $1.6187 / 8,195,851 in outer rollup rows — exact in both units. What does NOT roll up is the
-  cell that dies: 5 cycles (`producer_vanished` ×2, `crashed`, no stop stamped ×2) held
-  $0.2215 / 1,112,746 tokens with no outer row, because `step_tokens` rides the SUCCESS return and
-  a failed cell raises `InnerCycleUnscoreableError` before `_compute_step_tokens`. **Two fixes, not
-  one, because the two causes differ:** a deadline-cancelled cell can emit from `run_inner_cycle`
-  itself (`outer_ledger` and `cycle_dir_box["dir"]` are both in scope at the `result is None`
-  arm); a cell whose PRODUCER died cannot, since nothing outer is alive to emit — that one belongs
-  to the reaper, which already reads each sandbox's `owner.json` to decide orphanhood and is the
-  only component that can attribute a dead sandbox to its owner. Banking it as a
-  `SpendTombstoneRecord` on the owner's workspace ledger reuses the delete path's mechanism whole.
-  Exposure is bounded while L4 runs are the operator's, who is unmetered.
-
 **From the 2026-08-06 JustLogic model bake-off.** Each carries its measurement; the four
 root fixes that arc DID land (reasoning-token share on the ledger, provider-aware pricing,
 `answer_modal_share`, the `reasoning_only_response` arm) are in `git log`, not here.
 
-- **`reasoning_effort` is not a lever on `deepseek-v4-flash`, and the optimizer owns a third
-  of every L4 cell.** Measured across 292 optimizer calls: `l1_generate` (effort `medium`)
-  53 s / 5352 output tokens median, `l1_critique` (effort **`low`**) 45 s / 4206, `l2_context`
-  23 s / 2157. One `l1_critique` round-trip billed 4790 completion tokens for a 1044-character
-  answer — **~94% reasoning, against a schema that caps the answer at ~1300 characters** — so a
-  two-step effort change buys ~27% and the knob is not the lever. (`l1_critique` has since been
-  moved to `medium` deliberately — `low` was inherited from a profile note about the token FLOOR,
-  never measured as the better DISTILLER, so the comparison arm simply did not exist. Its
-  `max_tokens` went to 16000 with it: the tail already ran 11,370 against 12000.) The real options are a
-  different optimizer model for the schema-bearing nodes or an explicit reasoning budget, and
-  both are choices, not cleanups. Its cheaper twin is already the plan: `l1_generate` semantic
-  widening at a net-SHORTER prompt.
-
-  **Blocker CLEARED — and the headline was high.** Read off 46 banked ledgers joining
-  `llm_call_start.prompt_chars` to `token_usage`: the optimizer is **~20% of LLM seconds and
-  ~21% of cost**, not a third (`l1_generate` 8.7% / `l1_critique` 7.6% / `l2_context` 4.0% /
-  `l3_plan` 0.3%); backend scoring is the other 80%. The reasoning share holds — `l1_critique`
-  spends 4,724 reasoning tokens on a 932-char answer AT effort `low` — so the conclusion stands
-  and only its size moved. What the same read DID surface as a lever is input, not effort:
-  `l1_generate` split into thirds by prompt size runs 11.7k chars → 3,831 reasoning tok / 26.7s
-  against 23.2k → 5,408 / 42.1s, and 6.4% of every character ever sent to that node was a
-  verbatim second copy of a panel (fixed: `l1_layout_dups_across_slots`).
+- **`reasoning_effort` is not the lever on the optimizer call — INPUT SIZE is.** ~94% of an
+  optimizer round-trip is hidden reasoning (`l1_critique`: 4,724 reasoning tokens for a 932-char
+  answer at effort `low`), so a two-step effort change buys ~27%. The optimizer is ~20% of LLM
+  seconds and cost across 46 banked ledgers; backend scoring is the other 80%. What the same read
+  surfaced as the real lever: `l1_generate` by prompt-size thirds runs 11.7k chars → 3,831 reasoning
+  tok / 26.7 s against 23.2k → 5,408 / 42.1 s. Remaining options — a different optimizer model for
+  the schema-bearing nodes, or an explicit reasoning budget — are choices, not cleanups. The cheaper
+  twin is already the plan: `l1_generate` semantic widening at a net-SHORTER prompt.
 
 - **No structured-output route probe before a run spends money.** `inclusionai/ling-3.0-flash`
   answered HTTP 405 `json_schema response format is not supported` (DeepInfra);
@@ -84,127 +51,80 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
   swap-verb are both new capabilities, and the closing directive opens no new features until
   the config is distributable.**
 
-- **No surface reports the rate table's age.** `refresh_rates` writes `fetched_at`; only
-  `_cache_fresh` reads it, so nothing tells an operator their prices are three months old — it
-  shows up indirectly, as `unpriced_tokens` on a model the stale table lacks. **Two thirds of this
-  entry were wrong as filed and are now closed:** `refresh_rates` did have callers (CLI `new` +
-  `resume`), and what was actually missing is that only the CLI had them, so a web-only box never
-  refreshed at all. It now fires from `runner/entry.py::run_optimization`, the one seam every
-  launch path funnels through. Action for the remainder: decide whether age belongs on `/health`
-  (an install fact) or nowhere — with the refresh wired in, age is bounded by the TTL plus
-  time-since-last-run, which may make the surface not worth its wire.
+- **No surface reports the rate table's age.** Only `_cache_fresh` reads `fetched_at`, so a stale table
+  shows up indirectly as `unpriced_tokens`. The refresh gap itself is closed. Remaining action: decide
+  whether age belongs on a surface at all — it is now bounded by the TTL plus time-since-last-run. **The
+  home, if it earns one, is `GET /api/v1/health`** (`main.py::health_check`, already probed by every
+  deploy — not `routers/backends.py::get_backend_health`, which is a per-connector reachability probe).
+  Beside it: `shared/pricing.py` hand-rolls the cache WRITE, so it lacks the tmp+`os.replace` that
+  `store/io.py::write_json` gives — while `refresh_rates_in_background`'s docstring leans on a
+  half-written cache failing `json.loads`. A fourth site beside the three reads the Coupon/BYO entry
+  names, and the one where atomicity is load-bearing.
 
 - ⚠️ **`shared/identity.py` (the capability/tier authz vocabulary) collides with
   `domain/identity.py`** — flagged only, never acted on: the access model is the operator's call
   ([`../operations/access-model.md`](../operations/access-model.md)). The rest of the
   filler-name sweep is closed; see § Considered, not debt for the four names that keep theirs.
+  **Verified 2026-08-17, and it fails the same test § Considered applied to `session.py ×3`:** zero
+  `import … as` aliasing anywhere in the tree, disjoint symbol sets, and only two files importing
+  both (`store/stores.py`, `middleware/oidc.py`), so the ambiguity is never experienced. A third
+  `identity` exists beside them — the `infrastructure/identity/` OIDC package — and does not change
+  that. Leave it flagged; re-open only if a call site ever has to disambiguate.
 
-- **`datasets/bbeh/sweep/*.yaml` now PARSE but would mint 12 identical no-op forks.** The
-  filed entry said the blocker was a stale `brief` key; that was one of three, and fixing it
-  does not revive the verb. All 12 also carried `l1_section_overrides` / `_text`, and **none
-  of the 12 carries `l1_layout`** — the only lever `OperatorSweepFile` still has. So a
-  `--sweep-batch` run over them mints twelve forks identical to their parent and pays full
-  measurement for zero contrast. The three dead keys were stripped (operator-approved) so the
-  reader no longer raises; the payloads' `reason` fields are untouched and still carry the
-  measurement narratives that make them worth keeping (D001's +50pp persona, D002's +21pp
-  answer_format). Two of the removed levers are gone for structural reasons, not drift:
-  `l1_section_overrides` named sections (`axes_l1`) that are no longer panel names — the
-  modern lever IS `l1_layout` — and `l1_section_overrides_text` wrote `task_context`, which
-  is now frozen (`TaskDecomposition.merge` refuses it). **Action before anyone runs the verb:
-  author a real `l1_layout` per arm, or the batch measures nothing.** The mechanism itself is
-  sound and was exercised through the real reader (12/12).
+- **`datasets/bbeh/sweep/*.yaml` parse but would mint 12 identical no-op forks.** None of the 12
+  carries `l1_layout` — the only lever `OperatorSweepFile` still has — so `--sweep-batch` over them
+  pays full measurement for zero contrast. The dead keys they did carry are gone for structural
+  reasons, not drift: `l1_section_overrides` named sections that are no longer panel names, and
+  `l1_section_overrides_text` wrote `task_context`, now frozen (`TaskDecomposition.merge` refuses
+  it). **Action before anyone runs the verb: author a real `l1_layout` per arm, or the batch
+  measures nothing.** Mechanism itself is sound (exercised 12/12 through the real reader); the
+  payloads' `reason` fields still carry the measurement narratives worth keeping.
 
-- **`index.json` is the only payload a model could reach — measured 2026-08-05, and the answer is "not yet".** Every other `dict[str, Any]` in the read path is the node-keyed overlay whose keys the BACKEND invents at runtime, so no static model can name them; this one is PP-owned and statically knowable. **43 files, 24 top-level keys, 0 unreadable** — against ~120–160 lines of model, ~25 files, ~65 read sites (**net +60 to +100 LOC**) to close the misspelled-key class on 3 `update()` sites plus `create()`. Two reasons it is not a refactor: the ledger scores it **zero** (`any_params` excludes container values, `models_lax` moves ≤1), and `extra="forbid"` breaks the deliberately tolerant reads in `enumerate_cycles` / the lineage surveys. Action: **none — the numbers are the deliverable**; the `domain_any_maps` dimension is what will make it decidable. Re-verify 43/24/0 first. Blocker: none, it is a recorded decision.
-- **Two `CycleHop` types in the webapp, and the path codec is prose-enforced.** `lib/api/types.generated.ts` carries the generated one (`campaign_id`/`cycle_id`, emitted from `domain/cycle_paths.py` by `scripts/build_ts_types.py`); `lib/ids.ts` declares a second, local, camelCase one behind its own `CyclePath`. They are not assignable, which reads as a bug the first time someone tries. `encodeCyclePath`/`decodeCyclePath` likewise re-implement `encode_cycle_path` — and there is no `decode_cycle_path` in the Python tree at all, so the decoder mirrors nothing. **Two claims corrected 2026-08-15.** "The path codec is prose-enforced" is wrong: `lib/__tests__/cyclepath.test.ts` locks separators, both round-trips and five malformed cases. What is prose-only is *cross-language* agreement — nothing compares the TS literals against Python's output. And "no live drift" is half true: separators and the id character class agree, but `store/io.py::validate_path_component`'s all-dots traversal guard has **no TS mirror**, so `decodeCyclePath("..::..")` returns a path Python rejects (low impact — the browser only reads, and the server re-validates every hop). Why the duplication is dormant rather than latent: 32 files import `lib/ids`, while the generated `CycleHop` has ~0 direct importers — it is only ever read off a response, never constructed. Action: fold the camelCase hop into the generated type, then consider generating the codec (`openapi.generated.json` already ships). Not now — the webapp is stable. Blocker: none, but it is a webapp-wide rename.
+- **The cycle-path codec agrees with Python only in prose.** `lib/ids.ts` re-implements
+  `encode_cycle_path`'s separators and charset, and `cyclepath.test.ts` locks the TS side against itself.
+  Action: generate the codec from `openapi.generated.json`, or accept the duplication and say so.
+  Blocker: none; low priority — the browser only reads and the server re-validates every hop. **Do not
+  re-file "fold the hop into the generated `CycleHop`"** — refused on inspection: the generated type is
+  the wire element, `ids.ts`'s `PathHop` is the BROWSER's address (it encodes into `?path=` URLs and
+  view-memory keys), so binding them lets a server-side rename invalidate persisted addresses.
 
 **Ray / lineage follow-ups** (named during the 2026-07-26 time-ray landing; none blocks the feature):
 
-- **`lib/hooks/usePoll.ts` — head-of-line blocking.** One in-flight tick skips the whole next tick, and the lineage tick `Promise.all`s every subscribed key — one slow campaign's fetch delays every other key. Action: per-key in-flight accounting (a `usePoll` design change, not a caller patch).
-- **`/ray` payload size.** A `limit`-sized window carries full `llm_call` payloads — multi-MB on a chatty course. Action: per-kind field allowlist in `store/family_ray_views.py`, coordinated with what `lib/chat/activity.ts::projectionToActivity` actually reads (an uncoordinated elision silently blanks activity lines).
+- **`lib/hooks/usePoll.ts` — head-of-line blocking.** `inFlightRef` is a single boolean, and the lineage tick (`lib/lineage.tsx::LineageProvider`) `Promise.all`s every subscribed key — so one slow campaign's fetch delays every other key AND skips the next tick for all of them. Action: per-key in-flight accounting (a `usePoll` design change, not a caller patch). **Read the skip as a TRADE, not an oversight, or the fix will be wrong:** the hook's own comment argues it, because aborting a `/tree` tick slower than the 5 s interval would hang the surface on "Loading…" forever. `lib/workspace.tsx`'s two-cadence split is the existing caller-level mitigation of the same class; nothing does per-key accounting today.
+- **`/ray` payload size — and it is broader than "`llm_call`".** `family_ray_views.py::RayItem.payload` is the verbatim `json.loads` of the ledger record at EVERY kind; `_curated` filters by kind and never by field, so there is no projection anywhere on the path. The largest unread payload is `llm_call.payload.messages` (the whole rendered optimizer prompt) plus `.response` and `.reasoning` (4 KB cap) — but scoping an allowlist to that kind still leaves `cycle_seed.origin_prompt_fields`, `phase.payload.view` and `error.traceback` on the wire, all same-class. Action: per-kind field allowlist in `store/family_ray_views.py`. **Coordinate against three readers, not one:** `lib/chat/activity.ts::projectionToActivity`, plus `lib/derivations/time-ray.ts::rayHead` (joins open calls on `call_id`) and `::isHeartbeat` (reads `detail`) — eliding `call_id` kills the `waiting`/`wedged` head states silently rather than blanking an activity line. The "multi-MB" magnitude is the mechanism reasoned, never measured; measure a live window first.
 - **`/ray` non-304 cost while a run is live.** Every append moves the family validator, so each 5 s tick re-parses the whole merged window. Fine at current sizes; revisit with a per-ledger byte cursor if it shows in profiles.
 - **`/tree` always serves the whole subtree** (recursion to every fork + inner run) though collapsed sidebar rows render one tier. Action: only if tree size shows up — a `depth=` param is contract surface, don't add speculatively.
 - **View-memory hydration order.** Today's restore sites read the store during render (`useSyncExternalStore`), which is safe; a future consumer restoring from an effect could seed from the pre-hydration empty store and record it back. Guard belongs in `lib/view-memory.tsx` if a second effect-time reader ever appears.
 - **Weak-ETag identity folding.** `_conditional.py::weak_etag` folds the lens/samples mask (request identity) into the validator (resource state). Correct today because nothing caches by URL alone; a URL-keyed cache layer would cross-serve variants. Split validator vs `Vary`-style identity if one ever appears.
-- **`useNodeToggle`'s defaults-aware resolution has no Vitest** — the registry got its test (`lineage-registry.test.ts`). Not the "codec": `viewMemoryCodec` IS tested (`view-memory.test.ts` round-trips the persisted record), and calling it that pointed at the one piece with coverage. What is untested is `sidebar/grouping.ts::isNodeOpen`, where membership means *deviation from the per-kind default* — the four-way `(present/absent) × (default open/closed)` matrix. Cheapest shape is a pure `.test.ts` on `isNodeOpen`/`nodeKey`: testing the hook itself would need a jsdom `.test.tsx` under `lib/**/__tests__/`, a shape that exists nowhere today.
+- **`sidebar/grouping.ts::isNodeOpen` has no Vitest** — membership there means *deviation from the
+  per-kind default*, so the four-way `(present/absent) × (default open/closed)` matrix is untested.
+  Cheapest shape is a pure `.test.ts` on `isNodeOpen`/`nodeKey` against the module-private
+  `OPEN_BY_DEFAULT`, which the existing `components/**/__tests__/**` glob collects with no config change
+  (note `vitest.config.ts`'s `lib/**` glob is `.test.ts` ONLY — a jsdom `.test.tsx` there is not
+  collected at all). Not the codec: `viewMemoryCodec` IS tested. Whether it clears `tests/CLAUDE.md`'s
+  silent-harm bar is a separate call.
 
 **Do soon, not now** (surfaced by the 2026-07-10 drift pass; the six fields with *no* reader at all were already deleted):
 
-- **`start-run`'s launch fields are undeclared control-plane surface.** The handler reads
-  `payload.spend_budget_usd` (`command_dispatcher.py::_build_cycle_applier`) but
-  `m12-api-openapi.yaml` declares no such property on the command — so the one field a caller can
-  use to set a run's ceiling is invisible to the contract every other inbound field is checked
-  against, and its `token_budget` twin was never added for the same reason. Root `CLAUDE.md`
-  requires the schema to land *before* the handler; this one arrived the other way round. Action:
-  declare both on the `start-run` payload, then wire the token half at that seam (the CLI already
-  has `--token-budget`; the account ceiling reaches the runner regardless, so this is the
-  operator-supplied override only). Blocker: none — it is a spec edit plus one line.
-- **`export`s re-exported through `export *` barrels** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow` (all five still live; the 37 genuinely file-local ones already landed). They look local-only to a naive grep; stripping `export` silently narrows each barrel's public surface. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind. **The old "52" figure is retired (2026-07-16): every barrel has been touched by feature work since it was counted, and the barrels are load-bearing (85+/34+/32+ importers). Recount before acting; don't re-cite a headcount as current.**
+- **`export`s re-exported through `export *` barrels** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow` (all five still live; the 37 genuinely file-local ones already landed). They look local-only to a naive grep; stripping `export` silently narrows each barrel's public surface. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind. **The old "52" figure is retired (2026-07-16): every barrel has been touched by feature work since it was counted, and the barrels are load-bearing. Recount before acting; don't re-cite a headcount as current** — the last recount read `lib/api` 87 importers, `lib/derivations` 49 (grown ~50% since the prior note), `components/ui` 35, `lib/types` 33, `components/workflow` 12, all five still `export *`. Two traps in the recount itself: relative-path importers (`from "./api"`, `"../api"`) miss an `@/…` grep, and `lib/api/reads.ts`/`components/ingest/*` importing `"./types"` resolve to LEAF files, not the barrel.
 - **A salvaged Groq response reports ZERO tokens.** `infrastructure/llm/json_parse.py::try_groq_json_validate_repair` rebuilds an `LLMResponse` after re-parsing `failed_generation` out of a `json_validate_failed` 400, hardcoding `usage={"prompt_tokens": 0, "completion_tokens": 0}`. That call **already reached the wire and was billed** — the model burned tokens producing the malformed JSON. It IS metered (every returning optimizer round-trip passes `call.py`'s single exit), so this is not a seam that forgot; it is a seam that meters a **fabricated zero**, which is worse, because a zero is what a replayed call legitimately reports. **Why it is not a one-line fix:** Groq's 400 body carries no `usage`, so the true counts are unrecoverable, and `unpriced_tokens` is the WRONG home — it means *billed tokens with no USD rate* (count known, price unknown), whereas here the **count itself** is unknown. There is no "tokens unknown" representation on `TokenUsageRecord`, and adding one is the whole add-a-surface recipe ([`../developer/adding-a-surface.md`](../developer/adding-a-surface.md)) — record field, projection, and every reader that divides by a count. Note what it would NOT ride: the account gate now leans on the token arm precisely because a count is always knowable, and a row whose count is fabricated is the one thing that breaks that assumption. Do NOT estimate from content length — a fabricated number rendered as a measurement is the one thing this must never do. **Currently dormant** (`json_validate_failed` is Groq-only; every configured provider is `openrouter`), so it is a correctness landmine, not a live leak — it fires the day anyone repoints a node at Groq. Blocker: needs the unknown-count dimension.
 - **Post-flip copilot — deferred on purpose, not forgotten.** The `checkin` node consulting in run mode and raising `pause-cycle` / `change-spend-budget` / `fork-cycle` instead of draft patches. `RaisedCommand` (`datasets/origin_resolve.py`) is already general enough to carry it. Not debt and not now: it is a **new feature**, and the closing-phase directive is no new features until `promptpotter-self` is distributable. Lands with L4, so it belongs to [`l4-outer-loop.md`](l4-outer-loop.md) when it does.
-- **`RoundResult.results` drops the parent's panel on every round that promotes — but the filed ACTION would not deliver what it was filed for.** Re-verified 2026-08-15 across 142 banked round documents. The mechanism holds exactly: `l1/score/winner.py` seeds `best_results` from `parent.results` and overwrites it with `all_candidate_results[winner_id]` when a winner is elected — **69/69** rounds with a winner are byte-identical to that candidate's rows, **39/39** held rounds match no candidate. So the parent's per-sample panel on that round's own subset is never persisted on any promoting round, and that IS a real gap in the record.
+- **`RoundResult.results` drops the parent's panel on every round that promotes.** Verified 2026-08-15
+  over 142 round documents: 69/69 rounds with a winner are byte-identical to that candidate's rows,
+  39/39 held rounds match no candidate — so the parent's per-sample panel on the round's own subset is
+  never persisted when a winner is elected. **Action is ADDITIVE, and a subject swap is refused:** key
+  the parent's rows under a reserved id in `all_candidate_results`, leaving `results` as the subject
+  ~18 readers depend on. Swapping instead would lag the θ frontier permanently (`optimization/cycle.py`
+  + `mask/load.py` feed `cumulative_theta`), re-break two further writers in `resume_and_fork/repair.py`,
+  and silently reinterpret all 142 existing documents (`extra="ignore"`, no version marker). Blocker:
+  none, but a persisted-document change wants its own PR.
 
-  **Three corrections to the entry as filed.** (1) It is *not* the cause of the flips line's round-0 pinning: `sampleFlips` reads `all_candidate_results[candidate_id]` on BOTH sides (`lib/derivations/round-samples.ts`) and the round-0 reference is hardcoded in `RunCard.tsx`, so swapping this field's subject leaves that join with nothing new to match. (2) It is not a "duplicate": on the 39 held rounds it is the ONLY copy of the retained incumbent's rows, so inverting it does not remove a duplicate — it moves which of two subjects goes unpersisted. (3) "One assignment plus every reader" is under-scoped: `resume_and_fork/repair.py` holds a second and third WRITER that re-assert the invariant, and the frontier merges in `optimization/cycle.py` + `mask/load.py` feed `cumulative_theta` — the L4 outer fitness signal — so a subject swap would lag the frontier a round permanently. `winner.py` also computes the round's `accuracy` and `p_value` off the same local, and `RoundResult` is `extra="ignore"`, so all 142 existing documents would load under the new meaning with no version marker and no complaint.
-
-  Corrected action: **additive** — key the parent's rows into `all_candidate_results` under a reserved id, or give them their own field, and leave `results` as the headline's subject that ~18 readers already depend on. Blocker: none, but it is a persisted-document change, so it wants its own PR.
-- **`matched_origin_*` is named for the origin and computed from the parent.** `matched_origin_stats(origin_results=…)` is called with `RoundParent.results`, and `RoundParent` is "the origin only at round 0; the prior winner after it" — so `matched_origin_accuracy` / `matched_origin_composite` / the round-level twins are the PARENT's rate on the candidate's rows at every round ≥ 2. The two coincide at round 1, which is why the name survived. A name that stopped describing its contents; the repo already owns the right word (`parent`, per root `CLAUDE.md`). Action: rename to `matched_parent_*` — but re-scoped 2026-08-15, because three legs of the filed sweep are wrong. There are **five** names, not two-plus-twins (`_lift`, `_lift_ci_lo`, `_lift_ci_hi` as well), plus `matched_origin_stats`' own `origin_results` parameter and the `matched_origin_lift` function in `scoring/selection.py`. `RoundSummaryCandidate` declares none of them — it inherits from `DashboardCandidate`, so renaming the base moves both. And **`m12-api-openapi.yaml` and `openapi.generated.json` carry ZERO occurrences**: the round document is served as a raw file body by a route with no `response_model`, so the generated client surface that does carry the name is `webapp/lib/api/types.generated.ts` (regenerate with `scripts/build_ts_types.py`, gate-enforced) plus the camelCase webapp twins. The webapp COPY already says "parent" (`RunCard.tsx` explains why); only the identifiers are stale.
-
-  **The blocker is not "it touches a persisted document" — it is that `RoundResult` and `ScoredCandidate` are both `extra="ignore"`.** A hard rename does not raise on the 142 banked round files; it loads them with `matched_parent_* = None`, silently, voiding every historical floor, lift and CI. Worse than a crash. The migration must restamp those documents or state the loss explicitly; "no compat alias" is right but is not by itself a plan.
-
-**From the 2026-08-11 one-timeline pass.** The band's second home is fixed, the mask's parallel
-timeline is folded onto the ledger, and the whole cycle store was then WIPED (paid caches kept).
-
-**So every count below is provenance, not state** — it was measured on the pre-wipe store and
-will not recompute. Each names a defect in CODE that survives its data; read the number as "this
-is how often it bit", never as "this is what is on disk". Re-measure before pricing any of them.
-
-- ~~**The ELECTION has no ledger record.**~~ **Fixed 2026-08-11.** `ElectionRecord` carries the
-  crown at the coordinate `elect_round_winner` decides it, so the tree crowns an `l1_critique`
-  call earlier than it did and `CandidatesCard::views` stopped choosing a half per bar. Two
-  parts of the filed action were **refused on evidence** and should not be re-proposed:
-  - **θ did not move.** It is RESTAMPED when the ruler warms — that is what round 0's second
-    close exists to deliver (`runner/loop.py`) — so it stays on `round:complete`, which every
-    close re-reads. Only the crown never moves, and only the crown belongs to a record that
-    does not replay.
-  - **`matched_origin_*` did not move either, and never should.** The entry called it
-    unservable; it is in fact *unwanted*. Nothing plots a floor on a bar — the only renderer is
-    `ScoringInspector`, which reads it off the row it selected — so serving it on the tree would
-    have shipped a writer with no reader. And by this package's own test
-    (`infrastructure/CLAUDE.md`: a value the round document carries per candidate is already
-    addressable without the chronology) it earns no ledger payload at all.
-
-  What the record DID buy beyond the crown is `LineageNode.election_held`: `is_winner: false`
-  reads identically on a round that HELD and one still scoring, and the browser was inferring
-  between them off `dash.rounds[]` — which reported every held round as undecided for the rest
-  of the run.
-
-- ~~**The mask's What-If ordering is a point estimate; the election it claims to reproduce is
-  not.**~~ **Closed 2026-08-11, and the filed action was the wrong one — do not re-propose it.**
-  "Rank the lens by the election" cannot be done from the mask record at any price worth paying:
-  θ under another formula must be re-fit from per-sample grades against a re-calibrated δ ruler,
-  which is `ab_replay`'s substrate (`with_replay=True` plus an archive read), not a cheaper
-  version of it. The lens and `ab` are **one mechanism at two prices**, not two rankings to
-  reconcile — and the cheap one is polled by the tree route, so adopting the exact one would put
-  a campaign-wide refit behind a 5 s poll.
-
-  What was actually wrong was the CLAIM, and it was wrong in three places at once. The ranking
-  helper was called `round_winner_key` while its own docstring said it is not the round-winner
-  election — a name that had to be disclaimed at every one of its six call sites, all of them
-  display. It is `display_rank_key` now, `display_fitness`'s argmax form and nothing more.
-  `mask-projection.md` told the operator the `score:` lens names "the candidate that formula
-  would have elected"; it names the candidate that formula ranks first, and the row beside it
-  already pointed at `ab` for the other question. **No number moved** — the whole fix is the
-  claim, which is why it needed none of the evidence the wipe took away.
-
-- ~~**A repair re-banks corrected rounds onto the branch without a `round:complete`.**~~ **Fixed
-  2026-08-11**, which closes the family. `_rebank_on_branch` takes each corrected round through
-  the whole ingress — mint, measurement, election, close — in its own chronological place, so the
-  branch no longer shows a round document nothing on the ledger backs. **Nothing was invented to
-  do it:** the crown comes off the corrected `winner_id` and the frontier off the same
-  `RoundResult` fields the live close reads, which is what made this a disagreement between two
-  surfaces rather than a missing measurement. The close record moved onto
-  `RunCallbacks.on_round_close` to get there — `persist_round` was building the `PhaseRecord`
-  inline, and a second spelling of that payload in the repair path is what the seam exists to
-  prevent. **Verify by repairing a fork**: the cycle it was measured on is gone with the wipe.
+- **A repair's re-bank onto the branch has never been observed.** `_rebank_on_branch` was fixed
+  2026-08-11 to take each corrected round through the whole ingress — mint, measurement, election,
+  close — so the branch no longer shows a round document nothing on the ledger backs. The cycle it
+  was measured on went with that day's store wipe, so the fix is reasoned, not seen. Action: repair
+  a fork and confirm each corrected round carries its own `round:complete` on the branch. Blocker:
+  none — it needs a run, not a decision.
 
 **From the 2026-08-11 mobile pass — what it left half-done.**
 
@@ -221,7 +141,6 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
 - **`*_override → *_updates` L1 delta-key rename.** `prompt_fields_override` / `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements, but named "override." **Decision (settle first):** unify the pipeline delta to **`pipeline_overlay`** everywhere (kills the short/long two-name tax); the prompt/context deltas become `*_updates`. Rename writer→reader in one commit (schema `dispatch/schemas.py::L1Variant` is the source of truth — the LLM contract auto-propagates). Full site map: grep `*_override`. **The old rider "collapse `searchPoint.ts` + `candidateSearchPoint.ts` into one `wireToCandidateSearchPoint`" is DROPPED (verified 2026-07-16):** they answer different questions over one served field — `ObserveConfig` is a read-only view (keeps `steps`, carries a label), `CandidateSearchPoint` is an editable fork seed (drops `steps`). `lib/derivations/searchPoint.ts`'s module comment says so in-code. Merging would fuse a read projection with a write seed; the only real overlap is two lines of `candidate_scores.find`. **Blocker:** invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against a FRESH cycle that completes round 1, not a resume.
 
 **Security posture / migration:**
-- **The forbid-by-default flip obliges every on-disk model — now discharged by a table, and the table is what to check.** `application/restamp.py::_SURFACES` is the coverage contract: `CampaignConfig` (twice — the minted snapshot's config and the dataset template), `Campaign`, `BackendConnection`, `User`, `DiagnosticRunRecord`. **Adding a persisted `StrictModel` without adding its row is the bug**, and it has already cost one outage (`5a69ca67` dropped `BackendConnection.last_synced_at`; `init_services` raised `extra_forbidden` and every `new`/`resume` died at load). Two kinds are outside it *by design*, stated in the module docstring so the absence reads as a decision: `RoundResult`, because a row repairs by pruning and pruning cannot restore a RENAMED field's value, and `LLMResponse` under `optimizer_reuse/` is a content-addressed cache — evictable, not migratable. A third is outside it for a different reason: the per-cycle **ledger** is migrated by `compact_cycle_ledgers`, a sibling function on the same verb rather than a row, because a row prunes a `StrictModel` by `model_fields` and a ledger payload is `dict[str, Any]`. Read the table as covering the typed documents, not everything the verb touches. **Outside the table is not outside all obligation, and reading it that way already cost the record once** — `extra="ignore"` forgives an extra key, not a missing one, and it does not reach the `extra="forbid"` models nested inside, where a stale key is fatal in the other direction. Both halves are now owned and neither is a row: the tolerance rule and the reporting-vs-scoring boundary it stops at by `domain/round_diagnostics.py`'s module docstring, and **why round documents are reported on but never rewritten** by `application/restamp.py`'s, whose `check_round_documents` is what makes the drift visible at all.
 - **Backend-registration dedup** — `webapp/lib/hooks/useConnector.ts` client-side `distinct`/`seenEndpoints` collapse is a back-compat shim for per-dataset `BackendConnection` rows minted before the `wiring.py` one-row-per-`(base_url, backend_type)` fix. NOT a row-delete: it's a 3-step migration — (1) rewrite each campaign's `campaign.yaml::backend_id` to the canonical `local` (8 stale ids across 82 campaigns, all → the same `127.0.0.1:8000` endpoint); (2) collapse the duplicate rows (needs a new `BackendStore.remove`); (3) make every re-wire path reuse the canonical id. Then delete the loop. Also: `wiring.py` `not backend_id` reuse block should guard on `existing.base_url == backend_url` (mint a distinct id on mismatch). Blocker: write + operator-run the idempotent migration on their data first — the loop is load-bearing until then.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
@@ -236,11 +155,25 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
 
 ## Standing — long-lived design holds
 
+- **Every persisted `StrictModel` owes a row in `application/restamp.py::_SURFACES` — adding one without its row IS the bug.** It has already cost an outage: `5a69ca67` dropped `BackendConnection.last_synced_at`, `init_services` raised `extra_forbidden`, and every `new`/`resume` died at load. What the table deliberately excludes and why each absence is a decision — and why round documents are reported on but never rewritten — is stated in that module's own docstring; the tolerance rule and the reporting-vs-scoring boundary it stops at, by [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Tolerance is scoped by what a payload is FOR. Read the table as covering the typed documents, not everything the verb touches. **Outside the table is not outside all obligation, and reading it that way already cost the record once** — `extra="ignore"` forgives an extra key, not a missing one, and it does not reach the `extra="forbid"` models nested inside, where a stale key is fatal in the other direction.
+
 - **Tier 3c — the web-launch process split — is DEFERRED, and the trigger is what to re-read, not the deferral.** A web-launched run executes in-process in the API worker, so it shares that process, its env and every provider key ([`../operations/access-model.md`](../operations/access-model.md) § Tier 3). The reason to wait is not cost: **the requirement is undefined until we know what is being isolated.** Audited 2026-08-15 across every tenant-controlled path into that worker — scoring formula (AST-allowlisted, no attribute/subscript), YAML (`safe_load` throughout), dataset slugs (regex-validated), provider + `base_url` (closed three-entry registry, never tenant-set), and no URL fetched from tenant input. Nobody can supply executable code, so a boundary built now is built against a guess, and the guess decides the shape: a custom pipeline node wants a subprocess, a plugin connector a different trust model, arbitrary Python a container. **It also fights L4 directly** — `runner/inner/spawn.py` spawns each inner campaign as an `asyncio.create_task` in this process and depends on it (per-task ContextVar copies for ledger / round / abort, the flat `.inner/` sandbox, `set_optimizer_prompt_overrides` bound in the child), so the split would mean rebuilding the recursion seam at every depth while L4 is the closing focus. **Waiting costs nothing because the launch seam is already single** (`application/embedded_run.py`, `jobs/launcher/mint_and_start.py`) — keep it that way and a later move is contained; let run-launch logic spread across call sites and this becomes expensive. **THE TRIGGER: the first time a tenant can supply anything executable** — a custom node, a plugin connector, arbitrary Python. That is a product decision, and when it is made 3c stops being deferred and becomes a prerequisite of shipping it. Until then, what bounds the blast radius is 3a's kernel wall plus `DATA_DIR` (`deploy-linux/install-service.sh`), which takes away the service's ability to rewrite its own source and `.env`.
 
-- **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a release.** (1) The `ui/HoverCard` primitive rides ONE hover, while the native `title=` tooltips spread across the webapp are the same job — consolidate incrementally, alongside the three bespoke popovers vs `ui/Popover`. (2) Candidate-CI resolution is ONE seam and one estimator now (`scoring/selection.py::composite_ci`, stamped at `candidate_scored`); a second band beside it is what made the whisker appear and vanish by election gating, so do not add one back. (3) **Never examined, and the one with real reach:** `promptpotter/application/optimization/CLAUDE.md` asserts L2/L3/L4 are "the same family — each mutates a slower-changing surface of the level below", yet each is built from scratch (L2/L3 are escalation strategies, L4 a connector recursion). Whether the family should share machinery has never been asked, only asserted. The L2↔L4 hunt found one real collision underneath it (`NodeLayoutSpec.editor` claimed two owners of `l1_generate`'s layout, fixed `d1d792b0`), so the assertion is load-bearing enough to be wrong in places.
+- **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
+  release.** (1) **Tooltip/overlay consolidation:** ~86 of the webapp's ~170 DOM `title=` attributes are
+  teaching prose the browser renders as an unstyled, unselectable blob that dies on touch. Migrate **by
+  string source, not by file** — `lib/terms.ts::TERMS` first (~7 call sites), then the `VerifyPane` /
+  `RoundFileView` header glossaries (12 sites, two loops); leave the ~75 `title={same truncated string}`
+  sites, where HoverCard is strictly worse. Five bespoke floating overlays sit beside it, of which
+  `hs-heat-tip` is legitimately bespoke (its trigger is a `<canvas>` region with no element to anchor to).
+  (2) Candidate-CI resolution is ONE seam and one estimator (`scoring/selection.py::mean_fitness_ci`); a
+  second band beside it is what made the whisker appear and vanish by election gating — do not add one
+  back. (3) **Never examined, and the one with real reach:** `application/optimization/CLAUDE.md` asserts
+  L2/L3/L4 are one family, yet each is built from scratch. Whether they should share machinery has never
+  been asked, only asserted — and the L2↔L4 hunt found one real collision underneath it
+  (`NodeLayoutSpec.editor` claiming two owners of `l1_generate`'s layout, fixed `d1d792b0`).
 
-- **Two numbers ARE computed in the browser, against § Scoring authority** — verified while tracing the whisker, not suspected: `CandidatesCard.tsx` derives `cached_samples / n` and plots it as a chart series (its own tooltip admits "the height is geometry, the counts are the measurement"), and `ScoringInspector.tsx` subtracts `matchedOriginAccuracy` from `accuracy` for the "vs origin" delta. Both need serving, not deleting. Beside them, `composite_ci`'s NAME is wrong and it is the root of a bug already paid for: it runs `mean_ci` over per-cell mean FITNESS, and accuracy IS mean fitness, so the band brackets accuracy whatever the composite formula says. Believing the name is what put a `composite == accuracy` guard on the θ override and made a reader think the whisker sat on the wrong bar. Renaming it (and its `composite_ci_lo/hi` fields) is a migration over ~200 round documents, so it is filed, not done.
+- **FIVE numbers are computed in the browser, against § Scoring authority** — each verified by tracing, not suspected. **One filed target was wrong, so fix the aim before the code:** the `cached_samples / n` division is in `candidates/FitnessChart.tsx`, NOT `CandidatesCard.tsx`, which only counts and passes the field through. The rest: `ScoringInspector.tsx` subtracts `matchedParentAccuracy` from `accuracy` for the "vs parent" delta; `HardSamplesHeatmap.tsx` folds per-sample measurements into a mean and thresholds it at **`>= 0.5`**, which matches neither `lib/fitness.ts::HIT_THRESHOLD = 1.0` nor `sample-walk.ts::sampleBucket`'s 0/1 boundaries — so the mini heat strip and the table row directly beneath it can colour one sample differently on a graded scorer, while the served `series.mean_fitness` is already read by two sibling files and `archivePerSample` is already a prop; `dashboard/scoring/OuterSignalPanel.tsx::leadingArm` falls back to a browser-side argmax over `composite_fitness` when the engine elects on **θ**, disagreeing with `forest-layout.ts::pickWinner` (deliberately no-fallback, and its comment says why) exactly on HELD rounds — so it can draw a lift interval attributed to an arm the round never crowned; and `chat/ChatPane.tsx` mints `abilityDelta / usedUsd` and ships it as a headline `θ/$` KPI chip. All five need **serving**, not deleting, so four of them want a backend field first.
 
 - **`idea_fingerprint` cannot see a SEMANTIC re-proposal, and the gate built on it is the only
   cross-round one.** `domain/candidate_diff.py::idea_fingerprint` matches content-word overlap
@@ -267,7 +200,18 @@ is how often it bit", never as "this is what is on disk". Re-measure before pric
 - **Display-only recomputes do NOT breach scoring authority** — `headline-stats.ts::fitnessTrend` folds already-served values, and `presentation/views/live/phase.py` recomputes recall@k for the terminal readout. Serving either would add wire coupling for identical behaviour. (The bare `except: pass` around the recall block WAS the real smell, and was fixed.) **`hit_rate` sat on this list and should not have:** a fold is display-only only where its result is REACHABLE, and `is_hit` is `fitness >= 1.0` — unreachable on a graded scorer, so the column printed `0/N` on every row of a healthy campaign while this entry vouched for it. Now served (`SampleSeries.n_hits` / `mean_fitness`) and renamed `mean_fitness`. Check a proposed exemption at its threshold before granting one.
 - **Sample look-ahead is LIVE, and every part of it looks removable** — it defaults off, no committed campaign enables it, `ADMIN_CAPABILITIES` has exactly one member so the tier reads like scaffolding, and `_sample_lookahead_depth` returns 1 on `promptpotter-self` (the campaign most often read), so a reader concludes the branch never fires. It fires on every remote-HTTP dataset the moment the operator presses the button. Four pieces that must move together or not at all: the `.runtime/sample_lookahead.flag` write/poll/consume triple, the acquire/absorb split in `query_loop.py`, `dashboard.json::sample_lookahead` + `sample_lookahead_discards`, and the `scoring.lookahead` cap. **Never "recover" the discarded acquisition** — recording it makes the run's rows depend on in-flight depth, which forces a `human_intervened` stamp and devalues the campaign; that discard is the design, not an oversight. Why it is browser-only with no CLI verb: [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a.
 - **`session.py` ×3, `state.py` ×2, `base.py` ×2 keep their names — the package path already carries the concept.** Filed as a filler-name collision; the verification the entry asked for says no. Checked two ways and both come back clean: the three `session.py` are the run `Session` (`initialization/`), the CLI's accessor over that same noun (`cli/`), and the cookie→JSON auth store (`infrastructure/identity/`) — and **no module in the tree imports the auth one alongside either other**, so the only real ambiguity is never experienced; there is no disambiguating `import … as` anywhere, which is the friction a genuine clash produces. `escalation/state.py` vs `live_dashboard/state.py` and `llm/base.py` vs `projections/base.py` are each one concept per package, and `base.py`-holds-this-package's-ABC is a language-wide convention, not a filler name. Renaming any of them buys a longer import line and costs every citation that names it. Re-open only for a name whose *own package* cannot resolve it.
-- **The unreset ContextVars are NOT a leak class — the one real defect among them shipped, and "one `@contextmanager` for all" would have caused two.** Filed as seven vars with five leaking; it is eight, four have no reset path, and each was traced 2026-08-15. `_MODE` is set once per fresh inner task that then dies, and a NARROW scope is actively harmful: the mode must cover finalize or the archive reads, tracing sink, earned-blocks fence and optimizer clamp de-hermeticize mid-measurement. `_CURRENT_ROUND` is a per-round running marker with no enclosing block — `run_observers.py::set_round`'s first-token-only trick is a deliberate outer restore. `_INNER_SPAWN`'s stale-context path needs a second campaign in one task reaching `run_optimization` with no `cycle_id` **and** then spawning an inner cycle; every in-repo caller mints the cycle first, and spawning requires the cycle that would have prevented it. And **not** clearing `_OPTIMIZER_PROMPT_OVERRIDES` is load-bearing, not an oversight: `spawn.py::_run_inner_campaign` sets the inner mutations and *then* calls `run_optimization`, so an unconditional set there would wipe them — the eight test sites hand-calling `set_optimizer_prompt_overrides(None)` are test isolation, not a production symptom. The genuine defect the original entry never named — `_ABORT_CHECK` chaining one predicate per rebase, keeping every retired fork's `pause.flag` live — is fixed; `git log` has it. **Do not re-file a sweep here, and above all do not fuse them into one settings object:** `_ABORT_CHECK` is *composed* at the runner seam so an outer pause reaches a nested L4 cycle, and `session.pause_check` holds a second copy of that composition, so a context manager restoring only the ContextVar desyncs the checkpoint poll from the rate-limit poll.
+- **The unreset ContextVars are NOT a leak class — do not re-file a sweep, and never fuse them into one
+  settings object.** All eight traced 2026-08-15; the one genuine defect (`_ABORT_CHECK` chaining a
+  predicate per rebase, keeping retired forks' `pause.flag` live) is fixed. Each remaining non-reset is
+  load-bearing: `_MODE` must cover finalize or the archive reads, tracing sink, earned-blocks fence and
+  optimizer clamp de-hermeticize mid-measurement; `_CURRENT_ROUND`'s first-token-only trick is a
+  deliberate outer restore; `_INNER_SPAWN`'s stale path needs a cycle that would have prevented it; and
+  clearing `_OPTIMIZER_PROMPT_OVERRIDES` would wipe the inner mutations `spawn.py` sets before calling
+  `run_optimization`. A context manager restoring only the ContextVar desyncs the checkpoint poll from
+  the rate-limit poll, because `session.pause_check` holds a second copy of `_ABORT_CHECK`'s composition.
+- **θ and `matched_parent_*` do NOT belong on `ElectionRecord`** — refused on evidence when the crown moved there (2026-08-11), and the shape invites re-proposing both. θ is RESTAMPED when the ruler warms, which is what round 0's second close exists to deliver (`runner/loop.py`), so it stays on `round:complete`, which every close re-reads; only the crown never moves, and only the crown belongs to a record that does not replay. `matched_parent_*` is not merely unservable there but *unwanted*: nothing plots a floor on a bar (the sole renderer is `ScoringInspector`, off the row it selected), so serving it on the tree ships a writer with no reader — and by this package's own test (`infrastructure/CLAUDE.md`) a value the round document already carries per candidate earns no ledger payload at all.
+- **The `score:` lens cannot be ranked BY the election, at any price worth paying** — refused 2026-08-11; the tempting entry reads as a one-line consistency fix and is not. θ under another formula must be re-fit from per-sample grades against a re-calibrated δ ruler, which is `ab_replay`'s substrate (`with_replay=True` plus an archive read). The lens and `ab` are **one mechanism at two prices**, not two rankings to reconcile, and the cheap one is polled by the tree route — so adopting the exact one puts a campaign-wide refit behind a 5 s poll. What was wrong was the claim, and it is fixed: `display_rank_key` (ex-`round_winner_key`) names the candidate a formula ranks first, nothing more.
+- **Typing `index.json` — measured 2026-08-05, answered "not yet".** The only `dict[str, Any]` in the read path a static model could name (every other is the node-keyed overlay whose keys the backend invents at runtime). **43 files, 24 top-level keys, 0 unreadable**, against ~120–160 model lines / ~25 files / ~65 read sites — **net +60 to +100 LOC**. Refused because the ledger scores it **zero** (`any_params` excludes container values, `models_lax` moves ≤1) and `extra="forbid"` breaks the deliberately tolerant reads in `enumerate_cycles` / the lineage surveys. Re-verify 43/24/0 before re-opening; `domain_any_maps` is the dimension that would make it decidable.
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs by design; the "which do I use" rule is in [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_log`** — not a roundtrip shim; foreign fork-siblings + historical cycles have no live ledger, so the on-disk `index.json` is the only source. (Its round twin `from_disk_round` had zero callers and was deleted.)
 - **`measurement_archive.py` `.get(…, default)` at `save()`** — looks dead (the production writer always sets the keys) but `save()` has direct test-fixture callers with partial dicts; live boundary guards.
@@ -317,7 +261,7 @@ non-functional controls" sweep.
 
 | Placeholder | File | Future surface |
 |---|---|---|
-| Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx` | analytics search (C4-adjacent) |
+| Sidebar-footer search icon (disabled) | `webapp/components/shell/Sidebar.tsx` | analytics search (C4-adjacent) |
 | ChatPane attach + textarea + send (disabled) | `webapp/components/chat/ChatPane.tsx` | **C1** chat-first front door ([`chat-foundation.md`](chat-foundation.md)) |
 | ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | assistant tool-use — deferred past **C1** (asyncapi-first; [`chat-foundation.md`](chat-foundation.md) §7) |
 | AccountModal "Update profile" (disabled) | `webapp/components/account/AccountModal.tsx` | profile editing |

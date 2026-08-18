@@ -16,8 +16,8 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Folder | When to load | Index |
 |---|---|---|
 | [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
-| [`concepts/`](concepts/) | How the loop works conceptually. Read before the developer docs: [the-loop](concepts/the-loop.md) (the round shape + § The state record) · [scoring-and-memory](concepts/scoring-and-memory.md) · [campaign-tree](concepts/campaign-tree.md) · [structured-output](concepts/structured-output.md) · [optimizer-of-the-optimizer](concepts/optimizer-of-the-optimizer.md) · [paired-sample-pobb](concepts/paired-sample-pobb.md) | this table |
-| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.yaml` contract, dispatch hub + L1 layout, L1-candidate-analysis checklist (incl. the self-optimizing campaign lookup), self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
+| [`concepts/`](concepts/) | How the loop works conceptually. Read before the developer docs: [the-loop](concepts/the-loop.md) (the round shape + § The state record) · [scoring-and-memory](concepts/scoring-and-memory.md) · [campaign-tree](concepts/campaign-tree.md) · [structured-output](concepts/structured-output.md) | this table |
+| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.yaml` contract, dispatch hub + L1 layout, self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
 | [`operations/`](operations/) | Running it — four unrelated subjects, load one group not the folder: **run/watch/diagnose** (`persistence-and-state.md`, whose § Diagnosing a live or stuck run owns hang triage · `observability.md` · `backend-integration.md`) · **datasets** (`dataset-selection-rationale.md`, incl. § Adding a dataset · `dataset-reasoning-matrix.md`) · **security + deploy** (`access-model.md` — the map an audit opens, incl. § Running it securely) · **carry-over** (`mask-projection.md`). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The statistical model (verdict resolution) + the two spend-control procedures that read it: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison + the PEvol-Bench definition), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
@@ -28,8 +28,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 | Question | Read first |
 |---|---|
-| Where does this **subsystem** live — a cross-cutting concern spanning several packages (scoring, escalation, lineage, dispatch, identity)? | [`developer/concept-map.md`](developer/concept-map.md) — curated rows, each naming the orienting entry, the files it spans, and the wrong-but-plausible neighbour |
-| Which file owns the thing called **X** — a bare word, a class name? | **Search the repo.** There is no term index and there will not be one: a definition beside the code is a copy that drifts. The exception is a word naming more than one live thing (`seed`, `config`, `steps`, `terminal_node`) — [`developer/concept-map.md`](developer/concept-map.md) § Bare words, which says which senses exist — the one thing search cannot tell you. |
+| Which file owns the thing called **X** — a bare word, a class name? | **Search the repo.** There is no term index and there will not be one: a definition beside the code is a copy that drifts. |
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine |
 | How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
@@ -41,11 +40,12 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 ## L4 — the recursion case (project's closing focus)
 
-L4 (PromptPotter optimizing its own optimizer prompts) is the project's closing focus: finishing the recursion into a **distributable `promptpotter-self`**.
+L4 (PromptPotter optimizing its own optimizer prompts) is the project's closing focus: finishing the recursion into a **distributable `promptpotter-self`**. It has exactly **two owners, split doc-says-what-is-TRUE / skill-says-what-to-DO**, and nothing else may hold L4 prose:
 
-1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, what the outer fitness measures today (`mean_round_delta`) and what is still open about it, cost realism.
-2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan.** Read § Finish line first; it is the single owner of L4 status, and of what the panel may claim about a leader — read before any outer number is trusted.
-3. The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
+1. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)** — the measurand and why it is that one, what a panel may claim, the invariants that void a corpus, cost, and what is open. Read before any outer number is trusted.
+2. **`.claude/skills/potter-self/`** — the procedure: what to read while a run is live, the failure-mode playbook, the cost ladder, and every figure carrying a corpus date.
+
+The dataset side is [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4.
 
 ## What may live in `specs/`
 

@@ -1,5 +1,6 @@
-"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` / ``rename`` — thin shells over ``CommandDispatcher``,
-the sole writer of ``CommandRecord``. ``measurements/`` is never touched, so siblings still cache-hit."""
+"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` / ``rename`` / ``set-budget`` — thin shells over
+``CommandDispatcher``, the sole writer of ``CommandRecord``. ``measurements/`` is never touched, so
+siblings still cache-hit."""
 
 from __future__ import annotations
 
@@ -7,9 +8,10 @@ import argparse
 import logging
 import uuid
 
+from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandDispatcher,
     LifecycleKind,
@@ -19,7 +21,26 @@ from promptpotter.shared.errors import ConflictError, NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
-__all__ = ["cmd_archive", "cmd_delete", "cmd_pause", "cmd_rename", "cmd_unarchive"]
+__all__ = [
+    "cmd_archive",
+    "cmd_delete",
+    "cmd_pause",
+    "cmd_rename",
+    "cmd_set_budget",
+    "cmd_unarchive",
+]
+
+
+def _resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
+    """The ``--campaign``/``--cycle`` pair, falling back to the active pointer. Shared by every
+    cycle-scoped verb here so they cannot resolve "which cycle" two different ways."""
+    campaign_id: str = getattr(args, "campaign", None) or ""
+    cycle_id: str = getattr(args, "cycle", None) or ""
+    if not (campaign_id and cycle_id):
+        _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
+        campaign_id = campaign_id or pointer_cid
+        cycle_id = cycle_id or pointer_cyid
+    return campaign_id, cycle_id
 
 
 async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandResult | None:
@@ -83,12 +104,7 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
     lands on the ledger naming who asked — writing ``.runtime/pause.flag`` by hand leaves no such record."""
     identity = identity_from_args(args)
     store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id: str = getattr(args, "campaign", None) or ""
-    cycle_id: str = getattr(args, "cycle", None) or ""
-    if not (campaign_id and cycle_id):
-        _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
-        campaign_id = campaign_id or pointer_cid
-        cycle_id = cycle_id or pointer_cyid
+    campaign_id, cycle_id = _resolve_target(args, store)
     if not (campaign_id and cycle_id):
         return CommandResult(
             data={"status": "no_target"},
@@ -125,6 +141,65 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
         human=(
             f"{campaign_id}/{cycle_id} -> pause requested{_reason_suffix(args)}. "
             "The loop exits at its next checkpoint; `resume` picks it up."
+        ),
+    )
+
+
+async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
+    """Raise or lower a cycle's spend / token ceiling — the SAME ``change-spend-budget`` command the
+    browser fires, so the terminal can clear a budget wall too.
+
+    This is the verb that continues a budget-halted cycle: raise the ceiling, then ``resume``. The
+    launch flags (``--spend-budget`` / ``--token-budget``) cannot do it, because they only shape a
+    launch — this writes the operator ceiling the next launch composes on top of its config.
+    """
+    identity = identity_from_args(args)
+    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    campaign_id, cycle_id = _resolve_target(args, store)
+    if not (campaign_id and cycle_id):
+        return CommandResult(
+            data={"status": "no_target"},
+            human="No active cycle — name one with --campaign/--cycle.",
+        )
+    # Both absent is a no-op the dispatcher already rejects; sending them through keeps ONE
+    # validation of "at least one ceiling", on the command highway rather than per entry point.
+    payload = {
+        "max_usd": getattr(args, "max_usd", None),
+        "max_tokens": getattr(args, "max_tokens", None),
+    }
+    # The ONE verb here that needs the registry: the clamp counts in-flight commitments against
+    # the account, and `hold_ceiling` asks whether a live job carries the ceiling too. It is
+    # disk-backed over `default_jobs_dir()`, so this reads the server's jobs rather than an empty
+    # set — the dispatcher refuses outright without one, which is what left this verb unrunnable.
+    # No `on_reap`: this process exits in a second and must never reap the server's live cycle.
+    try:
+        await CommandDispatcher(store, JobRegistry(default_jobs_dir())).dispatch_cycle_command(
+            kind="change-spend-budget",
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            payload_extras=payload,
+            idempotency_key=uuid.uuid4().hex,
+            expected_version=None,
+        )
+    except NotFoundError:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "not_found"},
+            human=f"cycle not found: {campaign_id}/{cycle_id}",
+        )
+    except ConflictError as exc:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "conflict"},
+            human=str(exc),
+        )
+    logger.info("budget: %s/%s -> %s", campaign_id, cycle_id, payload)
+    # The REQUESTED figures are deliberately absent from the human line: the account clamp can
+    # write less than was asked (`quota.py::clamp_budget_change`), so quoting the request here
+    # would be the terminal telling the same lie the webapp's optimistic note used to.
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "budget_set", **payload},
+        human=(
+            f"{campaign_id}/{cycle_id} -> ceiling written. It is clamped against your account "
+            "allowance, so read the armed value back from the dashboard; `resume` picks it up."
         ),
     )
 

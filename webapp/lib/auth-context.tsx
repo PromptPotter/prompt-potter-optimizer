@@ -1,9 +1,12 @@
 "use client";
 // Auth context — single global probe of `/api/v1/auth/me`.
 //
-// Drives the WelcomeLockoutModal in app/layout.tsx. Other widgets (Topbar
-// account chip, etc.) can `useAuth()` once they want to react to identity
-// without their own fetch.
+// It also owns the ANON ENTRY PROMPT: whether the sign-in modal is open, and the
+// error a failed OIDC callback bounced back with. Both live here because the
+// prompt has several triggers (a Log in chip in the sidebar footer, the same
+// chip in the mobile app bar, the `?auth_error=` redirect) and exactly one
+// modal — `<WelcomeLockoutModal>` in app/page.tsx. A per-trigger copy of the
+// modal is how two of them drift.
 //
 // Three states:
 //   loading  — initial probe in flight (also after a focus revalidation
@@ -27,10 +30,23 @@ import { ApiError, fetchMe, type MeResponse } from "@/lib/api";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
+// What the one sign-in modal needs to render. `code`/`email` are non-null only
+// after an OIDC callback bounced back with a failure.
+export interface AuthPrompt {
+  open: boolean;
+  code: string | null;
+  email: string | null;
+}
+
+const PROMPT_CLOSED: AuthPrompt = { open: false, code: null, email: null };
+
 interface AuthCtx {
   status: AuthStatus;
   me: MeResponse | null;
   refresh: () => void;
+  authPrompt: AuthPrompt;
+  openAuthPrompt: () => void;
+  closeAuthPrompt: () => void;
 }
 
 const AuthContext = createContext<AuthCtx | null>(null);
@@ -38,6 +54,7 @@ const AuthContext = createContext<AuthCtx | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [authPrompt, setAuthPrompt] = useState<AuthPrompt>(PROMPT_CLOSED);
   // Bumped to force re-probes; the effect below depends on it.
   const [nonce, setNonce] = useState(0);
   // Latest probe wins — older in-flight responses are dropped if a newer
@@ -74,8 +91,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  const openAuthPrompt = useCallback(
+    () => setAuthPrompt({ open: true, code: null, email: null }),
+    [],
+  );
+  const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
+
+  // OIDC callback bounce-back: /auth/callback/{provider} 303s to
+  // /?auth_error=<code>(&email=<addr>) on failure. Open the prompt with the
+  // error banner, then strip the params from the visible URL so a refresh
+  // doesn't replay. Read window.location directly (not useSearchParams) to
+  // avoid the Suspense requirement that breaks static export. Same sanctioned
+  // set-state-in-effect pattern as `lib/workspace.tsx` deep-link hydration:
+  // SSR renders empty, client effect corrects post-hydration.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("auth_error");
+    if (!code) return;
+    setAuthPrompt({ open: true, code, email: url.searchParams.get("email") });
+    url.searchParams.delete("auth_error");
+    url.searchParams.delete("email");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   return (
-    <AuthContext.Provider value={{ status, me, refresh }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider
+      value={{ status, me, refresh, authPrompt, openAuthPrompt, closeAuthPrompt }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
 }
 

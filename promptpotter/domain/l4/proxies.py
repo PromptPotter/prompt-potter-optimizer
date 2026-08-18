@@ -139,7 +139,7 @@ class PanelPrecision(StrictModel):
     # THE SEED-PANEL LAYER, and the one thing L4 legitimately measures that the shared engine
     # cannot: an ordinary sample is graded so it carries no error bar, while an outer cell is a
     # whole inner campaign whose level was ESTIMATED. Everything else the outer level reports is
-    # the engine's own (`ScoredCandidate.matched_origin_lift*`). In the measurand's own units —
+    # the engine's own (`ScoredCandidate.matched_parent_lift*`). In the measurand's own units —
     # θ logits — never fitness: a cell's precision cannot cross the user-editable scoring
     # formula, and two scales inside one object publish an effect and a variance that cannot be
     # compared to each other.

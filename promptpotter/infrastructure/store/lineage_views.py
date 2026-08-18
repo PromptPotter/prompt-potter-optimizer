@@ -137,8 +137,8 @@ class LineageNode(StrictModel):
         description="The candidate's stored evaluator namespace — the measurement a `score:` "
         "lens re-scores against.",
     )
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
+    mean_fitness_ci_lo: float | None = None
+    mean_fitness_ci_hi: float | None = None
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -684,8 +684,8 @@ def _candidate_node(
         evaluators=cand.evaluators,
         # The candidate's own band, and only ever that: the round close no longer carries a
         # second one to prefer over it.
-        composite_ci_lo=cand.composite_ci_lo,
-        composite_ci_hi=cand.composite_ci_hi,
+        mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
+        mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,

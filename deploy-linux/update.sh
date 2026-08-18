@@ -19,6 +19,10 @@ HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 BACKEND_DIR="${BACKEND_DIR:-}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+# The data root, which the unit carries as `Environment=PROMPTPOTTER_HOME` (install-service.sh) and
+# every command run BY HAND from the checkout must be handed explicitly. Unset = the tree still
+# lives under $INSTALL_DIR and the default resolves to it.
+DATA_DIR="${DATA_DIR:-}"
 # The file systemd actually loads — see deploy.config.example. Branding any other one repaints
 # nothing.
 ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
@@ -45,7 +49,17 @@ fi
 
 # --- app: sync → deps → webapp → restart ------------------------------------
 say "app: $INSTALL_DIR"
+self_sha() { sha256sum "$HERE/update.sh" 2>/dev/null | cut -d' ' -f1; }
+self_before="$(self_sha)"
 sync "$INSTALL_DIR"
+# `sync` can replace THIS script, and bash keeps reading the descriptor it already opened — so the
+# remainder of the run is the PRE-sync copy, and every fix to this file lands one deploy late while
+# printing the old behaviour's output. Re-exec the new copy once, guarded against a loop.
+if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_before" ]]; then
+  ok "update.sh changed in this sync — re-running the new copy"
+  export UPDATE_REEXECED=1
+  exec bash "$HERE/update.sh" "$@"
+fi
 # Install the exact pinned graph from uv.lock — same source of truth as CI.
 # uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
 command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
@@ -68,7 +82,13 @@ fi
 # migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
 # leaves that cycle's ledger untouched and picks it up on the next one.
 say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
-if ! ( cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter restamp --apply ); then
+# PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
+# without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
+# root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
+# The prefix is spelled LITERALLY and defaulted rather than as `${DATA_DIR:+VAR=…}`: bash decides
+# what is an assignment while parsing, so one arriving from an expansion is taken as the command
+# NAME instead, and the line dies 127 on a box that had the root set all along.
+if ! ( cd "$INSTALL_DIR" && PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
@@ -93,11 +113,11 @@ fi
 
 # --- health -----------------------------------------------------------------
 say "health"
-wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH" && ok "app up ($BIND_PORT)" || bad "app down — journalctl -u $SERVICE_NAME -e"
+if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; fi
 # The bot has no port to probe — outbound-only is the charter — so `is-active` IS its health.
 if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
-  systemctl is-active --quiet "$BOT_SERVICE_NAME" && ok "admin bot up" || bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"
+  if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; fi
 fi
 if [[ -n "$BACKEND_DIR" ]]; then
-  wait_healthy "http://127.0.0.1:$BACKEND_PORT/status" && ok "backend up ($BACKEND_PORT)" || bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"
+  if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; fi
 fi

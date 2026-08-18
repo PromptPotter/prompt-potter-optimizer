@@ -139,13 +139,13 @@ def build_score_report(
     """Typed candidate score report. The CI is stamped HERE, off this candidate's own rows, so a finished candidate carries
     its whisker before its round ends — one writer, one band, no later override."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.scoring.selection import composite_ci
+    from promptpotter.application.scoring.selection import mean_fitness_ci
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
-    ci_lo, ci_hi = composite_ci(query_results)
+    ci_lo, ci_hi = mean_fitness_ci(query_results)
     return ScoredCandidate(
-        composite_ci_lo=ci_lo,
-        composite_ci_hi=ci_hi,
+        mean_fitness_ci_lo=ci_lo,
+        mean_fitness_ci_hi=ci_hi,
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

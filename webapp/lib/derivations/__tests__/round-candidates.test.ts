@@ -110,7 +110,7 @@ describe("roundCandidates — l2_terminal fixture", () => {
 
 // The in-flight branch, which the fixture above has none of. A live row is the same served
 // shape as a closed one, so every field carries through — the arm used to hardcode `theta`,
-// `compositeCi*` and `matchedOrigin*` to null as "stamped at round close", which the CI is not.
+// `meanFitnessCi*` and `matchedParent*` to null as "stamped at round close", which the CI is not.
 describe("roundCandidates — the in-flight round", () => {
   const live = dashboard({
     current_round: currentRound({
@@ -123,8 +123,8 @@ describe("roundCandidates — the in-flight round", () => {
           candidate_id: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03",
           accuracy: 0.6,
           composite_fitness: 0.55,
-          composite_ci_lo: 0.41,
-          composite_ci_hi: 0.69,
+          mean_fitness_ci_lo: 0.41,
+          mean_fitness_ci_hi: 0.69,
           scored_samples: 8,
           expected_samples: 20,
         }),
@@ -135,8 +135,8 @@ describe("roundCandidates — the in-flight round", () => {
 
   it("carries the whisker off the same row as the bar", () => {
     expect(row?.accuracy).toBe(0.6);
-    expect(row?.compositeCiLo).toBe(0.41);
-    expect(row?.compositeCiHi).toBe(0.69);
+    expect(row?.meanFitnessCiLo).toBe(0.41);
+    expect(row?.meanFitnessCiHi).toBe(0.69);
   });
 
   // The id both live readers join back on. A served lineage id here resolves in NEITHER

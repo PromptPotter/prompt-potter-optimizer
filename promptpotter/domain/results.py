@@ -17,6 +17,7 @@ from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
@@ -44,8 +45,6 @@ __all__ = [
     "RoundResult",
     "ScoreboardRow",
     "ScoredCandidate",
-    "SpendBucket",
-    "SpendRollup",
     "SweepBatchResult",
     "WarningDict",
     "best_round_by_measured_accuracy",
@@ -125,9 +124,7 @@ class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
     ``model_dump()`` IS the wire format; ``accuracy`` IS mean fitness, so there is no ``hits``."""
 
-    # `extra="ignore"`: round files written before `hits`/`ci_lo`/`ci_hi` were dropped
-    # still carry them, and a stale key must not make a paid measurement unreadable.
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, extra="ignore")
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     candidate_id: str
     label: str
@@ -159,31 +156,34 @@ class ScoredCandidate(StrictModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # The origin as this candidate's comparison floor — ``None`` unless the candidate covered
-    # the origin's whole panel, and NOT the population ``theta`` is ``None`` for (θ is
-    # subset-invariant, an accuracy is not). These MUST NOT default to 0.0: an unstamped 0.0 is
-    # indistinguishable from an origin that scored nothing, and reads as "this candidate beat
-    # the origin by its whole accuracy".
-    matched_origin_accuracy: float | None = None
-    matched_origin_composite: float | None = None
-    # The BLOCKED lift over that floor: mean per-cell ``(candidate − origin)`` across the cells
-    # both measured, Student-t bracketed (``scoring/selection.py::matched_origin_lift``). Sharper
-    # than ``composite_ci_*`` on the same rows because pairing removes the origin's cell-to-cell
+    # The PARENT as this candidate's comparison floor — the origin at round 0 and the prior winner
+    # after it (``RoundParent``), which is why these are not named for the origin. ``None`` unless
+    # the candidate covered the parent's whole panel, and NOT the population ``theta`` is ``None``
+    # for (θ is subset-invariant, an accuracy is not). These MUST NOT default to 0.0: an unstamped
+    # 0.0 is indistinguishable from a parent that scored nothing, and reads as "this candidate beat
+    # its parent by its whole accuracy".
+    matched_parent_accuracy: float | None = None
+    matched_parent_composite: float | None = None
+    # The BLOCKED lift over that floor: mean per-cell ``(candidate − parent)`` across the cells
+    # both measured, Student-t bracketed (``scoring/selection.py::matched_parent_lift``). Sharper
+    # than ``mean_fitness_ci_*`` on the same rows because pairing removes the parent's cell-to-cell
     # variation instead of carrying it as noise. ``None`` below two shared cells — an interval
     # from one pair is a fiction. It reads at EVERY level: inner cells are samples, outer cells
     # whole inner campaigns, and the arithmetic does not care which.
-    matched_origin_lift: float | None = None
-    matched_origin_lift_ci_lo: float | None = None
-    matched_origin_lift_ci_hi: float | None = None
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
     # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — what the
     # election ranks by. Unlike subset-relative `accuracy` it discounts for *which* samples this
     # candidate saw, so it explains a lower-accuracy winner. `None` outside the election fit.
     theta: float | None = None
     theta_se: float | None = None
-    # Normal-CLT CI on the mean per-cell composite fitness — present for any candidate with ≥1
-    # scored cell, unlike ``theta_se``. No composite point estimate should stand alone.
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
+    # Normal-CLT CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
+    # accuracy's own fold, so it brackets accuracy whatever the active composite formula is, which
+    # is why it is not named for the composite. Present for any candidate with ≥1 scored cell,
+    # unlike ``theta_se``; the blocked ``matched_parent_lift_ci_*`` above is sharper on these rows.
+    mean_fitness_ci_lo: float | None = None
+    mean_fitness_ci_hi: float | None = None
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -236,11 +236,11 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "accuracy",
     "composite_fitness",
     "total",
-    "composite_ci_lo",
-    "composite_ci_hi",
+    "mean_fitness_ci_lo",
+    "mean_fitness_ci_hi",
     "escalation_aborted",
-    "matched_origin_accuracy",
-    "matched_origin_composite",
+    "matched_parent_accuracy",
+    "matched_parent_composite",
 }
 
 
@@ -258,10 +258,10 @@ class ScoreboardRow(StrictModel):
     escalation_aborted: bool
     # ``None`` for a row that did not cover the origin's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the origin never gave.
-    matched_origin_accuracy: float | None
-    matched_origin_composite: float | None
-    composite_ci_lo: float | None
-    composite_ci_hi: float | None
+    matched_parent_accuracy: float | None
+    matched_parent_composite: float | None
+    mean_fitness_ci_lo: float | None
+    mean_fitness_ci_hi: float | None
     is_winner: bool
 
 
@@ -327,14 +327,14 @@ class RoundResult(StrictModel):
     # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks a
     # candidate early. Drives `improved`, p_value, verdict Δ. ``None`` when the round matched
     # nothing, nullable for the reason stated on ``ScoredCandidate``'s pair above.
-    matched_origin_accuracy: float | None = None
-    matched_origin_composite: float | None = None
+    matched_parent_accuracy: float | None = None
+    matched_parent_composite: float | None = None
     # The winner's blocked lift, copied from its ``ScoredCandidate``, so a reader of the round
     # can say whether the margin it is about to print is one the round could resolve. ``None``
     # on a round that crowned nobody: the parent's lift over itself is not a measurement.
-    matched_origin_lift: float | None = None
-    matched_origin_lift_ci_lo: float | None = None
-    matched_origin_lift_ci_hi: float | None = None
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
     # on the cycle's fixed δ ruler, so a drifting per-round subset cannot inflate the outer
     # fitness signal. None when the ruler is cold. There is deliberately no
@@ -467,64 +467,6 @@ class RoundResult(StrictModel):
         ``prompt_fields``. Empty only when no candidate was crowned — then no row is a winner."""
         lineage = self.prompt_fields.get("lineage")
         return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
-
-
-class SpendBucket(StrictModel):
-    """One spend sub-bucket (backend or optimizer-loop). Mutated only by
-    ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
-
-    used_usd: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    # How much of ``output_tokens`` bought hidden reasoning rather than an answer — a SUBSET of
-    # it, never added into a total. It answers latency, not money.
-    reasoning_tokens: int = 0
-    rate_known: bool = False
-    model: str | None = None
-    # Billed tokens whose USD cost could not be resolved (no wire cost AND no rate on file).
-    # >0 means the USD cap is blind to real spend here; the token cap backstops.
-    unpriced_tokens: int = 0
-
-    incurred_usd: float = 0.0
-    # >0 ⇒ ``incurred_usd`` UNDERSTATES what this search costs, so anything dividing by it
-    # reads cheapness that never happened. The L4 no-evidence guard refuses such a cell.
-    incurred_unpriced_tokens: int = 0
-
-
-class SpendRollup(StrictModel):
-    """A cycle's spend: the two buckets, and the totals every consumer reads off them.
-    ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
-
-    backend: SpendBucket = Field(default_factory=SpendBucket)
-    loop: SpendBucket = Field(default_factory=SpendBucket)
-    total_used_usd: float = 0.0
-    total_incurred_usd: float = 0.0
-
-    @property
-    def input_tokens(self) -> int:
-        return self.backend.input_tokens + self.loop.input_tokens
-
-    @property
-    def output_tokens(self) -> int:
-        return self.backend.output_tokens + self.loop.output_tokens
-
-    @property
-    def total_tokens_used(self) -> int:
-        """Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits
-        are excluded: a cap bounds what the run spends, not what it would have spent."""
-        return self.input_tokens + self.output_tokens
-
-    @property
-    def unpriced_tokens(self) -> int:
-        """Billed tokens with no resolvable USD rate. >0 means ``total_used_usd``
-        UNDERSTATES real spend — it is a floor, not the total."""
-        return self.backend.unpriced_tokens + self.loop.unpriced_tokens
-
-    @property
-    def incurred_unpriced_tokens(self) -> int:
-        """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ the L4 efficiency proxy would divide by
-        an understated cost and read cheapness that never happened, so such a cell is refused."""
-        return self.backend.incurred_unpriced_tokens + self.loop.incurred_unpriced_tokens
 
 
 class CycleResult(StrictModel):

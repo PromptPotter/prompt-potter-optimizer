@@ -159,7 +159,7 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
   // the backfill fired during, the sample id, and which priors got
   // caught up on that sample — so the operator can see paired comparison
   // becoming valid sample-by-sample.
-  // See docs/concepts/paired-sample-pobb.md.
+  // See docs/methods/candidate-elimination.md.
   const log = (dash as { backfill_log?: BackfillEntry[] } | null)?.backfill_log;
   if (!log || log.length === 0) return null;
   return (

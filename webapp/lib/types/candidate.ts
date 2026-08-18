@@ -37,15 +37,15 @@ export interface CandidateRow {
   // The CI whisker (served, never recomputed): the normal-CLT mean interval over the
   // candidate's own rows, stamped the moment it finishes scoring — so an IN-FLIGHT row carries
   // it too, and it does not wait for round close. ONE band, one writer, every arm.
-  compositeCiLo: number | null;
-  compositeCiHi: number | null;
+  meanFitnessCiLo: number | null;
+  meanFitnessCiHi: number | null;
   // The floor this candidate was JUDGED against — the origin restricted to the samples
   // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
   // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
   // the promotion gate used. `null` for candidates outside the election fit — nothing
   // matched them.
-  matchedOriginAccuracy: number | null;
-  matchedOriginComposite: number | null;
+  matchedParentAccuracy: number | null;
+  matchedParentComposite: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
   // Samples scored so far for this candidate; null when unknown.

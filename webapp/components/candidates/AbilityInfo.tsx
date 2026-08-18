@@ -6,7 +6,7 @@ import type { RoundSummary } from "@/lib/api/types.generated";
 // difficulty-adjusted ability θ, the metric the round winner is actually elected
 // on. Without this, a θ-elected winner sitting below a higher-accuracy sibling
 // reads as a contradiction. Copy is the human-facing twin of
-// docs/methods/exploration-exploitation.md — one corpus, two audiences; don't
+// docs/methods/verdict-resolution.md — one corpus, two audiences; don't
 // fork the explanation, keep them in step.
 //
 // Content only — no trigger of its own. It's read once and then never again, so it

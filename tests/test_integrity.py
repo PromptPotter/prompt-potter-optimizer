@@ -136,7 +136,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     so it rides the SAME serialization a round file carries (the earlier fabricated
     ``prompt_fields_override`` shape the model never emits made this test green while the feature
     mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
-    against the round's parent ``prompt_fields``, kept only when ``composite_ci_lo`` clears the
+    against the round's parent ``prompt_fields``, kept only when ``mean_fitness_ci_lo`` clears the
     matched origin, keyed by the run's answer-space signature so a logic block never reaches a
     ranking run."""
     from collections import defaultdict
@@ -152,12 +152,11 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             label=label,
             accuracy=comp,
             composite_fitness=comp,
-            hits=round(comp * 10),
             total=10,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
-            matched_origin_composite=0.50,
-            composite_ci_lo=ci_lo,
-            composite_ci_hi=ci_lo + 0.1,
+            matched_parent_composite=0.50,
+            mean_fitness_ci_lo=ci_lo,
+            mean_fitness_ci_hi=ci_lo + 0.1,
         ).model_dump()
 
     logic_run = {
@@ -464,7 +463,6 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
             round=n,
             label=f"C{n}.1" if n else "C0",
             accuracy=0.458,
-            hits=11,
             total=24,
             improved=False,
             prompt_fields={},
@@ -479,9 +477,8 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
                         changes_description=desc,
                         accuracy=0.5,
                         composite_fitness=0.5,
-                        hits=12,
                         total=24,
-                        matched_origin_accuracy=0.458,
+                        matched_parent_accuracy=0.458,
                         theta=0.31,
                         theta_se=0.42,
                     )
@@ -696,7 +693,7 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
         accuracy=0.75,
         composite_fitness=0.81,
         total=28,
-        matched_origin_lift=0.1,
+        matched_parent_lift=0.1,
         cumulative_theta=0.42,
         prompt_fields={
             "persona": "P",
@@ -723,7 +720,7 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
 
     m = export.measurement
     assert (m.round, m.accuracy, m.composite_fitness, m.n) == (3, 0.75, 0.81, 28)
-    assert (m.matched_origin_lift, m.theta) == (0.1, 0.42)
+    assert (m.matched_parent_lift, m.theta) == (0.1, 0.42)
 
     # `steps` is wire scaffold and the rendered prompt is `prompt_fields` again — neither is a
     # tunable, and one artifact does not state a fact twice.
@@ -1429,7 +1426,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
             label=reason,
             accuracy=0.0,
             composite_fitness=0.0,
-            hits=0,
             total=0,
             invalid=True,
             validation_failures=[
@@ -1444,7 +1440,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
             label="C1.9",
             accuracy=0.6,
             composite_fitness=0.6,
-            hits=6,
             total=10,
         )
 
@@ -1452,7 +1447,6 @@ def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() ->
         round=1,
         label="r1",
         accuracy=0.6,
-        hits=6,
         total=10,
         improved=False,
         prompt_fields={},
@@ -2597,12 +2591,13 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
         # OpenRouter's model id, and OpenRouter has NO key of its own here — which is
         # exactly the shipped table's shape for this model, and why the old chain's
         # cross-provider match had something wrong to reach for.
-        "deepseek/deepseek-v4-flash": (0.00000014, 0.00000028),
-        "openrouter/openai/gpt-oss-20b": (0.00000004, 0.00000015),
+        "deepseek/deepseek-v4-flash": spend_mod.Rate(0.00000014, 0.00000028),
+        "openrouter/openai/gpt-oss-20b": spend_mod.Rate(0.00000004, 0.00000015),
         # Groq answers a provider-less model id while the table keys it prefixed.
-        "groq/openai/gpt-oss-120b": (0.00000015, 0.0000006),
-        # The bare namespace the table keeps first-party OpenAI/Anthropic in.
-        "gpt-4o": (0.0000025, 0.00001),
+        "groq/openai/gpt-oss-120b": spend_mod.Rate(0.00000015, 0.0000006),
+        # The bare namespace the table keeps first-party OpenAI/Anthropic in, and the only row
+        # here carrying cache tiers — reads at 0.1x input, writes at 1.25x.
+        "gpt-4o": spend_mod.Rate(0.0000025, 0.00001, 0.000003125, 0.00000025),
     }
     monkeypatch.setattr(spend_mod, "load_rates", lambda: table)
     lookup_rate, compute_usd = spend_mod.lookup_rate, spend_mod.compute_usd
@@ -2629,6 +2624,19 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     # 4. And the provider reaches the pricing call, not just the lookup beneath it.
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10, provider="openrouter") is None
     assert compute_usd("deepseek/deepseek-v4-flash", 10, 10) is not None
+
+    # 5. A cache read is a SUBSET of the input count, so it is re-priced OUT of it rather than
+    #    added on top — 1000 input of which 800 cached bills 200 cold + 800 at the read tier.
+    cold = compute_usd("gpt-4o", 1000, 0, provider="openai")
+    hit = compute_usd("gpt-4o", 1000, 0, provider="openai", cache_read_tokens=800)
+    assert cold == pytest.approx(1000 * 0.0000025)
+    assert hit == pytest.approx(200 * 0.0000025 + 800 * 0.00000025)
+    assert hit < cold
+    #    A model whose table row carries no cache tier bills the read at the INPUT price, so the
+    #    number is UNCHANGED rather than silently discounted by a rate nobody sourced.
+    assert compute_usd(
+        "openai/gpt-oss-20b", 1000, 0, provider="openrouter", cache_read_tokens=800
+    ) == pytest.approx(compute_usd("openai/gpt-oss-20b", 1000, 0, provider="openrouter"))
 
 
 def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> None:

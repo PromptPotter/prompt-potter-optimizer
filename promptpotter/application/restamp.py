@@ -33,7 +33,11 @@ from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.io import read_json_optional, write_yaml
-from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
+from promptpotter.infrastructure.store.layout import (
+    ROUND_GLOB,
+    CycleLayout,
+    inner_sandboxes_dir,
+)
 from promptpotter.infrastructure.store.user_store import User
 
 __all__ = ["check_round_documents", "compact_cycle_ledgers", "restamp_campaign_configs"]
@@ -63,7 +67,7 @@ def _iter_round_documents() -> list[pathlib.Path]:
     return [
         p
         for tree in _workspace_trees()
-        for p in sorted(tree.glob("**/rounds/round_*.json"))
+        for p in sorted(tree.glob(f"**/rounds/{ROUND_GLOB}"))
         if ".runtime" not in p.parts
     ]
 
@@ -262,11 +266,14 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
     """Scan every surface; report, and rewrite the rows that rewrite. Roots come from
     ``config/paths.py``, so the verb addresses the trees the engine reads from any CWD."""
     root = DEFAULT_PROJECTS_ROOT
+    # A root that exists but is the WRONG tree reports a clean bill of health over data nobody
+    # asked about, so the subject is named on every path, not only the absent one.
+    print(f"Workspace: {root}")
     if not root.is_dir():
         # Nothing to re-stamp is not a failure and not an unreadable file — a fresh
         # install has no workspace yet, and counting that as a skip made the verb report
         # damage it had not found.
-        print(f"No workspace at {root} — nothing to re-stamp.")
+        print("  absent — nothing to re-stamp.")
         return {"rewritten": 0, "failed": 0, "skipped": 0}
 
     benchmarks = benchmark_datasets_root()
@@ -414,14 +421,16 @@ def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
 
 def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     """Re-project every finished cycle's ``.runtime/ledger.jsonl`` onto today's record shape."""
-    total_before = total_after = touched = skipped_live = 0
+    total_before = total_after = touched = 0
+    skipped: Counter[RunPhase] = Counter()
     rows: list[tuple[int, str]] = []
     for ledger_path in _iter_cycle_ledgers():
         cycle_dir = ledger_path.parent.parent
         manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
         finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-        if derive_run_phase(cycle_dir, is_terminal=finished) not in _COMPACTABLE_PHASES:
-            skipped_live += 1
+        phase = derive_run_phase(cycle_dir, is_terminal=finished)
+        if phase not in _COMPACTABLE_PHASES:
+            skipped[phase] += 1
             continue
         before, after, rewritten = _compact_one(ledger_path, apply=apply)
         total_before += before
@@ -432,7 +441,12 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
 
     mb = 1024 * 1024
     verb = "compacted" if apply else "would compact"
-    print(f"\nLedger compaction — {verb} {touched} cycle ledger(s); {skipped_live} still live")
+    print(f"\nLedger compaction — {verb} {touched} cycle ledger(s)")
+    # Name the phase rather than calling every exclusion "live": a CHECKIN skip clears only when
+    # the operator Starts that campaign, a RUNNING one on the next deploy, so one word for both
+    # sends the reader hunting a producer that was never there.
+    for phase, n in sorted(skipped.items()):
+        print(f"  {n:>6} skipped — {phase}")
     print(f"  {'before':>12}: {total_before / mb:8.2f} MB")
     print(f"  {'after':>12}: {total_after / mb:8.2f} MB")
     if total_before:
@@ -444,7 +458,8 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
         "cycles": touched,
-        "skipped_live": skipped_live,
+        "skipped_checkin": skipped.get(RunPhase.CHECKIN, 0),
+        "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
         "bytes_saved": total_before - total_after,
     }
 

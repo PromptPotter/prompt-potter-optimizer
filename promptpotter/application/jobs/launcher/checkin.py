@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.registry import JobRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def prepare_checkin_run(
 async def start_checkin_campaign(
     *,
     stores: Stores,
-    job_registry: Any,
+    job_registry: JobRegistry,
     campaign_id: str,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,

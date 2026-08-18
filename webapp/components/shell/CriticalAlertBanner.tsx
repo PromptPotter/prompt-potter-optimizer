@@ -6,8 +6,8 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { StatusKind } from "@/lib/poll";
 
-// The loud, can't-miss failure surface — a full-width sticky bar pinned under
-// the Topbar and rendered on EVERY tab (Chat / Dashboard / Verify / Files), so
+// The loud, can't-miss failure surface — a full-width sticky bar at the top of
+// the main column, rendered on EVERY tab (Chat / Dashboard / Verify / Files), so
 // a server-unreachable, crashed, or gone-silent run reaches an operator who
 // has alt-tabbed away from the dashboard. The verdict (and its precedence) is
 // the pure `criticalAlert` derivation; this component is the presentation. It

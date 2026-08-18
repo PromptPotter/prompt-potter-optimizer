@@ -19,6 +19,7 @@ the same stamp.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import time
@@ -31,9 +32,12 @@ from fastapi import Request
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.domain.run_records import TokenUsageRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S, derive_run_phase
+from promptpotter.infrastructure.store.account_spend import BilledSpend, forwarded_mark
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import (
@@ -46,6 +50,7 @@ from promptpotter.infrastructure.store.session_pointer import read_active_pointe
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.routers.campaigns._conditional import http_date
 from promptpotter.presentation.api.routers.campaigns.cycles import serve_dashboard_response
+from promptpotter.presentation.cli.commands import reset as reset_cmd
 from promptpotter.shared import clock
 from promptpotter.shared.errors import ConflictError
 
@@ -475,6 +480,116 @@ def test_reclaim_spares_a_sandbox_it_cannot_prove_is_an_orphan(built_stores: Sto
 
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
     assert sandbox.is_dir()
+
+
+def _spend_inner(sandbox: Path, *, input_tokens: int, output_tokens: int, cost_usd: float) -> Path:
+    """Put real money on the sandbox's inner cycle ledger, through the real writer."""
+    cycle_dir = sandbox / "tenant" / "campaigns" / "innerds__20260101-000000" / "cycles"
+    cycle_dir = cycle_dir / "inner-cycle-0"
+    CycleEventLog.open(CycleDir(cycle_dir)).append(
+        TokenUsageRecord(
+            kind="backend",
+            node="llm_only",
+            model="openai/gpt-oss-20b",
+            provider="openrouter",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            duration_s=1.0,
+            cost_usd=cost_usd,
+        )
+    )
+    return cycle_dir
+
+
+def _tombstones(stores: Stores) -> list[dict[str, object]]:
+    path = CycleEventLog.workspace_path(stores.campaigns.workspace)
+    if not path.is_file():
+        return []
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    return [r for r in rows if r.get("record_type") == "spend_tombstone"]
+
+
+def test_reclaiming_a_sandbox_banks_the_spend_its_ledgers_hold(built_stores: Stores) -> None:
+    """An inner sandbox is a SIBLING of the tenant tree, so no account-wide walk reaches it —
+    the reaper deleting one unbanked makes real money vanish from the lifetime record with no
+    error, and the account simply reads lower afterwards."""
+    sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
+    _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
+
+    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
+    assert not sandbox.exists()
+
+    banked = _tombstones(built_stores)
+    assert len(banked) == 1
+    assert banked[0]["used_usd"] == pytest.approx(0.25)
+    assert banked[0]["used_tokens"] == 1200
+
+
+def test_a_forwarded_inner_cycle_is_not_banked_twice(built_stores: Stores) -> None:
+    """An inner cycle forwards onto its outer ledger as it runs, so its rows are already counted.
+    Banking them whole on the way out bills that money a second time — silently, because a
+    tombstone is indistinguishable from spend that never reached anywhere else."""
+    sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
+    cycle_dir = _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
+    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
+    inner_hop = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+
+    # Half forwarded: only the remainder is still this sandbox's to bank.
+    inner.mark_spend_forwarded(inner_hop, BilledSpend(0.10, 400, 100, 0))
+    assert forwarded_mark(cycle_dir).used_usd == pytest.approx(0.10)
+
+    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
+    banked = _tombstones(built_stores)
+    assert len(banked) == 1
+    assert banked[0]["used_usd"] == pytest.approx(0.15)
+    assert banked[0]["used_tokens"] == 700
+
+
+def test_a_fully_forwarded_inner_cycle_banks_nothing(built_stores: Stores) -> None:
+    """The other end of the same rule: everything already counted leaves NO residue, so the
+    destroyer must write no tombstone at all rather than a zero-valued one."""
+    sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
+    cycle_dir = _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
+    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
+    inner.mark_spend_forwarded(
+        CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"),
+        BilledSpend(0.25, 1000, 200, 0),
+    )
+    assert forwarded_mark(cycle_dir).used_tokens == 1200
+
+    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
+    assert _tombstones(built_stores) == []
+
+
+async def test_reset_takes_the_inner_sandboxes_and_banks_them(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``reset`` declares it "never reaches a path it cannot explain", but the sandbox tree is a
+    SIBLING of ``projects/`` — so a per-tenant walk left one neither dropped, preserved, NOR
+    reported. The harm lands on the next run, not this one: inner campaign ids are
+    content-addressed, so a surviving sandbox is silently CONTINUED by a fresh ``new`` that
+    believes it started clean, and the money on it never reaches the lifetime record."""
+    _mint(built_stores)
+    sandbox = _sandbox(built_stores, _CAMPAIGN, _CYCLE)
+    _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
+    # No owner record, so nothing can name a workspace to bank this INTO — the key is a hash.
+    unowned = inner_sandbox_dir(
+        built_stores.shared_root, "t", CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle-x")
+    )
+    (unowned / "tenant").mkdir(parents=True)
+    monkeypatch.setattr(reset_cmd, "DEFAULT_PROJECTS_ROOT", built_stores.projects_root)
+
+    result = await reset_cmd.cmd_reset(
+        argparse.Namespace(all_tenants=True, yes=True, dry_run=False)
+    )
+
+    assert not sandbox.exists()
+    assert str(sandbox) in result.data["dropped"]
+    # Kept AND named — the unattributable arm may not be silently skipped either.
+    assert (unowned / "tenant").is_dir()
+    assert result.data["kept_sandboxes"] == [str(unowned)]
+    # A reset drops the data, never the money: the unforwarded residue reached the ledger.
+    assert [b["used_usd"] for b in _tombstones(built_stores)] == [pytest.approx(0.25)]
 
 
 def test_two_campaigns_on_one_origin_do_not_share_a_sandbox(built_stores: Stores) -> None:

@@ -137,6 +137,25 @@ def round_basename(round_num: int) -> str:
     return f"round_{round_num:04d}.json"
 
 
+# The glob that finds what ``round_basename`` writes. Spelled beside it so the pair moves together.
+ROUND_GLOB = "round_*.json"
+
+
+def round_number(path: Path) -> int | None:
+    """The reader-side INVERSE of :func:`round_basename`; ``None`` when the name is not a round file.
+
+    It is owned here because there was no inverse for years, so four readers each invented one —
+    and every one of them answers a plausible ZERO rather than raising on a name it cannot parse
+    (a resume seeding a fresh trajectory, a rewind that deletes nothing and reports success). That
+    is what made the naming claim above false: without this, a move on disk is silent, not one line.
+    """
+    stem = path.stem
+    if path.suffix != ".json" or not stem.startswith("round_"):
+        return None
+    suffix = stem.removeprefix("round_")
+    return int(suffix) if suffix.isdigit() else None
+
+
 @dataclass(frozen=True, slots=True)
 class CycleLayout:
     """Sole owner of the on-disk shape below ``campaigns/{c}/cycles/{cy}/`` — the ledger path, the
@@ -178,6 +197,11 @@ class CycleLayout:
 
     def round_file(self, round_num: int) -> Path:
         return self.rounds / round_basename(round_num)
+
+    def round_files(self) -> list[Path]:
+        """Every public round file, ascending — the zero-padding makes lexical order round order.
+        Empty (never raising) on a cycle whose resume state was stripped by ``--keep-results``."""
+        return sorted(self.rounds.glob(ROUND_GLOB)) if self.rounds.is_dir() else []
 
     # --- .runtime/ durability classes (spine / cache / control / rewind) ---
     @property

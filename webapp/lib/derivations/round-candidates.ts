@@ -74,7 +74,7 @@ export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> 
 // way because they both ride this list.
 // ONE mapping, both halves. A live row and a closed row are the same served shape
 // (`DashboardCandidate`), so there is nothing left to merge — the live arm used to hardcode
-// `theta`/`compositeCi*`/`matchedOrigin*` to null on the claim that all of them are "stamped at
+// `theta`/`meanFitnessCi*`/`matchedParent*` to null on the claim that all of them are "stamped at
 // round close", which is false for the CI: `l1/population.py` stamps it the moment a candidate
 // finishes scoring, so every in-flight bar was served a whisker and then told it had none.
 //
@@ -99,10 +99,10 @@ function rowOf(
     composite: c.composite_fitness,
     theta: c.theta,
     theta_se: c.theta_se,
-    compositeCiLo: c.composite_ci_lo,
-    compositeCiHi: c.composite_ci_hi,
-    matchedOriginAccuracy: c.matched_origin_accuracy,
-    matchedOriginComposite: c.matched_origin_composite,
+    meanFitnessCiLo: c.mean_fitness_ci_lo,
+    meanFitnessCiHi: c.mean_fitness_ci_hi,
+    matchedParentAccuracy: c.matched_parent_accuracy,
+    matchedParentComposite: c.matched_parent_composite,
     evaluators: c.evaluators,
     // Served on the base shape, so a LIVE row carries it too: the election runs at the end
     // of scoring, not at round close. `false` means nothing has been crowned yet — never

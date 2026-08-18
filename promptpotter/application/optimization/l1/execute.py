@@ -153,8 +153,8 @@ async def execute_round(
         improved_reason=round_result.improved_reason,
         p_value=round_result.p_value,
         candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
-        winner_matched_origin_accuracy=round_result.matched_origin_accuracy,
-        winner_matched_origin_composite=round_result.matched_origin_composite,
+        winner_matched_parent_accuracy=round_result.matched_parent_accuracy,
+        winner_matched_parent_composite=round_result.matched_parent_composite,
     )
 
     # PANEL COVERAGE — the round's own completeness, asked HERE because this is the last

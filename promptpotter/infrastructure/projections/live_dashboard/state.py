@@ -10,7 +10,8 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, SpendBucket, SpendRollup
+from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -24,8 +25,6 @@ __all__ = [
     "LoopWarning",
     "PobbBlock",
     "RunLimits",
-    "SpendBucket",
-    "SpendRollup",
     "warming_payload",
 ]
 
@@ -106,8 +105,13 @@ class InFlightCall(StrictModel):
 
 
 class RunLimits(StrictModel):
-    """``state.run_limits`` — the cycle's declared run-limit ceilings, written
-    once at ``INIT:exit``. Static, so a fork's reconcile dialog can default against it."""
+    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:exit`` so a fork's
+    reconcile dialog can default against them.
+
+    **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
+    ``spend_cap.json`` at every persist (``view.py::_persist``). They were static, and that is
+    precisely what made every surface reading them — the control's own prefill, the run strip —
+    report a number ``BudgetGate`` had stopped using the moment ``change-spend-budget`` landed."""
 
     max_rounds: int | None = None
     l1_patience: int

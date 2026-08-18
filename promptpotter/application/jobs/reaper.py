@@ -11,15 +11,12 @@ from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import (
-    read_json_optional,
-    rmtree_robust,
-    validate_path_component,
-)
+from promptpotter.infrastructure.store.io import read_json_optional, validate_path_component
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
     sandbox_owner_path,
+    tenant_workspace,
 )
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
@@ -115,7 +112,14 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
         if cycle_index.is_file():
             continue
         try:
-            rmtree_robust(sandbox)
+            store = CampaignStore(tenant_workspace(projects_root, str(owner.get("tenant_id", ""))))
+        except ValueError as exc:
+            # An owner triple that will not validate cannot name a workspace to bank INTO, and
+            # this function deletes on a fact: the sandbox is kept, money and all.
+            logger.warning("orphan inner sandbox %s names an unusable owner: %s", sandbox, exc)
+            continue
+        try:
+            store.delete_inner_sandbox(sandbox, campaign_id=str(owner.get("campaign_id", "")))
         except OSError as exc:
             # Reported, never swallowed: an unreclaimable sandbox is the exact silence
             # this function exists to end.

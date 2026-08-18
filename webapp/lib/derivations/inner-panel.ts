@@ -52,3 +52,17 @@ export function panelCellLabel(cell: string): string {
   const slash = cell.lastIndexOf("/");
   return slash >= 0 ? cell.slice(slash + 1) : cell;
 }
+
+// The inner cycle running RIGHT NOW, if any — the remote strip's drill target while
+// the outer is viewed. Whole-tree walk so a nested (L5+) run still resolves;
+// `run_phase` is course-only by construction, so candidates never match.
+export function runningInnerRun(root: LineageNode | null): LineageNode | null {
+  if (!root) return null;
+  const stack: LineageNode[] = [...(root.children ?? [])];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.kind === "course" && n.course_kind === "inner" && n.run_phase === "running") return n;
+    if (n.children) stack.push(...n.children);
+  }
+  return null;
+}

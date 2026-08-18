@@ -8,11 +8,9 @@ import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { fmtPct0 } from "@/lib/format";
 
-// Inline unit picker. Single label scheme — optgroup = the campaign's display
-// name, option `${unit} · best X · status`. The `variant` prop
-// only switches the wrapper CSS class (and the empty-state copy) so the
-// chat header can size the trigger differently from the dashboard
-// breadcrumb; the labels themselves are identical in both contexts.
+// Inline unit picker — the Dashboard masthead's title line. Single label
+// scheme: optgroup = the campaign's display name, option
+// `${unit} · best X · status`.
 //
 // A `cycle_id` is unique only within its campaign, so every option is keyed
 // and valued by the composite `campaign_id::cycle_id` (unitKey); selecting
@@ -27,11 +25,7 @@ function optionText(c: CycleListEntry): string {
   return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${runPhaseLabel(c.run_phase, c.status)}${babysat}`;
 }
 
-export const CyclePicker = memo(function CyclePicker({
-  variant = "breadcrumb",
-}: {
-  variant?: "breadcrumb" | "standalone";
-}) {
+export const CyclePicker = memo(function CyclePicker() {
   const {
     cycleId,
     campaignId,
@@ -56,7 +50,6 @@ export const CyclePicker = memo(function CyclePicker({
     [campaigns],
   );
 
-  const standalone = variant === "standalone";
   // Depth > 1 ⇒ viewing an inner descendant (an L4 inner loop). The picker's
   // select still binds to the ROOT hop (campaignId/cycleId); the breadcrumb
   // shows the leaf.
@@ -92,10 +85,10 @@ export const CyclePicker = memo(function CyclePicker({
     // Anon never loads the (auth-gated) workspace — show a terminal label, not a
     // perpetual "loading…" (frontend-surface-contract.md § I1).
     const restingLabel = status === "unauthed" ? "No campaign" : "loading…";
-    return <span>{standalone ? "New Job" : cycleId || restingLabel}</span>;
+    return <span>{cycleId || restingLabel}</span>;
   }
   if (cycles.length === 0) {
-    return <span>{standalone ? "New Job" : cycleId || "No campaigns yet"}</span>;
+    return <span>{cycleId || "No campaigns yet"}</span>;
   }
 
   const currentKey = campaignId && cycleId ? unitKey(campaignId, cycleId) : "";
@@ -104,7 +97,7 @@ export const CyclePicker = memo(function CyclePicker({
   );
 
   return (
-    <span className={`cycle-picker${standalone ? " standalone" : ""}`}>
+    <span className="cycle-picker">
       <select
         value={currentKey}
         onChange={(e) => {

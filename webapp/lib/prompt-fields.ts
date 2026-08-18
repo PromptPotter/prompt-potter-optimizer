@@ -1,5 +1,7 @@
 // The six PromptTemplate string fields — the decomposition scheme the optimizer
-// evolves. Canonical order + membership; MUST stay in sync with
+// evolves. Canonical MEMBERSHIP only — Python orders each prompt kind for itself
+// (`PromptTemplate.RENDER_ORDER`), so the sequence below is this editor's grid, not a
+// render order. MUST stay in sync with
 // `PROMPT_STRING_FIELDS` in `promptpotter/config/settings.py` (the TS/Py seam).
 //
 // Single source for every webapp consumer: the `PromptFieldsEditor` grid and the

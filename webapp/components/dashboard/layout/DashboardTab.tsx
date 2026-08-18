@@ -6,7 +6,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
 import { useOptimizerPromptRanking } from "@/lib/hooks/useOptimizerPromptRanking";
 import { DashSpine } from "./DashSpine";
-import { CyclePicker } from "@/components/shell/CyclePicker";
+import { RunMasthead } from "@/components/shell/RunMasthead";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
@@ -46,15 +46,7 @@ export function DashboardTab() {
 
   return (
     <div className="content" id="content-dashboard">
-      <DashSpine>
-        <header className="dash-hero">
-          <div className="page-header">
-            <div className="breadcrumb">
-              Campaign » <CyclePicker />
-            </div>
-          </div>
-        </header>
-      </DashSpine>
+      <RunMasthead />
       <DashSpine>
         <RunErrorBanner />
         <TopStrip />

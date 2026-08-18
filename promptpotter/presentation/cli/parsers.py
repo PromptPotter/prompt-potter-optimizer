@@ -460,6 +460,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--reason", default="", help="Optional operator-supplied reason, recorded with the command."
     )
 
+    p_set_budget = sub.add_parser(
+        "set-budget",
+        help="Raise or lower an EXISTING cycle's spend / token ceiling — the same "
+        "change-spend-budget command the webapp fires. This is how a budget-halted cycle is "
+        "continued: set a higher ceiling, then `resume`. The launch flags only shape a launch. "
+        "Clamped against your account allowance; read the armed value off the dashboard.",
+    )
+    p_set_budget.add_argument(
+        "--campaign", default="", help="Campaign id (default: the active one)."
+    )
+    p_set_budget.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+    p_set_budget.add_argument(
+        "--max-usd",
+        dest="max_usd",
+        type=float,
+        default=None,
+        help="New USD ceiling. 0 halts after the current round. Omit to leave it untouched.",
+    )
+    p_set_budget.add_argument(
+        "--max-tokens",
+        dest="max_tokens",
+        type=int,
+        default=None,
+        help="New token ceiling — the unit that survives an unpriced model. 0 halts after the "
+        "current round. Omit to leave it untouched.",
+    )
+
     for verb, summary in (
         (
             "archive",

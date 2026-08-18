@@ -160,7 +160,7 @@ function fmtTheta(v: number | null): string {
 // another candidate's rate would caption one individual with another's number.
 //
 // The pair is subset-matched, which is why it may be read as a before/after at all. Its
-// floor is served `matched_origin_accuracy`, and that name is a round-0 fossil: the
+// floor is served `matched_parent_accuracy`, and that name is a round-0 fossil: the
 // engine computes it from `RoundParent.results`, so the floor is the candidate's PARENT
 // — the origin at round 1, the prior round's winner after it. The copy says parent for
 // that reason, and the flips line below names its own reference for the same one.
@@ -238,7 +238,7 @@ function Lift({
 //
 // The headline numbers are all SERVED. The lift is `ability_delta` in logits, never a
 // percent and never `best − origin` (`run-summary.ts` states why); the accuracy pair
-// is the champion's own rate against `matched_origin_accuracy`, the origin restricted
+// is the champion's own rate against `matched_parent_accuracy`, the origin restricted
 // to the rows that candidate actually measured — the only honest floor under
 // elimination. Nothing here subtracts, defaults or rounds a number into existence.
 function ConfigBox({
@@ -280,7 +280,7 @@ function ConfigBox({
           </span>
           <Lift
             accuracy={shownRow?.accuracy ?? null}
-            originAccuracy={shownRow?.matchedOriginAccuracy ?? null}
+            originAccuracy={shownRow?.matchedParentAccuracy ?? null}
             theta={observe.state === "best" ? summary.abilityDelta : null}
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}

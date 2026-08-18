@@ -1,4 +1,5 @@
-/* Unauthed Topbar chips — Log in (yellow-gold) + Sign up for free (rust/burnt-orange).
+/* Unauthed entry chips — Log in (yellow-gold) + Sign up for free (rust/burnt-orange).
+   Two mount points, one look: the sidebar footer and the phone's app bar.
    Same shape, two color variants drawn straight from the accent palette. */
 .auth-chip{display:inline-flex;align-items:center;height:30px;padding:0 var(--space-14);border-radius:999px;border:0.5px solid transparent;font:inherit;font-size:var(--text-base);font-weight:600;text-decoration:none;cursor:pointer;transition:filter 120ms,transform 60ms}
 .auth-chip:hover{filter:brightness(1.08)}
