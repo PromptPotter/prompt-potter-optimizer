@@ -827,33 +827,10 @@ export interface RankedEdit {
   provenance: EffectProvenance[];
   per_cell_effects: CellEffect[];
   anchor_effect: number;
-  ci_lo: number;
-  ci_hi: number;
+  ci_lo: number | null;
+  ci_hi: number | null;
   n_cells: number;
   n_measurements: number;
-}
-
-/** One campaign's origin panel — the roster row and the comparability check in one shape. */
-export interface CampaignOrigin {
-  campaign_id: string;
-  cycle_id: string;
-  dataset_name: string;
-  created_at: string;
-  arm_id: string;
-  ruler_id: string | null;
-  calibration_model: '1PL' | '2PL' | null;
-  n_cells: number;
-  origin_level: number | null;
-  origin_accuracy: number | null;
-  spend_usd: number | null;
-  rounds_scored: number;
-  stop_reason: string | null;
-}
-
-/** One campaign's per-cell origin levels, served so the browser can plot them without */
-export interface CampaignCells {
-  campaign_id: string;
-  levels: Record<string, number>;
 }
 
 /** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a */
@@ -899,14 +876,62 @@ export interface OrderConfound {
   order_confounded: boolean;
 }
 
+/** One pickable metric. Served rather than restated in the browser, so a label and a unit have */
+export interface MetricSpec {
+  key: string;
+  label: string;
+  expression: string;
+  unit: 'level' | 'delta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds' | 'composed';
+  higher_is_better: boolean | null;
+  description: string;
+}
+
+/** One campaign, read under the selected metric — its identity, its per-cell values and the one */
+export interface CampaignReading {
+  campaign_id: string;
+  dataset_name: string;
+  created_at: string;
+  arm_id: string;
+  ruler_id: string | null;
+  spend_usd: number | null;
+  rounds_scored: number;
+  values: Record<string, number>;
+  value: number | null;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  n_cells: number;
+  n_unscorable: number;
+}
+
+/** One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell */
+export interface PairwiseComparison {
+  campaign_a: string;
+  campaign_b: string;
+  mean_d: number;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  p_value: number | null;
+  p_adjusted: number | null;
+  n_cells: number;
+}
+
+/** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
+export interface MetricReading {
+  spec: MetricSpec;
+  catalogue: MetricSpec[];
+  namespace: string[];
+  scored_cells: string[];
+  pairwise: PairwiseComparison[];
+  n_tests: number;
+}
+
 /** The whole read for one selection of campaigns — recomputed on every fetch. */
 export interface Evidence {
   generated_at: string;
-  n_cycles_scanned: number;
-  origins: CampaignOrigin[];
+  campaigns: CampaignReading[];
   comparability: Comparability;
-  cells: CampaignCells[];
-  shared_cells: string[];
+  metric: MetricReading;
+  unread_campaigns: string[];
   replicates: ArmReplicate[];
   variance: EvidenceVariance | null;
   power: EvidencePower | null;

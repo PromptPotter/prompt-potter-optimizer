@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.restamp import (
+    backfill_inner_facts,
     check_round_documents,
     compact_cycle_ledgers,
     restamp_campaign_configs,
@@ -19,6 +20,7 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     apply = bool(getattr(args, "apply", False))
     counts = restamp_campaign_configs(apply=apply)
     ledgers = compact_cycle_ledgers(apply=apply)
+    inner = backfill_inner_facts(apply=apply)
     # Read-only, so --apply does not change what it does.
     rounds = check_round_documents()
     verb = "re-stamped" if apply else "would re-stamp"
@@ -30,6 +32,10 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"({ledgers['skipped_producing']} producing + "
         f"{ledgers['skipped_checkin']} pre-loop, left alone). "
         f"Rounds: {rounds['rounds_checked'] - rounds['rounds_unreadable']}"
-        f"/{rounds['rounds_checked']} load."
+        f"/{rounds['rounds_checked']} load. "
+        f"Inner seed facts {verb} onto {inner['inner_rows_filled']} row(s) from the inner "
+        f"campaigns themselves; {inner['inner_rows_orphaned']} cell(s) no longer have one on "
+        f"disk and stay absent. Peak lift and round budget are never backfilled — no surviving "
+        f"record reproduces them exactly."
     )
-    return CommandResult(data={**counts, **ledgers, **rounds}, human=human)
+    return CommandResult(data={**counts, **ledgers, **rounds, **inner}, human=human)

@@ -105,8 +105,9 @@ CORRECT depends on what the payload carries:
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
 
-`application/restamp.py::check_round_documents` reports which side has drifted; nothing repairs
-a round document, because pruning cannot restore a renamed field's value.
+`application/restamp.py::check_round_documents` reports which side has drifted; PRUNING never
+repairs a round document, because it cannot restore a renamed field's value. Recovering one from a
+record that survives is a different act and may write (`restamp.py::backfill_inner_facts`).
 
 ## Conventions
 

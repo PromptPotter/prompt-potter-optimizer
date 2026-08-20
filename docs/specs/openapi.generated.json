@@ -364,29 +364,6 @@
         "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "type": "object"
       },
-      "CampaignCells": {
-        "additionalProperties": false,
-        "description": "One campaign's per-cell origin levels, served so the browser can plot them without\nre-deriving one. Keyed by the cell's QUERY, the identity that survives across campaigns.",
-        "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "levels": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Levels",
-            "type": "object"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "levels"
-        ],
-        "title": "CampaignCells",
-        "type": "object"
-      },
       "CampaignDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -499,39 +476,42 @@
         "title": "CampaignListResponse",
         "type": "object"
       },
-      "CampaignOrigin": {
+      "CampaignReading": {
         "additionalProperties": false,
-        "description": "One campaign's origin panel — the roster row and the comparability check in one shape.",
+        "description": "One campaign, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same campaign, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
           "arm_id": {
             "title": "Arm Id",
             "type": "string"
           },
-          "calibration_model": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "ci_hi": {
             "anyOf": [
               {
-                "enum": [
-                  "1PL",
-                  "2PL"
-                ],
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Calibration Model"
+            "title": "Ci Hi"
           },
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
           },
           "created_at": {
             "title": "Created At",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
             "type": "string"
           },
           "dataset_name": {
@@ -542,27 +522,9 @@
             "title": "N Cells",
             "type": "integer"
           },
-          "origin_accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Origin Accuracy"
-          },
-          "origin_level": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Origin Level"
+          "n_unscorable": {
+            "title": "N Unscorable",
+            "type": "integer"
           },
           "rounds_scored": {
             "title": "Rounds Scored",
@@ -590,34 +552,41 @@
             ],
             "title": "Spend Usd"
           },
-          "stop_reason": {
+          "value": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Stop Reason"
+            "title": "Value"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Values",
+            "type": "object"
           }
         },
         "required": [
           "campaign_id",
-          "cycle_id",
           "dataset_name",
           "created_at",
           "arm_id",
           "ruler_id",
-          "calibration_model",
-          "n_cells",
-          "origin_level",
-          "origin_accuracy",
           "spend_usd",
           "rounds_scored",
-          "stop_reason"
+          "values",
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n_cells",
+          "n_unscorable"
         ],
-        "title": "CampaignOrigin",
+        "title": "CampaignReading",
         "type": "object"
       },
       "CampaignStorageResponse": {
@@ -1859,11 +1828,11 @@
         "additionalProperties": false,
         "description": "The whole read for one selection of campaigns — recomputed on every fetch.",
         "properties": {
-          "cells": {
+          "campaigns": {
             "items": {
-              "$ref": "#/components/schemas/CampaignCells"
+              "$ref": "#/components/schemas/CampaignReading"
             },
-            "title": "Cells",
+            "title": "Campaigns",
             "type": "array"
           },
           "comparability": {
@@ -1880,9 +1849,8 @@
             "title": "Generated At",
             "type": "string"
           },
-          "n_cycles_scanned": {
-            "title": "N Cycles Scanned",
-            "type": "integer"
+          "metric": {
+            "$ref": "#/components/schemas/MetricReading"
           },
           "order_confound": {
             "anyOf": [
@@ -1893,13 +1861,6 @@
                 "type": "null"
               }
             ]
-          },
-          "origins": {
-            "items": {
-              "$ref": "#/components/schemas/CampaignOrigin"
-            },
-            "title": "Origins",
-            "type": "array"
           },
           "power": {
             "anyOf": [
@@ -1923,15 +1884,15 @@
             "title": "Replicates",
             "type": "array"
           },
-          "shared_cells": {
+          "spread": {
+            "$ref": "#/components/schemas/EditSpread"
+          },
+          "unread_campaigns": {
             "items": {
               "type": "string"
             },
-            "title": "Shared Cells",
+            "title": "Unread Campaigns",
             "type": "array"
-          },
-          "spread": {
-            "$ref": "#/components/schemas/EditSpread"
           },
           "variance": {
             "anyOf": [
@@ -1946,9 +1907,9 @@
         },
         "required": [
           "generated_at",
-          "n_cycles_scanned",
-          "origins",
-          "comparability"
+          "campaigns",
+          "comparability",
+          "metric"
         ],
         "title": "Evidence",
         "type": "object"
@@ -3003,6 +2964,114 @@
         "title": "MechanismToggle",
         "type": "object"
       },
+      "MetricReading": {
+        "additionalProperties": false,
+        "description": "The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a\nstale render cannot then show new bars under the old metric's label.",
+        "properties": {
+          "catalogue": {
+            "items": {
+              "$ref": "#/components/schemas/MetricSpec"
+            },
+            "title": "Catalogue",
+            "type": "array"
+          },
+          "n_tests": {
+            "title": "N Tests",
+            "type": "integer"
+          },
+          "namespace": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Namespace",
+            "type": "array"
+          },
+          "pairwise": {
+            "items": {
+              "$ref": "#/components/schemas/PairwiseComparison"
+            },
+            "title": "Pairwise",
+            "type": "array"
+          },
+          "scored_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scored Cells",
+            "type": "array"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/MetricSpec"
+          }
+        },
+        "required": [
+          "spec",
+          "catalogue",
+          "namespace",
+          "scored_cells",
+          "pairwise",
+          "n_tests"
+        ],
+        "title": "MetricReading",
+        "type": "object"
+      },
+      "MetricSpec": {
+        "additionalProperties": false,
+        "description": "One pickable metric. Served rather than restated in the browser, so a label and a unit have\none owner and a picker cannot drift from what the server actually computed.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "higher_is_better": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Higher Is Better"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "level",
+              "delta",
+              "seconds",
+              "usd",
+              "tokens",
+              "rank",
+              "rounds",
+              "composed"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "expression",
+          "unit",
+          "higher_is_better",
+          "description"
+        ],
+        "title": "MetricSpec",
+        "type": "object"
+      },
       "NestedPipelineRef": {
         "additionalProperties": false,
         "description": "Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are\nderived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary\ndataset.",
@@ -3228,6 +3297,84 @@
         "title": "OriginListResponse",
         "type": "object"
       },
+      "PairwiseComparison": {
+        "additionalProperties": false,
+        "description": "One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``mean_d = b - a`` has one reading\nacross the whole table. The interval and both p-values are ``None`` below two shared cells:\nnothing was tested there, which a ``1.0`` would misreport as a test that found nothing.",
+        "properties": {
+          "campaign_a": {
+            "title": "Campaign A",
+            "type": "string"
+          },
+          "campaign_b": {
+            "title": "Campaign B",
+            "type": "string"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "mean_d": {
+            "title": "Mean D",
+            "type": "number"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "p_adjusted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Adjusted"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          }
+        },
+        "required": [
+          "campaign_a",
+          "campaign_b",
+          "mean_d",
+          "ci_lo",
+          "ci_hi",
+          "p_value",
+          "p_adjusted",
+          "n_cells"
+        ],
+        "title": "PairwiseComparison",
+        "type": "object"
+      },
       "QuotaStatus": {
         "additionalProperties": false,
         "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
@@ -3306,12 +3453,26 @@
             "type": "number"
           },
           "ci_hi": {
-            "title": "Ci Hi",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
           },
           "ci_lo": {
-            "title": "Ci Lo",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
           },
           "label": {
             "title": "Label",
@@ -6001,7 +6162,7 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "Roster, comparability, replicates, the cell/arm/residual decomposition, what the selection\ncan resolve, and the run-order confound — reduced fresh from disk on each fetch (on-demand,\nnot the 2 s poll); zero LLM, nothing persisted.",
+        "description": "Roster, comparability, replicates, the cell/arm/residual decomposition, what the selection\ncan resolve, the run-order confound, and — under the selected metric — a merged interval per\ncampaign with every pairwise test. Reduced fresh from disk on each fetch (on-demand, not the\n2 s poll); zero LLM, nothing persisted.",
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {
@@ -6020,15 +6181,27 @@
             }
           },
           {
-            "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the only half that opens a round document past round 0: the rest reads one origin per campaign, this walks every round of every campaign.",
+            "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the widest walk here: the origin half reads one round-0 document per campaign, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
             "in": "query",
             "name": "ranking",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the only half that opens a round document past round 0: the rest reads one origin per campaign, this walks every round of every campaign.",
+              "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the widest walk here: the origin half reads one round-0 document per campaign, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
               "title": "Ranking",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected campaign carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "default": "measurand",
+              "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected campaign carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
+              "title": "Metric",
+              "type": "string"
             }
           }
         ],

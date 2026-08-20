@@ -561,7 +561,11 @@ controls:
         note: changing the selection resets the ranking press — that walk was for a different set.
 
   - id: metric_picker
-    do: Choose WHICH number everything below is about, from the server-served catalogue.
+    do: Choose WHICH number everything below is about, from the server-served catalogue — which
+        is built for THIS selection, so a metric no selected campaign can answer is never listed.
+        note: changing the selection CLEARS the pick, for the same reason it resets the ranking
+              press: the catalogue it was chosen from no longer applies. Cleared, not re-set to a
+              name — the default is the server's to choose, and the browser holds no copy of it.
         The label, unit, prose and direction all come off the wire; this surface names none of them.
         live: the merged intervals, the pairwise table, the variance decomposition, the power
               reading and the order confound ALL recompute under the pick, with no press.
@@ -577,19 +581,36 @@ controls:
         error: the server's own message beside the input, and the last good read STAYS on screen
                (failureKind → `invalid` is the operator's input, not a dead read). Never a raw
                "400 /api/v1/evidence" (I2).
-        note: direction is unknowable for a composed metric, so the surface names no winner.
+        note: direction is unknowable for a composed metric, and the surface says so ONCE —
+              off the served `higher_is_better: null`, never also in the metric's description.
 
   - id: chart_form
     do: Grouped / Stacked / Lines / Merged over the cells every campaign scored under the metric.
+        The y axis is TITLED with the metric, and the canvas carries the same string as its
+        accessible name — a composed expression otherwise plots as bare numbers with nothing on
+        screen saying what the height is.
+        note: value and interval are formatted through ONE served unit, so a latency row can never
+              read "1000s [900.000, 1100.000]". A unit that names nothing a reader lacks (a level,
+              a signed delta, a composed expression) is omitted rather than printed.
         empty: no shared cell → say so and point at Merged, which needs none.
 
   - id: unreadable_metric
-    do: When NO campaign scored a cell under the pick, the card says that ONCE — the metric, why
+    do: Reachable now only through a composed expression, since the picker cannot offer an
+        unanswerable metric. When NO campaign scored a cell under the pick, the card says that ONCE — the metric, why
         it cannot be read, and each campaign's unreadable count — and everything describing a
         plot that does not exist stays silent: no chart, no legend, no per-campaign tally, no
         pairwise card, no variance card.
         note: the failure this replaced was five blocks stating one absence in five wordings,
               including a lede claiming to have "plotted over the 0 cells".
+
+  - id: unread_campaigns
+    do: Name the campaigns that were SELECTED and answered nothing — no round-0 origin yet, or an
+        origin whose rows carry no channel. Served (`Evidence.unread_campaigns`), never derived by
+        differencing the picker against the roster.
+        note: a selection that thins itself in silence is the campaign-level twin of scoring an
+              unread cell as zero — the operator ticks four and reads three bars as four.
+        error: a selection where NOTHING answered is not a metric failure and must not read as
+               one; the server says so about the SELECTION and the surface passes it through.
 
   - id: merged_view
     do: One row per campaign — the cells collapsed to one estimate with its SERVED 95% interval,
@@ -599,12 +620,22 @@ controls:
         note: below two scored cells the dot renders with NO bar — a zero-width bracket would
               read as a perfect measurement. A campaign with no value keeps its row with an
               em-dash and its reason; vanishing from the chart is fabrication by omission.
+        note: each row is merged over THAT campaign's own cells, not the shared axis the other
+              three views plot, so the row CARRIES its cell count and the lede says which
+              denominator it is reading. Without it a wide interval beside a narrow one reads as
+              a difference between the campaigns rather than in how many cells each was read over.
+        note: the borrowed `ov-*` row style carries a last-row emphasis that does NOT come with
+              it — there the rows are rounds and the last is the latest, here they are campaigns
+              in run order, and bolding the newest asserts a winner nothing measured.
 
   - id: pairwise_table
     do: Every pair, blocked on the cells both scored: difference, 95% CI, n, p, and p (Holm).
         Raw and adjusted are shown TOGETHER — an adjusted-only column hides the correction, a
         raw-only column invites reading one test as if it were the only one.
-        empty: one campaign selected → "a pairwise comparison needs two."
+        empty: TWO states, and they must not be spelled the same. One campaign READ → "a pairwise
+               comparison needs two". Two or more that share no scored cell → say that, because
+               the shared-cell count is zero either way and reading the empty state off it blamed
+               the metric for a selection measured on different datasets.
         note: p is null where nothing was tested (below two shared cells) and renders "—", which
               is a different fact from a test that returned 1.00.
         note: the surface must state that Holm corrects across PAIRS and cannot correct across
@@ -623,9 +654,6 @@ controls:
         every campaign selected). Off by default; a selection change resets it.
         live: each edit's effect is read on the SELECTED metric and reported in its units, so the
               table under the picker cannot answer in a measurand the picker does not name.
-        empty: a `best_*` metric cannot rank an edit at all — a candidate has no best round of its
-               own. Served as `metric.spec.ranks_edits`: the press is withheld and the card states
-               that the question cannot be asked, which is NOT "nothing was measured".
         loading: the pane resolves to a reading state, never a permanent spinner (I1).
 ```
 

@@ -35,10 +35,66 @@ class OuterSampleProxies(StrictModel):
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 # ONE spelling of the `pipeline_data` key, shared by the emit site (`runner/inner/spawn.py`),
-# the infra-key allow-list keeping it off the scoring formula, and `panel_precision` below.
+# the infra-key allow-list carrying it (`scoring/sample_measurement.py`), and
+# `panel_precision` below.
 # Deliberately NOT derived as f"{OUTER_PROXY_KEYS[0]}_se": it is the SE of the arm's own
 # adopted level, not of the delta, and a derived name would assert an identity that is false.
 ADOPTED_LEVEL_SE_KEY = "mean_adopted_level_se"
+
+
+class InnerCellFacts(StrictModel):
+    """What one inner campaign knows about ITSELF, carried BESIDE the measurement rather than
+    inside it. Deliberately not ``OuterSampleProxies`` fields: those are what the outer formula
+    scores, and a trajectory detail reachable from the formula is one keystroke from grading on
+    something the law never measured. Same slot as :data:`ADOPTED_LEVEL_SE_KEY`.
+
+    Every one of these reached the outer row only inside ``reasoning_trace``'s prose before, where
+    no reader could compute on them — which is why the outer surfaces could report the scored lift
+    and nothing else about the run that produced it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # The floor `mean_round_delta` was differenced against. Carried because the delta alone cannot
+    # say whether a cell started hard or easy.
+    inner_origin_level: float
+    inner_final_lift: float
+    inner_peak_lift: float
+    inner_rounds_ran: int
+    inner_round_budget: int
+    inner_stop_reason: str
+    # REPORTING figures, and they enter no ledger. Billing is `_forward_inner_spend`'s DELTA onto
+    # the outer ledger; these are the cell's cumulative total across attempts, so a reader that
+    # treated them as a charge would bill a continued cell's history twice.
+    inner_spend_usd: float | None
+    inner_tokens: int | None
+    # The seed's own campaign. The outer row could not name it at all, so a cell was traceable
+    # back to its run only by rehashing the sandbox key and scanning every inner manifest.
+    inner_campaign_id: str
+
+
+# DERIVED from the model, never hand-listed — the same rule `OUTER_PROXY_KEYS` follows.
+INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
+
+
+def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | None:
+    """``None`` where the cycle has no trajectory to describe — a FLOORED cell adopted no levels
+    and an unscored origin is no floor to difference against. Absent, never zeroed."""
+    levels = result.round_adopted_levels
+    if result.origin_level is None or not levels:
+        return None
+    origin = result.origin_level
+    return InnerCellFacts(
+        inner_origin_level=origin,
+        inner_final_lift=levels[-1] - origin,
+        inner_peak_lift=max(levels) - origin,
+        inner_rounds_ran=result.n_l1_rounds,
+        inner_round_budget=len(held_levels(result)),
+        inner_stop_reason=str(result.stop_reason),
+        inner_spend_usd=result.spend.total_used_usd if result.spend else None,
+        inner_tokens=result.spend.total_tokens_used if result.spend else None,
+        inner_campaign_id=campaign_id,
+    )
 
 
 def held_levels(result: CycleResult) -> list[float]:
@@ -198,7 +254,9 @@ def panel_precision(
 
 __all__ = [
     "ADOPTED_LEVEL_SE_KEY",
+    "INNER_FACT_KEYS",
     "OUTER_PROXY_KEYS",
+    "InnerCellFacts",
     "InnerCycleUnscoreableError",
     "OuterSampleProxies",
     "PanelPrecision",
@@ -206,6 +264,7 @@ __all__ = [
     "compute_outer_proxies",
     "floor_reason",
     "held_levels",
+    "inner_cell_facts",
     "mean_adopted_level_se",
     "no_evidence_reason",
     "panel_precision",

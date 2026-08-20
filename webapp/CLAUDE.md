@@ -55,7 +55,7 @@ State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs
 - **Never hand-roll a second modal / popover / dropdown / toggle-chip / segmented control / toolbar.** Reach for `components/ui/*`, or add it there with a `*.module.css` and an RTL test.
 - **A card header is ONE row** — `Toolbar` + `ToolbarSep` + `ToolbarSpacer`, controls `flex: 0 0 auto`, because a toolbar that shrinks its buttons to fit is lying about how much room it has. Rare controls fold into `Menu` behind a `⋯`, lit while any is active; **a control driving one region belongs beside that region**, not in the header.
 - **Two surfaces sharing no axis do not share a box.** The candidates card's geometry exists to hold the dendrogram on its bars; the lineage forest is a cladogram of *cycles* with no shared axis, so it is its own `ForestCard`.
-- **An SVG node is a control.** `<g>` elements and tree nodes earn keyboard operability and a `role` like any other control — the accessibility floor is `BRAND.md`, and it does not stop at HTML elements.
+- **A painted surface is a control too.** SVG `<g>` elements and tree nodes earn keyboard operability and a `role`; a `<canvas>` earns an `aria-label` naming what it plots, because a chart is otherwise nothing at all to a screen reader — reading this rule as SVG-only is what let every Chart.js canvas ship unnamed. The accessibility floor is `BRAND.md`, and it does not stop at HTML elements.
 
 ## Display-data sources
 

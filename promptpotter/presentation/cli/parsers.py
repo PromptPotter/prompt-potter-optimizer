@@ -433,11 +433,25 @@ def build_parser() -> argparse.ArgumentParser:
         "line then reports on. Overrides the dataset argument.",
     )
     p_evidence.add_argument(
+        "--metric",
+        dest="metric",
+        # No default spelled here: which metrics exist and which one is the headline are the
+        # read's to decide against the selection in hand, so `cmd_evidence` supplies MEASURAND
+        # rather than this module keeping a second copy of the name.
+        default=None,
+        help="Which number to compare on. Unset reads each cell's own headline: the seed's lift "
+        "over its origin on the recursion, the sample's fitness elsewhere. The rest are offered "
+        "only where the selection carries them — the read prints its own 'Offered here:' line — "
+        "and 'expr:<formula>' composes over the names on that same line, e.g. "
+        "'expr:lift / latency'.",
+    )
+    p_evidence.add_argument(
         "--ranking",
         dest="ranking",
         action="store_true",
-        help="Also rank the measured edits. OFF by default: it is the only half that opens a "
-        "round document past round 0, so it walks every round of every campaign selected.",
+        help="Also rank the measured edits, in the selected metric. OFF by default: it is the "
+        "widest walk here — everything else reads one round-0 document per campaign, while this "
+        "opens every round of every campaign selected.",
     )
     p_evidence.add_argument(
         "--top",

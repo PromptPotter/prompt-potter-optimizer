@@ -2,6 +2,8 @@
 // formatting the dashboard repeats across panels. Import from here; never
 // re-inline a copy.
 
+import type { MetricSpec } from "@/lib/api/types";
+
 // Percentage, one decimal — "42.0%". Non-finite → "—".
 export function fmtPct1(v: number | null | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
@@ -88,10 +90,80 @@ export function fmtTokens(n: number): string {
   return `${n} tok`;
 }
 
+// A p-value, in the server's own register (`presentation/views/display.py::fmt_pvalue`) so the
+// terminal readout and the browser star the same result the same way. `null` means NOTHING WAS
+// TESTED — distinct from a test that found nothing, which is what a rendered 1.00 would claim.
+export function fmtPValue(p: number | null): string {
+  if (p == null) return "—";
+  if (p < 0.001) return "p<0.001 ***";
+  if (p < 0.01) return `p=${p.toFixed(3)} **`;
+  if (p < 0.05) return `p=${p.toFixed(2)} *`;
+  return `p=${p.toFixed(2)} (ns)`;
+}
+
+// ONE table from the served unit to how that unit reads, and every Compare number goes through it.
+// `Record<MetricUnit, …>` rather than an if-chain: the key type is read back off the generated
+// interface, so a unit added in Python is a COMPILE error here instead of a silent fallthrough to
+// three decimals — the same shape `ComparePane`'s COMPARABILITY map already uses.
+export type MetricUnit = MetricSpec["unit"];
+
+const UNIT_FORMAT: Record<MetricUnit, (v: number) => string> = {
+  // Only a delta is a difference, so only a delta earns a leading `+`.
+  level: (v) => v.toFixed(3),
+  delta: (v) => fmtSigned(v),
+  // `fmtSecs`, not `fmtDuration`: a cell can reply in under a second, and the coarse one rounds
+  // that to "1s" where the terminal prints 0.8.
+  seconds: fmtSecs,
+  usd: fmtUsd,
+  tokens: fmtTokens,
+  rank: (v) => v.toFixed(1),
+  rounds: (v) => v.toFixed(1),
+  composed: (v) => v.toFixed(3),
+};
+
+// A Compare metric value, dispatched on the unit the server served with it. Formatting only —
+// the number itself always arrives on the wire.
+export function fmtMetricValue(unit: MetricUnit, v: number | null): string {
+  return v == null ? "—" : UNIT_FORMAT[unit](v);
+}
+
+// The interval beside it, in the SAME units. Threading one unit through both is what the terminal
+// already does (`display.py::fmt_ci` takes its format spec as a keyword for exactly this reason);
+// without it a latency row reads "1000s [900.000, 1100.000]" — one value on two scales.
+// An absent interval must READ as absent: "[0.000, 0.000]" is a fabricated bracket claiming
+// certainty about a measurement that never happened.
+export function fmtMetricInterval(unit: MetricUnit, lo: number | null, hi: number | null): string {
+  if (lo == null || hi == null) return "—";
+  return `[${UNIT_FORMAT[unit](lo)}, ${UNIT_FORMAT[unit](hi)}]`;
+}
+
+// What the metric's axis is called: its label, plus the unit only where the unit names something
+// the reader does not already have. Mirrors `cli/commands/evidence.py::_roster_lines`.
+const UNNAMED_UNITS = new Set<MetricUnit>(["level", "delta", "composed"]);
+
+export function fmtMetricAxis(spec: MetricSpec): string {
+  return UNNAMED_UNITS.has(spec.unit) ? spec.label : `${spec.label} (${spec.unit})`;
+}
+
+// A campaign's distinguishing half. The `{dataset}__{rand6}` suffix is what separates two runs
+// of one origin, and the dataset is already named by the surface showing the row.
+export function shortId(campaignId: string): string {
+  const cut = campaignId.lastIndexOf("__");
+  return cut === -1 ? campaignId : campaignId.slice(cut + 2);
+}
+
 // Signed fixed-digit number — "+0.123" / "-0.045". Non-finite → "—".
 export function fmtSigned(v: number | null | undefined, digits = 3): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+}
+
+// Does a served interval clear zero? The ONE rule every effect table colours on, so the pairwise
+// table and the edit ranking cannot answer one question two ways. A missing bound is FLAT —
+// nothing was tested there, which is not a finding in either direction.
+export function effectTone(lo: number | null, hi: number | null): string {
+  if (lo == null || hi == null) return "l4-eff-flat";
+  return lo > 0 ? "l4-eff-pos" : hi < 0 ? "l4-eff-neg" : "l4-eff-flat";
 }
 
 // Fixed-digit number — null → "—", non-numbers pass through as String(v).

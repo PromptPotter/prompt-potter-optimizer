@@ -7,13 +7,14 @@ check, the variance decomposition and the confound flags all answer. The ranking
 candidate, walks every round document, and is therefore opt-in (``include_ranking``).
 
 **No L4 anywhere in here.** A cell is whatever the campaign scored one row against — an inner
-campaign on the recursion, a sample everywhere else — and `_cell_levels` reads the L4 proxy where
-it exists and the row's own fitness otherwise. Same arithmetic either way
-(`scoring/selection.py::matched_parent_lift` states the same rule for the per-round interval).
+campaign on the recursion, a sample everywhere else — and `evidence_metrics.py::cell_channels` is
+the only path from a row to a number, reading the L4 proxy where it exists and the row's own
+fitness otherwise. Same arithmetic either way (`scoring/selection.py::matched_parent_lift` states
+the same rule for the per-round interval).
 
-Everything is in the measurand's own units, never composite fitness: fitness is what a campaign's
-own `scoring` formula made of the measurand, so pooling on it averages numbers produced by
-different formulas and calls the result one quantity.
+Everything is in the SELECTED metric's own units, never composite fitness: fitness is what a
+campaign's own `scoring` formula made of the measurand, so pooling on it averages numbers produced
+by different formulas and calls the result one quantity.
 """
 
 from __future__ import annotations
@@ -26,9 +27,19 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
+from promptpotter.application.evidence_metrics import (
+    MEASURAND,
+    MetricSpec,
+    available_channels,
+    catalogue_for,
+    cell_channels,
+    resolve_metric,
+)
+from promptpotter.application.scoring.formula.compiler import (
+    CompiledExpression,
+    ScoringFormulaError,
+)
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
-from promptpotter.domain.results import CalibrationModel
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_rows_from_disk,
@@ -37,10 +48,12 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import (
+    holm_adjusted,
+    mean_ci_t,
     min_detectable_effect,
     paired_diff_posterior,
+    paired_reading,
     rank_correlation,
-    t_critical,
     two_way_effect_sds,
 )
 
@@ -50,9 +63,6 @@ if TYPE_CHECKING:
 _ORIGIN_HASH = "origin"
 # |rho| at or above this and the roster's ordering IS its chronology — see `OrderConfound`.
 _ORDER_CONFOUND_RHO = 0.9
-# The L4 recursion's measurand, in logits. Absent on an ordinary campaign, where a row's own
-# fitness is the level — one lookup, not a branch on what kind of campaign this is.
-_LEVEL_KEY = OUTER_PROXY_KEYS[0]
 
 ComparabilityReason = Literal["one_ruler", "rulers_differ", "ruler_unstamped", "datasets_differ"]
 
@@ -94,8 +104,8 @@ class RankedEdit(StrictModel):
     per_cell_effects: list[CellEffect]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
     # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
-    ci_lo: float
-    ci_hi: float
+    ci_lo: float | None
+    ci_hi: float | None
     n_cells: int
     n_measurements: int
 
@@ -118,11 +128,19 @@ class EditSpread(StrictModel):
 # --- the origin half: what the campaigns themselves say, before any candidate exists ---
 
 
-class CampaignOrigin(StrictModel):
-    """One campaign's origin panel — the roster row and the comparability check in one shape."""
+class CampaignReading(StrictModel):
+    """One campaign, read under the selected metric — its identity, its per-cell values and the one
+    estimate they merge to. ONE row, because a roster row and a metric reading that live in separate
+    lists can disagree about the same campaign, and under the default metric they held the same
+    number reached two ways.
+
+    ``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the
+    metric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored.
+    ``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a
+    bracket drawn from it is a fiction.
+    """
 
     campaign_id: str
-    cycle_id: str
     dataset_name: str
     created_at: str
     # The configuration the campaign RAN UNDER, hashed off round 0's `optimizer_prompt_hashes`.
@@ -132,22 +150,53 @@ class CampaignOrigin(StrictModel):
     # Which δ scale this origin's θ was read on. Campaigns whose ids differ measured on different
     # rulers, so their ABSOLUTE levels are not comparable however well paired the cells are.
     ruler_id: str | None
-    calibration_model: CalibrationModel | None
-    n_cells: int
-    # Mean over the origin's cells, in the measurand's own units. ``None`` when no cell priced.
-    origin_level: float | None
-    origin_accuracy: float | None
     spend_usd: float | None
     rounds_scored: int
-    stop_reason: str | None
+    values: dict[str, float]
+    value: float | None
+    ci_lo: float | None
+    ci_hi: float | None
+    n_cells: int
+    n_unscorable: int
 
 
-class CampaignCells(StrictModel):
-    """One campaign's per-cell origin levels, served so the browser can plot them without
-    re-deriving one. Keyed by the cell's QUERY, the identity that survives across campaigns."""
+class PairwiseComparison(StrictModel):
+    """One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell
+    difficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``
+    pairs rather than differencing two means.
 
-    campaign_id: str
-    levels: dict[str, float]
+    ``a`` precedes ``b`` in the roster's oldest-first order, so ``mean_d = b - a`` has one reading
+    across the whole table. The interval and both p-values are ``None`` below two shared cells:
+    nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.
+    """
+
+    campaign_a: str
+    campaign_b: str
+    mean_d: float
+    ci_lo: float | None
+    ci_hi: float | None
+    p_value: float | None
+    # Holm-Bonferroni across every pair in THIS read that carries a p. Served beside the raw value
+    # rather than replacing it, so the correction is visible instead of baked in.
+    p_adjusted: float | None
+    n_cells: int
+
+
+class MetricReading(StrictModel):
+    """The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a
+    stale render cannot then show new bars under the old metric's label."""
+
+    spec: MetricSpec
+    catalogue: list[MetricSpec]
+    # The channel names an expression may use ON THIS SELECTION — served rather than documented,
+    # so a composed metric cannot name a term the selection would silently read as zero. It is the
+    # INTERSECTION: a channel only some campaigns carry would compare one side against nothing.
+    namespace: list[str]
+    # The cells EVERY campaign SCORED under this metric — a subset of the measured intersection,
+    # because a cell can be measured and still be unreadable here. The charts share this axis.
+    scored_cells: list[str]
+    pairwise: list[PairwiseComparison]
+    n_tests: int
 
 
 class Comparability(StrictModel):
@@ -224,20 +273,25 @@ class Evidence(StrictModel):
     """The whole read for one selection of campaigns — recomputed on every fetch."""
 
     generated_at: str
-    n_cycles_scanned: int
-    origins: list[CampaignOrigin]  # oldest first — the confound reads off this order
+    # Oldest first — the confound reads off this order. Identity AND the metric reading in one
+    # row, so nothing downstream joins two lists on `campaign_id`.
+    campaigns: list[CampaignReading]
     comparability: Comparability
-    # Per-campaign per-cell levels: the plotting surface, served rather than re-derived.
-    cells: list[CampaignCells] = Field(default_factory=list)
-    # The cells EVERY campaign measured, in one order, so a grouped bar chart and a line chart
-    # agree on the axis without either picking one.
-    shared_cells: list[str] = Field(default_factory=list)
+    # WHICH number everything below is about — the picker's vocabulary, the merged per-campaign
+    # intervals and every pairwise test, all under one selection. Non-optional: the default always
+    # resolves, so there is no state where a chart is drawn under no named metric.
+    metric: MetricReading
+    # Ids that were ASKED for and answered nothing — no campaign of that name, no round-0 document
+    # under its root cycle, or an origin whose rows carry no channel. Served because the roster is
+    # otherwise the only evidence they were dropped, and a campaign that silently thins a
+    # selection is the campaign-level twin of scoring an unread cell as zero.
+    unread_campaigns: list[str] = Field(default_factory=list)
     replicates: list[ArmReplicate] = Field(default_factory=list)
     variance: EvidenceVariance | None = None
     power: EvidencePower | None = None
     order_confound: OrderConfound | None = None
     # Ranked desc by anchor_effect. Empty unless `include_ranking` was asked for — the only walk
-    # here that opens a round document past round 0.
+    # here that opens a round document past round 0, and the reason it alone is opt-in.
     ranking_computed: bool = False
     edits: list[RankedEdit] = Field(default_factory=list)
     spread: EditSpread = Field(default_factory=EditSpread)
@@ -261,28 +315,14 @@ class _Accum:
         self.orig_by_cell: dict[str, list[float]] = {}
 
 
-def _cell_levels(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell: mean level}``, keyed by QUERY — the cell identity that survives across campaigns,
-    where a per-campaign ``sample_id`` names a different cell."""
-    acc: dict[str, list[float]] = {}
-    for r in rows:
-        cell = r.get("query")
-        if not isinstance(cell, str):
-            continue
-        pd = r.get("pipeline_data")
-        value = pd.get(_LEVEL_KEY) if isinstance(pd, dict) else None
-        if not isinstance(value, int | float):
-            value = r.get("fitness")
-        if isinstance(value, int | float):
-            acc.setdefault(cell, []).append(float(value))
-    return {cell: sum(v) / len(v) for cell, v in acc.items()}
+def _dataset_name(manifest: dict[str, Any]) -> str:
+    block_raw = manifest.get("campaign_config")
+    block = block_raw if isinstance(block_raw, dict) else manifest
+    return str(block.get("dataset_name", ""))
 
 
 def _dataset_of(campaign_dir: Path) -> str:
-    cfg = read_json_tolerant(campaign_dir / "campaign.json", {})
-    block_raw = cfg.get("campaign_config")
-    block = block_raw if isinstance(block_raw, dict) else cfg
-    return str(block.get("dataset_name", ""))
+    return _dataset_name(read_json_tolerant(campaign_dir / "campaign.json", {}))
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
@@ -296,83 +336,185 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
 
 
 def campaign_evidence(
-    stores: Stores, campaign_ids: list[str], *, include_ranking: bool = False
+    stores: Stores,
+    campaign_ids: list[str],
+    *,
+    include_ranking: bool = False,
+    metric: str = MEASURAND,
 ) -> Evidence:
-    """Reduce the named campaigns into one evidence read. *campaign_ids* may span datasets, and
-    may name a campaign that no longer exists — an absent one is simply not in the roster.
+    """Reduce the named campaigns into one evidence read, under one metric. *campaign_ids* may span
+    datasets, and may name a campaign that no longer exists — an absent one is simply not in the
+    roster. *metric* is a catalogue key or ``expr:<formula>``; one this selection cannot answer
+    raises ``ValueError`` for the route to turn into a 400.
 
-    ``include_ranking`` is the only expensive half: everything else opens one round-0 document per
-    campaign, while the ranking walks every round document of every one of them.
+    EVERY metric is a fact about one CELL, read off the row that stands for it — on the recursion
+    a cell is a whole inner campaign, so its lift, its origin, its cost and its round count are
+    that seed's own. Nothing here opens a second document to derive a number the cell already
+    carries.
+
+    ONE metric then reaches everything: the roster's merged estimates, the pairwise tests, the
+    variance decomposition, the resolving power, the run-order confound and the edit ranking, so
+    no two numbers on the page can be about different quantities.
     """
     wanted = set(campaign_ids)
-    accums: dict[str, _Accum] = {}
-    origins: list[CampaignOrigin] = []
-    cells_by_campaign: dict[str, dict[str, float]] = {}
-    n_cycles = 0
+    channels_by_campaign: dict[str, dict[str, dict[str, float]]] = {}
+    # campaign_id -> (cycle_dir, dataset_name, created_at), insertion-ordered.
+    found: dict[str, tuple[Path, str, str]] = {}
 
     for campaign_dir in stores.campaigns.iter_campaign_dirs():
         if campaign_dir.name not in wanted:
             continue
-        cycles_dir = campaign_cycles_dir(campaign_dir)
-        if not cycles_dir.is_dir():
+        manifest = read_json_tolerant(campaign_dir / "campaign.json", {})
+        # The campaign's ROOT cycle — C0 — named by the manifest, never whichever sibling a
+        # directory walk happened to reach last. A forked campaign holds `cycle_x` beside
+        # `cycle_x_fork_y`, so walking them read the FORK's origin under the campaign's name with
+        # nothing on either surface saying which cycle the row came from.
+        cycle_dir = campaign_cycles_dir(campaign_dir) / str(manifest.get("root_cycle_id", ""))
+        if not CycleLayout(cycle_dir).rounds.is_dir():
             continue
-        dataset_name = _dataset_of(campaign_dir)
-        created_at = str(
-            read_json_tolerant(campaign_dir / "campaign.json", {}).get("created_at", "")
+        channels = cell_channels(origin_rows_from_disk(cycle_dir))
+        if not channels:
+            continue
+        channels_by_campaign[campaign_dir.name] = channels
+        found[campaign_dir.name] = (
+            cycle_dir,
+            _dataset_name(manifest),
+            str(manifest.get("created_at", "")),
         )
-        for cycle_dir in sorted(cycles_dir.iterdir()):
-            layout = CycleLayout(cycle_dir)
-            if not layout.rounds.is_dir():
-                continue
-            origin_cells = _cell_levels(origin_rows_from_disk(cycle_dir))
-            if not origin_cells:
-                continue
-            n_cycles += 1
-            hop = CycleHop(campaign_id=campaign_dir.name, cycle_id=cycle_dir.name)
-            origins.append(_origin_row(cycle_dir, hop, dataset_name, created_at, origin_cells))
-            cells_by_campaign[campaign_dir.name] = origin_cells
-            if not include_ranking:
-                continue
-            for round_file in sorted(layout.rounds.glob(ROUND_GLOB)):
+
+    # An unmeasured selection is not a metric problem, and answering it as one is what two
+    # ordinary actions — ticking a campaign whose origin has not run, mistyping an id — used to
+    # get back: "Metric 'measurand' is not one this selection can answer", about a vocabulary,
+    # when the fact is that there is nothing here to have a vocabulary over.
+    if not found:
+        raise ValueError(
+            f"None of {', '.join(sorted(wanted)) or 'the campaigns named'} has a scored round-0 "
+            "origin to read. A campaign answers here once its origin has run; one that does not "
+            "exist under this tenant answers never."
+        )
+    # WHICH metric is decidable only once the rows are in hand: the measurand is the seed's own
+    # lift where the cells carry one and the cell's own fitness where they do not, and a metric
+    # nothing in this selection answers is never offered.
+    available = available_channels(channels_by_campaign)
+    spec, compiled = resolve_metric(metric, available)
+
+    rows: list[CampaignReading] = []
+    for campaign_id, (cycle_dir, dataset_name, created_at) in found.items():
+        values, n_unscorable = _score_cells(compiled, channels_by_campaign[campaign_id])
+        rows.append(
+            _reading_row(cycle_dir, campaign_id, dataset_name, created_at, values, n_unscorable)
+        )
+    rows.sort(key=lambda r: (r.created_at, r.campaign_id))
+
+    # The one expensive walk, and the only one that opens a round document past round 0.
+    accums: dict[str, _Accum] = {}
+    if include_ranking:
+        for row in rows:
+            cycle_dir = found[row.campaign_id][0]
+            hop = CycleHop(campaign_id=row.campaign_id, cycle_id=cycle_dir.name)
+            for round_file in sorted(CycleLayout(cycle_dir).rounds.glob(ROUND_GLOB)):
                 if round_file.name == "round_0000.json":
                     continue
-                _accumulate_round(read_json_tolerant(round_file, {}), origin_cells, hop, accums)
+                _accumulate_round(
+                    read_json_tolerant(round_file, {}), row.values, hop, accums, compiled
+                )
 
-    origins.sort(key=lambda o: (o.created_at, o.campaign_id))
     edits = sorted(
         (_finalize(state_hash, acc) for state_hash, acc in accums.items()),
         key=lambda r: r.anchor_effect,
         reverse=True,
     )
-    shared = (
-        sorted(set.intersection(*(set(v) for v in cells_by_campaign.values())))
-        if cells_by_campaign
-        else []
-    )
+    scored = {r.campaign_id: r.values for r in rows if r.values}
     return Evidence(
         generated_at=utcnow_iso(),
-        n_cycles_scanned=n_cycles,
-        origins=origins,
-        comparability=_comparability(origins),
-        cells=[
-            CampaignCells(campaign_id=o.campaign_id, levels=cells_by_campaign[o.campaign_id])
-            for o in origins
-            if o.campaign_id in cells_by_campaign
-        ],
-        shared_cells=shared,
-        replicates=_replicates(origins),
-        variance=(variance := _variance(cells_by_campaign)),
-        power=_power(variance, origins),
-        order_confound=_order_confound(origins),
+        campaigns=rows,
+        comparability=_comparability(rows),
+        metric=_metric_reading(spec, rows, available),
+        unread_campaigns=sorted(wanted - set(found)),
+        replicates=_replicates(rows),
+        variance=(variance := _variance(scored)),
+        power=_power(variance, rows),
+        order_confound=_order_confound(rows),
         ranking_computed=include_ranking,
         edits=edits,
         spread=_edit_spread(edits),
     )
 
 
-def _origin_row(
-    cycle_dir: Path, hop: CycleHop, dataset_name: str, created_at: str, cells: dict[str, float]
-) -> CampaignOrigin:
+def _score_cells(
+    compiled: CompiledExpression, channels: dict[str, dict[str, float]]
+) -> tuple[dict[str, float], int]:
+    """``({cell: value}, n_unscorable)``. A cell the metric cannot read is dropped and COUNTED:
+    ``ScoringTermMissingError`` is a term the row never carried and its parent a division by zero or
+    a non-finite result, and both mean unscorable here — never a value of zero."""
+    values: dict[str, float] = {}
+    missed = 0
+    for cell, row_channels in channels.items():
+        try:
+            values[cell] = compiled.evaluate(dict(row_channels), "this cell")
+        except ScoringFormulaError:
+            missed += 1
+    return (values, missed)
+
+
+def _metric_reading(
+    spec: MetricSpec, rows: list[CampaignReading], available: frozenset[str]
+) -> MetricReading:
+    """The vocabulary the selection was read under, plus every pairwise test over it. The
+    per-campaign half lives on the roster rows themselves."""
+    scored = [r for r in rows if r.values]
+    shared = sorted(set.intersection(*(set(r.values) for r in scored))) if scored else []
+    pairwise = _pairwise(scored)
+    return MetricReading(
+        spec=spec,
+        catalogue=list(catalogue_for(available)),
+        namespace=sorted(available),
+        scored_cells=shared,
+        pairwise=pairwise,
+        n_tests=sum(1 for p in pairwise if p.p_value is not None),
+    )
+
+
+def _pairwise(rows: list[CampaignReading]) -> list[PairwiseComparison]:
+    """Every unordered pair, each blocked on the cells BOTH scored — strictly more evidence than
+    the roster-wide intersection, and the honest paired n for that one comparison, which is why it
+    is served per row."""
+    out: list[PairwiseComparison] = []
+    for i, a in enumerate(rows):
+        for b in rows[i + 1 :]:
+            cells = sorted(set(a.values) & set(b.values))
+            if not cells:
+                continue
+            mean_d, lo, hi, p_value, n = paired_reading(
+                [b.values[c] for c in cells], [a.values[c] for c in cells]
+            )
+            out.append(
+                PairwiseComparison(
+                    campaign_a=a.campaign_id,
+                    campaign_b=b.campaign_id,
+                    mean_d=mean_d,
+                    ci_lo=lo,
+                    ci_hi=hi,
+                    p_value=p_value,
+                    p_adjusted=None,
+                    n_cells=n,
+                )
+            )
+    tested = [i for i, r in enumerate(out) if r.p_value is not None]
+    adjusted = holm_adjusted([out[i].p_value or 0.0 for i in tested])
+    for slot, i in enumerate(tested):
+        out[i] = out[i].model_copy(update={"p_adjusted": adjusted[slot]})
+    return out
+
+
+def _reading_row(
+    cycle_dir: Path,
+    campaign_id: str,
+    dataset_name: str,
+    created_at: str,
+    values: dict[str, float],
+    n_unscorable: int,
+) -> CampaignReading:
     layout = CycleLayout(cycle_dir)
     doc = read_json_tolerant(layout.round_file(0), {})
     dash = read_json_tolerant(layout.dashboard, {})
@@ -380,44 +522,46 @@ def _origin_row(
     # The configuration the campaign ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
     hashes = doc.get("optimizer_prompt_hashes")
-    return CampaignOrigin(
-        campaign_id=hop.campaign_id,
-        cycle_id=hop.cycle_id,
+    ordered = [values[c] for c in sorted(values)]
+    bracketed = mean_ci_t(ordered)
+    return CampaignReading(
+        campaign_id=campaign_id,
         dataset_name=dataset_name,
         created_at=created_at,
         arm_id=_state_hash({"": dict(hashes)} if isinstance(hashes, dict) and hashes else {}),
         ruler_id=doc.get("ruler_id"),
-        calibration_model=doc.get("calibration_model"),
-        n_cells=len(cells),
-        origin_level=(sum(cells.values()) / len(cells)) if cells else None,
-        origin_accuracy=doc.get("accuracy"),
         spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
         rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
-        stop_reason=dash.get("stop_reason"),
+        values=values,
+        value=bracketed[0] if bracketed else (ordered[0] if ordered else None),
+        ci_lo=bracketed[1] if bracketed else None,
+        ci_hi=bracketed[2] if bracketed else None,
+        n_cells=len(ordered),
+        n_unscorable=n_unscorable,
     )
 
 
-def _replicates(origins: list[CampaignOrigin]) -> list[ArmReplicate]:
-    by_arm: dict[str, list[CampaignOrigin]] = {}
-    for o in origins:
-        by_arm.setdefault(o.arm_id, []).append(o)
+def _replicates(rows: list[CampaignReading]) -> list[ArmReplicate]:
+    by_arm: dict[str, list[CampaignReading]] = {}
+    for row in rows:
+        by_arm.setdefault(row.arm_id, []).append(row)
     out = []
     for arm, same in sorted(by_arm.items()):
-        levels = [o.origin_level for o in same if o.origin_level is not None]
+        levels = [r.value for r in same if r.value is not None]
         if len(levels) > 1:
             out.append(
                 ArmReplicate(
                     arm_id=arm,
-                    campaign_ids=[o.campaign_id for o in same],
+                    campaign_ids=[r.campaign_id for r in same],
                     level_spread=max(levels) - min(levels),
                 )
             )
     return out
 
 
-def _comparability(origins: list[CampaignOrigin]) -> Comparability:
-    datasets = sorted({o.dataset_name for o in origins if o.dataset_name})
-    rulers = {o.ruler_id for o in origins}
+def _comparability(rows: list[CampaignReading]) -> Comparability:
+    datasets = sorted({r.dataset_name for r in rows if r.dataset_name})
+    rulers = {r.ruler_id for r in rows}
     known = {r for r in rulers if r is not None}
     reason: ComparabilityReason
     verdict: bool | None
@@ -454,12 +598,10 @@ def _variance(by_arm: dict[str, dict[str, float]]) -> EvidenceVariance | None:
     )
 
 
-def _power(
-    variance: EvidenceVariance | None, origins: list[CampaignOrigin]
-) -> EvidencePower | None:
+def _power(variance: EvidenceVariance | None, rows: list[CampaignReading]) -> EvidencePower | None:
     """The paired SE of a two-arm contrast: pairing removes the cell effect — the term that is
     largest here — and leaves the residual on both arms, hence ``residual * sqrt(2 / cells)``."""
-    levels = [o.origin_level for o in origins if o.origin_level is not None]
+    levels = [r.value for r in rows if r.value is not None]
     if variance is None or len(levels) < 2 or variance.n_cells < 1:
         return None
     se = variance.residual_sd * (2.0 / variance.n_cells) ** 0.5
@@ -478,22 +620,22 @@ def _power(
     )
 
 
-def _order_confound(origins: list[CampaignOrigin]) -> OrderConfound | None:
-    """*origins* is already oldest-first, so the index IS the chronology."""
-    if len(origins) < 3:
+def _order_confound(rows: list[CampaignReading]) -> OrderConfound | None:
+    """*rows* is already oldest-first, so the index IS the chronology."""
+    if len(rows) < 3:
         return None
-    order = [float(i) for i in range(len(origins))]
+    order = [float(i) for i in range(len(rows))]
 
     def rho(values: list[float | None]) -> float | None:
         if any(v is None for v in values):
             return None
         return rank_correlation(order, [float(v) for v in values if v is not None])
 
-    level_rho = rho([o.origin_level for o in origins])
+    level_rho = rho([r.value for r in rows])
     return OrderConfound(
         level_vs_order=level_rho,
-        spend_vs_order=rho([o.spend_usd for o in origins]),
-        n_campaigns=len(origins),
+        spend_vs_order=rho([r.spend_usd for r in rows]),
+        n_campaigns=len(rows),
         order_confounded=level_rho is not None and abs(level_rho) >= _ORDER_CONFOUND_RHO,
     )
 
@@ -513,10 +655,14 @@ def _edit_spread(rows: list[RankedEdit]) -> EditSpread:
 
 def _accumulate_round(
     doc: dict[str, Any],
-    origin_cells: dict[str, float],
+    origin_values: dict[str, float],
     hop: CycleHop,
     accums: dict[str, _Accum],
+    compiled: CompiledExpression,
 ) -> None:
+    """An edit is worth whatever the SELECTED metric says it is — seconds, dollars, rounds, lift.
+    A candidate row is a cell like any other (on the recursion, its own inner campaign), so every
+    channel the roster can answer, the ranking can answer too."""
     round_num = int(doc.get("round", 0) or 0)
     for cand in doc.get("candidate_scores") or []:
         cand_id = str(cand.get("candidate_id", ""))
@@ -526,8 +672,10 @@ def _accumulate_round(
         state_hash = _state_hash(prompt_state)
         if state_hash == _ORIGIN_HASH:
             continue  # the no-op arm anchors others; it is not itself a ranked candidate
-        cand_cells = _cell_levels((doc.get("all_candidate_results") or {}).get(cand_id) or [])
-        paired = {c: cand_cells[c] for c in cand_cells if c in origin_cells}
+        cand_cells, _ = _score_cells(
+            compiled, cell_channels((doc.get("all_candidate_results") or {}).get(cand_id) or [])
+        )
+        paired = {c: cand_cells[c] for c in cand_cells if c in origin_values}
         if not paired:
             continue
         acc = accums.get(state_hash)
@@ -544,7 +692,7 @@ def _accumulate_round(
         )
         for cell, cand_fit in paired.items():
             acc.cand_by_cell.setdefault(cell, []).append(cand_fit)
-            acc.orig_by_cell.setdefault(cell, []).append(origin_cells[cell])
+            acc.orig_by_cell.setdefault(cell, []).append(origin_values[cell])
 
 
 def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
@@ -576,12 +724,7 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
         cell_cand.append(sum(cand_vals) / len(cand_vals))
         cell_orig.append(sum(orig_vals) / len(orig_vals))
 
-    anchor, anchor_se, n_cells = paired_diff_posterior(cell_cand, cell_orig)
-    # Student-t on the CELL count, not z: the SE is estimated from the same handful of
-    # cells it widens (≈7 cells → 2.45, not 1.96). Same rule as the per-round interval
-    # (`scoring/selection.py::matched_parent_lift`), so a corpus leader and a round verdict
-    # cannot disagree by bracketing the same evidence two ways.
-    crit = t_critical(max(n_cells - 1, 1))
+    anchor, ci_lo, ci_hi, _p, _n = paired_reading(cell_cand, cell_orig)
     return RankedEdit(
         state_hash=state_hash,
         label=acc.label,
@@ -589,8 +732,8 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
         provenance=acc.provenance,
         per_cell_effects=per_cell,
         anchor_effect=anchor,
-        ci_lo=anchor - crit * anchor_se,
-        ci_hi=anchor + crit * anchor_se,
+        ci_lo=ci_lo,
+        ci_hi=ci_hi,
         n_cells=len(per_cell),
         n_measurements=n_meas,
     )
@@ -598,8 +741,7 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
 
 __all__ = [
     "ArmReplicate",
-    "CampaignCells",
-    "CampaignOrigin",
+    "CampaignReading",
     "CellEffect",
     "Comparability",
     "EditSpread",

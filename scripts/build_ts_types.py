@@ -19,8 +19,7 @@ sys.path.insert(0, str(_REPO))
 
 from promptpotter.application.evidence import (
     ArmReplicate,
-    CampaignCells,
-    CampaignOrigin,
+    CampaignReading,
     CellEffect,
     Comparability,
     EditSpread,
@@ -28,9 +27,12 @@ from promptpotter.application.evidence import (
     Evidence,
     EvidencePower,
     EvidenceVariance,
+    MetricReading,
     OrderConfound,
+    PairwiseComparison,
     RankedEdit,
 )
+from promptpotter.application.evidence_metrics import MetricSpec
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -200,13 +202,15 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     EffectProvenance,
     EditSpread,
     RankedEdit,
-    CampaignOrigin,
-    CampaignCells,
     Comparability,
     ArmReplicate,
     EvidenceVariance,
     EvidencePower,
     OrderConfound,
+    MetricSpec,
+    CampaignReading,
+    PairwiseComparison,
+    MetricReading,
     Evidence,
     # --- campaigns/files router ---
     FileEntry,

@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import yaml
 
-from promptpotter.application.evidence import CampaignOrigin, _comparability
+from promptpotter.application.evidence import CampaignReading, _comparability
 from promptpotter.application.intelligence.exploration import (
     Observation,
     adopted_level_trajectory,
@@ -3704,21 +3704,21 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
     """The one reading that must not degrade quietly: a `None` here says "we cannot tell", and
     collapsing it to `len(ids) == 1` would answer YES for a roster where nothing is stamped."""
 
-    def origin(ruler: str | None) -> CampaignOrigin:
-        return CampaignOrigin(
+    def origin(ruler: str | None) -> CampaignReading:
+        return CampaignReading(
             campaign_id="c",
-            cycle_id="cy",
             dataset_name="d",
             created_at="",
             arm_id="a",
             ruler_id=ruler,
-            calibration_model=None,
-            n_cells=1,
-            origin_level=None,
-            origin_accuracy=None,
             spend_usd=None,
             rounds_scored=0,
-            stop_reason=None,
+            values={"q1": 0.0},
+            value=0.0,
+            ci_lo=None,
+            ci_hi=None,
+            n_cells=1,
+            n_unscorable=0,
         )
 
     def verdict(*rulers: str | None) -> tuple[bool | None, str]:

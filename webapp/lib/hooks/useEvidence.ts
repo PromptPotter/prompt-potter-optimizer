@@ -1,24 +1,41 @@
 "use client";
-// What a SET of campaigns jointly says, reduced fresh server-side. One-shot fetch (not the 2 s
-// poll) — it re-runs when the selection or the ranking flag changes and at no other time.
+// The Compare tab's one read. Not on the 2 s poll — a selection changes when the operator changes
+// it, so this is `useFetch`, one shot per (selection, metric, ranking).
 //
-// `ranking` is the operator's press, not a default: everything else opens one round-0 document
-// per campaign, while the ranking walks every round of every campaign selected. Passing it as a
-// dep means turning it on re-fetches once and turning it off does not re-walk.
+// `metric` is opaque: a catalogue key or a composed `expr:…`, both owned by the server. The one
+// failure that survives rather than blanking the pane is `invalid` — a rejected expression is the
+// operator's own half-typed input, not a dead read — and `useFetch` owns that, so there is no
+// last-good state machine here.
 
+import { fetchEvidence } from "@/lib/api/reads";
+import type { Evidence } from "@/lib/api/types";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { fetchEvidence, type Evidence } from "@/lib/api";
+
+export interface EvidenceRead {
+  evidence: Evidence | null;
+  loading: boolean;
+  error: string | null;
+  /** Set only when `error` is a rejected metric — render it beside the input, not as a dead pane. */
+  invalidMetric: string | null;
+}
 
 export function useEvidence(
   campaignIds: readonly string[],
   ranking: boolean,
-): { evidence: Evidence | null; loading: boolean; error: string | null } {
-  // Sorted + joined so a re-ordered selection of the same campaigns is the SAME key — the
-  // server pools them, and order is a picker artifact, not part of the question.
+  metric: string,
+): EvidenceRead {
   const key = [...campaignIds].sort().join(",");
-  const { data, loading, error } = useFetch<Evidence>(
-    key ? (signal) => fetchEvidence(key.split(","), { ranking }, signal) : null,
-    [key, ranking],
+  const { data, loading, error, kind } = useFetch<Evidence>(
+    key ? (signal) => fetchEvidence(key.split(","), { ranking, metric }, signal) : null,
+    [key, ranking, metric],
+    "invalid",
   );
-  return { evidence: data, loading, error };
+
+  const invalid = error !== null && kind === "invalid";
+  return {
+    evidence: data,
+    loading,
+    error: invalid ? null : error,
+    invalidMetric: invalid ? error : null,
+  };
 }

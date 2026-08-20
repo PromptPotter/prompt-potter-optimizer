@@ -1,9 +1,11 @@
 """Re-stamp every on-disk ``StrictModel`` record onto the current model. ``extra="forbid"`` obliges
 EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged — as a ROW.
 
-Round documents are CHECKED and never rewritten: a row repairs by pruning to ``model_fields``,
-which cannot restore a renamed field's value. Which drift is fatal, and why that is correct, is
-owned by ``domain/CLAUDE.md`` § Tolerance is scoped by what a payload is FOR."""
+PRUNING never touches a round document: a row repairs by pruning to ``model_fields``, which
+cannot restore a renamed field's value, so a repair there would be silently wrong. A migration that
+RECOVERS a value from a surviving record may write one — :func:`backfill_inner_facts` does. Which
+drift is fatal, and why that is correct, is owned by ``domain/CLAUDE.md`` § Tolerance is scoped by
+what a payload is FOR."""
 
 from __future__ import annotations
 
@@ -28,17 +30,24 @@ from promptpotter.application.views.view_models import (
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.io import read_json_optional, write_yaml
+from promptpotter.infrastructure.store.io import (
+    read_json_optional,
+    read_json_tolerant,
+    write_json,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     ROUND_GLOB,
     CycleLayout,
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.shared.errors import graceful
 
 __all__ = ["check_round_documents", "compact_cycle_ledgers", "restamp_campaign_configs"]
 
@@ -462,6 +471,124 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
         "bytes_saved": total_before - total_after,
     }
+
+
+# --- (4) the L4 seed facts that reached the row as prose and nothing else --------------------
+
+
+def _inner_cycle_index() -> dict[tuple[str, str, int, str], pathlib.Path]:
+    """``{(outer campaign, outer cycle, round, task) -> inner cycle dir}``.
+
+    The pointer between an outer cell and the inner campaign that produced it lives on the INNER
+    side — ``index.json::spawned_by``, written by ``runner/inner/spawn.py`` — so building this
+    index is the only join back. Sandboxes are a SIBLING tree of the workspace, which
+    :func:`_workspace_trees` already knows and a ``*``-per-level glob silently misses."""
+    index: dict[tuple[str, str, int, str], pathlib.Path] = {}
+    for tree in _workspace_trees():
+        for cycle_dir in sorted(tree.glob("*/campaigns/*/cycles/*")):
+            spawned = (read_json_tolerant(cycle_dir / "index.json", {}) or {}).get("spawned_by")
+            if not isinstance(spawned, dict) or not spawned.get("task"):
+                continue
+            key = (
+                str(spawned.get("outer_campaign_id") or ""),
+                str(spawned.get("outer_cycle_id") or ""),
+                int(spawned.get("round") or 0),
+                str(spawned["task"]),
+            )
+            index[key] = cycle_dir
+    return index
+
+
+def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
+    """What the seed's OWN campaign still says about itself, at full precision.
+
+    Read from the inner cycle rather than from the outer row's ``reasoning_trace`` sentence, which
+    prints its levels at 2dp. Only the fields checked against that sentence cell-by-cell are
+    written: ``rounds[].cumulative_theta`` reproduces the narrated origin and ending exactly on
+    every cell on disk, but its PEAK and its length do not — so it is the adopted frontier at the
+    endpoints and something else in between, and ``inner_peak_lift`` / ``inner_round_budget`` are
+    left ABSENT rather than filled from a series that disagrees. They fill in on the next live run.
+    """
+    dash = read_json_tolerant(cycle_dir / "dashboard.json", {}) or {}
+    index = read_json_tolerant(cycle_dir / "index.json", {}) or {}
+    levels = [
+        r["cumulative_theta"]
+        for r in (dash.get("rounds") or [])
+        if isinstance(r, dict) and isinstance(r.get("cumulative_theta"), int | float)
+    ]
+    if len(levels) < 2:
+        return {}
+    spend = dash.get("spend")
+    spend = spend if isinstance(spend, dict) else {}
+    buckets = [spend.get("backend"), spend.get("loop")]
+    tokens = sum(
+        int(b.get(k) or 0)
+        for b in buckets
+        if isinstance(b, dict)
+        for k in ("input_tokens", "output_tokens")
+    )
+    facts: dict[str, Any] = {
+        "inner_origin_level": float(levels[0]),
+        "inner_final_lift": float(levels[-1]) - float(levels[0]),
+        "inner_rounds_ran": max(int(index.get("n_rounds") or 0) - 1, 0),
+        "inner_stop_reason": str(index.get("stop_reason") or ""),
+        "inner_campaign_id": cycle_dir.parent.parent.name,
+    }
+    if isinstance(spend.get("total_used_usd"), int | float):
+        facts["inner_spend_usd"] = float(spend["total_used_usd"])
+    if tokens:
+        facts["inner_tokens"] = tokens
+    return facts
+
+
+def _backfill_round_document(
+    path: pathlib.Path, index: dict[tuple[str, str, int, str], pathlib.Path], *, apply: bool
+) -> tuple[int, int]:
+    """``(rows filled, rows whose inner campaign is no longer on disk)``."""
+    doc = read_json_tolerant(path, {})
+    if not isinstance(doc, dict):
+        return (0, 0)
+    campaign_id, cycle_id = path.parents[3].name, path.parents[1].name
+    round_num = int(doc.get("round") or 0)
+    filled = orphaned = 0
+    for rows in (doc.get("all_candidate_results") or {}).values():
+        for row in rows if isinstance(rows, list) else []:
+            pd = row.get("pipeline_data") if isinstance(row, dict) else None
+            # Idempotent, and a live full-precision value is never overwritten by this.
+            if not isinstance(pd, dict) or "inner_final_lift" in pd:
+                continue
+            if not isinstance(pd.get(OUTER_PROXY_KEYS[0]), int | float):
+                continue  # not an inner-campaign cell at all
+            cycle_dir = index.get((campaign_id, cycle_id, round_num, str(row.get("query") or "")))
+            facts = _facts_from_inner_cycle(cycle_dir) if cycle_dir is not None else {}
+            if not facts:
+                orphaned += 1
+                continue
+            pd.update(facts)
+            filled += 1
+    if filled and apply:
+        write_json(path, doc)
+    return (filled, orphaned)
+
+
+def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
+    """Lift each seed's own origin, ending, round count, stop reason and spend off the inner
+    campaign that produced it and onto the outer row, for cells measured before
+    ``InnerCellFacts`` carried them as numbers.
+
+    ROUND DOCUMENTS only, deliberately. The measurement archive is content-addressed —
+    ``(dataset_name, node_configs, sample_id)`` — and carries no campaign or cycle, so an archived
+    row cannot be joined to the inner campaign that produced it. A cell REPLAYED from the archive
+    in a future run therefore arrives without these fields until it is genuinely re-run; absent,
+    which every surface already reports honestly, rather than guessed."""
+    index = _inner_cycle_index()
+    filled = orphaned = 0
+    for path in _iter_round_documents():
+        with graceful(f"backfill {path}"):
+            got, lost = _backfill_round_document(path, index, apply=apply)
+            filled += got
+            orphaned += lost
+    return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
 
 
 def _drift_cause(exc: ValidationError) -> str:

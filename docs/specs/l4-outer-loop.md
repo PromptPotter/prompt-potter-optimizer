@@ -33,6 +33,16 @@ IS the mean logit lift — a number to read, not merely to order by.
 - **No difficulty denominator.** Every level is a θ on the cycle's own fixed δ ruler, so two levels already
   sit on one interval scale across seeds of different origin strength. Per-cell difficulty is modelled where
   it belongs: the round-winner election and PoBB, which fit an explicit per-cell δ.
+- **The row carries the seed's whole trajectory, and only ONE term of it scores.** An outer cell's
+  `pipeline_data` holds `mean_round_delta` (the scored measurand) plus `InnerCellFacts`
+  (`domain/l4/proxies.py`): that seed's origin level, where it ended, its peak, its round count,
+  its stop reason and its own spend. Those are REPORTING channels — what `evidence`'s Compare read
+  and any panel may ask about a cell — and none of them is a scoring term; the bullet below records
+  that peak and endpoint were measured as candidates for the measurand and lost. They exist because
+  they previously reached the row only inside `reasoning_trace`'s prose, where no reader could
+  compute on them, so the outer surfaces could report the scored lift and nothing else about the
+  run that produced it.
+
 - **One term, not a basket — measured, not aesthetic.** `lift × cleanliness × diversity_health × efficiency`
   went to a full panel and every factor beside the lift core failed the candidate-gradient bar: `cleanliness`
   put twice as much variance into the SEED as the arm (it graded which data a cell drew), `diversity_health`

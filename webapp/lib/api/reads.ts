@@ -367,20 +367,27 @@ export function fetchConfigMap(
 // selection can resolve, and the run-order confound. The selection may span datasets, and there
 // is no L4 gate — an ordinary campaign and a self-optimizing one take the same path.
 //
-// `ranking` is the ONLY expensive half and is off by default: the rest opens one round-0
-// document per campaign, while the ranking walks every round of every campaign selected. That is
-// why the pane puts it behind a press instead of a poll.
+// `metric` picks WHICH number all of it is about — a catalogue key, or a formula composed over
+// the channel names the response echoes back in `metric.namespace`. The `expr:` prefix is spelled
+// HERE and nowhere else, so no component has to know the wire encoding.
+//
+// `ranking` is the widest walk and is off by default: everything else opens one round-0 document
+// per campaign, while the ranking walks every round of every campaign selected. That is why the
+// pane puts it behind a press instead of a poll.
 //
 // Every shape is GENERATED from the Pydantic source (`Evidence` &c in
 // `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`,
 // the same setup that let the resource-matrix types drift two fields behind their model.
 export function fetchEvidence(
   campaignIds: readonly string[],
-  opts: { ranking?: boolean } = {},
+  opts: { ranking?: boolean; metric?: string } = {},
   signal?: AbortSignal,
 ): Promise<Evidence> {
   const qs = campaignIds.map((id) => `campaign=${encodeURIComponent(id)}`);
   if (opts.ranking) qs.push("ranking=true");
+  // A catalogue key or a composed `expr:…`, opaque here — the server owns both spellings, and
+  // `components/compare/MetricPicker.tsx` is the one place the browser spells the prefix.
+  if (opts.metric) qs.push(`metric=${encodeURIComponent(opts.metric)}`);
   return jget<Evidence>(`${API}/evidence?${qs.join("&")}`, signal);
 }
 

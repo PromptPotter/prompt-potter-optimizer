@@ -42,6 +42,18 @@ class PipelineData(TypedDict, total=False):
     # because it cancels in that difference (`domain/l4/proxies.py`).
     mean_round_delta: float
     mean_adopted_level_se: float
+    # The rest of that inner campaign's own trajectory and cost, carried beside the lift so a
+    # reader can ask what the run DID rather than only what it scored. `inner_spend_usd` /
+    # `inner_tokens` are reporting figures and bill nothing — see `InnerCellFacts`.
+    inner_origin_level: float
+    inner_final_lift: float
+    inner_peak_lift: float
+    inner_rounds_ran: int
+    inner_round_budget: int
+    inner_stop_reason: str
+    inner_spend_usd: float | None
+    inner_tokens: int | None
+    inner_campaign_id: str
     # Read defensively beside the top-level twins (`_absorb_sample_scored`, `RoundBuffer`):
     # no writer in this repo sets them here, but a backend that did must not be silently
     # dropped by ``ledger_sample_view``.

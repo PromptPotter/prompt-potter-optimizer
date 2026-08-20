@@ -28,6 +28,7 @@ from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
     floor_reason,
     held_levels,
+    inner_cell_facts,
     mean_adopted_level_se,
 )
 from promptpotter.domain.phases import RunPhase
@@ -796,6 +797,7 @@ async def _measure_inner_cell(
     # No exclusion decision here: `compute_outer_proxies` raises `InnerCycleUnscoreableError`,
     # which `measure_sample`'s catch-all turns into this sample's EXCLUDED row.
     proxies = compute_outer_proxies(result)
+    facts = inner_cell_facts(result, campaign_id)
 
     data: dict[str, Any] = {
         # The connector's `_extract_experiment` sets `ground_truth` to the same `inner:{query}`
@@ -814,6 +816,10 @@ async def _measure_inner_cell(
         # `mean - λ·se` haircut the spec forbids. Precision travels beside the measurement; it
         # never grades it.
         ADOPTED_LEVEL_SE_KEY: mean_adopted_level_se(result),
+        # The rest of what this seed knows about itself, as numbers rather than as the sentence
+        # in `reasoning_trace`. Same infra slot and the same rule: they travel beside the
+        # measurement and never grade it. `None` on a floored cell, whose keys are then absent.
+        **(facts.model_dump() if facts is not None else {}),
         # The archive's reuse contract: a named node means "this outcome depends on config only
         # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
         # only honest stamp is the LAST node of the outer chain — anything earlier lets a

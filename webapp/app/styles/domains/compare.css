@@ -123,19 +123,40 @@
   flex: 0 0 auto;
 }
 
-/* The forest's axis: one track per campaign, the dot placed by served level. */
-.cmp-forest-track {
-  position: relative;
-  flex: 1 1 auto;
-  height: 0.75rem;
-  min-width: 6rem;
-  border-bottom: 1px solid var(--color-border);
+/* The merged forest is the `ov-*` row from `l4.css`, borrowed whole so the app has ONE rendering
+   of "an estimate and how sure we are". The one thing that does not carry over is its last-row
+   emphasis: there the rows are rounds and the last is the latest, here they are campaigns in run
+   order, and bolding the newest asserts a winner nothing measured. */
+.cmp-forest .ov-row:last-child .ov-cell-label,
+.cmp-forest .ov-row:last-child .ov-cell-val {
+  font-weight: inherit;
 }
-.cmp-forest-dot {
-  position: absolute;
-  top: 0.125rem;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  transform: translateX(-50%);
+.cmp-forest .ov-row:last-child .ov-cell-label {
+  color: var(--color-text-secondary);
+}
+
+/* ── Composed metric ────────────────────────────────────────── */
+.cmp-expr {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-12);
+}
+.cmp-expr-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.cmp-expr-input {
+  width: min(28rem, 100%);
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  /* iOS focus-zoom is a constraint, not a rhythm value — the sanctioned raw-px exception. */
+  font-size: 16px;
+}
+.cmp-expr-bad {
+  border-color: var(--color-danger);
 }
