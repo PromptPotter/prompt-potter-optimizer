@@ -1,6 +1,6 @@
 # User Manual
 
-Read in order — by the end you'll have installed PromptPotter, run your first campaign, and know how to read what comes out.
+Read in order — by the end you'll have installed PromptPotter and run your first campaign.
 
 1. [What is PromptPotter?](01-what-is-promptpotter.md) — one paragraph + three concepts.
 2. [Install](02-install.md) — OpenRouter API key, `.env`, `pip install`.

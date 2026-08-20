@@ -96,7 +96,6 @@ loop = Loop(
     l1_patience=0,            # L1 mutates the winner
     l2_patience=2,            # L2 observes the history, re-aims L1
     l3_patience=1,            # L3 rewinds the lineage, climbs elsewhere
-    improvement_threshold=0.01,
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
     pobb_epsilon=0.2,         # how aggressively trailing candidates are killed
     spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped

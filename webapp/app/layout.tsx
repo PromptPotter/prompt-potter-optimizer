@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./styles/index.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { SurfaceFavicon } from "@/components/brand/SurfaceFavicon";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 
 // Link-unfurl (share-card) copy — what WhatsApp/Slack/iMessage/X show when the
@@ -14,16 +15,6 @@ const CARD_DESC =
 export const metadata: Metadata = {
   metadataBase: new URL(BRAND.url),
   title: "optimize, potter, learn",
-  // Browser-tab icon: the real mark (v3), replacing the 🏺 emoji data-URI
-  // placeholder. The mark is raster, so it cannot carry a prefers-color-scheme
-  // rule the way an SVG could — two cuts and a media query instead, because tab
-  // chrome may be light or dark and cannot pass a colour in.
-  icons: {
-    icon: [
-      { url: "/brand/tab-icon-pot-32.png", type: "image/png", media: "(prefers-color-scheme: light)" },
-      { url: "/brand/tab-icon-pot-32-dark.png", type: "image/png", media: "(prefers-color-scheme: dark)" },
-    ],
-  },
   description: BRAND.description,
   applicationName: BRAND.shortName,
   // publisher = the distributing brand; provider authored the software.
@@ -70,6 +61,16 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Browser-tab icon: the real mark (v3). The mark is raster, so it
+            cannot carry a prefers-color-scheme rule the way an SVG could — two
+            cuts and a media query instead, because tab chrome may be light or
+            dark and cannot pass a colour in. Declared here rather than through
+            `metadata.icons` because these are the PRE-PAINT cuts and
+            `SurfaceFavicon` repaints both onto a per-install ground: a
+            metadata-owned icon is re-emitted at hydration, landing after the
+            painted one and taking the tab back. One declaration, one owner. */}
+        <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/brand/tab-icon-pot-32.png" />
+        <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href="/brand/tab-icon-pot-32-dark.png" />
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
         {/* schema.org provenance — who publishes vs. who powers this unit.
             The crawler/agent-readable surface; the About pane shows the same
@@ -80,6 +81,7 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <SurfaceFavicon />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

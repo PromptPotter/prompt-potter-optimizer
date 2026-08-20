@@ -532,6 +532,90 @@ controls:
     do: Collapsible raw dashboard.json + trend + score-frequency. "Waiting for first poll…" until data.
 ```
 
+### Compare surface
+
+Reads a SET of campaigns rather than one, so it is scoped to no address: it takes its roster from
+the already-polled campaign registry and fetches once per (selection, metric, ranking) — never on
+the 2 s poll.
+
+```yaml
+surface: compare
+controls:
+  - id: campaign_picker
+    do: Select any campaigns, from any datasets, grouped by dataset with an All-in-dataset link.
+        anon: not rendered (the tab is authed chrome).
+        empty: "No campaigns yet."
+        note: changing the selection resets the ranking press — that walk was for a different set.
+
+  - id: metric_picker
+    do: Choose WHICH number everything below is about, from the server-served catalogue.
+        The label, unit, prose and direction all come off the wire; this surface names none of them.
+        live: the merged intervals, the pairwise table, the variance decomposition, the power
+              reading and the order confound ALL recompute under the pick, with no press.
+        note: a metric a selection cannot read stays selectable and explains itself (I3) — the
+              chart says which channel is missing rather than rendering an empty frame.
+
+  - id: metric_expression
+    do: Compose a metric over the served channel namespace, e.g. "lift / latency".
+        Picking Custom SEEDS the input from the metric already on screen, so it opens on a
+        formula that works rather than on an empty string the server rejects on sight.
+        Commits on Enter or blur, NEVER per keystroke — a keystroke-driven fetch key 400s on
+        every half-typed formula and blanks the card under the cursor still typing.
+        error: the server's own message beside the input, and the last good read STAYS on screen
+               (failureKind → `invalid` is the operator's input, not a dead read). Never a raw
+               "400 /api/v1/evidence" (I2).
+        note: direction is unknowable for a composed metric, so the surface names no winner.
+
+  - id: chart_form
+    do: Grouped / Stacked / Lines / Merged over the cells every campaign scored under the metric.
+        empty: no shared cell → say so and point at Merged, which needs none.
+
+  - id: unreadable_metric
+    do: When NO campaign scored a cell under the pick, the card says that ONCE — the metric, why
+        it cannot be read, and each campaign's unreadable count — and everything describing a
+        plot that does not exist stays silent: no chart, no legend, no per-campaign tally, no
+        pairwise card, no variance card.
+        note: the failure this replaced was five blocks stating one absence in five wordings,
+              including a lede claiming to have "plotted over the 0 cells".
+
+  - id: merged_view
+    do: One row per campaign — the cells collapsed to one estimate with its SERVED 95% interval,
+        drawn as the same `ov-axis` SVG row the outer-signal forest uses, so this app has one
+        rendering of "an estimate and how sure we are".
+        This is "all seeds in one bar": the read the tab exists for.
+        note: below two scored cells the dot renders with NO bar — a zero-width bracket would
+              read as a perfect measurement. A campaign with no value keeps its row with an
+              em-dash and its reason; vanishing from the chart is fabrication by omission.
+
+  - id: pairwise_table
+    do: Every pair, blocked on the cells both scored: difference, 95% CI, n, p, and p (Holm).
+        Raw and adjusted are shown TOGETHER — an adjusted-only column hides the correction, a
+        raw-only column invites reading one test as if it were the only one.
+        empty: one campaign selected → "a pairwise comparison needs two."
+        note: p is null where nothing was tested (below two shared cells) and renders "—", which
+              is a different fact from a test that returned 1.00.
+        note: the surface must state that Holm corrects across PAIRS and cannot correct across
+              METRICS — trying several and keeping the tightest is a comparison no column prices.
+
+  - id: comparability_note
+    do: Say whether the selection's absolute levels are one quantity, and why.
+        note: verdict `null` is UNKNOWN and MUST NOT render as yes.
+
+  - id: readings
+    do: Variance decomposition, resolving power, replicate spread, run-order confound — all under
+        the selected metric, so they describe the numbers actually plotted above them.
+
+  - id: ranking_press
+    do: "Compute ranking" — the one walk expensive enough to stay a press (every round document of
+        every campaign selected). Off by default; a selection change resets it.
+        live: each edit's effect is read on the SELECTED metric and reported in its units, so the
+              table under the picker cannot answer in a measurand the picker does not name.
+        empty: a `best_*` metric cannot rank an edit at all — a candidate has no best round of its
+               own. Served as `metric.spec.ranks_edits`: the press is withheld and the card states
+               that the question cannot be asked, which is NOT "nothing was measured".
+        loading: the pane resolves to a reading state, never a permanent spinner (I1).
+```
+
 ### Verify surface
 
 ```yaml

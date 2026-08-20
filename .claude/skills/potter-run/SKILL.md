@@ -75,14 +75,14 @@ max — ask before exceeding.
 | `set-budget` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens`. |
 
 **A budget halt is not the end of a run — it is two verbs.** `SPEND_BUDGET` / `TOKEN_BUDGET` mean
-the cycle hit *its own declared ceiling*, not that the work is done; the default `token_budget` is
-~a 5-round run, so a campaign that declared nothing stops there every time. Continue it with
-`set-budget --max-tokens <higher>` then `resume` — the ceiling is composed over the config at the
-next launch and the wallet still bounds it, so a raise sticks rather than being reset. Two things
+the cycle hit *its own declared ceiling*, not that the work is done. Only `spend_budget_usd` is
+armed by default, so a campaign that declared nothing stops on dollars — `token_budget` is `None`
+until set. Continue with `set-budget --max-usd <higher>` then `resume` — the ceiling is composed
+over the config at the next launch and the wallet still bounds it, so a raise sticks. Two things
 to check before assuming it worked: the ceiling is clamped against the account allowance, so read
 the ARMED value back off `dashboard.json::run_limits` rather than trusting the number you sent;
-and the token counter is CUMULATIVE across resume, so the new ceiling must exceed the total
-already spent, not the work remaining.
+and the counter is CUMULATIVE across resume, so the new ceiling must exceed the total already
+spent, not the work remaining.
 
 Flags come from `datasets/{name}/dataset.md § Init Flags`, verbatim — never guessed. `new`
 overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
@@ -185,10 +185,10 @@ So: **when a round reports `improved: false`, open
 it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
 candidate that failed. Report it as an instrument disagreement, and name both numbers.
 
-Do **not** answer this by retuning `improvement_threshold` / `pobb_epsilon`, and do **not** route
-promotion through `headline_metric` — that knob is display-only on purpose, and the gate is
-already θ. If a held round still looks wrong after reading both numbers, the question to ask is
-whether the *threshold* is right for this benchmark, not which estimator the gate should use.
+Do **not** answer this by retuning `pobb_epsilon`, and do **not** route promotion through
+`headline_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
+now means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
+wrong after reading both numbers, ask what the round measured, not which estimator the gate uses.
 
 ## Configs are the source of truth
 

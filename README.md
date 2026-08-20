@@ -30,13 +30,13 @@ Every measurement costs money, so the whole design is **most fitness per dollar*
 - **Optimizes itself** — point the optimizer at its own optimizer prompts. [L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)
 - **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
-## Five ways to run it
+## Six ways to run it
 
-1. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
-2. **CLI** — `python -m promptpotter new <name>` / `resume`.
-3. **Python / Jupyter notebook**.
-4. **REST API**.
-5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
+1. **WebApp** — Full UI setup
+2. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
+3. **CLI** — `python -m promptpotter new <name>` / `resume`.
+4. **REST API**
+5. **Python / Jupyter notebook** — Promptpotter is written in Python. The *DSPy setting* is only recommended for simple cases, due to DSPy not permitting the mechanics of promptpotter, i.e. ["", ""] . 
 
 **Direction — the sixth way: a tool another agent calls.** Parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — reaches for PromptPotter as its *try-harness-first* move before spending on fine-tuning. [Why, plus a same-dataset head-to-head](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md) · [roadmap § Agent-tool parity](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md).
 
@@ -75,6 +75,8 @@ The code-evolution systems mutate source; every prompt-evolution system above mu
 PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZero-shaped MCTS over the lineage**: [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#best-arm-identification--sequential-testing) prunes losers *within* a round, each round's ability backpropagates to its ancestors, and a UCB rule picks the ancestor to re-expand once a branch is spent. Rollouts give way to deterministic evaluation on your dataset, as in AlphaZero. [Comparison](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#comparison-to-mcts).
 
 **Test-time compute, moved out of the request.** The popular way to spend compute at inference is to search inside the request — sample many answers, verify, pick ([Snell et al.](https://arxiv.org/abs/2408.03314) · [survey](https://arxiv.org/abs/2406.16838)). PromptPotter is that same search run as **tuning infrastructure instead**: you run it, it finds a configuration, and from then on that configuration is simply *used on demand* — an ordinary call, with no search in the path and nothing learning at request time. The test-time budget is itself one of the things it can tune (`reasoning_effort`, `max_tokens`, the model), so the inference bill is something it optimizes rather than something it grows.
+
+If what you actually want is "pick the best *currently available* model for whatever I ask next" — one user, an arbitrary next question, live selection across whatever keys/subscriptions/local models you have — that's a gateway, not PromptPotter: [OpenRouter](https://openrouter.ai) (hosted) or [OmniRoute](https://github.com/diegosouzapw/OmniRoute) (self-hosted, stitches your own providers into one local endpoint) are built for exactly that. PromptPotter runs the opposite axis — one fixed task, hit repeatedly, tuned once *offline* against your real eval data until a prompt+model+params combo wins, then deployed and reused — so it's what tunes the thing a gateway ends up calling, not a replacement for the gateway itself. The two compose rather than compete.
 
 ### The loop
 

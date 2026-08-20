@@ -12,6 +12,8 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **what-if** / **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 
+⚠️ **A round is won on θ, not accuracy — when the operator reads the accuracy column, say so.** Subsets move between rounds and PoBB truncates arms at different depths, so a lower-accuracy winner is normally *correct*, not a bug: push back rather than accept the premise. Two states where θ is NOT ability and the pushback is wrong — an arm at 0.0 on every cell (pins to a floor constant, every lift reads `0.000`) and a cold ruler (θ is just logit-accuracy on its own subset). Owned by [`docs/methods/verdict-resolution.md`](docs/methods/verdict-resolution.md) § Reading a round.
+
 ## First — decide what KIND of ask this is, then load for it
 
 **This repo is not only code.** The same root file serves launching a campaign, diagnosing a live run, editing a prompt, changing the engine, changing the webapp, and cutting a dataset — and those load almost **disjoint** context. Reading everything is not the answer. Each row is *what to load*, then the **symptom** that kind produces when it goes wrong — the cure lives in the file the row points at, never in this table.

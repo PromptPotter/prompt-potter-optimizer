@@ -23,6 +23,22 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+- **PromptPotter's own REST API isn't hardened/documented to the bar that makes it
+  safe to lean on externally.** `GET /api/v1/campaigns` · `GET /campaigns/{id}` ·
+  `POST /commands/{kind}` · `GET /backends/{id}/health`, documented in
+  [`../operations/backend-integration.md`](../operations/backend-integration.md) §
+  "PromptPotter's own REST API" — the intended integration surface for external
+  callers today, but request/response shapes, stability guarantees, and worked
+  examples beyond the bare endpoint table don't exist yet. Action: hardening pass —
+  stability guarantees per endpoint, clearer request/response examples, a pointer to
+  the existing Swagger (`/docs`). Aside, not a commitment: gateways that stitch
+  together multiple model providers/keys (e.g. OmniRoute, a fault-tolerant local
+  multi-provider gateway) are a natural caller of this surface — campaigns are
+  async/long-running, so "submit, poll, fetch result" is the shape a caller needs
+  documented, not a synchronous request/response. Keep the surface protocol-agnostic
+  (REST, callable from anything) rather than coupling it to one gateway or protocol.
+  Blocker: none.
+
 **From the 2026-08-06 JustLogic model bake-off.** Each carries its measurement; the four
 root fixes that arc DID land (reasoning-token share on the ledger, provider-aware pricing,
 `answer_modal_share`, the `reasoning_only_response` arm) are in `git log`, not here.
