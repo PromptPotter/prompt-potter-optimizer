@@ -8,6 +8,7 @@ backend_name: PromptPotter
 backend_type: promptpotter
 available_models:
   - deepseek/deepseek-v4-flash:nitro
+  - qwen/qwen3.8-27b:nitro
   - openai/gpt-oss-120b
 # No node declares `prompt_info`, deliberately: none of these accepts a rendered target
 # prompt. The mutation surface IS `optimizer.param_keys` — each node's own PromptTemplate

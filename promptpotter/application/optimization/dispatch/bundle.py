@@ -174,6 +174,10 @@ class RoundDigest:
     # The same aggregate the degradation grade reads, computed BEFORE ``health`` is stamped —
     # so the critique cannot read the grade.
     node_failure_rates: dict[str, float] = field(default_factory=dict)
+    # Which samples THIS round scored — the freshness key for ``sample_transcripts``. Read off
+    # ``prior_rounds[-1]`` it was one round stale on the critique, whose own round is deliberately
+    # not in ``prior_rounds``, so the panel ranked by a subset the node was no longer being asked about.
+    latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)

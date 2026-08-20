@@ -263,8 +263,8 @@ resolved_prompts:
       change.
 
 
-      priority_fix: follow the answer_format template. <axis> MUST be EXACTLY one of the real pipeline
-      axes — a node param key from the catalogue, or persona/task_intent/problem_description/instruction/thinking_style/answer_format.
+      priority_fix: follow the answer_format template. <axis> MUST be EXACTLY one of
+      persona/task_intent/problem_description/instruction/thinking_style/answer_format.
       A descriptive name you invent (e.g. 'premise_parsing', 'reasoning') is INVALID and wastes the fix.
       Do not reflexively route every failure to thinking_style: an execution slip (a skipped step, a mis-read
       input, a formatting miss) is usually fixed better by instruction or answer_format; reserve thinking_style
@@ -278,7 +278,9 @@ resolved_prompts:
       Diagnose the mechanism: WHY the model landed wrong, not just that it did. Before claiming a bias
       (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one error
       class for another is not a fix. ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first,
-      labelled with its share of the misses ("Coordinate geometry (4 of 9): ..."). Three quotes from one
+      labelled with the MECHANISM and its share of the misses ("Coordinate geometry (4 of 9): ...") —
+      a label naming no mechanism ("Cluster", "Cluster 1", a bare sample id) steers nothing and wastes
+      the entry, which is the whole budget for that root cause. Three quotes from one
       cluster is ONE highlight: the next L1 gives each candidate a different failure mode, so naming one
       mode three times spends its whole round on one idea. 3 is a CEILING, not a quota — name a small
       second cluster, but where the misses truly share one root emit ONE entry and let the count say so.

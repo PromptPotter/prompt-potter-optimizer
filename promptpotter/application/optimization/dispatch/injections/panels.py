@@ -351,15 +351,21 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     rows = _misses(b)
     if not rows:
         return ""
-    # Freshest first. The pool is cumulative and stable-ordered, so a plain head slice served the
-    # same two or three rows for a cycle's whole life while the loop moved underneath it.
-    latest = {
-        sid
-        for r in (b.prior_rounds[-1].results if b.prior_rounds else [])
-        if (sid := r.get("sample_id")) is not None
-    }
-    rows.sort(key=lambda r: r.get("sample_id") not in latest)
-    shown = rows[:TRANSCRIPT_RENDER_CAP]
+    # Freshest first, then ROTATE. Freshness alone is a boolean over a pool whose insertion order
+    # froze at round 0, so a stable sort served the same head for a cycle's whole life: measured
+    # over the banked corpus, three of four runs of one cell handed their critique the identical
+    # transcript triple three rounds running — one of them the same 2,001 characters each time.
+    # A critique cannot name a cluster it is never shown, so the repeated diagnosis was the
+    # correct answer to a question asked three times. Rotating the eligible group by round spends
+    # the cap on a different slice each round; the cumulative-pool contract the header states is
+    # unchanged, only which of its still-unsolved rows get the deep read.
+    latest = b.digest.latest_sample_ids
+    fresh = [r for r in rows if r.get("sample_id") in latest]
+    stale = [r for r in rows if r.get("sample_id") not in latest]
+    if fresh:
+        off = (b.cycle_slice.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
+        fresh = fresh[off:] + fresh[:off]
+    shown = (fresh + stale)[:TRANSCRIPT_RENDER_CAP]
     header = (
         f"SAMPLE TRANSCRIPTS ({len(shown)}/{len(rows)} still-unsolved samples, shown complete — "
         "each trace is the LAST configuration to miss that sample, not necessarily the parent, so "

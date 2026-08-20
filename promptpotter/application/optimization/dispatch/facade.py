@@ -25,6 +25,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
+from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
@@ -251,7 +252,12 @@ def build_bundle(
     # WHOLE — the failure panels take the misses out of it themselves, and `answer_distribution`
     # needs the hits to see a pipeline that has collapsed onto a single label.
     origin_per_sample = list(cycle.origin_round.results)
-    trajectory_results = list(cycle.tracking.current_results)
+    # `absorb_round` folds a round into `tracking.current_results` only AFTER the critique call,
+    # so a node whose prompt opens "Read the measurements above" was handed the pool as of the
+    # PREVIOUS round and never its own. Same merge absorb will apply, over a local snapshot —
+    # L2/L3 pass no round and re-merge one already absorbed, which replaces rows with themselves.
+    latest_results = list(latest_round.results) if latest_round else []
+    trajectory_results = merge_known_outcomes(list(cycle.tracking.current_results), latest_results)
 
     return InjectionBundle(
         opt_sp=cycle.opt_sp,
@@ -262,6 +268,9 @@ def build_bundle(
             critique=latest_crit,
             node_failure_rates=(
                 compute_node_failure_rates(latest_round.results) if latest_round else {}
+            ),
+            latest_sample_ids=frozenset(
+                sid for r in latest_results if (sid := r.get("sample_id")) is not None
             ),
         ),
         axes=cycle.axes,
