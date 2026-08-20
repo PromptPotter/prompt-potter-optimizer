@@ -25,7 +25,7 @@
 // server deliberately cuts inner runs to milestones (`store/family_ray_views.py`).
 
 import { candidateLabel } from "@/lib/candidate-label";
-import { fmtPct0 } from "@/lib/format";
+import { fmtDuration, fmtPct0 } from "@/lib/format";
 
 // THE SCORING ORDER, and the only channel that carries it.
 //
@@ -267,7 +267,18 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
       // they never become steps. Making them items would fill the ray with nothing.
       const detail = str(p.detail);
       if (!detail) return null;
-      return { id: "inner-progress", kind: "progress", icon: "·", label: detail, tone: "muted" };
+      // The clock is formatted HERE, never composed into `detail` upstream: `elapsed_s` rides
+      // the same record, so the engine says only WHO the wait belongs to (the provider and its
+      // model) and no duration formatter is duplicated into the application layer.
+      const secs = num(p.elapsed_s);
+      return {
+        id: "inner-progress",
+        kind: "progress",
+        icon: "·",
+        label: detail,
+        detail: secs == null ? undefined : fmtDuration(secs),
+        tone: "muted",
+      };
     }
     case "candidate_minted": {
       // The candidate exists but has not been scored — the earliest point anything can

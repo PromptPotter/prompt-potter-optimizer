@@ -22,6 +22,9 @@ describe("projectionToActivity — llm_call_progress", () => {
       kind: "progress",
       icon: "·",
       label: "inner r2/3 · best 55%",
+      // The clock rides `elapsed_s` on the same record — the engine names WHO the wait belongs
+      // to, this layer formats how long.
+      detail: "30s",
       tone: "muted",
     });
   });

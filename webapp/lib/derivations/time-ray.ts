@@ -25,8 +25,8 @@ import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 export const WEDGED_AFTER_S = 300;
 
 // A step older than this is not "now" — the `running` head reads the newest step's text only
-// while that step is recent. Same number as the gap threshold, and for the same reason: six
-// missed 15 s heartbeats.
+// while that step is recent. Same number as the gap threshold, and for the same reason: nine
+// missed 10 s heartbeats.
 const RECENT_S = 90;
 
 export interface RayStep {

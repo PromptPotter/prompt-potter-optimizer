@@ -256,6 +256,15 @@ async def llm_call(
                     node=node or "llm_call",
                     round_num=context.round_num,
                     start_monotonic=_t0,
+                    # WHO the wait belongs to. A bare tick proves the process is alive and
+                    # says nothing about why it is quiet, so a slow provider read as a stalled
+                    # loop on every surface — an operator called a healthy 4-minute call a hang,
+                    # which is the whole reason this argument exists. The model is knowable only
+                    # here. The elapsed is NOT composed in: it rides `elapsed_s` on the same
+                    # record, so no duration formatter is duplicated down into this layer.
+                    detail_fn=lambda: (
+                        f"provider {merged.get('model') or '(unnamed)'} has not answered"
+                    ),
                 )
             )
         # Bounded honor-Retry-After loop: if the header is missing or attempts run out, the SDK

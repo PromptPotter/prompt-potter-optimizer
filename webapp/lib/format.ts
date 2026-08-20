@@ -42,11 +42,11 @@ export function fmtDuration(sec: number): string {
 // how long nothing happened, so it renders nothing at all below the gap threshold.
 //
 // Under 90 s is deliberately empty, and the number is load-bearing rather than taste. The
-// in-flight heartbeat fires every 15 s during every long await this package makes — the
+// in-flight heartbeat fires every 10 s during every long await this package makes — the
 // optimizer call, an L4 inner campaign, and `measure_sample`'s backend query, whose
 // QUERY_TIMEOUT is 120 s. The ray keeps those heartbeats as gap SUPPRESSORS (it drops them
 // from the rendered steps but counts them as proof of life), so a heartbeated 120 s query
-// grows no gap at all. 90 s = six missed heartbeats: it cannot be ordinary in-run latency.
+// grows no gap at all. 90 s = nine missed heartbeats: it cannot be ordinary in-run latency.
 //
 // If anyone ever makes the server stop sending `llm_call_progress` on the ray, every backend
 // query sprouts a spurious gap here. The coupling is commented at both ends.

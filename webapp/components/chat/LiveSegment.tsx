@@ -96,6 +96,9 @@ export function LiveSegment({
             {progress.icon}
           </span>
           <span className="chat-activity-label">{progress.label}</span>
+          {progress.detail ? (
+            <span className="chat-activity-detail">{progress.detail}</span>
+          ) : null}
           {/* The ♥ bank rides the PROGRESS chip, not the round rows above it: the feed is a
               history, and painting the current bank onto a finished round would misdate it.
               The chip is the one row that means "now". */}

@@ -43,9 +43,11 @@ Four rules, each one a thing a plausible edit would undo:
   `DashboardState` and raises at import if a member is missing. **Totality is the fix, not the relocation** —
   the client version covered three states and everything else resolved to "nothing running".
 - **The feed is curated, not the firehose, and every `ProjectionKind` maps to an item or an explicit
-  `null`** — no orphan. The `sample_scored` torrent collapses into one replaced progress chip; the **L4**
-  inner-campaign heartbeat carries `detail` and upserts one stable-id chip so the outer chat never reads as
-  silent; `command` surfaces as a "control applied" merge item and its `command_ack` is a non-item *unless
+  `null`** — no orphan. The `sample_scored` torrent collapses into one replaced progress chip; an in-flight
+  heartbeat carrying `detail` upserts one stable-id chip so the thread never reads as silent — the L4
+  inner-campaign tick names its round, an optimizer tick names the PROVIDER it is waiting on, which is the
+  one fact that separates a slow model from a dead loop (`elapsed_s` rides the same record, so the chip's
+  clock is formatted client-side and no duration formatter is duplicated into the engine); `command` surfaces as a "control applied" merge item and its `command_ack` is a non-item *unless
   rejected*, because acking an applied command prints the same fact twice.
 
 **A non-item is not the same as discarded.** `sample_order_preview` yields no item — nothing *happened*, it

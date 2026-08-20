@@ -16,14 +16,19 @@ if TYPE_CHECKING:
 __all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat"]
 
 
-HEARTBEAT_INTERVAL_S = 15.0
+HEARTBEAT_INTERVAL_S = 10.0
 """Seconds between in-flight progress ticks.
 
-15s is a compromise: short enough that the operator sees a fresh
-counter several times during a typical 60-120s optimizer call, long
-enough that 5-15s critique calls finish without ever emitting one. The
-ledger pays one append per tick - at four optimizer calls/round and
-~90s average call duration that's ~24 records/round, negligible."""
+This is the refresh rate of the only surface that says WHY the run is quiet — the
+chat's progress chip and the terminal's `still waiting` line both re-render per tick,
+naming the provider the call is waiting on. 15s was chosen so short calls emitted no
+tick at all; the cost of that silence turned out to be an operator reading a healthy
+long call as a hang, which is the more expensive failure. The ledger pays one append
+per tick — at four optimizer calls/round and ~90s average duration that is ~36
+records/round, still negligible.
+
+**`webapp/lib/format.ts::fmtGap` derives its threshold from this number** (it counts
+missed heartbeats to decide a silence is real). Change one, re-read the other."""
 
 
 async def heartbeat(
