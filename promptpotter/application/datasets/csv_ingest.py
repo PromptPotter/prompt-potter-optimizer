@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import random
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -252,9 +253,22 @@ def _read_xlsx(blob: bytes) -> Table:
         wb.close()
 
 
-def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) -> list[Sample]:
+def materialize_samples(
+    table: Table, *, query_col: str, ground_truth_col: str, order_seed: str | None
+) -> list[Sample]:
     """Belt-and-suspenders: the origin gate should already have rejected a column that is not a
-    member of ``table.headers``."""
+    member of ``table.headers``.
+
+    ``order_seed`` decorrelates the minted ``Sample.id`` sequence from the upload's row order;
+    ``None`` keeps the file as delivered. An uploaded bank is routinely GROUPED BY LABEL, and the
+    round-subset ranker ties across never-measured samples and breaks that tie on ascending id — so
+    a label-ordered id sequence hands each round a disjoint single-label panel and cross-round
+    accuracy stops being a series. Seeded rather than random: ids are minted ONCE here and read back
+    from the committed ``cache.json`` forever after, and ``sample_id`` is part of the measurement
+    cache key, so the permutation must be reproducible from what is on disk. Re-seeding an EXISTING
+    dataset is therefore a re-cut, not an edit — it repoints every cached row at a different
+    question, so it belongs on a new dataset rather than in place.
+    """
     for label, col in (("query", query_col), ("ground_truth", ground_truth_col)):
         if col not in table.headers:
             raise IngestError(
@@ -265,7 +279,9 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
                 ),
             )
 
-    samples: list[Sample] = []
+    # Validated in FILE order so a rejection quotes the row number the operator sees in their own
+    # file; the permutation below only decides which id each surviving row is minted under.
+    pairs: list[tuple[str, str]] = []
     for ordinal, row in enumerate(table.rows, start=1):
         query = row.get(query_col, "")
         ground_truth = row.get(ground_truth_col, "")
@@ -275,8 +291,13 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
             raise IngestError(
                 reason="bad_csv", message=f"Row {ordinal}: empty {ground_truth_col!r} cell."
             )
-        samples.append(Sample(id=len(samples), query=query, ground_truth=ground_truth))
-    return samples
+        pairs.append((query, ground_truth))
+    if order_seed is not None:
+        random.Random(order_seed).shuffle(pairs)
+    return [
+        Sample(id=i, query=query, ground_truth=ground_truth)
+        for i, (query, ground_truth) in enumerate(pairs)
+    ]
 
 
 def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:

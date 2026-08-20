@@ -187,6 +187,7 @@ class TenantDatasetStore:
         task_description: str,
         prompt_default: dict[str, Any],
         task_context: dict[str, Any],
+        sample_order_seed: str | None = None,
     ) -> Path:
         """Create ``datasets/{slug}/`` fresh and write the Origin files — the one commit mechanism
         for both entry points. The candidate library rides :meth:`write_candidate_library`."""
@@ -205,6 +206,11 @@ class TenantDatasetStore:
                 "source_file": source_file,
                 "headers": list(headers),
                 "row_count": len(serialized),
+                # WHICH permutation minted the ids below (`csv_ingest.materialize_samples`);
+                # `null` = the rows sit in the order the operator delivered them. Recorded
+                # because those ids are the measurement cache key, so the ordering is part of
+                # the origin and re-seeding is a re-cut onto a NEW dataset, never an edit.
+                "sample_order_seed": sample_order_seed,
                 "items": serialized,
             },
         )

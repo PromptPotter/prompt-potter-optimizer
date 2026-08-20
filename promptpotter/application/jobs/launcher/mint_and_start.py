@@ -338,12 +338,20 @@ def materialize_and_write_origin(
     """Materialize raw bank rows → Samples and write the committed dataset Origin files — the one
     commit body at check-in Start, shared by the CLI inline path and the web detach path."""
     table = Table(headers=draft.headers, rows=tuple(bank_items))
+    # Seeded on the slug, so the permutation is re-derivable from the dataset's own name and a
+    # DIFFERENT ordering can only exist under a different slug — which is what keeps `sample_id`
+    # (a measurement cache key) pointing at the same question for the life of the dataset.
+    order_seed = draft.slug
     samples = materialize_samples(
-        table, query_col=draft.column_query, ground_truth_col=draft.column_ground_truth
+        table,
+        query_col=draft.column_query,
+        ground_truth_col=draft.column_ground_truth,
+        order_seed=order_seed,
     )
     stores.tenant_datasets.write_committed_dataset(
         draft.slug,
         samples=samples,
+        sample_order_seed=order_seed,
         source_file=draft.source_file,
         headers=draft.headers,
         pipeline_json=_build_origin_pipeline_json(draft),
