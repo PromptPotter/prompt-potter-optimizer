@@ -263,7 +263,6 @@ CONNECTOR = Connector(
     # TPM relief comes from the OpenRouter optimizer default, not from this.)
     default_optimization=(
         ("n_variants", 3),
-        ("improvement_threshold", 0.01),
         ("degradation_threshold", 0.4),
     ),
     # A fresh drop's committed pipeline.yaml must OWN its task model — the dataset

@@ -144,8 +144,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     inner_pipeline = read_yaml_optional(benchmark_dir / "pipeline.yaml") if benchmark_dir else None
     # ...and the benchmark's CAMPAIGN config, which `_run_inner_campaign` reads to build every
     # cell's `CampaignConfig`. Its `scoring` block is the formula each inner fitness is computed
-    # under and its selection knobs (`elimination_n_min`, `pobb_epsilon`,
-    # `improvement_threshold`) decide which candidate a round adopts — so editing it changes
+    # under and its selection knobs (`elimination_n_min`, `pobb_epsilon`) decide which
+    # candidate a round adopts — so editing it changes
     # what `mean_round_delta` MEANS while leaving every other input here untouched. It escaped
     # the fingerprint entirely; nothing would have reported the pooling.
     inner_campaign = read_yaml_optional(benchmark_dir / "campaign.yaml") if benchmark_dir else None

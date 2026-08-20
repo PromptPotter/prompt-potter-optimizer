@@ -28,7 +28,6 @@
     "optimization": {
       "max_rounds": 7,
       "n_variants": 3,
-      "improvement_threshold": 0.01,
       "degradation_threshold": 0.4,
       "spend_budget_usd": 0.5,
       "token_budget": 1500000,

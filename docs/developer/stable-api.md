@@ -108,8 +108,8 @@ frozen key/default table (same rule as §4). Every knob is a
 self-describing field on `OptimizationConfig` in
 `application/campaign_config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
 `Field(description=…)` — and `application/knobs.py::KNOBS` is the walked
-taxonomy. Only `improvement_threshold` and `degradation_threshold` are
-required; everything else defaults. Read defaults off the fields, never
+taxonomy. Only `degradation_threshold` is required; everything else
+defaults. Read defaults off the fields, never
 off a doc.
 
 **Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `promptpotter/assets/optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.

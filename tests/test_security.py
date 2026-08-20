@@ -949,9 +949,7 @@ def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.runner.entry import _tighten_budgets
 
-    config = load_campaign_config(
-        {"optimization": {"improvement_threshold": 0.02, "degradation_threshold": 0.05}}
-    )
+    config = load_campaign_config({"optimization": {"degradation_threshold": 0.05}})
     attacker = config.model_copy(
         update={
             "optimization": config.optimization.model_copy(
@@ -997,7 +995,6 @@ def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> N
     config = load_campaign_config(
         {
             "optimization": {
-                "improvement_threshold": 0.02,
                 "degradation_threshold": 0.05,
                 "spend_budget_usd": 0.10,
                 "token_budget": 210_000,

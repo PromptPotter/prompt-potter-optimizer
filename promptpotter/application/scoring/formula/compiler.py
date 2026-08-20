@@ -8,7 +8,7 @@ import hashlib
 import math
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.scoring import DEFAULT_SCORER_ID, ScoringSpec
@@ -24,7 +24,7 @@ class ScoringTermMissingError(ScoringFormulaError):
     the live scorer must HALT, the read-side mask reports *unscorable* and never a fabricated number."""
 
 
-_SAFE_BUILTINS = {
+SAFE_BUILTINS = {
     "__builtins__": {
         "min": min,
         "max": max,
@@ -43,7 +43,7 @@ _SAFE_BUILTINS = {
 
 # AST allowlist — no Attribute (kills ``().__class__...``), comprehensions, lambdas, walrus, subscript.
 # Names are unrestricted (per-sample namespace varies per dataset); every Call must resolve to a name
-# in _SAFE_BUILTINS ∪ SCORING_FUNCTIONS ∪ namespace.
+# in SAFE_BUILTINS ∪ SCORING_FUNCTIONS ∪ namespace.
 _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
     {
         ast.Expression,
@@ -89,6 +89,56 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             f"in {source}. Allowed: arithmetic, comparisons, calls to the "
             "registered scoring helpers, namespace name lookups."
         )
+
+
+class CompiledExpression(NamedTuple):
+    """A validated formula plus the names it reads. ``evaluate`` returns a FINITE float or raises."""
+
+    names: frozenset[str]
+    evaluate: Callable[[dict[str, Any], str], float]
+
+
+def compile_expression(formula: str, *, source: str) -> CompiledExpression:
+    """The one safe-eval path in the package: parse, allow-list, compile, and classify what goes wrong.
+
+    The classification is the load-bearing half and the reason this is not three functions — a term the
+    record does not carry raises ``ScoringTermMissingError`` so a read-side caller can report *unscorable*,
+    while everything else raises the parent so the live scorer halts loud."""
+    tree = ast.parse(formula, f"<{source}>", "eval")
+    validate_ast(tree, source=source)
+    code = compile(tree, f"<{source}>", "eval")
+    names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
+
+    def _evaluate(namespace: dict[str, Any], subject: str) -> float:
+        try:
+            raw = eval(code, SAFE_BUILTINS, namespace)
+        except NameError as exc:
+            carried = sorted(k for k, v in namespace.items() if not callable(v))
+            raise ScoringTermMissingError(
+                f"The {source} {formula!r} names a term {subject} does not carry: {exc}. "
+                f"{subject} carries {carried} — either the formula is wrong, or this record "
+                "predates the term."
+            ) from exc
+        except Exception as exc:
+            raise ScoringFormulaError(
+                f"The {source} {formula!r} raised on {subject}: {type(exc).__name__}: {exc}."
+            ) from exc
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ScoringFormulaError(
+                f"The {source} {formula!r} returned non-numeric {raw!r} on {subject} — "
+                "it must evaluate to a number."
+            ) from exc
+        if not math.isfinite(value):
+            raise ScoringFormulaError(
+                f"The {source} {formula!r} evaluated to {value!r} on {subject} — a non-finite "
+                "result is missing data (a division by zero, or a term that was never measured), "
+                "not a perfect one. Fix the formula or exclude the measurement."
+            )
+        return value
+
+    return CompiledExpression(names=names, evaluate=_evaluate)
 
 
 def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
@@ -155,32 +205,12 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
             "and a ground truth, never a verdict; the formula IS the verdict."
         )
 
-    tree = ast.parse(formula, "<scoring>", "eval")
-    validate_ast(tree, source="per_sample scoring formula")
-    code = compile(tree, "<scoring>", "eval")
+    compiled = compile_expression(formula, source="per_sample scoring formula")
 
     def _scorer(result: dict[str, Any]) -> float:
-        ns = _build_namespace(result)
         query = str(result.get("query", "?"))[:80]
-        try:
-            raw = eval(code, _SAFE_BUILTINS, ns)
-        except NameError as exc:
-            # The one failure a HISTORY reader must tell apart from a broken formula: the record
-            # predates the term. `round_scorer` already draws this line; the per-sample scorer
-            # collapsed it, so `AxisIndex.refresh` could only catch the parent and had to swallow
-            # a live divide-by-zero to survive a stale archived row.
-            raise ScoringTermMissingError(
-                f"Scoring formula {formula!r} names a term query {query!r} does not carry: "
-                f"{exc}. Either the formula is wrong, or this record predates the term."
-            ) from exc
-        except Exception as exc:
-            raise ScoringFormulaError(
-                f"Scoring formula {formula!r} raised on query {query!r}: "
-                f"{type(exc).__name__}: {exc}. The formula references something the "
-                "trace doesn't carry (or a matcher rejected the input) — fix the "
-                "formula or the pipeline output, don't score it as a wrong answer."
-            ) from exc
-        return clamp_unit_score(raw, formula=formula, subject=f"query {query!r}")
+        value = compiled.evaluate(_build_namespace(result), f"query {query!r}")
+        return clamp_unit_score(value, formula=formula, subject=f"query {query!r}")
 
     return _scorer
 
@@ -207,10 +237,13 @@ def split_scoring_block(
 
 
 __all__ = [
+    "SAFE_BUILTINS",
+    "CompiledExpression",
     "ScoringFormulaError",
     "ScoringTermMissingError",
     "auto_scorer_id",
     "clamp_unit_score",
+    "compile_expression",
     "compile_scorer",
     "split_scoring_block",
     "validate_ast",

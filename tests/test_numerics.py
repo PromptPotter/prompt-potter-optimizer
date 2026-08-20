@@ -2207,6 +2207,49 @@ def test_pobb_check_gates_elimination_on_posterior():
     assert not any(isinstance(v, float) and k.startswith("winner") for k, v in cr.items())
 
 
+def test_pobb_epsilon_is_graded_by_depth_not_scalar():
+    """A raised ε must not spend its aggression at ``n_min``, where ONE discordant sample already
+    drives ``p_best`` to ~0.2. The bar is ``epsilon_floor`` at the floor and the full ``epsilon``
+    by twice that depth, so an arm one sample behind buys a short reprieve while an arm further
+    behind still dies at the floor. Equal floor and ε — the default — leaves the bar flat."""
+    cfg = PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.15)
+    graded = PoBBCheck(cfg, n_samples=28, delta_scale={})
+    assert graded.epsilon_at(6) == pytest.approx(0.15)
+    assert graded.epsilon_at(9) == pytest.approx(0.225)
+    assert graded.epsilon_at(12) == pytest.approx(0.30)
+    # Clamped past 2*n_min, never extrapolated: the ramp must not carry the bar ABOVE ε.
+    assert graded.epsilon_at(15) == pytest.approx(0.30)
+    assert graded.epsilon_at(28) == pytest.approx(0.30)
+
+    flat = PoBBCheck(
+        PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.30), n_samples=28, delta_scale={}
+    )
+    assert flat.epsilon_at(6) == pytest.approx(0.30)
+    # Shipped defaults sit floor and ε on the same constant, so an untouched config never grades.
+    shipped = PoBBCheck(PoBBConfig(), n_samples=28, delta_scale={})
+    assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon)
+
+    def arm_behind_perfect_prior(n: int, misses: int):
+        check = PoBBCheck(cfg, n_samples=28, delta_scale={})
+        check.register_completed(_measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
+        check.set_current("arm")
+        return check.check(
+            _measurements([0.0] * misses + [1.0] * (n - misses)),
+            candidate_idx=1,
+            n_total_candidates=2,
+        )
+
+    # One discordant loss survives the floor that used to cut it, and dies two samples later.
+    assert arm_behind_perfect_prior(6, 1) is None
+    cut = arm_behind_perfect_prior(8, 1)
+    assert cut is not None
+    # The bar that FIRED is what the decision archives — a reader must see 0.20 at n=8, never
+    # the configured 0.30, or the record cannot explain its own cut.
+    assert cut.check_result["epsilon"] == pytest.approx(0.20)
+    # Two behind is still cut at the floor: the reprieve is for a near-tie, not for a loser.
+    assert arm_behind_perfect_prior(6, 2) is not None
+
+
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(

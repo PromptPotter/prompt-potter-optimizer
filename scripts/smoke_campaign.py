@@ -66,7 +66,6 @@ def _build_config(
             "l1_patience": patience,
             "max_rounds": rounds,
             "n_variants": variants,
-            "improvement_threshold": 0.01,
             "degradation_threshold": 0.4,
             "l2_patience": 1,
             "l3_patience": 1,

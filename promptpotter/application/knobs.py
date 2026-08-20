@@ -242,6 +242,25 @@ COUPLINGS: tuple[Coupling, ...] = (
         ),
     ),
     Coupling(
+        name="epsilon_floor_inverted",
+        knobs=(
+            "optimization.pobb_epsilon_floor",
+            "optimization.pobb_epsilon",
+        ),
+        estimand=Estimand.STOPPING,
+        relation=(
+            "pobb_epsilon_floor is the bar at elimination_n_min, ramping UP to pobb_epsilon "
+            "by twice that depth — being a floor, it belongs at or below pobb_epsilon."
+        ),
+        consequence=(
+            "pobb_epsilon_floor sits ABOVE pobb_epsilon, which would grade the bar DOWNWARD "
+            "as evidence accumulates. The ramp goes flat at pobb_epsilon instead, so the floor "
+            "is inert and shallow candidates are cut on the deep bar."
+        ),
+        severity="inert",
+        predicate=lambda c: c.optimization.pobb_epsilon_floor > c.optimization.pobb_epsilon,
+    ),
+    Coupling(
         name="lock_in_threshold_inert",
         knobs=(
             "optimization.pobb_lock_in",

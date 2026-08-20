@@ -3,14 +3,10 @@ key when it had nothing to measure, so a formula naming it halts rather than sco
 
 from __future__ import annotations
 
-import ast
-
 from promptpotter.application.scoring.formula.compiler import (
-    _SAFE_BUILTINS,
-    ScoringFormulaError,
     ScoringTermMissingError,
     clamp_unit_score,
-    validate_ast,
+    compile_expression,
 )
 from promptpotter.domain.scoring import RoundScorer
 
@@ -25,24 +21,12 @@ def compile_round_scorer(formula: str | None) -> RoundScorer:
     if not formula:
         return _default_round_scorer
 
-    tree = ast.parse(formula, "<round_scoring>", "eval")
-    validate_ast(tree, source="per_round scoring formula")
-    code = compile(tree, "<round_scoring>", "eval")
+    compiled = compile_expression(formula, source="per_round scoring formula")
 
     def _scorer(values: dict[str, float]) -> float:
-        try:
-            raw = eval(code, _SAFE_BUILTINS, dict(values))
-        except NameError as exc:
-            raise ScoringTermMissingError(
-                f"Per-round scoring formula {formula!r}: {exc}. The round measured "
-                f"{sorted(values)}. A term the round could not measure is absent from that map "
-                "on purpose — score the round without it, or exclude the round."
-            ) from exc
-        except Exception as exc:
-            raise ScoringFormulaError(
-                f"Per-round scoring formula {formula!r} raised: {type(exc).__name__}: {exc}."
-            ) from exc
-        return clamp_unit_score(raw, formula=formula, subject="the round")
+        return clamp_unit_score(
+            compiled.evaluate(dict(values), "the round"), formula=formula, subject="the round"
+        )
 
     return _scorer
 

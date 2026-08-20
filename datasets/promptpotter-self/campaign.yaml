@@ -9,6 +9,7 @@ campaign_config:
   # it and `_MODEL_PROFILES` are the two that do not fail loudly when they lag behind it.
   allowed_models:
     - deepseek/deepseek-v4-flash:nitro
+    - qwen/qwen3.8-27b:nitro
     - openai/gpt-oss-120b
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
   # incumbent, so exploring costs nothing. The four-factor composite this replaces is described
@@ -64,7 +65,6 @@ campaign_config:
     # +0.143 are the only positive values ever recorded) and 10 of 17 rounds bought exactly zero.
     # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
     # rejects most real wins.
-    improvement_threshold: 0.01
     degradation_threshold: 0.4
     l2_patience: 2
     l3_patience: 1

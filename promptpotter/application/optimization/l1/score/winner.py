@@ -37,16 +37,12 @@ from promptpotter.domain.results import (
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared.statistics import paired_diff_posterior
+from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
-
-# Floor on the logistic slope p(1−p) when recalibrating ``improvement_threshold`` into
-# θ-logits: at the accuracy extremes p(1−p)→0 would blow the threshold up.
-_GATE_SLOPE_FLOOR = 0.05
 
 
 def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> None:
@@ -80,7 +76,6 @@ async def l1_score(
     dataset: list[Sample],
     *,
     pipeline_params: dict[str, Any] | None = None,
-    improvement_threshold: float,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,
@@ -303,60 +298,17 @@ async def l1_score(
         # FITNESS rather than binary hits: a candidate lifting ground-truth's rank without yet
         # landing it at rank 1 is real improvement a binary-hit test is blind to.
         cand_fit, origin_fit = paired_fitness(best_results, parent_election_results)
-        if cand_fit:
-            mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
-            if se_d > 1e-12:
-                from scipy.stats import norm
+        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, origin_fit, tail="greater")
 
-                p_value = float(norm.sf(mean_d / se_d))
-            else:
-                p_value = 0.0 if mean_d > 0 else 1.0
-
-    # ``delta_ok`` gates on the winner's ability lift over the matched origin, both on the
-    # cycle's FIXED δ ruler rather than on raw subset accuracy. The accuracy-space
-    # ``improvement_threshold`` is recalibrated to θ-logits by local linearization (σ' = p(1−p)),
-    # so the knob keeps meaning "min accuracy delta" while the comparison happens in θ. That
-    # tracks an accuracy gate to first order and diverges — correctly — once elimination
-    # truncates candidates to different prefixes, the exact case where subset accuracy stops
-    # being comparable.
-    # Linearize at the ORIGIN's operating point on this round's panel: a full-panel measurement
-    # and a property of the origin, not of whichever candidate won. Reading the winner's
-    # ``matched_parent_accuracy`` instead moves the bar with wherever PoBB stopped it.
-    slope = max(parent.report.accuracy * (1.0 - parent.report.accuracy), _GATE_SLOPE_FLOOR)
-    gate_bar = improvement_threshold / slope
-    theta_lift: float | None = None
-    delta_ok = False
-    if winner_id:
-        from promptpotter.application.intelligence.exploration import theta_lift_over_origin
-
-        # θ decouples per candidate given the FIXED δ ruler, so the election's ``abilities``
-        # posterior already carries the winner's and origin's θ on it — read it, never refit.
-        # ``None`` = the origin was never fit, so there is no floor to have improved on and the
-        # gate stays shut. One helper serves every reader of that policy, or they drift into
-        # inventing a coin-flip origin.
-        theta_lift = theta_lift_over_origin(abilities, winner_id)
-        delta_ok = theta_lift is not None and theta_lift > gate_bar
-    # ``delta_ok`` is the WHOLE verdict — add no second gate beside it. ``coverage_floor`` above
-    # is the ONE under-probing guard, so a re-check against the unclamped ``elimination_n_min``
-    # fires only where that floor was clamped and then refuses to call a round improved forever.
-    # A ``c0_ok`` floor is the other one not to re-add: it compares across evidence bases and
-    # gates nothing, since adoption is unconditional in ``absorb_round``. The lineage's standing
-    # against C0 stays RECORDED, not gated.
-    improved = delta_ok
-    # Name the estimator that decided, and keep the two ways a round holds distinct — "no winner
-    # cleared the matched parent" must not be said of a round that crowned nobody. The L4
-    # narrative quotes this string, so a wrong one teaches the outer loop the wrong lever.
-    if improved:
-        improved_reason: str | None = None
-    elif not winner_id:
-        improved_reason = "no candidate's ability exceeded the parent's on the round's δ ruler"
-    elif theta_lift is None:
-        improved_reason = "the parent's ability could not be fit, so there was no floor to clear"
-    else:
-        improved_reason = (
-            f"winner's ability lift {theta_lift:+.3f} logits did not clear {gate_bar:.3f} "
-            f"({improvement_threshold} accuracy at the parent's {parent.report.accuracy:.0%} rate)"
-        )
+    # A round improved iff it crowned somebody. ``elect_round_winner`` admits a candidate only on
+    # a STRICTLY positive ability lift over the parent on the cycle's fixed δ ruler, so the
+    # election already IS the gate. The second, stricter accuracy-recalibrated bar that used to sit
+    # here gated nothing — ``absorb_round`` adopts the winner either way — so it could only ever
+    # disagree with the adoption it annotated.
+    improved = bool(winner_id)
+    improved_reason = (
+        None if improved else "no candidate's ability exceeded the parent's on the round's δ ruler"
+    )
     round_result = RoundResult(
         round=round_num,
         label=best_label,

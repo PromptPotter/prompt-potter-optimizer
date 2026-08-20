@@ -103,18 +103,13 @@ def matched_parent_lift(
     # row and must bracket one population. A cell either arm errored on drops the PAIR, which is what
     # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
     from promptpotter.application.optimization.pobb.classification import scoreable_rows
-    from promptpotter.shared.statistics import paired_diff_posterior, t_critical
+    from promptpotter.shared.statistics import paired_reading
 
     cand_fit, parent_fit = paired_fitness(
         scoreable_rows(candidate_results), scoreable_rows(parent_results)
     )
-    if len(cand_fit) < 2:
-        return None
-    lift, se, n = paired_diff_posterior(cand_fit, parent_fit)
-    # Student-t, not z: the SE is estimated from the same handful of cells it widens (~7 cells ⇒
-    # 2.45, not 1.96). At the outer level those cells are whole inner campaigns and there are six.
-    crit = t_critical(n - 1)
-    return (lift, lift - crit * se, lift + crit * se)
+    lift, ci_lo, ci_hi, _p, _n = paired_reading(cand_fit, parent_fit)
+    return None if ci_lo is None or ci_hi is None else (lift, ci_lo, ci_hi)
 
 
 def elect_round_winner(
@@ -158,8 +153,11 @@ def elect_round_winner(
         # The floor counts EVIDENCE cells (non-errored, the θ fit's own population), not
         # attempted cells — that is what licenses the no-SE-margin rank.
         # `None` = this candidate or the origin was never fit; there is no lift to rank on.
+        # Strictly above, per this function's contract. `<= 0.0` is not a near-miss to be broken
+        # on cell count: when every arm scores 0 they all fit the SAME degenerate theta, so every
+        # lift is exactly 0.000 and a cell-count tiebreak crowns an arm that beat nothing.
         lift = theta_lift_over_origin(abilities, cid)
-        if lift is None:
+        if lift is None or lift <= 0.0:
             continue
         rank = (lift, n_cells)
         if rank > best_rank:

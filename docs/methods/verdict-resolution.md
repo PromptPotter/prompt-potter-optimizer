@@ -61,6 +61,31 @@ more power. It graduates **per-dataset**, behind the same θ interface, only whe
 
 ---
 
+## Reading a round — which column is the verdict
+
+**θ is the verdict; accuracy is not.** Two things move raw accuracy without any change in ability,
+so it is not comparable across rounds or across arms within a round:
+
+- **The subset moves.** `per_round_resubset` is ON by default, so consecutive rounds are scored on
+  different samples. Round N's accuracy and round N+1's are two different exams.
+- **Arms are truncated at different depths.** PoBB cuts a weak arm early, and `build_round_order`
+  front-loads the incumbent's misses (a hit enters only every 4th slot), so a cut arm was graded on
+  a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
+
+So **a winner with lower accuracy than a rival, or than the previous round, is normally correct** —
+`elect_round_winner` ranks difficulty-adjusted ability, which corrects for both. When an operator
+reads the accuracy column and calls the election wrong, say which column the election used; do not
+treat the inversion as a defect on their word.
+
+**Two states where θ is NOT ability, and the pushback above is wrong:**
+
+- **The 0% floor.** An arm that misses every cell gives the fit no information, so θ pins to the
+  same constant regardless of which samples it saw — every zero arm reads identically. At 0% the
+  column is a floor, not a measurement, and any lift computed from it is exactly `0.000`.
+- **A cold ruler.** Before the δ ruler warms, θ degenerates to logit-accuracy over the arm's own
+  subset and is not on the shared scale its name promises. Check `calibration_model` (`None` = cold)
+  and `ruler_id` — two θ readings are comparable only when their `ruler_id` matches.
+
 ## What this is for — separability
 
 Most candidates are dead. The job is to discover that in the fewest measurements possible, by
@@ -137,13 +162,17 @@ observations under Laplace.
 **Selection is parameter-free at the policy level** — no swap thresholds. `select_round_subset`
 ranks the whole bank each round and takes the top `budget`: *exploit* falls out of the ranking
 (samples on the contested band `δ_s ≈ leader θ` carry the most decision information and sort to the
-top), *explore* falls out of the prior (an unmeasured sample falls back to the population prior, so
-it still competes and gets pulled in when the contested band is thin). Cold start → bank-order
-prefix. The scoring-set floor is `elimination_n_min`.
+top), *explore* falls out of the prior. Note the strength of that second term: an unmeasured sample
+carries the population `σ_δ`, and `delta_learning_gain` rises with that SE, so unmeasured samples
+**outrank** measured ones rather than merely competing — and they tie with each other, so the
+tiebreak (ascending `sample_id`) drains the bank in stored order. On a bank stored grouped by label
+that yields disjoint single-label panels per round, and cross-round accuracy stops being a series.
+Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
-**Opt-in — default off.** `mechanisms.selection.per_round_resubset` (default `False`): off, every
-round and the origin reuse the deterministic campaign-start subset (`bank[:budget]`), so the sample
-set is fixed across rounds and accuracies are directly comparable.
+**On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
+while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
+(`bank[:budget]`), thawing to adaptive once the ruler locks. Off → that frozen prefix for the whole
+campaign, so the sample set is fixed across rounds and accuracies are directly comparable.
 
 ---
 

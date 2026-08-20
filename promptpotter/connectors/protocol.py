@@ -176,9 +176,8 @@ class Connector:
     domain-specific defaults (e.g. TermNorm pins ``n_variants=3``) without
     the launcher hard-coding the values. Empty mapping means "use
     :class:`OptimizationConfig` schema defaults verbatim." The required
-    fields (``improvement_threshold`` / ``degradation_threshold``) MUST be
-    present here when the connector intends to seed them — there is no
-    silent schema default."""
+    field (``degradation_threshold``) MUST be present here when the connector
+    intends to seed it — there is no silent schema default."""
 
     node_types: Mapping[str, NodeType] = field(default_factory=dict)
     """Static node→:class:`NodeType` classification, mirroring what the live

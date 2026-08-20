@@ -94,7 +94,6 @@ async def execute_round(
         n_candidates=len(candidates),
         n_samples=len(scoring_set),
         current_best_accuracy=cycle.tracking.current_accuracy,
-        improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
     )
     async with observed_node(
@@ -110,12 +109,12 @@ async def execute_round(
             candidates,
             scoring_set,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
-            improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             pobb_config=PoBBConfig(
                 n_min=opt.elimination_n_min,
                 epsilon=opt.pobb_epsilon,
+                epsilon_floor=opt.pobb_epsilon_floor,
                 lock_in=opt.pobb_lock_in,
                 lock_in_n_min=opt.pobb_lock_in_n_min,
                 epsilon_elimination=opt.mechanisms.elimination.epsilon_elimination,

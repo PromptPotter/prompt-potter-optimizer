@@ -209,10 +209,6 @@ class OptimizationConfig(StrictModel):
     n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         5, description="Candidates per round"
     )
-    improvement_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.GATE)] = Field(
-        ..., description="Min accuracy delta"
-    )
-
     optimizer_set: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         "",
         description=(
@@ -243,6 +239,22 @@ class OptimizationConfig(StrictModel):
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 15%; smaller → fewer stops.",
     )
+    pobb_epsilon_floor: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+        POBB_DEFAULT_EPSILON,
+        description=(
+            "The ε applied at exactly ``elimination_n_min``, ramping linearly up to "
+            "``pobb_epsilon`` by twice that depth. Equal to ``pobb_epsilon`` — the "
+            "default — leaves the bar flat and elimination unchanged, so it grades "
+            "only where ε was deliberately raised above it. At the floor a single "
+            "discordant sample already puts P(best) near 0.2, so one scalar ε is "
+            "either too eager there or too permissive deep; grading keeps a raised "
+            "ε's aggression at depth while giving a one-sample-behind arm a few more "
+            "cells to recover. Aggression belongs here and never in "
+            "``elimination_n_min``, which also gates the δ ruler's warmth. Set ABOVE "
+            "``pobb_epsilon`` and the bar goes flat at ``pobb_epsilon`` instead — the "
+            "``epsilon_floor_inverted`` coupling reports it."
+        ),
+    )
     pobb_lock_in: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         0.95,
         description="Leader lock-in threshold — the P(best) at which a leading "
@@ -271,14 +283,18 @@ class OptimizationConfig(StrictModel):
     )
 
     token_budget: Annotated[int | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
-        210_000,
+        None,
         description=(
             "Halt this cycle when cumulative tokens (optimizer + backend, input + "
-            "output) ≥ this value. The model-portable twin of ``spend_budget_usd``: "
-            "a free backend reports $0 so the USD ceiling sees only optimizer cost, "
-            "while this counts backend work too. Default ≈ a 5-round run (measured "
-            "~158k tokens) with headroom. Whichever of the two ceilings trips first "
-            "halts the cycle. ``None`` disarms the token ceiling."
+            "output) ≥ this value. ``None`` — the default — disarms it, leaving "
+            "``spend_budget_usd`` as the single ceiling: a token is worth a different "
+            "amount on every route, so a token cap sized for one model silently "
+            "becomes a different budget on the next, and it was the cap that halted "
+            "runs far below their USD ceiling. Dollars are the model-invariant "
+            "measure and every route we run reports a wire cost. Set an integer for "
+            "the one case USD cannot see — a backend that BILLS but reports no cost, "
+            "where spend reads low and ``unpriced_tokens`` on the dashboard is the "
+            "tell. Whichever of the two ceilings trips first halts the cycle."
         ),
     )
 

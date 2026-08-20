@@ -321,7 +321,7 @@ def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
 
 
 # Minimal valid OptimizationConfig — the two thresholds are required (no default).
-_OPT = {"improvement_threshold": 0.0, "degradation_threshold": 0.0}
+_OPT = {"degradation_threshold": 0.0}
 
 
 def _frozen_with_lock(node: str, open_keys: list[str]) -> dict:

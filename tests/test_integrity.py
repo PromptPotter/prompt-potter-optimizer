@@ -947,9 +947,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
 
         # Only a fork opens it: the delta reaches the fork's config, the parent stays frozen
         # (its rounds must remain comparable), and an unrelated fork inherits rather than resets.
-        base = CampaignConfig(
-            optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
-        )
+        base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
         forked = _apply_config_overrides(base, ConfigOverrides(schema_field_rename=True))
         assert forked.optimization.schema_field_rename is True
         assert base.optimization.schema_field_rename is False

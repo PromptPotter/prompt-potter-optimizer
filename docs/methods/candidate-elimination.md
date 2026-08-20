@@ -30,7 +30,7 @@ Individuals are evaluated sequentially on **Q** in the shared round order. The f
 1. Build the paired comparison set — each prior mapped onto the candidate's exact sample ids. Priors that cannot be caught up are **excluded, never zero-filled**.
 2. One joint 1PL Rasch fit over the candidate + every paired prior yields each arm's ability `θ` and its Laplace `se` on the cycle's fixed δ ruler.
 3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))` — closed-form, no Monte Carlo. `p_best = min` over priors (bounded above by the hardest prior).
-4. Stop when `p_best < ε`.
+4. Stop when `p_best < ε(n)` — ε is graded by depth, not scalar (see `pobb_epsilon_floor`).
 
 This is the **same difficulty-adjusted ability the round-winner election ranks by**, so mid-round elimination and end-round election cannot disagree about what "better" means — and because it is difficulty-adjusted it stays valid across partial prefixes, where a raw hit-rate would crown whoever banked the easy samples. The pairing still earns its keep: backfill guarantees priors have outcomes on the candidate's *contested* samples, which is exactly where the θ comparison gets its information.
 
@@ -48,6 +48,7 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 ## Tunable knobs
 
 - `OptimizationConfig.pobb_epsilon` (default `0.15`, `POBB_DEFAULT_EPSILON`) — smaller = more conservative. The one ε: "stop measuring a candidate whose probability of being the round's best is below ε". A stop ends measurement; it is **not** a verdict, and never removes the candidate from the election (`is_leader_eligible`).
+- `OptimizationConfig.pobb_epsilon_floor` (default `0.15`, `POBB_DEFAULT_EPSILON`) — the ε applied at exactly `elimination_n_min`, ramping linearly up to `pobb_epsilon` by twice that depth (`PoBBCheck.epsilon_at`). Equal to `pobb_epsilon` — the default — leaves the bar flat and elimination bit-identical, so grading exists only where ε was deliberately raised above it. Why it is not one scalar: at the floor a single discordant sample already drives `p_best` to ~0.2, so a lone ε is either too eager there or too permissive deep. Measured on `justlogic-d234` (ε raised to 0.30) three arms were cut at n=6 on exactly one discordant loss apiece — `p_best` 0.199, 0.2989, 0.2989, every one inside the band the raise opened. Grading keeps that aggression at depth and is cheap at the floor: an arm that stays behind is cut a few samples later, not at full budget. Aggression belongs here and never in `elimination_n_min`, which also gates ruler warmth. A floor set above `pobb_epsilon` would grade the bar downward; the ramp goes flat at `pobb_epsilon` instead and the `epsilon_floor_inverted` coupling reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the single min-samples floor. It gates PoBB (below it a candidate's θ posterior is too under-determined to act on) **and** the difficulty-ruler warmth: the per-cycle δ ruler stays flat (δ≡0 ⇒ θ = logit-accuracy) until at least this many grade-A samples are banked. Difficulty and ability become trustworthy at the same evidence threshold — one knob, no separate ruler-only constant.
 
 ## The full elimination ladder
@@ -60,11 +61,11 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `optimization/pobb/checks.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `optimization/pobb/checks.py` |
-| 5 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimization/pobb/checks.py` |
+| 5 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε(n)` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimization/pobb/checks.py` |
 
 **Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–5 co-exist in that final list — fatal beats rate beats Bayesian PoBB.
 
-**One comparator, one stop rule — do not add a sixth.** A paired-margin futility gate ran here and was removed. Anything that counts discordant binary wins is a second comparator beside the θ ruler the election actually ranks on, so the two disagree by construction; it re-encodes `improvement_threshold` a second time; and it goes inert on a graded backend, where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible` reads as a PoBB loss — silently barring a cut candidate from the round election, so whole rounds closed with no winner while the real θ lift was positive. Buying futility back means one gate **on the θ ruler**.
+**One comparator, one stop rule — do not add a sixth.** A paired-margin futility gate ran here and was removed. Anything that counts discordant binary wins is a second comparator beside the θ ruler the election actually ranks on, so the two disagree by construction; it re-encodes the election's bar a second time; and it goes inert on a graded backend, where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible` reads as a PoBB loss — silently barring a cut candidate from the round election, so whole rounds closed with no winner while the real θ lift was positive. Buying futility back means one gate **on the θ ruler**.
 
 ## On-disk shape and replay
 

@@ -139,6 +139,7 @@ class PoBBSnapshot:
 class PoBBConfig:
     n_min: int = 6
     epsilon: float = POBB_DEFAULT_EPSILON
+    epsilon_floor: float = POBB_DEFAULT_EPSILON
     lock_in: float = 0.95  # threshold only; leader_lock_in owns on/off
     lock_in_n_min: int = 8
     # Mechanism toggles (OptimizationConfig.mechanisms.elimination.*).
@@ -165,6 +166,7 @@ class PoBBCheck:
         self.delta_scale = dict(delta_scale)
         self.n_min = config.n_min
         self.epsilon = config.epsilon
+        self.epsilon_floor = config.epsilon_floor
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
         self.epsilon_elimination = config.epsilon_elimination
@@ -240,6 +242,19 @@ class PoBBCheck:
             prior_map = self.priors_by_sample.get(cid) or {}
             out[cid] = {sid: prior_map[sid] for sid in keys if sid in prior_map}
         return out
+
+    def epsilon_at(self, n: int) -> float:
+        """The ε bar at depth *n*: ``epsilon_floor`` at exactly ``n_min``, ramping linearly to
+        ``epsilon`` by ``2 * n_min``, and flat wherever the floor is not below ``epsilon`` — the
+        default, so an untouched config eliminates exactly as it did. At ``n_min`` one discordant
+        sample already puts ``p_best`` near 0.2, so a single scalar ε is either too eager there or
+        too permissive deep. The reprieve is cheap: an arm that stays behind is cut a few samples
+        later rather than at full budget."""
+        if self.epsilon <= self.epsilon_floor or n >= 2 * self.n_min:
+            return self.epsilon
+        return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * (
+            (n - self.n_min) / max(self.n_min, 1)
+        )
 
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
@@ -333,12 +348,12 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
-        # ε is the ONLY futility gate now, and it tests a slightly lower bar than adoption does.
-        # ``elimination_p_best`` compares strictly better-than-prior (no margin), while crowning
-        # needs the winner to clear the matched parent by ``improvement_threshold``. The prior
-        # set includes the incumbent (``l1/score/loop.py`` registers it as ``R{n}_winner``), so
-        # ε does ask "can this beat the parent" — it just cannot ask "by enough to be adopted",
-        # which leaves a thin band of arms that keep buying panel they can never be crowned on.
+        # ε is the ONLY futility gate, and it now tests the SAME bar adoption does:
+        # ``elimination_p_best`` compares strictly better-than-prior (no margin) and crowning
+        # needs a strictly positive θ lift over the parent. The prior set includes the incumbent
+        # (``l1/score/loop.py`` registers it as ``R{n}_winner``), so ε asks exactly "can this beat
+        # the parent". The band of arms that survived ε yet could never be crowned closed with the
+        # accuracy-recalibrated bar that opened it.
         #
         # A paired-margin futility gate that tested exactly that bar existed and was live-
         # validated (2026-07-04: tie cut q17/20, losers q10/q13); it was dropped in ``2ee23d40``
@@ -347,7 +362,8 @@ class PoBBCheck:
         # is a parameter, not a subsystem. **If the optimizer cannot be made to work and late
         # kills are implicated, bringing that gate back is the considered fallback**; the full
         # implementation is recoverable from ``2ee23d40``.
-        if not self.epsilon_elimination or p_best_current >= self.epsilon:
+        bar = self.epsilon_at(n)
+        if not self.epsilon_elimination or p_best_current >= bar:
             return None
 
         return _eliminate(
@@ -357,7 +373,7 @@ class PoBBCheck:
                 "total_samples": self.n_samples,
                 "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
-                "epsilon": float(self.epsilon),
+                "epsilon": float(bar),
                 "leader_id": hardest_prior_id,
                 "paired_breakdown": paired_breakdown,
             },

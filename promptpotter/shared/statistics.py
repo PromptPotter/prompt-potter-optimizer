@@ -6,6 +6,7 @@ import contextlib
 import math
 import threading
 from collections.abc import Mapping
+from typing import Literal
 
 
 def warm_stats_backend() -> None:
@@ -95,6 +96,80 @@ def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, flo
     return (mean, mean - z * se, mean + z * se)
 
 
+def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, float, int] | None:
+    """``(mean, lo, hi, n)`` on the SAME posterior as :func:`mean_ci`, bracketed with Student-t instead of the normal quantile.
+
+    Not a second spelling of ``mean_ci``, which stays z because it is pinned to the persisted ``noise_floor_ci_*`` fields. This
+    is for a READ that brackets a handful of cells, where the two quantiles are not interchangeable: at 6 cells t is 2.571
+    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``matched_parent_lift`` and the
+    edit ranking already use, so a campaign interval and a paired difference beside it cannot disagree about zero.
+
+    ``None`` below two values: one reading has no spread, and a bracket drawn from it is a fiction."""
+    n = len(values)
+    if n < 2:
+        return None
+
+    mean, se = _normal_posterior(values)
+    half = t_critical(n - 1, alpha) * se
+    return (mean, mean - half, mean + half, n)
+
+
+def paired_reading(
+    candidate_scores: list[float],
+    prior_scores: list[float],
+    *,
+    tail: Literal["two", "greater"] = "two",
+    alpha: float = 0.05,
+) -> tuple[float, float | None, float | None, float | None, int]:
+    """``(mean_d, ci_lo, ci_hi, p, n)`` over one paired difference — the bracket and the test from ONE posterior, so a caller
+    cannot draw an interval and a p-value that disagree about zero.
+
+    ``two`` asks whether two arms differ, with no pre-registered direction, so reading a pair in either order gives one number;
+    ``greater`` asks whether the candidate BEAT the prior, which is directional on purpose.
+
+    Below two pairs the bracket and the test are ``None``: nothing was tested, and a ``1.0`` there would misreport that as a
+    test that found nothing. The SE is :func:`paired_diff_posterior`'s, floored at ``1/(4n)``, so ``p`` is CONSERVATIVE wherever
+    the observed spread falls below that floor."""
+    mean_d, se_d, n = paired_diff_posterior(candidate_scores, prior_scores)
+    if n < 2:
+        return (mean_d, None, None, None, n)
+
+    from scipy.stats import t
+
+    # `_normal_posterior` floors the SE strictly above zero, so there is no degenerate branch here.
+    half = t_critical(n - 1, alpha) * se_d
+    upper = float(t.sf(mean_d / se_d, n - 1))
+    return (
+        mean_d,
+        mean_d - half,
+        mean_d + half,
+        2.0 * min(upper, 1.0 - upper) if tail == "two" else upper,
+        n,
+    )
+
+
+def holm_adjusted(p_values: list[float]) -> list[float]:
+    """Holm-Bonferroni step-down, returned IN INPUT ORDER with monotonicity enforced and clipped to 1.0.
+
+    An adjusted p, never a reject/keep flag — the caller renders a number rather than a verdict at an alpha nobody chose.
+    Holm rather than Bonferroni, which it uniformly dominates; rather than Benjamini-Hochberg, which controls the false
+    DISCOVERY rate over many independent hypotheses, where this corrects a handful of pairs that SHARE arms and is therefore
+    valid under the dependence those shared arms create.
+
+    This is a reporting correction and reaches nothing in the loop: candidate selection retired Holm for PoBB
+    (``docs/research/related-work.md``) and keeps it."""
+    m = len(p_values)
+    if m == 0:
+        return []
+
+    out = [0.0] * m
+    running = 0.0
+    for rank, idx in enumerate(sorted(range(m), key=lambda i: p_values[i])):
+        running = max(running, (m - rank) * p_values[idx])
+        out[idx] = min(1.0, running)
+    return out
+
+
 def two_way_effect_sds(
     cells_by_arm: Mapping[str, Mapping[str, float]],
 ) -> tuple[float, float, float] | None:
@@ -143,9 +218,12 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
 
 
 __all__ = [
+    "holm_adjusted",
     "mean_ci",
+    "mean_ci_t",
     "min_detectable_effect",
     "paired_diff_posterior",
+    "paired_reading",
     "rank_correlation",
     "t_critical",
     "two_way_effect_sds",

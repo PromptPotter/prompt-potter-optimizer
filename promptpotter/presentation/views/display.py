@@ -18,15 +18,22 @@ if TYPE_CHECKING:
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
-def fmt_ci(lower: float | None, upper: float | None) -> str:
-    """Format a 95% CI bracket, or ``—`` where no interval exists. An absent interval must READ as absent:
-    ``[0.0%-0.0%]`` is a fabricated bracket claiming certainty about a measurement that never happened."""
+def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
+    """Format a 95% CI bracket, or ``—`` where no interval exists. *spec* formats each bound — a share
+    reads as ``{:.1%}``, while seconds, dollars and a signed lift are none of those and read raw.
+
+    An absent interval must READ as absent: ``[0.0%, 0.0%]`` is a fabricated bracket claiming
+    certainty about a measurement that never happened."""
     if lower is None or upper is None:
         return "—"
-    return f"[{lower:.1%}-{upper:.1%}]"
+    return f"[{spec.format(lower)}, {spec.format(upper)}]"
 
 
-def fmt_pvalue(p: float) -> str:
+def fmt_pvalue(p: float | None) -> str:
+    """``None`` is a test that never ran — below two pairs nothing was tested, and a ``p=1.00 (ns)``
+    there would misreport that as a test which found nothing."""
+    if p is None:
+        return "—"
     if p < 0.001:
         return "p<0.001 ***"
     if p < 0.01:
@@ -202,7 +209,7 @@ def _scoreboard(
     for i, s in enumerate(ranked, 1):
         label = (s.label or "")[:8]
         acc = s.accuracy
-        ci_str = fmt_ci(s.mean_fitness_ci_lo, s.mean_fitness_ci_hi)
+        ci_str = fmt_ci(s.mean_fitness_ci_lo, s.mean_fitness_ci_hi, spec="{:.1%}")
         # Per-row matched-pair origin: this candidate's accuracy against origin on the *same
         # samples it ran*. ``None`` for a row that did not cover the origin's panel, and there
         # the column stays EMPTY rather than falling back to the full-set origin — a prefix

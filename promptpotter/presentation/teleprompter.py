@@ -72,7 +72,6 @@ class Loop:
     l1_patience: int = 0
     l2_patience: int = 2
     l3_patience: int = 1
-    improvement_threshold: float = 0.01
     degradation_threshold: float = 0.4
     elimination_n_min: int = 4
     pobb_epsilon: float = 0.2
@@ -88,7 +87,6 @@ class Loop:
             "l1_patience": self.l1_patience,
             "l2_patience": self.l2_patience,
             "l3_patience": self.l3_patience,
-            "improvement_threshold": self.improvement_threshold,
             "degradation_threshold": self.degradation_threshold,
             "elimination_n_min": self.elimination_n_min,
             "pobb_epsilon": self.pobb_epsilon,

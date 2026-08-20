@@ -8,5 +8,4 @@ campaign_config:
     l1_patience: 1
     max_rounds: 1
     n_variants: 1
-    improvement_threshold: 0.01
     degradation_threshold: 0.0

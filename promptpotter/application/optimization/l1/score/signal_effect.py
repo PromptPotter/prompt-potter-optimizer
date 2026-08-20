@@ -183,7 +183,7 @@ def decode_signal_effect(
                 "candidate_id": candidate_id,
                 "prior_candidate_ids": priors_at_test,
                 "queries_scored": queries_scored,
-                "epsilon": float(elim_check.epsilon),
+                "epsilon": float(cr.get("epsilon", elim_check.epsilon)),
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
