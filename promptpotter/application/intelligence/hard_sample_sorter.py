@@ -94,7 +94,11 @@ def _resolve_round_order(
         best_grades = {
             int(o.sample_id): float(o.response) for o in observations if o.candidate_id == best_cid
         }
-    return build_round_order(best_grades, posterior.delta, sorted(posterior.delta.keys()))
+    # A PREVIEW ruler off this artifact's own re-fit — deliberately not the cycle's locked one,
+    # which this module must never read (`optimization/CLAUDE.md`: the panel orders on the LOCKED
+    # δ, and `hard_samples.json`'s is re-anchored on every regeneration).
+    preview = posterior.anchored("1PL", 0)
+    return build_round_order(best_grades, preview, sorted(posterior.delta.keys()))
 
 
 def empty_artifact(*, cycle_id: str | None = None) -> dict[str, Any]:

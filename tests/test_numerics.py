@@ -17,15 +17,14 @@ import yaml
 
 from promptpotter.application.evidence import CampaignOrigin, _comparability
 from promptpotter.application.intelligence.exploration import (
-    FLAT_RULER_ID,
     Observation,
     adopted_level_trajectory,
+    extend_ruler,
     fit_rasch,
     fit_rasch_2pl,
     fit_theta_given_delta,
     graduate_ruler_model,
     ruler_expected_accuracy,
-    ruler_id,
     select_round_subset,
 )
 from promptpotter.application.mask.backprop import accumulate_node_stats, select_rewind_round
@@ -64,10 +63,18 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
+from promptpotter.domain.ruler import FLAT_RULER_ID, DeltaRuler, anchor_id_of, ruler_id
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
-from promptpotter.shared.statistics import mean_ci, two_way_effect_sds
+from promptpotter.shared.errors import RulerCoverageError
+from promptpotter.shared.statistics import (
+    holm_adjusted,
+    mean_ci,
+    mean_ci_t,
+    paired_reading,
+    two_way_effect_sds,
+)
 from tests.factories import cycle_result, lost_round, round_result
 
 # 1. Scorer matcher formulas — one parametrized family
@@ -805,6 +812,20 @@ def test_rasch_handles_sparse_matrix() -> None:
     assert all(se > 0 for se in posterior.delta_se.values())
 
 
+def _ruler(delta: dict[int, float], *, mu: float = 0.0, sigma: float = 2.0) -> DeltaRuler:
+    """A locked ruler over a bare δ map — the shape most numeric tests care about."""
+    return DeltaRuler(
+        delta=dict(delta),
+        delta_se=dict.fromkeys(delta, 0.5),
+        mu_delta=mu,
+        sigma_delta=sigma,
+        sigma_theta=1.5,
+        calibration_model="1PL",
+        anchor_id=anchor_id_of(delta, mu, sigma, "1PL"),
+        anchored_at_round=0,
+    )
+
+
 def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     # The cross-round comparability guard (slice 2). A FIXED difficulty ruler δ;
     # two candidates measured on DISJOINT subsets whose raw accuracies INVERT their
@@ -840,11 +861,17 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
     assert abs(same_easy - same_hard) < 0.5
 
-    # A sample absent from the ruler is placed at δ=0 (a FLAT ruler where it is cold), so the
-    # candidate is scored on the flat ruler — never omitted (one ruler, θ always; cold ⇒ θ is
-    # plain logit-accuracy). A single hit on flat δ ⇒ θ > 0 under the N(0,σ²) prior.
-    ghost = fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
-    assert "ghost" in ghost and ghost["ghost"][0] > 0.0
+    # A sample absent from a WARM ruler RAISES. It used to be graded at δ=0, which is not a
+    # neutral value but a position: on a ruler centred near +2.8 it scored an unmeasured cell as
+    # easier than anything ever measured, and silently pulled θ down ~2 logits for every round
+    # whose subset had walked off the scale. Loud beats plausible.
+    with pytest.raises(RulerCoverageError) as caught:
+        fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
+    assert "99" in str(caught.value)
+    # The COLD ruler is the one legitimate flat read: θ is plain logit-accuracy, which depends on
+    # no fit and so stays comparable across cycles. A single hit ⇒ θ > 0 under the N(0,σ²) prior.
+    cold = fit_theta_given_delta([Observation("ghost", 99, True)], None)
+    assert cold["ghost"][0] > 0.0
 
     # θ_se carries the quasi-likelihood dispersion correction. `Observation.response` is a GRADED
     # fitness, not a coin flip — a ranked-table answer at position 5 of 20, or the L4 outer
@@ -879,7 +906,7 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     # lucky thin resubset (`per_round_resubset`) cannot inflate the signal an outer cycle
     # optimizes against. The silent harm without this: a 5/6 easy-slice reads 0.83 and
     # feeds the outer a phantom +0.33 lift while the honest full-panel ability is 0.5.
-    ruler = {1: -2.0, 2: -2.0, 3: -2.0, 4: 2.0, 5: 2.0, 6: 2.0}  # easy 1-3, hard 4-6
+    ruler = _ruler({1: -2.0, 2: -2.0, 3: -2.0, 4: 2.0, 5: 2.0, 6: 2.0})  # easy 1-3, hard 4-6
     full = ruler_expected_accuracy(0.0, ruler)
     assert full is not None
     # Symmetric ruler about δ=0 ⇒ ability 0 projects to EXACTLY 0.5 — regardless of which
@@ -889,7 +916,7 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     lo, hi = ruler_expected_accuracy(-1.5, ruler), ruler_expected_accuracy(1.5, ruler)
     assert lo is not None and hi is not None and hi > full > lo
     # Cold ruler / absent ability → None so the proxy falls back to raw accuracy.
-    assert ruler_expected_accuracy(0.0, {}) is None
+    assert ruler_expected_accuracy(0.0, None) is None
     assert ruler_expected_accuracy(None, ruler) is None
 
 
@@ -897,7 +924,7 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # The L4 outer proxy's inner-search signal. Every branch here is a SILENT wrong-number
     # class: a completed inner run reports a plausible number and the outer optimizes on it,
     # so a mis-built level is invisible — the run looks fine and the outer fitness is wrong.
-    ruler = {1: -1.0, 2: 0.0, 3: 1.0}
+    ruler = _ruler({1: -1.0, 2: 0.0, 3: 1.0})
     origin_theta = (0.0, 0.30)
 
     def thetas(levels: list[tuple[float, float]]) -> list[float]:
@@ -961,7 +988,7 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # subset-invariant — differencing it across rounds compares two different scales.
     # SILENT: a dead inner campaign differenced against an invented floor reads as a huge lift.
     assert adopted_level_trajectory(None, [(1.0, 0.2)], ruler) == (None, [])
-    assert adopted_level_trajectory(origin_theta, [(1.0, 0.2)], {}) == (None, [])
+    assert adopted_level_trajectory(origin_theta, [(1.0, 0.2)], None) == (None, [])
 
 
 def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None:
@@ -1310,7 +1337,8 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     for sid in (3, 4, 5):
         for cid in ("a", "b", "c"):
             obs.extend(Observation(cid, sid, True) for _ in range(2))
-    picked_ids = {s.id for s in select_round_subset(bank, obs, 3)}
+    warm = _ruler(dict.fromkeys(range(6), 0.0))
+    picked_ids = {s.id for s in select_round_subset(bank, obs, 3, ruler=warm)}
     assert picked_ids == {0, 1, 2}
 
 
@@ -1330,7 +1358,7 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
         return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
 
     # Fixed δ ruler: easy {0..19} low difficulty, hard {20..39} high — the bank the election reads.
-    ruler = {i: (-1.5 if i < 20 else 1.5) for i in range(40)}
+    ruler = _ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
     # Origin spans all 40: easy {0..19} hit, hard {20..39} missed.
     origin = [res(i < 20, i) for i in range(40)]
     # Easy candidate: 16/20 on easy samples the origin also hits → accuracy 0.80, modest lift.
@@ -1382,7 +1410,7 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
 
     origin = [res(i, 0.0, errored=True) for i in range(6)]
     candidate = [res(i, 0.55) for i in range(6)]
-    abilities = candidate_abilities({"c1": candidate}, origin, {})
+    abilities = candidate_abilities({"c1": candidate}, origin, None)
 
     # The origin was never fit — nothing to floor against.
     assert ORIGIN_ABILITY_ID not in abilities.theta
@@ -1390,15 +1418,15 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     assert len(paired_fitness(candidate, origin)[0]) == 6
 
     assert theta_lift_over_origin(abilities, "c1") is None
-    winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, {})
+    winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, None)
     assert winner_id == ""
 
     # A measured origin still elects normally — the guard costs nothing when there IS a floor.
     scored_origin = [res(i, 0.1) for i in range(6)]
-    scored_abilities = candidate_abilities({"c1": candidate}, scored_origin, {})
+    scored_abilities = candidate_abilities({"c1": candidate}, scored_origin, None)
     lift = theta_lift_over_origin(scored_abilities, "c1")
     assert lift is not None and lift > 0.0
-    assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, {})[0] == "c1"
+    assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, None)[0] == "c1"
 
 
 def test_errored_cells_never_satisfy_coverage_floor() -> None:
@@ -1431,9 +1459,9 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     thin = [clean(0, 1.0), clean(1, 1.0)] + [errored(i) for i in range(2, 7)]
 
     # The lift is real (floor 2 elects it) — only coverage may stop it...
-    assert elect_round_winner(["thin"], {"thin": thin}, origin, 2, {})[0] == "thin"
+    assert elect_round_winner(["thin"], {"thin": thin}, origin, 2, None)[0] == "thin"
     # ...and at floor 6 it must: 2 evidence cells, not 7 attempted ones.
-    assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, {})[0] == ""
+    assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, None)[0] == ""
 
     # Repeated rows for one cell (what `verify` leaves behind): an errored row adds no
     # coverage, a clean one carries the cell, and the pair counts once.
@@ -2061,7 +2089,7 @@ def test_fatal_degradation_runtime_failure_escalates_to_operator():
             dataset=[{}, {}],
             effective_pipeline_params={"entity_profiling": {"max_tokens": None}},
             round_num=1,
-            elim_check=PoBBCheck(PoBBConfig(), n_samples=2, delta_scale={}),
+            elim_check=PoBBCheck(PoBBConfig(), n_samples=2, ruler=None),
             candidate_id="C1",
             candidate_label="C1",
             priors_at_test=[],
@@ -2188,7 +2216,7 @@ _DUMMY_SP = JobSearchPoint()
 
 def test_pobb_check_gates_elimination_on_posterior():
     """PoBB.check() fires when the paired-difference posterior clears the ε gate."""
-    check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
+    check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None)
     check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
     check_sep.set_current("loser")
     sig = check_sep.check(_measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
@@ -2213,7 +2241,7 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     by twice that depth, so an arm one sample behind buys a short reprieve while an arm further
     behind still dies at the floor. Equal floor and ε — the default — leaves the bar flat."""
     cfg = PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.15)
-    graded = PoBBCheck(cfg, n_samples=28, delta_scale={})
+    graded = PoBBCheck(cfg, n_samples=28, ruler=None)
     assert graded.epsilon_at(6) == pytest.approx(0.15)
     assert graded.epsilon_at(9) == pytest.approx(0.225)
     assert graded.epsilon_at(12) == pytest.approx(0.30)
@@ -2222,15 +2250,15 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     assert graded.epsilon_at(28) == pytest.approx(0.30)
 
     flat = PoBBCheck(
-        PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.30), n_samples=28, delta_scale={}
+        PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.30), n_samples=28, ruler=None
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30)
     # Shipped defaults sit floor and ε on the same constant, so an untouched config never grades.
-    shipped = PoBBCheck(PoBBConfig(), n_samples=28, delta_scale={})
+    shipped = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None)
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon)
 
     def arm_behind_perfect_prior(n: int, misses: int):
-        check = PoBBCheck(cfg, n_samples=28, delta_scale={})
+        check = PoBBCheck(cfg, n_samples=28, ruler=None)
         check.register_completed(_measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
         return check.check(
@@ -2255,7 +2283,7 @@ def test_pobb_locks_in_dominant_leader():
     check = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, leader_lock_in=True),
         n_samples=20,
-        delta_scale={},
+        ruler=None,
     )
     check.register_completed(_measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")
@@ -2284,7 +2312,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     candidate_samples = [9, 12, 13, 14, 8]  # disjoint from leader; AIME's hard sorter order.
 
     # --- Branch (a): no backfill_fn ⇒ incomplete prior is excluded, no elimination.
-    check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
+    check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None)
     check_no_backfill.register_completed(
         _measurements([1.0] * 8, sample_ids=leader_samples),
         candidate_id="R1_lucky_winner",
@@ -2318,7 +2346,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         return [{"sample_id": s.id, "fitness": 1.0 if truth[s.id] else 0.0} for s in samples]
 
     check_paired = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={}, backfill_fn=_stub_backfill
+        PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None, backfill_fn=_stub_backfill
     )
     check_paired.register_completed(
         _measurements([1.0] * 8, sample_ids=leader_samples),
@@ -3036,15 +3064,18 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
 def test_build_round_order_fronts_win_opportunities_with_hit_probes() -> None:
     """The shared round order is the elimination gate's evidence pipeline: seed-miss
     (win-opportunity) samples front-loaded ascending-δ, a seed-hit regression probe at
-    every 4th slot descending-δ, unknowns treated as opportunities, deterministic
-    tie-breaks. Silent harm: a wrong order re-creates the tie-prefix blindness — the
-    round completes, no error, and dead candidates ride their full budget again."""
+    every 4th slot descending-δ, unknowns riding the MISS stratum at the ruler's own
+    CENTRE, deterministic tie-breaks. Silent harm: a wrong order re-creates the
+    tie-prefix blindness — the round completes, no error, and dead candidates ride their
+    full budget again. Centre and not 0.0, which is a position on this scale rather than a
+    neutral one: it ranked every unknown ahead of every measured cell, so a near-floor
+    origin spent its round on cells no arm solves and learned nothing about which arm wins."""
     from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
 
     ids = list(range(24))
     # Seed hits 0-8; misses 9-22; sample 23 unmeasured by the seed (unclassified).
     seed_grades = dict.fromkeys(range(9), 1.0) | dict.fromkeys(range(9, 23), 0.0)
-    ruler: dict[int, float | tuple[float, float]] = {sid: float(sid % 7) for sid in range(20)}
+    ruler = _ruler({sid: float(sid % 7) for sid in range(20)}, mu=2.85)
 
     order = build_round_order(seed_grades, ruler, ids)
     assert sorted(order) == ids
@@ -3059,13 +3090,18 @@ def test_build_round_order_fronts_win_opportunities_with_hit_probes() -> None:
     # the unmeasured sample 23 must ride the miss stratum, not the tail).
     non_probe_head = [order[i] for i in range(16) if (i + 1) % 4 != 0]
     assert all(sid not in hit_set for sid in non_probe_head)
-    # MISS stratum walks ascending δ (cold/unknown entries at δ=0 first, ties by sid).
+    # Computed, not spelled: a hardcoded default here would pass while disagreeing with the ruler.
+    unmeasured = ruler.mu_delta
+    # An unknown sits mid-queue, so a measured EASIER cell is reached before it and a measured
+    # harder one after — the whole point of the centre.
+    assert min(ruler.delta.values()) < unmeasured < max(ruler.delta.values())
+    # MISS stratum walks ascending δ (unknown entries at the ruler's centre, ties by sid).
     miss_positions = [sid for sid in order if sid not in hit_set]
-    miss_keys = [(float(ruler.get(sid, 0.0)), sid) for sid in miss_positions]  # type: ignore[arg-type]
+    miss_keys = [(ruler.delta.get(sid, unmeasured), sid) for sid in miss_positions]
     assert miss_keys == sorted(miss_keys)
     # HIT stratum walks descending δ (likeliest regression points first).
     hit_positions = [sid for sid in order if sid in hit_set]
-    hit_keys = [(-float(ruler.get(sid, 0.0)), sid) for sid in hit_positions]  # type: ignore[arg-type]
+    hit_keys = [(-ruler.delta.get(sid, unmeasured), sid) for sid in hit_positions]
     assert hit_keys == sorted(hit_keys)
 
 
@@ -3081,7 +3117,7 @@ def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     from promptpotter.application.scoring.selection import elimination_p_best
 
     sids = list(range(12))
-    ruler: dict[int, float] = {}  # cold ruler — flat δ, the common early-cycle case
+    ruler = None  # cold ruler — flat δ, the common early-cycle case
 
     # Graded regime: candidate consistently outscores the prior; hit would be all-0.
     strong = [0.66] * 12
@@ -3124,6 +3160,82 @@ def test_mean_ci_bounds_and_degenerate_n() -> None:
     assert abs(mean - sum(values) / len(values)) < 1e-9
     assert lo < mean < hi
     assert lo < hi
+
+
+def test_mean_ci_t_brackets_wider_than_z_and_refuses_a_single_reading() -> None:
+    """The Compare read brackets a handful of cells, where t and z are not interchangeable — at 6
+    cells t is 2.571 against z's 1.96. Pin that ``mean_ci_t`` is the wider of the two on identical
+    data (a swap back to ``norm.ppf`` fails here) and that it refuses to bracket one reading."""
+    assert mean_ci_t([]) is None
+    assert mean_ci_t([0.5]) is None  # one reading has no spread; a bracket from it is a fiction
+
+    values = [0.40, 0.50, 0.45, 0.52, 0.38, 0.49]
+    reading = mean_ci_t(values)
+    assert reading is not None
+    mean_t, lo_t, hi_t, n = reading
+    _, lo_z, hi_z = mean_ci(values)
+    assert n == len(values)
+    assert abs(mean_t - sum(values) / len(values)) < 1e-9
+    assert lo_t < mean_t < hi_t
+    assert (hi_t - lo_t) > (hi_z - lo_z)
+
+
+def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_tests() -> None:
+    """Checked against an INDEPENDENT oracle, so a sidedness flip or a df off-by-one goes red
+    rather than agreeing with itself. The interval and the p come from ONE posterior, so the
+    silent failure this pins is the two disagreeing about zero — a bracket excluding it beside a
+    p that does not, or the reverse. The floor case pins the documented deviation instead of
+    hiding it: ``_normal_posterior`` clips the SE at ``1/(4n)``, so a near-constant difference
+    reads far LESS significant here than a textbook paired t-test."""
+    from scipy.stats import ttest_rel
+
+    # Spread wide enough that the 1/(4n) floor does not bind, so the two must agree exactly.
+    cand = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]
+    prior = [0.10, 0.85, 0.15, 0.80, 0.20, 0.70, 0.05, 0.90]
+    reference = float(ttest_rel(cand, prior).pvalue)
+
+    mean_d, lo, hi, p_two, n = paired_reading(cand, prior)
+    assert n == len(cand)
+    assert abs(mean_d - sum(c - p for c, p in zip(cand, prior, strict=True)) / n) < 1e-12
+    assert p_two is not None and abs(p_two - reference) < 1e-12
+
+    # One posterior, one verdict: a p above 0.05 and a bracket clearing zero cannot coexist.
+    assert lo is not None and hi is not None and lo < mean_d < hi
+    assert (p_two < 0.05) == (lo > 0.0 or hi < 0.0)
+
+    p_greater = paired_reading(cand, prior, tail="greater")[3]
+    assert p_greater is not None and abs(p_greater - reference / 2.0) < 1e-12
+
+    # Reading a pair in either order must give one number — the whole point of the two-sided test.
+    assert paired_reading(prior, cand)[3] == p_two
+
+    # The floor binds: a difference this tight is "significant" to a textbook test and must not be
+    # to this one.
+    tight_cand = [0.5000001 * i for i in range(1, 7)]
+    tight_prior = [0.5 * i for i in range(1, 7)]
+    tight_p = paired_reading(tight_cand, tight_prior)[3]
+    assert tight_p is not None and tight_p > float(ttest_rel(tight_cand, tight_prior).pvalue)
+
+    # One pair tests nothing and brackets nothing — absent, not a p of 1.0 nor a zero-width bar.
+    assert paired_reading([0.5], [0.1])[1:4] == (None, None, None)
+
+
+def test_holm_adjusted_enforces_monotonicity_and_preserves_input_order() -> None:
+    """A plain Bonferroni pass satisfies the first case and fails the second — which is the point
+    of pinning the second. Holm is a STEP-DOWN: an adjusted p may never fall below the one before
+    it in rank order, so the running maximum is load-bearing, not defensive."""
+    assert holm_adjusted([]) == []
+    assert holm_adjusted([0.037]) == [0.037]  # m=1 is the identity
+
+    # sorted 0.01,0.03,0.04 -> x3, x2, x1 = 0.03, 0.06, 0.04; the last is dragged up to 0.06.
+    assert holm_adjusted([0.01, 0.04, 0.03]) == pytest.approx([0.03, 0.06, 0.06])
+
+    # Bonferroni would give [0.06, 0.063, 1.0]; the step-down gives the middle term the max.
+    assert holm_adjusted([0.02, 0.021, 0.9]) == pytest.approx([0.06, 0.06, 0.9])
+
+    # Order is the CALLER's, not rank order — a table renders rows where it put them.
+    assert holm_adjusted([0.9, 0.01, 0.04]) == pytest.approx([0.9, 0.03, 0.08])
+    assert all(0.0 <= p <= 1.0 for p in holm_adjusted([0.4, 0.6, 0.8]))
 
 
 # --- task_context framing is frozen ------------------------------------------------------
@@ -3227,14 +3339,12 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
 
     # Eight distinct samples clears any sample floor on its own — the arm count is the binding
     # condition, and a fresh campaign hands this function exactly this shape.
-    flat, _, model = _calibrate_delta_ruler(None, n_min, enable_2pl=False, archive_obs=arm_a)
-    assert flat == {} and model is None
+    flat, _ = _calibrate_delta_ruler(None, n_min, enable_2pl=False, archive_obs=arm_a)
+    assert flat is None
 
     arm_b = [Observation("b", sid, 1.0 if sid < 5 else 0.0) for sid in range(8)]
-    warm, _, warm_model = _calibrate_delta_ruler(
-        None, n_min, enable_2pl=False, archive_obs=arm_a + arm_b
-    )
-    assert warm and warm_model == "1PL"
+    warm, _ = _calibrate_delta_ruler(None, n_min, enable_2pl=False, archive_obs=arm_a + arm_b)
+    assert warm is not None and warm.calibration_model == "1PL"
 
 
 def test_panel_precision_names_the_lever_the_panel_needs() -> None:
@@ -3546,16 +3656,24 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     """Comparability is a machine-checkable fact or it is nothing. The cold ruler shares ONE id
     everywhere — flat δ makes θ plain logit-accuracy, which depends on no fit — while any refit
     gets its own, because δ estimates move with the archive the fit saw."""
-    assert ruler_id(None) == ruler_id({}) == FLAT_RULER_ID
+    assert ruler_id(None) == FLAT_RULER_ID
 
-    fitted = {1: 0.5, 2: -0.25, 3: 0.0}
+    fitted = _ruler({1: 0.5, 2: -0.25, 3: 0.0})
     # Key order is not part of the scale.
-    assert ruler_id(fitted) == ruler_id({3: 0.0, 2: -0.25, 1: 0.5})
-    # A 1PL entry and its explicit-discrimination spelling ARE one scale.
-    assert ruler_id(fitted) == ruler_id({1: (0.5, 1.0), 2: -0.25, 3: 0.0})
+    assert fitted.anchor_id == anchor_id_of({3: 0.0, 2: -0.25, 1: 0.5}, 0.0, 2.0, "1PL")
     # …and a genuinely different δ is a different scale, however small the move.
-    assert ruler_id(fitted) != ruler_id({1: 0.5, 2: -0.2500001, 3: 0.0})
+    assert fitted.anchor_id != anchor_id_of({1: 0.5, 2: -0.2500001, 3: 0.0}, 0.0, 2.0, "1PL")
     assert ruler_id(fitted) != FLAT_RULER_ID
+
+    # THE ANCHOR, NOT THE MEMBERSHIP. Anchored extension adds cells without moving the ones
+    # already there, so a θ read before and after are on ONE scale and must share an id. Hashing
+    # the membership would churn it every round, read a cycle as incomparable with ITSELF, and —
+    # since `evidence.py` reads round 0's id into `Comparability` — poison cross-campaign
+    # comparison too.
+    grown = extend_ruler(fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)])
+    assert set(grown.delta) == {1, 2, 3, 9}
+    assert ruler_id(grown) == ruler_id(fitted)
+    assert all(grown.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
 
 
 def test_two_way_decomposition_reads_only_the_cells_every_arm_measured() -> None:
@@ -3589,15 +3707,15 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
     def origin(ruler: str | None) -> CampaignOrigin:
         return CampaignOrigin(
             campaign_id="c",
-            cycle_id="y",
+            cycle_id="cy",
             dataset_name="d",
             created_at="",
             arm_id="a",
             ruler_id=ruler,
             calibration_model=None,
             n_cells=1,
-            origin_level=0.0,
-            origin_accuracy=0.0,
+            origin_level=None,
+            origin_accuracy=None,
             spend_usd=None,
             rounds_scored=0,
             stop_reason=None,
@@ -3612,3 +3730,75 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
     # Unstamped, and mixed-with-stamped: neither is a yes.
     assert verdict(None, None) == (None, "ruler_unstamped")
     assert verdict("r1", None) == (None, "ruler_unstamped")
+
+
+def test_overlap_set_is_one_every_member_actually_answered() -> None:
+    """The 1-to-1 bars rest on one property: every member of the adopted line has answered every
+    cell of the set its rate is read over. Break it and each bar still renders — over a smaller
+    denominator, at a rate nothing measured, side by side as if comparable.
+
+    Also pins the three rules that keep the set affordable and honest: a HELD round's parent
+    re-score widens the incumbent's coverage; the choice prefers cells the new member already
+    holds; and a member is a CONFIGURATION, not a lineage id — an L2/L3 transition re-mints the
+    incumbent's OSP from the same prompt fields, which put one configuration on the chart twice,
+    at the same rate by construction, under a label naming no candidate.
+    """
+    from promptpotter.domain.results import (
+        RoundResult,
+        ScoredCandidate,
+        choose_overlap_set,
+        measured_cells,
+        winner_trajectory,
+    )
+
+    def rows(*ids: int) -> list[dict[str, object]]:
+        return [{"sample_id": i, "fitness": 1.0} for i in ids]
+
+    def scored(cid: str, label: str) -> ScoredCandidate:
+        return ScoredCandidate(
+            candidate_id=cid, label=label, accuracy=0.5, composite_fitness=0.5, total=1
+        )
+
+    def rnd(n: int, cid: str, label: str, instruction: str, *ids: int) -> RoundResult:
+        return RoundResult(
+            round=n,
+            label=label,
+            accuracy=0.5,
+            total=len(ids),
+            improved=n > 0,
+            # `instruction` IS the configuration here — two rounds sharing it are one member
+            # however their lineage ids differ.
+            prompt_fields={"instruction": instruction, "lineage": {"id": cid}},
+            results=rows(*ids),
+            candidates_scored=1,
+            candidate_scores=[scored(cid, label)],
+        )
+
+    # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9; round 3
+    # HELD but an L2 transition re-minted the incumbent — same instruction, new id, no label.
+    history = [
+        rnd(0, "c0", "C0", "base", 1, 2, 3, 4, 5, 6),
+        rnd(1, "c0", "C0", "base", 7, 8),
+        rnd(2, "w2", "C2.1", "edited", 5, 6, 7, 9),
+        rnd(3, "l2-remint", "C3.1", "edited", 5, 6),
+    ]
+    line = winner_trajectory(history)
+    # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
+    # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
+    assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
+    # The held round WIDENED the incumbent rather than replacing it — without that, 7 and 8 are
+    # lost and cell 7 could never join the set below.
+    assert measured_cells(line[0].rows) == {1, 2, 3, 4, 5, 6, 7, 8}
+
+    c0, w2 = measured_cells(line[0].rows), measured_cells(line[1].rows)
+    chosen = choose_overlap_set(c0, already_measured=w2, previous=(), size=4)
+    # 9 is w2's but C0 never answered it, so it cannot be a shared basis at any price.
+    assert 9 not in chosen
+    # THE invariant: C0 has answered every chosen cell, so both bars are read on the same exam.
+    assert set(chosen) <= c0
+    # Free-first: the three cells w2 already holds are taken before any that must be bought.
+    assert {5, 6, 7} <= set(chosen)
+    assert len([s for s in chosen if s not in w2]) == 1
+
+    # Stickiness is the tiebreak, never an override — a cheaper cell still wins the slot.
+    assert choose_overlap_set(c0, already_measured=w2, previous=[1, 2, 3], size=3) == [5, 6, 7]

@@ -276,7 +276,7 @@ def build_bundle(
         axes=cycle.axes,
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
-        delta_scale=cycle.delta_scale,
+        ruler=cycle.ruler,
         prior_rounds=list(cycle.rounds),
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
         earned_blocks=cycle.earned_blocks,

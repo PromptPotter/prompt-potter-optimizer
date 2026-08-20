@@ -10,6 +10,7 @@ from promptpotter.application.intelligence.exploration import (
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
 from promptpotter.application.optimization.l1.critique import run_l1_critique
+from promptpotter.application.optimization.l1.score.overlap import measure_overlap
 from promptpotter.application.optimization.l1.score.winner import l1_score
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (
@@ -64,21 +65,27 @@ async def execute_round(
     # Narrow the train-split bank to ``sp_budget_ttest`` contested samples via the
     # adaptive queue mechanism. Origin + every candidate share this subset so PoBB compares
     # like-for-like.
-    if not opt.mechanisms.selection.per_round_resubset or not cycle.delta_scale:
+    if not opt.mechanisms.selection.per_round_resubset or cycle.ruler is None:
         # Frozen selection: ignore accumulating observations, so every round gets the
         # deterministic campaign-start subset (bank prefix) — one fixed sample basis.
-        # Two triggers: resubset is OFF, OR the δ ruler is still COLD (empty) — a
-        # per-round subset would then be difficulty-blind and cross-round-incomparable,
-        # and freezing concentrates measurements so the ruler warms + locks fastest
-        # (`Cycle._maybe_warm_ruler`). Once warm, the branch below thaws to adaptive.
+        # Two triggers: resubset is OFF, OR the δ ruler is still COLD — a per-round subset
+        # would then be difficulty-blind and cross-round-incomparable, and freezing
+        # concentrates measurements so the ruler warms + locks fastest. Once warm, the
+        # branch below thaws to adaptive.
         scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_ttest)
     else:
         # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
         observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
+        # Thawing to adaptive is what can walk the subset off the locked ruler: the acquisition
+        # score prefers unmeasured cells, because `delta_learning_gain` rises with δ's SE.
+        # `anchor_floor` reserves enough already-anchored cells for the next extension to equate
+        # against, so growth stays possible.
         scoring_set = select_round_subset(
             scoring_pool,
             observations,
             config.sp_budget_ttest,
+            ruler=cycle.ruler,
+            anchor_floor=opt.elimination_n_min,
         )
 
     candidates, yield_stats = await generate_or_load_candidates(
@@ -149,7 +156,7 @@ async def execute_round(
         winner_evaluators=dict(round_result.evaluators),
         winner_total=round_result.total,
         improved=round_result.improved,
-        improved_reason=round_result.improved_reason,
+        verdict_reason=round_result.verdict_reason,
         p_value=round_result.p_value,
         candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
         winner_matched_parent_accuracy=round_result.matched_parent_accuracy,
@@ -220,6 +227,13 @@ async def execute_round(
         )
         declare_run_phase(session, RunPhase.PAUSED)
         raise StopLoop(StopReason.PAUSED)
+
+    # The 1-to-1 series. Here and nowhere earlier: the election, the ruler extension and the
+    # panel gate are all behind us, so no cell this buys can reach a decision this round made —
+    # and the fields it writes sit outside `results` / `all_candidate_results`, which is where
+    # the NEXT round's acquisition and ruler read. Bounded by `sp_budget_ttest` on ONE
+    # searchpoint, and zero on a held round.
+    await measure_overlap(cycle, round_result, scoring_pool)
 
     # The election, banked. AFTER the panel gate on purpose: a round halted on a holed panel is
     # unwound and re-run, so crowning it would put a winner on the timeline for a round that

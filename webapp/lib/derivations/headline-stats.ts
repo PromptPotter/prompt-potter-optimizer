@@ -106,8 +106,9 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
 }
 
 export interface FitnessTrend {
-  // Per-round measured accuracy, ascending.
-  points: { round: number; composite: number }[];
+  // Per-round measured accuracy, ascending. `theta` is the subset-invariant peer beside it,
+  // `null` on any round read while the ruler was still cold.
+  points: { round: number; composite: number; theta: number | null; n: number | null }[];
   // Running-best composite, index-aligned with `points`.
   best: number[];
 }
@@ -120,22 +121,25 @@ export interface FitnessTrend {
 // round drew, or a held round's retained incumbent re-scored on them. It matches the
 // Best/current tiles, which settle to the same basis.
 //
-// It used to plot `cumulative_accuracy`, "the incumbent lineage rescored over EVERY
-// sample probed so far". No rescore happened: that series pooled rows measured by
-// DIFFERENT configurations, so the line could sit above everything the cycle had
-// measured (`57%→78%` on a run whose best candidate reached 0.679).
-//
-// The concern it was answering is real — under `per_round_resubset` each round scores
-// a fresh hard-first draw, so the same prompt swings and can read as a false "great
-// start → decay". The honest fix is the round's own sample count beside the number,
-// and `RoundSummary.cumulative_theta` (ability on the cycle's fixed δ ruler, which IS
-// subset-invariant) once this chart grows a logit axis to plot it on.
+// Never `cumulative_accuracy`: it pools rows measured by DIFFERENT configurations, so the line
+// can sit above everything the cycle has actually measured. Under `per_round_resubset` each
+// round draws a fresh hard-first subset, so one prompt swings and can read as a false "great
+// start → decay" — answered by the round's own sample count beside the number, and by `theta`,
+// which is subset-invariant, rides each point, and gets its own axis on `TrendChart` because a
+// logit is unbounded and signed and cannot share the `0..1` one accuracy is drawn on.
 export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
   servedBest?: number | null,
 ): FitnessTrend {
   const points = (rounds ?? [])
-    .map((r) => ({ round: r.round, composite: r.accuracy }))
+    .map((r) => ({
+      round: r.round,
+      composite: r.accuracy,
+      theta: r.cumulative_theta,
+      // Read off the winner's own row: the round-level count is not on this summary, and the
+      // arms of one round all measured the same draw.
+      n: r.candidates.find((c) => c.is_winner)?.scored_samples ?? null,
+    }))
     .sort((a, b) => a.round - b.round);
   const best: number[] = [];
   let runningBest = 0;

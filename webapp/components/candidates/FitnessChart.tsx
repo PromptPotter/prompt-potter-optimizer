@@ -63,6 +63,8 @@ declare module "chart.js" {
 // Four sites join on this label — the dataset, the sample-count plugin's bars-only
 // filter, and both tooltip callbacks.
 const CACHE_SERIES = "cached";
+// The adopted line on one shared set of cells. Joined by the dataset and its tooltip.
+const OVERLAP_SERIES = "trajectory";
 
 const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
   id: "sampleCount",
@@ -361,29 +363,33 @@ export const FitnessChart = memo(function FitnessChart({
   // paints a stub). Unstarted bars stay null so chart.js leaves the slot
   // blank — distinguishing "still computing" from "not yet started".
   const {
-    accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, accPlot, compPlot, whatifPlot,
+    accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, overlapRaw, accPlot, compPlot, whatifPlot,
   } = useMemo(() => {
     const aR: (number | null)[] = [];
     const cR: (number | null)[] = [];
     const wR: (number | null)[] = [];
     const vR: (number | null)[] = [];
     const tR: (number | null)[] = [];
+    const oR: (number | null)[] = [];
     for (let i = 0; i < labels.length; i++) {
       aR.push(views[i]?.accuracy ?? null);
       cR.push(views[i]?.composite ?? null);
       wR.push(views[i]?.whatif ?? null);
       vR.push(views[i]?.diag?.accuracy ?? null);
       tR.push(views[i]?.theta ?? null);
+      oR.push(views[i]?.overlapAccuracy ?? null);
     }
     const coerce = (v: number | null, i: number): number | null =>
       v == null ? (views[i]?.started ? 0 : null) : v;
-    // verify and θ stay strictly sparse — NO started-floor coercion. For verify a
+    // verify, θ and the overlap stay strictly sparse — NO started-floor coercion. For verify a
     // 0-height stub on every column would read as a red dot everywhere. For θ it
     // is worse: on the 0–1 percent axis a coerced 0 reads as "nothing yet", but θ
     // is a logit where 0 is a REAL, middling ability — coercing a missing θ to 0
-    // renders a fabricated measurement.
+    // renders a fabricated measurement. The overlap is sparse by nature: only the adopted line
+    // is measured on the shared set, so most bars have none and a floored 0 would claim they
+    // scored nothing on it rather than that they were never read on it.
     return {
-      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR, thetaRaw: tR,
+      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR, thetaRaw: tR, overlapRaw: oR,
       accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
     };
   }, [views, labels]);
@@ -402,6 +408,7 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, selectedKey, themeVersion]);
 
   const hasVerify = useMemo(() => views.some((v) => v.diag != null), [views]);
+  const hasOverlap = useMemo(() => views.some((v) => v.overlapAccuracy != null), [views]);
 
   // Origin INCLUDED — a banked C0 is the most common replay, and the first thing this is
   // opened for. `null` is a GAP (no measured panel: a course, a sliced bar); a measured 0 is
@@ -419,7 +426,8 @@ export const FitnessChart = memo(function FitnessChart({
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     // BAR series only — the cache line sits on top of the group rather than inside it, so
     // counting it would narrow every bar the moment the overlay appeared.
-    const seriesCount = metrics.size + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
+    const seriesCount =
+      metrics.size + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0) + (hasOverlap ? 1 : 0);
     const cat =
       seriesCount <= 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
     // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
@@ -496,6 +504,20 @@ export const FitnessChart = memo(function FitnessChart({
         ...shared,
       });
     }
+    if (hasOverlap) {
+      // The adopted line on ONE set of cells — the only bars here two rounds can be differenced
+      // on, since every other series is read on whatever subset its own round bought. Populated
+      // for C0 and the winners and nobody else; teal keeps it out of the accent register so it
+      // does not read as a rival reading of the accuracy bar beside it.
+      datasets.push({
+        label: OVERLAP_SERIES,
+        data: overlapRaw,
+        backgroundColor: getCss("--color-overlap"),
+        borderColor: borderArr(getCss("--color-overlap")),
+        borderWidth: widthArr(),
+        ...shared,
+      });
+    }
     if (hasVerify) {
       // Workspace-verify overlay — populated only on bars with a matching
       // DiagnosticRunRecord. Red is the only series colour outside the
@@ -532,7 +554,7 @@ export const FitnessChart = memo(function FitnessChart({
     }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, cacheShare, metrics, showAccuracy, showComposite, showAbility, showWhatIf, showCache, hasVerify, themeVersion, selectionBorder]);
+  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, overlapRaw, cacheShare, metrics, showAccuracy, showComposite, showAbility, showWhatIf, showCache, hasVerify, hasOverlap, themeVersion, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
     if (label === "verify") {
@@ -543,6 +565,15 @@ export const FitnessChart = memo(function FitnessChart({
         ? ` (workspace acc on n=${diag.workspaceN}, +${diag.samplesAdded} fresh)`
         : "";
       return `verify: ${v.toFixed(3)}${tail}`;
+    }
+    if (label === OVERLAP_SERIES) {
+      const v = overlapRaw[idx];
+      // The COUNT travels with the rate. Without it the bar is a percentage over an unnamed
+      // denominator, which is the exact reading this series exists to replace.
+      const n = views[idx]?.overlapN;
+      return v == null
+        ? `${OVERLAP_SERIES}: not on the winner trajectory`
+        : `${OVERLAP_SERIES}: ${v.toFixed(3)}${n ? ` on ${n} shared cells` : ""}`;
     }
     if (label === "ability") {
       const v = thetaRaw[idx];

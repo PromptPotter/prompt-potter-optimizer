@@ -164,7 +164,8 @@ assert _LEDGER_PIPELINE_KEYS.issubset(_DECLARED_PIPELINE_KEYS), (
 
 def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
     """NEW dicts, never a pop: the argument is the same object that becomes the archive row,
-    ``RoundResult.results``, ``all_candidate_results`` and ``trajectory_results``."""
+    ``RoundResult.results``, ``all_candidate_results``, ``overlap_results`` and
+    ``InjectionBundle.trajectory_results``."""
     out: dict[str, Any] = {k: v for k, v in result.items() if k in _LEDGER_SAMPLE_KEYS}
     if "pipeline_data" in result:
         pd = result["pipeline_data"]

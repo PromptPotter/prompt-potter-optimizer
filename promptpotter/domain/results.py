@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any, Literal, NotRequired, TypedDict
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
 
 from pydantic import ConfigDict, Field, computed_field
 
@@ -15,16 +15,12 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.ruler import CalibrationModel
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
-
-# Which IRT model a cycle's δ ruler was fitted under. The ABSENCE of a member is the third,
-# real state — a cold ruler is flat, so θ degenerates to logit-accuracy. Never collapse it
-# into "1PL".
-CalibrationModel = Literal["1PL", "2PL"]
 
 __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
@@ -40,20 +36,28 @@ __all__ = [
     "EliminationContext",
     "HardSampleOrder",
     "HeadlineMetric",
+    "OverlapMember",
+    "OverlapReading",
     "PayloadOutcome",
     "RoundParent",
     "RoundResult",
     "ScoreboardRow",
     "ScoredCandidate",
     "SweepBatchResult",
+    "TrajectoryStep",
     "WarningDict",
     "best_round_by_measured_accuracy",
     "candidate_label",
+    "choose_overlap_set",
+    "incumbent_key",
     "is_electable",
     "is_leader_eligible",
     "is_round_winner",
+    "measured_cells",
     "merge_known_outcomes",
+    "overlap_series",
     "unscoreable_cells",
+    "winner_trajectory",
 ]
 
 
@@ -241,6 +245,14 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "escalation_aborted",
     "matched_parent_accuracy",
     "matched_parent_composite",
+    # The election's own number and the margin it was decided on. Without these the table can
+    # seat a winner it has no column able to explain — the state that sent an operator hunting
+    # for a bug in a round that was decided correctly.
+    "theta",
+    "theta_se",
+    "matched_parent_lift",
+    "matched_parent_lift_ci_lo",
+    "matched_parent_lift_ci_hi",
 }
 
 
@@ -262,6 +274,14 @@ class ScoreboardRow(StrictModel):
     matched_parent_composite: float | None
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
+    # What the round was actually WON on, and by how much over the parent. See ``ScoredCandidate``
+    # for what each ``None`` means — θ is absent outside the election fit, the lift below two
+    # shared cells. Ranking reads ``theta``, so the row and its rank cannot disagree.
+    theta: float | None
+    theta_se: float | None
+    matched_parent_lift: float | None
+    matched_parent_lift_ci_lo: float | None
+    matched_parent_lift_ci_hi: float | None
     is_winner: bool
 
 
@@ -287,6 +307,168 @@ class RoundParent(StrictModel):
     # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data markers — kept ``dict``
     # so the markers survive serialization, which a closed model would strip.
     results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OverlapMember(StrictModel):
+    """One adopted incumbent, read on the round's overlap set."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # The round this individual was crowned; 0 is the origin.
+    round: int
+    candidate_id: str
+    label: str
+    # Its rate over the set — every member's on the SAME cells, which is the whole point.
+    # ``RoundResult.accuracy`` is read on whatever the acquisition bought that round, so two
+    # rounds' headline rates sat different exams and differencing them measures the exam.
+    accuracy: float
+    # Scoreable cells of the set this member holds. Equal to ``len(sample_ids)`` unless one came
+    # back unscoreable for this individual — a fact about it, not about the set.
+    total: int
+
+
+class OverlapReading(StrictModel):
+    """The cells EVERY adopted incumbent has answered, and each one's rate over them.
+
+    The comparison no other surface can make. Not a second fitness: a round's own accuracy is
+    read on the subset that round bought, and the acquisition maximises information about one
+    ability rather than spread, so consecutive rounds can share almost no cells at all. This is
+    one exam, sat by C0 and by every winner since.
+
+    REPORT-ONLY, and that is what makes measuring the winner ALONE unbiased. These rows reach no
+    election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
+    incumbent would be better-identified than the arms it was judged against. The rows live on
+    ``RoundResult.overlap_results``, outside ``results`` and
+    ``all_candidate_results``, because those two are exactly where every one of those paths reads.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # Ascending, and re-chosen each round: it may swap cells as the line grows, preferring ones
+    # the new member has already answered so a swap costs nothing. Whatever it holds at a given
+    # round, every member listed below has answered all of it.
+    sample_ids: list[int] = Field(default_factory=list)
+    # Adoption order — C0 first.
+    members: list[OverlapMember] = Field(default_factory=list)
+    # What this round PAID: the new winner on the cells its line had answered and it had not.
+    # Zero on a held round, since the retained incumbent is already on the set. Sole count of
+    # those rows — nothing re-derives it from the row list beside it.
+    measured: int = 0
+
+
+class TrajectoryStep(NamedTuple):
+    """One adopted incumbent and every cell the cycle has measured it on.
+
+    ``key`` is :func:`incumbent_key` — the identity a caller must match a round against, since
+    ``candidate_id`` is the id this configuration FIRST arrived as and a later round can carry
+    the same configuration under a new one.
+    """
+
+    key: str
+    round: int
+    candidate_id: str
+    label: str
+    rows: list[dict[str, Any]]
+
+
+def overlap_series(overlap: OverlapReading | None) -> str:
+    """The adopted line on one line — every member's rate over the SAME cells, plus what the
+    round paid to keep the set whole. Empty when there is no reading, so a caller appends
+    nothing rather than printing a header over an absence."""
+    if overlap is None or not overlap.members:
+        return ""
+    arms = "  →  ".join(f"{m.label} {m.accuracy:.1%}" for m in overlap.members)
+    paid = f", +{overlap.measured} measured" if overlap.measured else ""
+    return f"{len(overlap.sample_ids)} shared cells{paid}: {arms}"
+
+
+def measured_cells(rows: Sequence[Mapping[str, Any]]) -> set[int]:
+    """Which samples a row set carries a SCOREABLE verdict for. An errored cell is not coverage —
+    counting it would put a member on the overlap set holding a hole."""
+    return {
+        int(sid) for r in rows if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+    }
+
+
+def incumbent_key(rr: RoundResult) -> str:
+    """What makes two rounds' incumbents the SAME measurable individual: the configuration they
+    are scored under — the prompt fields and the pipeline params, with ``lineage`` dropped.
+
+    **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
+    prompt strings — it writes ``l1_layout`` / ``l1_overrides`` / ``plan``, which steer the
+    OPTIMIZER, not the target prompt — so the incumbent's id changes while the thing being
+    measured does not. Keyed on the id, that put ONE configuration on the trajectory twice, at
+    the same rate by construction, the second time under a label naming no candidate. Keyed here,
+    the two fold into one member, which is also what the measurement archive already believes:
+    it is content-addressed on the node configs, so the re-measure cache-hit anyway.
+    """
+    fields = {k: v for k, v in rr.prompt_fields.items() if k != "lineage"}
+    # The node's rendered ``prompt`` is dropped, and this is not tidiness. It is the RENDER of the
+    # fields above, so it adds nothing — and on a WINNING round the round file records the render
+    # the round STARTED with rather than the elected winner's (``l1_score`` takes it from
+    # ``parse_population``, which carries param overrides; the target prompt is rendered later, at
+    # ``to_job_search_point``). Keyed on it, one configuration splits into two members a round
+    # apart. Every other param — temperature, effort — is a real axis and stays in the key.
+    params = {
+        node: {k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg
+        for node, cfg in (rr.pipeline_params or {}).items()
+    }
+    return stable_hash([fields, params])
+
+
+def winner_trajectory(rounds: Sequence[RoundResult]) -> list[TrajectoryStep]:
+    """The campaign's adopted line — C0, then every round that adopted a different configuration
+    — each member carrying the union of every cell the cycle measured it on, in adoption order.
+
+    ONE rule covers both round shapes: ``results`` belongs to the round's incumbent whether the
+    round crowned an arm or retained one, so a HELD round's parent re-score WIDENS that member's
+    coverage instead of being lost. The overlap rows an earlier round paid for join it too — they
+    are that individual's own measurement, quarantined from the decisions and from nothing else.
+    """
+    rows: dict[str, list[dict[str, Any]]] = {}
+    # key → the round that first adopted this configuration, and the candidate it arrived as.
+    first: dict[str, tuple[int, str]] = {}
+    labels: dict[str, str] = {}
+    for rr in rounds:
+        for cs in rr.candidate_scores:
+            labels.setdefault(cs.candidate_id, cs.label)
+        cid = rr.winner_id
+        if not cid:
+            continue
+        key = incumbent_key(rr)
+        first.setdefault(key, (rr.round, cid))
+        merged = merge_known_outcomes(rows.get(key, []), list(rr.results))
+        rows[key] = merge_known_outcomes(merged, list(rr.overlap_results))
+    # `R{n}` only if a configuration was never a scored candidate at all — with the key above that
+    # is a genuine anomaly rather than the routine L2 case, and a truncated id in its place would
+    # be a hash the operator cannot join to anything on screen.
+    return [
+        TrajectoryStep(
+            key=key, round=rnd, candidate_id=cid, label=labels.get(cid) or f"R{rnd}", rows=rows[key]
+        )
+        for key, (rnd, cid) in first.items()
+    ]
+
+
+def choose_overlap_set(
+    common: Collection[int],
+    *,
+    already_measured: Collection[int],
+    previous: Collection[int],
+    size: int,
+) -> list[int]:
+    """Which cells the next 1-to-1 reading is taken on, in preference order: what the new member
+    has already answered (free), then what the line was last read on (so the bars stay still),
+    then the cheapest remaining id.
+
+    *common* is the intersection over the members that are ALREADY on the set, so every cell here
+    is one they have all answered — which is what bounds the cost to the new member alone and
+    keeps C0 from ever paying again. Pure and total, so a resumed cycle re-chooses the same set
+    off the round documents.
+    """
+    free, prior = set(already_measured), set(previous)
+    ranked = sorted(sorted(common), key=lambda s: (s not in free, s not in prior))
+    return sorted(ranked[:size])
 
 
 # The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no
@@ -318,8 +500,13 @@ class RoundResult(StrictModel):
     improved: bool
     # One-sided two-proportion p-value vs origin; drives the IMPROVED gate. None ⇒ no test ran.
     p_value: float | None = None
-    # When `improved=False` despite Δ>0: which of {delta_threshold, significance, min_samples} blocked promotion.
-    improved_reason: str | None = None
+    # WHY this round ended the way it did, in the numbers it was decided on — the elected arm's θ,
+    # the parent's, the margin and its SE, or on a held round the best arm that still failed to
+    # clear. Written on EVERY round, won or held: its predecessor was one constant sentence
+    # emitted only on failure, so a round that crowned somebody explained nothing and the
+    # operator's "why did THIS one win?" had no surface to answer it. `None` only before the
+    # election runs.
+    verdict_reason: str | None = None
     degraded_samples: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
@@ -353,8 +540,12 @@ class RoundResult(StrictModel):
     # WHICH δ scale the θs above were read on (`intelligence/exploration.py::ruler_id`). Every
     # cycle refits its ruler from an archive that grows between runs, so a θ is only comparable
     # to one carrying the same id — without it, incomparability is un-derivable and cross-campaign
-    # readings silently mix scales. `None` on a round written before the stamp existed.
+    # readings silently mix scales. `None` names NO scale: that θ is comparable to nothing.
     ruler_id: str | None = None
+    # HOW MANY cells that ruler carried for this reading. The ruler grows by anchored extension,
+    # so `ruler_id` alone cannot say how much of the scale was real when the round was read —
+    # and a round scored mostly OFF the ruler renders identically to one scored on it.
+    ruler_n: int = 0
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
@@ -381,6 +572,13 @@ class RoundResult(StrictModel):
     # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
     # a parse failure yields no candidate to charge. One of the three constants above.
     l1_parse_failure: str | None = None
+    # The 1-to-1 reading of the adopted line on one shared set of cells, and the rows this round
+    # bought to keep it whole. Two fields for the same reason `accuracy` and `results` are two:
+    # one is what a reader is told, the other is what it was read off. The rows are HERE and not
+    # in `results` / `all_candidate_results` by design — see `OverlapReading`. `None` before
+    # the line has a second member, since C0 alone has nothing to be compared against.
+    overlap: OverlapReading | None = None
+    overlap_results: list[dict[str, Any]] = Field(default_factory=list)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
     critique: CritiqueReadout | None = None
@@ -445,22 +643,29 @@ class RoundResult(StrictModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def scoreboard(self) -> list[ScoreboardRow]:
-        """Rank-ordered display table — composite-first, accuracy-tiebreak; winner tagged.
+        """Rank-ordered display table — the crown first, then θ, then composite.
 
         Derived, never stored: it cannot drift from `candidate_scores` the way a
-        hand-built twin could.
+        hand-built twin could. On a warm round rank 1 IS the winner, by construction; on a cold
+        one no row carries a θ and the order falls back to the composite it always had.
         """
         from promptpotter.domain.rendering import display_rank_key
 
+        winner_id = self.winner_id
         ranked = sorted(
             self.candidate_scores,
-            key=lambda c: display_rank_key(c.composite_fitness, c.accuracy),
+            key=lambda c: display_rank_key(
+                c.composite_fitness,
+                c.accuracy,
+                c.theta,
+                is_winner=is_round_winner(c.candidate_id, winner_id),
+            ),
             reverse=True,
         )
         return [
             ScoreboardRow(
                 rank=i,
-                is_winner=is_round_winner(c.candidate_id, self.winner_id),
+                is_winner=is_round_winner(c.candidate_id, winner_id),
                 **c.model_dump(include=_SCOREBOARD_INCLUDE),
             )
             for i, c in enumerate(ranked, start=1)

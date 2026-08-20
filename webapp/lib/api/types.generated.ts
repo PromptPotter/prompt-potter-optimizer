@@ -76,6 +76,22 @@ export interface PanelPrecision {
   n_cells: number;
 }
 
+/** One adopted incumbent, read on the round's overlap set. */
+export interface OverlapMember {
+  round: number;
+  candidate_id: string;
+  label: string;
+  accuracy: number;
+  total: number;
+}
+
+/** The cells EVERY adopted incumbent has answered, and each one's rate over them. */
+export interface OverlapReading {
+  sample_ids: number[];
+  members: OverlapMember[];
+  measured: number;
+}
+
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
 export interface RoundSummary {
   round: number;
@@ -85,9 +101,11 @@ export interface RoundSummary {
   calibration_model: '1PL' | '2PL' | null;
   improved: boolean | null;
   electable_count: number | null;
+  verdict_reason: string | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
+  overlap: OverlapReading | null;
   panel_precision: PanelPrecision | null;
 }
 
@@ -223,6 +241,11 @@ export interface ScoreboardRow {
   matched_parent_composite: number | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
+  theta: number | null;
+  theta_se: number | null;
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -314,7 +337,7 @@ export interface RoundResult {
   total: number;
   improved: boolean;
   p_value: number | null;
-  improved_reason: string | null;
+  verdict_reason: string | null;
   degraded_samples: number;
   deprecated: number;
   escalation_signal: unknown | null;
@@ -327,6 +350,7 @@ export interface RoundResult {
   cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;
   ruler_id: string | null;
+  ruler_n: number;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
   origin_accuracy: number;
@@ -338,6 +362,8 @@ export interface RoundResult {
   evaluators: Record<string, number>;
   l1_yield: number;
   l1_parse_failure: string | null;
+  overlap: OverlapReading | null;
+  overlap_results: Record<string, unknown>[];
   diagnostics: unknown | null;
   critique: unknown | null;
   health: DegradationHealth | null;
@@ -352,9 +378,11 @@ export interface RoundResult {
   l1_n_duplicate: number;
   /** Variants re-proposing an idea an EARLIER round measured and lost. */
   l1_n_repeat: number;
-  /** Rank-ordered display table — composite-first, accuracy-tiebreak; winner
-   * tagged.  Derived, never stored: it cannot drift from `candidate_scores`
-   * the way a hand-built twin could. */
+  /** Rank-ordered display table — the crown first, then θ, then composite.
+   * Derived, never stored: it cannot drift from `candidate_scores` the way a
+   * hand-built twin could. On a warm round rank 1 IS the winner, by
+   * construction; on a cold one no row carries a θ and the order falls back
+   * to the composite it always had. */
   scoreboard: ScoreboardRow[];
 }
 

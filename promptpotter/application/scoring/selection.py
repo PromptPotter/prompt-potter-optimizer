@@ -13,7 +13,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.exploration import RaschPosterior, Ruler
+    from promptpotter.application.intelligence.exploration import RaschPosterior
+    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
@@ -117,7 +118,7 @@ def elect_round_winner(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
     coverage_floor: int,
-    delta_scale: Ruler,
+    ruler: DeltaRuler | None,
 ) -> tuple[str, RaschPosterior]:
     """The rank key is the POINT-ESTIMATE lift, with no winner's-curse margin — under-probing is ``coverage_floor``'s job.
     The overlap guard and the θ-lift guard cover different holes: one grades an errored row 0.0, the fit drops it."""
@@ -129,7 +130,7 @@ def elect_round_winner(
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
         origin_results,
-        delta_scale,
+        ruler,
     )
 
     best_rank: tuple[float, int] = (0.0, 0)
@@ -170,7 +171,7 @@ def elimination_p_best(
     candidate_grades: Sequence[float],
     paired_prior_grades: Mapping[str, Sequence[float]],
     candidate_sample_ids: Sequence[int],
-    delta_scale: Ruler,
+    ruler: DeltaRuler | None,
 ) -> tuple[float, dict[str, float]]:
     """Scores on the SAME θ the round-winner election ranks by, so elimination and election cannot
     disagree on what better means. Closed-form, so the resume replayer re-derives the cut exactly."""
@@ -184,16 +185,27 @@ def elimination_p_best(
     from promptpotter.application.intelligence.exploration import Observation, fit_theta_given_delta
 
     sids = [int(s) for s in candidate_sample_ids]
+    # The ONE sanctioned provisional read: this runs DURING the round, on cells `calibrate_ruler`
+    # cannot have absorbed yet — extension needs the round's grades, which do not exist while the
+    # round is still buying them. Misses stand at the ruler's own centre, and since both arms are
+    # scored on the identical cell list they see the identical δ vector, so a constant
+    # misspecification cannot favour one of them.
+    entries = ruler.entries_covering(sids) if ruler is not None else None
+    anchor = ruler.anchor_id if ruler is not None else ""
     cand_obs = [
         Observation("__cand__", sid, float(g))
         for sid, g in zip(sids, candidate_grades, strict=True)
     ]
-    theta_c, se_c = fit_theta_given_delta(cand_obs, delta_scale).get("__cand__", (0.0, 0.0))
+    theta_c, se_c = fit_theta_given_delta(cand_obs, entries, anchor_id=anchor).get(
+        "__cand__", (0.0, 0.0)
+    )
 
     per_prior: dict[str, float] = {}
     for pid, grades in paired_prior_grades.items():
         prior_obs = [Observation(pid, sid, float(g)) for sid, g in zip(sids, grades, strict=True)]
-        theta_p, se_p = fit_theta_given_delta(prior_obs, delta_scale).get(pid, (0.0, 0.0))
+        theta_p, se_p = fit_theta_given_delta(prior_obs, entries, anchor_id=anchor).get(
+            pid, (0.0, 0.0)
+        )
         denom = math.sqrt(se_c * se_c + se_p * se_p)
         if denom > 1e-12:
             per_prior[pid] = float(norm.cdf((theta_c - theta_p) / denom))

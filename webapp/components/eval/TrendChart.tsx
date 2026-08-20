@@ -24,21 +24,48 @@ export const TrendChart = memo(function TrendChart() {
     [dash?.rounds, dash?.best],
   );
   const curData = points.map((p) => p.composite);
+  const thetaData = points.map((p) => p.theta);
+  // Silent until the ruler warms — a flat ruler makes θ logit-accuracy on each round's own
+  // subset, which is the very thing this axis exists to be independent of.
+  const hasTheta = thetaData.some((t) => typeof t === "number");
   const labels = points.map((p) => String(p.round));
   // Quiet amber notices for rounds the backend graded `degraded` — the webapp
   // twin of the CLI's yellow degraded line. `critical` stays on the loud banner.
   const degraded = degradedRoundNotices(dash);
 
+  // Two axes, deliberately. `y` is accuracy, pinned to 0..1 and unlabelled. `theta` is a LOGIT —
+  // unbounded, signed, and the series the round is actually won on — so it cannot share that
+  // scale and gets its own VISIBLE axis on the right. Drawing it against 0..1 would clip every
+  // negative ability to the floor and read as a run that never started.
   const data = {
     labels,
     datasets: [
-      { data: bestData, borderColor: getCss("--color-accent"), backgroundColor: cssRgba("--color-accent-rgb", 0.08), tension: 0.3, pointRadius: 2, fill: true, borderWidth: 1.5 },
-      { data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5 },
+      { data: bestData, borderColor: getCss("--color-accent"), backgroundColor: cssRgba("--color-accent-rgb", 0.08), tension: 0.3, pointRadius: 2, fill: true, borderWidth: 1.5, yAxisID: "y", label: "best accuracy" },
+      { data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "y", label: "round accuracy" },
+      ...(hasTheta
+        ? [{ data: thetaData, borderColor: getCss("--color-text-secondary"), borderDash: [4, 3], tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "theta", label: "ability θ", spanGaps: true }]
+        : []),
     ],
   };
   const options = lineChartDefaults({
-    plugins: { legend: { display: false } },
-    scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } },
+    plugins: {
+      legend: { display: hasTheta, labels: { boxWidth: 10, font: { size: 10 } } },
+      tooltip: {
+        callbacks: {
+          afterBody: (items: { dataIndex: number }[]) => {
+            const n = points[items[0]?.dataIndex ?? -1]?.n;
+            // The count the accuracy was measured over — the other half of the honest fix,
+            // since under `per_round_resubset` two rounds' accuracies sat different exams.
+            return typeof n === "number" ? `n = ${n}` : "";
+          },
+        },
+      },
+    },
+    scales: {
+      x: { display: false },
+      y: { display: false, min: 0, max: 1 },
+      theta: { display: hasTheta, position: "right" as const, grid: { display: false }, ticks: { font: { size: 9 } } },
+    },
   });
 
   return (

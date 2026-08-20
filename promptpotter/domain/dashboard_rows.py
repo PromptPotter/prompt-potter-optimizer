@@ -14,7 +14,7 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.results import CalibrationModel, DegradationHealth
+from promptpotter.domain.results import CalibrationModel, DegradationHealth, OverlapReading
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["DashboardCandidate", "RoundSummary", "RoundSummaryCandidate"]
@@ -118,6 +118,11 @@ class RoundSummary(StrictModel):
     # campaign visibly climb while its bank drained. Round 0 holds no election ⇒ both unset.
     improved: bool | None = None
     electable_count: int | None = None
+    # WHY it ended that way, in the numbers it was decided on — mirrors
+    # ``RoundResult.verdict_reason``. `improved` alone says a round held and cannot say which arm
+    # came closest or how far short, which is the question a browser reader actually has; this is
+    # that answer's only route out of the engine. Round 0 holds no election ⇒ unset.
+    verdict_reason: str | None = None
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
     # Sample ids in measurement order; the longest candidate sequence carries the full series,
     # since PoBB truncates losers rather than the queue mechanism itself.
@@ -125,6 +130,12 @@ class RoundSummary(StrictModel):
     # Round-close degradation verdict, origin included. ``None`` only when the round measured
     # zero samples. Webapp/CLI render it; never recompute.
     health: DegradationHealth | None = None
+    # The adopted line read on ONE shared set of cells — C0 and every winner since, on the same
+    # exam. `accuracy` above and this are not rivals: that one is the round's own subset, this one
+    # is the only basis two rounds can be differenced on. `None` until the line has a second
+    # member. Mirrors `RoundResult.overlap`; the rows behind it stay on the round
+    # document, since a browser reading them would be reading a quarantine.
+    overlap: OverlapReading | None = None
     # How sharply the L4 panel's cells were measured against how far apart they landed — the
     # monitoring read saying which lever the round's spread calls for. ``None`` on any non-L4
     # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is

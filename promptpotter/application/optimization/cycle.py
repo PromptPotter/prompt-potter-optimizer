@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,16 +25,16 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     merge_known_outcomes,
 )
+from promptpotter.domain.ruler import FLAT_RULER_ID, CalibrationModel, DeltaRuler, ruler_id
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.exploration import Observation, RulerEntry
+    from promptpotter.application.intelligence.exploration import Observation
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import CalibrationModel
     from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def _origin_round(
     theta: tuple[float, float] | None,
     calibration_model: CalibrationModel | None,
     ruler_id: str,
+    ruler_n: int,
 ) -> RoundResult:
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
     add: its θ on the cycle's δ ruler, and a matched origin that is itself. Nothing re-derived."""
@@ -87,6 +89,7 @@ def _origin_round(
         cumulative_theta_se=theta[1] if theta is not None else None,
         calibration_model=calibration_model,
         ruler_id=ruler_id,
+        ruler_n=ruler_n,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
         # C0's measurement is optimizer-independent but its critique is not, and a campaign
@@ -127,10 +130,11 @@ def _calibrate_delta_ruler(
     *,
     enable_2pl: bool,
     archive_obs: list[Observation],
-) -> tuple[dict[int, RulerEntry], tuple[float, float] | None, CalibrationModel | None]:
-    """The per-cycle FIXED ruler every later θ readout is measured against
-    (``docs/methods/verdict-resolution.md``). Cold start returns a FLAT ruler and a
-    ``None`` model."""
+    round_num: int = 0,
+) -> tuple[DeltaRuler | None, tuple[float, float] | None]:
+    """The per-cycle ANCHORING fit — the scale every later θ readout is measured against
+    (``docs/methods/verdict-resolution.md``). It locks the anchor; ``extend_ruler`` grows the
+    membership afterwards without moving it. Cold start returns ``None``, which reads FLAT."""
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,
         Observation,
@@ -150,7 +154,7 @@ def _calibrate_delta_ruler(
     # banked that run INSIDE its own evidence epoch, where the archive read cannot see it.
     obs = dedup_observations(archive_obs, origin_obs)
     if not obs:
-        return {}, None, None
+        return None, None
     # Two warmth conditions, both knowable without fitting — below either the ruler stays flat
     # and the fit would be discarded unread, so skip the 1PL + 2PL + CV storm entirely.
     # DISTINCT SAMPLES ≥ n_min: both fits key δ on ``sorted({o.sample_id})``.
@@ -161,14 +165,13 @@ def _calibrate_delta_ruler(
     # function, since 40 origin rows from one candidate clear any sample floor alone. One arm
     # therefore stays FLAT and re-attempts next round, once the round's own candidates are
     # banked grade-A and the fit has arms to compare.
-    ruler: dict[int, RulerEntry] = {}
-    model: CalibrationModel | None = None
+    ruler: DeltaRuler | None = None
     if len({o.sample_id for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
         fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
         # Cold below the floor: too few banked samples to trust a fitted ruler → stay flat.
         if len(post.delta) >= n_min:
-            ruler, model = post.ruler(), fitted
-            if model == "2PL":
+            ruler = post.anchored(fitted, round_num)
+            if fitted == "2PL":
                 logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
     # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES. Never hand back the JOINT fit's
     # ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors ``mean(θ)==0`` per call, so
@@ -176,30 +179,91 @@ def _calibrate_delta_ruler(
     # estimators — a BIAS channel, which does not average out over a panel.
     # ``obs``, not ``origin_obs``: the deduped set carries the archive's origin rows too.
     origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
-    return ruler, fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID), model
+    entries = ruler.entries() if ruler is not None else None
+    anchor = ruler.anchor_id if ruler is not None else ""
+    theta = fit_theta_given_delta(origin_obs_all, entries, anchor_id=anchor)
+    return ruler, theta.get(ORIGIN_ABILITY_ID)
+
+
+def _read_persisted_ruler(session: Session) -> DeltaRuler | None:
+    """The ruler this cycle already owns, off its own ledger. ``None`` on a fresh mint — nothing
+    appended yet — which is the cold path. A fork inherits its parent's through
+    ``CycleEventLog.inherit_from``, so its θ stay on the parent's scale rather than a fresh fit."""
+    if not session.state.cycle_id:
+        return None
+    ruler = session.store.campaigns.read_ruler(session.hop)
+    if ruler is None:
+        _refuse_unreproducible_rounds(session)
+    return ruler
+
+
+def _refuse_unreproducible_rounds(session: Session) -> None:
+    """Nothing on the ledger, but the rounds on disk say a warm ruler read them.
+
+    Warmth is monotone within a cycle, so the LAST round document answers this in one read — and
+    a fresh mint has no round files at all, which is the silent path. Falling through instead is
+    what the fix removes: ``_calibrate_delta_ruler`` would walk an archive that has grown since
+    the lock and hand back a different scale under the same cycle."""
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.store.io import read_json_tolerant
+    from promptpotter.infrastructure.store.layout import CycleLayout
+    from promptpotter.shared.errors import RulerUnpersistedError
+
+    cycle_dir = session.store.campaigns.cycle_dir(session.hop)
+    rounds = CycleLayout(CycleDir(cycle_dir)).round_files()
+    if not rounds:
+        return
+    doc = read_json_tolerant(rounds[-1], {})
+    stamped = str((doc or {}).get("ruler_id") or "")
+    if not stamped or stamped == FLAT_RULER_ID:
+        return
+    raise RulerUnpersistedError(
+        stamped, campaign_id=session.hop.campaign_id, cycle_id=session.hop.cycle_id
+    )
+
+
+def _origin_theta_on(
+    origin_results: list[dict[str, Any]] | None,
+    ruler: DeltaRuler,
+    archive_obs: list[Observation],
+) -> tuple[float, float] | None:
+    """C0's ability on an ALREADY-anchored ruler. Restricted to the cells that ruler carries: the
+    archive has grown since the lock, and reading θ over rows the scale never absorbed is the very
+    thing this arc removes."""
+    from promptpotter.application.intelligence.exploration import (
+        ORIGIN_ABILITY_ID,
+        dedup_observations,
+        fit_theta_given_delta,
+        observations_from_results,
+    )
+
+    origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
+    obs = [
+        o
+        for o in dedup_observations(archive_obs, origin_obs)
+        if o.candidate_id == ORIGIN_ABILITY_ID and o.sample_id in ruler.delta
+    ]
+    fit = fit_theta_given_delta(obs, ruler.entries(), anchor_id=ruler.anchor_id)
+    return fit.get(ORIGIN_ABILITY_ID)
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
 
 
 def _cumulative_theta(
-    results: list[dict[str, Any]], delta_scale: dict[int, RulerEntry] | None
+    results: list[dict[str, Any]], ruler: DeltaRuler | None
 ) -> tuple[float, float] | None:
     """The θ-space peer of the cumulative composite: one virtual candidate (the frontier) fit
     against the fixed δ, so rounds land on one scale once per-round subsets drift."""
     from promptpotter.application.intelligence.exploration import (
-        Observation,
         fit_theta_given_delta,
-        graded_response,
+        observations_from_results,
     )
-    from promptpotter.shared.errors import is_error_result
 
-    obs = [
-        Observation(_FRONTIER_ABILITY_ID, int(sid), graded_response(r))
-        for r in results
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
-    ]
-    return fit_theta_given_delta(obs, delta_scale or {}).get(_FRONTIER_ABILITY_ID)
+    obs = observations_from_results({_FRONTIER_ABILITY_ID: results})
+    entries = ruler.entries() if ruler is not None else None
+    anchor = ruler.anchor_id if ruler is not None else ""
+    return fit_theta_given_delta(obs, entries, anchor_id=anchor).get(_FRONTIER_ABILITY_ID)
 
 
 def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) -> None:
@@ -276,12 +340,10 @@ class Cycle:
     # archive candidate carrying it to ``ORIGIN_ABILITY_ID``, so the origin is ONE candidate
     # with one θ rather than one per round subset it was re-scored against.
     origin_sp_hash: str = ""
-    # sample_id → difficulty, calibrated at start and LOCKED on the first warm fit, so every
-    # cross-round θ readout lands on one scale. Empty = still cold, and the gates degenerate to
-    # θ == logit-accuracy.
-    delta_scale: dict[int, RulerEntry] | None = None
-    # None while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one lies.
-    calibration_model: CalibrationModel | None = None
+    # The cycle's δ scale: ANCHORED on the first warm fit and grown by `calibrate_ruler` after
+    # every round, so it always covers the cells its θ are read on while the anchor stays put.
+    # ``None`` = still cold, and the gates degenerate to θ == logit-accuracy.
+    ruler: DeltaRuler | None = None
     # Stashed by L2/L3 rebase emission; `runner.entry` resolves it post-finalize.
     rebase_request: RebaseRequest | None = None
 
@@ -308,7 +370,6 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
-        from promptpotter.application.intelligence.exploration import ruler_id
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -321,12 +382,22 @@ class Cycle:
             dataset_name=session.dataset_name,
             origin_sp_hash=origin_sp_hash,
         )
-        delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
-            origin_results,
-            config.optimization.elimination_n_min,
-            enable_2pl=config.optimization.enable_2pl_graduation,
-            archive_obs=archive_obs,
-        )
+        # A cycle that already OWNS a ruler reads it back rather than re-deriving one. Re-deriving
+        # was the resume half of the off-ruler bug: `_calibrate_delta_ruler` walks the archive,
+        # which has GROWN since the lock, so a resumed cycle silently continued on a different
+        # scale under a different id — visible on disk as one cycle carrying two `ruler_id`s.
+        persisted = _read_persisted_ruler(session)
+        ruler: DeltaRuler | None
+        if persisted is not None:
+            ruler = persisted
+            origin_theta = _origin_theta_on(origin_results, ruler, archive_obs)
+        else:
+            ruler, origin_theta = _calibrate_delta_ruler(
+                origin_results,
+                config.optimization.elimination_n_min,
+                enable_2pl=config.optimization.enable_2pl_graduation,
+                archive_obs=archive_obs,
+            )
         from promptpotter.application.intelligence.earned_blocks import (
             answer_space_signature,
             earned_library_for,
@@ -349,8 +420,9 @@ class Cycle:
                     report=origin_report,
                     results=list(origin_results or []),
                     theta=origin_theta,
-                    calibration_model=calibration_model,
-                    ruler_id=ruler_id(delta_scale),
+                    calibration_model=ruler.calibration_model if ruler is not None else None,
+                    ruler_id=ruler_id(ruler),
+                    ruler_n=len(ruler.delta) if ruler is not None else 0,
                 )
             ],
             tracking=CycleRoundState(
@@ -366,8 +438,7 @@ class Cycle:
             opt_sp=opt_sp,
             archive_observations=archive_obs,
             origin_sp_hash=origin_sp_hash,
-            delta_scale=delta_scale,
-            calibration_model=calibration_model,
+            ruler=ruler,
         )
 
     @property
@@ -377,10 +448,14 @@ class Cycle:
     @property
     def ruler_id(self) -> str:
         """DERIVED from the ruler, never stored beside it — a stamp that could disagree with the
-        scale it names is worse than none."""
-        from promptpotter.application.intelligence.exploration import ruler_id
+        scale it names is worse than none. It names the ANCHOR, so it is stable across the
+        extensions that grow the ruler's membership within one cycle."""
+        return ruler_id(self.ruler)
 
-        return ruler_id(self.delta_scale)
+    @property
+    def calibration_model(self) -> CalibrationModel | None:
+        """``None`` while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one lies."""
+        return self.ruler.calibration_model if self.ruler is not None else None
 
     def restamp_origin_round(self, parent: RoundParent) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
@@ -399,6 +474,7 @@ class Cycle:
             results=list(parent.results),
             theta=carried,
             calibration_model=self.calibration_model,
+            ruler_n=len(self._ruler_cells),
             ruler_id=self.ruler_id,
         )
 
@@ -460,7 +536,7 @@ class Cycle:
                 )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
-            cum = _cumulative_theta(acc_cum, self.delta_scale)
+            cum = _cumulative_theta(acc_cum, self.ruler)
             if cum is not None and (tr.best_theta is None or cum[0] > tr.best_theta):
                 tr.best_theta = cum[0]
         tr.current_results = acc_cum
@@ -468,59 +544,96 @@ class Cycle:
         tr.current_accuracy = last_rr.accuracy
         tr.current_composite_fitness = last_rr.composite_fitness
 
-    def warm_ruler_if_cold(self) -> None:
-        """The first fit clearing the warmth floor is adopted and never re-fit, so every warm round
-        shares one ruler. Attempted BEFORE the round's election and again once it closed."""
-        # Two attempt points: the ≥2-arm floor is satisfied the moment the round's own
-        # candidates are banked, which is BEFORE `elect_round_winner` runs, and trying only
-        # after `absorb_round` leaves the election that needs the ruler always on a cold one.
-        # This relaxes the TIMING, never the rule — a one-arm pool still stays flat below.
+    def calibrate_ruler(self, measured: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
+        """Cold: attempt the anchoring fit and LOCK. Warm: EXTEND onto every cell in ``measured``.
+
+        POSTCONDITION on return: the ruler is ``None`` (still cold) or it carries every sample_id
+        in ``measured``. That is the whole contract — ``fit_theta_given_delta`` raises on a hole
+        rather than defaulting it to δ=0, so a gap surfaces as a crashed cycle instead of silently
+        depressing every θ downstream. Called once per round, after every cell has a grade and
+        before the election that reads them.
+        """
+        from promptpotter.application.intelligence.exploration import (
+            extend_ruler,
+            observations_from_results,
+        )
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
 
-        if self.delta_scale:
+        if self.ruler is None:
+            # The ≥2-arm floor is satisfied the moment the round's own candidates are banked, so
+            # the attempt sits BEFORE the election that needs it rather than after the round closed.
+            # This relaxes the TIMING, never the rule — a one-arm pool still stays flat.
+            ruler, origin_theta = _calibrate_delta_ruler(
+                self.origin_round.results,
+                self.config.optimization.elimination_n_min,
+                enable_2pl=self.config.optimization.enable_2pl_graduation,
+                archive_obs=build_archive_observations(
+                    self.session.store,
+                    dataset_name=self.session.dataset_name,
+                    origin_sp_hash=self.origin_sp_hash,
+                ),
+                round_num=max(len(self.rounds) - 1, 0),
+            )
+            if ruler is None:
+                return  # still cold — legitimate, and it re-attempts next round
+            self.ruler = ruler
+            self._restamp_on_warm(origin_theta)
+
+        obs = observations_from_results(measured)
+        if obs:
+            self.ruler = extend_ruler(self.ruler, obs)
+        self._persist_ruler()
+
+    def _restamp_on_warm(self, origin_theta: tuple[float, float] | None) -> None:
+        """Every θ already taken on the flat ruler, re-read on the one just locked."""
+        # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit must move
+        # both, or the round file reports the origin at two abilities.
+        o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
+        self.origin_round.cumulative_theta = o_theta
+        self.origin_round.cumulative_theta_se = o_se
+        # The scale stamps follow the θ they describe. C0 was built cold, so leaving them behind
+        # reports a warm ability as unfitted — the exact confusion the ids exist to end.
+        self.origin_round.calibration_model = self.calibration_model
+        self.origin_round.ruler_id = self.ruler_id
+        self.origin_round.ruler_n = len(self.ruler.delta) if self.ruler is not None else 0
+        self.origin_round.candidate_scores = [
+            c.model_copy(update={"theta": o_theta, "theta_se": o_se})
+            for c in self.origin_round.candidate_scores
+        ]
+        # …and every L1 round that already closed: a round that closed on a flat ruler had its θ
+        # fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
+        # ``round_adopted_levels`` for the L4 law to average. The ROUND's frontier θ only —
+        # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
+        frontier: list[dict[str, Any]] = []
+        for rr in self.rounds:
+            frontier = merge_known_outcomes(frontier, list(rr.results))
+            if rr.round > 0:
+                # Only the cells the freshly-locked ruler carries: it was anchored on the origin
+                # and the archive, and a round that already walked past that is not on this scale.
+                on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in self._ruler_cells]
+                restamped = _cumulative_theta(on_ruler, self.ruler)
+                rr.cumulative_theta, rr.cumulative_theta_se = (
+                    restamped if restamped is not None else (None, None)
+                )
+                rr.calibration_model = self.calibration_model
+                rr.ruler_id = self.ruler_id
+                rr.ruler_n = len(self._ruler_cells)
+
+    @property
+    def _ruler_cells(self) -> set[int]:
+        return set(self.ruler.delta) if self.ruler is not None else set()
+
+    def _persist_ruler(self) -> None:
+        """The ruler lands on the cycle ledger BEFORE the round document that names it. A crash
+        between them leaves a ruler carrying cells no round mentions, which is harmless; the
+        reverse leaves a round whose θ nothing can reproduce, which is the state being removed."""
+        if self.ruler is None or not self.session.state.cycle_id:
             return
-        delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
-            self.origin_round.results,
-            self.config.optimization.elimination_n_min,
-            enable_2pl=self.config.optimization.enable_2pl_graduation,
-            archive_obs=build_archive_observations(
-                self.session.store,
-                dataset_name=self.session.dataset_name,
-                origin_sp_hash=self.origin_sp_hash,
-            ),
+        self.session.store.campaigns.write_ruler(
+            self.session.hop, self.ruler, round_num=max(len(self.rounds) - 1, 0)
         )
-        if delta_scale:  # warmed — lock the ruler + re-read every θ already taken on it
-            self.delta_scale = delta_scale
-            self.calibration_model = calibration_model
-            # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit must
-            # move both, or the round file reports the origin at two abilities.
-            o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
-            self.origin_round.cumulative_theta = o_theta
-            self.origin_round.cumulative_theta_se = o_se
-            # The scale stamps follow the θ they describe. C0 was built cold, so leaving them
-            # behind reports a warm ability as unfitted — the exact confusion the ids exist to end.
-            self.origin_round.calibration_model = calibration_model
-            self.origin_round.ruler_id = self.ruler_id
-            self.origin_round.candidate_scores = [
-                c.model_copy(update={"theta": o_theta, "theta_se": o_se})
-                for c in self.origin_round.candidate_scores
-            ]
-            # …and every L1 round that already closed: a round that closed on a flat ruler had
-            # its θ fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
-            # ``round_adopted_levels`` for the L4 law to average. The ROUND's frontier θ only —
-            # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
-            frontier: list[dict[str, Any]] = []
-            for rr in self.rounds:
-                frontier = merge_known_outcomes(frontier, list(rr.results))
-                if rr.round > 0:
-                    restamped = _cumulative_theta(frontier, delta_scale)
-                    rr.cumulative_theta, rr.cumulative_theta_se = (
-                        restamped if restamped is not None else (None, None)
-                    )
-                    rr.calibration_model = calibration_model
-                    rr.ruler_id = self.ruler_id
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
         """The ONE adoption seam for an L1 win and an L2/L3 transition alike: persistent memory
@@ -551,7 +664,6 @@ class Cycle:
                 self.opt_sp.memory.wounds.runtime_failures.append(rf)
 
         self.rounds.append(rr)
-        self.warm_ruler_if_cold()
         # The winner OSP carries its own lineage, so IDENTITY moves forward rather than just
         # the six prompt strings. A HELD round returns the incumbent itself, so the lineage ids
         # match, nothing is adopted and no node is minted.
@@ -573,12 +685,16 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
-        cur = _cumulative_theta(tr.current_results, self.delta_scale)
+        cur = _cumulative_theta(tr.current_results, self.ruler)
         if cur is not None and (tr.best_theta is None or cur[0] > tr.best_theta):
             tr.best_theta = cur[0]
 
         rr.cumulative_theta, rr.cumulative_theta_se = cur if cur is not None else (None, None)
         rr.calibration_model = self.calibration_model
         rr.ruler_id = self.ruler_id
+        # The size travels with the id it describes. Stamped only on the origin and the
+        # restamp path before, so every L1 round document reported `ruler_n=0` on a warm
+        # ruler — which `log.md` prints as "ruler: 0 cells" and a reader takes for cold.
+        rr.ruler_n = len(self._ruler_cells)
         rr.opt_sp = self.opt_sp
         return rr

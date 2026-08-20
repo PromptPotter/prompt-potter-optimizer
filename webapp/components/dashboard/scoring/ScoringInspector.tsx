@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { fmtPct1, fmtPctSigned } from "@/lib/format";
+import { fmtPct1, fmtSigned } from "@/lib/format";
 import type { CandidateRow, SelectedCandidate } from "@/lib/types";
 import { liveCandidateRow } from "@/lib/poll";
 import {
@@ -139,12 +139,32 @@ export function ScoringInspector({ selected, onClose }: Props) {
               title="The origin re-scored on the samples THIS candidate measured — the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the origin's full-set rate is the wrong comparison and would read as a phantom lift."
             >
               {fmtPct1(row.matchedParentAccuracy)}
-              {typeof selected.accuracy === "number"
-                ? ` (${fmtPctSigned(selected.accuracy - row.matchedParentAccuracy)})`
-                : ""}
             </span>
           </div>
         )}
+        {/* The SERVED lift and its interval, not a difference of two accuracies computed here.
+            That subtraction was a number made in the browser (`webapp/CLAUDE.md` § Scoring
+            authority) and it carried no uncertainty — so a margin the round could not resolve
+            rendered identically to one it could, which is the whole question this row answers. */}
+        {typeof row?.matchedParentLift === "number" &&
+          typeof row.matchedParentLiftCiLo === "number" &&
+          typeof row.matchedParentLiftCiHi === "number" && (
+            <div className="inspector-row">
+              <span className="inspector-key">lift vs parent</span>
+              <span
+                className="inspector-val"
+                title="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
+              >
+                {fmtSigned(row.matchedParentLift)} [{fmtSigned(row.matchedParentLiftCiLo)},{" "}
+                {fmtSigned(row.matchedParentLiftCiHi)}]
+                {row.matchedParentLiftCiLo <= 0 && row.matchedParentLiftCiHi >= 0 ? (
+                  <span className="l4-eff-flat"> spans 0 — not separable</span>
+                ) : (
+                  " clears 0"
+                )}
+              </span>
+            </div>
+          )}
         {typeof row?.theta === "number" && (
           <div className="inspector-row">
             <span className="inspector-key">ability θ</span>

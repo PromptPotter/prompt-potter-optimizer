@@ -194,15 +194,20 @@ def _scoreboard(
 
     ranked = sorted(
         scored,
-        key=lambda s: display_rank_key(s.composite_fitness, s.accuracy),
+        key=lambda s: display_rank_key(
+            s.composite_fitness, s.accuracy, s.theta, is_winner=s.label == winner_label
+        ),
         reverse=True,
     )
     w = 78
 
+    # Column ORDER is the row's, and the two disagreed: the header named Composite before 95% CI
+    # while the row printed them the other way round, so every CI was read against the wrong
+    # column. The interval brackets mean per-cell fitness — accuracy's own fold — so it sits
+    # beside Accuracy, and `Ability θ` closes the table with what the round is actually won on.
     hdr = (
-        # CI sits beside Composite because that is what it brackets — never beside Accuracy,
-        # which draws two different quantities as if one bounded the other.
-        f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'Composite':>9s}  {'95% CI':>16s}  {'Delta':>7s}"
+        f"{'#':<4s}{'Label':<8s}{'Accuracy':>8s}   {'95% CI':>16s}   "
+        f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
@@ -227,8 +232,13 @@ def _scoreboard(
         else:
             winner_mark = ""
         comp_val = display_fitness(s.composite_fitness, acc)
-        comp_part = f"   {comp_val:>8.4f}"
-        row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
+        # "---", never "0.000": a candidate outside the election fit has no ability, and while the
+        # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
+        theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
+        row = (
+            f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}   "
+            f"{comp_val:>9.4f}   {theta_str:>9s}   {delta_str:>7s}{winner_mark}"
+        )
         lines.append(f"  {_box_line(row, width=w)}")
 
     lines.append(f"  {_box_bottom(width=w)}")

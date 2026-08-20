@@ -86,7 +86,7 @@ async def score_population(
     elim_check = build_elimination_check(
         pobb_config,
         n_samples=len(dataset),
-        delta_scale=cycle.delta_scale or {},
+        ruler=cycle.ruler,
         backfill_fn=_pobb_backfill,
     )
 
@@ -110,7 +110,7 @@ async def score_population(
     # evidence immediately instead of a zero-information tie prefix. Every candidate
     # walks the same order: shared prefixes keep paired stats comparable and the
     # running display honest.
-    order = build_round_order(seed_grades, cycle.delta_scale or {}, [int(s.id) for s in dataset])
+    order = build_round_order(seed_grades, cycle.ruler, [int(s.id) for s in dataset])
     samples_by_id = {int(s.id): s for s in dataset}
     dataset = [samples_by_id[sid] for sid in order]
 

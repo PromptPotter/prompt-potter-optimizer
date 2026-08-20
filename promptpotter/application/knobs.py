@@ -192,17 +192,22 @@ COUPLINGS: tuple[Coupling, ...] = (
         estimand=Estimand.SELECTION,
         relation=(
             "per_round_resubset=ON re-picks the scored subset per candidate. Every "
-            "cross-round comparator now reads ONE fixed δ ruler in θ — the stall "
-            "replayer, c0_ok, the round-winner election and PoBB elimination all via "
-            "fit_theta_given_delta on cycle.delta_scale — so the accuracy-space collision "
-            "is resolved. Residual: a sample absent from the δ bank is flat (δ=0)."
+            "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
+            "c0_ok, the round-winner election and PoBB elimination all via "
+            "fit_theta_given_delta on cycle.ruler — and that ruler is EXTENDED to cover each "
+            "round's new cells, so the accuracy-space collision is resolved."
         ),
         consequence=(
-            "Resubset is comparability-coherent; flipping the default ON is the operator's "
-            "deliberate step (fork-compare to validate). The one residual: while the bank "
-            "is thin (< elimination_n_min grade-A samples), unbanked samples score "
-            "flat, so heavy per-candidate drift on a cold bank is only partially "
-            "difficulty-adjusted — it warms toward full adjustment as the archive grows."
+            "Resubset is comparability-coherent in θ, with TWO residuals. WARMTH: below "
+            "elimination_n_min banked samples the ruler stays flat and θ is logit-accuracy "
+            "on each arm's OWN subset, so those rounds are subset-relative until it warms. "
+            "BAND: the acquisition buys the cells whose δ sits nearest the leader's θ, which "
+            "against a wide bank collapses onto a narrow δ range — inside it every cell is "
+            "equally hard, so θ reduces to logit-accuracy plus a constant while the ruler is "
+            "warm and every id matches, which makes this the silent one. Turning resubset "
+            "OFF freezes the panel to the campaign-start prefix, which removes the band "
+            "residual by forcing the same cells into every panel. A cell missing from a WARM "
+            "ruler is neither residual — it raises."
         ),
         severity="info",
         predicate=lambda c: bool(_sel(c).per_round_resubset),
@@ -315,11 +320,14 @@ COUPLINGS: tuple[Coupling, ...] = (
             "(θ) or carry the subset badge."
         ),
         consequence=(
-            "The operator reads accuracy/composite as the headline while θ decides the "
-            "winner — the lineage can show a higher-accuracy candidate losing, "
-            "unexplained. Set headline_metric='ability' under resubset."
+            "The headline reads accuracy/composite while θ decides the winner. Every "
+            "surface now prints θ beside it, so the pairing is legible rather than "
+            "unexplained — but the headline is still the subset-relative one. Set "
+            "headline_metric='ability' under resubset."
         ),
-        severity="info",
+        # `inert`, not `info`: nothing about this combination co-moves — one knob's display
+        # choice simply wastes the other's invariance, which is exactly what inert names.
+        severity="inert",
         predicate=lambda c: bool(_sel(c).per_round_resubset) and c.headline_metric != "ability",
     ),
     Coupling(

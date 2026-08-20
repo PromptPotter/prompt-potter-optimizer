@@ -10,11 +10,12 @@
 // strip — clear/fill, per-round aggregate picks, and an opt-in trajectory drill.
 
 import { useState, type CSSProperties } from "react";
-import type { RoundSummary } from "@/lib/api/types";
+import type { OverlapReading, RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   measuredUniverse,
   roundMeasuredSets,
+  roundsCoveringSample,
   sameSampleSet,
   toggleInSet,
 } from "@/lib/sample-set";
@@ -41,7 +42,13 @@ function activeStyle(on: boolean): CSSProperties {
   };
 }
 
-export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
+export function SampleSetControl({
+  rounds,
+  overlap,
+}: {
+  rounds: RoundSummary[];
+  overlap: OverlapReading | null;
+}) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [detailOpen, setDetailOpen] = useState(false);
   const [includePlanned, setIncludePlanned] = useState(false);
@@ -51,6 +58,17 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
   const universe = measuredUniverse(rounds);
   const roundSets = roundMeasuredSets(rounds);
   const inSet = new Set(sampleSet);
+  // Which cells are the fixed yardstick, and how widely each cell was measured. A chip every
+  // round bought can carry a cross-round comparison; one a single round bought cannot, and
+  // before this they looked the same, so a bar computed over seven cells read like a result.
+  const coverage = roundsCoveringSample(rounds);
+  const fullyCovered = roundSets.length;
+  // The engine's own shared set — the cells EVERY member of the winner trajectory answered. A
+  // stronger guarantee than the coverage count beside it: that one says how many ROUNDS bought a
+  // cell, this says the adopted line has all of it, which is what makes a cross-round difference
+  // legitimate. Served, so the strip and the chart's trajectory bars are the same set by
+  // construction.
+  const shared = new Set(overlap?.sample_ids ?? []);
 
   return (
     <div
@@ -70,13 +88,20 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
         {universe.map((sid) => {
           const on = inSet.has(sid);
+          const seen = coverage.get(sid) ?? 0;
+          const everywhere = seen >= fullyCovered && fullyCovered > 0;
           return (
             <button
               key={sid}
               type="button"
               aria-pressed={on}
               onClick={() => setSelectionForSampleSet(toggleInSet(sampleSet, sid))}
-              title={`Sample #${sid} — ${on ? "in" : "not in"} the fitness set. Click to toggle.`}
+              title={
+                `Sample #${sid} — ${on ? "in" : "not in"} the fitness set. Click to toggle. ` +
+                `Measured in ${seen}/${fullyCovered} rounds` +
+                (everywhere ? " — every bar can be read on it." : " — a bar for a round that never bought it is blank, not zero.") +
+                (shared.has(sid) ? " On the winner trajectory's shared set: C0 and every winner since answered it." : "")
+              }
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: "var(--text-xs)",
@@ -85,10 +110,18 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
                 borderRadius: 2,
                 cursor: "pointer",
                 border: "0.5px solid var(--color-border)",
+                // Three independent facts, three channels, so none hides another: SELECTED is
+                // the fill (what the bars use), COVERAGE is the opacity (whether they can be
+                // read on it), and a cell on the trajectory's SHARED SET is underlined in its
+                // own colour — the one basis on which C0 and every winner are all readable.
+                textDecoration: shared.has(sid) ? "underline" : "none",
+                textDecorationColor: "var(--color-overlap)",
+                textUnderlineOffset: 2,
                 borderColor: on ? "rgba(59,130,246,0.55)" : "var(--color-border)",
                 background: on ? "rgba(59,130,246,0.18)" : "var(--color-background-secondary)",
-                color: on ? NEW_COLOR : "var(--color-text-tertiary)",
+                color: on ? NEW_COLOR : everywhere ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
                 fontWeight: on ? 600 : 400,
+                opacity: everywhere ? 1 : 0.55,
               }}
             >
               {sid}
@@ -110,6 +143,17 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
         >
           Off
         </button>
+        {overlap != null && (
+          <button
+            type="button"
+            aria-pressed={sameSampleSet(sampleSet, overlap.sample_ids)}
+            onClick={() => setSelectionForSampleSet(overlap.sample_ids)}
+            title={`The ${overlap.sample_ids.length} cells every candidate on the winner trajectory has answered — the one basis C0 and each winner can be differenced on. Same set the trajectory bars use.`}
+            style={activeStyle(sameSampleSet(sampleSet, overlap.sample_ids))}
+          >
+            trajectory · {overlap.sample_ids.length}
+          </button>
+        )}
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
           round:
         </span>
@@ -133,7 +177,8 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
             color: "var(--color-text-tertiary)",
           }}
         >
-          {sampleSet.length}/{universe.length} · composite/what-if off
+          {sampleSet.length}/{universe.length}
+          · composite/what-if off
         </span>
       </div>
 

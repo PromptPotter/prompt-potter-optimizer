@@ -101,9 +101,11 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         calibration_model=rr.calibration_model,
         improved=None if rr.round == 0 else rr.improved,
         electable_count=None if rr.round == 0 else rr.electable_count,
+        verdict_reason=None if rr.round == 0 else rr.verdict_reason,
         candidates=candidates,
         selection=selection,
         health=rr.health,
+        overlap=rr.overlap,
         panel_precision=_panel_precision(rr, origin_rows),
     )
 

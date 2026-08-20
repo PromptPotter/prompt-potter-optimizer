@@ -8,11 +8,17 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import expected_order
-from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.shared.errors import is_error_result
+from promptpotter.domain.ruler import (
+    CalibrationModel,
+    DeltaRuler,
+    Ruler,
+    anchor_id_of,
+    ruler_entry,
+)
+from promptpotter.shared.errors import RulerCoverageError, is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import CalibrationModel, RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -20,39 +26,22 @@ if TYPE_CHECKING:
 # election can read its θ on the same scale as the real candidates.
 ORIGIN_ABILITY_ID = "__origin__"
 
-# A difficulty-ruler entry is either a bare δ (1PL — discrimination ≡ 1) or a
-# ``(δ, a)`` pair (2PL — per-sample discrimination ``a``). The richer 2PL value
-# rides *inside* the same ruler mapping so every θ consumer reads one ``Ruler``
-# and the 1PL→2PL switch is invisible above ``fit_theta_given_delta`` (the seam):
-# a plain float stays 1PL, a tuple carries discrimination, an absent sample is
-# flat (δ=0, a=1). This is the "one ruler, θ always, flat where cold" contract,
-# generalized to 2PL.
-RulerEntry = float | tuple[float, float]
-Ruler = Mapping[int, RulerEntry]
-
-# The identity a COLD ruler shares everywhere: flat δ means θ is plain logit-accuracy, which
-# depends on no fit and is therefore comparable across cycles. A fitted ruler is not.
-FLAT_RULER_ID = "flat"
-
 __all__ = [
-    "FLAT_RULER_ID",
     "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
-    "Ruler",
-    "RulerEntry",
     "adopted_level_trajectory",
     "build_observations",
     "candidate_abilities",
     "dedup_observations",
+    "extend_ruler",
     "fit_rasch",
     "fit_rasch_2pl",
     "fit_theta_given_delta",
     "graded_response",
     "graduate_ruler_model",
-    "ruler_entry",
+    "observations_from_results",
     "ruler_expected_accuracy",
-    "ruler_id",
     "select_round_subset",
     "theta_lift_over_origin",
 ]
@@ -72,39 +61,25 @@ def graded_response(result: Mapping[str, Any]) -> float:
     return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
 
 
-def ruler_entry(value: RulerEntry) -> tuple[float, float]:
-    """Split a ruler entry into ``(δ, a)``; a bare float is 1PL (a≡1)."""
-    if isinstance(value, tuple):
-        return float(value[0]), float(value[1])
-    return float(value), 1.0
-
-
-def ruler_id(delta_scale: Ruler | None) -> str:
-    """The scale a θ was read ON. Two θ readings are comparable iff these match — a cycle fits its
-    own ruler from an archive that grows between runs, so identical grades on identical rows still
-    move θ, and nothing downstream could say so while the scale went unrecorded."""
-    if not delta_scale:
-        return FLAT_RULER_ID
-    return stable_hash([[sid, ruler_entry(delta_scale[sid])] for sid in sorted(delta_scale)])
-
-
-def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> float | None:
+def ruler_expected_accuracy(theta: float | None, ruler: DeltaRuler | None) -> float | None:
     """Ability re-projected onto the FIXED ruler — the subset-invariant peer of a round's raw accuracy.
     ``None`` at cold start (no ability or ruler), where callers fall back to raw accuracy."""
-    if theta is None or not delta_scale:
+    if theta is None or ruler is None or not ruler.delta:
         return None
-    etas = np.array([a * (theta - d) for d, a in (ruler_entry(v) for v in delta_scale.values())])
+    etas = np.array(
+        [a * (theta - d) for d, a in (ruler_entry(v) for v in ruler.entries().values())]
+    )
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
 def adopted_level_trajectory(
     origin: tuple[float, float] | None,
     incumbents: Sequence[tuple[float, float] | None],
-    delta_scale: Ruler | None,
+    ruler: DeltaRuler | None,
 ) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
     """Origin ability plus the per-round ability of the incumbent the search ADOPTED, in logits on
     the locked ruler. Why the incumbent: ``specs/l4-outer-loop.md`` § The measurand."""
-    if origin is None or not delta_scale:
+    if origin is None or ruler is None or not ruler.delta:
         return None, []
     prev = origin
     out: list[tuple[float, float]] = []
@@ -152,13 +127,21 @@ class RaschPosterior:
     discrimination: dict[int, float] = field(default_factory=dict)
     discrimination_se: dict[int, float] = field(default_factory=dict)
 
-    def ruler(self) -> dict[int, RulerEntry]:
-        """``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination was estimated — δ and a folded
-        into one per-sample value, the shape the θ seam reads."""
-        return {
-            sid: ((d, self.discrimination[sid]) if sid in self.discrimination else d)
-            for sid, d in self.delta.items()
-        }
+    def anchored(self, calibration_model: CalibrationModel, round_num: int) -> DeltaRuler:
+        """LOCK this fit as a cycle's ruler. Carries the priors the fit converged to, which the one-shot
+        version discarded — without them an extension cannot regularize a new cell the way the anchored
+        ones were, and the scale bends. The anchor id is stamped HERE, once, and never recomputed."""
+        return DeltaRuler(
+            delta=dict(self.delta),
+            delta_se=dict(self.delta_se),
+            discrimination={sid: a for sid, a in self.discrimination.items() if a != 1.0},
+            mu_delta=self.mu_delta,
+            sigma_delta=self.sigma_delta,
+            sigma_theta=self.sigma_theta,
+            calibration_model=calibration_model,
+            anchor_id=anchor_id_of(self.delta, self.mu_delta, self.sigma_delta, calibration_model),
+            anchored_at_round=round_num,
+        )
 
 
 def _map_fit(
@@ -311,17 +294,37 @@ def fit_rasch(
 
 def fit_theta_given_delta(
     observations: list[Observation],
-    delta: Ruler,
+    delta: Ruler | None,
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
+    anchor_id: str = "",
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> dict[str, tuple[float, float]]:
-    """Fixed δ decouples the candidates; a sample absent from the ruler sits at δ=0, a=1 — FLAT where
-    cold, so θ degenerates to logit-accuracy. ``theta_se`` carries the √φ dispersion correction."""
+    """Fixed δ decouples the candidates. ``theta_se`` carries the √φ dispersion correction.
+
+    ``delta=None`` is the COLD ruler — flat δ=0, a=1, so θ degenerates to logit-accuracy. That is
+    legitimate (round 0 has one arm, and logit-accuracy depends on no fit, so it is comparable
+    across cycles) and it is the ONLY state in which a cell may go ungraded.
+
+    A ruler that is not ``None`` must carry every observed cell, and a hole RAISES rather than
+    grading it δ=0 — zero is a POSITION on this scale, not a neutral value, so a ruler centred
+    well above it would read an unmeasured cell as easier than anything ever measured.
+    """
+    if delta is None:
+        graded: dict[int, tuple[float, float]] = dict.fromkeys(
+            (o.sample_id for o in observations), (0.0, 1.0)
+        )
+    else:
+        observed = {o.sample_id for o in observations}
+        missing = sorted(observed - delta.keys())
+        if missing:
+            raise RulerCoverageError(missing, anchor_id=anchor_id)
+        graded = {sid: ruler_entry(delta[sid]) for sid in observed}
+
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
-        d, a = ruler_entry(delta.get(o.sample_id, 0.0))
+        d, a = graded[o.sample_id]
         by_c.setdefault(o.candidate_id, []).append((d, a, o.response))
 
     out: dict[str, tuple[float, float]] = {}
@@ -349,6 +352,78 @@ def fit_theta_given_delta(
         phi = max(float(np.sum((h_arr - p) ** 2 / var)) / dof, _MIN_DISPERSION)
         out[cid] = (theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9))))
     return out
+
+
+def extend_ruler(
+    ruler: DeltaRuler,
+    observations: list[Observation],
+    *,
+    max_iter: int = 50,
+    tol: float = 1e-4,
+) -> DeltaRuler:
+    """δ for cells the ruler does not yet carry, fit against arm abilities read ON the frozen ruler.
+
+    Fixed-common-item calibration: the anchored cells give every arm a θ on the existing scale, and
+    each new cell's δ is then the one value that explains its responses at those θ. The anchor never
+    moves — existing δ, ``mu_delta``, ``sigma_delta``, ``calibration_model`` and ``anchor_id`` are
+    carried verbatim, and ``mean(theta) == 0`` is NEVER re-imposed (that is ``_map_fit``'s job, and
+    re-imposing it here is exactly how the scale would drift).
+
+    ONE pass, deliberately — not coordinate ascent. Folding the new δ back into the arms' θ reads as
+    "more accurate" and lets the anchor drift a little every round, which is this bug in slow motion.
+
+    Raises ``RulerCoverageError`` when a new cell has no arm carrying an anchored ability to link
+    through: the subset walked entirely off the ruler and there is nothing to equate against. A
+    provisional δ would be a fabricated value written permanently into the scale — the transient
+    read that legitimately needs one is ``DeltaRuler.entries_covering``, not this.
+    """
+    new_ids = {o.sample_id for o in observations} - ruler.delta.keys()
+    if not new_ids:
+        return ruler
+
+    anchored = [o for o in observations if o.sample_id in ruler.delta]
+    # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`, so this link is regularized exactly as the
+    # election's own θ read is. The ruler CARRIES the fit's converged σ_θ and nothing passes it
+    # yet: doing so moves every θ in the repo and belongs in its own commit with its own
+    # before/after, not smuggled in here where it would be indistinguishable from the extension.
+    theta = fit_theta_given_delta(anchored, ruler.entries(), anchor_id=ruler.anchor_id)
+
+    by_s: dict[int, list[tuple[float, float]]] = {}
+    for o in observations:
+        arm = theta.get(o.candidate_id)
+        if o.sample_id in ruler.delta or arm is None:
+            continue
+        by_s.setdefault(o.sample_id, []).append((arm[0], o.response))
+
+    unlinkable = sorted(new_ids - by_s.keys())
+    if unlinkable:
+        raise RulerCoverageError(unlinkable, anchor_id=ruler.anchor_id)
+
+    inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
+    delta = dict(ruler.delta)
+    delta_se = dict(ruler.delta_se)
+    for sid, rows in by_s.items():
+        t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
+        y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
+        # Seeded at the ruler's own centre and pulled by N(μ_δ, σ_δ²) — the same prior the anchored
+        # cells were fit under, which is why `sigma_delta` had to be carried on the ruler at all.
+        d = ruler.mu_delta
+        for _ in range(max_iter):
+            p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
+            grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
+            info = float(np.sum(p * (1.0 - p))) + inv_var
+            step = grad / max(info, 1e-9)
+            d += step
+            if abs(step) < tol:
+                break
+        p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
+        info = float(np.sum(p * (1.0 - p))) + inv_var
+        delta[sid] = d
+        delta_se[sid] = float(1.0 / np.sqrt(max(info, 1e-9)))
+
+    # A new cell keeps a ≡ 1 even under 2PL: one round's three-to-six arms cannot identify a
+    # discrimination, and `_LOG_A_CLIP` would happily let a separable cell run to ±3.
+    return ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
 
 
 # Prior on log-discrimination (2PL): log(aₛ) ~ N(0, σ_a²) shrinks aₛ → 1, so the
@@ -557,18 +632,22 @@ def graduate_ruler_model(
     return "1PL", base
 
 
+def observations_from_results(
+    results_by_id: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> list[Observation]:
+    """The ONE walk from ``{candidate_id: rows}`` to observations, skipping unscored and errored
+    cells. Four inline copies of it existed; two fits that skip different sets disagree about the
+    scale, and nothing anywhere would have said so."""
+    return [
+        Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
+        for cid, results in results_by_id.items()
+        for r in results
+        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+    ]
+
+
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
-    obs: list[Observation] = []
-    for rr in rounds:
-        for cid, results in rr.all_candidate_results.items():
-            for r in results:
-                sid = r.get("sample_id")
-                if sid is None or is_error_result(r):
-                    continue
-                obs.append(
-                    Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
-                )
-    return obs
+    return [o for rr in rounds for o in observations_from_results(rr.all_candidate_results)]
 
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
@@ -584,25 +663,17 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
 def candidate_abilities(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
-    delta_scale: Ruler,
+    ruler: DeltaRuler | None,
 ) -> RaschPosterior:
     """The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so it shares the arms'
     scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable."""
-    obs: list[Observation] = []
-    pools: list[tuple[str, list[QueryMeasurement]]] = [
-        (cid, list(results)) for cid, results in results_by_id.items()
-    ]
-    pools.append((ORIGIN_ABILITY_ID, list(origin_results)))
-    for cid, results in pools:
-        for r in results:
-            sid = r.get("sample_id")
-            if sid is None or is_error_result(r):
-                continue
-            obs.append(
-                Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
-            )
-    fit = fit_theta_given_delta(obs, delta_scale)
-    split = {int(sid): ruler_entry(v) for sid, v in delta_scale.items()}
+    obs = observations_from_results({**results_by_id, ORIGIN_ABILITY_ID: origin_results})
+    fit = fit_theta_given_delta(
+        obs,
+        ruler.entries() if ruler is not None else None,
+        anchor_id=ruler.anchor_id if ruler is not None else "",
+    )
+    split = {sid: ruler_entry(v) for sid, v in (ruler.entries() if ruler else {}).items()}
     return RaschPosterior(
         theta={cid: t for cid, (t, _) in fit.items()},
         theta_se={cid: se for cid, (_, se) in fit.items()},
@@ -626,35 +697,69 @@ def select_round_subset(
     bank: list[Sample],
     observations: list[Observation],
     budget: int,
+    *,
+    ruler: DeltaRuler | None = None,
+    anchor_floor: int = 0,
 ) -> list[Sample]:
-    """A δ fit needs at least TWO arms or selecting on it is a difficulty ratchet — with one arm δ
-    collapses to its hit pattern, so the contested band is just the incumbent's own misses."""
+    """Which cells this round buys, ordered on the cycle's LOCKED ruler.
+
+    Never ``fit_rasch`` here: a fresh re-anchoring per round makes the δ that CHOOSES the samples
+    a different scale from the δ that SCORES them. The L1 panel is already forbidden that
+    (``optimization/CLAUDE.md``); selection is bound by the same rule.
+
+    Cold ruler ⇒ the deterministic bank prefix, unchanged: a δ fit needs at least TWO arms or
+    selecting on it is a difficulty ratchet, and freezing the subset is what lets the ruler warm.
+    """
     if budget <= 0 or not bank:
         return []
     if budget >= len(bank):
         return list(bank)
-    if len({o.candidate_id for o in observations}) < 2:
+    if ruler is None or not ruler.delta:
         return list(bank[:budget])
-    posterior = fit_rasch(observations)
-    if not posterior.delta:
-        return list(bank[:budget])
+
     by_id = {int(s.id): s for s in bank}
-    # Unmeasured samples fall back to population prior (μ_δ, σ_δ).
-    delta_map = {sid: posterior.delta.get(sid, posterior.mu_delta) for sid in by_id}
-    delta_se_map = {sid: posterior.delta_se.get(sid, posterior.sigma_delta) for sid in by_id}
-    if posterior.theta:
-        leader_id = max(posterior.theta, key=lambda cid: posterior.theta[cid])
-        leader_theta = posterior.theta[leader_id]
-        leader_var = posterior.theta_se[leader_id] ** 2
+    # A cell the ruler has not absorbed stands at the ruler's own centre with the population SE.
+    delta_map = {sid: ruler.delta.get(sid, ruler.mu_delta) for sid in by_id}
+    delta_se_map = {sid: ruler.delta_se.get(sid, ruler.sigma_delta) for sid in by_id}
+    anchored = [o for o in observations if o.sample_id in ruler.delta]
+    theta = fit_theta_given_delta(anchored, ruler.entries(), anchor_id=ruler.anchor_id)
+    if theta:
+        leader_theta, leader_se = max(theta.values(), key=lambda ts: ts[0])
+        leader_var = leader_se**2
     else:
-        leader_theta, leader_var = 0.0, posterior.sigma_theta**2
+        leader_theta, leader_var = 0.0, _INIT_SIGMA_THETA**2
     ranked = expected_order(
         leader_theta,
-        posterior.sigma_theta**2,
+        _INIT_SIGMA_THETA**2,
         leader_theta,
         leader_var,
         delta_map,
         delta_se_map,
         list(by_id),
     )
-    return [by_id[sid] for sid in ranked[:budget]]
+    return [by_id[sid] for sid in _with_anchor_block(ranked, budget, ruler, anchor_floor)]
+
+
+def _with_anchor_block(
+    ranked: list[int], budget: int, ruler: DeltaRuler, anchor_floor: int
+) -> list[int]:
+    """Reserve enough already-anchored cells for the next extension to equate against.
+
+    ``delta_learning_gain`` rises with δ's SE, so an unmeasured cell outranks a measured one by
+    construction — correct while the ruler is cold, catastrophic once it is locked: the subset
+    walks off the ruler entirely and extension has nothing left to link through. The acquisition
+    ordering is left alone; only the tail is repaired, lowest-ranked first."""
+    picked = ranked[:budget]
+    floor = min(anchor_floor, len(ruler.delta.keys() & set(ranked)), budget)
+    have = sum(1 for sid in picked if sid in ruler.delta)
+    if have >= floor:
+        return picked
+    spare = [sid for sid in ranked[budget:] if sid in ruler.delta]
+    out = list(picked)
+    for i in range(len(out) - 1, -1, -1):
+        if have >= floor or not spare:
+            break
+        if out[i] not in ruler.delta:
+            out[i] = spare.pop(0)
+            have += 1
+    return out

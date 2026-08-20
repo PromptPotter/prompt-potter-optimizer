@@ -108,7 +108,7 @@ class LiveDisplay(DerivedView):
         # Live round-leader tracker, ordered by the shared `display_rank_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
-        self._round_best_key: tuple[float, float] | None = None
+        self._round_best_key: tuple[bool, float, float, float] | None = None
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
@@ -334,7 +334,11 @@ class LiveDisplay(DerivedView):
             if event.phase == CampaignPhase.INIT and event.event == "exit"
             else None
         )
-        if env_obj is not None and env_obj.state.resumed_from_round > 0:
+        # `> 1`, not `> 0` — `resumed_from_round` counts the NEXT L1 round, so a fresh mint is 1
+        # and only `>= 2` is a real rewind (`initialization/loop_start.py` gates on the same
+        # number). At `> 0` this fired on every fresh run and seeded the origin a second time
+        # beside the one `on_round_complete` appends, printing round 0 twice in the table.
+        if env_obj is not None and env_obj.state.resumed_from_round > 1:
             del self.campaign_rounds[self.initial_len :]
             cycle_state = event.data.get("state")
             for rr in getattr(cycle_state, "rounds", None) or []:
@@ -344,7 +348,10 @@ class LiveDisplay(DerivedView):
                         "label": rr.label,
                         "accuracy": rr.accuracy,
                         "composite_fitness": rr.composite_fitness,
-                        "hits": rr.hits,
+                        # Same keys as `on_round_complete`'s builder below, and it is the same
+                        # table they feed. This one carried a `hits` that `RoundResult` has never
+                        # declared, so every rewind-resume raised `AttributeError` right here.
+                        "cumulative_theta": rr.cumulative_theta,
                         "total": rr.total,
                         "improved": rr.improved,
                         "results": rr.results,
@@ -489,8 +496,11 @@ class LiveDisplay(DerivedView):
     def _fmt_round_leader(
         self, label: str, acc: float, origin_acc: float, composite: float | None
     ) -> str:
-        """Scoreboard one-liner, ordered by the shared ``display_rank_key`` so the live ★ cannot contradict the display ranking.
-        Point-estimate only — the true θ-LCB election prints at round close."""
+        """Scoreboard one-liner, ordered by the shared ``display_rank_key``.
+
+        Two arguments deliberately: mid-round no arm carries a θ and nobody is crowned, so the key
+        degrades to the composite it always was. The θ-ordered scoreboard prints at round close,
+        once the election has fit one."""
         delta_origin = acc - origin_acc
         key = display_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
@@ -521,6 +531,10 @@ class LiveDisplay(DerivedView):
                 "label": round_result.label,
                 "accuracy": round_result.accuracy,
                 "composite_fitness": round_result.composite_fitness,
+                # The progress table's series and the subset it was read over. Accuracy is
+                # subset-relative under `per_round_resubset`; θ is not, which is why the table
+                # differences this one and badges the other.
+                "cumulative_theta": round_result.cumulative_theta,
                 "total": round_result.total,
                 "improved": round_result.improved,
                 "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),

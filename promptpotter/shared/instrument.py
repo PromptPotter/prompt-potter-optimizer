@@ -72,12 +72,17 @@ def instrument_depth() -> int:
 
 class MeasurementRole(enum.StrEnum):
     """WHY a scoring pass ran — the half of provenance an id alone cannot carry. ``PANEL`` is a
-    candidate's own evidence in the round's shared order; the other three re-enter outside it."""
+    candidate's own evidence in the round's shared order; every other member re-enters outside it."""
 
     PANEL = "panel"
     BACKFILL = "backfill"
     PARENT = "parent"
     REPAIR = "repair"
+    # QUARANTINED: the winner read on the cells its whole line has already answered
+    # (``domain/results.py::OverlapReading``). Report-only — these rows reach no election, no
+    # parent floor, no lift and no acquisition, so the pass may measure one arm without making
+    # it better-identified than the arms it was judged against.
+    OVERLAP = "overlap"
 
 
 @dataclass(frozen=True)

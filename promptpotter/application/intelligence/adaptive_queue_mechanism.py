@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.scoring import is_hit
 from promptpotter.shared import sigmoid
+
+if TYPE_CHECKING:
+    from promptpotter.domain.ruler import DeltaRuler
 
 __all__ = [
     "build_round_order",
@@ -106,24 +110,26 @@ def pick_value(
     ) + delta_learning_gain(mu_c, var_c, delta_s, se_delta_s)
 
 
-def _ruler_delta(entry: float | tuple[float, float]) -> float:
-    """δ from a ruler value — a bare float is 1PL; a 2PL entry is ``(δ, a)``."""
-    return float(entry[0]) if isinstance(entry, tuple) else float(entry)
-
-
 def build_round_order(
     seed_grades: Mapping[int, float],
-    delta_ruler: Mapping[int, float | tuple[float, float]],
+    ruler: DeltaRuler | None,
     sample_ids: Sequence[int],
 ) -> list[int]:
+    # An unmeasured sample stands at the ruler's OWN centre, not at 0.0. Zero is a position on
+    # this scale, not a neutral one — δ is centred wherever the bank's difficulty puts it — and
+    # the miss stratum sorts ascending, so grading an unknown cell 0.0 puts it ahead of every
+    # known-discriminating one and spends the round on cells no arm solves. A cold ruler is flat,
+    # so everything ties at 0.0 and the order falls back to sample id.
     miss_stratum: list[int] = []
     hit_stratum: list[int] = []
     for sid in sample_ids:
         (hit_stratum if is_hit(seed_grades.get(sid)) else miss_stratum).append(sid)
 
+    centre = ruler.mu_delta if ruler is not None else 0.0
+    known = ruler.delta if ruler is not None else {}
+
     def _delta(sid: int) -> float:
-        entry = delta_ruler.get(sid)
-        return _ruler_delta(entry) if entry is not None else 0.0
+        return known.get(sid, centre)
 
     miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
     hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))

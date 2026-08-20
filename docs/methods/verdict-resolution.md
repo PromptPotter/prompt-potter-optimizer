@@ -26,8 +26,10 @@ P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 
 Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton on the sparse
 observation matrix, Laplace SEs, anchored to `mean(θ) == 0` for identifiability;
-`intelligence/exploration.py::fit_rasch`). One fit, two consumers: `δ_s` drives sample selection
-below and surfaces as the hardness leaderboard; `θ_c` is the **round-winner gate**.
+`intelligence/exploration.py::fit_rasch`). That joint fit runs ONCE, at ruler lock — every reading
+after it holds δ fixed and solves θ alone (`::fit_theta_given_delta`), or the scale moves under the
+round it judges. Two consumers: `δ_s` selects samples and ranks hardness; `θ_c` is the
+**round-winner gate**.
 
 **θ is why per-round resubsetting is safe at all.** Score each candidate on a different,
 signal-chased subset and raw accuracy drifts — whoever drew the easier samples wins on paper — but
@@ -67,7 +69,10 @@ more power. It graduates **per-dataset**, behind the same θ interface, only whe
 so it is not comparable across rounds or across arms within a round:
 
 - **The subset moves.** `per_round_resubset` is ON by default, so consecutive rounds are scored on
-  different samples. Round N's accuracy and round N+1's are two different exams.
+  different samples. Round N's accuracy and round N+1's are two different exams. It can also
+  FREEZE: the acquisition is a function of the ruler and a leader θ pinned by the archive, so once
+  both settle every round re-picks the same argmax — measured, two consecutive rounds drawing an
+  identical 28 ids. Neither state makes the two rounds' accuracies comparable.
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early, and `build_round_order`
   front-loads the incumbent's misses (a hit enters only every 4th slot), so a cut arm was graded on
   a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
@@ -77,7 +82,8 @@ So **a winner with lower accuracy than a rival, or than the previous round, is n
 reads the accuracy column and calls the election wrong, say which column the election used; do not
 treat the inversion as a defect on their word.
 
-**Two states where θ is NOT ability, and the pushback above is wrong:**
+**States where θ is NOT ability, and the pushback above is wrong.** Count them off the list, not
+off this sentence — it said "two" while listing three:
 
 - **The 0% floor.** An arm that misses every cell gives the fit no information, so θ pins to the
   same constant regardless of which samples it saw — every zero arm reads identically. At 0% the
@@ -85,6 +91,37 @@ treat the inversion as a defect on their word.
 - **A cold ruler.** Before the δ ruler warms, θ degenerates to logit-accuracy over the arm's own
   subset and is not on the shared scale its name promises. Check `calibration_model` (`None` = cold)
   and `ruler_id` — two θ readings are comparable only when their `ruler_id` matches.
+- **A collapsed band.** Acquisition buys the cells whose δ sits nearest the leader's θ, and against
+  a wide bank that collapses onto a razor-thin range — measured, 28 cells spanning 0.63 logits on a
+  ruler spanning 11.4. Inside a band that narrow every cell is equally hard, so the 1PL fit reduces
+  to `θ = logit(accuracy) + c` and the adjustment does no work: ranking on θ and ranking on accuracy
+  are the same ranking, and the parent's floor moves with the band's centre rather than its ability
+  (one origin read `-0.340` on round 0's spread and `-1.385` on the band). Unlike the two above this
+  one is SILENT — the ruler is warm, `ruler_id` matches, every number renders.
+  Check the round's own cells against the ruler's δ spread before trusting a θ lift: a panel whose
+  δ all sit within a logit of each other carries no difficulty information to adjust for, so the
+  θ column there is logit-accuracy wearing a ruler's name.
+
+  **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
+  own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
+  C0 and every winner since on ONE set of cells all of them answered, chosen from what the line
+  already shares and topped up on the new winner alone. It is a rate, not an ability, so it needs
+  no ruler and no adjustment — which is the point: it is what remains readable when the scale
+  underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
+  identify the incumbent better than the arms it judges. Round documents, `log.md`, `review.md`,
+  the round-close terminal line and the candidates chart's `trajectory` series all render the same
+  reading. It does not repair the acquisition — it measures around it.
+- **A ruler HOLE — impossible now, and named because it was silent for so long.** A cell missing
+  from a warm ruler was graded δ=0, which is a *position* on the scale rather than a neutral value:
+  against a centre near +2.1 it scored an unmeasured cell as easier than anything ever measured and
+  pulled θ down ~2 logits. `fit_theta_given_delta` raises on it now, and `Cycle.calibrate_ruler`
+  makes coverage a postcondition by EXTENDING the ruler onto each round's cells.
+
+**The ruler grows; the anchor does not.** `ruler_id` names the ANCHORING fit, not the membership, so
+it is stable across the extensions that add cells within a cycle — that is what lets two θ read at
+different depths stay comparable. `ruler_n` on each round says how many cells the scale carried when
+that round was read. The ruler is persisted (`RulerRecord`), so a resume reuses it rather than
+re-deriving a different one from a grown archive, and a fork inherits its parent's.
 
 ## What this is for — separability
 
@@ -237,8 +274,8 @@ campaign owns it, and `GET /datasets/{name}/heatmap` folds it from the archive p
   `::decision_information_gain` + `::delta_learning_gain`).
 - Round order — `::build_round_order`, called once per round at
   `optimization/l1/score/loop.py::score_population`.
-- Between-round subset pick — `intelligence/exploration.py::select_round_subset` (still fits **1PL**
-  via `::fit_rasch` — feeding graduated discrimination `aₛ` in here is open,
+- Between-round subset pick — `intelligence/exploration.py::select_round_subset`, off the LOCKED
+  ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
 - Persisted ranking writer — `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,
   which calls the same `pick_value` the between-round pick calls: one function, two trigger points.

@@ -23,7 +23,9 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
     archive read), not a cheaper version of it. So a divergence means "under this formula the
     crowned candidate is no longer the best-scoring one", where ``ab`` answers if the RUN moved."""
 
-    def _key(evaluators: Mapping[str, float], accuracy: float) -> tuple[float, float] | None:
+    def _key(
+        evaluators: Mapping[str, float], accuracy: float
+    ) -> tuple[bool, float, float, float] | None:
         # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
         # it references a schema-bound evaluator absent from those values — is
         # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns

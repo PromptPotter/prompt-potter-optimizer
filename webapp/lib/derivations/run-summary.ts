@@ -41,8 +41,15 @@ export interface RunSummary {
   // and looks broken — the reader has no way to tell "nothing has been tried" from
   // "two things were tried and both lost", and those are opposite facts about a run.
   // `improved` is served (`RoundSummary.improved`); round 0 holds no election and
-  // reports `null`.
-  lastRound: { round: number; candidates: number; improved: boolean | null } | null;
+  // reports `null`. `verdictReason` is the engine's own account of the election in θ
+  // vocabulary — it rides a tooltip rather than the line, because this surface is read
+  // by someone who has not agreed to speak logits.
+  lastRound: {
+    round: number;
+    candidates: number;
+    improved: boolean | null;
+    verdictReason: string | null;
+  } | null;
 }
 
 export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
@@ -65,7 +72,12 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",
     lastRound: last
-      ? { round: last.round, candidates: last.candidates.length, improved: last.improved }
+      ? {
+          round: last.round,
+          candidates: last.candidates.length,
+          improved: last.improved,
+          verdictReason: last.verdict_reason,
+        }
       : null,
   };
 }

@@ -72,6 +72,7 @@ describe("runSummary", () => {
       round: 2,
       candidates: 2,
       improved: null,
+      verdictReason: null,
     });
     const lost = runSummary(
       dash({
@@ -88,7 +89,12 @@ describe("runSummary", () => {
         ],
       }),
     );
-    expect(lost?.lastRound).toEqual({ round: 1, candidates: 2, improved: false });
+    expect(lost?.lastRound).toEqual({
+      round: 1,
+      candidates: 2,
+      improved: false,
+      verdictReason: null,
+    });
     // …and the champion correctly walks back to the origin, which is the pairing the
     // surface has to render as one sentence.
     expect(lost?.championLabel).toBe("C0");

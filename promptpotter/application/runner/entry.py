@@ -396,7 +396,7 @@ def _build_cycle_result(
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
     # outer loop with the floor it started from.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
-    ds = cycle.delta_scale if cycle is not None else None
+    ds = cycle.ruler if cycle is not None else None
     origin_lv: tuple[float, float] | None = None
     levels: list[tuple[float, float]] = []
     if cycle is not None:

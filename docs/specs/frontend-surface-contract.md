@@ -495,11 +495,24 @@ controls:
   - id: candidates.metric
     do: ONE multi-select (Acc/Comp/θ) driving the bar series AND every node label in both views.
         Never empty. θ rides a right-hand axis and stays sparse (a missing θ is never a 0 bar).
+  - id: candidates.overlap
+    do: The `trajectory` bar series — every candidate on the adopted line (C0 and each winner)
+        read on the ONE set of cells all of them answered, served as `RoundSummary.overlap`.
+        Auto-appears whenever a round carries a reading and stays sparse: an off-line candidate
+        has none, and a coerced 0 there would claim it scored nothing rather than that it was
+        never read on the set. It is NOT a rival of the accuracy bar beside it — that one is read
+        on whatever subset its own round bought, and these are the only two bars on this chart
+        that may be differenced. Teal, outside the accent register, for exactly that reason. The
+        rate carries its own count in the tooltip; the set drifts as the line grows, so the legend
+        and the strip below name the size. Suppressed while the Fixed sample set re-bases the
+        bars, like every other served aggregate.
   - id: candidates.menu
     do: The ⋯ overflow, lit while any member is active. Lens re-projects under an alternative
         criterion (served); What-If reveals evaluator checkboxes and becomes the master lens;
         Fixed sample set re-bases every bar on one set (off when the bars are courses — a run
-        is not a scored row); Loaded from cache draws the dashed replayed-share line, off by
+        is not a scored row), and its strip carries the engine's own shared set as a one-click
+        pick plus an underline on the cells in it — the same set `candidates.overlap` plots, so
+        the two cannot name different cells; Loaded from cache draws the dashed replayed-share line, off by
         default and NEVER disabled — a banked C0 is the usual replay, so greying out on it
         hides the case the control exists for.
   - id: samples

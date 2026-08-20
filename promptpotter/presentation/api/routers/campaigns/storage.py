@@ -16,7 +16,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import NotFoundError
 
 # Per-sample arrays inside a public round file that the backend produced → ``connector``.
-_CONNECTOR_ROUND_KEYS = ("results", "all_candidate_results")
+_CONNECTOR_ROUND_KEYS = ("results", "all_candidate_results", "overlap_results")
 
 # Loop's four leaves, then the full six (top-level Connector / Loop / Dataset flattened).
 _LOOP_LEAVES = ("state", "trace", "history", "reports")

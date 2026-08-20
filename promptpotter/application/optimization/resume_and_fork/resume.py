@@ -238,7 +238,7 @@ async def resume_with_divergence_check(
                 t,
                 ledger_decisions.get(t.round),
                 origin_results=origin_results_rescored,
-                delta_scale=cycle.delta_scale,
+                ruler=cycle.ruler,
             )
             if div is not None:
                 return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)

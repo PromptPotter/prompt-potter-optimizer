@@ -13,7 +13,8 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
-from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
+from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord, RulerRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.account_spend import (
@@ -25,6 +26,7 @@ from promptpotter.infrastructure.store.account_spend import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
+    scan_ledger_ruler,
 )
 from promptpotter.infrastructure.store.io import (
     read_json,
@@ -1041,6 +1043,16 @@ class CampaignStore:
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
+
+    def write_ruler(self, hop: CycleHop, ruler: DeltaRuler, *, round_num: int) -> None:
+        """Appended BEFORE the round document that names it. A crash between the two leaves a ruler
+        carrying cells no round mentions, which is harmless; the reverse leaves a round whose θ
+        nothing can reproduce, which is the state this record exists to end."""
+        cycle_dir = self.cycle_dir(hop)
+        CycleEventLog.open(CycleDir(cycle_dir)).append(RulerRecord(ruler=ruler, round=round_num))
+
+    def read_ruler(self, hop: CycleHop) -> DeltaRuler | None:
+        return scan_ledger_ruler(self._layout(hop).ledger)
 
 
 __all__ = ["CampaignStore", "origin_accuracy_of"]

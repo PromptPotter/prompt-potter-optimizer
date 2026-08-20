@@ -26,7 +26,7 @@ from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.exploration import RulerEntry
+    from promptpotter.domain.ruler import DeltaRuler
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class AbReport:
 
 def _make_replay_verdict(
     session: Session,
-    delta_scale: dict[int, RulerEntry] | None,
+    ruler: DeltaRuler | None,
     sink: list[ReplayMismatch],
 ) -> Verdict:
     """The replay as a verdict on the shared fold. Rescoring happens HERE, not in a prior pass, because the fold only
@@ -111,7 +111,7 @@ def _make_replay_verdict(
         for items in rd.all_candidate_results.values():
             rescore_results(items, scorer, sc.scorer_id, sc.scorer_formula)
         found = replay_all_mismatches(
-            rd, rnd.decisions, origin_results=rnd.known_outcomes, delta_scale=delta_scale
+            rd, rnd.decisions, origin_results=rnd.known_outcomes, ruler=ruler
         )
         if not found:
             return VerdictOutcome(diverged=False)
@@ -174,7 +174,7 @@ def ab_replay_cycle(
         if origin is not None
         else ""
     )
-    delta_scale, _, _ = _calibrate_delta_ruler(
+    ruler, _ = _calibrate_delta_ruler(
         origin_results,
         n_min,
         enable_2pl=enable_2pl,
@@ -186,7 +186,7 @@ def ab_replay_cycle(
     )
 
     mismatches: list[ReplayMismatch] = []
-    result = find_divergences(record, _make_replay_verdict(session, delta_scale, mismatches))
+    result = find_divergences(record, _make_replay_verdict(session, ruler, mismatches))
     n_rounds = sum(len(c.rounds) for c in record.cycles)
     logger.info(
         "A/B replay: campaign %s, %d cycle(s), %d round(s), %d mismatch(es), %d divergence(s)",

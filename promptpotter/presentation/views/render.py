@@ -141,7 +141,9 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{s.label}={s.accuracy:.1%}{' (aborted)' if s.escalation_aborted else ''}"
             for s in sorted(
                 v.scores,
-                key=lambda s: display_rank_key(s.composite_fitness, s.accuracy),
+                key=lambda s: display_rank_key(
+                    s.composite_fitness, s.accuracy, s.theta, is_winner=s.label == v.winner_label
+                ),
                 reverse=True,
             )
         ]
@@ -175,20 +177,17 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f" ({versus}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
-    elif v.improved_reason:
-        # Positive Δ but blocked by significance or sample-count floor — name
-        # the reason so the operator sees why a numerically-better candidate
-        # didn't graduate.
-        out.append(
-            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
-            f" ({versus}, n={v.winner_total})"
-            f"  reason: {v.improved_reason}{comp_tag}"
-        )
     else:
         out.append(
-            f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate "
-            f"{v.winner_accuracy:.1%}{comp_tag}"
+            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
+            f" ({versus}, n={v.winner_total}){comp_tag}"
         )
+    # The round is won on θ-lift, so the accuracy on the line above is never the number that
+    # decided it. The reason prints whichever way the round went — on a win as much as a hold, or
+    # "why did THIS one win?" is answered nowhere. The lift interval is NOT repeated here;
+    # `live/phase.py::render_round_stats` prints it once at round close.
+    if v.verdict_reason:
+        out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
 
     if not show_inline and v.winner_composite_fitness is not None:
         # Composite block also compares against matched-pair origin composite

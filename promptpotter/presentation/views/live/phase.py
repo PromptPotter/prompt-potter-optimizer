@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.rendering import display_fitness, display_rank_key
-from promptpotter.domain.results import is_round_winner
+from promptpotter.domain.results import is_round_winner, overlap_series
 from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
@@ -34,41 +34,57 @@ def fmt_elapsed(seconds: float) -> str:
     return f"{s // 3600}h {(s % 3600) // 60:02d}m"
 
 
-def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
+# A θ band narrow enough that three readings inside it cannot be three different results: one
+# round's own θ SE on a realistic panel is several times this, so the banner fires on a series
+# that is genuinely flat and stays quiet on one that is merely noisy. It advises stopping, and a
+# false stop costs more than a missed one.
+_PLATEAU_THETA_BAND = 0.05
+
+
+def render_progress_table(rounds: list[dict[str, Any]]) -> str:
     if not rounds:
         return ""
 
-    header = f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s} {'Rolling Avg':>13s} {'Trend':>8s}"
+    header = (
+        f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s} "
+        f"{'Ability θ':>10s} {'Trend':>9s}"
+    )
     lines: list[str] = [_node_line(header)]
 
-    accs: list[float] = []
+    # Trend and the plateau banner read ABILITY, never accuracy. Under `per_round_resubset` each
+    # round scores a fresh hard-first draw, so consecutive accuracies belong to different exams
+    # and their difference is mostly which cells were drawn. `cumulative_theta` is the cycle's
+    # one subset-invariant series. Accuracy stays on the table — it is a true fact about the
+    # round — but it is badged with the `n` it was measured over rather than differenced, and
+    # nothing here may average it across rounds: that mean names a number no configuration scored.
+    thetas: list[float] = []
+    prev: float | None = None
     for rd in rounds:
         acc = rd.get("accuracy") or 0
-        accs.append(acc)
-        rolling = sum(accs[-window:]) / len(accs[-window:])
-        if len(accs) <= 1:
-            trend = "-"
+        theta = rd.get("cumulative_theta")
+        theta = float(theta) if isinstance(theta, int | float) else None
+        if theta is None:
+            th_str, trend = "---", "-"
         else:
-            d = acc - accs[-2]
-            if abs(d) < 0.001:
-                trend = "+0.0%  <-- plateau"
-            elif d > 0:
-                trend = f"+{d:.1%}"
-            else:
-                trend = f"{d:.1%}"
+            thetas.append(theta)
+            th_str = f"{theta:+.3f}"
+            trend = "-" if prev is None else f"{theta - prev:+.3f}"
+            prev = theta
         rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
         comp = display_fitness(rd.get("composite_fitness"), acc)
-        row = f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"
+        # `28+33` when the origin panel is carried: the band this round chose to learn from,
+        # then the fixed yardstick every round shares. One number would hide that two rounds
+        # with the same `n` can have bought entirely different cells.
+        n = int(rd.get("total") or 0)
+        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f} {th_str:>10s} {trend:>9s}"
         lines.append(_node_line(row))
 
-    if len(accs) >= 3:
-        recent_avg = sum(accs[-3:]) / 3
-        if all(abs(a - recent_avg) < 0.005 for a in accs[-3:]):
+    if len(thetas) >= 3:
+        recent = thetas[-3:]
+        mean = sum(recent) / 3
+        if all(abs(t - mean) < _PLATEAU_THETA_BAND for t in recent):
             lines.append(
-                _node_line(
-                    f"{YELLOW}-- Plateau: rolling avg stable at"
-                    f" {recent_avg:.1%} for 3 rounds{RESET}"
-                )
+                _node_line(f"{YELLOW}-- Plateau: ability flat at {mean:+.3f} for 3 rounds{RESET}")
             )
 
     lines.append(_node_line(""))
@@ -96,7 +112,12 @@ def render_round_stats(
             ),
             max(
                 round_result.candidate_scores,
-                key=lambda s: display_rank_key(s.composite_fitness, s.accuracy),
+                key=lambda s: display_rank_key(
+                    s.composite_fitness,
+                    s.accuracy,
+                    s.theta,
+                    is_winner=is_round_winner(s.candidate_id, round_result.winner_id),
+                ),
             ),
         )
         accuracy = best.accuracy
@@ -130,6 +151,12 @@ def render_round_stats(
                 f"[{lo:+.3f}, {hi:+.3f}]  |  {verdict}"
             )
         )
+
+    # The 1-to-1 series: the adopted line read on the cells all of it has answered. It is the
+    # ONLY line here two rounds can be differenced on — every other number above is read on the
+    # subset this round happened to buy. Silent until the line has a second member.
+    if series := overlap_series(round_result.overlap):
+        lines.append(_node_line(f"trajectory ({series})"))
 
     # Degradation verdict — the served ``round_result.health`` (R-36: rendered,
     # not recomputed). Loudness scales with grade; ``healthy`` stays silent.

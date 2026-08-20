@@ -23,6 +23,11 @@
      lava register on purpose — it rides the accuracy axis and must not read as a
      metric. An annotation colour like --color-ci, not a status one. */
   --color-cache:#a78bfa;
+  /* The overlap series on the fitness chart — the adopted line read on ONE shared set of
+     cells. Teal, outside both the accent register and the status register: it rides the
+     accuracy axis beside bars measured on a DIFFERENT basis, so it must read as its own
+     reading rather than as a better or worse version of the one next to it. */
+  --color-overlap:#2dd4bf;
   /* Dashboard layout — one source for the centred spines. NarrowSpine
      wraps the header + diagnostics; WideSpine wraps the panel grids. */
   --dash-narrow-max:980px;

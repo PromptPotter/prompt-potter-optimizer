@@ -22,7 +22,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.intelligence.exploration import RulerEntry
+    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -158,12 +158,12 @@ class PoBBCheck:
         config: PoBBConfig,
         *,
         n_samples: int,
-        delta_scale: dict[int, RulerEntry],
+        ruler: DeltaRuler | None,
         backfill_fn: BackfillFn | None = None,
     ) -> None:
         # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
-        # elimination θ and election θ agree (flat where the ruler is cold). Empty ⇒ flat.
-        self.delta_scale = dict(delta_scale)
+        # elimination θ and election θ agree (``None`` ⇒ flat, where the ruler is still cold).
+        self.ruler = ruler
         self.n_min = config.n_min
         self.epsilon = config.epsilon
         self.epsilon_floor = config.epsilon_floor
@@ -313,7 +313,7 @@ class PoBBCheck:
         # P(best) = difficulty-adjusted θ ability, bounded above by min over priors of
         # P(θ_cand > θ_prior_i) — the same metric the round-winner election ranks by.
         p_best_current, p_better = elimination_p_best(
-            candidate_grades, paired_priors, candidate_sample_ids, self.delta_scale
+            candidate_grades, paired_priors, candidate_sample_ids, self.ruler
         )
         hardest_prior_id = min(p_better, key=lambda k: p_better[k])
 
@@ -400,7 +400,7 @@ def build_elimination_check(
     config: PoBBConfig,
     *,
     n_samples: int,
-    delta_scale: dict[int, RulerEntry],
+    ruler: DeltaRuler | None,
     backfill_fn: BackfillFn | None,
 ) -> PoBBCheck:
     """Build the round's leader-elimination check — the swap point for alternative strategies. The
@@ -408,7 +408,7 @@ def build_elimination_check(
     return PoBBCheck(
         config,
         n_samples=n_samples,
-        delta_scale=delta_scale,
+        ruler=ruler,
         backfill_fn=backfill_fn,
     )
 

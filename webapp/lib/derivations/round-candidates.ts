@@ -103,6 +103,9 @@ function rowOf(
     meanFitnessCiHi: c.mean_fitness_ci_hi,
     matchedParentAccuracy: c.matched_parent_accuracy,
     matchedParentComposite: c.matched_parent_composite,
+    matchedParentLift: c.matched_parent_lift,
+    matchedParentLiftCiLo: c.matched_parent_lift_ci_lo,
+    matchedParentLiftCiHi: c.matched_parent_lift_ci_hi,
     evaluators: c.evaluators,
     // Served on the base shape, so a LIVE row carries it too: the election runs at the end
     // of scoring, not at round close. `false` means nothing has been crowned yet — never

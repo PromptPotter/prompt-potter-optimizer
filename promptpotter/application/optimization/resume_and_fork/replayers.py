@@ -17,7 +17,7 @@ from promptpotter.application.scoring.selection import elect_round_winner, elimi
 from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.exploration import RulerEntry
+    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
@@ -53,7 +53,7 @@ class ReplayContext(NamedTuple):
     round_data: RoundResult
     decisions: list[dict[str, Any]]
     origin_results: list[dict[str, Any]]
-    delta_scale: dict[int, RulerEntry] | None
+    ruler: DeltaRuler | None
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
@@ -97,13 +97,13 @@ def _replay_context(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None,
     origin_results: list[dict[str, Any]] | None,
-    delta_scale: dict[int, RulerEntry] | None,
+    ruler: DeltaRuler | None,
 ) -> ReplayContext:
     return ReplayContext(
         round_data=round_data,
         decisions=list(decisions or []),
         origin_results=list(origin_results or []),
-        delta_scale=delta_scale,
+        ruler=ruler,
     )
 
 
@@ -111,10 +111,10 @@ def replay_decisions(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
-    delta_scale: dict[int, RulerEntry] | None = None,
+    ruler: DeltaRuler | None = None,
 ) -> ReplayMismatch | None:
     """Walk this round's ledger decisions in order; return the FIRST mismatch (resume's halt seam)."""
-    ctx = _replay_context(round_data, decisions, origin_results, delta_scale)
+    ctx = _replay_context(round_data, decisions, origin_results, ruler)
     return next(_iter_mismatches(ctx), None)
 
 
@@ -122,11 +122,11 @@ def replay_all_mismatches(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
-    delta_scale: dict[int, RulerEntry] | None = None,
+    ruler: DeltaRuler | None = None,
 ) -> list[ReplayMismatch]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round diff, where
     ``replay_decisions`` short-circuits at the first."""
-    ctx = _replay_context(round_data, decisions, origin_results, delta_scale)
+    ctx = _replay_context(round_data, decisions, origin_results, ruler)
     return list(_iter_mismatches(ctx))
 
 
@@ -143,7 +143,7 @@ def _replay_round_winner(
         cast("dict[str, list[QueryMeasurement]]", all_results),
         cast("list[QueryMeasurement]", ctx.origin_results),
         coverage_floor,
-        ctx.delta_scale or {},
+        ctx.ruler,
     )
     return winner_id
 
@@ -181,7 +181,7 @@ def _pobb_replay_snapshot(
         candidate_grades,
         paired_prior_grades,
         [int(s) for s in candidate_sample_ids],
-        ctx.delta_scale or {},
+        ctx.ruler,
     )
     return float(p_best)
 

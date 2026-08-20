@@ -46,6 +46,14 @@ export interface CandidateRow {
   // matched them.
   matchedParentAccuracy: number | null;
   matchedParentComposite: number | null;
+  // The blocked lift over that floor WITH its 95% interval — served, and sharper than the mean
+  // band above because pairing removes the parent's cell-to-cell variation instead of carrying
+  // it as noise. An interval spanning 0 means the round could not separate this candidate from
+  // its parent, which a bare difference of two accuracies cannot say. `null` below two shared
+  // cells: an interval from one pair is a fiction.
+  matchedParentLift: number | null;
+  matchedParentLiftCiLo: number | null;
+  matchedParentLiftCiHi: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
   // Samples scored so far for this candidate; null when unknown.
@@ -88,4 +96,14 @@ export interface CandidateView extends CandidateRow {
   electionPending: boolean;
   // Latest `verify` diagnostic run whose source label matches this candidate.
   diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
+  // This candidate's rate on the cells the whole adopted line has answered — SERVED
+  // (`RoundSummary.overlap`), never re-derived here. `null` for every candidate that is not on
+  // that line, which is most of them: only C0 and the winners are measured on the shared set.
+  // It is NOT a second opinion about `accuracy` above — that one is read on whatever subset its
+  // round bought, and the two are only equal by coincidence.
+  overlapAccuracy: number | null;
+  // The member's OWN denominator on that set (`OverlapMember.total`) — it travels with the rate
+  // above, since a percentage over an unnamed count is the reading this series replaces. Equal
+  // to the set size unless one of its cells came back unscoreable for this candidate alone.
+  overlapN: number | null;
 }

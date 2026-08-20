@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.results import HardSampleOrder
+from promptpotter.domain.results import HardSampleOrder, OverlapReading
 
 __all__ = [
     "AnyView",
@@ -175,6 +175,13 @@ class ScoreEntry:
     # answers (`scoring/metrics.py::matched_parent_stats`) — which is NOT the same as 0.0.
     matched_parent_accuracy: float | None = None
     matched_parent_composite: float | None = None
+    # What this row was RANKED on: ``None`` outside the election fit, and for every row while the
+    # ruler is cold. A table printing accuracy alone can seat a winner it has no column able to
+    # explain. The blocked LIFT and its interval are deliberately not here — the terminal's Δ
+    # column is accuracy-space and a second, fitness-space margin beside it would read as the
+    # same number twice; the interval's surfaces are ``ScoreboardRow`` and ``DashboardCandidate``.
+    theta: float | None = None
+    theta_se: float | None = None
 
 
 @dataclass(frozen=True)
@@ -193,7 +200,10 @@ class RoundCompleteView:
     # ``None`` alongside ``matched_parent_accuracy`` — there is no Δ without a floor.
     delta: float | None
     p_value: float | None
-    improved_reason: str | None
+    # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
+    # Present on a won round as well as a held one, which is what lets the terminal print a
+    # verdict either way instead of falling silent exactly when nothing was resolved.
+    verdict_reason: str | None
     next_action: str
     l1_critique_text: str
     composite_fitness_formula: str | None
@@ -321,6 +331,21 @@ class RoundDigestView:
     l1_n_repeat: int
     candidates_scored: int
     evaluators: dict[str, float]
+    # THIS round's own comparison floor — the parent re-scored on the samples this round drew.
+    # `log.md` compared against the whole-cycle origin composite instead, so under
+    # `per_round_resubset` it read draw difficulty as candidate lift and printed a different Δ
+    # from the terminal for the same round. ``None`` where the round matched nothing, and there
+    # is no fallback to the cycle origin: that is a different sample basis, not a default.
+    matched_parent_composite: float | None = None
+    # The subset-invariant series and how much ruler was real when it was read, so a reader can
+    # see a round scored mostly off the scale. Mirrors ``RoundResult``.
+    cumulative_theta: float | None = None
+    ruler_n: int = 0
+    # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
+    verdict_reason: str | None = None
+    # The adopted line read on ONE shared set of cells — the only row in this view two rounds can
+    # be differenced on, since `accuracy` above is read on whatever subset the round bought.
+    overlap: OverlapReading | None = None
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
     # empty for resumed / pre-PoBB rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
@@ -361,7 +386,6 @@ class LogMdView:
     status: DigestStatusView
     rounds: tuple[RoundDigestView, ...]
     formula: str | None
-    origin_composite_fitness: float | None
     hard_samples: HardSamplesView | None
     final: FinalWinnerView | None
     forks: tuple[ForkSummaryView, ...] = ()

@@ -11,6 +11,8 @@ const round = (r: number, accuracy: number, composite_fitness: number): RoundSum
     calibration_model: null,
     improved: null,
     electable_count: null,
+    verdict_reason: null,
+    overlap: null,
     panel_precision: null,
     candidates: [],
     selection: [],

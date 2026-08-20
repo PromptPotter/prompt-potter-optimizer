@@ -42,3 +42,15 @@ export function roundMeasuredSets(rounds: RoundSummary[]): RoundMeasuredSet[] {
     .filter((r) => r.selection.length > 0)
     .map((r) => ({ round: r.round, ids: [...new Set(r.selection)].sort((a, b) => a - b) }));
 }
+
+// How many rounds measured each sample. Set membership over the served `selection` lists —
+// never a score, so it stays on the right side of the no-recompute rule. It answers the one
+// question the strip could not: a sample every round measured is a basis two rounds can be
+// compared on, and one a single round bought is not, yet both render identically today.
+export function roundsCoveringSample(rounds: RoundSummary[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const r of rounds) {
+    for (const sid of new Set(r.selection)) out.set(sid, (out.get(sid) ?? 0) + 1);
+  }
+  return out;
+}

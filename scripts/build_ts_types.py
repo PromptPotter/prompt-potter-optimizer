@@ -52,6 +52,8 @@ from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchem
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
+    OverlapMember,
+    OverlapReading,
     RoundResult,
     ScoreboardRow,
     ScoredCandidate,
@@ -142,6 +144,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RoundSummaryCandidate,
     DegradationHealth,
     PanelPrecision,
+    OverlapMember,
+    OverlapReading,
     RoundSummary,
     DiagnosticRunRecord,
     # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`;

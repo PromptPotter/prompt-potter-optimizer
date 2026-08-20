@@ -88,6 +88,12 @@ export function fmtTokens(n: number): string {
   return `${n} tok`;
 }
 
+// Signed fixed-digit number — "+0.123" / "-0.045". Non-finite → "—".
+export function fmtSigned(v: number | null | undefined, digits = 3): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+}
+
 // Fixed-digit number — null → "—", non-numbers pass through as String(v).
 export function fmtNum(v: unknown, digits = 3): string {
   if (v == null) return "—";

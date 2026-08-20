@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CycleSeed,
@@ -55,6 +56,22 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
         if isinstance(seed_data, dict):
             try:
                 found = CycleSeed.model_validate(seed_data)
+            except ValidationError:
+                continue
+    return found
+
+
+def scan_ledger_ruler(ledger_path: Path) -> DeltaRuler | None:
+    """The cycle's δ ruler, or ``None`` while it is still cold. Appended at lock and after every
+    extension, so the LAST match wins — that record carries the widest membership."""
+    found: DeltaRuler | None = None
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"ruler"})):
+        if rec.get("record_type") != "ruler":
+            continue
+        data = rec.get("ruler")
+        if isinstance(data, dict):
+            try:
+                found = DeltaRuler.model_validate(data)
             except ValidationError:
                 continue
     return found

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,10 +21,29 @@ def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
     return composite_fitness if composite_fitness is not None else accuracy
 
 
-def display_rank_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """``display_fitness``'s argmax form — what every DISPLAY site orders by, the mask lens with
-    them. NOT the election (``elect_round_winner``'s Rasch θ-lift), which no aggregate reproduces."""
-    return (display_fitness(composite_fitness, accuracy), accuracy)
+def display_rank_key(
+    composite_fitness: float | None,
+    accuracy: float,
+    theta: float | None = None,
+    *,
+    is_winner: bool = False,
+) -> tuple[bool, float, float, float]:
+    """``display_fitness``'s argmax form — what every DISPLAY site orders by.
+
+    On a warm round rank 1 IS the crown, by construction: the round is won on Rasch θ-lift over
+    the parent (``elect_round_winner``), so a table ordered on the composite could seat the winner
+    anywhere and offer no column that explained it. Both leading terms DEFAULT OFF, so a cold
+    round — no candidate carrying a θ, nothing crowned yet — orders on the composite alone.
+
+    ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
+    DIFFERENT ordering under a what-if formula, and pinning the active-formula winner to rank 1
+    there would leave it unable to disagree."""
+    return (
+        is_winner,
+        theta if theta is not None else -math.inf,
+        display_fitness(composite_fitness, accuracy),
+        accuracy,
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -142,10 +142,10 @@ async def run_round_loop(
             is_final_round = clean_rounds + 1 >= max_rounds
 
             # Sampled BEFORE the round is scored, because the warm now happens inside scoring
-            # (`warm_ruler_if_cold`, ahead of the election that needs it). Read after
+            # (`calibrate_ruler`, ahead of the election that needs it). Read after
             # `execute_round` this is already False on the round that warmed, and round 0 keeps
             # its cold θ on disk forever — the exact silence the re-persist below exists to break.
-            ruler_was_cold = not cycle.delta_scale
+            ruler_was_cold = cycle.ruler is None
             round_result = await execute_round(
                 cycle,
                 round_num,
@@ -161,7 +161,7 @@ async def run_round_loop(
             # cold value, and every non-live reader shows a θ-less C0 beside candidates that
             # have one.
             cycle.absorb_round(round_result, round_num)
-            if ruler_was_cold and cycle.delta_scale:
+            if ruler_was_cold and cycle.ruler is not None:
                 persist_round(cycle, cycle.origin_round, session, cb)
 
             if cycle.axes and len(cycle.rounds) >= 2:

@@ -27,6 +27,8 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
     candidate_label,
+    is_round_winner,
+    overlap_series,
 )
 
 __all__ = ["render_review_md"]
@@ -297,6 +299,12 @@ def _render_round(
             f"- composite_fitness: `{round_data.composite_fitness:.4f}`",
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
+        if series := overlap_series(round_data.overlap):
+            parts.append(f"- trajectory: {series}")
+        if round_data.verdict_reason:
+            # The round is won on θ-lift, so `improved` above names the outcome and nothing on
+            # this page named the number behind it.
+            parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
     parts += _render_l1_inputs(opt_sp, lineage)
@@ -349,15 +357,16 @@ def _render_variants_table(
     parts: list[str] = ["**Variants**", ""]
     if scored:
         by_label = {c.label: c for c in round_data.candidate_scores}
-        parts.append("| variant | composite_fitness | acc | Δ_origin | beat | evidence | changes |")
-        parts.append("|---|---|---|---|---|---|---|")
+        parts.append(
+            "| variant | composite_fitness | acc | θ | lift vs parent | won | evidence | changes |"
+        )
+        parts.append("|---|---|---|---|---|---|---|---|")
         for i, v in enumerate(variants):
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
             label = candidate_label(round_data.round, i)
-            parts.append(
-                f"| `{label}` | {_score_cells(by_label.get(label))} | {evidence} | {changes} |"
-            )
+            cells = _score_cells(by_label.get(label), round_data.winner_id)
+            parts.append(f"| `{label}` | {cells} | {evidence} | {changes} |")
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
         parts.append("|---|---|---|---|")
@@ -370,16 +379,25 @@ def _render_variants_table(
     return parts
 
 
-def _score_cells(c: ScoredCandidate | None) -> str:
-    """``—`` only where there genuinely is no number — a variant the round never scored, or one
-    with no MATCHED origin, where ``None`` is deliberate: a 0.0 there reads as beating it whole."""
+def _score_cells(c: ScoredCandidate | None, winner_id: str) -> str:
+    """``—`` only where there genuinely is no number — a variant the round never scored, one
+    outside the election fit, or one sharing under two cells with its parent, where ``None`` is
+    deliberate: a 0.0 there reads as a measurement.
+
+    The ``won`` column is the ELECTED id, and the margin beside it is the θ-lift with its
+    interval. Both replace a composite Δ and a ``✓`` derived from it — which is not the election
+    rule and carried no interval, so the glyph read as a verdict the round had not made."""
     if c is None:
-        return "— | — | — | —"
-    mo = c.matched_parent_composite
-    if mo is None:
-        return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | — | —"
-    delta = c.composite_fitness - mo
-    return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | {delta:+.4f} | {'✓' if delta > 0 else '·'}"
+        return "— | — | — | — | —"
+    theta = "—" if c.theta is None else f"{c.theta:+.3f}"
+    lo, hi = c.matched_parent_lift_ci_lo, c.matched_parent_lift_ci_hi
+    lift = (
+        f"{c.matched_parent_lift:+.3f} [{lo:+.3f}, {hi:+.3f}]"
+        if c.matched_parent_lift is not None and lo is not None and hi is not None
+        else "—"
+    )
+    won = "✓" if is_round_winner(c.candidate_id, winner_id) else "·"
+    return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | {theta} | {lift} | {won}"
 
 
 def _fmt_evidence_cell(raw: object) -> str:

@@ -377,7 +377,7 @@ function ChallengerVerdict({
   const last = summary.lastRound;
   if (state !== "best" || !last || last.improved !== false || last.candidates === 0) return null;
   return (
-    <span className="run-diff-verdict">
+    <span className="run-diff-verdict" title={last.verdictReason ?? undefined}>
       round {last.round}: {last.candidates} candidate{last.candidates === 1 ? "" : "s"} ran, none
       beat the origin
     </span>

@@ -322,6 +322,20 @@ export function CandidatesCard() {
     setSelected(next);
   };
 
+  // The adopted line's shared reading, off the LATEST round that has one: the set drifts as
+  // the line grows, and the newest round names the basis the bars are on now. Served
+  // (`RoundSummary.overlap`) and only re-keyed here by candidate id — the browser computes no
+  // rate. `overlap.sample_ids` doubles as the fixed-sample-set quick-pick below, so the strip
+  // and this series are the same set by construction rather than by agreement.
+  const overlap = useMemo(
+    () => history.reduce<RoundSummary["overlap"]>((best, r) => r.overlap ?? best, null),
+    [history],
+  );
+  const overlapByCandidate = useMemo(
+    () => new Map((overlap?.members ?? []).map((m) => [m.candidate_id, m])),
+    [overlap],
+  );
+
   // The measured-sample universe the bars can be sliced over — used to seed the
   // set when the operator first turns the mode on. The chip strip + per-round
   // picks + trajectory drill all live in `SampleSetControl`.
@@ -417,13 +431,18 @@ export function CandidatesCard() {
         // From the same row as the bar above it, whichever half that was.
         meanFitnessCiLo: sliced ? null : (m.mean_fitness_ci_lo ?? null),
         meanFitnessCiHi: sliced ? null : (m.mean_fitness_ci_hi ?? null),
-        // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR.
-        // The matched origin is a per-candidate number the inspector renders for the one row it
-        // selected (`ScoringInspector`, off `roundCandidates`) — so serving it a second time on
-        // the tree would be a writer with no reader, which is why the election record does not
-        // carry it either: `rounds/round_NNNN.json` already addresses it per candidate.
+        // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR,
+        // and a lift interval is not a bar geometry either. The matched origin and the blocked
+        // lift are per-candidate numbers the inspector renders for the one row it selected
+        // (`ScoringInspector`, off `roundCandidates`), so filling them in here would put a second
+        // writer on a chart nothing reads them from. The election record DOES carry all five —
+        // `ScoreboardRow` and `RoundSummaryCandidate` both serve them — this half simply has no
+        // use for them; `/tree` is a genealogy, not a verdict surface.
         matchedParentAccuracy: null,
         matchedParentComposite: null,
+        matchedParentLift: null,
+        matchedParentLiftCiLo: null,
+        matchedParentLiftCiHi: null,
         evaluators: n.evaluators,
         is_winner: m.is_winner ?? false,
         n_samples: sliced ? n.sample_set_n : (m.scored_samples ?? null),
@@ -442,9 +461,14 @@ export function CandidatesCard() {
         // `dash.rounds[]`, which reported every held round as undecided for the rest of the run.
         electionPending: !isCourse && !n.election_held,
         diag: diagView(diagByLabel.get(label)),
+        // Suppressed while sliced or on a course, exactly like the other served aggregates: this
+        // is a rate over the LINE's own set, and re-basing the bars onto a different one leaves
+        // it describing cells the chart is no longer showing.
+        overlapAccuracy: sliced || isCourse ? null : (overlapByCandidate.get(n.id)?.accuracy ?? null),
+        overlapN: sliced || isCourse ? null : (overlapByCandidate.get(n.id)?.total ?? null),
       };
     });
-  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel]);
+  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel, overlapByCandidate]);
 
   // A fork's attempt is a course under the hood — the ⑂ marks lead there.
   const forkKeys = useMemo(
@@ -739,14 +763,14 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
-        {sampleSet && !barsAreCourses && <SampleSetControl rounds={history} />}
+        {sampleSet && !barsAreCourses && <SampleSetControl rounds={history} overlap={overlap} />}
         {/* Legend + chart + genealogy wrapped so they share one width — the
             dendrogram's x-alignment depends on sitting in the same box as the
             canvas it hangs under. */}
         <div className="fitness-chart-wrap">
           {/* `showCache` forces the legend on even at one metric: the dashed line rides the
               accuracy axis, so without a key 0.50 reads as a score. */}
-          {(metrics.size > 1 || showWhatIf || showCache) && (
+          {(metrics.size > 1 || showWhatIf || showCache || overlap != null) && (
             <div className="fitness-legend">
               {metrics.has("accuracy") && (
                 <span><span className="dot accuracy" />accuracy</span>
@@ -758,6 +782,11 @@ export function CandidatesCard() {
                 <span><span className="dot composite" />composite</span>
               )}
               {showWhatIf && <span><span className="dot whatif" />what-if</span>}
+              {overlap != null && (
+                <span title={`Every candidate on the winner trajectory, read on the same ${overlap.sample_ids.length} cells — the only pair of bars here that can be differenced`}>
+                  <span className="dot overlap" />trajectory · {overlap.sample_ids.length}
+                </span>
+              )}
               {showCache && (
                 <span title="Share of each candidate's scored panel that was replayed from the archive">
                   <span className="dash cached" />share from cache

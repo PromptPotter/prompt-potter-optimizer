@@ -189,6 +189,11 @@ def from_disk_log(
                 l1_n_repeat=t.l1_n_repeat,
                 candidates_scored=t.candidates_scored,
                 evaluators=dict(t.evaluators),
+                matched_parent_composite=t.matched_parent_composite,
+                cumulative_theta=t.cumulative_theta,
+                ruler_n=t.ruler_n,
+                verdict_reason=t.verdict_reason,
+                overlap=t.overlap,
                 p_best_trajectory=traj,
             )
         )
@@ -233,7 +238,6 @@ def from_disk_log(
         rounds=tuple(round_views),
         # Top-level key is the running cycle's copy, stamped at init; `final` only exists at stop.
         formula=final.get("scorer_round_formula") or index.get("scorer_round_formula"),
-        origin_composite_fitness=final.get("origin_composite_fitness"),
         hard_samples=hard,
         final=final_view,
         forks=fork_views,

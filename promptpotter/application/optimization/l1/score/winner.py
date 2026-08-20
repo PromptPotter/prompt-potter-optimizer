@@ -40,9 +40,79 @@ from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from promptpotter.application.intelligence.exploration import RaschPosterior
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
+
+
+def _theta(value: float | None, *, signed: bool = True) -> str:
+    """A θ that was never fit prints as ``n/a`` — never as ``0.000``, which is a real ability.
+    ``signed=False`` for an SE, which has no direction to carry a leading ``+``."""
+    if value is None:
+        return "n/a"
+    return f"{value:+.3f}" if signed else f"{value:.3f}"
+
+
+def _verdict_reason(
+    *,
+    winner_id: str,
+    electable: Sequence[str],
+    abilities: RaschPosterior,
+    labels: Mapping[str, str],
+    coverage_floor: int,
+    n_scored: int,
+    ruler_n: int,
+) -> str:
+    """This round's outcome stated in the numbers that decided it.
+
+    Written whether the round was won or held. The election ranks θ-lift over the parent, so the
+    sentence names that lift, both abilities and the SE behind them — the operator reading a
+    lower-accuracy winner needs the number it actually won on, and a held round needs to say which
+    arm came closest and how far short. On a COLD ruler it says so: θ there is logit-accuracy on
+    each arm's own subset, which is not the scale the word promises."""
+    from promptpotter.application.intelligence.exploration import (
+        ORIGIN_ABILITY_ID,
+        theta_lift_over_origin,
+    )
+
+    scale = "" if ruler_n else " (cold ruler — θ is logit-accuracy on each arm's own subset)"
+    parent = abilities.theta.get(ORIGIN_ABILITY_ID)
+    census = f"{len(electable)} of {n_scored} electable, coverage floor {coverage_floor}"
+    ranked = sorted(
+        (
+            (lift, cid)
+            for cid in electable
+            if (lift := theta_lift_over_origin(abilities, cid)) is not None
+        ),
+        reverse=True,
+    )
+    if not ranked:
+        return f"no arm could be read against the parent on the round's δ ruler; {census}{scale}"
+    if winner_id:
+        lift = next(x for x, cid in ranked if cid == winner_id)
+        runner = next(
+            (
+                f"; runner-up {labels.get(cid, cid[:12])} at {x:+.3f}"
+                for x, cid in ranked
+                if cid != winner_id
+            ),
+            "",
+        )
+        return (
+            f"{labels.get(winner_id, winner_id[:12])} won on θ lift {lift:+.3f} "
+            f"(θ {_theta(abilities.theta.get(winner_id))} vs parent {_theta(parent)}, "
+            f"se {_theta(abilities.theta_se.get(winner_id), signed=False)}){runner}{scale}"
+        )
+    best_lift, best = ranked[0]
+    return (
+        f"no arm cleared the parent: best {labels.get(best, best[:12])} "
+        f"θ {_theta(abilities.theta.get(best))} vs parent {_theta(parent)} "
+        f"(lift {best_lift:+.3f}, se {_theta(abilities.theta_se.get(best), signed=False)}); "
+        f"{census}{scale}"
+    )
 
 
 def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> None:
@@ -227,7 +297,9 @@ async def l1_score(
     # This round's candidates are already banked, so the ruler's ≥2-arm floor is satisfiable NOW
     # — and the election below is what needs it. Warming only after ``absorb_round`` left every
     # election on a cold ruler, with no later round to spend a warm one on at L4's budget.
-    cycle.warm_ruler_if_cold()
+    # EXTENSION rides the same seam: on return the ruler covers every cell scored below, which is
+    # what lets the θ fit raise on a hole instead of grading it δ=0.
+    cycle.calibrate_ruler({**all_candidate_results, "__parent__": parent_election_results})
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor;
     # without it a resumed run elects a thin candidate the live path rejected.
     winner_id, abilities = elect_round_winner(
@@ -235,7 +307,7 @@ async def l1_score(
         all_candidate_results,
         parent_election_results,
         coverage_floor,
-        cycle.delta_scale or {},
+        cycle.ruler,
     )
     # From the SAME fixed-ruler fit the election just ran, never a second one, so the dashboard
     # can show *why* a lower-accuracy candidate won. ``None`` outside the election fit — and
@@ -243,7 +315,7 @@ async def l1_score(
     # to logit-accuracy over the candidate's OWN subset and is not on the scale its name
     # promises. Guarded here rather than by emptying ``electable``, which is also the resume
     # decision's ``candidate_ids``; the election is still valid on a cold ruler.
-    for cid in electable if cycle.delta_scale else ():
+    for cid in electable if cycle.ruler is not None else ():
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
             continue
@@ -306,8 +378,14 @@ async def l1_score(
     # here gated nothing — ``absorb_round`` adopts the winner either way — so it could only ever
     # disagree with the adoption it annotated.
     improved = bool(winner_id)
-    improved_reason = (
-        None if improved else "no candidate's ability exceeded the parent's on the round's δ ruler"
+    verdict_reason = _verdict_reason(
+        winner_id=winner_id,
+        electable=electable,
+        abilities=abilities,
+        labels={cs.candidate_id: cs.label for cs in candidate_scores},
+        coverage_floor=coverage_floor,
+        n_scored=len(scored),
+        ruler_n=len(cycle.ruler.delta) if cycle.ruler is not None else 0,
     )
     round_result = RoundResult(
         round=round_num,
@@ -317,7 +395,7 @@ async def l1_score(
         total=best_total,
         improved=improved,
         p_value=p_value,
-        improved_reason=improved_reason,
+        verdict_reason=verdict_reason,
         origin_accuracy=best_origin_accuracy,
         matched_parent_accuracy=best_matched_parent_acc,
         matched_parent_composite=best_matched_parent_composite,

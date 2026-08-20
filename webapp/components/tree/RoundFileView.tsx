@@ -1,20 +1,24 @@
 "use client";
 import { useState } from "react";
 import { Badge, CardFrame } from "@/components/ui";
+import type { RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1 } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
 
-interface ScoreboardEntry {
-  rank?: number;
-  candidate_id?: string;
-  changes_description?: string;
-  accuracy?: number;
-  composite_fitness?: number;
-  hits: number;
-  total: number;
-  is_winner?: boolean;
-}
+// The round file IS `RoundResult.model_dump()`, so its shape is DERIVED from the generated wire
+// type rather than re-declared (`webapp/CLAUDE.md` § A wire shape is GENERATED). A hand-typed
+// interface drifts with the gate green, because nothing can compare one against the model it
+// claims to describe: require a `hits` the model never declares (`domain/results.py` disowns it
+// outright) and every summary line renders "undefined/20 hits" with no check able to say so.
+//
+// `Partial` because the value reaching this component is a cast over arbitrary parsed JSON: a
+// file on disk can promise a SUBSET of the current model, never the whole of it. That is also
+// what keeps a removed field a compile error here instead of an `undefined` on screen.
+export type RoundDoc = Partial<RoundResult>;
 
+// The one shape that genuinely cannot be derived: `results` is `list[dict[str, Any]]` on the
+// model, so the wire type is `Record<string, unknown>[]` and the per-row keys exist nowhere to
+// generate from. Hand-written, and saying so, per that section's narrow escape.
 interface ResultRow {
   sample_id?: string | number;
   query?: string;
@@ -23,22 +27,13 @@ interface ResultRow {
   fitness?: number;
 }
 
-export interface RoundDoc {
-  round?: number;
-  accuracy?: number;
-  composite_fitness?: number;
-  hits: number;
-  total: number;
-  origin_accuracy?: number;
-  // The origin restricted to the winner's OWN measured samples — the floor `improved`
-  // was decided against. Preferred over `origin_accuracy` below: under elimination the
-  // winner may have run 8 of 20 samples, and quoting the full-set rate beside its
-  // subset accuracy renders a lift that was never measured.
-  matched_parent_accuracy?: number | null;
-  improved?: boolean;
-  p_value?: number;
-  scoreboard?: ScoreboardEntry[];
-  results?: ResultRow[];
+function fmtTheta(v: number | null | undefined): string {
+  return typeof v === "number" ? (v >= 0 ? `+${v.toFixed(3)}` : v.toFixed(3)) : "—";
+}
+
+function fmtLift(lift: number | null | undefined, lo: number | null | undefined, hi: number | null | undefined): string {
+  if (typeof lift !== "number" || typeof lo !== "number" || typeof hi !== "number") return "—";
+  return `${fmtTheta(lift)} [${fmtTheta(lo)}, ${fmtTheta(hi)}]`;
 }
 
 interface Props {
@@ -48,7 +43,7 @@ interface Props {
 
 export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
-  const results = doc.results ?? [];
+  const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
   // Matched first, full-set only as the fallback, and the label says which — an
   // unlabelled "(origin 18%)" beside a subset accuracy of 58% is a lift nothing measured.
@@ -63,10 +58,20 @@ export function RoundFileView({ doc, raw }: Props) {
           <Badge>round {doc.round ?? "—"}</Badge>
           <span>accuracy {fmtPct1(doc.accuracy)} {originShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The origin re-scored on the samples this round's winner measured — the floor the promotion gate used." : "The origin's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({originLabel} {fmtPct1(originShown)})</span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
-          <span>{doc.hits}/{doc.total} hits</span>
+          <span>n {doc.total ?? "—"}</span>
+          {typeof doc.cumulative_theta === "number" && (
+            <span title="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
+              θ {fmtTheta(doc.cumulative_theta)}{typeof doc.ruler_n === "number" && doc.ruler_n > 0 ? ` (${doc.ruler_n} cells)` : ""}
+            </span>
+          )}
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
           {doc.improved ? <span className="pass">improved</span> : <span style={{ color: "var(--color-text-tertiary)" }}>no improvement</span>}
         </div>
+        {doc.verdict_reason && (
+          <div className="round-file-summary-row" style={{ color: "var(--color-text-tertiary)" }}>
+            {doc.verdict_reason}
+          </div>
+        )}
       </div>
 
       {scoreboard.length > 0 && (
@@ -83,7 +88,8 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th>Hits</th>
+                  <th title="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</th>
+                  <th title="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</th>
                   <th>Win</th>
                 </tr>
               </thead>
@@ -96,7 +102,8 @@ export function RoundFileView({ doc, raw }: Props) {
                     </td>
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
-                    <td>{s.hits}/{s.total}</td>
+                    <td>{fmtTheta(s.theta)}</td>
+                    <td>{fmtLift(s.matched_parent_lift, s.matched_parent_lift_ci_lo, s.matched_parent_lift_ci_hi)}</td>
                     <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
                   </tr>
                 ))}

@@ -13,6 +13,7 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
+from promptpotter.domain.results import overlap_series
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
@@ -72,12 +73,7 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
     return lines
 
 
-def _render_round(
-    rd: RoundDigestView,
-    *,
-    formula: str | None,
-    origin_composite_fitness: float | None,
-) -> list[str]:
+def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     parts: list[str] = [
         f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
         "",
@@ -85,6 +81,16 @@ def _render_round(
         f"- samples: {rd.total}",
         f"- composite_fitness: `{rd.composite_fitness:.4f}`",
     ]
+    if rd.cumulative_theta is not None:
+        # The cross-round series, with the ruler it was read on beside it: accuracy above is
+        # subset-relative and this is not, so they can move in opposite directions legitimately.
+        parts.append(f"- ability θ: `{rd.cumulative_theta:+.3f}` (ruler: {rd.ruler_n} cells)")
+    if series := overlap_series(rd.overlap):
+        # The one row two rounds can be differenced on — `accuracy` above is read on whatever
+        # subset this round bought, and the acquisition does not hold it still.
+        parts.append(f"- trajectory: {series}")
+    if rd.verdict_reason:
+        parts.append(f"- verdict: {rd.verdict_reason}")
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
     if rd.l1_yield < 1.0:
@@ -102,7 +108,9 @@ def _render_round(
         rd.composite_fitness,
         rd.evaluators,
         formula,
-        origin=origin_composite_fitness,
+        # THIS round's matched floor, the same one the terminal compares against — the two
+        # printed different Δ for one round while this read the whole-cycle origin composite.
+        origin=rd.matched_parent_composite,
         use_short_names=False,
     )
     if composite_fitness_block:
@@ -187,11 +195,7 @@ def to_markdown(view: LogMdView) -> str:
     if not view.rounds:
         parts += ["_No rounds yet._", ""]
     for rd in view.rounds:
-        parts += _render_round(
-            rd,
-            formula=view.formula,
-            origin_composite_fitness=view.origin_composite_fitness,
-        )
+        parts += _render_round(rd, formula=view.formula)
 
     parts += _render_hard_samples(view.hard_samples)
 

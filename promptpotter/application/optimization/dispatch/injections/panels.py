@@ -4,7 +4,6 @@ import re
 from collections import Counter
 from typing import Any, cast
 
-from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
@@ -570,14 +569,11 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
 def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
     """This miss's δ on the cycle's locked ruler — ``None`` while the ruler is cold or the
     sample is off it. A 2PL entry carries ``(δ, a)``; only δ is a difficulty."""
-    ruler = b.delta_scale
+    ruler = b.ruler
     sid = row.get("sample_id")
-    if not ruler or sid is None:
+    if ruler is None or sid is None:
         return None
-    entry = ruler.get(int(sid))
-    if entry is None:
-        return None
-    return ruler_entry(entry)[0]
+    return ruler.delta.get(int(sid))
 
 
 @signal(

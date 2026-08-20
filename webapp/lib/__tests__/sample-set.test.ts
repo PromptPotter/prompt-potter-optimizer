@@ -17,6 +17,8 @@ const round = (r: number, selection: number[]): RoundSummary =>
     calibration_model: null,
     improved: null,
     electable_count: null,
+    verdict_reason: null,
+    overlap: null,
     panel_precision: null,
     candidates: [],
     selection,

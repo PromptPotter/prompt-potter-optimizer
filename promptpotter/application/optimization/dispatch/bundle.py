@@ -8,11 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.exploration import RulerEntry
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CritiqueReadout, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.ruler import DeltaRuler
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
@@ -198,7 +198,7 @@ class InjectionBundle:
     # The cycle's LOCKED ruler, and the only per-sample difficulty a panel may quote:
     # `hard_samples.json`'s δ is re-fitted and re-anchored on every regeneration, so it moves
     # under the reader. Empty while the ruler is still cold.
-    delta_scale: dict[int, RulerEntry] | None = None
+    ruler: DeltaRuler | None = None
     # What `mutation_memory` reads. Each round already carries its parent prompt and every
     # candidate's evolved one, so "what was tried, and how did it score" is a diff away.
     prior_rounds: list[RoundResult] = field(default_factory=list)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -157,6 +157,50 @@ class RequestTooLargeError(RuntimeError):
         )
 
 
+class RulerCoverageError(PotterError):
+    """A θ was asked for on a warm δ ruler that does not carry the cell.
+
+    Coverage is a POSTCONDITION of ``Cycle.calibrate_ruler``, so this is an engine fault and never
+    a data condition: it means a measured cell reached a θ read without passing the extension seam.
+    Deliberately caught nowhere — it must surface as a crashed cycle with a traceback, because the
+    only quiet alternative is a δ=0 default, which reads an off-ruler cell as easier than anything
+    ever measured and depresses every θ downstream of it.
+    """
+
+    code = "ruler_coverage"
+
+    def __init__(self, missing: Sequence[int], *, anchor_id: str = "") -> None:
+        shown = ", ".join(str(sid) for sid in list(missing)[:10])
+        more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        super().__init__(
+            f"δ ruler {anchor_id or '<unknown>'} does not carry {len(missing)} measured "
+            f"sample(s): {shown}{more}. The round was scored on cells the ruler never absorbed.",
+            details={"missing_sample_ids": list(missing)[:50], "anchor_id": anchor_id},
+        )
+
+
+class RulerUnpersistedError(PotterError):
+    """This cycle's rounds were read on a WARM δ ruler that its ledger cannot reproduce.
+
+    ``write_ruler`` appends the ``RulerRecord`` BEFORE the round document that names it, so a
+    live run cannot reach this: it means the ledger was truncated, or the rounds predate the
+    record existing at all. Resuming would re-derive a ruler from an archive that has grown since
+    the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
+    every θ read on the later one incomparable with the earlier. Refuse, and name the campaign.
+    """
+
+    code = "ruler_unpersisted"
+
+    def __init__(self, stamped_id: str, *, campaign_id: str, cycle_id: str) -> None:
+        super().__init__(
+            f"cycle {cycle_id} (campaign {campaign_id}) stamps δ ruler {stamped_id} on its "
+            "rounds but its ledger holds no RulerRecord, so those θ cannot be reproduced and "
+            "resuming would silently continue on a different scale. Start a fresh campaign; the "
+            "measurement archive is content-addressed and re-scores its cells from cache.",
+            details={"ruler_id": stamped_id, "campaign_id": campaign_id, "cycle_id": cycle_id},
+        )
+
+
 class ResumeDivergenceError(RuntimeError):
     """A recorded decision re-derives differently under the active scorer: every decision is a pure
     function of scored results. Branch with ``resume --fork-on-divergence``, or revert the formula."""
@@ -275,6 +319,8 @@ __all__ = [
     "PotterError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
+    "RulerCoverageError",
+    "RulerUnpersistedError",
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",

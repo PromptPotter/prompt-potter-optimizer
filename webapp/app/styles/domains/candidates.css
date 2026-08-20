@@ -57,6 +57,7 @@
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
 .fitness-legend .dot.ability{background:var(--color-text-tertiary)}
 .fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+.fitness-legend .dot.overlap{background:var(--color-overlap)}
 /* A dashed rule, not a dot — a swatch would imply a fifth bar series. */
 .fitness-legend .dash{display:inline-block;width:16px;height:0;margin-right:5px;vertical-align:middle;border-top:1.5px dashed transparent}
 .fitness-legend .dash.cached{border-top-color:var(--color-cache)}

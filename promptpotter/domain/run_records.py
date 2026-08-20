@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -517,6 +518,22 @@ class ElectionRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class RulerRecord(StrictModel):
+    """The cycle's δ ruler as it stands. Appended at LOCK and after every EXTENSION; the LAST
+    record wins, exactly as a re-seed supersedes. Written WHOLE rather than as a delta: `append`
+    is not crash-atomic, so a torn line falls back to the previous complete ruler — a valid,
+    merely smaller scale the next round re-extends — where a folded delta would lose cells
+    silently. A fork inherits its parent's virtually, so its θ stay on the parent's scale.
+    Not a progress event — the SSE tail skips it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["ruler"] = "ruler"
+    ruler: DeltaRuler
+    round: int
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class CycleSeedRecord(StrictModel):
     """A fork inherits its parent's seed VIRTUALLY but appends its own, so a scan of one cycle's
     ledger returns that cycle's seed. Not a progress event — the SSE tail skips it."""
@@ -542,6 +559,7 @@ CycleRecord = Annotated[
     | LLMCallStartRecord
     | PhaseRecord
     | RoundWarningRecord
+    | RulerRecord
     | SnapshotRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,
