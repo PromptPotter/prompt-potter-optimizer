@@ -117,6 +117,10 @@ export function WorkflowCanvas({ pipeline }: Props) {
   // the signal legible at a glance and under prefers-reduced-motion (no pulse).
   // Gated on `viewingLive`: on a historical round there is no live node to name.
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
+  // The card's own green: the RUN's state, not the connection's. `isLive` also requires a
+  // fresh poll, so a throttled background tab greyed out a healthy run. Staleness is the
+  // connection banner's job; `isLive` still gates the pulse, which must not animate stale data.
+  const runIsRunning = viewingLive && dash?.run_phase === "running";
   // "idle" used to catch everything that wasn't live — a paused run, a run held at
   // the origin gate and a dead producer all read the same word. Name the phase the
   // server declares instead; only a genuinely phase-less payload falls through.
@@ -138,12 +142,12 @@ export function WorkflowCanvas({ pipeline }: Props) {
   };
 
   return (
-    <div className={cx("workflow-card", isLive && viewingLive && "running")}>
+    <div className={cx("workflow-card", runIsRunning && "running")}>
       <div className="workflow-toolbar">
         <span className="workflow-title">Optimizer</span>
         <RoundAxis />
         <span
-          style={{ color: isLive && viewingLive ? colors.ok : colors.txt }}
+          style={{ color: runIsRunning ? colors.ok : colors.txt }}
           aria-live="polite"
         >
           ● {status}

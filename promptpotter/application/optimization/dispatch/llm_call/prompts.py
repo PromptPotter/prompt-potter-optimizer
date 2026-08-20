@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
@@ -24,7 +25,6 @@ from promptpotter.shared.instrument import instrument_mode
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "OPTIMIZER_PIPELINE_PATH",
     "base_optimizer_template",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
@@ -51,8 +51,10 @@ __all__ = [
 # ``site-packages/datasets/``, the HuggingFace library's directory.
 #
 # The manifest resolves through ``optimizer_pipeline_path()`` and the registry does not:
-# the operator may shadow the file they author, never the file we generate.
-OPTIMIZER_PIPELINE_PATH = optimizer_pipeline_path()
+# the operator may shadow the file they author, never the file we generate. The manifest's
+# path is resolved per read rather than bound here, because binding it at import let a
+# long-running server keep serving the model it saw at startup after the operator had
+# edited or shadowed the file — and label it "current" on the node inspector.
 OPTIMIZER_SCHEMAS_PATH = optimizer_assets_root() / "resolved_schemas.json"
 
 # Per-cycle override of the optimizer prompts, keyed by optimizer node
@@ -97,18 +99,34 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     return {k: v for k, v in data.items() if isinstance(v, dict)}
 
 
-@functools.lru_cache(maxsize=1)
 def optimizer_manifest() -> dict[str, Any]:
     """Public because this is what callers hash and render — the raw bytes stopped being a meaningful
-    identity once the file carried comments and block scalars. Warns once when it is not the shipped one."""
-    if optimizer_assets_root() / "pipeline.yaml" != OPTIMIZER_PIPELINE_PATH:
+    identity once the file carried comments and block scalars. Resolved and stat-ed on every call so a
+    hand-edit and a tenant shadow both take effect without a restart: this is the ONE file an operator
+    edits to change the optimizer's model, and a process that cached it at import reported the old one
+    as live."""
+    path = optimizer_pipeline_path()
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        # A vanished manifest is the reader's error to raise, not this line's — fall through on a
+        # stamp no real file can hold so the cache cannot answer for a file that is gone.
+        stamp = -1
+    return _manifest_at(path, stamp)
+
+
+@functools.lru_cache(maxsize=2)
+def _manifest_at(path: Path, _mtime_ns: int) -> dict[str, Any]:
+    """Keyed on the resolved path AND its mtime, so an edit invalidates its own entry. Two slots is
+    the whole population: the shipped manifest and one tenant shadow are all that ever alternate."""
+    if optimizer_assets_root() / "pipeline.yaml" != path:
         logger.warning(
             "optimizer manifest OVERRIDDEN: reading %s instead of the manifest shipped with "
             "the package. Provider, model and temperature for every optimizer node come from "
             "that file.",
-            OPTIMIZER_PIPELINE_PATH,
+            path,
         )
-    manifest: dict[str, Any] = read_yaml(OPTIMIZER_PIPELINE_PATH)
+    manifest: dict[str, Any] = read_yaml(path)
     return manifest
 
 
