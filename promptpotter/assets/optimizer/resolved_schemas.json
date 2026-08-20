@@ -627,11 +627,13 @@
           },
           "thinking_style": {
             "default": "",
+            "description": "How to reason. Never the output shape or the scoring rule — those are answer_format's.",
             "title": "Thinking Style",
             "type": "string"
           },
           "answer_format": {
             "default": "",
+            "description": "The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
             "title": "Answer Format",
             "type": "string"
           },

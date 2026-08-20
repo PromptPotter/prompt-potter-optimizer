@@ -553,12 +553,19 @@ async def _run_in_background(
             status=status,
             stop_reason=persisted_reason,
         )
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        # Both reach here: the runner re-raises a cancellation past its own finalize, and the
-        # pause flag's synthetic KeyboardInterrupt escapes round-0 origin scoring, which runs
-        # inside `_prepare_run` — outside the round loop's own arm.
+    except asyncio.CancelledError:
+        # The runner re-raises a cancellation past its own finalize. Whoever cancelled this task
+        # awaits it, so this one must propagate.
         job_registry.mark_finished(job_id, status="stopped", stop_reason="task_cancelled")
         raise
+    except KeyboardInterrupt as exc:
+        # The pause flag's SYNTHETIC interrupt, raised by origin scoring to unwind (`scoring/
+        # search_point_scorer.py`) — round-0 origin runs inside `_prepare_run`, outside the round
+        # loop's own arm. It is fully handled here, and it must NOT propagate: asyncio hands a
+        # KeyboardInterrupt escaping a task to the event loop, which stops it — so re-raising took
+        # the whole web process down on every Pause. The CLI re-raises because there the process
+        # IS the run; here the run is one job inside a server serving everyone else.
+        job_registry.mark_finished(job_id, status="stopped", stop_reason=str(exc) or "paused")
     except Exception as exc:
         # Anything reaching here fired BEFORE / OUTSIDE the runner's own try/except (e.g.
         # ``build_run_observers`` blew up), so no ``ErrorRecord`` was emitted and the

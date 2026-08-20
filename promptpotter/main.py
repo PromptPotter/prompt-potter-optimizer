@@ -21,6 +21,7 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, webapp_static_root
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.presentation.admin_bot import notify_operator
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
 from promptpotter.presentation.api.routers.auth import auth_router
@@ -35,6 +36,23 @@ from promptpotter.shared.errors import PotterError
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _telegram_shutdown_notice(registry: JobRegistry) -> None:
+    """Tell the operator the API stopped, on the admin bot's existing channel. The incident this
+    exists for exited 0, so ``Restart=on-failure`` stayed quiet and the box was down until someone
+    loaded the page — a stop with a campaign still in flight is the shape worth waking up for, and
+    it names what it interrupted. An in-process hook cannot report a SIGKILL, an OOM or a power
+    cut; those need a watchdog off the box."""
+    running = registry.list_running()
+    if running:
+        interrupted = ", ".join(f"{job.hop.campaign_id}/{job.hop.cycle_id}" for job in running)
+        notify_operator(
+            f"⚠ {settings.BRAND_SERVICE_NAME} stopped with {len(running)} run(s) in flight: "
+            f"{interrupted}\nResume from the campaign once it is back up."
+        )
+    else:
+        notify_operator(f"{settings.BRAND_SERVICE_NAME} stopped (nothing running).")
 
 
 @asynccontextmanager
@@ -66,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await sweep_task
+    await asyncio.to_thread(_telegram_shutdown_notice, registry)
     logger.info("Shutting down %s", settings.BRAND_SERVICE_NAME)
 
 

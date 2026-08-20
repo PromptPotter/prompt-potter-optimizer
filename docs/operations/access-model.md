@@ -161,7 +161,7 @@ source, its venv and its `.env`, which is persistence rather than disclosure. Un
 now (`BOT_ENV_FILE`): the admin bot is already its own unit, so its `ADMIN_BOT_PASSPHRASE` — the
 second factor on inbound `/block` and `/grant` — leaves the API's environment, and a read of that
 process stops conferring command authority. The bot's token and chat id must stay in both, since
-`auth.py` imports `notify_operator` and sends on them. Still absent: a `promptpotter-loop` service
+the API sends on them too (`auth.py` on a new sign-in, `main.py` on shutdown). Still absent: a `promptpotter-loop` service
 user and `ReadWritePaths` scoped to the cycle tree alone — that half only bites CLI-launched runs
 until 3c, so it stays gated on 3c.
 
@@ -313,7 +313,7 @@ HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
 HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 ```
 
-**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: `auth.py` imports `notify_operator` and announces new sign-ins on the same bot. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting the host-admin tier. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
+**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: the API announces new sign-ins (`auth.py`) and its own shutdown (`main.py`) on the same bot, and without them `notify_operator` returns False and logs — the bot keeps answering commands, so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting the host-admin tier. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
 
 **Daily use** — message your bot:
 

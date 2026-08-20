@@ -147,7 +147,15 @@ async def prepare_checkin_run(
         persist_origin_candidate_library(stores, canonical, draft)
         dataset_name = canonical
         pipeline_overlay = draft.pipeline_overlay
-        origin_override = draft.origin_prompt_fields if draft.reused_origin_id else None
+        # Whenever THIS turn authored an origin, not only when it reused one. Gated on
+        # `reused_origin_id` the override was dropped in the case that needs it: a fresh origin
+        # over an existing slug never reaches `materialize_and_write_origin` (that writes the
+        # dataset, which later campaigns share), so the run silently measured whatever
+        # `prompts/default.yaml` the FIRST campaign on that slug committed — a prompt nobody in
+        # this check-in saw, under the first campaign's identity, so the cache replayed it too.
+        # `committed_prompt_fields` rather than the raw dict, or the label enumeration is lost.
+        authored = any(str(value).strip() for value in draft.origin_prompt_fields.values())
+        origin_override = draft.committed_prompt_fields() if authored else None
 
     session = await make_session(dataset_name)
 

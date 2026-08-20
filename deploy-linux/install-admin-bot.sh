@@ -68,6 +68,17 @@ if [[ "$BOT_ENV_FILE" != "$ENV_FILE" ]] \
     warn "ADMIN_BOT_PASSPHRASE is STILL in the app's $ENV_FILE. It is the second factor on inbound /block and /grant commands, and only the bot reads it — a copy in the API's environment turns a read of that process into command authority. Delete THAT line (not the token or chat id, which the API needs to send notifications) and restart $SERVICE_NAME."
 fi
 
+# The same split read the other way. The warning above catches a key that should NOT be in the
+# app's file; this catches the two that MUST be. `notify_operator` returns False and logs when the
+# API has neither, so a split deploy loses every outbound notice — the sign-in ones and the
+# shutdown alert — while the bot answers commands normally and nothing anywhere reports the hole.
+if [[ "$BOT_ENV_FILE" != "$ENV_FILE" ]]; then
+    for key in ADMIN_BOT_TELEGRAM_TOKEN ADMIN_BOT_CHAT_ID; do
+        sudo grep -q "^$key=." "$ENV_FILE" 2>/dev/null \
+            || warn "$key is not in the app's $ENV_FILE, so $SERVICE_NAME can SEND nothing — no sign-in notices, no shutdown alert. Copy it from $BOT_ENV_FILE (the passphrase stays bot-only) and restart $SERVICE_NAME."
+    done
+fi
+
 # ADMIN_BOT_MODULE is the one knob whose default is a PLACEHOLDER (`myapp.…`), so a deploy that
 # never set it installs a unit whose ExecStart cannot resolve. systemd reports that as
 # "unavailable resources" and auto-restarts forever, naming neither the module nor the file to

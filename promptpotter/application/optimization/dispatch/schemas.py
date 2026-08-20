@@ -463,8 +463,17 @@ class CheckinOutput(OptimizerResponseModel):
     task_intent: str = ""
     problem_description: str = ""
     instruction: str = ""
-    thinking_style: str = ""
-    answer_format: str = ""
+    # Undescribed, these two collide: the node wrote the scorer's bold-span contract into
+    # `thinking_style` and left `answer_format` empty, so the one field the optimizer may NOT
+    # freely rewrite held the extraction rule and the one it protects held nothing.
+    thinking_style: str = Field(
+        default="",
+        description="How to reason. Never the output shape or the scoring rule — those are answer_format's.",
+    )
+    answer_format: str = Field(
+        default="",
+        description="The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
+    )
     task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
     # Origin-resolution block — populated only on the web ingest check-in path.
     assessment: str = Field(default="", description="One-line read of the current origin state.")
