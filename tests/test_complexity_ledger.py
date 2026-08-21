@@ -12,7 +12,7 @@ LEDGER_BASELINE = {
     "init_files": 48,
     "reexport_shims": 6,
     "config_leaf_fields": 39,
-    "settings_env": 30,
+    "settings_env": 31,
     "settings_const": 15,
     "opt_search_point_fields": 25,
     "any_params": 50,

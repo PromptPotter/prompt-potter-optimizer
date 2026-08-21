@@ -1090,7 +1090,8 @@ def test_host_wallet_ceilings_hold_in_both_units(
     assert free_tier.token_budget_total is None
     idle = types.SimpleNamespace(list_running=lambda *, user_id: [])
 
-    # No override must NOT read as uncapped in either unit.
+    # No override must NOT read as uncapped in either unit. The USD arm is one STEP, not the whole
+    # ceiling — the offer is denominated in runs, and a first run declaring the lot funds no second.
     fresh = admit_launch(
         requested_cap_usd=None,
         requested_cap_tokens=None,
@@ -1098,7 +1099,8 @@ def test_host_wallet_ceilings_hold_in_both_units(
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
     )
-    assert fresh.usd == pytest.approx(settings.FREE_TIER_SPEND_CAP_USD)
+    assert fresh.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
+    assert fresh.usd < settings.FREE_TIER_SPEND_CAP_USD
     assert fresh.tokens == settings.FREE_TIER_TOKEN_CAP
 
     # Clamping a declaration down to the remainder is what makes a campaign halt mid-run, so a
@@ -1143,7 +1145,8 @@ def test_host_wallet_ceilings_hold_in_both_units(
         ),
         job_registry=idle,
     )
-    assert blind.usd == pytest.approx(settings.UNPRICED_GRACE_USD)
+    assert blind.usd <= settings.UNPRICED_GRACE_USD
+    assert blind.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
     assert blind.tokens == settings.FREE_TIER_TOKEN_CAP - 500_000
 
     # A rate belongs to the (provider, model) PAIR, so the record handed to the pricer must carry

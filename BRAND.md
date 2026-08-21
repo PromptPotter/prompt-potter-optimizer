@@ -59,7 +59,11 @@ Two cuts beyond the mask itself, neither of them a redesign:
 
 - **Tab pair** — `tab-icon-pot-32.png` (ink) and `tab-icon-pot-32-dark.png` (bone), selected by
   `media="(prefers-color-scheme: …)"` on the `<link>`. Raster cannot carry the media query internally
-  the way an SVG favicon can, hence two files.
+  the way an SVG favicon can, hence two files. In the app they are the **pre-paint** icon only:
+  `SurfaceFavicon.tsx` repaints the tab from the 128² master onto a ground the hostname picks — a gold
+  disc on localhost, a near-black rounded square on the deployed unit, the mark flipping ink/gold to
+  sit on each and breaking out of the shape at 92% of the tile. The site leaves the pair untinted, so
+  a session's three tabs are three icons.
 - **App icon** — `app-icon-pot-512.png`, **opaque on bone paper**. A launcher composites an installed icon
   onto a surface we do not control, so a transparent mark would vanish on a dark one.
 
@@ -122,8 +126,8 @@ at whatever the master happens to be. The mark is masked at ≤26 px, so it is 1
 
 | File | What it is | Where it shows |
 |---|---|---|
-| `mark-pot.png` | same artwork, cut to **128²** — nothing paints it above 26 px, so DPR sets the ceiling, not print | login eyebrow, running-jobs button, About-this-unit (via `PotterMark.tsx`) |
-| `tab-icon-pot-32.png` / `-dark.png` | 32² ink / bone | browser tab of the live unit |
+| `mark-pot.png` | same artwork, cut to **128²** — nothing paints it above 32 px, so DPR sets the ceiling, not print | login eyebrow, running-jobs button, About-this-unit (via `PotterMark.tsx`), and the tab icon `SurfaceFavicon.tsx` recolours |
+| `tab-icon-pot-32.png` / `-dark.png` | 32² ink / bone | the unit's tab before `SurfaceFavicon` repaints it — and with JS off, instead of it |
 | `app-icon-pot-512.png` | same cut as the site's | Web App Manifest — the installed-app / launcher icon |
 
 **One app icon, both jobs.** The iOS home-screen icon and the PWA launcher icon are the same

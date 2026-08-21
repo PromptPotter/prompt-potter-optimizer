@@ -87,13 +87,13 @@ export function BrandShowcase() {
             </svg>
             <div className="ls-meta">
               <span>
-                <b>16</b> candidates
+                <b>8</b> candidates
               </span>
               <span>
-                <b>1,248</b> scored
+                <b>320</b> scored
               </span>
               <span>
-                <b>$2.41</b> spend
+                <b>5</b> rounds
               </span>
             </div>
           </div>

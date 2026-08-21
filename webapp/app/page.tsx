@@ -1,4 +1,5 @@
 import { AccessGate } from "@/components/onboarding/AccessGate";
+import { AllowanceSpent } from "@/components/onboarding/AllowanceSpent";
 import { AppShell } from "@/components/shell/AppShell";
 import { ConsentGate } from "@/components/onboarding/ConsentGate";
 import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
@@ -19,13 +20,15 @@ export default function Home() {
         <ViewMemoryProvider>
           <AppShell />
         </ViewMemoryProvider>
-        {/* Three overlays, all reading auth state and none of them chrome. The two
+        {/* Four overlays, all reading auth state and none of them chrome. The two
             gates are blocking (a blocked account, an unaccepted Terms) and mutually
             exclusive by construction; the sign-in prompt is dismissable and fires
-            from any Log in / Sign up chip, of which there are several. All three
-            self-hide for anon-with-nothing-to-say. */}
+            from any Log in / Sign up chip, of which there are several. The spent
+            allowance is a notice rather than a gate — it says the runs are over, not
+            that the results are. All four self-hide for anon-with-nothing-to-say. */}
         <AccessGate />
         <ConsentGate />
+        <AllowanceSpent />
         <WelcomeLockoutModal />
       </WorkspaceProvider>
     </ErrorBoundary>

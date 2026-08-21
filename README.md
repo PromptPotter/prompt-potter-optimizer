@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://promptpotter.com"><b>promptpotter.com</b></a> — <b>$0.30 of free credit</b> to try a real run in the browser, hosted and paid for by me. Offer runs until <b>15 Sept 2026</b>; bring-your-own-key is in the works.
+  <a href="https://promptpotter.com"><b>promptpotter.com</b></a> — <b>10 free optimization runs</b> on your own data, up to 10 rounds each, in the browser and on my key. Offer stands until <b>15 Sept 2026</b>; bring-your-own-key is in the works.
 </p>
 
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
@@ -21,7 +21,9 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 
 ## ⭐ Features
 
-Every measurement costs money, so the whole design is **most fitness per dollar**. The capabilities PromptPotter shares with the rest of the field are in the [comparison table](#scientific-framing) below; these are the ones it doesn't:
+Every measurement costs money, so the whole design is **most fitness per dollar**. What that buys in practice: a real run on a Swiss invoice account-coding set moved exact-match accuracy from **5% to 55%** — and stopped because it hit its own spend cap, not because it ran out of ideas. (5 rounds, n=20; a measured lift, not a significance claim.)
+
+The capabilities PromptPotter shares with the rest of the field are in the [comparison table](#scientific-framing) below; these are the ones it doesn't:
 
 - **💬 Chat-first** — talk to the Potter and watch it work inline, Perplexity-style: the searches, the tool calls, each round as it lands, and a button whenever a decision is yours. Ships as a reusable **chat-app template** — keep the chat core, delete the optimizer panes. [spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/chat-foundation.md)
 - **Searches a tree, not a trail** — every round's result flows back to each ancestor it descends from, so a spent branch rewinds to whichever ancestor the evidence favours and ***climbs a different hill*** instead of stalling. Branches are kept and compared rather than discarded, and an ancestor's score reflects what re-expanding from it actually yielded — including in branches it never ran itself.

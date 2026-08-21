@@ -74,8 +74,8 @@ export function AuthCore({ errorCode, errorEmail }: Props) {
       ) : null}
 
       <p className="auth-note">
-        Create your account with Google. PromptPotter is opening up in stages, so running
-        campaigns switches on once we reach you &mdash; your account is saved either way.
+        Create your account with Google. Signing up is the grant: 10 optimization runs on your
+        own data, up to 10 rounds each, on my key.
       </p>
 
       <div className="login-buttons">

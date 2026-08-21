@@ -106,7 +106,7 @@ replaces the artwork instead — three files, and nothing else refers to them:
 | File | Where it shows | Constraint on a replacement |
 |---|---|---|
 | `webapp/public/brand/mark-pot.png` | login eyebrow, running-jobs button, About-this-unit | the **alpha channel is the mark** — it is used as a CSS mask painted with `currentColor`, so colour in the file is ignored. Ship a transparent cut, not a coloured one. |
-| `webapp/public/brand/tab-icon-pot-32.png` + `-dark.png` | browser tab | two cuts, ink and light, chosen by `media=` on the `<link>`. Raster cannot hold a `prefers-color-scheme` rule internally, so both are required. |
+| `webapp/public/brand/tab-icon-pot-32.png` + `-dark.png` | browser tab, pre-paint | two cuts, ink and light, chosen by `media=` on the `<link>`. Raster cannot hold a `prefers-color-scheme` rule internally, so both are required. Swapping them is not the whole tab: `SurfaceFavicon.tsx` repaints it onto a gold/ink ground that says *which install* this is, and those two colours are ours with no override yet. |
 | `webapp/public/brand/app-icon-pot-512.png` | Web App Manifest / installed icon | must be **opaque** — a launcher composites it onto a surface we do not control |
 
 `webapp/components/brand/PotterMark.tsx` is the only renderer; it masks the PNG

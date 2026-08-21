@@ -19,6 +19,7 @@ Copy register swaps with the theme (theme = audience selector — see [`BRAND.md
 - **`PromptPotter` is literal text.** Always rendered as text in branded imagery, never implied or stylized away (see [`BRAND.md`](BRAND.md) for the visual side).
 - **Domain framing.** PromptPotter = LLM-driven program evolution; new names and sentences draw on: evolve, generation, population, fitness, mutation, selection, individual.
 - **Spend, not patience.** Operator-facing surfaces expose spend ($/tokens) as the headline cost; patience/FSM bookkeeping stays internal.
+- **The offer is denominated in what it completes, never in credit granted.** A buyer reads a sum of money as its own size, so the grant is stated in runs and rounds — what they get to finish — and the dollar figure appears only as a *receipt* beside a measured result, where small is the proof rather than the catch.
 
 ## Anti-references — what the copy must NOT sound like
 

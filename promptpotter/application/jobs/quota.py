@@ -165,7 +165,8 @@ def admit_launch(
     [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every launch
     admits through here. A declaration the account cannot cover is refused WHOLE rather than clamped
     down, because a clamped launch starts, spends and halts mid-campaign — the outcome the ceiling
-    exists to prevent, not to cause. Declaring nothing declares the headroom."""
+    exists to prevent, not to cause. Declaring nothing declares the headroom under whatever bounds
+    the DECLARATION — for a metered account, one step of it (:func:`_launch_step`)."""
     wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
     if wallet.spent.unpriced_tokens and wallet.headroom.usd is not None:
         logger.warning(
@@ -180,13 +181,20 @@ def admit_launch(
     ):
         raise _refused(wallet, "This account has nothing left to spend.")
     delegated = _delegated_spend_ceiling(stores)
+    step = _launch_step(user, wallet, delegated)
     tokens = requested_cap_tokens
     if requested_cap_usd is None:
         # A grant bounds what may be DECLARED, so declaring nothing declares the headroom under it
         # — never the grant itself, which would refuse an account that can still afford the run.
-        usd = _lowest(wallet.headroom.usd, delegated)
+        usd = _lowest(wallet.headroom.usd, delegated, step)
     else:
         usd = _lowest(requested_cap_usd, delegated)
+        if step is not None and usd is not None and usd > step:
+            raise _refused(
+                wallet,
+                f"A run on this account is admitted at ${step:.2f} and this one declares "
+                f"${usd:.2f}.",
+            )
         if wallet.headroom.usd is not None and usd is not None and usd > wallet.headroom.usd:
             raise _refused(
                 wallet,
@@ -254,10 +262,11 @@ def clamp_budget_change(
     wallet = read_account_wallet(
         user=user, stores=stores, job_registry=job_registry, excluding_hop=hop
     )
+    delegated = _delegated_spend_ceiling(stores)
     usd = (
         None
         if max_usd is None
-        else _lowest(max_usd, wallet.headroom.usd, _delegated_spend_ceiling(stores))
+        else _lowest(max_usd, wallet.headroom.usd, delegated, _launch_step(user, wallet, delegated))
     )
     tokens = max_tokens
     if tokens is not None and wallet.headroom.tokens is not None:
@@ -376,6 +385,24 @@ def is_host_tenant_dir(user_id: str) -> bool:
     """The DIRECTORY-walk reading, for the cross-tenant install report, which has tenant dirs rather
     than sessions and no issuer surviving on disk. Live twin: :func:`spends_the_hosts_own_key`."""
     return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
+
+
+def _launch_step(user: User, wallet: AccountWallet, delegated: float | None) -> float | None:
+    """The most ONE run on the ANONYMOUS grant may declare, whatever its headroom. The offer is
+    denominated in runs, and a single run declaring the rest of the grant leaves the others
+    unfunded — so the ceiling divides into steps and each launch takes one.
+
+    It rations that grant and nothing else, so three accounts fall outside it: the operator of the
+    box, who is not metered at all; a DELEGATED principal, whose attenuated ceiling (ADR-0005) is a
+    narrower authority granted on purpose; and one the operator hand-raised on ``user.json``, where
+    stepping the allowance they just wrote would quietly undo it."""
+    if (
+        wallet.ceilings.usd is None
+        or delegated is not None
+        or user.spend_budget_usd_total is not None
+    ):
+        return None
+    return settings.FREE_TIER_LAUNCH_STEP_USD
 
 
 def _delegated_spend_ceiling(stores: Stores) -> float | None:

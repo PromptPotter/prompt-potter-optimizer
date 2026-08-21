@@ -298,6 +298,8 @@ Run on the box for the next test-linux update; each is idempotent.
 
 Signing up **is** the grant. Anyone completing OIDC gets an account that can act immediately, bounded by `Settings.FREE_TIER_SPEND_CAP_USD` rather than by your approval ([ADR-0003](../adr/0003-spend-and-tenancy.md) § Spend). There is no queue to work through, so the only recurring admin action is the reverse one — **taking access away**.
 
+That ceiling is spent one **step** at a time (`Settings.FREE_TIER_LAUNCH_STEP_USD`, applied by `quota.py::_launch_step`): the offer is denominated in runs rather than in credit, so a launch declares a step instead of the whole remainder and a first campaign can no longer consume the grant a tenth one was promised. It rations the anonymous grant only — a delegated principal answers to its attenuated ceiling instead, and an account you raised by hand on `user.json` keeps what you gave it.
+
 **The one rule: a control-plane change never has an inbound door open to the internet.** The blocklist is the front-door lock, so its edit never sits behind a public endpoint. The edit happens **on the box**, which reaches *out* to your phone — nothing new is exposed. Exposing an admin endpoint instead would put that lock on the public internet behind a single token, and a token living in a cloud tool (n8n, Zapier, CI) turns a breach there into your auth gate. If an external tool genuinely must drive an admin action, gate it behind an edge broker (Cloudflare Access service token) **plus** an app token — never a bare public route ([ADR-0004](../adr/0004-operator-admin-channels.md) § "When option C is the right escalation").
 
 ### Blocking an account from Telegram
