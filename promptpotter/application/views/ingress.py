@@ -343,6 +343,7 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         mean_fitness_ci_lo=sc.mean_fitness_ci_lo,
         mean_fitness_ci_hi=sc.mean_fitness_ci_hi,
         escalation_aborted=sc.escalation_aborted,
+        partial_reason=sc.partial_reason,
         invalid_reason=invalid_reason,
         matched_parent_accuracy=sc.matched_parent_accuracy,
         matched_parent_composite=sc.matched_parent_composite,

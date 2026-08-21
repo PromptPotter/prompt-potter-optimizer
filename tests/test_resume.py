@@ -68,8 +68,9 @@ def _prior(sample_id: int, predicted: str = "p", gt: str = "g") -> dict:
     }
 
 
-def test_rescore_results_accumulates_and_projects_active() -> None:
-    """Two scorers accumulate side-by-side; top-level fitness follows the latest call."""
+def test_rescore_results_projects_the_scorer_it_was_handed() -> None:
+    """A re-read row carries the LATEST scorer's verdict. Silent if it broke: every estimator reads
+    ``fitness`` and would simply be answering an older formula."""
     result = {
         "query": "q",
         "predicted": "**42**",
@@ -79,15 +80,10 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
         "pipeline_data": None,
         "ground_truth_rank": 1,
     }
-    formula_a = "exact_match(predicted, ground_truth)"
-    rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
-    rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
-    assert list(result["scored"]) == ["a"]  # idempotent
+    rescore_results([result], compile_scorer("exact_match(predicted, ground_truth)"))
     assert result["fitness"] == 1.0 and is_hit(result["fitness"])
 
-    formula_b = "1 - exact_match(predicted, ground_truth)"
-    rescore_results([result], compile_scorer(formula_b), scorer_id="b", formula=formula_b)
-    assert set(result["scored"]) == {"a", "b"}
+    rescore_results([result], compile_scorer("1 - exact_match(predicted, ground_truth)"))
     assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
@@ -265,8 +261,6 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
         scorer=compile_scorer(formula),
-        scorer_id="x",
-        scorer_formula=formula,
     )
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)
@@ -287,8 +281,6 @@ def test_rescored_prior_tail_filters_off_dataset_and_evicted() -> None:
         dataset_sample_ids={1, 2},
         deprecated_samples={2: _prior(2)},  # sample 2 deprecated → must remeasure
         scorer=compile_scorer(formula),
-        scorer_id="x",
-        scorer_formula=formula,
     )
     assert set(tail) == {1}
     assert {r["sample_id"] for r in merge_with_unprocessed_priors([], tail)} == {1}

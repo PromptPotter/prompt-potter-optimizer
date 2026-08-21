@@ -49,26 +49,16 @@ class SpendRollup(StrictModel):
     loop: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
-
-    @property
-    def input_tokens(self) -> int:
-        return self.backend.input_tokens + self.loop.input_tokens
-
-    @property
-    def output_tokens(self) -> int:
-        return self.backend.output_tokens + self.loop.output_tokens
-
-    @property
-    def total_tokens_used(self) -> int:
-        """Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits
-        are excluded: a cap bounds what the run spends, not what it would have spent."""
-        return self.input_tokens + self.output_tokens
-
-    @property
-    def unpriced_tokens(self) -> int:
-        """Billed tokens with no resolvable USD rate. >0 means ``total_used_usd``
-        UNDERSTATES real spend — it is a floor, not the total."""
-        return self.backend.unpriced_tokens + self.loop.unpriced_tokens
+    # Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits are
+    # excluded: a cap bounds what the run spends, not what it would have spent.
+    total_tokens_used: int = 0
+    # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend
+    # — it is a floor, not the total.
+    unpriced_tokens: int = 0
+    # Both are FOLDED beside the USD totals (`live_dashboard/view.py::_absorb_token_usage`), never
+    # derived on read: a `@computed_field` serializes but does not round-trip, and
+    # `resolve_resume_state` re-validates this whole state out of `dashboard.json` on every resume.
+    # Serving them is also what keeps the gauge and the halt gate one computation.
 
     @property
     def incurred_unpriced_tokens(self) -> int:

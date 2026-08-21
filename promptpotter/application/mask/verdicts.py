@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from promptpotter.application.mask.divergence import Verdict, VerdictOutcome
 from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.rendering import display_rank_key
+from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
 from promptpotter.domain.scoring import RoundScorer
 
 
@@ -23,9 +23,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
     archive read), not a cheaper version of it. So a divergence means "under this formula the
     crowned candidate is no longer the best-scoring one", where ``ab`` answers if the RUN moved."""
 
-    def _key(
-        evaluators: Mapping[str, float], accuracy: float
-    ) -> tuple[bool, float, float, float] | None:
+    def _key(evaluators: Mapping[str, float], accuracy: float) -> DisplayRankKey | None:
         # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
         # it references a schema-bound evaluator absent from those values — is
         # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns

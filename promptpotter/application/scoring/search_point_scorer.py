@@ -38,8 +38,6 @@ def rescored_prior_tail(
     dataset_sample_ids: set[int],
     deprecated_samples: dict[int, QueryMeasurement],
     scorer: Scorer | None,
-    scorer_id: str,
-    scorer_formula: str | None,
 ) -> dict[int, QueryMeasurement]:
     """The cache priors this run may archive without re-measuring, rescored ONCE. The active scorer
     is fixed for one call, so rescoring per prior per sample was O(samples²) for the same answers."""
@@ -49,7 +47,7 @@ def rescored_prior_tail(
             continue
         entry = cast(QueryMeasurement, dict(prior))
         if scorer is not None:
-            rescore_results([cast("dict[str, Any]", entry)], scorer, scorer_id, scorer_formula)
+            rescore_results([cast("dict[str, Any]", entry)], scorer)
         tail[sid] = entry
     return tail
 
@@ -154,7 +152,7 @@ def _resolve_prior_cache(
             is_deprecated,
         )
 
-        node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
+        node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
         cached_sample_results = cast(
             "dict[int, QueryMeasurement]",
             archive_views.reusable_results(
@@ -315,8 +313,6 @@ async def score_search_point(
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples=deprecated_samples,
         scorer=session.scoring.scorer,
-        scorer_id=session.scoring.scorer_id,
-        scorer_formula=session.scoring.scorer_formula,
     )
     if force_fresh and store:
         # An append-only log does not overwrite: force_fresh means REPLACE these rows.

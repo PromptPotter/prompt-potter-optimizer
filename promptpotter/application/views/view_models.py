@@ -167,6 +167,10 @@ class ScoreEntry:
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     escalation_aborted: bool = False
+    # Why this row scored fewer cells than the panel: "" (whole panel) | "skip" (operator cut the
+    # walk short). Carried because the display RANKS on it (`domain/rendering.py::display_rank_key`)
+    # and a view cannot demote what it was never told.
+    partial_reason: str = ""
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None

@@ -197,10 +197,19 @@ def two_way_effect_sds(
         (cells_by_arm[a][c] - arm_mean[a] - cell_mean[c] + grand) ** 2 for a in arms for c in shared
     )
     residual = math.sqrt(ss / ((len(arms) - 1) * (len(shared) - 1)))
-    return (_sd(list(cell_mean.values())), _sd(list(arm_mean.values())), residual)
+    cell_sd = sample_sd(list(cell_mean.values()))
+    arm_sd = sample_sd(list(arm_mean.values()))
+    if cell_sd is None or arm_sd is None:  # both margins are guarded >= 2 above
+        return None
+    return (cell_sd, arm_sd, residual)
 
 
-def _sd(xs: list[float]) -> float:
+def sample_sd(xs: list[float]) -> float | None:
+    """Sample SD (n−1). ``None`` below two points — one reading has no spread, and reporting 0.0
+    for it would claim perfect precision from a single measurement. The ONE spelling: it was
+    written out three times, and only the copy carrying this guard was right."""
+    if len(xs) < 2:
+        return None
     mean = sum(xs) / len(xs)
     return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
 
@@ -225,6 +234,7 @@ __all__ = [
     "paired_diff_posterior",
     "paired_reading",
     "rank_correlation",
+    "sample_sd",
     "t_critical",
     "two_way_effect_sds",
     "warm_stats_backend",

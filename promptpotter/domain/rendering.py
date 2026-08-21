@@ -21,13 +21,20 @@ def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
     return composite_fitness if composite_fitness is not None else accuracy
 
 
+# The ordering key every display site sorts on. Named once because it was restated as a bare
+# tuple at two call sites, and adding a term to the key silently broke both — the shape is
+# `display_rank_key`'s to declare, not each caller's to remember.
+DisplayRankKey = tuple[bool, bool, float, float, float]
+
+
 def display_rank_key(
     composite_fitness: float | None,
     accuracy: float,
     theta: float | None = None,
     *,
     is_winner: bool = False,
-) -> tuple[bool, float, float, float]:
+    is_partial: bool = False,
+) -> DisplayRankKey:
     """``display_fitness``'s argmax form — what every DISPLAY site orders by.
 
     On a warm round rank 1 IS the crown, by construction: the round is won on Rasch θ-lift over
@@ -40,6 +47,10 @@ def display_rank_key(
     there would leave it unable to disagree."""
     return (
         is_winner,
+        # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
+        # order is stratified, so the cells a stopped walk kept are a biased slice rather than a
+        # smaller sample of the same thing.
+        not is_partial,
         theta if theta is not None else -math.inf,
         display_fitness(composite_fitness, accuracy),
         accuracy,
@@ -310,6 +321,7 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
 
 __all__ = [
+    "DisplayRankKey",
     "classify_result",
     "display_fitness",
     "display_rank_key",

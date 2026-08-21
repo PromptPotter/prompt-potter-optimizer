@@ -117,6 +117,7 @@ def render_round_stats(
                     s.accuracy,
                     s.theta,
                     is_winner=is_round_winner(s.candidate_id, round_result.winner_id),
+                    is_partial=bool(s.partial_reason),
                 ),
             ),
         )

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
+    "distinct_valid_cells",
     "elect_round_winner",
     "elimination_p_best",
     "matched_parent_lift",
@@ -68,7 +69,7 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
     return {sid: sum(v) / len(v) for sid, v in acc.items()}
 
 
-def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
+def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
     """Counted per CELL, not per row, so replicate rows can never falsely satisfy
     ``coverage_floor``; a cell with one errored and one clean row still counts."""
     from promptpotter.application.optimization.pobb.classification import scoreable_rows
@@ -137,7 +138,7 @@ def elect_round_winner(
     winner_id = ""
     for cid in candidate_ids:
         cand_results = list(results_by_id.get(cid) or [])
-        n_cells = _distinct_valid_cells(cand_results)
+        n_cells = distinct_valid_cells(cand_results)
         if n_cells < coverage_floor:
             continue
         cand_fit, _ = paired_fitness(cand_results, origin_results)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import content_hash
@@ -30,14 +30,15 @@ class SearchPoint(StrictModel):
 class JobSearchPoint(SearchPoint):
     model_config = ConfigDict(frozen=True)
 
-    pipeline_params: dict[str, Any] | None = None
-    prompt_fields: dict[str, Any] | None = None
+    # Empty is the ONE spelling for "carries none" on both. No reader distinguishes absent from
+    # empty, and `content_hash` omits a falsy `pipeline_params` either way — so the archive key is
+    # unmoved — while the nullable twin reaches `CycleResult` / `export.py` as a crash.
+    pipeline_params: dict[str, Any] = Field(default_factory=dict)
+    prompt_fields: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("pipeline_params")
     @classmethod
-    def _params_nested_by_node(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        if v is None:
-            return v
+    def _params_nested_by_node(cls, v: dict[str, Any]) -> dict[str, Any]:
         flat = sorted(k for k, val in v.items() if isinstance(val, (str, int, float)))
         if flat:
             raise ValueError(
@@ -47,29 +48,26 @@ class JobSearchPoint(SearchPoint):
         return v
 
     def render(self) -> str:
-        for node_config in (self.pipeline_params or {}).values():
+        for node_config in self.pipeline_params.values():
             if isinstance(node_config, dict) and "prompt" in node_config:
                 return str(node_config["prompt"])
         return ""
 
     @property
-    def config_params(self) -> dict[str, Any] | None:
+    def config_params(self) -> dict[str, Any]:
         """``pipeline_params`` minus the per-node rendered prompt, which rides ``prompt_fields``
         and :meth:`render`. Sole writer of the strip — the observe view reads it verbatim."""
-        pp = self.pipeline_params
-        if pp is None:
-            return None
         return {
             node: (
                 {k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg
             )
-            for node, cfg in pp.items()
+            for node, cfg in self.pipeline_params.items()
         }
 
     def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
         """Optimizer-side dedup over the SCHEMA-RESOLVED node configs, never the archive key.
         A ``None`` schema would hash the raw params under this same name — so it is required."""
-        return pipeline_schema.sp_hash(self.pipeline_params or {})
+        return pipeline_schema.sp_hash(self.pipeline_params)
 
     def content_hash(self, dataset: list[Any]) -> str:
         """The measurement-archive key — rendered prompt + dataset + the overlay-MERGED

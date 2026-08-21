@@ -23,11 +23,17 @@ export interface SpendView {
   // At least one bucket reported a USD rate; when false, USD is unreliable
   // and the caller should fall back to a token count.
   rateKnown: boolean;
-  // Per-bucket input+output token sums (the no-rate fallback display), and
-  // their total (the token ceiling's spent side).
+  // Per-bucket input+output token sums — the no-rate fallback display, and the only
+  // sums still made here, because no bucket serves its own.
   backendTokens: number;
   loopTokens: number;
+  // The token ceiling's spent side, SERVED. It is the same number the halt probe reads
+  // (`SpendRollup.total_tokens_used`); summing the buckets here made the gauge and the
+  // gate two different computations in two languages.
   totalTokens: number;
+  // >0 ⇒ some calls had no resolvable USD rate, so `totalUsd` is a floor and the USD cap
+  // cannot see the difference. Served, for the same reason.
+  unpricedTokens: number;
   // Fraction of the LOOP bucket's output tokens the optimizer spent thinking rather
   // than answering; null when nothing has been billed yet or the models report no
   // breakdown. A subset of the output tokens, never an addition to them — it explains
@@ -61,7 +67,8 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
     rateKnown: Boolean(backend?.rate_known || loop?.rate_known),
     backendTokens,
     loopTokens,
-    totalTokens: backendTokens + loopTokens,
+    totalTokens: block?.total_tokens_used ?? 0,
+    unpricedTokens: block?.unpriced_tokens ?? 0,
     loopReasoningShare:
       loop && loop.output_tokens > 0 ? loop.reasoning_tokens / loop.output_tokens : null,
   };

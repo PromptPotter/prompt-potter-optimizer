@@ -370,9 +370,7 @@ class AxisIndex:
             stamp = {"fk": formula_key, "sig": list(signatures.get(run_id) or ())}
             if scorer is not None:
                 try:
-                    rescore_results(
-                        detail.get("measurements") or [], scorer, scorer_id, scorer_formula
-                    )
+                    rescore_results(detail.get("measurements") or [], scorer)
                 except ScoringTermMissingError as exc:
                     skipped.append(run_id)
                     self._unscoreable_runs.add(run_id)

@@ -275,7 +275,7 @@ class OptSearchPoint(PromptTemplate):
         # `schema` resolves the registry-declared case (`schema_family`, no inline schema).
         fold_schema_descriptions(pp, schema)
 
-        pf = None
+        pf: dict[str, Any] = {}
         if rendered and prompt_node:
             pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
             block = self._render_few_shot_block()
@@ -284,7 +284,7 @@ class OptSearchPoint(PromptTemplate):
 
         return JobSearchPoint(
             pipeline_params=pp,
-            prompt_fields=pf or None,
+            prompt_fields=pf,
         )
 
     def mutate(self, **changes: Any) -> OptSearchPoint:

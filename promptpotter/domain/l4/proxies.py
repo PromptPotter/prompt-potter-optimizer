@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING, CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.statistics import sample_sd
 
 logger = logging.getLogger(__name__)
 
@@ -243,13 +244,11 @@ def panel_precision(
     cells = sorted(v_level.keys() & o_level.keys() & v_se.keys() & o_se.keys())
     if len(cells) < 2:
         return None
-    diffs = [v_level[c] - o_level[c] for c in cells]
-    mean = sum(diffs) / len(diffs)
-    observed = (sum((d - mean) ** 2 for d in diffs) / (len(diffs) - 1)) ** 0.5
+    observed = sample_sd([v_level[c] - o_level[c] for c in cells])
+    if observed is None:  # unreachable: `cells` is guarded >= 2 above
+        return None
     estimation = (sum(v_se[c] ** 2 + o_se[c] ** 2 for c in cells) / len(cells)) ** 0.5
-    return PanelPrecision(
-        estimation_sd=float(estimation), observed_sd=float(observed), n_cells=len(cells)
-    )
+    return PanelPrecision(estimation_sd=float(estimation), observed_sd=observed, n_cells=len(cells))
 
 
 __all__ = [

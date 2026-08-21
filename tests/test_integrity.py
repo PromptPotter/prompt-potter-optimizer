@@ -81,7 +81,6 @@ def test_pipeline_params_rejects_flat_param_map() -> None:
     JobSearchPoint(pipeline_params={"llm_only": {"model": "x", "temperature": 0.1}})
     JobSearchPoint(pipeline_params={"steps": ["llm_ranking"], "llm_ranking": {"prompt": "x"}})
     JobSearchPoint(pipeline_params={})
-    JobSearchPoint(pipeline_params=None)
     with pytest.raises(pydantic.ValidationError):
         JobSearchPoint(pipeline_params={"model": "x", "temperature": 0.1})
 
@@ -2782,9 +2781,7 @@ async def _walk(
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", backend.measure):
         session = types.SimpleNamespace(
-            scoring=types.SimpleNamespace(
-                scorer=lambda r: 1.0, scorer_id="fake", scorer_formula=None, round_scorer=None
-            ),
+            scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
             pause_check=None,
             skip_check=None,
             skip_consume=None,

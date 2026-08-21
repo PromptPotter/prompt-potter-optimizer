@@ -1443,7 +1443,7 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     the next generation's parent with no error and a plausible-looking dashboard.
     """
     from promptpotter.application.scoring.selection import (
-        _distinct_valid_cells,
+        distinct_valid_cells,
         elect_round_winner,
     )
 
@@ -1466,7 +1466,7 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     # Repeated rows for one cell (what `verify` leaves behind): an errored row adds no
     # coverage, a clean one carries the cell, and the pair counts once.
     repeated = [clean(0, 1.0), clean(1, 1.0), errored(0), errored(1)]
-    assert _distinct_valid_cells(repeated) == 2
+    assert distinct_valid_cells(repeated) == 2
 
 
 # 5. Measurement rerun short-circuit + refusal classification

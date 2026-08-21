@@ -407,6 +407,8 @@ export interface SpendRollup {
   loop: SpendBucket;
   total_used_usd: number;
   total_incurred_usd: number;
+  total_tokens_used: number;
+  unpriced_tokens: number;
 }
 
 /** One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface. */

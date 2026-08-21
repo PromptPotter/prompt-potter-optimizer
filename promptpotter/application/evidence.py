@@ -54,6 +54,7 @@ from promptpotter.shared.statistics import (
     paired_diff_posterior,
     paired_reading,
     rank_correlation,
+    sample_sd,
     two_way_effect_sds,
 )
 
@@ -640,17 +641,8 @@ def _order_confound(rows: list[CampaignReading]) -> OrderConfound | None:
     )
 
 
-def _sample_sd(xs: list[float]) -> float | None:
-    """Sample SD (n−1). ``None`` below two points — one reading has no spread, and reporting
-    0.0 for it would claim perfect precision from a single measurement."""
-    if len(xs) < 2:
-        return None
-    mean = sum(xs) / len(xs)
-    return float((sum((x - mean) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5)
-
-
 def _edit_spread(rows: list[RankedEdit]) -> EditSpread:
-    return EditSpread(edit_effect_sd=_sample_sd([r.anchor_effect for r in rows]), n_edits=len(rows))
+    return EditSpread(edit_effect_sd=sample_sd([r.anchor_effect for r in rows]), n_edits=len(rows))
 
 
 def _accumulate_round(

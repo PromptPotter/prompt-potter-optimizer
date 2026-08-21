@@ -11,14 +11,10 @@ from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
 
 
-class PipelineData(TypedDict, total=False):
-    # The pipeline's result ranking — the terminal ranker's output, derived at
-    # measurement time (``terminal_ranking``). The scorer + ``find_gt_rank`` read this.
-    result_ranking: list[dict[str, Any]]
-    # Raw per-node ranker outputs, copied from the wire response for per-node
-    # diagnostics (retriever recall vs ranker precision). One of these is the source
-    # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
-    final_ranking: list[dict[str, Any]]
+class LedgerPipelineData(TypedDict, total=False):
+    """The pipeline half of a ledger record. Membership IS the projection: a field declared here
+    reaches ``ledger_sample_view``'s output, one declared on :class:`PipelineData` does not."""
+
     total_time: float
     # The DEEPEST node that ran — never a failure signal. It doubles as the archive's reuse
     # depth ("this outcome depends on config only up to here"), which is what the L4 connector
@@ -31,16 +27,38 @@ class PipelineData(TypedDict, total=False):
     # came from chars/4 fallback, not provider usage; the bracketed keys are present
     # only when the provider surfaced them.
     step_tokens: dict[str, dict[str, Any]]
-    llm_provider: str
-    pipeline_params: dict[str, Any]
     diagnostics: dict[str, Any]
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
+    mean_round_delta: float
+    # Read defensively beside the top-level twins (``_absorb_sample_scored``, ``RoundBuffer``):
+    # no writer in this repo sets them here, but a backend that did must not be silently
+    # dropped by ``ledger_sample_view``.
+    error: str | None
+    input_tokens: int
+    output_tokens: int
+
+
+class PipelineData(LedgerPipelineData, total=False):
+    """What the backend returned BESIDE the ledger half. It is on disk twice already, from the
+    same objects and never from a ledger record: the ``MeasurementArchive`` row keyed
+    ``(dataset_name, node_configs, sample_id)``, and ``rounds/round_NNNN.json::results[]`` +
+    ``::all_candidate_results{}``. The reasoning trace and the resolved params are the bulk of it,
+    and the panels that cite them (``dispatch/injections/panels.py``) read the in-memory
+    ``InjectionBundle.trajectory_results``, never a ledger record."""
+
+    # The pipeline's result ranking — the terminal ranker's output, derived at
+    # measurement time (``terminal_ranking``). The scorer + ``find_gt_rank`` read this.
+    result_ranking: list[dict[str, Any]]
+    # Raw per-node ranker outputs, copied from the wire response for per-node
+    # diagnostics (retriever recall vs ranker precision). One of these is the source
+    # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
+    final_ranking: list[dict[str, Any]]
+    pipeline_params: dict[str, Any]
     # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
     # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
     reasoning_trace: str
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift. The SE beside it
-    # is this arm's OWN half of a paired cell difference — the shared origin level is excluded
-    # because it cancels in that difference (`domain/l4/proxies.py`).
-    mean_round_delta: float
+    # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
+    # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
     mean_adopted_level_se: float
     # The rest of that inner campaign's own trajectory and cost, carried beside the lift so a
     # reader can ask what the run DID rather than only what it scored. `inner_spend_usd` /
@@ -54,12 +72,6 @@ class PipelineData(TypedDict, total=False):
     inner_spend_usd: float | None
     inner_tokens: int | None
     inner_campaign_id: str
-    # Read defensively beside the top-level twins (`_absorb_sample_scored`, `RoundBuffer`):
-    # no writer in this repo sets them here, but a backend that did must not be silently
-    # dropped by ``ledger_sample_view``.
-    error: str | None
-    input_tokens: int
-    output_tokens: int
 
 
 class QueryMeasurement(TypedDict):
@@ -112,73 +124,17 @@ class QueryMeasurement(TypedDict):
 # (`live_dashboard/view.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
 # chat's `sampleScoredCandidate`). A superset of both, so the ledger holds exactly what the
 # operator was shown and there is one definition to keep in sync instead of two.
-#
-# What it drops is on disk twice already, from the same objects and never from this record:
-# the MeasurementArchive row keyed (dataset_name, node_configs, sample_id), and
-# `rounds/round_NNNN.json::results[]` + `::all_candidate_results{}`. The reasoning trace and
-# the resolved params are the bulk of it, and the panels that cite them
-# (`dispatch/injections/panels.py`) read the in-memory `InjectionBundle.trajectory_results`,
-# never a ledger record.
-_LEDGER_SAMPLE_KEYS: frozenset[str] = frozenset(
-    {
-        "sample_id",
-        "query",
-        "ground_truth",
-        "predicted",
-        "fitness",
-        "cached",
-        "error",
-        "error_category",
-        "ground_truth_rank",
-        "n_candidates",
-        "input_tokens",
-        "output_tokens",
-        "_running",
-        "retry_of_deprecated_cache",
-        "retry_of_degraded",
-        "rerun_comparison",
-        "samplescan_resolved",
-        "switched_out",
-        "config_fundamental_skip",
-        "persistently_degraded",
-        "degraded_observed",
-        "degraded_obs_count",
-        "degraded_obs_threshold",
-    }
-)
 _LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
-    {
-        "total_time",
-        "terminal_node",
-        "step_timings",
-        "step_tokens",
-        "diagnostics",
-        "error",
-        "input_tokens",
-        "output_tokens",
-        "mean_round_delta",
-    }
-)
-
-# A key named here but not declared above is dropped from every ledger record and nothing
-# says so — the reader keeps working on the default. Fail at import instead.
-_DECLARED_SAMPLE_KEYS: frozenset[str] = frozenset(QueryMeasurement.__annotations__)
-_DECLARED_PIPELINE_KEYS: frozenset[str] = frozenset(PipelineData.__annotations__)
-assert _LEDGER_SAMPLE_KEYS.issubset(_DECLARED_SAMPLE_KEYS), (
-    f"ledger keep-set names undeclared QueryMeasurement keys: "
-    f"{sorted(_LEDGER_SAMPLE_KEYS - _DECLARED_SAMPLE_KEYS)}"
-)
-assert _LEDGER_PIPELINE_KEYS.issubset(_DECLARED_PIPELINE_KEYS), (
-    f"ledger keep-set names undeclared PipelineData keys: "
-    f"{sorted(_LEDGER_PIPELINE_KEYS - _DECLARED_PIPELINE_KEYS)}"
+    LedgerPipelineData.__required_keys__ | LedgerPipelineData.__optional_keys__
 )
 
 
 def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
     """NEW dicts, never a pop: the argument is the same object that becomes the archive row,
     ``RoundResult.results``, ``all_candidate_results``, ``overlap_results`` and
-    ``InjectionBundle.trajectory_results``."""
-    out: dict[str, Any] = {k: v for k, v in result.items() if k in _LEDGER_SAMPLE_KEYS}
+    ``InjectionBundle.trajectory_results``. Every top-level key rides along — only
+    ``pipeline_data`` is narrowed, to :class:`LedgerPipelineData`."""
+    out: dict[str, Any] = {k: v for k, v in result.items() if k != "pipeline_data"}
     if "pipeline_data" in result:
         pd = result["pipeline_data"]
         out["pipeline_data"] = (

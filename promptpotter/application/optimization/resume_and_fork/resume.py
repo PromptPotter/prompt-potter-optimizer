@@ -133,7 +133,7 @@ async def resume_with_divergence_check(
 
     def _rescore(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = list(items or [])
-        rescore_results(out, scorer, sc.scorer_id, sc.scorer_formula)
+        rescore_results(out, scorer)
         return out
 
     for t in prior:

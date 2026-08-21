@@ -22,6 +22,7 @@ from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.metrics import _compute_accuracy, matched_parent_stats
 from promptpotter.application.scoring.selection import (
+    distinct_valid_cells,
     elect_round_winner,
     matched_parent_lift,
     paired_fitness,
@@ -291,6 +292,12 @@ async def l1_score(
         # that artifact drags the round below origin. It keeps its matched-origin stamp, so the
         # record stays honest; the round-level fact is charged to the L4 floor instead.
         if not is_electable(candidate_scores[cs_idx], cand_results):
+            continue
+        # …and the COVERAGE half of the same rule, which `elect_round_winner` applies below and
+        # this list did not: an arm under the floor cannot be crowned, so counting it as electable
+        # reported three admissible arms on a round where exactly one could win. An operator skip
+        # is the fastest way to produce one — it leaves a 3-cell arm carrying a full-looking rate.
+        if distinct_valid_cells(cand_results) < coverage_floor:
             continue
         electable.append(ind.lineage.id)
 

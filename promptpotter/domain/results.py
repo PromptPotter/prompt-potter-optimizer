@@ -199,8 +199,12 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
 
 
 def is_electable(cs: ScoredCandidate, rows: Sequence[Mapping[str, object]]) -> bool:
-    """The election's admission rule, and the outer verdict must use it too: filtering on
-    :func:`is_leader_eligible` alone lets a collapsed arm top a round that refused to crown it."""
+    """Whether the round can READ this arm — the half of admission that needs no budget: filtering
+    on :func:`is_leader_eligible` alone lets a collapsed arm top a round that refused to crown it.
+
+    NOT the whole election rule, which adds a COVERAGE floor invisible from here (this is domain;
+    counting scoreable cells is `scoring/selection.py::distinct_valid_cells`). A caller treating it
+    as the whole rule over-reports how many arms could win."""
     return is_leader_eligible(cs) and bool(rows) and not is_answer_collapsed(rows)
 
 
@@ -659,6 +663,7 @@ class RoundResult(StrictModel):
                 c.accuracy,
                 c.theta,
                 is_winner=is_round_winner(c.candidate_id, winner_id),
+                is_partial=bool(c.partial_reason),
             ),
             reverse=True,
         )

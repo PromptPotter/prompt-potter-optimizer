@@ -109,7 +109,6 @@ _INFRA_KEYS: frozenset[str] = frozenset(
     {
         "step_timings",
         "step_tokens",
-        "llm_provider",
         "total_time",
         "pipeline_params",
         "diagnostics",
@@ -455,12 +454,7 @@ async def measure_sample(
         from promptpotter.application.scoring.formula import rescore_results
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
-        rescore_results(
-            [result],
-            session.scoring.scorer,
-            session.scoring.scorer_id,
-            session.scoring.scorer_formula,
-        )
+        rescore_results([result], session.scoring.scorer)
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         category, error_msg = _classify_http_error(exc)

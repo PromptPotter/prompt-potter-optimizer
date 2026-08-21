@@ -673,6 +673,10 @@ class LiveDashboardView(DerivedView):
 
         spend.total_used_usd = round(spend.backend.used_usd + spend.loop.used_usd, 6)
         spend.total_incurred_usd = round(spend.backend.incurred_usd + spend.loop.incurred_usd, 6)
+        spend.total_tokens_used = sum(
+            b.input_tokens + b.output_tokens for b in (spend.backend, spend.loop)
+        )
+        spend.unpriced_tokens = spend.backend.unpriced_tokens + spend.loop.unpriced_tokens
         self._schedule_persist()
 
     @property

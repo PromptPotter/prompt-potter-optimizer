@@ -107,9 +107,9 @@ def _make_replay_verdict(
         rd = rnd.round_data
         if rd is None:
             return VerdictOutcome(diverged=False)
-        rescore_results(rd.results, scorer, sc.scorer_id, sc.scorer_formula)
+        rescore_results(rd.results, scorer)
         for items in rd.all_candidate_results.values():
-            rescore_results(items, scorer, sc.scorer_id, sc.scorer_formula)
+            rescore_results(items, scorer)
         found = replay_all_mismatches(
             rd, rnd.decisions, origin_results=rnd.known_outcomes, ruler=ruler
         )
@@ -168,7 +168,7 @@ def ab_replay_cycle(
     # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw. Rescored first: the ruler is fitted
     # on the grades the CURRENT scorer gives, or arm B is measured against arm A's δ.
     origin_results = origin.results if origin is not None else []
-    rescore_results(origin_results, scorer, sc.scorer_id, sc.scorer_formula)
+    rescore_results(origin_results, scorer)
     origin_sp_hash = (
         JobSearchPoint(pipeline_params=origin.pipeline_params).sp_hash(session.pipeline_schema)
         if origin is not None

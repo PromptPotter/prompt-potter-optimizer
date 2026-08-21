@@ -74,12 +74,7 @@ def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMea
     return cast(QueryMeasurement, out)
 
 
-def _materialize_cached(
-    item: QueryMeasurement,
-    scorer: Scorer,
-    scorer_id: str,
-    scorer_formula: str | None,
-) -> QueryMeasurement:
+def _materialize_cached(item: QueryMeasurement, scorer: Scorer) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
     # Deliberately BINARY, on the archived vs rescored verdict rather than the graded fitness:
     # a float comparison fires per sample on every formula tweak, and this warning is calibrated
@@ -89,19 +84,18 @@ def _materialize_cached(
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
-    rescore_results([r], scorer, scorer_id, scorer_formula)
+    rescore_results([r], scorer)
     archived_hit = is_hit(archived_fitness)
     rescored_hit = is_hit(r.get("fitness"))
     if archived_fitness is not None and archived_hit != rescored_hit:
         predicted = r.get("predicted") or ""
         if not _BOLD_MARKER_RE.search(predicted):
             logger.warning(
-                "Cache rescore drift on %r: archived hit=%s → rescored hit=%s "
-                "(scorer=%s). Policy divergence — not explained by bold-wrapper strip.",
+                "Cache rescore drift on %r: archived hit=%s → rescored hit=%s. "
+                "Policy divergence — not explained by bold-wrapper strip.",
                 (r.get("query") or "")[:60],
                 archived_hit,
                 rescored_hit,
-                scorer_id,
             )
     return cast(QueryMeasurement, r)
 
@@ -138,8 +132,6 @@ class QueryLoopState:
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
-    scorer_id: str
-    scorer_formula: str | None
     # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
     # Persists results-so-far after each fresh measurement and returns the running fitness over
@@ -237,7 +229,7 @@ class _Slot:
 async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
     if cached is not None:
-        cached_r = _materialize_cached(cached, ctx.scorer, ctx.scorer_id, ctx.scorer_formula)
+        cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
         cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
         # Overlay current-run sample_id — archived traces may predate the field.
@@ -247,9 +239,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
     deprecated_display: QueryMeasurement | None = None
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
         # Rescored here, rendered in `_absorb`: a display call from a slot prints out of walk order.
-        deprecated_display = _materialize_cached(
-            cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
-        )
+        deprecated_display = _materialize_cached(cached_deprecated, ctx.scorer)
 
     result = await measure_sample(
         sample,
@@ -337,8 +327,6 @@ async def run_query_loop(
         on_sample_scored=on_sample_scored,
         axes=axes,
         scorer=session.scoring.scorer,
-        scorer_id=session.scoring.scorer_id,
-        scorer_formula=session.scoring.scorer_formula,
         deprecated_samples=deprecated_samples,
         persist_fresh=persist_fresh,
         running_scores=running_scores,

@@ -162,6 +162,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     backendTokens,
     loopTokens,
     totalTokens,
+    unpricedTokens,
   } = readSpend(dash);
 
   // Headline KPIs. `abilityDelta` is SERVED and is in LOGITS, so it renders as θ and never as
@@ -381,7 +382,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
             {budgetUsd != null ? ` / $${budgetUsd.toFixed(2)}` : ""}
           </span>
         ) : null}
-        {spend && spend.backend.unpriced_tokens + spend.loop.unpriced_tokens > 0 ? (
+        {unpricedTokens > 0 ? (
           <span
             className="remote-spend-warn"
             title="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop."

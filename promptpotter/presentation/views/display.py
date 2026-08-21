@@ -195,7 +195,11 @@ def _scoreboard(
     ranked = sorted(
         scored,
         key=lambda s: display_rank_key(
-            s.composite_fitness, s.accuracy, s.theta, is_winner=s.label == winner_label
+            s.composite_fitness,
+            s.accuracy,
+            s.theta,
+            is_winner=s.label == winner_label,
+            is_partial=bool(s.partial_reason),
         ),
         reverse=True,
     )

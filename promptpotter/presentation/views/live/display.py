@@ -11,7 +11,7 @@ from promptpotter.application.views.view_models import AnyView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.rendering import display_rank_key
+from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
     LLMCallProgressRecord,
@@ -108,7 +108,7 @@ class LiveDisplay(DerivedView):
         # Live round-leader tracker, ordered by the shared `display_rank_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
-        self._round_best_key: tuple[bool, float, float, float] | None = None
+        self._round_best_key: DisplayRankKey | None = None
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None

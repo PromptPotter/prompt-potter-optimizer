@@ -205,12 +205,7 @@ async def verify_candidate(
     workspace_qms = list(by_sample.values())
 
     if session.scoring.scorer is not None:
-        rescore_results(
-            cast("list[dict[str, Any]]", workspace_qms),
-            session.scoring.scorer,
-            session.scoring.scorer_id,
-            session.scoring.scorer_formula,
-        )
+        rescore_results(cast("list[dict[str, Any]]", workspace_qms), session.scoring.scorer)
     workspace_scores = compute_composite_fitness(
         workspace_qms,
         schema,

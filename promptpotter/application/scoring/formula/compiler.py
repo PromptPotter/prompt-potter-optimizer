@@ -161,15 +161,13 @@ def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
 
 
 def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
-    pd = result.get("pipeline_data") or {}
+    """A term is bound only where the row CARRIES it. Binding a 0 for an absent count scores the row
+    against a measurement nobody took; leaving it out is what raises ``ScoringTermMissingError``, the
+    verdict this module's own contract promises and the read side renders as *unscorable*.
 
-    step_tokens = pd.get("step_tokens") or {}
-    input_tokens = 0
-    output_tokens = 0
-    for entry in step_tokens.values():
-        if isinstance(entry, dict):
-            input_tokens += int(entry.get("input", 0))
-            output_tokens += int(entry.get("output", 0))
+    ``ground_truth_rank`` is the exception and stays bound at ``None`` — that is a value, meaning the
+    truth was not in the ranking, which is what ``rr`` scores as a miss."""
+    pd = result.get("pipeline_data") or {}
 
     # No ``hit`` here: it is written by ``rescore_results`` AFTER this scorer runs, so a
     # formula naming it read 0 on every fresh row and the PREVIOUS scorer's value on a
@@ -177,14 +175,17 @@ def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
     # arm that decides a label.
     ns: dict[str, Any] = {
         "ground_truth_rank": result.get("ground_truth_rank"),
-        "n_candidates": result.get("n_candidates", 0),
         "error": result.get("error"),
         "predicted": result.get("predicted", ""),
         "ground_truth": result.get("ground_truth", ""),
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
         **SCORING_FUNCTIONS,
     }
+    if "n_candidates" in result:
+        ns["n_candidates"] = result["n_candidates"]
+    if step_tokens := (pd.get("step_tokens") or {}):
+        entries = [e for e in step_tokens.values() if isinstance(e, dict)]
+        ns["input_tokens"] = sum(int(e.get("input", 0)) for e in entries)
+        ns["output_tokens"] = sum(int(e.get("output", 0)) for e in entries)
 
     for key, val in pd.items():
         if isinstance(val, dict):
