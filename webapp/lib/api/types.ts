@@ -11,7 +11,6 @@ export type {
   CampaignListResponse,
   CampaignSummary,
   RankedEdit,
-  CellEffect,
   EffectProvenance,
   EditSpread,
   CampaignReading,

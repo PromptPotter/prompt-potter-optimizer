@@ -44,7 +44,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
 
-Reads happen by opening files. There is no read CLI. The file tree is the dashboard.
+Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS campaigns is in no single file. The file tree is the dashboard.
 
 ## Live-run supervision
 
@@ -80,6 +80,13 @@ Read this before proposing any new run. It is the reason a year of panels produc
 - Found in passing and closed: the inner benchmark's `campaign.yaml` was **completely unhashed**, so editing its `scoring` formula or `pobb_epsilon` would have silently pooled measurements taken under different rules.
 
 ## What the outer panel can and cannot tell you (73 cells / 17 arms / 6 seeds, 2026-08-15)
+
+> **Recompute this section before trusting it — `promptpotter evidence --campaign <id> ...` now
+> answers most of it on demand.** The variance split is `variance.{cell_effect_sd,arm_effect_sd,
+> residual_sd}`, the resolving power is `power.{paired_se,min_detectable_effect,
+> cells_for_largest_gap}`, and the replicate and run-order reasoning are `replicates` /
+> `order_confound`. The figures below are a READING taken on 2026-08-15, not a standing fact:
+> this skill's own rule is to prefer the answer already on disk, and that answer now has a verb.
 
 - **Variance structure.** Seed effect SD **0.198**, arm effect **0.109** (both shrunk by their own estimation error), residual **0.170** — so seed variance is ~3.3x arm variance, and pairing every arm across the same cells is what makes the comparison possible at all. A typical two-arm gap (0.154 logits) resolves at **~10 paired cells**; the panel runs 6. Un-paired it would take **22.9**. The earlier "~35 cells/arm" figure came from a 39-cell read where the arm effect measured 0.077; it roughly doubled as the corpus grew, so **the panel is closer to working than it used to look** — and 6 → 10 cells is the cheapest move on the board.
 - **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict (a *within-round* paired comparison against the matched origin on the same samples), so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars. Rendered per cell by `application/runner/inner/spawn.py::_lift_shape`.

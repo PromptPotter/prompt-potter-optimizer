@@ -481,8 +481,15 @@
         "description": "One campaign, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same campaign, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
           "arm_id": {
-            "title": "Arm Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arm Id"
           },
           "campaign_id": {
             "title": "Campaign Id",
@@ -721,31 +728,6 @@
         "title": "CampaignSummary",
         "type": "object"
       },
-      "CellEffect": {
-        "additionalProperties": false,
-        "description": "One environment cell's paired (candidate − origin) effect for an edit.",
-        "properties": {
-          "cell": {
-            "title": "Cell",
-            "type": "string"
-          },
-          "mean_d": {
-            "title": "Mean D",
-            "type": "number"
-          },
-          "n": {
-            "title": "N",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "cell",
-          "mean_d",
-          "n"
-        ],
-        "title": "CellEffect",
-        "type": "object"
-      },
       "CommandAcceptedBody": {
         "additionalProperties": false,
         "description": "The 202 response shape declared in ``m12-api-openapi.yaml``.",
@@ -813,6 +795,10 @@
             "title": "N Rulers",
             "type": "integer"
           },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
           "reason": {
             "enum": [
               "one_ruler",
@@ -839,7 +825,8 @@
           "verdict",
           "reason",
           "datasets",
-          "n_rulers"
+          "n_rulers",
+          "note"
         ],
         "title": "Comparability",
         "type": "object"
@@ -3019,6 +3006,12 @@
         "additionalProperties": false,
         "description": "One pickable metric. Served rather than restated in the browser, so a label and a unit have\none owner and a picker cannot drift from what the server actually computed.",
         "properties": {
+          "axis_label": {
+            "description": "What to CALL this metric's axis: the label, plus the unit only where the unit names\nsomething the reader does not already have. SERVED, so neither surface hand-writes the\n\"unnamed\" set below to derive it.",
+            "readOnly": true,
+            "title": "Axis Label",
+            "type": "string"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -3067,7 +3060,8 @@
           "expression",
           "unit",
           "higher_is_better",
-          "description"
+          "description",
+          "axis_label"
         ],
         "title": "MetricSpec",
         "type": "object"
@@ -3486,23 +3480,6 @@
             "title": "N Measurements",
             "type": "integer"
           },
-          "per_cell_effects": {
-            "items": {
-              "$ref": "#/components/schemas/CellEffect"
-            },
-            "title": "Per Cell Effects",
-            "type": "array"
-          },
-          "prompt_state": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Prompt State",
-            "type": "object"
-          },
           "provenance": {
             "items": {
               "$ref": "#/components/schemas/EffectProvenance"
@@ -3518,9 +3495,7 @@
         "required": [
           "state_hash",
           "label",
-          "prompt_state",
           "provenance",
-          "per_cell_effects",
           "anchor_effect",
           "ci_lo",
           "ci_hi",
@@ -6178,6 +6153,18 @@
               },
               "title": "Campaign",
               "type": "array"
+            }
+          },
+          {
+            "description": "Pool every campaign bound to this dataset, in addition to any named by `campaign`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Pool every campaign bound to this dataset, in addition to any named by `campaign`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
+              "title": "Dataset",
+              "type": "string"
             }
           },
           {

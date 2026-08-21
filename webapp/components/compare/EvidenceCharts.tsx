@@ -18,7 +18,7 @@
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import type { CampaignReading, Evidence } from "@/lib/api";
-import { fmtMetricAxis, fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
+import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
 import type { MetricUnit } from "@/lib/format";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, useThemeVersion } from "@/lib/theme";
 
@@ -72,7 +72,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   useThemeVersion();
   const cells = evidence.metric.scored_cells;
   const series = evidence.campaigns;
-  const axis = fmtMetricAxis(evidence.metric.spec);
+  const axis = evidence.metric.spec.axis_label;
 
   // Merged answers BEFORE the empty guard: it needs no shared cell, so a selection with nothing
   // in common still reports what each campaign is worth on its own.

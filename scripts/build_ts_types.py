@@ -20,7 +20,6 @@ sys.path.insert(0, str(_REPO))
 from promptpotter.application.evidence import (
     ArmReplicate,
     CampaignReading,
-    CellEffect,
     Comparability,
     EditSpread,
     EffectProvenance,
@@ -204,7 +203,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CampaignSummary,
     CampaignListResponse,
     # --- cross-campaign evidence (application/evidence) — nested types first ---
-    CellEffect,
     EffectProvenance,
     EditSpread,
     RankedEdit,

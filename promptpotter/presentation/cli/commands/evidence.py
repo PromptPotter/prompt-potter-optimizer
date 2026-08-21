@@ -15,6 +15,7 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     get_verbose,
     identity_from_args,
+    resolve_campaign_hint,
 )
 from promptpotter.presentation.views.display import fmt_ci, fmt_pvalue
 
@@ -41,25 +42,6 @@ if _unformatted:
     raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")
 del _unformatted
 
-# Units that name nothing a reader needs: a level and a delta are already in the measurand's own
-# scale, and a composed expression has no unit at all.
-_UNNAMED_UNITS = frozenset({"level", "delta", "composed"})
-
-_COMPARABILITY_NOTE = {
-    "datasets_differ": (
-        "Comparability NO: this selection spans several datasets, which measure different things "
-        "— the values above are not one quantity and no pairing rescues them."
-    ),
-    "rulers_differ": (
-        "Comparability NO: these origins were measured on different delta rulers, so their "
-        "absolute levels are not one quantity. Only within-ruler comparisons hold."
-    ),
-    "ruler_unstamped": (
-        "Comparability UNKNOWN: at least one origin predates the ruler stamp. Absolute levels "
-        "above may sit on different delta scales — pair on cells, do not read the column."
-    ),
-}
-
 
 def _roster_lines(ev: Evidence) -> list[str]:
     """One row per campaign, identity and reading in ONE table. Two tables — a roster in the
@@ -67,9 +49,8 @@ def _roster_lines(ev: Evidence) -> list[str]:
     different units, and the operator had no way to see which column the picker moved."""
     m = ev.metric
     spec = _UNIT_SPEC[m.spec.unit]
-    unit = "" if m.spec.unit in _UNNAMED_UNITS else f" ({m.spec.unit})"
     lines = [
-        f"{len(ev.campaigns)} campaign(s), oldest first, read under {m.spec.label}{unit}.",
+        f"{len(ev.campaigns)} campaign(s), oldest first, read under {m.spec.axis_label}.",
         m.spec.description,
         # The value column brackets that campaign's OWN cells — its `cells` count — because that
         # is what `mean_ci_t` was handed. Calling it "merged over the cells every campaign
@@ -90,7 +71,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
         value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
         lines.append(
             f"{r.created_at[:10]:<10}  {r.campaign_id:<26}  {r.dataset_name[:18]:<18}  "
-            f"{r.arm_id[:8]:<8}  {(r.ruler_id or '-')[:8]:<8}  {value}  "
+            f"{(r.arm_id or '-')[:8]:<8}  {(r.ruler_id or '-')[:8]:<8}  {value}  "
             f"{fmt_ci(r.ci_lo, r.ci_hi, spec=spec):>20}  {r.n_cells:>5}  {r.n_unscorable:>6}  "
             f"{r.rounds_scored:>6}"
         )
@@ -105,9 +86,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
             "\nNo campaign scored a cell under this metric — unavailable for this selection, "
             "which is not the same as a value of zero."
         )
-    note = _COMPARABILITY_NOTE.get(ev.comparability.reason)
-    if note:
-        lines.append(f"\n{note}")
+    lines.append(f"\n{ev.comparability.note}")
     for rep in ev.replicates:
         lines.append(
             f"\nArm {rep.arm_id[:8]} ran {len(rep.campaign_ids)} times — a REPLICATE, spread "
@@ -221,8 +200,13 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
             f"{spec.format(c.anchor_effect):>11}  {fmt_ci(c.ci_lo, c.ci_hi, spec=spec):>20}  "
             f"{c.n_cells:>5}  {c.n_measurements:>4}{'*' if clears else ' '} {c.label}"
         )
+    spread = ev.spread
     return [
         *lines,
+        "",
+        f"Spread across all {spread.n_edits} edit(s): SD {spec.format(spread.edit_effect_sd)}"
+        if spread.edit_effect_sd is not None
+        else f"Spread across all {spread.n_edits} edit(s): one reading has none.",
         "",
         "* the interval excludes zero. Everything else is consistent with no effect — the "
         "ranking orders them, it does not endorse them.",
@@ -236,7 +220,12 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
 
     setup_logging(style="full" if get_verbose() else "cli")
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    ids = list(args.campaign) or campaigns_on_dataset(stores, args.dataset or "")
+    # Through the ONE matcher, so `--campaign ca6d4d` reaches the same campaign here as it does
+    # for `verify`. An id that still resolves to nothing rides `unread_campaigns`, which is the
+    # read's own way of saying so — it was the only way a mistyped id surfaced at all.
+    ids = [resolve_campaign_hint(stores, c) for c in args.campaign] or campaigns_on_dataset(
+        stores, args.dataset or ""
+    )
     try:
         ev = campaign_evidence(
             stores, ids, include_ranking=args.ranking, metric=args.metric or MEASURAND

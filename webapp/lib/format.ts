@@ -137,14 +137,6 @@ export function fmtMetricInterval(unit: MetricUnit, lo: number | null, hi: numbe
   return `[${UNIT_FORMAT[unit](lo)}, ${UNIT_FORMAT[unit](hi)}]`;
 }
 
-// What the metric's axis is called: its label, plus the unit only where the unit names something
-// the reader does not already have. Mirrors `cli/commands/evidence.py::_roster_lines`.
-const UNNAMED_UNITS = new Set<MetricUnit>(["level", "delta", "composed"]);
-
-export function fmtMetricAxis(spec: MetricSpec): string {
-  return UNNAMED_UNITS.has(spec.unit) ? spec.label : `${spec.label} (${spec.unit})`;
-}
-
 // A campaign's distinguishing half. The `{dataset}__{rand6}` suffix is what separates two runs
 // of one origin, and the dataset is already named by the surface showing the row.
 export function shortId(campaignId: string): string {

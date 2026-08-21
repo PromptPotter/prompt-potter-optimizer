@@ -45,7 +45,7 @@ covered, re-read state from disk — that is what makes turn 0 and turn 100 the 
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 
-Reads happen by opening files; there is no read CLI. Campaign detail lives in
+Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS campaigns is in no single file. Campaign detail lives in
 `campaigns/<campaign_id>/{campaign.json,dashboard.json,log.md}`, per-cycle detail in
 `cycles/<cycle_id>/{index.json,log.md,rounds/}`, per-round node I/O in
 `.runtime/cache/rounds/round_NNNN.json`. **Open JSON as UTF-8 explicitly** — a default read on
@@ -73,6 +73,9 @@ max — ask before exceeding.
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. |
 | `set-budget` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens`. |
+| `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
+| `verify` | Re-score one candidate on more samples and record the result WITHOUT touching the cycle. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
+| `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
 
 **A budget halt is not the end of a run — it is two verbs.** `SPEND_BUDGET` / `TOKEN_BUDGET` mean
 the cycle hit *its own declared ceiling*, not that the work is done. Only `spend_budget_usd` is

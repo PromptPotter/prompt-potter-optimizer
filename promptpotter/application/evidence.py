@@ -23,7 +23,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -71,8 +71,9 @@ ComparabilityReason = Literal["one_ruler", "rulers_differ", "ruler_unstamped", "
 # --- the ranking: what a scored EDIT is worth (needs round >= 1, and is opt-in) ---
 
 
-class CellEffect(StrictModel):
-    """One environment cell's paired (candidate − origin) effect for an edit."""
+class CellEffect(NamedTuple):
+    """One environment cell's paired (candidate − origin) effect. INTERNAL to ``_finalize`` — the
+    two numbers a surface renders, ``n_cells`` and ``n_measurements``, are folded from it here."""
 
     cell: str
     mean_d: float
@@ -100,9 +101,10 @@ class RankedEdit(StrictModel):
 
     state_hash: str
     label: str
-    prompt_state: dict[str, dict[str, str]]  # {node: {field: value}} — the edit itself
+    # Neither the edit's own text nor its per-cell breakdown rides here: a {node: {field: prose}}
+    # map per ranked edit is the largest thing this read can put on the wire, and no surface opens
+    # it. `state_hash` names the edit and `provenance` says where to read it.
     provenance: list[EffectProvenance]
-    per_cell_effects: list[CellEffect]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
     # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
     ci_lo: float | None
@@ -146,8 +148,9 @@ class CampaignReading(StrictModel):
     created_at: str
     # The configuration the campaign RAN UNDER, hashed off round 0's `optimizer_prompt_hashes`.
     # Two campaigns sharing it are replicates of one arm however much else differs, which is the
-    # fact a roster listing campaigns cannot show.
-    arm_id: str
+    # fact a roster listing campaigns cannot show. `None` where round 0 carries no hashes: the arm
+    # is UNKNOWN, which groups with nothing — least of all with every other unstamped campaign.
+    arm_id: str | None
     # Which δ scale this origin's θ was read on. Campaigns whose ids differ measured on different
     # rulers, so their ABSOLUTE levels are not comparable however well paired the cells are.
     ruler_id: str | None
@@ -214,6 +217,10 @@ class Comparability(StrictModel):
     reason: ComparabilityReason
     datasets: list[str]
     n_rulers: int
+    # The sentence BOTH surfaces render, so neither keeps a per-reason map that can go an arm out
+    # of step with the other's — including the one reason that QUALIFIES rather than disqualifies
+    # the column, which a map indexed defensively drops in silence.
+    note: str
 
 
 class EvidenceVariance(StrictModel):
@@ -529,7 +536,10 @@ def _reading_row(
         campaign_id=campaign_id,
         dataset_name=dataset_name,
         created_at=created_at,
-        arm_id=_state_hash({"": dict(hashes)} if isinstance(hashes, dict) and hashes else {}),
+        # An UNSTAMPED round is not the origin arm — it is an UNKNOWN one, which groups with
+        # nothing. Collapsing the two onto one hash makes `_replicates` report every unstamped
+        # campaign as a replicate of the rest, spread and all, over a shared absence.
+        arm_id=_state_hash({"": dict(hashes)}) if isinstance(hashes, dict) and hashes else None,
         ruler_id=doc.get("ruler_id"),
         spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
         rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
@@ -545,7 +555,8 @@ def _reading_row(
 def _replicates(rows: list[CampaignReading]) -> list[ArmReplicate]:
     by_arm: dict[str, list[CampaignReading]] = {}
     for row in rows:
-        by_arm.setdefault(row.arm_id, []).append(row)
+        if row.arm_id is not None:
+            by_arm.setdefault(row.arm_id, []).append(row)
     out = []
     for arm, same in sorted(by_arm.items()):
         levels = [r.value for r in same if r.value is not None]
@@ -566,17 +577,38 @@ def _comparability(rows: list[CampaignReading]) -> Comparability:
     known = {r for r in rulers if r is not None}
     reason: ComparabilityReason
     verdict: bool | None
+    note: str
     if len(datasets) > 1:
         # Different measurands entirely — no ruler agreement could rescue this, so it outranks
         # everything below.
         reason, verdict = "datasets_differ", False
+        note = (
+            "Comparability NO — this selection spans several datasets, which measure different "
+            "things. The values are not one quantity and no pairing rescues them; the roster and "
+            "spend still compare, the numbers do not."
+        )
     elif not rulers or None in rulers:
         reason, verdict = "ruler_unstamped", None
+        note = (
+            "Comparability UNKNOWN — at least one origin predates the ruler stamp, which is not "
+            "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
+            "do not read the value column across campaigns."
+        )
     elif len(known) > 1:
         reason, verdict = "rulers_differ", False
+        note = (
+            "Comparability NO — these origins were measured on different δ rulers, so their "
+            "absolute values are not one quantity. Only within-ruler comparisons hold."
+        )
     else:
         reason, verdict = "one_ruler", True
-    return Comparability(verdict=verdict, reason=reason, datasets=datasets, n_rulers=len(known))
+        note = (
+            "Comparability YES — these origins were measured on one δ ruler, so their values are "
+            "directly comparable."
+        )
+    return Comparability(
+        verdict=verdict, reason=reason, datasets=datasets, n_rulers=len(known), note=note
+    )
 
 
 def _variance(by_arm: dict[str, dict[str, float]]) -> EvidenceVariance | None:
@@ -720,9 +752,7 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
     return RankedEdit(
         state_hash=state_hash,
         label=acc.label,
-        prompt_state=acc.prompt_state,
         provenance=acc.provenance,
-        per_cell_effects=per_cell,
         anchor_effect=anchor,
         ci_lo=ci_lo,
         ci_hi=ci_hi,
@@ -734,7 +764,6 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
 __all__ = [
     "ArmReplicate",
     "CampaignReading",
-    "CellEffect",
     "Comparability",
     "EditSpread",
     "EffectProvenance",

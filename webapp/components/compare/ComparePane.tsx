@@ -39,32 +39,12 @@ const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
   },
 ];
 
-// Keyed by `Comparability.reason`. Every one of these disqualifies or qualifies the `level`
-// column, so none may render as a shrug.
-const COMPARABILITY: Record<Evidence["comparability"]["reason"], { tone: string; text: string }> = {
-  one_ruler: {
-    tone: "l4-note",
-    text: "These origins were measured on one δ ruler, so their values are directly comparable.",
-  },
-  rulers_differ: {
-    tone: "l4-warn",
-    text:
-      "These origins were measured on different δ rulers, so their absolute values are not one " +
-      "quantity. Only within-ruler comparisons hold.",
-  },
-  ruler_unstamped: {
-    tone: "l4-warn",
-    text:
-      "At least one origin predates the ruler stamp, so comparability is unknown — which is not " +
-      "the same as yes. Pair on cells; do not read the value column across campaigns.",
-  },
-  datasets_differ: {
-    tone: "l4-warn",
-    text:
-      "This selection spans several datasets, which measure different things. The values are not " +
-      "one quantity and no pairing rescues them — the roster and spend still compare, the numbers do not.",
-  },
-};
+// The SENTENCE is served (`Comparability.note`); a per-reason text map here would be a second
+// copy free to drift out of step with the terminal's. Only the tone is a rendering choice, and
+// it reads `verdict`, whose `null` is UNKNOWN and never a yes.
+function comparabilityTone(verdict: boolean | null): string {
+  return verdict === true ? "l4-note" : "l4-warn";
+}
 
 export function ComparePane() {
   const { campaigns } = useWorkspace();
@@ -101,10 +81,7 @@ export function ComparePane() {
     setSelected([]);
   }, [reset]);
 
-  const comparability = useMemo(
-    () => (evidence ? COMPARABILITY[evidence.comparability.reason] : null),
-    [evidence],
-  );
+  const comparability = evidence?.comparability ?? null;
   // Whether the selected metric read ANYTHING. Everything below the picker describes a number
   // that then does not exist, so it stays silent rather than restating the same absence four ways.
   const readable = !!evidence?.campaigns.some((c) => c.n_cells > 0);
@@ -187,7 +164,11 @@ export function ComparePane() {
                 )}
                 {readable ? (
                   <>
-                    {comparability && <p className={comparability.tone}>{comparability.text}</p>}
+                    {comparability && (
+                      <p className={comparabilityTone(comparability.verdict)}>
+                        {comparability.note}
+                      </p>
+                    )}
                     <EvidenceCharts evidence={evidence} view={view} />
                     <SeriesLegend evidence={evidence} />
                     <MetricLede evidence={evidence} view={view} />
@@ -315,6 +296,9 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </p>
       ) : (
         <>
+          {/* The three-way split only. `null_arm_scatter` is the INTERPRETATION of the arm
+              row and the lede below states it with its meaning — a second, bare copy in this
+              list showed the operator one number twice in one card. */}
           <dl className="l4-readings">
             <div>
               <dt>cell effect</dt>
@@ -329,10 +313,6 @@ function Readings({ evidence }: { evidence: Evidence }) {
             <div>
               <dt>residual</dt>
               <dd>{v.residual_sd.toFixed(3)}</dd>
-            </div>
-            <div>
-              <dt>noise floor</dt>
-              <dd>{v.null_arm_scatter.toFixed(3)}</dd>
             </div>
           </dl>
           <p className="l4-lede">

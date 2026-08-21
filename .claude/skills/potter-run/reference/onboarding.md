@@ -16,8 +16,10 @@ those two servers do internally.
 **Web flow:**
 
 1. Sidebar → "Start a new campaign" opens the IngestPane.
-2. Upload CSV / TSV / JSON / JSONL / XLSX, ≤25 MB, ≤500 rows → a server-held `DraftCampaign`
-   (nothing on disk yet).
+2. Upload CSV / TSV / JSON / JSONL / XLSX, ≤25 MB (`MAX_UPLOAD_BYTES`), ≤50 000 rows
+   (`MAX_SAMPLES`) → a DURABLE check-in campaign. It is on disk and in the sidebar from this
+   first action, survives a restart, and `draft_id` IS its `campaign_id`; nothing RUNS until
+   Start.
 3. The user types what the prompt is supposed to do. Submitting marks it CONFIRMED.
 4. One `checkin` turn proposes the column map (`query` + `ground_truth`), the six decomposed
    Layer-1 prompt fields, and the 7-field `task_context`; code fills the closed-label answer

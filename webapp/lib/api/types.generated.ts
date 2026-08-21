@@ -801,13 +801,6 @@ export interface CampaignListResponse {
   total: number;
 }
 
-/** One environment cell's paired (candidate − origin) effect for an edit. */
-export interface CellEffect {
-  cell: string;
-  mean_d: number;
-  n: number;
-}
-
 /** Where one occurrence of an edit was measured on disk. */
 export interface EffectProvenance {
   campaign_id: string;
@@ -826,9 +819,7 @@ export interface EditSpread {
 export interface RankedEdit {
   state_hash: string;
   label: string;
-  prompt_state: Record<string, Record<string, string>>;
   provenance: EffectProvenance[];
-  per_cell_effects: CellEffect[];
   anchor_effect: number;
   ci_lo: number | null;
   ci_hi: number | null;
@@ -842,6 +833,7 @@ export interface Comparability {
   reason: 'one_ruler' | 'rulers_differ' | 'ruler_unstamped' | 'datasets_differ';
   datasets: string[];
   n_rulers: number;
+  note: string;
 }
 
 /** One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns */
@@ -887,6 +879,10 @@ export interface MetricSpec {
   unit: 'level' | 'delta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds' | 'composed';
   higher_is_better: boolean | null;
   description: string;
+  /** What to CALL this metric's axis: the label, plus the unit only where the unit
+   * names something the reader does not already have. SERVED, so neither
+   * surface hand-writes the "unnamed" set below to derive it. */
+  axis_label: string;
 }
 
 /** One campaign, read under the selected metric — its identity, its per-cell values and the one */
@@ -894,7 +890,7 @@ export interface CampaignReading {
   campaign_id: string;
   dataset_name: string;
   created_at: string;
-  arm_id: string;
+  arm_id: string | null;
   ruler_id: string | null;
   spend_usd: number | null;
   rounds_scored: number;

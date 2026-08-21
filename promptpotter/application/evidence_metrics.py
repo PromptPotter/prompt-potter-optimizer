@@ -26,6 +26,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from pydantic import computed_field
+
 from promptpotter.application.scoring.formula.compiler import (
     CompiledExpression,
     compile_expression,
@@ -65,6 +67,19 @@ class MetricSpec(StrictModel):
     # winner picked by a guess.
     higher_is_better: bool | None
     description: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def axis_label(self) -> str:
+        """What to CALL this metric's axis: the label, plus the unit only where the unit names
+        something the reader does not already have. SERVED, so neither surface hand-writes the
+        "unnamed" set below to derive it."""
+        return self.label if self.unit in _UNNAMED_UNITS else f"{self.label} ({self.unit})"
+
+
+# A level and a delta are already in the measurand's own scale, and a composed expression has no
+# unit at all — naming any of the three tells the reader nothing they do not have.
+_UNNAMED_UNITS: frozenset[str] = frozenset({"level", "delta", "composed"})
 
 
 # --- Channels: what one row can be asked for -------------------------------------------------
@@ -130,6 +145,8 @@ def _row_channels(row: Mapping[str, Any]) -> dict[str, float]:
     put("final_lift", _number(pd.get("inner_final_lift")))
     put("peak_lift", _number(pd.get("inner_peak_lift")))
     put("rounds", _number(pd.get("inner_rounds_ran")))
+    put("round_budget", _number(pd.get("inner_round_budget")))
+    put("unworked", _number(pd.get("inner_unworked_s")))
 
     # Two homes, never a fallback chain: a row is EITHER an inner campaign, whose cost the spawn
     # site forwards, OR a pipeline sample, whose cost rides `step_tokens`. No outer node is
@@ -152,6 +169,8 @@ CHANNELS: tuple[str, ...] = (
     "final_lift",
     "peak_lift",
     "rounds",
+    "round_budget",
+    "unworked",
     "latency",
     "cost",
     "tokens",
@@ -238,6 +257,30 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         unit="rounds",
         higher_is_better=False,
         description="How many L1 rounds each seed's inner campaign got through before it stopped.",
+    ),
+    MetricSpec(
+        key="round_budget",
+        label="Rounds available",
+        expression="round_budget",
+        unit="rounds",
+        higher_is_better=None,
+        description=(
+            "How many L1 rounds each seed's inner campaign was GIVEN. Read beside Rounds run: "
+            "two of two is a cell that finished, two of twelve is one that stopped early."
+        ),
+    ),
+    MetricSpec(
+        key="unworked",
+        label="Time not working",
+        expression="unworked",
+        unit="seconds",
+        higher_is_better=False,
+        description=(
+            "Seconds the seed's inner campaign was blocked rather than working — the machine "
+            "suspended, or queued behind the rate limiter another cell was using — and handed "
+            "back to its deadline. Read it beside a short run: it separates a cell that was slow "
+            "from a box that was oversubscribed while it ran."
+        ),
     ),
     MetricSpec(
         key="latency",

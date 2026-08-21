@@ -11,7 +11,11 @@ from typing import Annotated
 
 from fastapi import Query
 
-from promptpotter.application.evidence import Evidence, campaign_evidence
+from promptpotter.application.evidence import (
+    Evidence,
+    campaign_evidence,
+    campaigns_on_dataset,
+)
 from promptpotter.application.evidence_metrics import MEASURAND
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -28,6 +32,17 @@ def get_evidence(
         list[str],
         Query(description="Campaign ids to pool. Repeat the parameter; may span datasets."),
     ] = [],  # noqa: B006 -- FastAPI reads the default to type the query, and never mutates it
+    dataset: Annotated[
+        str,
+        Query(
+            description=(
+                "Pool every campaign bound to this dataset, in addition to any named by "
+                "`campaign`. Read off each manifest, so it catches an A/B arm, a fork and a "
+                "rename that a name-shaped guess would skip — which is what the browser was "
+                "doing client-side, then sending one query parameter per campaign."
+            )
+        ),
+    ] = "",
     ranking: Annotated[
         bool,
         Query(
@@ -56,8 +71,11 @@ def get_evidence(
     can resolve, the run-order confound, and — under the selected metric — a merged interval per
     campaign with every pairwise test. Reduced fresh from disk on each fetch (on-demand, not the
     2 s poll); zero LLM, nothing persisted."""
+    selected = list(campaign)
+    if dataset:
+        selected += [c for c in campaigns_on_dataset(stores, dataset) if c not in selected]
     try:
-        return campaign_evidence(stores, list(campaign), include_ranking=ranking, metric=metric)
+        return campaign_evidence(stores, selected, include_ranking=ranking, metric=metric)
     except (ValueError, SyntaxError) as exc:
         # The `?lens=` contract: a selection this layer cannot resolve is the caller's mistake, and
         # it names what went wrong rather than 500-ing on a formula someone typed. Passed through
