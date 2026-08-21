@@ -130,12 +130,16 @@ renderer, period.** No sidecar paths, no out-of-band state mounting.
 **Everything that reaches a model is bounded where it is PRODUCED** —
 an LLM-written field at its parse boundary (`dispatch/schemas.py`:
 `max_length` plus a truncating validator), operator-authored framing
-at its mint-time `check_budget`, a derived view at its render cap. A
-bound at the *composition* site could only choose which half the model
-sees, so a composed prompt over its node's ceiling
+at its mint-time `check_budget`, a derived view at its render cap.
+A composition-site bound may never **cut**: slicing a rendered panel
+only chooses which half the model sees. It may **select** — whole
+items dropped under the node's ceiling
 (`OPTIMIZER_PROMPT_BUDGET_CHARS`; `prompt_chars` on the ledger is the
-measurement) is a **report that a producer bound failed**, never the
-place to fix it. Two corollaries are easy to miss: input length is a
+measurement), in the layout's own priority order, leaving a smaller
+COMPLETE package rather than half of one. Per-panel caps stay
+production bounds, and each is chosen alone: their SUM is nobody's
+until the composition owns it, which is the whole job of selecting.
+Two corollaries are easy to miss: input length is a
 quality tax and not only a bill — every model degrades as its input
 grows — and **the response JSON Schema is prompt text**, riding
 `response_format` on every call, so its field names and `description`

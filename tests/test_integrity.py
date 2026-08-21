@@ -599,7 +599,8 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
         axes=None,
     )
     with caplog.at_level(logging.WARNING):
-        rendered = _r_task_context(bundle)
+        # Items joined for the assertion below; `task_context` is one item by contract.
+        rendered = "".join(i.text for i in _r_task_context(bundle))
     assert long_field in rendered, "authored framing must reach the LLM whole"
     assert "…" not in rendered, "authored text is never clipped"
     assert not any("cap" in r.getMessage() for r in caplog.records), (
@@ -3414,3 +3415,123 @@ def test_ranking_is_opt_in_and_opens_no_later_round_until_asked(built_stores: An
     # Paired candidate − origin on the cells both measured: (0.6-0.2 + 0.9-0.4) / 2.
     assert on.edits[0].anchor_effect == pytest.approx(0.45)
     assert on.edits[0].n_cells == 2
+
+
+def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None:
+    """The optimizer must never be asked to judge a number it was not told the meaning of.
+
+    Panels used to bound themselves and each bound was chosen alone, so their sum ran ~2x the node
+    ceiling: whether a small panel reached the prompt at all depended on how much the large ones
+    happened to want that round. Nothing errors when it does not — the model simply reasons without
+    its objective, its precision and its caveats, and the round completes looking normal.
+
+    Round-robin over ITEMS is what fixes it: every panel places its first item before any panel
+    places its second. Ordering greedily instead — the obvious implementation — fails this.
+    """
+    from promptpotter.application.optimization.dispatch.bundle import (
+        FENCE_CLOSE,
+        FENCE_OPEN_PREFIX,
+        Item,
+    )
+    from promptpotter.application.optimization.dispatch.compose import select
+    from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
+
+    # One panel that would eat any budget, and the short frame panels behind it in layout order.
+    big = [Item(f"row {i}: " + "x" * 400, trusted=False) for i in range(12)]
+    rendered = {
+        "sample_transcripts": big,
+        "measurand": [Item("OBJECTIVE: composite_fitness = 0.51")],
+        "confounds": [Item("LIVE CAVEATS: COLD RULER")],
+        "budget_state": [Item("BUDGET: round 1 of 4")],
+    }
+    order = ["sample_transcripts", "measurand", "confounds", "budget_state"]
+
+    picked, coverage = select(rendered, order, budget=2_000)
+
+    # The big panel is THINNED, not dropped, and not served whole.
+    assert 0 < coverage["sample_transcripts"].placed < coverage["sample_transcripts"].produced
+    # …and every short panel behind it still arrived, whole.
+    for name in ("measurand", "confounds", "budget_state"):
+        assert picked[name] == rendered[name][0].text, f"{name} starved by the panel ahead of it"
+
+    # The composition — not the panel — states what it showed, because only it knows.
+    assert "showed" in picked["sample_transcripts"]
+    # Its untrusted rows are fenced ONCE, around the surviving run, so the tag cannot be split.
+    assert picked["sample_transcripts"].count(FENCE_OPEN_PREFIX) == 1
+    assert picked["sample_transcripts"].count(FENCE_CLOSE) == 1
+
+    # Coverage reports SILENCE at zero. `injection_chars` omits empty panels by construction, so a
+    # panel that never rendered in a whole campaign read exactly like one nobody put in the layout
+    # — which is how one sat on three floors, unfired, for 414 optimizer calls.
+    picked2, coverage2 = select({**rendered, "l1_wounds": []}, [*order, "l1_wounds"], budget=2_000)
+    assert coverage2["l1_wounds"].produced == 0
+    assert picked2["l1_wounds"] == ""
+
+    # A budget too small for even one item yields nothing, never half of one.
+    picked3, _ = select(rendered, order, budget=5)
+    assert all(v == "" for v in picked3.values())
+
+    # An INDIVISIBLE panel is all-or-nothing at every budget. Half the prompt under edit is not a
+    # smaller view of it — every mutation is a whole-field replacement, so a field the generator
+    # cannot see is one it overwrites blind. Which panels those are is asked of the kind each
+    # signal declares (`InjectionKind.divisible`), never of a list here: the hand-authored set this
+    # replaced named `task_context` and silently skipped `rendered_prompt`.
+    fields = ("persona", "task_intent", "instruction", "thinking_style", "answer_format")
+    edit_order = ["rendered_prompt", "sample_transcripts", "measurand"]
+    edit_rendered = {
+        **rendered,
+        "rendered_prompt": [Item(f"[{f}] " + "y" * 300) for f in fields],
+    }
+    whole = frozenset(n for n in edit_order if not INJECTIONS[n].kind.divisible)
+    assert "rendered_prompt" in whole, "the artifact under edit must never arrive truncated"
+    for squeeze in (400, 900, 1_600, 3_000, 6_000):
+        _, cov = select(edit_rendered, edit_order, budget=squeeze, exempt=whole)
+        for name in whole:
+            c = cov[name]
+            assert c.placed in (0, c.produced), (
+                f"{name} placed {c.placed}/{c.produced} items at budget {squeeze} — "
+                "an indivisible panel was served in half"
+            )
+
+
+def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None:
+    """`absorb_round` stamps a round's ruler identity AFTER the critique call, so on that path the
+    round document still reads cold. Sourced from it, `confounds` told the distiller "COLD RULER"
+    on every warm round — a panel stating a falsehood, with no symptom anywhere to catch it."""
+    from unittest.mock import Mock
+
+    from factories import round_result
+
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.dispatch.facade import build_bundle
+    from promptpotter.application.optimization.dispatch.injections.panels import _r_confounds
+    from promptpotter.domain.ruler import DeltaRuler
+
+    session = Mock()
+    session.scoring.scorer_round_formula = "accuracy"
+    session.spend_used = None
+    warm = DeltaRuler(
+        delta={1: -0.5, 2: 0.5, 3: 1.0},
+        delta_se={},
+        discrimination={},
+        mu_delta=0.0,
+        sigma_delta=1.0,
+        sigma_theta=1.0,
+        calibration_model="1PL",
+        anchor_id="anchor-x",
+        anchored_at_round=1,
+    )
+    cycle = Cycle(
+        session=session,
+        config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+        rounds=[round_result(0)],
+        ruler=warm,
+    )
+    # Exactly what `run_l1_critique` is handed: the round the loop has not folded in yet.
+    bundle = build_bundle(cycle, latest_round=round_result(1))
+
+    assert bundle.digest.calibration_model == "1PL"
+    assert bundle.digest.ruler_id == "anchor-x"
+    assert bundle.digest.ruler_n == 3
+    assert "COLD RULER" not in _r_confounds(bundle)

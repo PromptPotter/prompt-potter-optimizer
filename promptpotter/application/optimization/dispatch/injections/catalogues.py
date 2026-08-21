@@ -9,6 +9,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     AXES_ENUM_PREVIEW,
     InjectionBundle,
     InjectionKind,
+    Item,
     signal,
 )
 from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
@@ -42,18 +43,18 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
     # A value-space menu is what a mutation may SAY, never why it should be made.
     citable=False,
 )
-def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
+def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
     """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
     Symmetric with `l1_signal_catalogue` (the menu L2 picks from for L1's layout).
     """
     schema = b.pipeline_schema
     if schema is None:
-        return ""
+        return []
     # ONE surface: model/provider are always absent (operator-owned, never an
     # optimizer axis), so the catalogue never advertises them.
     npk = schema.node_param_keys()
     if not npk:
-        return ""
+        return []
     lines = ["PIPELINE PARAM CATALOGUE (use only these — do not invent):"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
@@ -77,7 +78,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         lines.append(f"  {node_name}: {', '.join(bits)}")
         if SCHEMA_DESCRIPTIONS_PARAM in params:
             lines.extend(_schema_description_block(node))
-    return "\n".join(lines)
+    return [Item("\n".join(lines))]
 
 
 # The two modes that render. `off` is absent by construction: no header ⇒ no text ⇒ the
@@ -94,23 +95,23 @@ _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
     char_cap=None,
     citable=False,
 )
-def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
+def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
     """The building-block library L1 picks from. ``restrict`` is a hard value space, ``guidance`` leaves it open. It
     falls back to general reasoning modules — NEVER silence, which shifts temp-0 generation to weaker mutations."""
     mode = b.prompt_block_catalogue
     header = _BLOCK_LIBRARY_HEADERS.get(mode)
     if header is None:
-        return ""
+        return []
     library = (
         prompt_blocks() if mode == "restrict" else (b.earned_blocks or general_reasoning_blocks())
     )
     if not library:
-        return ""
+        return []
     lines = [header]
     for field, blocks in library.items():
         lines.append(f"  {field}:")
         lines.extend(f"    - {text}" for text in blocks)
-    return "\n".join(lines)
+    return [Item("\n".join(lines))]
 
 
 @signal(
@@ -119,7 +120,7 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     char_cap=None,
     citable=False,
 )
-def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
+def _r_l1_signal_catalogue(b: InjectionBundle) -> list[Item]:
     """ONLY what the wire schema cannot say. It listed all 18 signal names and nothing else — the
     values without the keys — so L2 supplied a shape: one fire keyed the map by slot with a
     ``<slot>_block`` value apiece, the next keyed it by SIGNAL with invented sub-selectors. Both
@@ -133,9 +134,11 @@ def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
     AWAY, and stating it as one an edit must satisfy by itself is what asked L2 to restate a layout
     it was not changing."""
     mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory)
-    return (
-        "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "
-        "enum; pick from there and invent nothing.\n"
-        "  The one rule it cannot state: after your edit is applied, each of these must still sit "
-        f"under SOME slot, or the whole edit rolls back —\n    {', '.join(mandatory)}"
-    )
+    return [
+        Item(
+            "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "
+            "enum; pick from there and invent nothing.\n"
+            "  The one rule it cannot state: after your edit is applied, each of these must still sit "
+            f"under SOME slot, or the whole edit rolls back —\n    {', '.join(mandatory)}"
+        )
+    ]

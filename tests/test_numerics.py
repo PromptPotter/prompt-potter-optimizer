@@ -3544,29 +3544,35 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
             pd["mean_adopted_level_se"] = se
         return {"sample_id": sid, "query": f"seed-{sid}", "pipeline_data": pd}
 
-    def render(rows: list[dict], origin: list[dict]) -> str:
-        return _r_inner_narratives(
-            InjectionBundle(
-                opt_sp=OptSearchPoint(),
-                pipeline_schema=None,
-                cycle_slice=CycleSlice(
-                    round_num=1,
-                    current_accuracy=0.5,
-                    best_accuracy=0.5,
-                    best_round=0,
-                    l1_stall_count=0,
-                    l2_round=0,
-                    l2_stall_count=0,
-                    l3_round=0,
-                    l3_stall_count=0,
-                    exploration_budget="tight",
-                ),
-                digest=RoundDigest(
-                    diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None
-                ),
-                axes=None,
-                origin_per_sample=origin,
-                trajectory_results=rows,
+    from promptpotter.application.optimization.dispatch.compose import SECTION_SEP
+
+    def render(rows: list[dict], origin: list[dict], *, at_origin: bool = False) -> str:
+        return SECTION_SEP.join(
+            item.text
+            for item in _r_inner_narratives(
+                InjectionBundle(
+                    is_origin_round=at_origin,
+                    opt_sp=OptSearchPoint(),
+                    pipeline_schema=None,
+                    cycle_slice=CycleSlice(
+                        round_num=1,
+                        current_accuracy=0.5,
+                        best_accuracy=0.5,
+                        best_round=0,
+                        l1_stall_count=0,
+                        l2_round=0,
+                        l2_stall_count=0,
+                        l3_round=0,
+                        l3_stall_count=0,
+                        exploration_budget="tight",
+                    ),
+                    digest=RoundDigest(
+                        diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None
+                    ),
+                    axes=None,
+                    origin_per_sample=origin,
+                    trajectory_results=rows,
+                )
             )
         )
 
@@ -3603,6 +3609,22 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
     floored = render([cell(1, -1.00, None), cell(2, 0.10, 0.05)], origin)
     assert floored.index("seed-1") < floored.index("seed-2")
     assert "-1.000 (unpriced)" in floored
+
+    # AT THE ORIGIN both arms are the same rows, so the paired difference is every cell against
+    # ITSELF. Measured on `promptpotter-self__c355c2`: six seeds that had each gained (+0.405 to
+    # +0.734) rendered `+0.000` six times, and the C0 critique read that as "all 6 seeds show zero
+    # net lift ... not exploring beyond baseline space" — then spent the round's whole candidate
+    # budget escaping a baseline nothing had shown it was stuck on. SILENT: the header took its
+    # honest no-signal branch and the numbers under it won anyway. The seed's OWN lift is the
+    # measurement at C0, carrying its own SE rather than a difference's.
+    c0_rows = [cell(1, 0.405, 0.27), cell(2, 0.734, 0.28)]
+    at_c0 = render(c0_rows, c0_rows, at_origin=True)
+    assert "+0.000" not in at_c0
+    assert "+0.405 ±0.270" in at_c0 and "+0.734 ±0.280" in at_c0
+    assert "ORIGIN round" in at_c0 and "no edit to compare against yet" in at_c0
+    # Weakest first, and every cell earns the full trace cap: at C0 there is no "worse than the
+    # origin" subset to spend it on, and the weakest seeds are what the first edit must attack.
+    assert at_c0.index("seed-1") < at_c0.index("seed-2")
 
 
 def test_matched_parent_lift_drops_the_cell_that_measured_nothing() -> None:

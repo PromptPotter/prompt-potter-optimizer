@@ -189,6 +189,26 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     tc_text = DispatchHub.render("task_context", bundle)
     assert "UNTRUSTED" not in tc_text
 
+    # The fence must survive CROSS-PANEL selection, not just a single panel's own truncation.
+    # `compose.select` places items from several panels under one ceiling, and it is the COMPOSITION
+    # that fences each surviving untrusted run — so a tag can no longer be split by a selection that
+    # happened after the renderer baked one in. That is the property: an unterminated fence lets
+    # dataset text run loose to the end of the prompt as instructions, a silent leak with the run
+    # completing normally. Squeezed to every budget, open and close must still match.
+    from promptpotter.application.optimization.dispatch.compose import SECTION_SEP, select
+
+    fenced = {n: DispatchHub.render_items(n, bundle) for n in ("diagnostics", "l1_wounds")}
+    order = ["diagnostics", "l1_wounds"]
+    assert any(not i.trusted for items in fenced.values() for i in items), (
+        "fixture must carry untrusted items or this asserts nothing"
+    )
+    for budget in (10, 200, 900, 4000, 100_000):
+        picked, _ = select(fenced, order, budget)
+        body = SECTION_SEP.join(picked[n] for n in order)
+        assert body.count("<UNTRUSTED_DATASET_CONTENT") == body.count(
+            "</UNTRUSTED_DATASET_CONTENT>"
+        ), f"selection at budget {budget} left a fence open"
+
 
 async def test_outer_sample_deadline_cancels_the_inner_campaign(
     tmp_path: Path, monkeypatch: Any

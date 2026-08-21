@@ -7,6 +7,8 @@ from promptpotter.application.optimization.dispatch.facade import (
     DispatchHub,
     build_bundle,
     injection_char_counts,
+    injection_coverage_counts,
+    injection_silent_panels,
 )
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
@@ -42,8 +44,11 @@ async def run_l1_critique(
         load_optimizer_prompt,
     )
 
-    template, prompt_vars, rendered = DispatchHub.fill(
-        load_optimizer_prompt("l1_critique"), resolve_node_layout("l1_critique"), bundle
+    template, prompt_vars, rendered, coverage = DispatchHub.fill(
+        load_optimizer_prompt("l1_critique"),
+        resolve_node_layout("l1_critique"),
+        bundle,
+        node="l1_critique",
     )
 
     result, _prompt, _repairs = await run_optimizer_node(
@@ -55,6 +60,8 @@ async def run_l1_critique(
             round_num=round_num,
             cache=cycle.session.store.optimizer_reuse,
             injection_chars=injection_char_counts(rendered, prompt_vars),
+            injection_dropped=injection_coverage_counts(coverage),
+            injection_silent=tuple(injection_silent_panels(coverage)),
         ),
     )
     assert isinstance(result, L1CritiqueOutput), (

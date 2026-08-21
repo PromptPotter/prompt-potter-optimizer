@@ -191,6 +191,12 @@ class LLMCallStartRecord(StrictModel):
     # over-budget warning could be read and not acted on; this is the breakdown that names the
     # panel. Empty for a node that composes no layout (`checkin`) and on a cache replay.
     injection_chars: dict[str, int] = Field(default_factory=dict)
+    # What the node's ceiling REFUSED, per panel, in whole sections — and which layout panels had
+    # nothing to say at all. `injection_chars` can only ever report what SURVIVED, so on its own it
+    # cannot separate a panel the budget thinned from one that rendered short, nor a panel silent
+    # every round of a campaign from one nobody put in the layout.
+    injection_dropped: dict[str, int] = Field(default_factory=dict)
+    injection_silent: list[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

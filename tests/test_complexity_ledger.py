@@ -8,7 +8,7 @@ only where the surface stands now — never a target to reach.
 from promptpotter.diagnostics import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 325,
+    "modules": 326,
     "init_files": 48,
     "reexport_shims": 6,
     "config_leaf_fields": 39,
@@ -19,7 +19,7 @@ LEDGER_BASELINE = {
     "domain_any_maps": 82,
     "models_lax": 3,
     "prompt_string_fields": 6,
-    "injections": 26,
+    "injections": 32,
     "escalation_rules": 6,
     "claude_md": 7,
 }

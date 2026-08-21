@@ -103,6 +103,23 @@ class DeltaRuler(StrictModel):
             for sid, d in self.delta.items()
         }
 
+    def band_span(self, sample_ids: Iterable[int]) -> tuple[float, float] | None:
+        """``(round_span, ruler_span)`` in logits — ``None`` below two cells on either side, where
+        a span is not a reading.
+
+        The collapsed-band check `docs/methods/verdict-resolution.md` § "A collapsed band" names
+        and nothing performed. The acquisition buys the cells whose δ sits nearest the leader's θ,
+        and against a wide bank that collapses onto a razor-thin range; inside one every cell is
+        equally hard, so the 1PL fit reduces to ``θ = logit(accuracy) + c`` and the difficulty
+        adjustment does no work. Unlike a cold ruler it is SILENT — the ruler is warm, the id
+        matches, every number renders — which is why the state has to be computed to be seen.
+        """
+        on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
+        if len(on) < 2 or len(self.delta) < 2:
+            return None
+        full = list(self.delta.values())
+        return (max(on) - min(on), max(full) - min(full))
+
     def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
         """This ruler completed with a PROVISIONAL entry at its own centre (``mu_delta``, a=1) for
         each id it does not carry.

@@ -10,6 +10,7 @@ import logging
 from promptpotter.application.optimization.dispatch.bundle import (
     InjectionBundle,
     InjectionKind,
+    Item,
     signal,
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
@@ -38,10 +39,10 @@ _PLAN_HEADER = "PLAN:\n"
     char_cap=800 + len(_PLAN_HEADER),
     citable=True,
 )
-def _r_plan(b: InjectionBundle) -> str:
+def _r_plan(b: InjectionBundle) -> list[Item]:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
     plan = b.opt_sp.plan
-    return f"{_PLAN_HEADER}{plan}" if plan else ""
+    return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
 
 @signal(
@@ -50,10 +51,10 @@ def _r_plan(b: InjectionBundle) -> str:
     char_cap=400,
     citable=False,
 )
-def _r_l3_to_l2_note(b: InjectionBundle) -> str:
+def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
     """Sticky L3→L2 directive — mounted only in L2's template, absent from L1."""
     note = b.opt_sp.memory.wounds.l3_note
-    return f"L3 NOTE TO L2:\n{note}" if note else ""
+    return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
 
 
 _TARGET_PROMPT_HEADER = (
@@ -83,7 +84,7 @@ _OPTIMIZER_PROMPT_HEADER = (
     # The prompt under edit is the SUBJECT of a mutation, never its evidence.
     citable=False,
 )
-def _r_rendered_prompt(b: InjectionBundle) -> str:
+def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     """The artifact under edit — a target prompt, inner optimizer prompts, or both; each half empty where
     it is not the mutation surface. An L4 outer point is INERT: its levers ride ``pipeline_params``."""
     sections: list[str] = []
@@ -105,7 +106,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
             for node, fields in inner.items()
             for field, text in fields.items()
         )
-    return "\n\n".join(sections)
+    return [Item("\n\n".join(sections))]
 
 
 @signal(
@@ -114,9 +115,9 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
     char_cap=None,
     citable=False,
 )
-def _r_l1_overrides(b: InjectionBundle) -> str:
+def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
     overrides = b.opt_sp.memory.l1_overrides
-    return f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else ""
+    return [Item(f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else "")]
 
 
 @signal(
@@ -125,7 +126,7 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
     char_cap=None,
     citable=False,
 )
-def _r_l1_layout(b: InjectionBundle) -> str:
+def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     """The OTHER lever's current value — the sibling ``l1_overrides`` has always had, and L2's primary
     lever went without. An edit is per SLOT, and the floor packs 12 of its 13 signals into
     ``problem_description``, so rewriting the one slot worth editing drops everything not restated in
@@ -136,7 +137,7 @@ def _r_l1_layout(b: InjectionBundle) -> str:
     lines = [f"  {slot}: {', '.join(layout.slot(slot)) or '(empty)'}" for slot in L1_LAYOUT_SLOTS]
     if unplaced := sorted(NODE_LAYOUTS["l1_generate"].possible - set(layout.all_placeholders())):
         lines.append(f"  available, not shown: {', '.join(unplaced)}")
-    return "CURRENT L1 LAYOUT — what l1_generate reads today:\n" + "\n".join(lines)
+    return [Item("CURRENT L1 LAYOUT — what l1_generate reads today:\n" + "\n".join(lines))]
 
 
 @signal(
@@ -149,17 +150,17 @@ def _r_l1_layout(b: InjectionBundle) -> str:
     # the channel it named — task_context is frozen and never carries an axis directive.
     citable=True,
 )
-def _r_task_context(b: InjectionBundle) -> str:
+def _r_task_context(b: InjectionBundle) -> list[Item]:
     """The operator's framing, rendered VERBATIM — this panel never truncates, because a renderer cannot
     know which half of an authored sentence matters. The budget is enforced at mint, where a human is."""
     tc = b.opt_sp.memory.task_context
     if not tc:
-        return ""
+        return []
     skip = {"raw_description", "upstream_context", "downstream_context"}
     pairs = [(k, v) for k, v in tc.to_dict().items() if v and k not in skip]
     if not pairs:
-        return ""
-    return "TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs)
+        return []
+    return [Item("TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs))]
 
 
 @signal(
@@ -170,8 +171,8 @@ def _r_task_context(b: InjectionBundle) -> str:
     char_cap=2000,
     citable=True,
 )
-def _r_critique(b: InjectionBundle) -> str:
-    return format_l1_critique_for_prompt(b.digest.critique, b.pipeline_schema)
+def _r_critique(b: InjectionBundle) -> list[Item]:
+    return [Item(format_l1_critique_for_prompt(b.digest.critique, b.pipeline_schema))]
 
 
 _REBASE_CAPABILITY_TEXT = (
@@ -205,18 +206,18 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
     char_cap=None,
     citable=False,
 )
-def _r_rebase_capability(b: InjectionBundle) -> str:
+def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
     """The ``fork_proposal`` escape hatch, empty when the capability is off so an ablation body is
     bit-for-bit identical. Reachability is read off the DECLARED param, never off a node name."""
     if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
-        return ""
+        return []
     schema = b.pipeline_schema
     unlockable = (
         not b.schema_field_rename
         and schema is not None
         and any(SCHEMA_RENAME_PARAM in n.param_keys for n in schema.nodes)
     )
-    return _REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else "")
+    return [Item(_REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else ""))]
 
 
 _TERMINATE_CAPABILITY_TEXT = (
@@ -244,12 +245,15 @@ _TERMINATE_STARVED_TEXT = (
     char_cap=None,
     citable=False,
 )
-def _r_terminate_capability(b: InjectionBundle) -> str:
+def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
     """The ``terminate_proposal`` instruction; off ⇒ empty string, so an ablation body is bit-for-bit
     identical. Its starvation coaching is gated a second time on a round that HAS a starved node."""
     if not b.terminate_capability:
-        return ""
+        return []
     starved = evidence_starved_node(b.digest.node_failure_rates)
-    return _TERMINATE_CAPABILITY_TEXT + (
-        _TERMINATE_STARVED_TEXT.format(node=starved) if starved else ""
-    )
+    return [
+        Item(
+            _TERMINATE_CAPABILITY_TEXT
+            + (_TERMINATE_STARVED_TEXT.format(node=starved) if starved else "")
+        )
+    ]

@@ -457,6 +457,18 @@ class Cycle:
         """``None`` while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one lies."""
         return self.ruler.calibration_model if self.ruler is not None else None
 
+    @property
+    def ruler_n(self) -> int:
+        """The size travelling with the id above. Third of one derived trio, and public for the
+        same reason the other two are: a round is stamped from the CYCLE, so anything describing
+        this round's scale before ``absorb_round`` has run must ask here."""
+        return len(self._ruler_cells)
+
+    def cumulative_theta(self, results: list[dict[str, Any]]) -> tuple[float, float] | None:
+        """The frontier's θ on THIS cycle's ruler. Bound here so a caller reading ability before
+        the round is absorbed computes the number absorb will stamp, rather than a second one."""
+        return _cumulative_theta(results, self.ruler)
+
     def restamp_origin_round(self, parent: RoundParent) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
         the run before the fix. θ is carried, not re-fit: the ruler is locked."""
@@ -474,7 +486,7 @@ class Cycle:
             results=list(parent.results),
             theta=carried,
             calibration_model=self.calibration_model,
-            ruler_n=len(self._ruler_cells),
+            ruler_n=self.ruler_n,
             ruler_id=self.ruler_id,
         )
 
@@ -536,7 +548,7 @@ class Cycle:
                 )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
-            cum = _cumulative_theta(acc_cum, self.ruler)
+            cum = self.cumulative_theta(acc_cum)
             if cum is not None and (tr.best_theta is None or cum[0] > tr.best_theta):
                 tr.best_theta = cum[0]
         tr.current_results = acc_cum
@@ -613,13 +625,13 @@ class Cycle:
                 # Only the cells the freshly-locked ruler carries: it was anchored on the origin
                 # and the archive, and a round that already walked past that is not on this scale.
                 on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in self._ruler_cells]
-                restamped = _cumulative_theta(on_ruler, self.ruler)
+                restamped = self.cumulative_theta(on_ruler)
                 rr.cumulative_theta, rr.cumulative_theta_se = (
                     restamped if restamped is not None else (None, None)
                 )
                 rr.calibration_model = self.calibration_model
                 rr.ruler_id = self.ruler_id
-                rr.ruler_n = len(self._ruler_cells)
+                rr.ruler_n = self.ruler_n
 
     @property
     def _ruler_cells(self) -> set[int]:
@@ -685,7 +697,7 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
-        cur = _cumulative_theta(tr.current_results, self.ruler)
+        cur = self.cumulative_theta(tr.current_results)
         if cur is not None and (tr.best_theta is None or cur[0] > tr.best_theta):
             tr.best_theta = cur[0]
 
@@ -695,6 +707,6 @@ class Cycle:
         # The size travels with the id it describes. Stamped only on the origin and the
         # restamp path before, so every L1 round document reported `ruler_n=0` on a warm
         # ruler — which `log.md` prints as "ruler: 0 cells" and a reader takes for cold.
-        rr.ruler_n = len(self._ruler_cells)
+        rr.ruler_n = self.ruler_n
         rr.opt_sp = self.opt_sp
         return rr

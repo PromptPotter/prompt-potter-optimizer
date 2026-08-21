@@ -6,6 +6,8 @@ from promptpotter.application.optimization.dispatch.facade import (
     DispatchHub,
     build_bundle,
     injection_char_counts,
+    injection_coverage_counts,
+    injection_silent_panels,
 )
 from promptpotter.application.optimization.dispatch.injections.registry import citable_fields
 from promptpotter.application.optimization.dispatch.l1_wire_schema import (
@@ -97,8 +99,11 @@ async def l1_generate(
 
     bundle = build_bundle(cycle)
     # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
-    template, injection_vars, rendered = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
+    template, injection_vars, rendered, coverage = DispatchHub.fill(
+        load_optimizer_prompt("l1_generate"),
+        opt_sp.memory.l1_layout,
+        bundle,
+        node="l1_generate",
     )
     # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
     # the wire schema's enum, so the two can't disagree about which panels exist this round.
@@ -139,6 +144,8 @@ async def l1_generate(
                 round_num=round_num,
                 cache=cycle.session.store.optimizer_reuse,
                 injection_chars=injection_char_counts(rendered, injection_vars),
+                injection_dropped=injection_coverage_counts(coverage),
+                injection_silent=tuple(injection_silent_panels(coverage)),
             ),
             template=template,
         )

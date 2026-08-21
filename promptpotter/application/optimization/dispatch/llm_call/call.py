@@ -68,6 +68,12 @@ class LLMCallContext:
     # over-budget warning fires there, and a breakdown that lands only after the call cannot
     # explain the warning the operator is reading.
     injection_chars: dict[str, int] = field(default_factory=dict)
+    # The other half of that breakdown, and the half `injection_chars` can never carry: what the
+    # ceiling REFUSED (per panel, in sections) and which layout panels produced nothing at all.
+    # A panel reading 300 chars says nothing about whether that was all it had; a panel absent
+    # from the breakdown reads identically to one nobody put in the layout.
+    injection_dropped: dict[str, int] = field(default_factory=dict)
+    injection_silent: tuple[str, ...] = ()
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
@@ -215,6 +221,8 @@ async def llm_call(
                     started_at_ms=int(time.time() * 1000),
                     prompt_chars=prompt_chars,
                     injection_chars=dict(context.injection_chars),
+                    injection_dropped=dict(context.injection_dropped),
+                    injection_silent=list(context.injection_silent),
                 )
             )
         # Lets the operator tell an in-flight call from a frozen process without opening
@@ -237,13 +245,26 @@ async def llm_call(
             if oversize and context.injection_chars
             else ""
         )
+        # What the ceiling COST, on the normal path rather than the alarm one: selection keeps the
+        # prompt under budget, so the fact worth reading is which panel gave way to keep it there.
+        # Reported because a thinned panel is otherwise indistinguishable from a quiet one.
+        thinned = (
+            " · thinned: "
+            + ", ".join(
+                f"{name} -{n}"
+                for name, n in sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])[:3]
+            )
+            if context.injection_dropped
+            else ""
+        )
         log(
-            "→ optimizer call: %s · %s · %d-char prompt%s%s",
+            "→ optimizer call: %s · %s · %d-char prompt%s%s%s",
             node or "llm_call",
             merged["model"],
             prompt_chars,
             f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
             heaviest,
+            thinned,
         )
         # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
         # Cancelled on every path by the `finally` below.

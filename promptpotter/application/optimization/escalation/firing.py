@@ -14,6 +14,8 @@ from promptpotter.application.optimization.dispatch.facade import (
     DispatchHub,
     build_bundle,
     injection_char_counts,
+    injection_coverage_counts,
+    injection_silent_panels,
 )
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
@@ -326,10 +328,11 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        template, prompt_vars, rendered = DispatchHub.fill(
+        template, prompt_vars, rendered, coverage = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
             resolve_node_layout(transition.template_name),
             build_bundle(cycle),
+            node=transition.template_name,
         )
         try:
             raw, prompt, _ = await run_optimizer_node(
@@ -341,6 +344,8 @@ async def _run_transition(
                     round_num=round_num,
                     cache=cycle.session.store.optimizer_reuse,
                     injection_chars=injection_char_counts(rendered, prompt_vars),
+                    injection_dropped=injection_coverage_counts(coverage),
+                    injection_silent=tuple(injection_silent_panels(coverage)),
                 ),
             )
             result = transition.parse(raw, cycle.opt_sp, prompt)

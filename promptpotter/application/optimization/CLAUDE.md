@@ -22,7 +22,16 @@ The parent searchpoint was selected for measured reasons. `l1_generate` mutates 
 
 No data justifying a choice ⇒ do not gamble. Random exploration is reserved for explicit stall.
 
-`l1_generate`'s evidence base lives on its surface — every citable panel is a same-named DispatchHub injection (no phantom panels; a citable name that never renders invites fabricated citations):
+`l1_generate`'s evidence base lives on its surface — every citable panel is a same-named DispatchHub injection (no phantom panels; a citable name that never renders invites fabricated citations).
+
+**The decision frame comes first, and it answers what the evidence panels cannot: whether the number under all of them can be trusted.** Every one is short, and each self-suppresses where it has nothing to say. `measurand` and `confounds` are `L1_MANDATORY` — a generator that cannot name its objective is optimizing a column, and one blind to a cold ruler or a collapsed band will read noise as a result:
+
+- `measurand` — the ACTIVE composite-fitness formula and where this round landed on it, terms resolved (`shared/composite.py::render_composite_fitness_block`). Not the raw `scoring` block: an expression the model has to parse first is not an objective it can aim at.
+- `precision` — that level's own error bar, plus each arm's fitness interval and the scale it was read on (`ruler_id` / `ruler_n` / `calibration_model`). A level with no interval beside it invites reading a move inside its own noise as a result.
+- `detectable_move` — the smallest ability gain this round could tell from zero (`shared/statistics.py::min_detectable_effect`, on the CONTRAST se, since an edit is judged against the incumbent). Without a bar, every proposal is measured against none.
+- `sample_provenance` — n, whether the subset is `frozen` or `adaptive`, how much of it the last round also graded, and where PoBB cut each arm. A rate is set as much by which cells were graded and where an arm stopped as by the configuration under test.
+- `confounds` — the states where the numbers above are NOT ability, MEASURED rather than warned about in advance: a cold ruler, a collapsed δ band (`DeltaRuler.band_span`), a subset that moved whole. Silent when none is live, which is the point — a caveat that renders every round is read as boilerplate by the third one. The engine computes this for the OPERATOR at INIT; the optimizer reasoning from θ needs the same statement.
+- `budget_state` — rounds and spend left. **Not citable**: budget says how boldly to spend a round, never that a mutation is the right one.
 
 - `critique` — the distiller's compression of the round's failures: `failure_highlights` (quoting SAMPLE TRANSCRIPTS; generated FIRST so a long output truncates a steer, never the evidence the next round differentiates on) + `priority_fix` + `suggested_axes`.
 - `answer_distribution` — what the pipeline ANSWERS vs what is true, as label tallies, plus the score a constant single-label answer would earn. **The collapse detector:** accuracy alone cannot separate a pipeline that reasons from one emitting the same label every time, and on a skewed label set that constant *is* a respectable-looking score — without this panel a generator rewrites the instruction it is already being denied, louder, every round. Silent above `ANSWER_SPACE_CAP` (`config/settings.py`) distinct ground truths, or when every one is distinct (free-text answers have no collapse to detect).

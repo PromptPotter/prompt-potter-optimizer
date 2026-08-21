@@ -87,16 +87,23 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 # retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-# Per-node ceiling on a COMPOSED optimizer prompt. It ALARMS; it never cuts — length is bounded
-# where each item is PRODUCED, so a prompt over its ceiling is the report that one of those
-# bounds failed, and cutting here could only choose which half the model sees. Per node rather
-# than one shared number, which fires on every call and teaches nothing. `l3_plan` has never
-# fired and takes l2_context's; `checkin` runs around the loop and never composes here.
+# Per-node ceiling on a COMPOSED optimizer prompt, ENFORCED by item selection: the hub spends this
+# taking each panel's next item in layout order until it runs out, so a panel is thinned rather than
+# a prompt overrun. It never CUTS — a whole item is dropped or kept, because slicing one chooses
+# which half the model sees. **The ONLY number bounding a composed prompt**: a panel that also
+# budgets itself hands the sum back to nobody, and a ceiling is then respected only while enough
+# panels happen to be silent. Per node rather than one shared number, which fires on every call and
+# teaches nothing. `checkin` runs around the loop and never composes here.
 OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
-    "l1_generate": 19_000,
-    "l1_critique": 14_500,
-    "l2_context": 12_000,
-    "l3_plan": 12_000,
+    "l1_generate": 11_400,
+    # Above its L2/L3 siblings, and the transcript atom is why: a whole sample transcript is
+    # indivisible, so this ceiling decides how many the distiller sees. The caps inside one are
+    # balanced against their own medians (`bundle.py`), so buying another transcript by re-cutting
+    # them clips the model's reasoning — the half the panel header orders the critique to quote.
+    # Set where TWO whole transcripts still fit beside the frame.
+    "l1_critique": 10_150,
+    "l2_context": 7_500,
+    "l3_plan": 7_500,
 }
 
 # PoBB elimination — a candidate stops when its P(best) drops below ε. The runtime value is

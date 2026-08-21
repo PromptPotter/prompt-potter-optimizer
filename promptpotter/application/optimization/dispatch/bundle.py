@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 
 # Per-injection caps — bound LLM-authored output to keep individual blocks tight.
 AXES_ENUM_PREVIEW = 4
+# How many arms `precision` quotes an interval for. The leader and its nearest rivals answer
+# "is this separable"; the tail is already in `mutation_memory` and repeating it here would spend
+# the frame's whole budget on the arms least likely to win.
+PRECISION_ARM_ROWS = 3
+# A round whose cells span less than this FRACTION of the ruler's own δ range is reported as a
+# collapsed band. Deliberately loose: it must catch the case `verdict-resolution.md` records
+# without firing on an ordinary acquisition draw. A first estimate, to refine against banked rounds.
+BAND_COLLAPSE_RATIO = 0.20
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 # Complete failing samples the `sample_transcripts` panel shows the distiller — full premises
@@ -49,17 +57,9 @@ INNER_NARRATIVE_CAP = 1150
 # NOT, which lead and keep their detail while the rest cost a line each.
 INNER_NARRATIVE_FULL_CELLS = 3
 INNER_NARRATIVE_SUMMARY_CAP = 160
-# The DENSE peer of the transcripts above: one line per miss, so the generator sees the SHAPE
-# of what it is failing rather than three failures in full.
-MISS_RENDER_CAP = 10
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
-# The panel's whole budget, and the injection's `char_cap` — ONE number, because two sized
-# apart is what let 10 rows of ≤238c compose ~2,645 against a 2,400 cap. Rows are dropped at
-# the PRODUCTION site, hardest-miss first (the panel is ordered easiest-first, and it already
-# owns the "(+N harder misses not shown)" line that reports the drop).
-MISS_PANEL_CAP = 2400
 # How many prior rounds L1 sees itself in. The value STEM, never the LLM's own
 # `changes_description`: that prose is optional, can be empty, and two candidates can carry the
 # same words for different mutations. What changed is a fact; what it was called is not.
@@ -70,16 +70,6 @@ MEMORY_FIELD_CAP = 2
 # round fit one line inside the panel cap — so the anti-re-proposal record stays COMPLETE
 # rather than dropping recent rounds to truncation.
 MEMORY_VALUE_CAP = 60
-# The panel's whole budget, and the injection's `char_cap` — one number for the same reason
-# `MISS_PANEL_CAP` is. Rows are dropped OLDEST-first at the production site: the render is
-# newest-first, so what falls off is what L1 is least likely to re-propose. Getting this
-# backwards is the defect it replaces — rows were built oldest-first into a single fenced
-# section, so `_truncate_to_cap` sliced the tail and took the most recent rounds with it,
-# along with the fence's closing tag.
-MEMORY_RENDER_CAP = 1800
-# Reserved per row for the `↺ same idea as rN (xM)` marker, which is appended after the row is
-# measured. Wider than the longest real marker so the reserve can never under-count.
-MEMORY_MARK_ALLOWANCE = 40
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
@@ -131,6 +121,19 @@ class InjectionKind(enum.StrEnum):
     TRACE = "trace"
     DIRECTIVE = "directive"
 
+    @property
+    def divisible(self) -> bool:
+        """Whether a composition may place SOME of this panel's sections and leave the rest.
+
+        Evidence thins gracefully — three misses instead of six is a smaller sample of the same
+        story — and state does not: half of the artifact under edit (TRACE) or half an instruction
+        (DIRECTIVE) is a different and wrong thing, not a smaller one. Every mutation is a
+        WHOLE-field replacement, so a field the generator cannot see is one it overwrites blind.
+        Asked of the kind every signal already declares rather than of a set of names, which
+        silently skips whatever it failed to list.
+        """
+        return self in (InjectionKind.MEASUREMENT, InjectionKind.DERIVED)
+
 
 @dataclass(frozen=True)
 class _Injection:
@@ -139,7 +142,7 @@ class _Injection:
 
     name: str
     kind: InjectionKind
-    render: Callable[[InjectionBundle], str]
+    render: Renderer
     char_cap: int | None
     citable: bool
 
@@ -162,6 +165,41 @@ class CycleSlice:
     # renders and l1_generate's rules cite, computed once in `build_bundle`.
     exploration_budget: str
     pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The ACTIVE composite-fitness formula, so a node can state what it is optimizing rather than
+    # infer it from a column. Resolved once here because the resolution chain reads `Session`.
+    composite_formula: str | None = None
+    composite_formula_short: str | None = None
+    # `frozen` (campaign-start prefix) or `adaptive` (acquisition re-picks per round). The real
+    # predicate is `per_round_resubset and ruler is not None`, and a renderer deriving that for
+    # itself is how a panel and `l1/execute.py` come to disagree about what chose the rows.
+    subset_mode: str | None = None
+    elimination_n_min: int | None = None
+    sp_budget_ttest: int | None = None
+    max_rounds: int | None = None
+    spend_budget_usd: float | None = None
+    # A FLOOR while unpriced tokens are outstanding — `SpendRollup` says so, and a panel quoting
+    # it must not round the word "spent" into a certainty the rollup does not carry.
+    spend_used_usd: float | None = None
+    # `(name, severity, consequence)` from `knobs.py::check_couplings` — the SAME text preflight
+    # shows the operator at INIT, so the one statement of when θ is not ability reaches the
+    # optimizer that reasons from θ and not only the terminal.
+    couplings: tuple[tuple[str, str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ArmReading:
+    """One scored arm, narrowed to what a panel may quote. Deliberately not `ScoredCandidate`, which
+    carries `prompt_fields` and `resolved_pipeline_params` — a panel that can reach a rival's whole
+    prompt will eventually quote it, and ``bundle.py`` is contractually light."""
+
+    label: str
+    theta: float | None
+    theta_se: float | None
+    mean_fitness_ci_lo: float | None
+    mean_fitness_ci_hi: float | None
+    scored_samples: int
+    expected_samples: int
+    elimination_stopped: bool
 
 
 @dataclass(frozen=True)
@@ -178,6 +216,23 @@ class RoundDigest:
     # ``prior_rounds[-1]`` it was one round stale on the critique, whose own round is deliberately
     # not in ``prior_rounds``, so the panel ranked by a subset the node was no longer being asked about.
     latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
+    # The round BEFORE this one, for "did the subset move?". Filled in `build_bundle` because
+    # `prior_rounds[-1]` is the just-closed round on generate/L2/L3 and the round-before on
+    # critique — a renderer differencing them itself is right on one path and wrong on the other.
+    prev_sample_ids: frozenset[Any] = field(default_factory=frozenset)
+    # THIS round's numbers. They reach the critique no other way: `build_bundle(cycle, latest_round=…)`
+    # runs before `absorb_round` folds the round into `cycle.rounds`, so `prior_rounds[-1]` is the
+    # PREVIOUS round there. Every panel that states an objective or a precision reads these.
+    composite_fitness: float | None = None
+    evaluators: dict[str, float] = field(default_factory=dict)
+    cumulative_theta: float | None = None
+    cumulative_theta_se: float | None = None
+    # The scale those θ were read ON. Two θ are comparable iff these match; `calibration_model`
+    # absent is the COLD state, where θ is logit-accuracy on the arm's own subset.
+    ruler_id: str | None = None
+    ruler_n: int = 0
+    calibration_model: str | None = None
+    arms: tuple[ArmReading, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -215,9 +270,26 @@ class InjectionBundle:
     # Already unlocked ⇒ the rebase_capability directive drops the unlock clause, since there
     # is nothing left to ask for.
     schema_field_rename: bool = False
+    # The round under render IS the origin, so `origin_per_sample` and `trajectory_results` are
+    # the same rows. Any panel differencing the two would render a cell against itself.
+    is_origin_round: bool = False
 
 
-Renderer = Callable[[InjectionBundle], str]
+@dataclass(frozen=True)
+class Item:
+    """One placeable unit of a panel — a row, a header, a paragraph.
+
+    The unit the COMPOSITION works in, and the reason a panel never budgets itself: one large
+    block can only be starved whole, where rows thin. ``trusted=False`` marks dataset-derived
+    text — a sample query, a model echo, a ground truth — and the fence around it is the
+    composition's to emit, so a renderer never mentions one.
+    """
+
+    text: str
+    trusted: bool = True
+
+
+Renderer = Callable[[InjectionBundle], list[Item]]
 
 # Filled by the @signal decorator at each renderer's definition site. registry.py imports the
 # renderer modules to trigger registration, then snapshots this into the public INJECTIONS dict.
@@ -260,15 +332,11 @@ __all__ = [
     "INNER_NARRATIVE_FULL_CELLS",
     "INNER_NARRATIVE_SUMMARY_CAP",
     "MEMORY_FIELD_CAP",
-    "MEMORY_MARK_ALLOWANCE",
-    "MEMORY_RENDER_CAP",
     "MEMORY_ROUND_CAP",
     "MEMORY_VALUE_CAP",
     "MISS_GT_CAP",
-    "MISS_PANEL_CAP",
     "MISS_PREDICTED_CAP",
     "MISS_QUERY_CAP",
-    "MISS_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
     "NODE_FAILURE_RENDER_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",

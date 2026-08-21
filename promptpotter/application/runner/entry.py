@@ -571,6 +571,9 @@ async def _run_single_cycle(
         # Same gate, two cadences — the round boundary and the per-sample checkpoint — bound as
         # ONE object, so a ceiling moved mid-flight moves both and both name one reason.
         session.budget_tripped = budget_gate.tripped
+        # The same rollup the gate compares against, read as an AMOUNT rather than a verdict —
+        # `budget_tripped` can only answer "already over", which no panel can spend.
+        session.spend_used = budget_gate.usd_spent
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,

@@ -11,7 +11,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     VALIDATION_RENDER_CAP,
     InjectionBundle,
     InjectionKind,
-    fence_untrusted,
+    Item,
     signal,
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure
@@ -93,16 +93,13 @@ def _runtime_block(b: InjectionBundle) -> str:
     # RUNTIME_FAILURE_RECENCY_WINDOW of runtime + the validation list; runtime is
     # already window-bounded ("… N older suppressed"). Truncating runtime mid-list
     # would invite L1 to re-propose a dropped config (the validator still blocks it).
-    char_cap=2500,
+    char_cap=None,
     citable=True,
 )
-def _r_l1_wounds(b: InjectionBundle) -> str:
-    # Fenced PER BLOCK. One fence around the joined pair left its separator inside the fence,
-    # so `_truncate_to_cap` split there and dropped the closing tag — the failure the fence
-    # note in `bundle.py` describes.
-    return "\n\n".join(
-        fence_untrusted(blk) for blk in (_validation_block(b), _runtime_block(b)) if blk
-    )
+def _r_l1_wounds(b: InjectionBundle) -> list[Item]:
+    # One item per block: the composition fences the contiguous run, so no selection can split
+    # the pair across a tag.
+    return [Item(blk, trusted=False) for blk in (_validation_block(b), _runtime_block(b)) if blk]
 
 
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
@@ -119,10 +116,10 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
 @signal(
     "guard_breaches",
     kind=InjectionKind.MEASUREMENT,
-    char_cap=400,
+    char_cap=None,
     citable=True,
 )
-def _r_guard_breaches(b: InjectionBundle) -> str:
+def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
     """L2 + L3 post-parse guard outcomes in one block; both route to L3, which reads its own past breaches to avoid
     repeating them. ``escalate_l2`` force-triggers off the stream directly, not this render."""
     wounds = b.opt_sp.memory.wounds
@@ -134,7 +131,7 @@ def _r_guard_breaches(b: InjectionBundle) -> str:
         )
         if blk
     ]
-    return "\n".join(blocks)
+    return [Item("\n".join(blocks))]
 
 
 def _format_runtime_failure_lines(rf: RuntimeFailure) -> list[str]:

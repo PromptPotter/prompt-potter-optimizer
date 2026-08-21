@@ -139,6 +139,11 @@ class Session:
     # The round-boundary check alone let a whole round of scoring run past the ceiling; for an
     # L4 outer round that is `n_candidates x n_samples` inner CAMPAIGNS of overshoot.
     budget_tripped: Callable[[], StopReason | None] | None = None
+    # What has been spent so far, for the panel that tells an optimizer how much run is left.
+    # A callable off the same rollup `budget_tripped` reads, bound at the same seam, because the
+    # amount lives only on the dashboard projection and `application/optimization/` must not
+    # import one. A FLOOR while unpriced tokens are outstanding.
+    spend_used: Callable[[], float] | None = None
 
 
 def new_session_state(

@@ -22,6 +22,11 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "pipeline_param_catalogue",
         "critique",
         "answer_distribution",
+        # Also the second kind: `measurand` names the number every variant is judged on — without
+        # it an edit optimizes a column rather than an objective — and `confounds` is the sole
+        # carrier of the states where that number is not ability.
+        "measurand",
+        "confounds",
     }
 )
 
@@ -29,6 +34,12 @@ L1_MANDATORY: frozenset[str] = frozenset(
 # L1 can't see L2's own state.
 L1_POSSIBLE: frozenset[str] = frozenset(
     {
+        "measurand",
+        "precision",
+        "detectable_move",
+        "sample_provenance",
+        "confounds",
+        "budget_state",
         "plan",
         "rendered_prompt",
         "pipeline_param_catalogue",
@@ -131,6 +142,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
+                "measurand",
+                "precision",
+                "detectable_move",
+                "confounds",
+                "sample_provenance",
                 "pipeline_param_catalogue",
                 "prompt_block_catalogue",
                 "plan",
@@ -142,6 +158,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_wounds",
                 "escalation_panel",
                 "origin_strengths",
+                "budget_state",
             ],
         ),
     ),
@@ -158,6 +175,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         editor="l4",
         possible=frozenset(
             {
+                "measurand",
+                "precision",
+                "detectable_move",
+                "sample_provenance",
+                "confounds",
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
@@ -173,6 +195,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         mandatory=frozenset({"diagnostics"}),
         floor=L1Layout(
             problem_description=[
+                "measurand",
+                "confounds",
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
@@ -209,6 +233,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_signal_catalogue",
                 "rebase_capability",
                 "terminate_capability",
+                "measurand",
+                "precision",
+                "confounds",
+                "budget_state",
             }
         ),
         mandatory=frozenset(
@@ -222,6 +250,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
+                # The frame leads: L2 holds terminate authority, and a layer deciding whether a
+                # fault is recoverable must read the objective and its caveats before the evidence.
+                "measurand",
+                "confounds",
+                "budget_state",
                 "plan",
                 "l3_to_l2_note",
                 "rendered_prompt",
@@ -260,6 +293,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "archive_top_runs",
                 "rebase_capability",
                 "terminate_capability",
+                "measurand",
+                "precision",
+                "confounds",
+                "budget_state",
             }
         ),
         mandatory=frozenset(
@@ -272,6 +309,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
+                # Same reason as L2: a replan that may terminate the cycle reads the objective and
+                # its caveats first, or it argues about a number it was never shown the shape of.
+                "measurand",
+                "confounds",
+                "budget_state",
                 "plan",
                 "diagnostics",
                 "evidence_health",

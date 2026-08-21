@@ -1,5 +1,5 @@
-"""``char_cap`` (set per ``@signal``, ``None`` for the internally-capped renderers) truncates and
-warns: a backstop so a deep-stall round can't balloon the optimizer prompt past its budget.
+"""``char_cap`` is a runaway backstop, carried only by the panels the composition places WHOLE.
+A divisible panel needs none — `compose.select` thins it to whatever the node ceiling affords.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ import functools
 import inspect
 from collections.abc import Mapping
 
+from promptpotter.application.optimization.dispatch import bundle
 from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
     injection_registry,
@@ -32,12 +33,22 @@ INJECTIONS: dict[str, _Injection] = injection_registry()
 # escalation panel's budget has widened past `tight`.
 STALL_EXPLORATION = "stall_exploration"
 
+# The modules whose source DECIDES what an optimizer prompt contains. One tuple, because the
+# orphan check below and the identity digest above must never disagree about the set: a renderer
+# module missing from the digest changes every prompt and voids nothing.
+_RENDERER_MODULES = (catalogues, layer_state, panels, wounds)
+
 
 @functools.cache
 def injection_source_digest() -> str:
     """The panels' text is code, so it sits outside ``_identity_config``'s prompt templates and
-    layouts. Its estimator-side twin is ``measurement_source_digest``."""
-    return module_source_digest(catalogues, layer_state, panels, wounds)
+    layouts. Its estimator-side twin is ``measurement_source_digest``.
+
+    ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
+    prompt receives live there rather than in the renderer that spends them. A module that shapes
+    the prompt and is not hashed here pools corpora the fingerprint exists to keep apart.
+    """
+    return module_source_digest(bundle, *_RENDERER_MODULES)
 
 
 def citable_fields(
@@ -68,7 +79,7 @@ for _key, _inj in INJECTIONS.items():
         raise RuntimeError(f"INJECTIONS[{_key!r}] has mismatched name {_inj.name!r}.")
 _orphans = [
     f"{_mod.__name__}.{_name}"
-    for _mod in (catalogues, layer_state, panels, wounds)
+    for _mod in _RENDERER_MODULES
     for _name, _fn in inspect.getmembers(_mod, inspect.isfunction)
     if _name.startswith("_r_") and _fn.__module__ == _mod.__name__ and _fn not in _wired
 ]
