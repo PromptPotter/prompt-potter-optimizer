@@ -248,24 +248,40 @@ def _build_divergence_hint() -> str:
 _DIVERGENCE_HINT = _build_divergence_hint()
 
 
-def resolve_campaign(stores: Stores, needle: str) -> str:
-    """Resolve *needle* to a campaign id — full id, 6-hex suffix, or unambiguous prefix. One
-    resolver shared by every command that names a campaign, not a copy per command."""
+def _campaign_matches(stores: Stores, needle: str) -> list[str]:
+    """Full id, 6-hex suffix, unambiguous prefix, then substring — the ONE matcher, so every verb
+    that names a campaign reaches the same one. Raises on ambiguity: picking one of several is the
+    only outcome worse than not resolving at all."""
     ids = stores.campaigns.list_campaign_ids()
     if needle in ids:
-        return needle
+        return [needle]
     candidates = [cid for cid in ids if cid.endswith(f"__{needle}") or cid.startswith(needle)]
     if needle and not candidates:
         candidates = [cid for cid in ids if needle in cid]
-    if not candidates:
-        raise SystemExit(f"ERROR: no campaign matches {needle!r}.")
     if len(candidates) > 1:
         raise SystemExit(
             f"ERROR: {needle!r} matches {len(candidates)} campaigns: "
             f"{', '.join(candidates[:5])}{'…' if len(candidates) > 5 else ''}. "
             "Pass the full id."
         )
-    return candidates[0]
+    return candidates
+
+
+def resolve_campaign(stores: Stores, needle: str) -> str:
+    """*needle* → a campaign id, exiting when nothing matches. For a verb that has no other answer."""
+    matches = _campaign_matches(stores, needle)
+    if not matches:
+        raise SystemExit(f"ERROR: no campaign matches {needle!r}.")
+    return matches[0]
+
+
+def resolve_campaign_hint(stores: Stores, needle: str) -> str:
+    """*needle* resolved where one campaign matches, returned UNCHANGED where none does.
+
+    For the verbs whose dispatcher already answers ``not_found`` for an absent id: they keep
+    answering it, and gain the prefix / 6-hex-suffix reach ``verify`` and ``noise-floor`` have.
+    Without it one verb resolves a needle the verb beside it reports missing."""
+    return next(iter(_campaign_matches(stores, needle)), needle)
 
 
 def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:

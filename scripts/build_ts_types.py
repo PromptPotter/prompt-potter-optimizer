@@ -50,7 +50,11 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     WoundChannels,
 )
-from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
+from promptpotter.domain.pipeline_schema import (
+    NodeConfigParam,
+    NodeOutputSchema,
+    NodeSearchNarrowing,
+)
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
@@ -60,6 +64,7 @@ from promptpotter.domain.results import (
     ScoreboardRow,
     ScoredCandidate,
 )
+from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -79,6 +84,7 @@ from promptpotter.infrastructure.store.lineage_views import (
 )
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandAcceptedBody,
+    OriginGateDecisionPayload,
 )
 from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
@@ -260,6 +266,13 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ConfigEstimandGroup,
     ConfigCoupling,
     ConfigMapResponse,
+    # --- the fork seed + the one command payload the browser needs a member of. Hand-declaring
+    # these in `commands.ts` is what lets a wire field go unrepresented and a closed set be
+    # re-spelled by hand. ---
+    ConfigOverrides,
+    NodeSearchNarrowing,  # nested in CycleSeed.optimizer_narrowing — the emitter does not recurse
+    CycleSeed,
+    OriginGateDecisionPayload,
 ]
 
 _OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"
@@ -380,6 +393,18 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
     return f"// {note}\nexport type {enum_cls.__name__} = {members};"
 
 
+def _emit_command_kinds() -> str:
+    """Emit ``ALL_DISPATCHED_KINDS`` as a named union so ``postCommand`` can be narrowed.
+
+    Same argument as ``_emit_stop_reason_labels``: against a `kind: string` parameter a renamed
+    verb reaches the operator as a runtime ``command_kind_unknown`` 404, not a compile error."""
+    from promptpotter.presentation.api.middleware.command_dispatcher import ALL_DISPATCHED_KINDS
+
+    members = " | ".join(repr(k) for k in sorted(ALL_DISPATCHED_KINDS))
+    note = "Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py)."
+    return f"// {note}\nexport type CommandKind = {members};"
+
+
 def _emit_stop_reason_labels() -> str:
     """Emit ``STOP_REASON_INFO`` (domain/phases.py) as a TS label const — the
     single label source, mirrored to the webapp without hand-maintained drift."""
@@ -470,6 +495,7 @@ def main() -> int:
             "(domain/phases.py::DashboardState).",
         )
     )
+    blocks.append(_emit_command_kinds())
     blocks.append(_emit_stop_reason_labels())
     blocks.append(_emit_evaluator_meta())
     content = _HEADER + "\n\n".join(blocks) + "\n"

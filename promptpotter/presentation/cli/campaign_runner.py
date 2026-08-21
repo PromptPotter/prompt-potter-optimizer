@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import importlib
 import json
@@ -54,6 +55,23 @@ assert _declared == COMMANDS.keys(), (
     f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
     f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
 )
+
+
+def _validate_run_limits(args: argparse.Namespace) -> None:
+    """Refuse a launch ceiling the wire would refuse, before anything is minted."""
+    from pydantic import ValidationError
+
+    from promptpotter.presentation.api.middleware.command_dispatcher import RunLimitsPayload
+
+    try:
+        RunLimitsPayload(
+            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+            spend_budget_usd=getattr(args, "spend_budget_usd", None),
+            token_budget=getattr(args, "token_budget", None),
+        )
+    except ValidationError as exc:
+        bad = ", ".join(f"--{str(e['loc'][0]).replace('_', '-')}: {e['msg']}" for e in exc.errors())
+        raise SystemExit(f"invalid run limit — {bad}") from None
 
 
 def main() -> None:
@@ -110,6 +128,9 @@ def main() -> None:
     if args.command in ("new", "resume"):
         from promptpotter.config.first_run import ensure_api_key
 
+        # The launch ceilings through the SAME bounds the wire enforces. argparse types them and
+        # bounds neither, so `--halt-at 1.5` was accepted and then never fired.
+        _validate_run_limits(args)
         ensure_api_key()
 
     module_path, _, attr = COMMANDS[args.command].partition(":")

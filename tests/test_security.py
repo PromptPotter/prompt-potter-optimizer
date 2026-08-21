@@ -806,39 +806,41 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     Pinned at BOTH seams that turn a wire number into a ceiling — the router's launch limits and
     the dispatcher's ``change-spend-budget`` — because a guard on one leaves the other open.
     """
-    import types
+    from pydantic import ValidationError
 
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.presentation.api.middleware.command_dispatcher import (
-        CommandDispatcher,
-        optional_bounded_number,
+        ChangeSpendBudgetPayload,
+        MintCampaignPayload,
+        StartRunPayload,
     )
-    from promptpotter.presentation.api.routers.commands import _run_limits
-    from promptpotter.shared.errors import PayloadInvalidError
-    from promptpotter.shared.identity import default_identity
 
-    hop = CycleHop(campaign_id="camp-nan", cycle_id="cycle_nan000000")
-    disp = CommandDispatcher(types.SimpleNamespace(identity=default_identity()))
-
+    at = {"campaign_id": "camp-nan", "cycle_id": "cycle_nan000000"}
     for bad in (float("nan"), float("inf"), float("-inf")):
-        with pytest.raises(PayloadInvalidError):
-            optional_bounded_number(bad, field="spend_budget_usd", lo=0.0)
-        with pytest.raises(PayloadInvalidError):
-            _run_limits({"spend_budget_usd": bad})
-        with pytest.raises(PayloadInvalidError):
-            _run_limits({"halt_at_accuracy": bad})
-        with pytest.raises(PayloadInvalidError):
-            disp._build_cycle_applier("change-spend-budget", None, hop, {"max_usd": bad})
+        with pytest.raises(ValidationError):
+            StartRunPayload(**at, kind="resume", spend_budget_usd=bad)
+        with pytest.raises(ValidationError):
+            StartRunPayload(**at, kind="resume", halt_at_accuracy=bad)
+        with pytest.raises(ValidationError):
+            MintCampaignPayload(dataset_name="ds", spend_budget_usd=bad)
+        with pytest.raises(ValidationError):
+            ChangeSpendBudgetPayload(**at, max_usd=bad)
 
     # And the guard rejects only what it names: the bounds themselves still admit, or a launch
     # that CAN be metered is refused instead — the same ceiling gone, the other direction. All
     # THREE limits ride: a dropped arm is a ceiling the caller declared and the run never had.
-    assert _run_limits(
-        {"spend_budget_usd": 0.0, "halt_at_accuracy": 1.0, "token_budget": 5_000}
-    ) == {"halt_at_accuracy": 1.0, "spend_budget_usd": 0.0, "token_budget": 5_000}
+    run = StartRunPayload(
+        **at, kind="resume", spend_budget_usd=0.0, halt_at_accuracy=1.0, token_budget=5_000
+    )
+    assert (run.spend_budget_usd, run.halt_at_accuracy, run.token_budget) == (0.0, 1.0, 5_000)
     # The token arm is counted, not priced — a float is a typo, not a rounding instruction.
-    with pytest.raises(PayloadInvalidError):
-        _run_limits({"token_budget": 5_000.5})
+    with pytest.raises(ValidationError):
+        StartRunPayload(**at, kind="resume", token_budget=5_000.5)
+    # `bool` IS an `int` in Python and Pydantic coerces it unless the field is strict, so an
+    # unguarded ceiling admits `true` as 1 — a $1 cap the operator never wrote.
+    with pytest.raises(ValidationError):
+        StartRunPayload(**at, kind="resume", token_budget=True)
+    with pytest.raises(ValidationError):
+        ChangeSpendBudgetPayload(**at, max_usd=True)
 
 
 async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Path) -> None:

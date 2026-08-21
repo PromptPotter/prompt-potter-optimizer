@@ -8,6 +8,7 @@ import {
   type ConfigOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
+import type { NodeSearchNarrowing } from "@/lib/api/types";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -127,9 +128,12 @@ export function SteerForkPanel({
   // whole-overlay patch; we keep only its `optimizer` block. Rides
   // `OperatorForkOverride.optimizer_narrowing` → the fork seed (cycle-level lock
   // override of the campaign's mint-time narrowing). Empty = inherit unchanged.
-  const editedNarrowing = useRef<Record<string, unknown>>({});
+  const editedNarrowing = useRef<Record<string, NodeSearchNarrowing>>({});
   const captureLocks = (nodeId: string, patch: DraftPatch) => {
-    const overlay = (patch.pipeline_overlay ?? {}) as Record<string, { optimizer?: unknown }>;
+    const overlay = (patch.pipeline_overlay ?? {}) as Record<
+      string,
+      { optimizer?: NodeSearchNarrowing }
+    >;
     const opt = overlay[nodeId]?.optimizer;
     if (opt) editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: opt };
   };

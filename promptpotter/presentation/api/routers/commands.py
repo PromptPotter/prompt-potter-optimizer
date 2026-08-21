@@ -4,51 +4,47 @@ declared in the OpenAPI spec BEFORE its handler lands, and a response shape neve
 from __future__ import annotations
 
 import logging
-import re
 from typing import Annotated, Any, cast, get_args
 
 from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
-from pydantic import Field
+from pydantic import Field, ValidationError
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, OptimizationOverrides
-from promptpotter.application.datasets.origin_readiness import (
-    origin_delta,
-    origin_projection,
-)
-from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.jobs.launcher.checkin import (
     load_checkin_draft,
     save_checkin_draft,
     start_checkin_campaign,
 )
-from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
-from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.layout import validate_dataset_name
-from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     ALL_DISPATCHED_KINDS,
+    PAYLOAD_MODEL_FOR_KIND,
     CampaignConfigKind,
+    CampaignPayload,
     CheckinScopedKind,
     CommandAcceptedBody,
     CommandDispatcher,
+    CommandPayload,
+    CyclePayload,
     CycleScopedKind,
+    EditDraftCampaignPayload,
     LifecycleKind,
+    LifecyclePayload,
+    ReplaceDatasetPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
     WorkspaceScopedKind,
-    optional_bounded_int,
-    optional_bounded_number,
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
 )
 from promptpotter.shared.errors import (
     BadRequestError,
-    ConflictError,
     NotFoundError,
     PayloadInvalidError,
-    PotterError,
     ServiceUnavailableError,
 )
 
@@ -88,125 +84,14 @@ def ensure_idempotency_key(header_value: str | None) -> str:
     return header_value.strip()
 
 
-def _require_string(payload: dict[str, Any], key: str, *, max_len: int) -> str:
-    raw = payload.get(key, "")
-    if not isinstance(raw, str) or not raw:
-        raise PayloadInvalidError(f"payload.{key} is required and must be a non-empty string.")
-    if len(raw) > max_len:
-        raise PayloadInvalidError(f"payload.{key} exceeds {max_len} chars.")
-    return raw
-
-
-def _optional_string(payload: dict[str, Any], key: str, *, max_len: int) -> str:
-    raw = payload.get(key, "")
-    if not isinstance(raw, str):
-        raise PayloadInvalidError(f"payload.{key} must be a string.")
-    if len(raw) > max_len:
-        raise PayloadInvalidError(f"payload.{key} exceeds {max_len} chars.")
-    return raw
-
-
-_SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
-
-
-def _require_slug(payload: dict[str, Any], key: str, *, max_len: int) -> str:
-    """Slug-validated required field per the OpenAPI pattern ``^[a-z][a-z0-9-]*$``."""
-    raw = _require_string(payload, key, max_len=max_len)
-    if not _SLUG_PATTERN.fullmatch(raw):
-        raise PayloadInvalidError(f"payload.{key} must match ^[a-z][a-z0-9-]*$")
-    return raw
-
-
-def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") -> str:
-    """Extract a dataset name under whichever key the wire gives it. Deciding what a name IS belongs to ``validate_dataset_name``:
-    a pattern of its own here is a second rule that can disagree with the slug ingest mints off a filename."""
-    raw = _require_string(payload, key, max_len=64)
+def _validated_payload(kind: str, raw: dict[str, Any]) -> CommandPayload:
+    """The WHOLE of payload validation for every dispatched kind, at one call. The model's own
+    ``extra="forbid"`` is what refuses an undeclared key: dropping one instead is how a field
+    reaches the applier as an absent argument and fails as if it had never been sent."""
     try:
-        return validate_dataset_name(raw)
-    except ValueError as exc:
-        raise PayloadInvalidError(f"payload.{key}: {exc}") from exc
-
-
-def _run_limits(payload: dict[str, Any]) -> dict[str, float | int]:
-    """The three operator-set run limits, shared by ``mint-campaign`` and ``start-run`` and declared
-    on both payloads in ``m12-api-openapi.yaml`` (`RunLimits`). Both budget arms ride, because the
-    USD one goes blind on a model with no rate on file and the token one is what still holds —
-    serving only USD is the same half-gate the account tier already refuses to be."""
-    limits: dict[str, float | int] = {}
-    halt = optional_bounded_number(
-        payload.get("halt_at_accuracy"), field="halt_at_accuracy", lo=0.0, hi=1.0
-    )
-    if halt is not None:
-        limits["halt_at_accuracy"] = halt
-    spend = optional_bounded_number(
-        payload.get("spend_budget_usd"), field="spend_budget_usd", lo=0.0
-    )
-    if spend is not None:
-        limits["spend_budget_usd"] = spend
-    tokens = optional_bounded_int(payload.get("token_budget"), field="token_budget", lo=0)
-    if tokens is not None:
-        limits["token_budget"] = tokens
-    return limits
-
-
-def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate + project the workspace payload. The result lands on the ledger record, so keep the keys minimal and
-    lossless — the audit trail mirrors the request."""
-    if kind == "register-backend":
-        name = _require_string(payload, "name", max_len=128)
-        backend_type = _require_string(payload, "backend_type", max_len=64)
-        base_url = _require_string(payload, "base_url", max_len=2048)
-        out: dict[str, Any] = {
-            "name": name,
-            "backend_type": backend_type,
-            "base_url": base_url,
-        }
-        if payload.get("id"):
-            out["id"] = _require_slug(payload, "id", max_len=64)
-        return out
-    # mint-campaign
-    mint_out: dict[str, Any] = {"dataset_name": _require_dataset_name(payload)}
-    mint_out.update(_run_limits(payload))
-    return mint_out
-
-
-class _EditDraftPatch(StrictModel):
-    """Sparse mutation payload — only declared fields ride through."""
-
-    slug: str | None = Field(
-        default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
-    )
-    connector: str | None = Field(default=None, min_length=1, max_length=64)
-    scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
-    raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
-    pipeline_overlay: dict[str, Any] | None = None
-    # Written by the setup-panel mode toggle; read by commit's
-    # `_build_origin_pipeline_json` + `derive_optimizer_locks`.
-    pipeline_steps: list[str] | None = None
-    column_query: str | None = Field(default=None, max_length=256)
-    column_ground_truth: str | None = Field(default=None, max_length=256)
-    # Replaces the draft's fields wholesale — the editor sends the full PromptTemplate object.
-    origin_prompt_fields: dict[str, Any] | None = None
-    # Shallow-merged onto the draft's current overrides then validated against
-    # OptimizationOverrides, so the editor can send one knob or several; a nested
-    # `mechanisms` replaces wholesale.
-    optimization_overrides: dict[str, Any] | None = None
-    # From the operator's upload or derived from one of the draft's own columns
-    # (`routers/datasets/ingest.py`); both ride this patch.
-    candidate_library: list[str] | None = Field(default=None, min_length=1)
-    # Replaces the draft's set wholesale — the checklist sends the full ticked list, and an
-    # empty list clears it (restrictive default). Not gated, like the connector.
-    allowed_models: list[str] | None = None
-
-
-# Every field the origin resolver may propose must be settable here — that correspondence is
-# what renders a finding as a clickable `edit-draft-campaign` without the model ever naming a
-# command. Fails at import, not at the operator's click.
-if not set(FINDING_PATCH_KEYS.values()) <= set(_EditDraftPatch.model_fields):
-    raise RuntimeError(
-        "resolver proposes fields edit-draft-campaign cannot patch: "
-        f"{set(FINDING_PATCH_KEYS.values()) - set(_EditDraftPatch.model_fields)}"
-    )
+        return PAYLOAD_MODEL_FOR_KIND[kind].model_validate(raw)
+    except ValidationError as exc:
+        raise PayloadInvalidError(f"payload invalid for {kind!r}: {exc}") from exc
 
 
 def _require_kind(envelope: CommandEnvelope, expected: str) -> None:
@@ -214,121 +99,6 @@ def _require_kind(envelope: CommandEnvelope, expected: str) -> None:
     ``post_command`` runs against the path segment."""
     if envelope.kind != expected:
         raise PayloadInvalidError(f"envelope.kind must be {expected!r}, got {envelope.kind!r}.")
-
-
-def _require_checkin_id(payload: dict[str, Any], key: str) -> str:
-    """The check-in campaign id, whichever name the wire gives it: ``draft_id`` and
-    ``campaign_id`` are the same id (re-keyed at ``create_checkin_campaign``)."""
-    raw = _require_string(payload, key, max_len=128)
-    if len(raw) < 8:
-        raise PayloadInvalidError(f"payload.{key} is required (8-128 chars).")
-    return raw
-
-
-def _reread_draft(stores: Stores, draft_id: str) -> DraftCampaign:
-    draft = load_checkin_draft(stores, draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
-    return draft
-
-
-def _reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
-    """The post-mutation draft, re-read from ``draft.json`` — the response body for
-    a deduped ``Idempotency-Key`` retry, whose first attempt already persisted it."""
-    return draft_wire_with_locks(_reread_draft(stores, draft_id))
-
-
-def _origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
-    """What the applier MOVED in the origin, diffed against its pre-apply projection. Recorded on the ack because the
-    command payload states only what was ASKED for."""
-    return origin_delta(before, origin_projection(_reread_draft(stores, draft_id)))
-
-
-async def dispatch_draft_patch(
-    stores: Stores,
-    *,
-    draft_id: str,
-    patch_raw: dict[str, Any],
-    idempotency_key: str,
-) -> dict[str, Any]:
-    """The single write path behind ``edit-draft-campaign``. The candidate-library routes derive their patch and then ride this,
-    so an origin edit is a ``CommandRecord`` whatever the ingress looked like."""
-    patch = _EditDraftPatch.model_validate(patch_raw)
-
-    draft = load_checkin_draft(stores, draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
-
-    changes: dict[str, Any] = {}
-    provenance: dict[str, Provenance] = {}
-    if patch.slug is not None and patch.slug != draft.slug:
-        if stores.tenant_datasets.slug_exists(patch.slug):
-            suggested = stores.tenant_datasets.suggest_free_slug(patch.slug)
-            raise ConflictError(
-                f"Slug '{patch.slug}' already exists in your collection.",
-                code="slug_collision",
-                details={"suggested_slug": suggested},
-            )
-        changes["slug"] = patch.slug
-    # Config + the authored prompt are not gated — just set the value.
-    for patch_val, draft_attr in (
-        (patch.connector, "connector"),
-        (patch.scoring_composite, "scoring_composite"),
-        (patch.pipeline_overlay, "pipeline_overlay"),
-        (patch.origin_prompt_fields, "origin_prompt_fields"),
-        (patch.pipeline_steps, "pipeline_steps"),
-        (patch.candidate_library, "candidate_library"),
-        (patch.allowed_models, "allowed_models"),
-    ):
-        if patch_val is not None:
-            changes[draft_attr] = patch_val
-
-    # Shallow-merge so one knob can change without resetting the rest, then validate the
-    # result (rejects unknown keys / out-of-range max_rounds / malformed mechanisms).
-    if patch.optimization_overrides is not None:
-        merged = {**draft.optimization_overrides, **patch.optimization_overrides}
-        changes["optimization_overrides"] = OptimizationOverrides.model_validate(merged).model_dump(
-            mode="json"
-        )
-
-    # The task framing IS gated — an operator edit CONFIRMS it, which is what opens the
-    # origin-readiness gate for a field left PROPOSED or UNSET.
-    if patch.raw_task_description is not None:
-        changes["raw_task_description"] = patch.raw_task_description
-        provenance["task_description"] = Provenance.CONFIRMED
-
-    # Each column must be a member of the uploaded headers (422 otherwise); confirming flips
-    # its provenance so the origin-readiness gate opens.
-    for label, col in (
-        ("column_query", patch.column_query),
-        ("column_ground_truth", patch.column_ground_truth),
-    ):
-        if col is not None and col not in draft.headers:
-            raise PayloadInvalidError(
-                f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
-            )
-
-    def _apply() -> dict[str, Any]:
-        updated = draft.apply_resolution(values=changes, provenance=provenance)
-        if patch.column_query is not None or patch.column_ground_truth is not None:
-            updated = updated.confirm_columns(
-                query_col=patch.column_query, ground_truth_col=patch.column_ground_truth
-            )
-        save_checkin_draft(stores, updated)
-        return draft_wire_with_locks(updated)
-
-    before = origin_projection(draft)
-    dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_checkin_command(
-        kind="edit-draft-campaign",
-        campaign_id=draft_id,
-        payload={"draft_id": draft_id, "patch": patch_raw},
-        idempotency_key=idempotency_key,
-        applier=_apply,
-        on_replay=lambda: _reread_draft_wire(stores, draft_id),
-        effect_fn=lambda: _origin_effect(stores, draft_id, before),
-    )
-    return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/edit-draft-campaign")
@@ -345,21 +115,19 @@ async def edit_draft_campaign(
     """
     _require_kind(envelope, "edit-draft-campaign")
     idemp = ensure_idempotency_key(idempotency_key)
-    draft_id = _require_checkin_id(envelope.payload, "draft_id")
-    patch_raw = envelope.payload.get("patch", {})
-    if not isinstance(patch_raw, dict):
-        raise PayloadInvalidError("payload.patch must be an object.")
+    payload = cast(
+        EditDraftCampaignPayload, _validated_payload("edit-draft-campaign", envelope.payload)
+    )
     return await dispatch_draft_patch(
         stores,
-        draft_id=draft_id,
-        patch_raw=patch_raw,
+        draft_id=payload.draft_id,
+        patch=payload.patch,
         idempotency_key=idemp,
     )
 
 
 @commands_router.post("/resolve-origin")
 async def resolve_origin(
-    request: Request,
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -371,50 +139,13 @@ async def resolve_origin(
     deterministic checklist re-gates before the response.
     """
     _require_kind(envelope, "resolve-origin")
-    idemp = ensure_idempotency_key(idempotency_key)
-    draft_id = _require_checkin_id(envelope.payload, "draft_id")
-    message = _optional_string(envelope.payload, "message", max_len=4000)
-    draft = load_checkin_draft(stores, draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
-
-    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-
-    async def _apply() -> dict[str, Any]:
-        try:
-            result = await resolve_origin_turn(stores=stores, draft=draft, message=message)
-        except PotterError:
-            raise
-        except Exception as exc:
-            # A PotterError, so the dispatcher's mapping seam emits a `rejected` ack and
-            # re-raises as 502 rather than the generic 409 the bare-Exception arm produces.
-            logger.exception("resolve-origin turn failed for draft %s", draft_id)
-            raise ServiceUnavailableError(
-                f"origin resolver turn failed: {exc}", code="resolver_failed"
-            ) from exc
-        return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
-
-    def _on_replay() -> dict[str, Any]:
-        # `cache.json::resolution` is byte-identical to the live turn's block, so a deduped
-        # retry never re-spends the LLM call.
-        bank = stores.checkin.load_bank(draft_id) or {}
-        return {
-            "resolution": bank.get("resolution") or {},
-            "draft": _reread_draft_wire(stores, draft_id),
-        }
-
-    before = origin_projection(draft)
-    dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_checkin_command(
-        kind="resolve-origin",
-        campaign_id=draft_id,
-        payload=envelope.payload,
-        idempotency_key=idemp,
-        applier=_apply,
-        on_replay=_on_replay,
-        effect_fn=lambda: _origin_effect(stores, draft_id, before),
+    payload = cast(ResolveOriginPayload, _validated_payload("resolve-origin", envelope.payload))
+    return await dispatch_origin_resolution(
+        stores,
+        draft_id=payload.draft_id,
+        message=payload.message,
+        idempotency_key=ensure_idempotency_key(idempotency_key),
     )
-    return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/start-checkin")
@@ -434,7 +165,8 @@ async def start_checkin(
     """
     _require_kind(envelope, "start-checkin")
     idemp = ensure_idempotency_key(idempotency_key)
-    campaign_id = _require_checkin_id(envelope.payload, "campaign_id")
+    payload = cast(StartCheckinPayload, _validated_payload("start-checkin", envelope.payload))
+    campaign_id = payload.campaign_id
 
     draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
@@ -471,7 +203,7 @@ async def start_checkin(
     outcome = await dispatcher.dispatch_checkin_command(
         kind="start-checkin",
         campaign_id=campaign_id,
-        payload=envelope.payload,
+        payload=payload.model_dump(mode="json"),
         idempotency_key=idemp,
         applier=_apply,
         # `job_id` has no disk home, so a deduped retry could only fabricate one;
@@ -498,11 +230,11 @@ async def replace_dataset(
     """
     _require_kind(envelope, "replace-dataset")
     idemp = ensure_idempotency_key(idempotency_key)
-    raw_slug = _require_dataset_name(envelope.payload, "slug")
+    payload = cast(ReplaceDatasetPayload, _validated_payload("replace-dataset", envelope.payload))
     dispatcher = CommandDispatcher(stores)
     outcome = await dispatcher.dispatch_workspace_command(
         kind="replace-dataset",
-        payload={"slug": raw_slug},
+        payload=payload,
         idempotency_key=idemp,
     )
     # Echo the subject, nothing more — `version_and_repoint` records the counts + the
@@ -534,102 +266,43 @@ async def post_command(
             code="command_kind_unknown",
         )
 
-    payload = envelope.payload
+    payload = _validated_payload(kind, envelope.payload)
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
     if kind in _WORKSPACE_SCOPED_KINDS:
-        workspace_payload = _build_workspace_payload(kind, payload)
         workspace_kind: WorkspaceScopedKind = kind  # type: ignore[assignment]
         workspace_outcome = await dispatcher.dispatch_workspace_command(
             kind=workspace_kind,
-            payload=workspace_payload,
+            payload=payload,
             idempotency_key=idemp,
         )
         return workspace_outcome.accepted
 
-    campaign_id = _require_string(payload, "campaign_id", max_len=128)
-
     if kind in _CAMPAIGN_CONFIG_KINDS:
         # In-place manifest edit — campaign-scoped, no cycle.
-        config_payload: dict[str, Any]
-        if kind == "set-allowed-models":
-            allowed_raw = payload.get("allowed_models")
-            if not isinstance(allowed_raw, list) or not all(
-                isinstance(m, str) for m in allowed_raw
-            ):
-                raise PayloadInvalidError("payload.allowed_models must be a list of strings.")
-            config_payload = {"allowed_models": allowed_raw}
-        else:
-            # Optional, not required: clearing the label restores the dataset-name
-            # fallback the display chain already documents, so "" is a real value.
-            config_payload = {"label": _optional_string(payload, "label", max_len=200).strip()}
         config_kind: CampaignConfigKind = kind  # type: ignore[assignment]
         config_outcome = await dispatcher.dispatch_campaign_config(
             kind=config_kind,
-            campaign_id=campaign_id,
-            payload=config_payload,
+            payload=cast(CampaignPayload, payload),
             idempotency_key=idemp,
         )
         return config_outcome.accepted
 
     if kind in _LIFECYCLE_KINDS:
-        reason = _optional_string(payload, "reason", max_len=512)
         lifecycle_kind: LifecycleKind = kind  # type: ignore[assignment]
-        # `keep_results` only meaningful for delete-campaign; harmless on the others.
-        keep_results = bool(payload.get("keep_results", False))
         lifecycle_outcome = await dispatcher.dispatch_lifecycle(
             kind=lifecycle_kind,
-            campaign_id=campaign_id,
-            reason=reason,
+            payload=cast(LifecyclePayload, payload),
             idempotency_key=idemp,
-            keep_results=keep_results,
         )
         return lifecycle_outcome.accepted
 
-    # Cycle-scoped. The kind-specific payload fields ride `extras`; the dispatcher's
-    # `_build_cycle_applier` reads them per kind.
-    cycle_id = _require_string(payload, "cycle_id", max_len=128)
-    extras: dict[str, Any] = {}
-    if kind == "fork-cycle":
-        round_raw = payload.get("round", 0)
-        if not isinstance(round_raw, int) or round_raw < 0:
-            raise PayloadInvalidError("payload.round must be a non-negative integer.")
-        extras["round"] = round_raw
-        extras["candidate_id"] = _optional_string(payload, "candidate_id", max_len=128)
-        # Required — every operator fork is `operator_steered`. The dispatcher validates it
-        # into a typed `CycleSeed` (wire schema: m12-api-openapi.yaml::OperatorForkOverride).
-        extras["seed"] = payload.get("seed")
-        extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
-    elif kind in ("change-spend-budget", "origin-gate-decision", "set-sample-lookahead"):
-        # Passed through, NOT validated here: `_build_cycle_applier` validates every
-        # cycle-scoped kind's extras and is the seam the CLI reaches too. A second spelling
-        # here re-derives the same rules and disagrees with them.
-        extras.update(
-            {
-                k: payload[k]
-                for k in ("max_usd", "max_tokens", "decision", "enabled")
-                if k in payload
-            }
-        )
-    elif kind == "start-run":
-        kind_raw = payload.get("kind")
-        if kind_raw not in ("new", "resume"):
-            raise PayloadInvalidError("payload.kind must be 'new' or 'resume'.")
-        extras["kind"] = kind_raw
-        extras.update(_run_limits(payload))
-    elif kind == "step-cycle":
-        rounds_raw = payload.get("rounds", 1)
-        if not isinstance(rounds_raw, int) or not (1 <= rounds_raw <= 100):
-            raise PayloadInvalidError("payload.rounds must be an integer in [1, 100].")
-        extras["rounds"] = rounds_raw
-
+    cycle_payload = cast(CyclePayload, payload)
     cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(
         kind=cycle_kind,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        payload_extras=extras,
+        payload=cycle_payload,
         idempotency_key=idemp,
         expected_version=expected_version,
     )

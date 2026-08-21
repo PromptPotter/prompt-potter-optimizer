@@ -2699,17 +2699,30 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          pattern: '^[a-z0-9][a-z0-9_-]*$'
-          description: 'Campaign id ({dataset}__{rand6_hex}).'
+          description: |
+            Campaign id ({dataset}__{rand6_hex}). Deliberately UNPATTERNED, like every
+            other id here: the shape is minted, not parsed, and a regex in this file is
+            a second rule that can disagree with `CampaignPayload` — which is the half
+            that actually refuses. Bounds live on the model.
         cycle_id:
           type: string
           minLength: 1
           maxLength: 128
-          pattern: '^cycle_[0-9a-f_]+$'
           description: 'Content-addressed cycle id (`cycle_{target_hash[:12]}` + optional sibling suffix).'
 
     PauseCyclePayload:
-      $ref: '#/components/schemas/CycleRef'
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          properties:
+            reason:
+              type: string
+              maxLength: 512
+              description: |
+                Why the pause was asked for, recorded on the `CommandRecord`. The
+                CLI's `pause --reason` has always sent it; declaring it here is
+                what makes the two entry points one contract.
 
     OriginGateDecisionPayload:
       allOf:
@@ -2734,6 +2747,7 @@ components:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
           required: [cells]
+          additionalProperties: false
           properties:
             cells:
               type: integer
@@ -2971,9 +2985,11 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-          pattern: '^[a-z0-9][a-z0-9_-]*$'
           description: |
             Dataset under `datasets/{dataset_name}/` to mint a campaign for.
+            No `pattern`: `MintCampaignPayload` refuses to carry one so that the slug
+            ingest mints off a filename stays the ONE rule, and a copy here was that
+            second rule.
             Campaign-from-origin (reuse a chosen prior origin) rides the DRAFT
             path instead — `POST /origins/{origin_id}/draft` prefills a check-in
             with the origin's exact prompt fields, then `start-checkin` seeds C0
@@ -3122,8 +3138,10 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          pattern: '^[a-z0-9][a-z0-9_-]*$'
-          description: 'Campaign id ({dataset}__{rand6_hex}).'
+          description: |
+            Campaign id ({dataset}__{rand6_hex}). Unpatterned for the same reason as
+            `CycleRef.campaign_id`: `CampaignPayload` is the half that refuses, and it
+            carries bounds only.
 
     CampaignLifecyclePayload:
       allOf:
@@ -3840,7 +3858,9 @@ components:
               type: string
               minLength: 1
               maxLength: 64
-              pattern: '^[a-z0-9][a-z0-9_-]*$'
+              # Verbatim from `_EditDraftPatch.slug`, which enforces it. The copy here
+              # admitted a leading digit the model refuses.
+              pattern: '^[a-z][a-z0-9_-]*$'
             connector:
               type: string
               minLength: 1
@@ -3973,8 +3993,10 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-          pattern: '^[a-z0-9][a-z0-9_-]*$'
-          description: The colliding dataset name to version-and-repoint away.
+          description: |
+            The colliding dataset name to version-and-repoint away. Unpatterned:
+            `ReplaceDatasetPayload` carries bounds only, and the one slug regex that
+            does exist lives on `_EditDraftPatch.slug`.
 
     ReplaceDatasetResponse:
       type: object

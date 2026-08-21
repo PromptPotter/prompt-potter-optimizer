@@ -246,8 +246,9 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
 
     from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
         mint_operator_fork,
+        sanctioned_models,
+        steer_is_babysit,
     )
-    from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
     from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
@@ -259,12 +260,12 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
             raise SystemExit(f"ERROR: --steer-model expects NODE=MODEL, got {spec!r}")
         overlay.setdefault(node, {})["model"] = model
 
-    # Read the origin's allow-list off the campaign config (unchanged by this steer —
-    # the fork inherits it). A steer OUTSIDE it taints (babysit + grade C); a steer to
-    # a sanctioned model is clean.
-    allowed_models = ctx.campaign_config.allowed_models
-    disallowed = overlay_sets_model_outside_allowed(overlay, allowed_models)
+    # The SAME question the web fork-cycle applier asks, of the same list — the origin's frozen
+    # `allowed_models`, off the campaign manifest. `ctx.campaign_config` is a different list, one
+    # the inherited overlay and the cycle seed have already moved.
+    disallowed = steer_is_babysit(session.store, ctx.campaign_id, overlay)
     if disallowed:
+        allowed_models = sanctioned_models(session.store, ctx.campaign_id)
         # Same capability gate the web fork-cycle applier runs. The terminal owner
         # holds it; a delegated sub-principal without it is refused here.
         if not has_capability(session.identity, CAMPAIGN_BABYSIT_CAP):

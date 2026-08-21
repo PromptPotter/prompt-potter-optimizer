@@ -15,6 +15,7 @@ from promptpotter.application.datasets.csv_ingest import (
     candidate_library_from_rows,
     parse_candidate_library,
 )
+from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
     SlugTakenError,
@@ -30,10 +31,8 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
-from promptpotter.presentation.api.routers.commands import (
-    dispatch_draft_patch,
-    ensure_idempotency_key,
-)
+from promptpotter.presentation.api.middleware.command_dispatcher import dispatch_draft_patch
+from promptpotter.presentation.api.routers.commands import ensure_idempotency_key
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 from promptpotter.shared.errors import (
     ConflictError,
@@ -146,7 +145,7 @@ async def upload_candidate_library(
     return await dispatch_draft_patch(
         stores,
         draft_id=draft_id,
-        patch_raw={"candidate_library": terms},
+        patch=EditDraftPatch(candidate_library=terms),
         idempotency_key=idemp,
     )
 
@@ -154,8 +153,8 @@ async def upload_candidate_library(
 class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
 
-    # `draft_id` IS the owning `campaign_id`; bound it exactly as every other
-    # check-in route does (`commands.py::_require_checkin_id`), not 64.
+    # `draft_id` IS the owning `campaign_id`; bound it exactly as every other check-in payload
+    # does (`command_dispatcher.py::_CheckinPayload` and its subclasses), not 64.
     draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 
@@ -198,7 +197,7 @@ async def build_candidate_library_from_column(
     return await dispatch_draft_patch(
         stores,
         draft_id=body.draft_id,
-        patch_raw={"candidate_library": terms},
+        patch=EditDraftPatch(candidate_library=terms),
         idempotency_key=idemp,
     )
 

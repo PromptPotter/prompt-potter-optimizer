@@ -38,7 +38,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ForkResult", "_mint_fork", "cleanup_stub_fork_if_empty", "mint_operator_fork"]
+__all__ = [
+    "ForkResult",
+    "_mint_fork",
+    "cleanup_stub_fork_if_empty",
+    "mint_operator_fork",
+    "sanctioned_models",
+    "steer_is_babysit",
+]
 
 
 class ForkResult(NamedTuple):
@@ -312,6 +319,27 @@ def cleanup_stub_fork_if_empty(
     elif deleted:
         logger.info("Stub fork cleaned up: %s (parent=%s)", hop.cycle_id, parent_cycle_id)
     return deleted, reason
+
+
+def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] | None) -> bool:
+    """Does *overlay* steer a node OUTSIDE the ORIGIN's sanctioned models — the ADR-0005 §4 babysit
+    action, a distinct capability above the RUN-tier fork?
+
+    ONE read of the sanction, off the campaign manifest where it is FROZEN. A session's resolved
+    config is the wrong list — it has already been through the inherited overlay and the cycle
+    seed, so a seeded fork answers differently there than on the wire for the same steer.
+    """
+    from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
+
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    allowed = campaign.config.get("allowed_models") if campaign else None
+    return overlay_sets_model_outside_allowed(overlay, allowed)
+
+
+def sanctioned_models(stores: Stores, campaign_id: str) -> Any:
+    """The origin's frozen ``allowed_models`` — for a surface that has to NAME them in its refusal."""
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    return campaign.config.get("allowed_models") if campaign else None
 
 
 def mint_operator_fork(

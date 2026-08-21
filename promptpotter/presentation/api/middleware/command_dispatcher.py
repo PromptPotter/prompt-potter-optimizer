@@ -5,18 +5,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import Annotated, Any, Literal, cast, get_args
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
 from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
+)
+from promptpotter.application.datasets.draft_patch import (
+    EditDraftPatch,
+    apply_draft_patch,
+    plan_draft_patch,
 )
 from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
 from promptpotter.application.jobs.registry import JobRegistry
@@ -74,56 +78,6 @@ class _IdempotentMatch(StrictModel):
     model_config = ConfigDict(frozen=True)
     command_id: str
     offset: int
-
-
-def _optional_float(raw: object) -> float | None:
-    if isinstance(raw, int | float):
-        return float(raw)
-    return None
-
-
-def _optional_int(raw: object) -> int | None:
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        return None
-    return raw
-
-
-def optional_bounded_number(
-    value: object, *, field: str, lo: float, hi: float | None = None
-) -> float | None:
-    """A finite bounded number, or ``None`` when absent — **the one spelling of "a limit off the
-    wire"**, for the router's ``mint-campaign`` / ``start-run`` arms and the dispatcher's
-    ``change-spend-budget`` alike. Out of range is a 422, never a silent omission: dropping the key
-    let a run start with no spend cap and no halt threshold while the client got a 202.
-
-    Finiteness is checked SEPARATELY from the range because a range test cannot see it. ``NaN``
-    compares False against every bound, so it passes a check written as two rejections, becomes the
-    admitted cap, and disarms the ``BudgetGate`` — whose probe is ``spent >= cap``, false forever.
-    ``+inf`` does the same wherever the bound is one-sided."""
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise PayloadInvalidError(f"payload.{field} must be a number")
-    if not math.isfinite(value):
-        raise PayloadInvalidError(f"payload.{field} must be a finite number")
-    if value < lo or (hi is not None and value > hi):
-        bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
-        raise PayloadInvalidError(f"payload.{field} must be {bound}")
-    return float(value)
-
-
-def optional_bounded_int(value: object, *, field: str, lo: int) -> int | None:
-    """The integer twin of :func:`optional_bounded_number`, for a ceiling that is COUNTED rather
-    than priced — the token arm of every budget. It needs no finiteness check and must not grow
-    one: ``NaN`` and ``inf`` are floats, so requiring ``int`` already excludes them, which is why
-    the token ceiling was never reachable by the trick that disarmed the USD one."""
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise PayloadInvalidError(f"payload.{field} must be an integer")
-    if value < lo:
-        raise PayloadInvalidError(f"payload.{field} must be at least {lo}")
-    return value
 
 
 def _parse_cycle_seed(raw: object) -> CycleSeed:
@@ -251,6 +205,214 @@ if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
     )
 
 
+def _reject_bool(v: object) -> object:
+    """``bool`` IS an ``int`` in Python and Pydantic coerces it, so a wire ``true`` arrives as 1 —
+    which reads as "disarm" on a count and as a $1 ceiling on a budget."""
+    if isinstance(v, bool):
+        raise ValueError("must be a number, not a boolean")
+    return v
+
+
+# The two wire scalar types. `strict` is what refuses `true` where an int is meant; `allow_inf_nan`
+# is what refuses `+inf`, which PASSES a bare `ge=` bound and then disarms the `BudgetGate` whose
+# probe is `spent >= cap`. Neither is a default — both were bought.
+WireInt = Annotated[int, Field(strict=True)]
+WireFloat = Annotated[float, BeforeValidator(_reject_bool), Field(allow_inf_nan=False)]
+
+
+class CommandPayload(StrictModel):
+    """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
+    extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it."""
+
+
+class CampaignPayload(CommandPayload):
+    campaign_id: str = Field(min_length=1, max_length=128)
+
+
+class CyclePayload(CampaignPayload):
+    cycle_id: str = Field(min_length=1, max_length=128)
+
+
+class ForkCyclePayload(CyclePayload):
+    round: int = Field(default=0, ge=0)
+    candidate_id: str = Field(default="", max_length=128)
+    # Required — every operator fork is `operator_steered`. Kept as a dict here and validated into
+    # a typed `CycleSeed` at the applier, which stamps the lineage provenance the wire omits.
+    seed: dict[str, Any]
+    steered_by: str = Field(default="", max_length=256)
+
+
+class SkipSearchpointPayload(CyclePayload):
+    pass
+
+
+class DeleteCyclePayload(CyclePayload):
+    pass
+
+
+class CleanupEmptyCyclesPayload(CyclePayload):
+    pass
+
+
+class PauseCyclePayload(CyclePayload):
+    reason: str = Field(default="", max_length=512)
+
+
+class SetSampleLookaheadPayload(CyclePayload):
+    cells: WireInt = Field(ge=1, description="1 disarms.")
+
+
+class OriginGateDecisionPayload(CyclePayload):
+    decision: Literal["rescore", "proceed", "abort"]
+
+
+class ChangeSpendBudgetPayload(CyclePayload):
+    max_usd: WireFloat | None = Field(default=None, ge=0.0)
+    max_tokens: WireInt | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _at_least_one_ceiling(self) -> ChangeSpendBudgetPayload:
+        """An ABSENT arm means "leave it untouched", so both absent is a command that asks for
+        nothing and would ack ``applied`` having moved neither ceiling. Raised as the domain error
+        rather than a ``ValueError``, which Pydantic would wrap — this one propagates unwrapped, so
+        the CLI building the model directly gets the same 422-shaped refusal the route does."""
+        if self.max_usd is None and self.max_tokens is None:
+            raise PayloadInvalidError(
+                "change-spend-budget requires at least one of max_usd / max_tokens."
+            )
+        return self
+
+
+class RunLimitsPayload(CommandPayload):
+    """The three launch ceilings, bounded ONCE. ``campaign_runner.main`` validates the CLI's
+    ``--halt-at`` / ``--spend-budget`` / ``--token-budget`` through this before dispatch, so the
+    terminal refuses what HTTP refuses — argparse types these and bounds none of them, and an
+    unbounded ceiling is one that never fires or fires on round 0."""
+
+    halt_at_accuracy: WireFloat | None = Field(default=None, ge=0.0, le=1.0)
+    # Both budget arms ride: the USD one goes blind on a model with no rate on file and the token
+    # one is what still holds, so serving only USD is a half-gate.
+    spend_budget_usd: WireFloat | None = Field(default=None, ge=0.0)
+    token_budget: WireInt | None = Field(default=None, ge=0)
+
+
+class StartRunPayload(CyclePayload, RunLimitsPayload):
+    kind: Literal["new", "resume"]
+
+
+class StepCyclePayload(CyclePayload):
+    rounds: WireInt = Field(default=1, ge=1, le=100)
+
+
+class LifecyclePayload(CampaignPayload):
+    reason: str = Field(default="", max_length=512)
+    # Only meaningful for `delete-campaign`; harmless on the other two.
+    keep_results: bool = False
+
+
+class SetAllowedModelsPayload(CampaignPayload):
+    allowed_models: list[str]
+
+
+class SetCampaignLabelPayload(CampaignPayload):
+    # Required, and `""` is the CLEAR — it restores the dataset-name fallback the display chain
+    # already documents. Defaulting it too would give "clear" two spellings, omit and empty, and
+    # the declared contract only ever named one.
+    label: str = Field(max_length=200)
+
+
+class RegisterBackendPayload(CommandPayload):
+    name: str = Field(min_length=1, max_length=128)
+    backend_type: str = Field(min_length=1, max_length=64)
+    base_url: str = Field(min_length=1, max_length=2048)
+    # Auto-derived from `name` when omitted (`_slugify_backend_id`).
+    id: str | None = Field(default=None, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
+
+
+class ReplaceDatasetPayload(CommandPayload):
+    slug: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _slug_is_a_dataset_name(self) -> ReplaceDatasetPayload:
+        from promptpotter.infrastructure.store.layout import validate_dataset_name
+
+        validate_dataset_name(self.slug)
+        return self
+
+
+class _CheckinPayload(CommandPayload):
+    """``draft_id`` and ``campaign_id`` are the same id, re-keyed at ``create_checkin_campaign``;
+    each check-in verb names it whichever way its wire schema does."""
+
+
+class EditDraftCampaignPayload(_CheckinPayload):
+    draft_id: str = Field(min_length=8, max_length=128)
+    # TYPED, so `_validated_payload` is the whole of it — a `dict[str, Any]` defers validation into
+    # the applier, past the capability gate. Required: an omitted patch is a no-op that still mints
+    # a `CommandRecord` and an ack, so the ledger would carry an edit that edited nothing.
+    patch: EditDraftPatch
+
+
+class ResolveOriginPayload(_CheckinPayload):
+    draft_id: str = Field(min_length=8, max_length=128)
+    message: str = Field(default="", max_length=4000)
+
+
+class StartCheckinPayload(_CheckinPayload):
+    campaign_id: str = Field(min_length=8, max_length=128)
+
+
+class MintCampaignPayload(CommandPayload):
+    dataset_name: str = Field(min_length=1, max_length=64)
+    halt_at_accuracy: WireFloat | None = Field(default=None, ge=0.0, le=1.0)
+    spend_budget_usd: WireFloat | None = Field(default=None, ge=0.0)
+    token_budget: WireInt | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _name_is_a_dataset_name(self) -> MintCampaignPayload:
+        """Deciding what a name IS belongs to ``validate_dataset_name`` — a pattern of its own here
+        is a second rule that can disagree with the slug ingest mints off a filename."""
+        from promptpotter.infrastructure.store.layout import validate_dataset_name
+
+        validate_dataset_name(self.dataset_name)
+        return self
+
+
+# The generic route's kind → payload type. An enum-keyed dispatch table over TYPES, which is the
+# form root `CLAUDE.md` sanctions — asking a type what it accepts, rather than asking a list of
+# names, is what stops a key going silently unread when a verb grows one.
+PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
+    "fork-cycle": ForkCyclePayload,
+    "skip-searchpoint": SkipSearchpointPayload,
+    "delete-cycle": DeleteCyclePayload,
+    "cleanup-empty-cycles": CleanupEmptyCyclesPayload,
+    "pause-cycle": PauseCyclePayload,
+    "set-sample-lookahead": SetSampleLookaheadPayload,
+    "origin-gate-decision": OriginGateDecisionPayload,
+    "change-spend-budget": ChangeSpendBudgetPayload,
+    "start-run": StartRunPayload,
+    "step-cycle": StepCyclePayload,
+    "archive-campaign": LifecyclePayload,
+    "delete-campaign": LifecyclePayload,
+    "unarchive-campaign": LifecyclePayload,
+    "set-allowed-models": SetAllowedModelsPayload,
+    "set-campaign-label": SetCampaignLabelPayload,
+    "register-backend": RegisterBackendPayload,
+    "mint-campaign": MintCampaignPayload,
+    "replace-dataset": ReplaceDatasetPayload,
+    "edit-draft-campaign": EditDraftCampaignPayload,
+    "resolve-origin": ResolveOriginPayload,
+    "start-checkin": StartCheckinPayload,
+}
+# Total over the dispatched set, exactly as `CAP_FOR_KIND` is: a kind with no payload type is a
+# kind whose wire shape nothing states, and a typed route is not an exemption from having one.
+if set(PAYLOAD_MODEL_FOR_KIND) != ALL_DISPATCHED_KINDS:
+    raise RuntimeError(
+        "PAYLOAD_MODEL_FOR_KIND out of sync with the dispatched command set: "
+        f"{ALL_DISPATCHED_KINDS.symmetric_difference(PAYLOAD_MODEL_FOR_KIND)}"
+    )
+
+
 class CommandAcceptedBody(StrictModel):
     """The 202 response shape declared in ``m12-api-openapi.yaml``."""
 
@@ -282,51 +444,51 @@ class CommandDispatcher:
         self,
         *,
         kind: LifecycleKind,
-        campaign_id: str,
-        reason: str,
+        payload: LifecyclePayload,
         idempotency_key: str,
-        keep_results: bool = False,
     ) -> CommandOutcome:
         """The ``CommandRecord`` lands on the WORKSPACE ledger because ``archive`` MOVES the
         campaign tree and ``delete`` REMOVES it — its own ledger cannot be the audit home."""
-        self._load_owned_campaign(campaign_id)
+        self._load_owned_campaign(payload.campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload={"campaign_id": campaign_id, "reason": reason, "keep_results": keep_results},
+            payload=payload.model_dump(mode="json"),
             idempotency_key=idempotency_key,
-            applier=lambda: self._apply_lifecycle(kind, campaign_id, reason, keep_results),
+            applier=lambda: self._apply_lifecycle(kind, payload),
         )
 
     async def dispatch_campaign_config(
         self,
         *,
         kind: CampaignConfigKind,
-        campaign_id: str,
-        payload: dict[str, Any],
+        payload: CampaignPayload,
         idempotency_key: str,
     ) -> CommandOutcome:
         """An in-place edit of ``campaign.json`` — the campaign persists, so the record is an
         ordinary workspace-ledger admin edit rather than the lifecycle move beside it."""
-        self._load_owned_campaign(campaign_id)
+        self._load_owned_campaign(payload.campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload={"campaign_id": campaign_id, **payload},
+            payload=payload.model_dump(mode="json"),
             idempotency_key=idempotency_key,
-            applier=self._build_campaign_config_applier(kind, campaign_id, payload),
+            applier=self._build_campaign_config_applier(payload),
         )
 
-    def _build_campaign_config_applier(
-        self, kind: CampaignConfigKind, campaign_id: str, payload: dict[str, Any]
-    ) -> Applier:
-        if kind == "set-allowed-models":
-            raw = payload.get("allowed_models")
-            models = [str(m) for m in raw] if isinstance(raw, list) else []
-            return lambda: self._apply_set_allowed_models(campaign_id, models)
-        return lambda: self._apply_set_campaign_label(campaign_id, str(payload.get("label", "")))
+    def _build_campaign_config_applier(self, payload: CampaignPayload) -> Applier:
+        cid = payload.campaign_id
+        if isinstance(payload, SetAllowedModelsPayload):
+            models = list(payload.allowed_models)
+            return lambda: self._apply_set_allowed_models(cid, models)
+        if isinstance(payload, SetCampaignLabelPayload):
+            label = payload.label
+            return lambda: self._apply_set_campaign_label(cid, label)
+        raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
+            f"no applier wired for campaign-config payload {type(payload).__name__}"
+        )
 
     def _apply_set_allowed_models(
         self, campaign_id: str, allowed_models: list[str]
@@ -350,14 +512,16 @@ class CommandDispatcher:
         self,
         *,
         kind: CycleScopedKind,
-        campaign_id: str,
-        cycle_id: str,
-        payload_extras: dict[str, Any],
+        payload: CyclePayload,
         idempotency_key: str,
         expected_version: int | None,
     ) -> CommandOutcome:
-        """``Expected-Version`` is checked only when the header is present — the v0 relaxation of
+        """The payload arrives TYPED, which is the whole validation — the CLI and the API build the
+        same model, so neither entry point can validate a field the other spells differently.
+
+        ``Expected-Version`` is checked only when the header is present — the v0 relaxation of
         ADR-0001, which mandates it."""
+        campaign_id, cycle_id = payload.campaign_id, payload.cycle_id
         campaign = self._load_owned_campaign(campaign_id)
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
         cycle_dir = self._stores.campaigns.cycle_dir(hop)
@@ -384,11 +548,11 @@ class CommandDispatcher:
                 campaign=campaign, hop=hop, idempotency_key=idempotency_key
             )
 
-        applier = self._build_cycle_applier(kind, campaign, hop, payload_extras)
+        applier = self._build_cycle_applier(kind, campaign, hop, payload)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload={"campaign_id": campaign_id, "cycle_id": cycle_id, **payload_extras},
+            payload=payload.model_dump(mode="json"),
             idempotency_key=idempotency_key,
             applier=applier,
         )
@@ -429,7 +593,9 @@ class CommandDispatcher:
         return await self._record_and_apply(
             ledger=root_ledger,
             kind="delete-cycle",
-            payload={"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id},
+            payload=DeleteCyclePayload(
+                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id
+            ).model_dump(mode="json"),
             idempotency_key=idempotency_key,
             applier=_apply,
         )
@@ -441,7 +607,7 @@ class CommandDispatcher:
         self,
         *,
         kind: WorkspaceScopedKind,
-        payload: dict[str, Any],
+        payload: CommandPayload,
         idempotency_key: str,
     ) -> CommandOutcome:
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
@@ -449,21 +615,27 @@ class CommandDispatcher:
         # A deduped retry must not re-run the migration — it would version the slug a second
         # time — and the body echoes the subject, so it replays without touching disk.
         on_replay: Callable[[], Any] | None = None
-        if kind == "register-backend":
-            applier = lambda: self._apply_register_backend(payload)  # noqa: E731
-        elif kind == "replace-dataset":
-            applier = lambda: self._apply_replace_dataset(payload)  # noqa: E731
-            on_replay = lambda: {"slug": str(payload["slug"])}  # noqa: E731
-        else:
-            assert kind == "mint-campaign"
+        if isinstance(payload, RegisterBackendPayload):
+            backend = payload
+            applier = lambda: self._apply_register_backend(backend)  # noqa: E731
+        elif isinstance(payload, ReplaceDatasetPayload):
+            slug = payload.slug
+            applier = lambda: self._apply_replace_dataset(slug)  # noqa: E731
+            on_replay = lambda: {"slug": slug}  # noqa: E731
+        elif isinstance(payload, MintCampaignPayload):
+            mint = payload
 
             async def applier() -> None:
-                await self._apply_mint_campaign(payload)
+                await self._apply_mint_campaign(mint)
+        else:  # pragma: no cover — the registry pairs every kind with a type
+            raise PayloadInvalidError(
+                f"no applier wired for workspace payload {type(payload).__name__}"
+            )
 
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload=payload,
+            payload=payload.model_dump(mode="json"),
             idempotency_key=idempotency_key,
             applier=applier,
             on_replay=on_replay,
@@ -598,14 +770,18 @@ class CommandDispatcher:
         kind: CycleScopedKind,
         campaign: Campaign,
         hop: CycleHop,
-        payload_extras: dict[str, Any],
+        payload: CyclePayload,
     ) -> Any:
-        if kind == "fork-cycle":
+        """Dispatched on the payload's TYPE, not on ``kind`` — every cycle-scoped verb owns one
+        model, so the branch that reads a field is the branch its type reached. Nothing here
+        re-validates: the model is the only validation, and a second lenient pass over an
+        already-recorded payload can only disagree with the record."""
+        if isinstance(payload, ForkCyclePayload):
             from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
                 mint_operator_fork,
             )
 
-            seed = _parse_cycle_seed(payload_extras.get("seed"))
+            seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
             # ADR-0005 §4 babysit action, a distinct cap above the RUN-tier fork. A steer to a
             # SANCTIONED model is a clean human fork.
@@ -630,10 +806,10 @@ class CommandDispatcher:
                 new_cycle_id = mint_operator_fork(
                     stores=self._stores,
                     hop=hop,
-                    from_round=int(payload_extras.get("round", 0)),
-                    from_candidate_id=str(payload_extras.get("candidate_id", "")),
+                    from_round=payload.round,
+                    from_candidate_id=payload.candidate_id,
                     seed=seed,
-                    steered_by=str(payload_extras.get("steered_by", "")),
+                    steered_by=payload.steered_by,
                 )
                 await self._apply_start_run(
                     hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
@@ -643,86 +819,57 @@ class CommandDispatcher:
                 )
 
             return _apply_fork
-        if kind == "step-cycle":
+        if isinstance(payload, StepCyclePayload):
             # Advance N rounds in place then auto-pause, on the resume machinery + RunMode's
             # run-scoped stop — the `campaign.step` tier for a delegate without run.
-            rounds = payload_extras.get("rounds", 1)
-            steps = int(rounds) if isinstance(rounds, int | float) else 1
+            steps = payload.rounds
             return lambda: self._apply_start_run(
                 hop=hop,
                 kind="resume",
                 halt_at_accuracy=None,
                 spend_budget_usd=None,
-                stop_after_rounds=max(1, steps),
+                stop_after_rounds=steps,
             )
-        if kind == "skip-searchpoint":
+        if isinstance(payload, SkipSearchpointPayload):
             return lambda: self._apply_skip_searchpoint(hop)
-        if kind == "cleanup-empty-cycles":
+        if isinstance(payload, CleanupEmptyCyclesPayload):
             return lambda: self._apply_cleanup_empty(hop)
-        if kind == "pause-cycle":
+        if isinstance(payload, PauseCyclePayload):
             return lambda: self._apply_pause_cycle(hop)
-        if kind == "set-sample-lookahead":
-            cells = payload_extras.get("cells")
-            # Strictly int, and `bool` is an int in Python — a coerced `True` would read as 1 and
-            # silently disarm the very press that meant to arm.
-            if not isinstance(cells, int) or isinstance(cells, bool) or cells < 1:
-                raise PayloadInvalidError(
-                    "set-sample-lookahead requires an integer `cells` >= 1 (1 disarms)."
-                )
+        if isinstance(payload, SetSampleLookaheadPayload):
+            cells = payload.cells
             return lambda: self._apply_set_sample_lookahead(hop, cells=cells)
-        if kind == "origin-gate-decision":
-            decision = str(payload_extras.get("decision", ""))
-            if decision not in ("rescore", "proceed", "abort"):
-                raise PayloadInvalidError(
-                    "origin-gate-decision requires decision ∈ {rescore, proceed, abort}."
-                )
+        if isinstance(payload, OriginGateDecisionPayload):
+            decision = payload.decision
             return lambda: self._apply_origin_gate_decision(hop, decision)
-        if kind == "change-spend-budget":
-            # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is non-numeric
-            # or negative is a typo, not a no-op. Coercing it to None drops that ceiling while
-            # the other applies, so the operator believes both landed when only one did.
-            usd_val = optional_bounded_number(
-                payload_extras.get("max_usd"), field="max_usd", lo=0.0
-            )
-            tok_val = optional_bounded_int(
-                payload_extras.get("max_tokens"), field="max_tokens", lo=0
-            )
-            if usd_val is None and tok_val is None:
-                raise PayloadInvalidError(
-                    "change-spend-budget requires at least one of max_usd / max_tokens."
-                )
+        if isinstance(payload, ChangeSpendBudgetPayload):
+            usd_val, tok_val = payload.max_usd, payload.max_tokens
 
             async def _apply_budget() -> None:
                 await self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
 
             return _apply_budget
-        if kind == "start-run":
-            run_kind = str(payload_extras.get("kind", ""))
-            # Re-read leniently: the router validated these before they landed on the record, so
-            # the strict pass belongs there and a second one here would reject its own ledger.
-            halt = _optional_float(payload_extras.get("halt_at_accuracy"))
-            spend = _optional_float(payload_extras.get("spend_budget_usd"))
-            tokens = _optional_int(payload_extras.get("token_budget"))
+        if isinstance(payload, StartRunPayload):
+            run = payload
 
             async def _apply() -> None:
                 await self._apply_start_run(
                     hop=hop,
-                    kind=run_kind,
-                    halt_at_accuracy=halt,
-                    spend_budget_usd=spend,
-                    token_budget=tokens,
+                    kind=run.kind,
+                    halt_at_accuracy=run.halt_at_accuracy,
+                    spend_budget_usd=run.spend_budget_usd,
+                    token_budget=run.token_budget,
                 )
 
             return _apply
-        raise PayloadInvalidError(  # pragma: no cover — caller validates kind
+        raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
             f"no applier wired for cycle-scoped kind {kind!r}"
         )
 
-    def _apply_lifecycle(
-        self, kind: LifecycleKind, campaign_id: str, reason: str, keep_results: bool
-    ) -> None:
+    def _apply_lifecycle(self, kind: LifecycleKind, payload: LifecyclePayload) -> None:
         changed_at = utcnow_iso()
         campaigns = self._stores.campaigns
+        campaign_id, reason = payload.campaign_id, payload.reason
         if kind == "archive-campaign":
             campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
         elif kind == "unarchive-campaign":
@@ -730,31 +877,23 @@ class CommandDispatcher:
         else:  # delete-campaign — destructive (keepsake spared only with keep_results)
             campaigns.delete_campaign(
                 campaign_id,
-                keep_results=keep_results,
+                keep_results=payload.keep_results,
                 changed_at=changed_at,
                 reason=reason,
                 inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
 
-    def _apply_replace_dataset(self, payload: dict[str, Any]) -> dict[str, str]:
+    def _apply_replace_dataset(self, slug: str) -> dict[str, str]:
         try:
-            result = version_and_repoint(stores=self._stores, slug=str(payload["slug"]))
+            result = version_and_repoint(stores=self._stores, slug=slug)
         except NothingToReplaceError as exc:
             raise ConflictError(
                 str(exc), code="nothing_to_replace", details={"slug": exc.slug}
             ) from exc
         return {"slug": result.slug}
 
-    def _apply_register_backend(self, payload: dict[str, Any]) -> None:
-        name = str(payload["name"])
-        backend_type = str(payload["backend_type"])
-        base_url = str(payload["base_url"])
-        explicit_id = payload.get("id")
-        backend_id = (
-            str(explicit_id)
-            if isinstance(explicit_id, str) and explicit_id
-            else _slugify_backend_id(name)
-        )
+    def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:
+        backend_id = payload.id or _slugify_backend_id(payload.name)
         if self._stores.backends.get(backend_id) is not None:
             raise ConflictError(
                 f"Backend '{backend_id}' already exists", details={"backend_id": backend_id}
@@ -762,9 +901,9 @@ class CommandDispatcher:
         self._stores.backends.register(
             BackendConnection(
                 id=backend_id,
-                name=name,
-                backend_type=backend_type,
-                base_url=base_url.rstrip("/"),
+                name=payload.name,
+                backend_type=payload.backend_type,
+                base_url=payload.base_url.rstrip("/"),
             )
         )
 
@@ -845,7 +984,7 @@ class CommandDispatcher:
             max_tokens=max_tokens,
         )
 
-    async def _apply_mint_campaign(self, payload: dict[str, Any]) -> None:
+    async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
         """The 202 returns once the manifest + root cycle index are written; the run proceeds via
         JobRegistry and the webapp discovers the new ids by polling ``/api/v1/active``."""
         from promptpotter.application.jobs.launcher.mint_and_start import mint_campaign_command
@@ -854,16 +993,15 @@ class CommandDispatcher:
             raise ServiceUnavailableError(
                 "job registry not initialised", code="job_registry_unavailable"
             )
-        dataset_name = str(payload.get("dataset_name", ""))
         # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
         # origin_override here. Its PotterErrors map centrally in `_record_and_apply`.
         await mint_campaign_command(
             stores=self._stores,
-            dataset_name=dataset_name,
+            dataset_name=payload.dataset_name,
             job_registry=self._job_registry,
-            halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
-            spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
-            token_budget=_optional_int(payload.get("token_budget")),
+            halt_at_accuracy=payload.halt_at_accuracy,
+            spend_budget_usd=payload.spend_budget_usd,
+            token_budget=payload.token_budget,
         )
 
     async def _apply_start_run(
@@ -954,3 +1092,122 @@ class CommandDispatcher:
                 f"Campaign not found: {campaign_id}", code="command_target_not_found"
             )
         return campaign
+
+
+# ----------------------------------------------------------------------------------
+# The two origin-authoring write paths, module-level so EVERY adapter reaches them — a router
+# module cannot be one, since importing it drags FastAPI into a CLI verb. The rules themselves
+# are one layer down (`application/datasets/draft_patch.py`); what stays here is the
+# record-and-apply order this module owns.
+# ----------------------------------------------------------------------------------
+
+
+def _reread_draft(stores: Stores, draft_id: str) -> Any:
+    from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
+
+    draft = load_checkin_draft(stores, draft_id)
+    if draft is None:
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+    return draft
+
+
+def reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
+    """The post-mutation draft, re-read from ``draft.json`` — the response body for a deduped
+    ``Idempotency-Key`` retry, whose first attempt already persisted it."""
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+
+    return draft_wire_with_locks(_reread_draft(stores, draft_id))
+
+
+def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
+    """What the applier MOVED in the origin, diffed against its pre-apply projection. Recorded on
+    the ack because the command payload states only what was ASKED for."""
+    from promptpotter.application.datasets.origin_readiness import origin_delta, origin_projection
+
+    return origin_delta(before, origin_projection(_reread_draft(stores, draft_id)))
+
+
+async def dispatch_draft_patch(
+    stores: Stores,
+    *,
+    draft_id: str,
+    patch: EditDraftPatch,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """The single write path behind ``edit-draft-campaign``. The candidate-library ingresses and
+    the CLI's ``--set`` derive their patch and then ride this, so an origin edit is a
+    ``CommandRecord`` whatever the ingress looked like."""
+    from promptpotter.application.datasets.origin_readiness import origin_projection
+    from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+
+    draft = _reread_draft(stores, draft_id)
+    plan = plan_draft_patch(stores, draft, patch)
+
+    def _apply() -> dict[str, Any]:
+        updated = apply_draft_patch(draft, plan)
+        save_checkin_draft(stores, updated)
+        return draft_wire_with_locks(updated)
+
+    before = origin_projection(draft)
+    outcome = await CommandDispatcher(stores).dispatch_checkin_command(
+        kind="edit-draft-campaign",
+        campaign_id=draft_id,
+        payload=EditDraftCampaignPayload(draft_id=draft_id, patch=patch).model_dump(mode="json"),
+        idempotency_key=idempotency_key,
+        applier=_apply,
+        on_replay=lambda: reread_draft_wire(stores, draft_id),
+        effect_fn=lambda: origin_effect(stores, draft_id, before),
+    )
+    return cast("dict[str, Any]", outcome.result)
+
+
+async def dispatch_origin_resolution(
+    stores: Stores,
+    *,
+    draft_id: str,
+    message: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """One origin-resolver turn, recorded. Calling ``resolve_origin_turn`` bare puts the turn on no
+    ledger AND re-spends the LLM call that ``on_replay`` serves from ``cache.json``."""
+    from promptpotter.application.datasets.origin_readiness import origin_projection
+    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+
+    draft = _reread_draft(stores, draft_id)
+
+    async def _apply() -> dict[str, Any]:
+        try:
+            result = await resolve_origin_turn(stores=stores, draft=draft, message=message)
+        except PotterError:
+            raise
+        except Exception as exc:
+            # A PotterError, so the dispatcher's mapping seam emits a `rejected` ack and
+            # re-raises as 502 rather than the generic 409 the bare-Exception arm produces.
+            logger.exception("resolve-origin turn failed for draft %s", draft_id)
+            raise ServiceUnavailableError(
+                f"origin resolver turn failed: {exc}", code="resolver_failed"
+            ) from exc
+        return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
+
+    def _on_replay() -> dict[str, Any]:
+        # `cache.json::resolution` is byte-identical to the live turn's block, so a deduped
+        # retry never re-spends the LLM call.
+        bank = stores.checkin.load_bank(draft_id) or {}
+        return {
+            "resolution": bank.get("resolution") or {},
+            "draft": reread_draft_wire(stores, draft_id),
+        }
+
+    before = origin_projection(draft)
+    outcome = await CommandDispatcher(stores).dispatch_checkin_command(
+        kind="resolve-origin",
+        campaign_id=draft_id,
+        payload=ResolveOriginPayload(draft_id=draft_id, message=message).model_dump(mode="json"),
+        idempotency_key=idempotency_key,
+        applier=_apply,
+        on_replay=_on_replay,
+        effect_fn=lambda: origin_effect(stores, draft_id, before),
+    )
+    return cast("dict[str, Any]", outcome.result)

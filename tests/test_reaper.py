@@ -705,7 +705,10 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     ``n_rounds == 0``, which IS the just-minted window before round 1 commits. So the one
     deletion the verb can perform is the one most likely to be live, and that was the
     unchecked case; the case it did refuse was harmless."""
-    from promptpotter.presentation.api.middleware.command_dispatcher import CommandDispatcher
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        CommandDispatcher,
+        DeleteCyclePayload,
+    )
 
     tenant_root, _ = _lifecycle_fixture(built_stores, running=True)
     stub = "cycle-0_fork_deadbeef"
@@ -724,9 +727,7 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     with pytest.raises(ConflictError):
         await disp.dispatch_cycle_command(
             kind="delete-cycle",
-            campaign_id=_CAMPAIGN,
-            cycle_id=stub,
-            payload_extras={},
+            payload=DeleteCyclePayload(campaign_id=_CAMPAIGN, cycle_id=stub),
             idempotency_key="k1",
             expected_version=None,
         )
@@ -737,9 +738,7 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     _age(stub_dir, 10_000)
     await disp.dispatch_cycle_command(
         kind="delete-cycle",
-        campaign_id=_CAMPAIGN,
-        cycle_id=stub,
-        payload_extras={},
+        payload=DeleteCyclePayload(campaign_id=_CAMPAIGN, cycle_id=stub),
         idempotency_key="k2",
         expected_version=None,
     )
@@ -755,11 +754,16 @@ async def test_the_delete_verb_reaches_the_store_that_allows_it(built_stores: St
     CLI verbs go through here, so the store-level test above passed while every operator
     surface stayed dead. A second opinion in front of a guard is not redundancy — it is
     the guard, and it is the one nothing tested."""
-    from promptpotter.presentation.api.middleware.command_dispatcher import CommandDispatcher
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        CommandDispatcher,
+        LifecyclePayload,
+    )
 
     _, campaign_dir = _lifecycle_fixture(built_stores, running=False)
     await CommandDispatcher(built_stores).dispatch_lifecycle(
-        kind="delete-campaign", campaign_id=_CAMPAIGN, reason="", idempotency_key="k1"
+        kind="delete-campaign",
+        payload=LifecyclePayload(campaign_id=_CAMPAIGN),
+        idempotency_key="k1",
     )
     assert not campaign_dir.exists()
 

@@ -2020,6 +2020,83 @@ def test_every_test_named_by_the_package_exists() -> None:
     )
 
 
+def test_declared_command_payloads_match_their_models() -> None:
+    """The spec DECLARES a payload and the model ENFORCES it; a field on one side only is a
+    promise nobody keeps, and it is silent in both directions. A spec-only field is one the
+    browser is told to send and the server 422s as undeclared; a model-only field is one the
+    server accepts while the document that is supposed to be the closed inbound set never
+    named it. Three had already drifted, including a `pattern` the model deliberately refuses
+    to carry so that ONE slug rule governs both ingest and mint.
+
+    Names, requiredness, and any declared ``pattern`` — six of those were spec-only, refusing
+    nothing. Numeric and length bounds are deliberately NOT compared: restating them here would
+    rebuild the duplication this test exists to police, and a bound the spec understates is a
+    documentation nit rather than a promise the server breaks.
+    """
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        PAYLOAD_MODEL_FOR_KIND,
+    )
+
+    doc = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "docs/specs/m12-api-openapi.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    schemas = doc["components"]["schemas"]
+
+    def flatten(node: dict[str, Any]) -> tuple[dict[str, Any], set[str]]:
+        """``$ref`` and ``allOf`` resolved to (declared properties, required names)."""
+        if "$ref" in node:
+            return flatten(schemas[node["$ref"].rsplit("/", 1)[-1]])
+        props: dict[str, Any] = {}
+        required: set[str] = set()
+        for part in node.get("allOf", [node]):
+            if "$ref" in part or "allOf" in part:
+                p, r = flatten(part)
+            else:
+                p, r = dict(part.get("properties", {})), set(part.get("required", ()))
+            props |= p
+            required |= r
+        return props, required
+
+    def model_pattern(model: Any, field: str) -> str | None:
+        return next(
+            (m.pattern for m in model.model_fields[field].metadata if getattr(m, "pattern", None)),
+            None,
+        )
+
+    mismatched: list[str] = []
+    for kind, model in sorted(PAYLOAD_MODEL_FOR_KIND.items()):
+        operation = doc["paths"][f"/commands/{kind}"]["post"]
+        body = operation["requestBody"]["content"]["application/json"]["schema"]
+        payload = next(
+            part["properties"]["payload"]
+            for part in body.get("allOf", [body])
+            if "payload" in part.get("properties", {})
+        )
+        properties, required = flatten(payload)
+        declared = set(properties)
+        enforced = set(model.model_fields)
+        enforced_required = {n for n, f in model.model_fields.items() if f.is_required()}
+        if declared != enforced:
+            mismatched.append(
+                f"{kind}: spec-only={sorted(declared - enforced)} "
+                f"model-only={sorted(enforced - declared)}"
+            )
+        if required != enforced_required:
+            mismatched.append(
+                f"{kind}: required spec={sorted(required)} model={sorted(enforced_required)}"
+            )
+        for name in sorted(declared & enforced):
+            spec_pattern = properties[name].get("pattern")
+            if spec_pattern != model_pattern(model, name):
+                mismatched.append(
+                    f"{kind}.{name}: pattern spec={spec_pattern!r} "
+                    f"model={model_pattern(model, name)!r}"
+                )
+    assert not mismatched, f"declared payload != enforced payload: {mismatched}"
+
+
 def test_declared_command_kinds_match_the_wired_set() -> None:
     """A command kind that LOOKS live in the spec but is not wired, or the reverse.
 
@@ -2341,12 +2418,17 @@ def test_one_dataset_name_rule_reaches_every_entry_point() -> None:
     directory while ``slug_exists`` would answer for two.
     """
     from promptpotter.application.datasets.draft_campaign import default_slug_from_filename
-    from promptpotter.presentation.api.routers.commands import _require_dataset_name
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        MintCampaignPayload,
+        ReplaceDatasetPayload,
+    )
 
     for filename in ("2024-sales.csv", "Q3_report.csv", "customers.csv"):
         slug = default_slug_from_filename(filename)
         validate_dataset_name(slug)  # the ingest path's gate
-        assert _require_dataset_name({"dataset_name": slug}) == slug  # the wire's
+        # Both wire payloads that name a dataset defer to that ONE rule rather than restating it.
+        assert MintCampaignPayload(dataset_name=slug).dataset_name == slug
+        assert ReplaceDatasetPayload(slug=slug).slug == slug
 
     for bad in ("Foo", "UPPER", "-leading", "_leading", "has space", "has.dot", ""):
         with pytest.raises(ValueError):

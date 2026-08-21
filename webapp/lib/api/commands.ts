@@ -9,14 +9,25 @@
 // the OpenAPI schema); detailed apply results (new fork id, cleanup count) flow via the
 // workspace poll picking up the new on-disk state.
 
+import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { API } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
+import type {
+  CommandKind,
+  ConfigOverrides as WireConfigOverrides,
+  CycleSeed,
+  OriginGateDecisionPayload,
+} from "./types.generated";
 import type { CommandAcceptedBody } from "./types";
 
-async function _postCommand(
-  kind: string,
+// The ONE `POST /commands/{kind}` write path. Generic over the response because the
+// typed routes (`edit-draft-campaign`, `start-checkin`, `resolve-origin`,
+// `replace-dataset`) answer with a domain object rather than the 202 envelope — those
+// four had each re-spelled this function to say so.
+export async function postCommand<T = CommandAcceptedBody>(
+  kind: CommandKind,
   payload: Record<string, unknown>,
-): Promise<CommandAcceptedBody> {
+): Promise<T> {
   const r = await fetch(`${API}/commands/${kind}`, {
     method: "POST",
     headers: {
@@ -27,7 +38,7 @@ async function _postCommand(
     cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
-  return (await r.json()) as CommandAcceptedBody;
+  return (await r.json()) as T;
 }
 // The fork's `OptimizationConfig` delta — twin of the OpenAPI `ConfigOverrides`.
 // Every field optional; absent inherits the parent. Values are ABSOLUTE for the
@@ -39,15 +50,18 @@ async function _postCommand(
 // comparability and are set at mint or by an L2/L3 `fork_proposal` — never by a
 // checkbox on a dialog whose job is "how much budget does this fork get". A
 // human-set model/provider value rides the fork's `pipeline_overlay`, not here.
-export interface ConfigOverrides {
-  max_rounds?: number;
-  spend_budget_usd?: number | null;
-  token_budget?: number | null;
-  l1_patience?: number;
-  l2_patience?: number | null;
-  l3_patience?: number | null;
-  pobb_epsilon?: number;
-}
+export type ConfigOverrides = Partial<
+  Pick<
+    WireConfigOverrides,
+    | "max_rounds"
+    | "spend_budget_usd"
+    | "token_budget"
+    | "l1_patience"
+    | "l2_patience"
+    | "l3_patience"
+    | "pobb_epsilon"
+  >
+>;
 // The edited-searchpoint origin override — twin of the OpenAPI
 // `OperatorForkOverride`. Required on every operator fork (all are
 // `operator_steered`). `origin_prompt_fields` is the PromptTemplate field shape;
@@ -55,12 +69,9 @@ export interface ConfigOverrides {
 // and merged onto the dataset overlay at fork init. `optimizer_narrowing` carries
 // per-node param LOCK edits ({node: {param_keys, param_allowed_values}}) — overrides the
 // campaign's mint-time narrowing for this cycle only; absent inherits it unchanged.
-export interface OperatorForkOverride {
-  origin_prompt_fields?: Record<string, unknown>;
-  pipeline_overlay?: Record<string, unknown>;
-  optimizer_narrowing?: Record<string, unknown>;
-  config_overrides?: ConfigOverrides;
-}
+export type OperatorForkOverride = Partial<
+  Omit<CycleSeed, "origin_source" | "config_overrides">
+> & { config_overrides?: ConfigOverrides };
 // Mint an `operator_steered` fork rooted at the selected searchpoint, carrying
 // the operator's edits + reconciled limits. The single fork write path.
 export async function postForkCycle(
@@ -78,7 +89,7 @@ export async function postForkCycle(
     seed: opts.seed,
   };
   if (opts.steeredBy) payload.steered_by = opts.steeredBy;
-  return _postCommand("fork-cycle", payload);
+  return postCommand("fork-cycle", payload);
 }
 // Rewrite a campaign's inner-optimizer model allow-list — the frozen
 // `campaign.json::config`, the single source both the fork cap-gate and the runner's
@@ -88,7 +99,7 @@ export async function postSetAllowedModels(
   campaignId: string,
   allowedModels: string[],
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("set-allowed-models", {
+  return postCommand("set-allowed-models", {
     campaign_id: campaignId,
     allowed_models: allowedModels,
   });
@@ -104,13 +115,13 @@ export async function postSetCampaignLabel(
   campaignId: string,
   label: string,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("set-campaign-label", { campaign_id: campaignId, label });
+  return postCommand("set-campaign-label", { campaign_id: campaignId, label });
 }
 export async function postCleanupEmpty(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("cleanup-empty-cycles", {
+  return postCommand("cleanup-empty-cycles", {
     campaign_id: campaignId,
     cycle_id: cycleId,
   });
@@ -137,12 +148,12 @@ export async function postArchiveCampaign(
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = { campaign_id: campaignId };
   if (reason) payload.reason = reason;
-  return _postCommand("archive-campaign", payload);
+  return postCommand("archive-campaign", payload);
 }
 export async function postUnarchiveCampaign(
   campaignId: string,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("unarchive-campaign", { campaign_id: campaignId });
+  return postCommand("unarchive-campaign", { campaign_id: campaignId });
 }
 export async function postDeleteCampaign(
   campaignId: string,
@@ -150,7 +161,7 @@ export async function postDeleteCampaign(
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = { campaign_id: campaignId };
   if (reason) payload.reason = reason;
-  return _postCommand("delete-campaign", payload);
+  return postCommand("delete-campaign", payload);
 }
 // Pause a running cycle — the single operator-interrupt verb. Writes
 // `.runtime/pause.flag`; the loop's `pause_check` sees it at the next checkpoint,
@@ -163,7 +174,7 @@ export async function postPauseCycle(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("pause-cycle", { campaign_id: campaignId, cycle_id: cycleId });
+  return postCommand("pause-cycle", { campaign_id: campaignId, cycle_id: cycleId });
 }
 // Operator early-abort of the searchpoint scoring right now: writes a one-shot
 // `.runtime/skip.flag`; the loop cuts the remaining samples of the in-flight
@@ -175,7 +186,7 @@ export async function postSkipSearchpoint(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
+  return postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
 // Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
 // so it is a cancel rather than a second verb. The request is sent unclamped and the walk
@@ -189,7 +200,7 @@ export async function postSetSampleLookahead(
   cycleId: string,
   cells: number,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("set-sample-lookahead", {
+  return postCommand("set-sample-lookahead", {
     campaign_id: campaignId,
     cycle_id: cycleId,
     cells,
@@ -207,13 +218,13 @@ export async function postSetSampleLookahead(
 // the origin force-fresh (reflecting a backend-code fix) and re-evaluates the
 // gate in place; `proceed` overrides into L1; `abort` ends the cycle with
 // `StopReason.ORIGIN_GATE`. Cycle-scoped per `m12-api-openapi.yaml::originGateDecision`.
-export type OriginGateDecision = "rescore" | "proceed" | "abort";
+export type OriginGateDecision = OriginGateDecisionPayload["decision"];
 export async function postOriginGateDecision(
   campaignId: string,
   cycleId: string,
   decision: OriginGateDecision,
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("origin-gate-decision", {
+  return postCommand("origin-gate-decision", {
     campaign_id: campaignId,
     cycle_id: cycleId,
     decision,
@@ -230,7 +241,7 @@ export async function postChangeSpendBudget(
   };
   if (typeof caps.maxUsd === "number") payload.max_usd = caps.maxUsd;
   if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
-  return _postCommand("change-spend-budget", payload);
+  return postCommand("change-spend-budget", payload);
 }
 export async function postStartRun(
   campaignId: string,
@@ -249,5 +260,5 @@ export async function postStartRun(
   if (opts.spendBudgetUsd !== undefined) {
     payload.spend_budget_usd = opts.spendBudgetUsd;
   }
-  return _postCommand("start-run", payload);
+  return postCommand("start-run", payload);
 }

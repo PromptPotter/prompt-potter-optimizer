@@ -1493,11 +1493,55 @@ export interface ConfigMapResponse {
   couplings: ConfigCoupling[];
 }
 
+/** Every field optional — absent inherits the parent — applied to the fork's snapshot at */
+export interface ConfigOverrides {
+  max_rounds: number | null;
+  spend_budget_usd: number | null;
+  token_budget: number | null;
+  l1_patience: number | null;
+  l2_patience: number | null;
+  l3_patience: number | null;
+  pobb_epsilon: number | null;
+  per_round_resubset: boolean | null;
+  schema_field_rename: boolean | null;
+}
+
+/** The dataset's ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only */
+export interface NodeSearchNarrowing {
+  param_keys: string[] | null;
+  param_allowed_values: Record<string, string[]>;
+}
+
+/** ``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only. */
+export interface CycleSeed {
+  origin_prompt_fields: Record<string, unknown>;
+  pipeline_overlay: Record<string, unknown>;
+  /** Per-fork search-space lock edits (param-key subset + allowed-values) —
+   * overrides the campaign's mint-time narrowing for this cycle only, the
+   * cycle-level peer of the campaign-wide
+   * `CampaignConfig.optimizer_narrowing`. Empty for an unedited fork or a
+   * campaign-from-origin seed. */
+  optimizer_narrowing: Record<string, NodeSearchNarrowing>;
+  config_overrides: ConfigOverrides;
+  /** C0 lineage provenance — 'fork_seed' | 'campaign_origin'; empty when the seed
+   * carries no origin (an L2/L3 rebase replays its own). */
+  origin_source: string;
+}
+
+export interface OriginGateDecisionPayload {
+  campaign_id: string;
+  cycle_id: string;
+  decision: 'rescore' | 'proceed' | 'abort';
+}
+
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
+
+// Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py).
+export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Operator-facing label per terminal reason (StopReason). Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.

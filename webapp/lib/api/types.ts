@@ -25,6 +25,7 @@ export type {
   MetricReading,
   Evidence,
   CommandAcceptedBody,
+  NodeSearchNarrowing,
   CycleHop,
   CycleListEntry,
   CyclesResponse,

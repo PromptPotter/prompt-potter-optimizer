@@ -5,14 +5,19 @@ from __future__ import annotations
 
 import argparse
 import logging
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from pydantic import ValidationError
 
 from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
+from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
-from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.presentation.api.middleware.command_dispatcher import (
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
+)
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     backend_unreachable_result,
@@ -27,7 +32,7 @@ from promptpotter.presentation.cli.commands._shared import (
 )
 from promptpotter.presentation.cli.session import load_session
 from promptpotter.presentation.views.startup_checklist import checkin_line
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import PayloadInvalidError, PotterError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -35,10 +40,10 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.datasets.origin_readiness import FieldGap
-    from promptpotter.application.datasets.origin_resolve import OriginResolutionResult
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -52,83 +57,81 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 # runs the loop inline with `LiveDisplay`; the web detaches via `JobRegistry`.
 # Spec: ``docs/specs/roadmap.md``.
 
-# Field id → ``DraftCampaign`` attribute a ``--set`` writes — the CLI parallel of
-# the web Advanced block. Only ``task_description`` is gated (CONFIRM opens the
-# readiness gate); the rest are config the operator overrides off its default.
-# Columns route through ``confirm_columns`` separately.
-_SET_ATTR: dict[str, str] = {
+# The CLI's ``--set`` vocabulary, DERIVED from the one patch model every ingress edits an origin
+# through (``application/datasets/draft_patch.py::EditDraftPatch``) — hand-listing it here would
+# make the terminal and the web Advanced block two capabilities wearing one name. Only the two
+# SPELLINGS that genuinely differ live here.
+_SET_ALIAS: dict[str, str] = {
+    # What an operator calls the framing; the model names the RAW text, pre-decomposition.
     "task_description": "raw_task_description",
-    "connector": "connector",
-    "scoring_composite": "scoring_composite",
+    # Dotted on a command line, underscored on the wire — one field either way.
+    "column.query": "column_query",
+    "column.ground_truth": "column_ground_truth",
 }
 
-# The campaign-config knobs are NOT draft attributes — they ride the draft's one
-# ``optimization_overrides`` dict, so a ``--set`` on them merges + validates through
-# ``OptimizationOverrides`` exactly as the web Advanced block does
-# (``routers/commands.py::dispatch_draft_patch``). Derived from the model, never
-# hand-listed. ``mechanisms`` is nested and has no flat string form.
+# The campaign-config knobs are NOT patch fields — they ride the patch's one
+# ``optimization_overrides`` dict, shallow-merged and validated by ``plan_draft_patch`` exactly as
+# the web Advanced block's are. Derived from the model, never hand-listed. ``mechanisms`` is nested
+# and has no flat string form.
 _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {"mechanisms"}
+
+# What a `FIELD=VALUE` can name: every scalar the patch declares, under its CLI spelling.
+_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_SET_ALIAS.values())) | set(_SET_ALIAS)
 
 
 def _settable() -> str:
-    return ", ".join(sorted({*_SET_ATTR, *_SET_KNOBS, "column.query", "column.ground_truth"}))
+    return ", ".join(sorted(_SET_FIELDS | _SET_KNOBS))
 
 
-def _set_knob(draft: DraftCampaign, field: str, raw: str) -> DraftCampaign:
-    """Merge one ``--set`` knob onto the draft's overrides. Pydantic coerces the raw CLI string and
-    enforces the leaf's bounds, so there is no second range check to drift from the model's own."""
-    merged = {**draft.optimization_overrides, field: raw}
-    try:
-        knobs = OptimizationOverrides.model_validate(merged)
-    except ValidationError as exc:
-        detail = exc.errors()[0].get("msg", "invalid value")
-        raise SystemExit(f"ERROR: --set {field}={raw!r} rejected: {detail}") from None
-    return draft.apply_resolution(values={"optimization_overrides": knobs.model_dump(mode="json")})
-
-
-def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
+def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
+    """``--set FIELD=VALUE`` → the patch the web sends. Shape only: every BOUND, the slug-collision
+    check and the column-membership check belong to the patch model and ``plan_draft_patch``, so the
+    terminal cannot enforce a different rule than the browser does."""
+    patch_raw: dict[str, Any] = {}
+    knobs: dict[str, Any] = {}
     for item in sets:
         if "=" not in item:
             raise SystemExit(f"ERROR: --set expects FIELD=VALUE, got {item!r}.")
-        field, raw = item.split("=", 1)
-        field, raw = field.strip(), raw.strip()
-        if field in ("column.query", "column.ground_truth"):
-            if raw not in draft.headers:
-                raise SystemExit(
-                    f"ERROR: --set {field}={raw!r} is not an uploaded column. "
-                    f"Available: {', '.join(draft.headers) or '<none>'}."
-                )
-            kwarg = "query_col" if field == "column.query" else "ground_truth_col"
-            draft = draft.confirm_columns(**{kwarg: raw})
-            continue
+        field, raw = (part.strip() for part in item.split("=", 1))
         if field in _SET_KNOBS:
-            draft = _set_knob(draft, field, raw)
-            continue
-        attr = _SET_ATTR.get(field)
-        if attr is None:
+            knobs[field] = raw
+        elif field in _SET_FIELDS:
+            patch_raw[_SET_ALIAS.get(field, field)] = raw
+        else:
             raise SystemExit(
                 f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
             )
-        if field == "task_description":
-            # Gated — confirming the framing opens the origin-readiness gate.
-            draft = draft.apply_resolution(
-                values={attr: raw}, provenance={field: Provenance.CONFIRMED}
-            )
-        else:
-            # Config — not gated, just set the value (parity with the web Advanced block).
-            draft = draft.apply_resolution(values={attr: raw})
+    if knobs:
+        patch_raw["optimization_overrides"] = knobs
+    try:
+        return EditDraftPatch.model_validate(patch_raw)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        name = str(first.get("loc", ("?",))[0])
+        raise SystemExit(
+            f"ERROR: --set {name} rejected: {first.get('msg', 'invalid value')}"
+        ) from None
+
+
+def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
+    """The draft as the dispatcher just left it. Every write path persists, so the CLI re-reads
+    rather than threading a model the applier already superseded."""
+    from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
+
+    draft = load_checkin_draft(stores, campaign_id)
+    assert draft is not None  # just written by the applier
     return draft
 
 
-def _raise_incomplete(gaps: Sequence[FieldGap], last: OriginResolutionResult | None) -> NoReturn:
+def _raise_incomplete(gaps: Sequence[FieldGap], resolution: dict[str, Any] | None) -> NoReturn:
     """Print the still-open gaps + the resolver's questions and exit non-zero, rather than minting a
     half-specified origin."""
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
     lines += [f"  - {g.field}: {g.hint}" for g in gaps]
     questions = (
-        (last.resolution.get("last_resolution") or {}).get("next_action", {}).get("questions", [])
-        if last
-        else []
+        ((resolution or {}).get("last_resolution") or {})
+        .get("next_action", {})
+        .get("questions", [])
     )
     if questions:
         lines += ["", "The resolver asked:"]
@@ -148,8 +151,6 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     from promptpotter.application.datasets.csv_ingest import IngestError
     from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
     from promptpotter.application.datasets.origin_readiness import origin_readiness
-    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-    from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
     from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.store.stores import build_stores
 
@@ -175,23 +176,43 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     campaign_id = draft.draft_id  # the check-in campaign id (draft re-keyed at mint)
     checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({campaign_id})")
 
-    if args.sets:
-        draft = _apply_sets(draft, args.sets)
-        save_checkin_draft(stores, draft)
+    # Both mutations ride `CommandDispatcher`, exactly as the browser's do: each lands a
+    # `CommandRecord` + ack on the check-in ledger, each is idempotent under its key, and the
+    # resolver turn replays from `cache.json` rather than re-spending the LLM call. Writing the
+    # draft directly here records an operator's `--set` nowhere and re-bills every retry.
+    try:
+        if args.sets:
+            await dispatch_draft_patch(
+                stores,
+                draft_id=campaign_id,
+                patch=_sets_to_patch(args.sets),
+                idempotency_key=uuid.uuid4().hex,
+            )
+            draft = _reload_draft(stores, campaign_id)
 
-    last: Any = None
-    if not origin_readiness(draft).complete:
-        checkin_line("origin resolver", "running AI check-in")
-        # One turn: code owns the deterministic facts (the answer space) and the
-        # operator states the framing up front via --set, so the resolver only
-        # reads the columns + authors the prompt. A residual gap surfaces below
-        # with the --set instructions rather than spinning more LLM turns.
-        last = await resolve_origin_turn(stores=stores, draft=draft)
-        draft = last.draft
+        resolution: dict[str, Any] | None = None
+        if not origin_readiness(draft).complete:
+            checkin_line("origin resolver", "running AI check-in")
+            # One turn: code owns the deterministic facts (the answer space) and the operator
+            # states the framing up front via --set, so the resolver only reads the columns +
+            # authors the prompt. A residual gap surfaces below with the --set instructions
+            # rather than spinning more LLM turns.
+            turn = await dispatch_origin_resolution(
+                stores,
+                draft_id=campaign_id,
+                message="",
+                idempotency_key=uuid.uuid4().hex,
+            )
+            resolution = turn.get("resolution") or {}
+            draft = _reload_draft(stores, campaign_id)
+    except PotterError as exc:
+        # The dispatcher's own refusals — a taken slug, a column that is not an uploaded header,
+        # a knob out of range. One wording for both entry points.
+        raise SystemExit(f"ERROR: {exc}") from None
 
     readiness = origin_readiness(draft)
     if not readiness.complete:
-        _raise_incomplete(readiness.gaps, last)
+        _raise_incomplete(readiness.gaps, resolution)
 
     checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
     return campaign_id
@@ -203,18 +224,22 @@ async def _ingest_and_prepare_checkin(
     """The CLI tail of check-in Start, sharing :func:`prepare_checkin_run` with the web detach path.
     Backend reachability is not preflighted: a check-in is durable, so ``resume`` runs it later."""
     from promptpotter.application.jobs.launcher.checkin import (
-        load_checkin_draft,
+        load_checkin_for_start,
         prepare_checkin_run,
     )
+    from promptpotter.application.jobs.launcher.mint_and_start import LaunchError
     from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.store.stores import build_stores
 
     campaign_id = await _ingest_checkin(args)
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    assert campaign is not None  # just minted
-    draft = load_checkin_draft(stores, campaign_id)
-    assert draft is not None  # just authored
+    # The SAME gate the web Start runs, and it owns three things a bare load does not: recovering
+    # a pending dataset replacement, the ownership check and the lifecycle check. Hand-rolling it
+    # lets the terminal start a campaign the browser would refuse.
+    try:
+        hop, draft = load_checkin_for_start(stores, campaign_id)
+    except LaunchError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
 
     async def make_session(dataset_name: str) -> Session:
         return await init_services_cli(
@@ -226,7 +251,7 @@ async def _ingest_and_prepare_checkin(
 
     prepared = await prepare_checkin_run(
         stores,
-        hop=campaign.root_hop,
+        hop=hop,
         draft=draft,
         make_session=make_session,
     )

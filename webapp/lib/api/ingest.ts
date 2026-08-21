@@ -4,6 +4,7 @@
 
 import { API } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
+import { postCommand } from "./commands";
 import type {
   CheckinReopenResponse,
   DraftCampaignWire,
@@ -97,36 +98,16 @@ export async function postDraftFromOrigin(originId: string): Promise<DraftCampai
   return (await r.json()) as DraftCampaignWire;
 }
 export async function postReplaceDataset(slug: string): Promise<ReplaceDatasetResponse> {
-  const r = await fetch(`${API}/commands/replace-dataset`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify({ kind: "replace-dataset", payload: { slug } }),
-    cache: "no-store",
-  });
-  if (!r.ok) await throwApiError(r);
-  return (await r.json()) as ReplaceDatasetResponse;
+  return postCommand<ReplaceDatasetResponse>("replace-dataset", { slug });
 }
 export async function postEditDraftCampaign(
   draftId: string,
   patch: DraftPatch,
 ): Promise<DraftCampaignWire> {
-  const r = await fetch(`${API}/commands/edit-draft-campaign`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify({
-      kind: "edit-draft-campaign",
-      payload: { draft_id: draftId, patch },
-    }),
-    cache: "no-store",
+  return postCommand<DraftCampaignWire>("edit-draft-campaign", {
+    draft_id: draftId,
+    patch,
   });
-  if (!r.ok) await throwApiError(r);
-  return (await r.json()) as DraftCampaignWire;
 }
 // Start a durable check-in campaign: gate the origin, commit the dataset, mint +
 // spawn the run, flipping `checkin` → `active`. `campaignId` is the draft's
@@ -135,20 +116,9 @@ export async function postEditDraftCampaign(
 export async function postStartCheckin(
   campaignId: string,
 ): Promise<StartCheckinResponse> {
-  const r = await fetch(`${API}/commands/start-checkin`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify({
-      kind: "start-checkin",
-      payload: { campaign_id: campaignId },
-    }),
-    cache: "no-store",
+  return postCommand<StartCheckinResponse>("start-checkin", {
+    campaign_id: campaignId,
   });
-  if (!r.ok) await throwApiError(r);
-  return (await r.json()) as StartCheckinResponse;
 }
 export async function getCampaignCheckin(
   campaignId: string,
@@ -165,18 +135,5 @@ export async function getCampaignCheckin(
 // auto-confirms; low-confidence lands `proposed`). Synchronous, like
 // `edit-draft-campaign`. Returns the resolver output + the post-apply draft.
 export async function postResolveOrigin(draftId: string): Promise<ResolveOriginResponse> {
-  const r = await fetch(`${API}/commands/resolve-origin`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify({
-      kind: "resolve-origin",
-      payload: { draft_id: draftId },
-    }),
-    cache: "no-store",
-  });
-  if (!r.ok) await throwApiError(r);
-  return (await r.json()) as ResolveOriginResponse;
+  return postCommand<ResolveOriginResponse>("resolve-origin", { draft_id: draftId });
 }
