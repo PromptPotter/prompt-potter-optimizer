@@ -4,9 +4,10 @@ one mutator here, and the render functions read these fields verbatim."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from promptpotter.domain.results import is_round_winner
+from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 
@@ -63,7 +64,7 @@ class RoundBuffer:
         result: dict[str, Any],
     ) -> None:
         pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
+        query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
         # Tokens may live on result or pd; prefer result, preserve 0 vs None.
         in_tok = result.get("input_tokens")
         out_tok = result.get("output_tokens")
@@ -94,7 +95,10 @@ class RoundBuffer:
                 # only on the inbound source name.
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
-                "time_s": round(query_time, 2),
+                "time_s": None if query_time is None else round(query_time, 2),
+                # The producer's own "this row errored" fact. Without it the tape has only
+                # `fitness`, whose absence it cannot tell from a graded miss.
+                "error": result.get("error"),
                 "terminal_node": pd.get("terminal_node") or "",
                 "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
                 "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,

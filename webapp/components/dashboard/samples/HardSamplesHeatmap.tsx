@@ -63,9 +63,10 @@ function liveMeasurements(
       if (typeof s === "string") {
         // The live tape is TEXT, so it carries only the HIT/MISS mark the terminal
         // renders — the grade itself never survives the line. Reconstruct the two
-        // endpoints; the dict branch below has the real number.
+        // endpoints; the dict branch below has the real number. An ERR row was never
+        // graded, so it contributes no cell rather than a red one.
         const p = parseSampleLine(s);
-        if (p.sampleId != null && p.status) {
+        if (p.sampleId != null && (p.status === "HIT" || p.status === "MISS")) {
           sid = p.sampleId;
           fitness = p.status === "HIT" ? 1 : 0;
         }

@@ -55,6 +55,7 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
     // A live row carries the crown too — the election lands at the end of scoring, not at
     // round close — so the default is "nothing crowned yet", never "this one lost".
     is_winner: false,
+    invalid: false,
     ...over,
   };
 }
@@ -224,6 +225,7 @@ export function summaryCandidate(
     expected_samples: 0,
     cached_samples: 0,
     is_winner: false,
+    invalid: false,
     evaluators: {},
     changes_description: "",
     partial_reason: "",

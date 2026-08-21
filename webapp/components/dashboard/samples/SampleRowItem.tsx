@@ -18,7 +18,10 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
       </div>
     );
   }
-  const tag = row.status === "HIT" ? "tag-hit" : "tag-miss";
+  // Three marks, three tags — `ERR` shares no colour with `MISS`
+  // (`lib/types/sample.ts::SampleStatus`).
+  const tag =
+    row.status === "HIT" ? "tag-hit" : row.status === "ERR" ? "tag-err" : "tag-miss";
   const pred = row.predicted ? row.predicted : "∅";
   return (
     <details className="rsv-row">

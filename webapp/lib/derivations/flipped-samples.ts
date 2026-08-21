@@ -43,12 +43,17 @@ export interface SampleFlips {
 
 const EMPTY: SampleFlips = { gained: [], lost: [], compared: 0, unchanged: 0 };
 
+// Only a GRADED row may enter the partition. `ERR` passes a `!= null` status check but
+// carries no verdict, so counting one would inflate `compared` and bank it as `unchanged`
+// — a row nothing scored, reported as a row that scored the same twice.
+const graded = (r: SampleRow): boolean => r.status === "HIT" || r.status === "MISS";
+
 function byId(rows: SampleRow[]): Map<number, SampleRow> {
   const out = new Map<number, SampleRow>();
   for (const r of rows) {
     // Last write wins: a sample re-measured within one candidate's stream is the
     // same cell answered again, and the later answer is the current one.
-    if (r.sample_id != null && r.status != null) out.set(r.sample_id, r);
+    if (r.sample_id != null && graded(r)) out.set(r.sample_id, r);
   }
   return out;
 }
@@ -60,7 +65,7 @@ export function sampleFlips(origin: SampleRow[], champion: SampleRow[]): SampleF
   const lost: SampleFlip[] = [];
   let compared = 0;
   for (const after of champion) {
-    if (after.sample_id == null || after.status == null) continue;
+    if (after.sample_id == null || !graded(after)) continue;
     const b = before.get(after.sample_id);
     if (!b) continue;
     compared += 1;

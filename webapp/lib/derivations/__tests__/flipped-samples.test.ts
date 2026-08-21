@@ -15,7 +15,6 @@ function row(sample_id: number | null, status: SampleStatus | null, predicted = 
     ground_truth: "",
     scorer: "",
     elapsed_s: null,
-    has_error: false,
   };
 }
 

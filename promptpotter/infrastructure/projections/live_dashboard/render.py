@@ -47,14 +47,16 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     qi = int(s.get("qi", 0))
     sid = s.get("sample_id")
     sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
-    # The `HIT `/`MISS` mark is a PARSED CONTRACT with `webapp/lib/sample-line.ts`, which
-    # regexes this tape to drive the live heatmap. It is derived here, never stored.
-    hit = is_hit(s.get("fitness"))
+    # The `HIT `/`MISS`/`ERR ` mark is a PARSED CONTRACT with `webapp/lib/sample-line.ts`, which
+    # regexes this tape to drive the live heatmap. `ERR ` is a THIRD state, not a bad MISS: an
+    # errored row was never graded, and reading its absent fitness as one reports a backend
+    # fault as a candidate answering wrong.
+    errored = bool(s.get("error"))
     cached = bool(s.get("cached"))
-    time_s = float(s.get("time_s") or 0.0)
+    time_s = s.get("time_s")
     badge = _NODE_BADGES.get(s.get("terminal_node") or "", (s.get("terminal_node") or "?")[:2])
     cache_icon = "📖" if cached else " "
-    mark = "HIT " if hit else "MISS"
+    mark = "ERR " if errored else ("HIT " if is_hit(s.get("fitness")) else "MISS")
     query = _trim(s.get("query") or "", 42)
     pred = _trim(s.get("prediction") or "", 28)
     gt = _trim(s.get("ground_truth") or "", 20)
@@ -65,8 +67,11 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
         tok_seg = (
             f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
         )
+    # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
+    # must stay distinguishable from a row that never reached the pipeline.
+    time_col = f"{time_s:4.1f}s" if isinstance(time_s, int | float) else "     "
     return (
-        f"  {time_s:4.1f}s #{qi:03d}{sid_seg} {mark} [{badge}]{cache_icon}"
+        f"  {time_col} #{qi:03d}{sid_seg} {mark} [{badge}]{cache_icon}"
         f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
     )
 
@@ -99,6 +104,7 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 candidate_id=served.get("candidate_id"),
                 accuracy=accuracy if accuracy is not None else _partial_mean_fitness(samples),
                 composite_fitness=served.get("composite_fitness"),
+                invalid=bool(served.get("invalid", False)),
                 scored_samples=int(served.get("scored_samples") or len(samples)),
                 cached_samples=int(
                     cached if cached is not None else sum(1 for s in samples if s.get("cached"))

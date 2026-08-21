@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
@@ -21,6 +21,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     view_fields,
 )
+from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
     build_node_block,
@@ -181,7 +182,10 @@ class LiveDashboardView(DerivedView):
             # Origin anchor seeds from round 0 if it's already on disk (resume);
             # otherwise apply_phase sets it at INIT:exit. Origin is just round 0.
             origin_acc=next((r.accuracy for r in self.state.rounds if r.round == 0), 0.0),
-            best_acc=self.state.best,
+            # The core's own running MAX, seeded from the resumed high-water. 0.0 is the
+            # identity element of that max, not a reported number — `s.best` stays `None`
+            # until a round settles, and only it reaches the browser.
+            best_acc=self.state.best if self.state.best is not None else 0.0,
         )
         # RLock so the boundary-flush path can be called from inside a handler already holding
         # it via `on_record`; the Timer thread takes the same lock and cannot race a mutation.
@@ -613,7 +617,7 @@ class LiveDashboardView(DerivedView):
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
         pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
+        query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
         is_cached = bool(result.get("cached", False))
 
         # First arm through the single owner of "this sample errored" — the measurement path sets
@@ -633,7 +637,7 @@ class LiveDashboardView(DerivedView):
         # Not cleared outright: under look-ahead another sample is often still open when this
         # one lands, and blanking the panel would report "nothing in flight" mid-request.
         self._refresh_open_sample_markers()
-        s.last_query_elapsed_s = round(query_time, 2)
+        s.last_query_elapsed_s = None if query_time is None else round(query_time, 2)
         self._set_state(
             DashboardState.BETWEEN_CANDIDATES
             if last_in_candidate
@@ -769,7 +773,7 @@ class LiveDashboardView(DerivedView):
         s = self.state
         acc = round(round_accuracy, 4)
         s.current_acc = acc
-        if acc > s.best:
+        if s.best is None or acc > s.best:
             s.best = acc
         s.patience = f"{l1_stall_count}/{self.patience_max}"
         s.hearts = hearts

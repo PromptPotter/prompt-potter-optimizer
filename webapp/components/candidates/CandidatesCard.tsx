@@ -405,7 +405,10 @@ export function CandidatesCard() {
       // measuring anything has no number and must render blank, never as its origin's.
       const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
       const live = isCourse ? undefined : inflightByLabel.get(n.label);
-      const useLive = live != null && own == null;
+      // An INVALID candidate was rejected before it cost a sample, and the served row reports
+      // `INVALID_SCORES`' synthetic 0.0. The tree withholds that number, so falling back to the
+      // live half would put the fabricated one back on the bar.
+      const useLive = live != null && !live.invalid && own == null;
       // The chosen half. Every measured number below reads off THIS, so a bar and its whisker
       // can never come from two different polling clocks.
       const m = useLive ? live : n;

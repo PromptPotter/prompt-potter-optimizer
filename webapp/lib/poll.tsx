@@ -67,6 +67,9 @@ export interface LiveSample {
   prediction?: string;
   cached?: boolean;
   time_s?: number;
+  // The producer's own "this row errored" fact (`round_buffer.py::append_sample`). Without
+  // it a reader has only `fitness`, whose absence is indistinguishable from a graded 0.
+  error?: unknown;
   terminal_node?: string;
   input_tokens?: number;
   output_tokens?: number;

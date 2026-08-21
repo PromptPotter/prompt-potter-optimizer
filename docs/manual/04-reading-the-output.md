@@ -97,10 +97,11 @@ A candidate cut mid-scoring says which mechanism cut it, and both forms start `�
 
 ```
 ✂ eliminated q18/28  p_best=3.2% < eps=15%  vs C3.2 (of 4 priors)
+✂ answer collapsed q6/28  one label for every sample — no measurement of ability to score
 ✂ degradation q3/4  75% degraded  (empty_output)
 ```
 
-The first is [PoBB](../methods/candidate-elimination.md) — the candidate's posterior probability of being best fell below the abort threshold, so the remaining samples were not worth buying. The second is the degradation check: the pipeline itself was breaking. A `✓ leader locked` line is the same machinery reaching the opposite verdict.
+The first two are [PoBB](../methods/candidate-elimination.md) and mean opposite things: `eliminated` ran out of evidence — the posterior probability of being best fell below the abort threshold, so the remaining samples were not worth buying — while `answer collapsed` is a verdict, an arm that stopped answering the question. It quotes no posterior because it computed none. The third is the degradation check: the pipeline itself was breaking. A `✓ leader locked` line is PoBB stopping for the opposite reason.
 
 The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 

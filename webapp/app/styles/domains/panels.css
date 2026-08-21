@@ -64,6 +64,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    tracks the same signal across modes. */
 .tag-hit{color:var(--color-success);font-weight:600}
 .tag-miss{color:var(--color-danger);font-weight:600}
+/* Warning, not danger, so the eye reads ERR as "the pipeline faulted" rather than
+   "the candidate was wrong". */
+.tag-err{color:var(--color-warn);font-weight:600}
 /* Cache provenance — neutral (neither pass nor fail), so it reads as
    metadata, not a scoring signal. 📖 glyph is always paired with the
    word "cached" (a11y: state never by colour/icon alone). */

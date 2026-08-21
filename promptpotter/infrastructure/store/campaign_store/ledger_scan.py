@@ -115,10 +115,17 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
             # included, so everything the candidate knows about itself is already here and
             # is copied by name. Election and θ are not: they belong to the ROUND, and the
             # round says so on its own close record (`scan_ledger_round_closes`).
+            fields = {key: scores.get(key) for key in _SCORED_INCLUDE}
+            if not int(scores.get("total") or 0):
+                # A report over ZERO rows carries no measurement — an INVALID candidate's
+                # synthetic 0.0 reads as getting every answer wrong. Identity and state survive;
+                # numbers nothing earned do not (``_merge`` skips ``None``).
+                fields["accuracy"] = None
+                fields["composite_fitness"] = None
             _merge(
                 (rnd, idx),
-                state="measured",
-                **{key: scores.get(key) for key in _SCORED_INCLUDE},
+                state="invalid" if scores.get("invalid") else "measured",
+                **fields,
             )
 
     # An `id` + a `label` are what make a candidate a NODE. A fold that saw neither event

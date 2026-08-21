@@ -158,6 +158,19 @@ def is_hit(fitness: float | None) -> bool:
     return fitness is not None and fitness >= HIT_THRESHOLD
 
 
+def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
+    """Wall-clock this row RECORDED, or ``None`` where it recorded none — the display read.
+
+    A cached replay's ``0.0`` is a true reading (``_materialize_cached`` stamps it; nothing was
+    spent), while a row that never reached the pipeline has no time at all. Two display sites
+    each wrote ``pd.get("total_time", 0.0) or 0.0``, which made those two identical and painted
+    the second as an instant success. What a cell COST is a different question with a different
+    answer — ``step_timings``, read by ``evidence_metrics.py``, which survives the cache stamp."""
+    pd = result.get("pipeline_data") or {}
+    total = pd.get("total_time")
+    return float(total) if isinstance(total, int | float) else None
+
+
 class ScoringSpec(NamedTuple):
     """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_round, scorer_id)``."""
 

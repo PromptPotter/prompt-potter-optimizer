@@ -101,16 +101,12 @@ export function RoundSamplesView() {
       // merge. `roundDoc` is null on the live round (the fetch is idled), and
       // an in-flight row reads `dash`, so the source is unambiguous.
       const raw = samplesForRow(c, dash, roundDoc);
-      // An L4 cell has no HIT/MISS to filter on — it was optimized, not scored, so
-      // every `status` is null. The control is hidden in that mode; skipping the
-      // filter here keeps a stale "hit" pick from blanking the panel.
+      // An L4 cell has no mark to filter on — it was optimized, not scored, so every
+      // `status` is null. The control is hidden in that mode; skipping the filter here
+      // keeps a stale `HIT` pick from blanking the panel.
       const filtered = isL4
         ? raw
-        : raw.filter((s) => {
-            if (statusFilter === "all") return true;
-            if (statusFilter === "hit") return s.status === "HIT";
-            return s.status === "MISS";
-          });
+        : raw.filter((s) => statusFilter === "all" || s.status === statusFilter);
       out.push({ candidate: c, samples: filtered });
     }
     if (candFilter !== "all") {

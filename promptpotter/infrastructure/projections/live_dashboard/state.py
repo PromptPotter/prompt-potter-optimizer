@@ -198,8 +198,10 @@ class LiveDashboardState(StrictModel):
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
-    best: float = 0.0
-    current_acc: float = 0.0
+    # ``None`` until round 0 settles — a `0.0` default reports "Best 0%" for the whole origin
+    # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
+    best: float | None = None
+    current_acc: float | None = None
     # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's
     # ``cumulative_theta`` minus the origin's. The ONE derivation — the webapp headline chip
     # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
@@ -241,7 +243,9 @@ class LiveDashboardState(StrictModel):
     max_cells_in_flight: int = 1
     concurrency_arming: ConcurrencyArming = "round"
 
-    last_query_elapsed_s: float = 0.0
+    # ``None`` where the last row recorded no time at all — a cached replay's 0.0 is a real
+    # reading and must stay separable from it (``domain/scoring.py::recorded_elapsed_s``).
+    last_query_elapsed_s: float | None = None
     wallclock_serialized_at: str | None = None
 
     n_variants: int

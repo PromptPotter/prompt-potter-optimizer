@@ -18,6 +18,10 @@ import type { CandidateRow, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
 
+// Did this row carry the producer's error payload. One predicate for both readers, so a
+// live row and its settled twin cannot disagree about whether the row was ever graded.
+const errorMark = (e: unknown): boolean => e != null && e !== "";
+
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
 // only. Returns rows in source order; the caller decides if it wants
@@ -46,13 +50,19 @@ function liveSamplesFor(
         ground_truth: p.gt ?? "",
         scorer: p.scorer ?? "",
         elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
-        has_error: false,
         raw_line: p.raw,
       });
     } else if (raw && typeof raw === "object") {
       const sid = typeof raw.sample_id === "number" ? raw.sample_id : null;
-      const status =
-        typeof raw.fitness === "number" ? (isHit(raw.fitness) ? "HIT" : "MISS") : null;
+      // The error is asked FIRST: an errored row carries no `fitness`, and reading that
+      // absence as a grade reports a backend fault as a wrong answer.
+      const status = errorMark(raw.error)
+        ? "ERR"
+        : typeof raw.fitness === "number"
+          ? isHit(raw.fitness)
+            ? "HIT"
+            : "MISS"
+          : null;
       out.push({
         key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
         round,
@@ -65,7 +75,6 @@ function liveSamplesFor(
         ground_truth: "",
         scorer: "",
         elapsed_s: typeof raw.time_s === "number" ? raw.time_s : null,
-        has_error: false,
       });
     }
   });
@@ -104,8 +113,13 @@ function historicalSamplesFor(
   return list.map((sample, ord) => {
     const s = sample as RawHistoricalSample;
     const sid = typeof s.sample_id === "number" ? s.sample_id : null;
-    const status =
-      typeof s.fitness === "number" ? (isHit(s.fitness) ? "HIT" : "MISS") : null;
+    const status = errorMark(s.error)
+      ? "ERR"
+      : typeof s.fitness === "number"
+        ? isHit(s.fitness)
+          ? "HIT"
+          : "MISS"
+        : null;
     const elapsed =
       typeof s.elapsed_s === "number"
         ? s.elapsed_s
@@ -124,7 +138,6 @@ function historicalSamplesFor(
       ground_truth: typeof s.ground_truth === "string" ? s.ground_truth : "",
       scorer: typeof s.scorer === "string" ? s.scorer : "",
       elapsed_s: elapsed,
-      has_error: s.error != null && s.error !== "",
     };
   });
 }

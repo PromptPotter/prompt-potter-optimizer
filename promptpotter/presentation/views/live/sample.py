@@ -47,7 +47,13 @@ def fmt_query_result(
 
     tt = pd.get("total_time")
 
-    if classify_result(r).is_fatal:
+    if err:
+        # Asked FIRST: an errored row carries no ``fitness``, and the MISS ladder below would read
+        # that absence as a grade. The tape marks the same row ``ERR``
+        # (`live_dashboard/render.py::fmt_sample_line`) — two readouts of one row may not disagree
+        # about whether it was ever scored.
+        tag = "ERR"
+    elif classify_result(r).is_fatal:
         tag = "DEPR"
     elif is_hit(r.get("fitness")):
         tag = "HIT"
@@ -96,7 +102,7 @@ def fmt_query_result(
     sid_col = f"#{sid:03d}" if sid is not None else "    "
     step_block = f" {step}" if step else ""
     if err:
-        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
+        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} {str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
     # An L4 outer sample is not a question with an answer — it is a whole inner campaign, and
     # the row's `mean_round_delta` is what it measured. Rendered as HIT/MISS-vs-ground-truth

@@ -5,7 +5,10 @@
 // to this shape. Renderers see one shape; the two source readers live
 // in `lib/derivations/round-samples.ts`.
 
-export type SampleStatus = "HIT" | "MISS";
+// The tape's three marks (`live_dashboard/render.py::fmt_sample_line`). `ERR` is a THIRD
+// state, not a bad `MISS`: an errored row was never graded, so it belongs on neither side
+// of a hit/miss partition and must not reach one as a zero.
+export type SampleStatus = "HIT" | "MISS" | "ERR";
 
 export interface SampleRow {
   // Stable React key — `${round}|${candidate_id}|${sample_id ?? ord}`.
@@ -29,9 +32,6 @@ export interface SampleRow {
   scorer: string;
   // Wall-clock duration in seconds; null when the source omits it.
   elapsed_s: number | null;
-  // Set when the scored result carried an error payload (historical
-  // mode); always false in live mode unless the parser reports raw.
-  has_error: boolean;
   // The raw compact line (live mode only) — kept for the fallback
   // render when `parseSampleLine` couldn't match the regex.
   raw_line?: string;

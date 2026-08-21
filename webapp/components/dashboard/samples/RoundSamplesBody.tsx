@@ -1,5 +1,5 @@
 "use client";
-import { isSelectedCandidate, type CandidateRow, type SampleRow, type SelectedCandidate } from "@/lib/types";
+import { isSelectedCandidate, type CandidateRow, type SampleRow, type SampleStatus, type SelectedCandidate } from "@/lib/types";
 import type { LineageNode } from "@/lib/api";
 import { SampleRowItem } from "./SampleRowItem";
 import { PanelCellRow } from "./PanelCellRow";
@@ -7,12 +7,15 @@ import { fmtPct0 } from "@/lib/format";
 import { panelCellKey } from "@/lib/derivations";
 import { SegmentedControl, type Segment } from "@/components/ui";
 
-export type StatusFilter = "all" | "hit" | "miss";
+// Derived from `SampleStatus`, not re-spelled: the old pair named two marks of three, so ERR rows
+// answered neither filter and were reachable only under ALL — faults hidden from a hunt for faults.
+export type StatusFilter = "all" | SampleStatus;
 
 const STATUS_FILTERS: readonly Segment<StatusFilter>[] = [
   { value: "all", label: "ALL" },
-  { value: "hit", label: "HIT" },
-  { value: "miss", label: "MISS" },
+  { value: "HIT", label: "HIT" },
+  { value: "MISS", label: "MISS" },
+  { value: "ERR", label: "ERR" },
 ];
 
 // Cap on rendered rows per candidate group so the DOM stays bounded
@@ -87,7 +90,7 @@ export function RoundSamplesBody({
             options={STATUS_FILTERS}
             value={statusFilter}
             onChange={onStatusFilter}
-            ariaLabel="HIT/MISS filter"
+            ariaLabel="Sample status filter"
           />
         )}
         <span className="rsv-count">

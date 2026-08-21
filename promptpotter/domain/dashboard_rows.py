@@ -37,6 +37,10 @@ class DashboardCandidate(StrictModel):
     candidate_id: str | None = None
     accuracy: float | None = None
     composite_fitness: float | None = None
+    # Rejected before it cost a sample (`l1/population.py::INVALID_SCORES`). Served because the
+    # scores beside it are SYNTHETIC — without it the row is byte-identical to one that got
+    # everything wrong.
+    invalid: bool = False
     scored_samples: int = 0
     cached_samples: int = 0
     # Unknown until the first sample announces the walk's length.
