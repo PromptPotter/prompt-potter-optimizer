@@ -26,24 +26,23 @@ class MaskCandidate(StrictModel):
     n_scored: int = 0
     is_winner: bool = False
     is_eligible: bool = True
-    # Which PoBB abort contributor cut this candidate's measurement early, if any:
-    # ``"epsilon"`` (ε-elimination) | ``"lock_in"`` (leader lock-in) | ``None``
-    # (ran to completion). The abort verdict reads this; the scoring verdict ignores
-    # it. Recorded fact from ``elimination_context.leader_locked``.
+    # Which PoBB gate cut this candidate's measurement early, if any — an ``EliminationGate``
+    # value, or ``None`` (ran to completion). The abort verdict reads this; the scoring verdict
+    # ignores it. Recorded fact, read off ``elimination_context.gate``, never re-derived.
     abort: str | None = None
 
 
 class MaskRound(StrictModel):
-    """One round on a cycle's spine. The anchor is round ``N-1``'s elected winner (empty at round 0), and
-    the verdict needs it to reproduce the "origin held, no promotion" outcome under a swap."""
+    """One round on a cycle's spine. The parent is round ``N-1``'s elected winner (empty at round 0),
+    and the verdict needs it to reproduce the "parent held, no promotion" outcome under a swap."""
 
     model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     round: int
     candidates: list[MaskCandidate] = Field(default_factory=list)
-    anchor_evaluators: dict[str, float] = Field(default_factory=dict)
-    anchor_accuracy: float = 0.0
+    parent_evaluators: dict[str, float] = Field(default_factory=dict)
+    parent_accuracy: float = 0.0
     # The recorded round itself, and the pool of known per-sample outcomes as it stood
     # BEFORE this round ran — the substrate a REPLAY verdict re-derives from, and the only
     # thing on this model that is a raw measurement rather than a summary of one. Carried

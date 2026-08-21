@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -26,6 +27,7 @@ from promptpotter.application.scoring.selection import (
     elect_round_winner,
     matched_parent_lift,
     paired_fitness,
+    parent_cells,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
@@ -75,19 +77,16 @@ def _verdict_reason(
     lower-accuracy winner needs the number it actually won on, and a held round needs to say which
     arm came closest and how far short. On a COLD ruler it says so: θ there is logit-accuracy on
     each arm's own subset, which is not the scale the word promises."""
-    from promptpotter.application.intelligence.exploration import (
-        ORIGIN_ABILITY_ID,
-        theta_lift_over_origin,
-    )
+    from promptpotter.application.intelligence.exploration import theta_lift_over_parent
 
     scale = "" if ruler_n else " (cold ruler — θ is logit-accuracy on each arm's own subset)"
-    parent = abilities.theta.get(ORIGIN_ABILITY_ID)
+    parent = abilities.theta.get(PARENT_ABILITY_ID)
     census = f"{len(electable)} of {n_scored} electable, coverage floor {coverage_floor}"
     ranked = sorted(
         (
             (lift, cid)
             for cid in electable
-            if (lift := theta_lift_over_origin(abilities, cid)) is not None
+            if (lift := theta_lift_over_parent(abilities, cid)) is not None
         ),
         reverse=True,
     )
@@ -294,10 +293,10 @@ async def l1_score(
         # record stays honest; the round-level fact is charged to the L4 floor instead.
         if not is_electable(candidate_scores[cs_idx], cand_results):
             continue
-        # …and the COVERAGE half of the same rule, which `elect_round_winner` applies below and
-        # this list did not: an arm under the floor cannot be crowned, so counting it as electable
-        # reported three admissible arms on a round where exactly one could win. An operator skip
-        # is the fastest way to produce one — it leaves a 3-cell arm carrying a full-looking rate.
+        # …and the COVERAGE half of the same rule `elect_round_winner` applies below: an arm under
+        # the floor cannot be crowned, so counting it electable overstates what could win. The
+        # floor catches an arm thin for a reason OTHER than elimination (an operator skip) — PoBB
+        # never cuts below its own `n_min`, which IS this floor.
         if distinct_valid_cells(cand_results) < coverage_floor:
             continue
         electable.append(ind.lineage.id)
@@ -307,7 +306,7 @@ async def l1_score(
     # election on a cold ruler, with no later round to spend a warm one on at L4's budget.
     # EXTENSION rides the same seam: on return the ruler covers every cell scored below, which is
     # what lets the θ fit raise on a hole instead of grading it δ=0.
-    cycle.calibrate_ruler({**all_candidate_results, "__parent__": parent_election_results})
+    cycle.calibrate_ruler({**all_candidate_results, PARENT_ABILITY_ID: parent_election_results})
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor;
     # without it a resumed run elects a thin candidate the live path rejected.
     winner_id, abilities = elect_round_winner(
@@ -346,7 +345,9 @@ async def l1_score(
             "coverage_floor": coverage_floor,
         },
         winner_id,
-        data={"current_best_accuracy_at_record": parent.report.accuracy},
+        # The PARENT this election ranked against; the round document cannot carry it, since on a
+        # won round `results` is the winner's rows.
+        data={"parent_cells": parent_cells(parent_election_results)},
         round=round_num,
     )
     if winner_id:
@@ -377,8 +378,8 @@ async def l1_score(
         # A recorded diagnostic; it does not gate promotion. Significance runs on the per-sample
         # FITNESS rather than binary hits: a candidate lifting ground-truth's rank without yet
         # landing it at rank 1 is real improvement a binary-hit test is blind to.
-        cand_fit, origin_fit = paired_fitness(best_results, parent_election_results)
-        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, origin_fit, tail="greater")
+        cand_fit, parent_fit = paired_fitness(best_results, parent_election_results)
+        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit, tail="greater")
 
     # A round improved iff it crowned somebody. ``elect_round_winner`` admits a candidate only on
     # a STRICTLY positive ability lift over the parent on the cycle's fixed δ ruler, so the

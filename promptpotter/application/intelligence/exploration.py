@@ -22,12 +22,14 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
-# Sentinel candidate id the origin rides under inside a joint ability fit, so the
-# election can read its θ on the same scale as the real candidates.
+# C0 inside the δ-calibrating fit; the archive's copies of the origin fold onto this one id.
 ORIGIN_ABILITY_ID = "__origin__"
+# The ROUND'S PARENT inside a joint ability fit — the origin at round 0, the prior winner after.
+PARENT_ABILITY_ID = "__parent__"
 
 __all__ = [
     "ORIGIN_ABILITY_ID",
+    "PARENT_ABILITY_ID",
     "Observation",
     "RaschPosterior",
     "adopted_level_trajectory",
@@ -43,7 +45,7 @@ __all__ = [
     "observations_from_results",
     "ruler_expected_accuracy",
     "select_round_subset",
-    "theta_lift_over_origin",
+    "theta_lift_over_parent",
 ]
 
 
@@ -662,12 +664,15 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
 
 def candidate_abilities(
     results_by_id: Mapping[str, list[QueryMeasurement]],
-    origin_results: list[QueryMeasurement],
+    parent_results: list[QueryMeasurement],
     ruler: DeltaRuler | None,
 ) -> RaschPosterior:
-    """The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so it shares the arms'
-    scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable."""
-    obs = observations_from_results({**results_by_id, ORIGIN_ABILITY_ID: origin_results})
+    """The PARENT is folded in as a pseudo-candidate under ``PARENT_ABILITY_ID`` so it shares the arms'
+    scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable.
+
+    ``parent_results`` is the incumbent RE-SCORED on this round's panel, never C0's banked rows —
+    an arm is crowned on a lift over what it must actually beat."""
+    obs = observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
     fit = fit_theta_given_delta(
         obs,
         ruler.entries() if ruler is not None else None,
@@ -683,14 +688,14 @@ def candidate_abilities(
     )
 
 
-def theta_lift_over_origin(abilities: RaschPosterior, candidate_id: str) -> float | None:
-    """``None`` when either arm was never fit — an origin whose samples all errored has no entry, and
+def theta_lift_over_parent(abilities: RaschPosterior, candidate_id: str) -> float | None:
+    """``None`` when either arm was never fit — a parent whose samples all errored has no entry, and
     defaulting it to 0.0 invents a logit-0 floor nobody measured. Absent is not a number."""
     theta_c = abilities.theta.get(candidate_id)
-    theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID)
-    if theta_c is None or theta_origin is None:
+    theta_parent = abilities.theta.get(PARENT_ABILITY_ID)
+    if theta_c is None or theta_parent is None:
         return None
-    return theta_c - theta_origin
+    return theta_c - theta_parent
 
 
 def select_round_subset(

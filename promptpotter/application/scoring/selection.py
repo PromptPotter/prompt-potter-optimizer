@@ -1,7 +1,12 @@
 """Which candidate WINS, and which is cut — the θ-ranked election plus the closed-form elimination
-posterior, and the paired-cell substrate both stand on. ONE rule, two callers: the live scorer
-(``l1_score``) and the resume divergence replayer, so a resumed run can never re-elect a different
-winner under an unchanged scorer.
+posterior, and the paired-cell substrate both stand on. ONE rule, three callers: the live scorer
+(``l1_score``), the resume divergence replayer and the A/B replay, so a resumed run can never
+re-elect a different winner under an unchanged scorer.
+
+One rule is not enough on its own — the PARENT has to travel with it. The rule ranks each arm
+against ``parent_results``, and a caller passing a different panel re-elects differently with the
+scorer untouched. So the live election records the parent it used (``parent_cells``) and both
+replayers read it; none of them may reconstruct one.
 
 ``mean_fitness_ci`` lives here rather than with the fitness gateway because it reads
 ``_mean_fitness_by_cell``, whose docstring forbids adding the scoreable filter that
@@ -24,6 +29,7 @@ __all__ = [
     "matched_parent_lift",
     "mean_fitness_ci",
     "paired_fitness",
+    "parent_cells",
 ]
 
 
@@ -79,18 +85,18 @@ def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
 
 def paired_fitness(
     candidate_results: list[QueryMeasurement],
-    origin_results: list[QueryMeasurement],
+    parent_results: list[QueryMeasurement],
 ) -> tuple[list[float], list[float]]:
     """The matched pairs the round-significance test runs on. Sorted by ``sample_id`` so a replay
-    is deterministic."""
+    is deterministic. Every caller pairs against the PARENT — the origin only at round 0."""
     cand_by_sid = _mean_fitness_by_cell(candidate_results)
-    origin_by_sid = _mean_fitness_by_cell(origin_results)
+    parent_by_sid = _mean_fitness_by_cell(parent_results)
     cand_fit: list[float] = []
-    origin_fit: list[float] = []
-    for sid in sorted(cand_by_sid.keys() & origin_by_sid.keys(), key=lambda s: (s is None, s)):
+    parent_fit: list[float] = []
+    for sid in sorted(cand_by_sid.keys() & parent_by_sid.keys(), key=lambda s: (s is None, s)):
         cand_fit.append(cand_by_sid[sid])
-        origin_fit.append(origin_by_sid[sid])
-    return cand_fit, origin_fit
+        parent_fit.append(parent_by_sid[sid])
+    return cand_fit, parent_fit
 
 
 def matched_parent_lift(
@@ -114,54 +120,76 @@ def matched_parent_lift(
     return None if ci_lo is None or ci_hi is None else (lift, ci_lo, ci_hi)
 
 
+def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]:
+    """The parent panel an election ranked against, projected to the THREE fields
+    ``elect_round_winner`` reads off it: the cell, its grade, and whether it errored.
+
+    Recorded beside the decision because nothing else on the round document carries it — on a WON
+    round ``RoundResult.results`` holds the winner's rows, not the parent's — so a replayer had to
+    reconstruct the parent, and every reconstruction picked a different one than live used."""
+    return [
+        {
+            "sample_id": sid,
+            "fitness": r.get("fitness"),
+            "error_category": r.get("error_category"),
+        }
+        for r in parent_results
+        if (sid := r.get("sample_id")) is not None
+    ]
+
+
 def elect_round_winner(
     candidate_ids: list[str],
     results_by_id: Mapping[str, list[QueryMeasurement]],
-    origin_results: list[QueryMeasurement],
+    parent_results: list[QueryMeasurement],
     coverage_floor: int,
     ruler: DeltaRuler | None,
 ) -> tuple[str, RaschPosterior]:
-    """The rank key is the POINT-ESTIMATE lift, with no winner's-curse margin — under-probing is ``coverage_floor``'s job.
-    The overlap guard and the θ-lift guard cover different holes: one grades an errored row 0.0, the fit drops it."""
+    """ADMISSION is the point-estimate lift — strictly above the parent. The RANK is ``P(θ_cand >
+    θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot disagree about
+    what better means. The overlap guard and the θ-lift guard cover different holes: one grades an
+    errored row 0.0, the fit drops it."""
     from promptpotter.application.intelligence.exploration import (
+        PARENT_ABILITY_ID,
         candidate_abilities,
-        theta_lift_over_origin,
+        theta_lift_over_parent,
     )
+    from promptpotter.shared.statistics import p_exceeds
 
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
-        origin_results,
+        parent_results,
         ruler,
     )
+
+    theta_parent = abilities.theta.get(PARENT_ABILITY_ID)
+    se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
 
     best_rank: tuple[float, int] = (0.0, 0)
     winner_id = ""
     for cid in candidate_ids:
         cand_results = list(results_by_id.get(cid) or [])
         n_cells = distinct_valid_cells(cand_results)
+        # Catches an arm thin for a reason OTHER than elimination (an operator skip). PoBB never
+        # cuts below its own `n_min`, which IS this floor, so no cut arm is stopped here.
         if n_cells < coverage_floor:
             continue
-        cand_fit, _ = paired_fitness(cand_results, origin_results)
+        cand_fit, _ = paired_fitness(cand_results, parent_results)
         if not cand_fit:
             continue
-        # Rank by the difficulty-adjusted ability lift POINT ESTIMATE — a candidate strictly
-        # above origin wins, no winner's-curse SE margin required. The prior `- theta_se` shrink
-        # discarded genuinely-better candidates whenever the posterior was wide (thin per-round
-        # budgets ⇒ theta_se can dwarf a real gain), so the loop never compounded a discovered
-        # improvement — the next round re-explored origin instead of building on the better
-        # candidate. Under-probing is already guarded independently by `coverage_floor` above
-        # (a candidate below it never reaches here), so dropping the SE shrink cannot let a thin
-        # fluke win — only fully-probed candidates compete, best point-estimate θ takes it.
-        # The floor counts EVIDENCE cells (non-errored, the θ fit's own population), not
-        # attempted cells — that is what licenses the no-SE-margin rank.
-        # `None` = this candidate or the origin was never fit; there is no lift to rank on.
-        # Strictly above, per this function's contract. `<= 0.0` is not a near-miss to be broken
-        # on cell count: when every arm scores 0 they all fit the SAME degenerate theta, so every
-        # lift is exactly 0.000 and a cell-count tiebreak crowns an arm that beat nothing.
-        lift = theta_lift_over_origin(abilities, cid)
+        # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
+        # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
+        lift = theta_lift_over_parent(abilities, cid)
         if lift is None or lift <= 0.0:
             continue
-        rank = (lift, n_cells)
+        # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
+        # round could TELL the arms apart — a thin arm out-points a full panel on a margin
+        # inside its own SE.
+        theta_c = abilities.theta.get(cid)
+        if theta_c is None or theta_parent is None:
+            continue
+        p_better = p_exceeds(theta_c, abilities.theta_se.get(cid) or 0.0, theta_parent, se_parent)
+        rank = (p_better, n_cells)
         if rank > best_rank:
             best_rank = rank
             winner_id = cid
@@ -179,11 +207,8 @@ def elimination_p_best(
     if not paired_prior_grades:
         return 1.0, {}
 
-    import math
-
-    from scipy.stats import norm
-
     from promptpotter.application.intelligence.exploration import Observation, fit_theta_given_delta
+    from promptpotter.shared.statistics import p_exceeds
 
     sids = [int(s) for s in candidate_sample_ids]
     # The ONE sanctioned provisional read: this runs DURING the round, on cells `calibrate_ruler`
@@ -207,9 +232,7 @@ def elimination_p_best(
         theta_p, se_p = fit_theta_given_delta(prior_obs, entries, anchor_id=anchor).get(
             pid, (0.0, 0.0)
         )
-        denom = math.sqrt(se_c * se_c + se_p * se_p)
-        if denom > 1e-12:
-            per_prior[pid] = float(norm.cdf((theta_c - theta_p) / denom))
-        else:
-            per_prior[pid] = 1.0 if theta_c > theta_p else 0.0
+        # The SAME comparison `elect_round_winner` ranks on — one function, so a cut and a crown
+        # cannot be computed on two different readings of "better".
+        per_prior[pid] = p_exceeds(theta_c, se_c, theta_p, se_p)
     return min(per_prior.values()), per_prior

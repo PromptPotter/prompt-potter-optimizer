@@ -141,7 +141,9 @@ async def resume_with_divergence_check(
         for items in t.all_candidate_results.values():
             _rescore(items)
 
-    origin_results_rescored = _rescore(cycle.tracking.current_results)
+    # For the CYCLE's own state, never as a comparison anchor: the PoBB prior seed and the
+    # trajectory pool read these rows, and each election's anchor rides its own decision record.
+    _rescore(cycle.tracking.current_results)
 
     # Fingerprinted BEFORE any repair, from ONE cycle, so both sets differ by exactly what the
     # repair changed. Deep copies because the repair mutates `prior` in place. No pre-replay:
@@ -237,7 +239,6 @@ async def resume_with_divergence_check(
             div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t,
                 ledger_decisions.get(t.round),
-                origin_results=origin_results_rescored,
                 ruler=cycle.ruler,
             )
             if div is not None:

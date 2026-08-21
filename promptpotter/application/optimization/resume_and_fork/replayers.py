@@ -14,7 +14,8 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
 )
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import EliminationGate, RoundResult
+from promptpotter.domain.scoring import is_answer_collapsed
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
@@ -43,16 +44,18 @@ class ReplayMismatch(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """One round's measurements + the origin, all rescored — a replayer re-derives from its own round and
-    nothing else, so a decision needing the cycle's HISTORY is ``ARCHIVAL``, never ``REPLAYED``.
+    """One round's measurements, rescored — a replayer re-derives from its own round and nothing
+    else, so a decision needing the cycle's HISTORY is ``ARCHIVAL``, never ``REPLAYED``.
 
     ``decisions`` arrives from the LEDGER (``scan_ledger_decisions``), which is where a decision is
-    written and stamped with the round that made it. The round document used to carry a second copy,
-    assembled from whatever was pending when it happened to be written."""
+    written and stamped with the round that made it — never a second copy off the round document,
+    which is assembled from whatever was pending when it happened to be written.
+
+    Deliberately carries NO comparison anchor: a caller-supplied one is a caller-private one, so
+    the anchor rides the decision that used it."""
 
     round_data: RoundResult
     decisions: list[dict[str, Any]]
-    origin_results: list[dict[str, Any]]
     ruler: DeltaRuler | None
 
 
@@ -96,13 +99,11 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
 def _replay_context(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None,
-    origin_results: list[dict[str, Any]] | None,
     ruler: DeltaRuler | None,
 ) -> ReplayContext:
     return ReplayContext(
         round_data=round_data,
         decisions=list(decisions or []),
-        origin_results=list(origin_results or []),
         ruler=ruler,
     )
 
@@ -110,38 +111,45 @@ def _replay_context(
 def replay_decisions(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None = None,
-    origin_results: list[dict[str, Any]] | None = None,
     ruler: DeltaRuler | None = None,
 ) -> ReplayMismatch | None:
     """Walk this round's ledger decisions in order; return the FIRST mismatch (resume's halt seam)."""
-    ctx = _replay_context(round_data, decisions, origin_results, ruler)
+    ctx = _replay_context(round_data, decisions, ruler)
     return next(_iter_mismatches(ctx), None)
 
 
 def replay_all_mismatches(
     round_data: RoundResult,
     decisions: list[dict[str, Any]] | None = None,
-    origin_results: list[dict[str, Any]] | None = None,
     ruler: DeltaRuler | None = None,
 ) -> list[ReplayMismatch]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round diff, where
     ``replay_decisions`` short-circuits at the first."""
-    ctx = _replay_context(round_data, decisions, origin_results, ruler)
+    ctx = _replay_context(round_data, decisions, ruler)
     return list(_iter_mismatches(ctx))
 
 
 def _replay_round_winner(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> str:
-    """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, never a
-    parallel rule — so an unchanged scorer re-elects exactly, and only a real scorer change diverges."""
+    """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, against
+    the SAME parent — READ from the decision, never reconstructed. One shared rule is not enough
+    alone: it ranks each arm against the parent panel, and the three callers that each reconstructed
+    one reconstructed a different panel."""
+    parent = data.get("parent_cells")
+    if parent is None:
+        # Never fall back to a reconstruction — guessing quietly is the defect itself.
+        raise ValueError(
+            "this ROUND_WINNER decision carries no `parent_cells`, so the panel its election "
+            "ranked against is unrecoverable and the winner cannot be re-derived"
+        )
     all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref["coverage_floor"])
     winner_id, _ = elect_round_winner(
         candidate_ids,
         cast("dict[str, list[QueryMeasurement]]", all_results),
-        cast("list[QueryMeasurement]", ctx.origin_results),
+        cast("list[QueryMeasurement]", parent),
         coverage_floor,
         ctx.ruler,
     )
@@ -189,6 +197,15 @@ def _pobb_replay_snapshot(
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
+    """Dispatches on the gate the PRODUCER named, never on the ε rule alone: a collapse cut returns
+    before ``elimination_p_best`` is reached, so it holds no posterior and re-deriving it under ε
+    tests a real ``p_best`` against a bar nobody set — which no collapse can re-derive as true."""
+    if inputs_ref.get("gate") == EliminationGate.COLLAPSED:
+        # Bit-exact by construction: `is_answer_collapsed` reads only `predicted` / `ground_truth`,
+        # which rescoring never touches, so this arm can never false-positive on a scorer change.
+        cid = str(inputs_ref.get("candidate_id", ""))
+        rows = ctx.round_data.all_candidate_results.get(cid) or []
+        return is_answer_collapsed(rows[: int(inputs_ref["queries_scored"])])
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if p_best is None:
         return False

@@ -485,10 +485,10 @@ def _mask_cand(cid: str, acc: float, **kw: object) -> MaskCandidate:
 def test_mask_scoring_divergence_self_consistency_and_eligibility():
     """The scoring mask's correctness backbone, in one record.
 
-    Realized election (``winner.py``): argmax display_rank_key over {origin-anchor}
-    ∪ *eligible* candidates. Round 1: origin C0=0.5, A=0.75 (winner), B=0.25, and an
-    INELIGIBLE C=1.0 (escalation-aborted-style). Round 2: A carries to anchor, D=1.0
-    wins.
+    Realized election (``winner.py``): argmax display_rank_key over {parent}
+    ∪ *eligible* candidates. Round 1: the origin C0=0.5 is the parent, A=0.75 (winner),
+    B=0.25, and an INELIGIBLE C=1.0 (escalation-aborted-style). Round 2: A carries
+    forward as the parent, D=1.0 wins.
 
     (a) Self-consistency + eligibility: feeding the *realizing* criterion
     (``accuracy``) reproduces every is_winner → zero divergences. C's 1.0 must NOT
@@ -501,8 +501,8 @@ def test_mask_scoring_divergence_self_consistency_and_eligibility():
     r1 = MaskRound(
         cycle_id="cyc",
         round=1,
-        anchor_evaluators={"accuracy": 0.5},
-        anchor_accuracy=0.5,
+        parent_evaluators={"accuracy": 0.5},
+        parent_accuracy=0.5,
         candidates=[
             _mask_cand("A", 0.75, is_winner=True),
             _mask_cand("B", 0.25),
@@ -512,8 +512,8 @@ def test_mask_scoring_divergence_self_consistency_and_eligibility():
     r2 = MaskRound(
         cycle_id="cyc",
         round=2,
-        anchor_evaluators={"accuracy": 0.75},  # A carried forward
-        anchor_accuracy=0.75,
+        parent_evaluators={"accuracy": 0.75},  # A carried forward
+        parent_accuracy=0.75,
         candidates=[_mask_cand("D", 1.0, is_winner=True)],
     )
     record = MaskRecord(cycles=[MaskCycle(cycle_id="cyc", rounds=[r0, r1, r2])])
@@ -617,22 +617,22 @@ def test_mask_abort_verdict_rides_the_same_fold():
 
 
 def _flip_spine(cycle_id: str, *, n_rounds: int = 3) -> list[MaskRound]:
-    """A spine whose round 1 flips leader under ``1 - accuracy``: anchor 0.5, A=0.75 wins,
+    """A spine whose round 1 flips leader under ``1 - accuracy``: parent 0.5, A=0.75 wins,
     B=0.25 loses. Round 2 exists only to be claimed as the divergent tail."""
     rounds = [
         MaskRound(cycle_id=cycle_id, round=0, candidates=[_mask_cand("C0", 0.5, is_winner=True)]),
         MaskRound(
             cycle_id=cycle_id,
             round=1,
-            anchor_evaluators={"accuracy": 0.5},
-            anchor_accuracy=0.5,
+            parent_evaluators={"accuracy": 0.5},
+            parent_accuracy=0.5,
             candidates=[_mask_cand("A", 0.75, is_winner=True), _mask_cand("B", 0.25)],
         ),
         MaskRound(
             cycle_id=cycle_id,
             round=2,
-            anchor_evaluators={"accuracy": 0.75},
-            anchor_accuracy=0.75,
+            parent_evaluators={"accuracy": 0.75},
+            parent_accuracy=0.75,
             candidates=[_mask_cand("D", 1.0, is_winner=True)],
         ),
     ]
@@ -1384,9 +1384,10 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     """An origin whose every sample errored must not be scored as a coin-flip.
 
     ``candidate_abilities`` drops errored rows, and ``fit_theta_given_delta`` omits an arm with
-    no observation — so such an origin carries no ``ORIGIN_ABILITY_ID`` entry. Reading it as
-    ``.get(ORIGIN_ABILITY_ID, 0.0)`` invented θ=0, i.e. an origin able on ~50% of the ruler, and
-    both the winner election and the ``delta_ok`` promotion gate ranked against that phantom.
+    no observation — so such a parent carries no ``PARENT_ABILITY_ID`` entry (at round 0 the
+    parent IS the origin). Reading it as ``.get(..., 0.0)`` invented θ=0, i.e. a floor able on
+    ~50% of the ruler, and both the winner election and the ``delta_ok`` promotion gate ranked
+    against that phantom.
 
     ``paired_fitness`` does not catch it: it grades an errored row as a 0.0 cell, so the
     origin-overlap guard passes on the very rows the θ fit discarded.
@@ -1396,9 +1397,9 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     is built on a number nobody observed.
     """
     from promptpotter.application.intelligence.exploration import (
-        ORIGIN_ABILITY_ID,
+        PARENT_ABILITY_ID,
         candidate_abilities,
-        theta_lift_over_origin,
+        theta_lift_over_parent,
     )
     from promptpotter.application.scoring.selection import elect_round_winner, paired_fitness
 
@@ -1413,18 +1414,18 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     abilities = candidate_abilities({"c1": candidate}, origin, None)
 
     # The origin was never fit — nothing to floor against.
-    assert ORIGIN_ABILITY_ID not in abilities.theta
+    assert PARENT_ABILITY_ID not in abilities.theta
     # ...yet the overlap guard sees six shared cells, so it cannot be the thing that stops us.
     assert len(paired_fitness(candidate, origin)[0]) == 6
 
-    assert theta_lift_over_origin(abilities, "c1") is None
+    assert theta_lift_over_parent(abilities, "c1") is None
     winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, None)
     assert winner_id == ""
 
     # A measured origin still elects normally — the guard costs nothing when there IS a floor.
     scored_origin = [res(i, 0.1) for i in range(6)]
     scored_abilities = candidate_abilities({"c1": candidate}, scored_origin, None)
-    lift = theta_lift_over_origin(scored_abilities, "c1")
+    lift = theta_lift_over_parent(scored_abilities, "c1")
     assert lift is not None and lift > 0.0
     assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, None)[0] == "c1"
 
@@ -1432,8 +1433,9 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
 def test_errored_cells_never_satisfy_coverage_floor() -> None:
     """``coverage_floor`` must count the same cells the θ fit consumes.
 
-    The floor is the SOLE under-probing guard — the election ranks by θ point estimate
-    with no SE margin *because* only fully-probed candidates compete. Errored rows
+    The floor catches an arm thin for a reason OTHER than elimination — an operator skip, a
+    run that errored out. (It is not an under-probing guard: it equals PoBB's own ``n_min``,
+    which no cut goes below. Ranking on P is what covers that hole.) Errored rows
     (CONNECTION/UNKNOWN — e.g. an L4 inner campaign dying of a timeout) are not fatal-
     classified, so a deprecation-only coverage count includes them while the θ fit drops
     them: a candidate whose cells mostly died as tooling errors passed the floor on
@@ -1469,7 +1471,42 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
     assert distinct_valid_cells(repeated) == 2
 
 
-# 5. Measurement rerun short-circuit + refusal classification
+def test_a_thin_arm_cannot_win_on_a_margin_inside_its_own_noise() -> None:
+    """`coverage_floor` IS PoBB's `n_min`, so every cut arm clears it and reaches the election.
+    Ranked on a bare point estimate, a thin arm out-points a full panel on a margin smaller than
+    its own SE.
+
+    Silent harm: a winner is crowned, every number renders, and the lineage descends from a margin
+    the round could not measure."""
+    from promptpotter.application.intelligence.exploration import (
+        PARENT_ABILITY_ID,
+        candidate_abilities,
+    )
+    from promptpotter.application.scoring.selection import elect_round_winner
+    from promptpotter.shared.statistics import p_exceeds
+
+    def res(hit: bool, sid: int) -> dict:
+        return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
+
+    ruler = _ruler(dict.fromkeys(range(28), 0.0))
+    origin = [res(i < 14, i) for i in range(28)]
+    deep = [res(i < 21, i) for i in range(28)]  # full panel, a well-measured gain
+    shallow = [res(i < 5, i) for i in range(6)]  # cut at n_min, higher RATE on 1/6 the evidence
+
+    ab = candidate_abilities({"deep": deep, "shallow": shallow}, origin, ruler)
+    theta_p, se_p = ab.theta[PARENT_ABILITY_ID], ab.theta_se[PARENT_ABILITY_ID]
+    p = {c: p_exceeds(ab.theta[c], ab.theta_se[c], theta_p, se_p) for c in ("deep", "shallow")}
+
+    # The thin arm's POINT lift is larger, on nearly twice the SE — so it demonstrated less.
+    assert ab.theta["shallow"] > ab.theta["deep"]
+    assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"]
+    assert p["deep"] > p["shallow"]
+    args = (["deep", "shallow"], {"deep": deep, "shallow": shallow}, origin, 6, ruler)
+    assert elect_round_winner(*args)[0] == "deep"
+
+    # Ranking on P must never DISQUALIFY — that is what separates it from the `- theta_se` shrink
+    # it replaced, which turned a wide-posterior gain negative and crowned nobody.
+    assert elect_round_winner(["shallow"], {"shallow": shallow}, origin, 6, ruler)[0] == "shallow"
 
 
 def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
@@ -2481,13 +2518,13 @@ def test_leader_eligibility_bars_invalid_measurement_not_stops():
         candidate_id="C1.2",
         accuracy=0.40,
         elimination_stopped=True,
-        elimination_context={"p_best": 0.048, "epsilon": 0.05, "leader_locked": False},
+        elimination_context={"p_best": 0.048, "epsilon": 0.05, "gate": "epsilon"},
     )
     leader_locked = _cs(
         candidate_id="C1.1",
         accuracy=0.55,
         elimination_stopped=True,
-        elimination_context={"p_best": 0.96, "epsilon": 0.05, "leader_locked": True},
+        elimination_context={"p_best": 0.96, "epsilon": 0.05, "gate": "lock_in"},
     )
     clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
 
@@ -2669,7 +2706,7 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     h = compute_round_health(results=results, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
-    assert h.reasons == ["evidence_starved"]
+    assert h.cause == "evidence_starved"
     assert h.dominant_node == "web_search"
     assert h.node_failure_rates.get("web_search") == 0.5
     assert h.suggested_action and "web_search" in h.suggested_action
@@ -2706,7 +2743,7 @@ def test_a_near_constant_answerer_is_reported_and_still_grades_healthy():
     assert h is not None
     assert h.answer_modal_share == 0.95
     assert h.grade == "healthy"
-    assert h.reasons == [], "the share reports; it must never become a grading arm"
+    assert h.cause is None, "the share reports; it must never become a grading arm"
 
     # Identity-keyed answers (every truth distinct — an L4 outer round's per-seed tokens)
     # make collapse a meaningless question, and the report must abstain rather than read 1.0.
@@ -2740,7 +2777,7 @@ def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
     h = compute_round_health(results=no_result_rows, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
-    assert h.reasons == ["unscoreable"]
+    assert h.cause == "unscoreable"
     assert h.no_result_count == 20
     assert h.suggested_action and "answer_format" in h.suggested_action
     # Critical → halts even in the least-strict armed mode; this is the guarantee
@@ -2753,7 +2790,7 @@ def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
     hw = compute_round_health(results=wrong_rows, prior_healths=[])
     assert hw is not None
     assert hw.no_result_count == 0
-    assert "unscoreable" not in hw.reasons
+    assert hw.cause != "unscoreable"
 
 
 def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
@@ -2771,7 +2808,7 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
     ho = compute_round_health(results=[], prior_healths=[], is_origin=True)
     assert ho is not None
     assert ho.grade == "critical"
-    assert ho.reasons == ["origin_unmeasured"]
+    assert ho.cause == "origin_unmeasured"
     # Halts even in the least-strict armed mode — the baseline-less election never begins.
     assert origin_gate_tripped(ho, "critical_only") == StopReason.ORIGIN_GATE
 
@@ -2780,26 +2817,26 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
 
 
 @pytest.mark.parametrize(
-    ("attempted", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
+    ("attempted", "structural", "transient", "prior_clean", "consec", "grade", "cause"),
     [
         # lca-bom-termnorm origin: 60% structural failures, untested → critical/structural.
-        (20, 12, 0, 0, 1, "critical", ["structural"]),
+        (20, 12, 0, 0, 1, "critical", "structural"),
         # First-sight structural at an untested config, even at low rate → critical.
-        (20, 1, 0, 0, 1, "critical", ["structural_untested"]),
+        (20, 1, 0, 0, 1, "critical", "structural_untested"),
         # The SAME isolated structural failure deep in a proven campaign → NOT critical.
-        (20, 1, 0, 5, 1, "healthy", []),
+        (20, 1, 0, 5, 1, "healthy", None),
         # Sustained: 3 consecutive degraded rounds escalates on persistence alone.
-        (20, 0, 5, 5, 3, "critical", ["persistent"]),
+        (20, 0, 5, 5, 3, "critical", "persistent"),
         # Transient noise on a proven pipeline above the rate floor → degraded, quiet.
-        (20, 0, 5, 5, 1, "degraded", ["degraded"]),
+        (20, 0, 5, 5, 1, "degraded", "degraded"),
         # A clean round at an UNTESTED config is healthy. It used to grade ``degraded``
         # purely because a 20-sample Wilson interval is wide — precision is not health,
         # and that verdict was what kept ``prior_clean_rounds`` pinned at 0 forever.
-        (20, 0, 0, 0, 0, "healthy", []),
+        (20, 0, 0, 0, 0, "healthy", None),
     ],
 )
 def test_degradation_health_is_context_aware(
-    attempted, structural, transient, prior_clean, consec, grade, reasons
+    attempted, structural, transient, prior_clean, consec, grade, cause
 ):
     """The verdict grades the SAME degradation differently by track record, and only a
     ``critical`` grade carries an operator-facing suggested action (never auto-stops)."""
@@ -2815,7 +2852,7 @@ def test_degradation_health_is_context_aware(
     )
     assert h is not None
     assert h.grade == grade
-    assert h.reasons == reasons
+    assert h.cause == cause
     assert (h.suggested_action is not None) is (grade == "critical")
 
 
@@ -2869,7 +2906,7 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
         for _ in range(5)
     ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
     h = compute_round_health(results=transient_rows, prior_healths=fresh)
-    assert h is not None and h.grade == "critical" and "persistent" in h.reasons
+    assert h is not None and h.grade == "critical" and h.cause == "persistent"
 
 
 def test_ungraded_prior_round_is_transparent_to_the_track_record():
@@ -2899,7 +2936,7 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
         for _ in range(5)
     ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
     h = compute_round_health(results=transient_rows, prior_healths=[degraded, None, degraded])
-    assert h is not None and h.grade == "critical" and "persistent" in h.reasons
+    assert h is not None and h.grade == "critical" and h.cause == "persistent"
 
 
 def test_all_errored_round_is_critical_not_unmeasured() -> None:
@@ -2915,7 +2952,7 @@ def test_all_errored_round_is_critical_not_unmeasured() -> None:
         for _ in range(10)
     ]
     h = compute_round_health(results=rows, prior_healths=[])
-    assert h is not None and h.grade == "critical" and "backend_unreachable" in h.reasons
+    assert h is not None and h.grade == "critical" and h.cause == "backend_unreachable"
     assert h.samples == 10 and h.suggested_action is not None
 
 
@@ -3886,3 +3923,78 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
 
     # Stickiness is the tiebreak, never an override — a cheaper cell still wins the slot.
     assert choose_overlap_set(c0, already_measured=w2, previous=[1, 2, 3], size=3) == [5, 6, 7]
+
+
+def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
+    """`elimination_stopped` covers two gates and only one measured anything: a collapse cut
+    returns before the posterior, so `p_best`/`epsilon`/`n_priors`/`leader_id` are placeholders.
+    Read through the ε fields it renders `0.0% < 15% vs ? (of 0 priors)` — four invented numbers —
+    and tells the generator the strongest verdict the loop has was "NOT a verdict", leaving the
+    collapsed idea free to be re-proposed.
+
+    Silent harm: nothing errors, every field renders, and the number diagnosed from was never
+    measured."""
+    from promptpotter.application.optimization.dispatch.injections.panels import _candidate_fate
+    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
+    from promptpotter.domain.results import EliminationGate
+
+    from .factories import scored_candidate
+
+    rows = [
+        {
+            "sample_id": i,
+            "hit": i % 2 == 0,
+            "fitness": 1.0 if i % 2 == 0 else 0.0,
+            "predicted": "Uncertain",
+            "ground_truth": "TRUE" if i % 2 == 0 else "FALSE",
+        }
+        for i in range(6)
+    ]
+    signal = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rows, 0, 1)
+    assert signal is not None, "a constant answerer must be cut at n_min"
+    cr = signal.check_result
+    assert cr["gate"] == EliminationGate.COLLAPSED
+    # The ε fields were never computed, so nothing downstream may present one as measured.
+    assert not {"p_best", "epsilon", "n_priors"} & cr.keys()
+
+    def cand(cid: str, **ctx: object):
+        return scored_candidate(
+            cid,
+            total=6,
+            elimination_stopped=True,
+            scored_samples=6,
+            expected_samples=28,
+            elimination_context={"queries_scored": 6, "total_queries": 28, **ctx},
+        )
+
+    collapsed = _candidate_fate(cand("collapsed", gate=EliminationGate.COLLAPSED))
+    epsilon_cut = _candidate_fate(
+        cand("eps", p_best=0.03, epsilon=0.15, gate=EliminationGate.EPSILON)
+    )
+
+    # What the GENERATOR is handed must invert between the two, and quote no ε number it lacks.
+    assert "NOT a verdict" in epsilon_cut
+    assert "NOT a verdict" not in collapsed and "VERDICT" in collapsed
+    assert "ε" not in collapsed and "P(best)" not in collapsed
+
+
+def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
+    """`lost_ideas` feeds the cross-round repeat gate, whose rejection is a synthetic-0 that never
+    reaches an LLM. Only ε weighed the arm against its priors — LOCK_IN is the opposite verdict,
+    COLLAPSED is the ABSENCE of a measurement, and a degradation cut names no gate because the node
+    broke rather than the idea losing.
+
+    Silent harm: banking any of the three blacklists an idea no round ever judged, and every later
+    re-proposal is rejected as `repeat_variant` for the rest of the cycle with nothing raised."""
+    from promptpotter.application.optimization.validators.l1_invariants import lost_ideas
+    from promptpotter.domain.results import EliminationGate
+
+    def banked(ctx: dict | None) -> bool:
+        rnd = lost_round(1, "instruction", "count the premises first", elimination_context=ctx)
+        return bool(lost_ideas([rnd]))
+
+    assert banked({"gate": EliminationGate.EPSILON}), "an ε cut IS the measurement, and it lost"
+    assert banked(None), "a plain accuracy loss is still a measured loss"
+    assert not banked({"gate": EliminationGate.COLLAPSED})
+    assert not banked({"gate": EliminationGate.LOCK_IN})
+    assert not banked({}), "a degradation cut carries no gate — the node broke, not the idea"

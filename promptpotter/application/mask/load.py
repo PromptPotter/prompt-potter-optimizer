@@ -1,5 +1,5 @@
-"""Load the realized record from disk — pure read, never re-runs. Round ``N``'s anchor is ``N-1``'s winner, so a
-fork's first round reaches into the PARENT; a genuinely absent anchor makes no claim rather than a fake one."""
+"""Load the realized record from disk — pure read, never re-runs. Round ``N``'s parent is ``N-1``'s winner, so a
+fork's first round reaches into the parent CYCLE; a genuinely absent parent makes no claim rather than a fake one."""
 
 from __future__ import annotations
 
@@ -139,11 +139,11 @@ def _mask_candidate(
 
 
 def _abort_contributor(sc: ScoredCandidate) -> str | None:
-    """Which PoBB contributor cut this candidate early — ``leader_locked``
-    discriminates lock-in (B) from ε-elimination (A); ``None`` if it ran to term."""
-    if not sc.elimination_stopped or not sc.elimination_context:
-        return None
-    return "lock_in" if sc.elimination_context.get("leader_locked") else "epsilon"
+    """Which PoBB gate stopped this candidate early; ``None`` if it ran to term. Read, not inferred
+    — guessing it from ``leader_locked`` labelled every collapse cut ``"epsilon"``. Deliberately NOT
+    gated on ``elimination_stopped``: a lock-in is a stop that leaves it False, so requiring it made
+    the ``lock_in`` contributor unreachable and its lens unable to fire."""
+    return sc.elimination_context.get("gate")
 
 
 def load_mask_record(
@@ -201,12 +201,12 @@ def load_mask_record(
     for cid in files:
         _order(cid)
 
-    # Pass 2: thread the carried-forward winner. A round's anchor (origin) is the
-    # winner at the end of the prior round; when origin holds (no candidate winner)
-    # it carries unchanged. The winner's evaluators live on its candidate_scores
-    # row, NOT the (often-empty) top-level round ``evaluators`` field.
+    # Pass 2: thread the carried-forward winner. A round's parent is the winner at the end
+    # of the prior round; when it holds (no candidate winner) it carries unchanged. The
+    # winner's evaluators live on its candidate_scores row, NOT the (often-empty) top-level
+    # round ``evaluators`` field.
     winner_at: dict[tuple[str, int], tuple[dict[str, float], float]] = {}
-    # The known-outcomes pool threads the SAME way the anchor does — inherited across the
+    # The known-outcomes pool threads the SAME way the parent does — inherited across the
     # fork edge from the branch point, then folded round by round. Each round is handed the
     # pool as it stood BEFORE it ran, which is what the live election saw (`Cycle.absorb_round`
     # merges the round's own rows only after it finished).
@@ -229,8 +229,8 @@ def load_mask_record(
                     cycle_id=cid,
                     round=rn,
                     candidates=candidates,
-                    anchor_evaluators=carried[0],
-                    anchor_accuracy=carried[1],
+                    parent_evaluators=carried[0],
+                    parent_accuracy=carried[1],
                     # Through the store's typed read, not a second ``model_validate`` here:
                     # that one is the sole typed read of a round document, and it RAISES on a
                     # file the current models cannot parse. Correct for a replay, which

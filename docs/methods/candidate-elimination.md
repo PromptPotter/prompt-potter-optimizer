@@ -34,7 +34,7 @@ Individuals are evaluated sequentially on **Q** in the shared round order. The f
 
 This is the **same difficulty-adjusted ability the round-winner election ranks by**, so mid-round elimination and end-round election cannot disagree about what "better" means — and because it is difficulty-adjusted it stays valid across partial prefixes, where a raw hit-rate would crown whoever banked the easy samples. The pairing still earns its keep: backfill guarantees priors have outcomes on the candidate's *contested* samples, which is exactly where the θ comparison gets its information.
 
-Code: `application/scoring/metrics.py::elimination_p_best` (the one θ rule, shared by live `check()` and the resume replayer), driven by `application/optimization/pobb/checks.py::PoBBCheck`. Cross-cycle comparison is the deterministic A/B replay engine (`resume_and_fork/ab_replay.py`, the `ab` verb) — it re-derives recorded decisions under the current engine, no new measurements.
+Code: `application/scoring/selection.py::elimination_p_best` (the one θ rule, shared by live `check()` and the resume replayer), driven by `application/optimization/pobb/checks.py::PoBBCheck`. Cross-cycle comparison is the deterministic A/B replay engine (`resume_and_fork/ab_replay.py`, the `ab` verb) — it re-derives recorded decisions under the current engine, no new measurements.
 
 ## Two regimes
 
@@ -57,11 +57,11 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `OptSearchPoint.wounds.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `wounds.validation_failures` | `optimization/l1/score/loop.py::score_population` |
+| 1 | **Validation skip** — `OptSearchPoint.wounds.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `wounds.validation_failures` | `optimization/l1/score/candidate.py::score_one_candidate` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `optimization/pobb/checks.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `optimization/pobb/checks.py` |
-| 5 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε(n)` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimization/pobb/checks.py` |
+| 5 | **`PoBBCheck`** — three exits, in order: answer-collapse, leader lock-in, paired `P(best) < ε(n)` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimization/pobb/checks.py` |
 
 **Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–5 co-exist in that final list — fatal beats rate beats Bayesian PoBB.
 
@@ -69,7 +69,7 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 
 ## On-disk shape and replay
 
-Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader_id`, `candidate_sample_ids` (the ordered list the candidate had measured at decision time) and `prior_histories[cid]` (each prior's grades restricted to exactly those samples, after backfill). `inputs_ref` additionally records the gate parameters in force.
+Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader_id`, `candidate_sample_ids` (the ordered list the candidate had measured at decision time) and `prior_histories[cid]` (each prior's grades restricted to exactly those samples, after backfill). `inputs_ref` records the gate parameters in force **and which `EliminationGate` fired** — only ε computed a posterior, so a replayer re-deriving a collapse cut under the ε rule tests a real `p_best` against a bar nobody set.
 
 That makes the divergence replayer self-contained (`resume_and_fork/replayers.py::_pobb_replay_snapshot`): it rebuilds the candidate vector from the rescored results keyed by `candidate_sample_ids`, pairs each prior via `prior_histories`, and calls the same `elimination_p_best` on the cycle's fixed δ ruler. **No cross-round "find R1_winner in prior rounds" logic and no backfill during replay** — the decision record is the entire input, and the θ rule is closed-form and deterministic, so replay is bit-for-bit when no scorer change moved the candidate's grades. When the active scorer differs the candidate side is rescored and the prior side stays at the recorded grades; a scorer change that materially shifts priors surfaces as divergence via the candidate side.
 

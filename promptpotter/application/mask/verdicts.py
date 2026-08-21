@@ -16,7 +16,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
     """The scoring verdict for a swapped criterion: **re-ranks the RECORD, it does not re-run the
     election.** The eligible filter is the realized one (``is_electable``); the ordering is
     ``display_rank_key`` over the masked aggregate, where the election ranks Rasch θ-lift over the
-    anchor behind a coverage floor.
+    parent behind a coverage floor.
 
     That gap is not closable here: θ under another formula must be re-fit from per-sample grades
     against a re-calibrated δ ruler — ``ab_replay``'s substrate (``with_replay=True`` plus an
@@ -24,7 +24,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
     crowned candidate is no longer the best-scoring one", where ``ab`` answers if the RUN moved."""
 
     def _key(evaluators: Mapping[str, float], accuracy: float) -> DisplayRankKey | None:
-        # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
+        # A candidate/parent whose stored namespace can't satisfy this mask's formula —
         # it references a schema-bound evaluator absent from those values — is
         # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns
         # that single resolution (returns None); same class of incompleteness as the
@@ -36,19 +36,19 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
         return None if value is None else display_rank_key(value, accuracy)
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
-        # Origin round 0 holds no election; and without the anchor we cannot
-        # reproduce the "origin held" case → honest: no divergence claimed.
-        if rnd.round == 0 or not rnd.anchor_evaluators:
+        # Round 0 holds no election; and without the parent we cannot
+        # reproduce the "parent held" case → honest: no divergence claimed.
+        if rnd.round == 0 or not rnd.parent_evaluators:
             return VerdictOutcome(diverged=False)
 
         recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_winner), None)
 
-        best_key = _key(rnd.anchor_evaluators, rnd.anchor_accuracy)
-        # Anchor unscorable under this mask ⇒ no origin floor to reproduce the
-        # "origin held" case against → honest: claim no divergence this round.
+        best_key = _key(rnd.parent_evaluators, rnd.parent_accuracy)
+        # Parent unscorable under this mask ⇒ no floor to reproduce the
+        # "parent held" case against → honest: claim no divergence this round.
         if best_key is None:
             return VerdictOutcome(diverged=False)
-        leader_id: str | None = None  # origin/anchor holds until a challenger beats it
+        leader_id: str | None = None  # the parent holds until a challenger beats it
         for c in rnd.candidates:
             if not c.is_eligible or not c.evaluators:
                 continue

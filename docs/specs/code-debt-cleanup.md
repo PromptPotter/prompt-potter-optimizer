@@ -104,6 +104,45 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
   the wire element, `ids.ts`'s `PathHop` is the BROWSER's address (it encodes into `?path=` URLs and
   view-memory keys), so binding them lets a server-side rename invalidate persisted addresses.
 
+**Webapp — the operator can see a run and not read it** (named 2026-08-21; each is its own item, listed together because they share a cause: the browser renders what the engine serves and says nothing about what the engine *decided*):
+
+- **Three diagnostics mint no cycle, so nothing they measure has a browser home.** `seed-screen`,
+  `noise-floor` and `verify` write no cycle for the dashboard to address, and an inner L4 campaign
+  lists only under `descend=`. Through an L4 run the outer campaign therefore reads idle while the
+  work is one hop down — not wrong, and it reads as broken, which is the worse failure because
+  nothing on screen says so. Action: name the surface each one writes to *before* adding a surface;
+  `descend=` may already answer the L4 half. Blocker: none.
+
+- **Accuracy is the prominent headline where the round is won on θ.** The root `CLAUDE.md` carries a
+  standing ⚠ about exactly this, which is the tell: a *recurring human* misreading is a layout
+  problem, not a doc problem, and the doc has not stopped it. `trajectory` is the ruler-free answer
+  to "is this working" — C0 and every winner since on one shared cell set — and the three states
+  where θ is not ability (an arm at 0.0 on every cell, a cold ruler, a collapsed selection band) are
+  all backend-decidable. Action: promote `trajectory`, and render the not-ability states beside the
+  number they invalidate. Note the second half is a **served** field, not a client derivation
+  (§ Scoring authority, `webapp/CLAUDE.md`). Blocker: none.
+
+- **Absent-vs-zero is a rule, and only its named instances have been fixed.** Every number reaches
+  the screen as measured / not-measured / not-applicable and may not lose which one on the way; the
+  tell is a null branch in the browser that no Python writer can emit. The five sites filed as
+  "Step 5" are closed (`git log`). Action: sweep for the *rule* — writers whose `0.0` default is
+  indistinguishable from a measurement — rather than re-checking those five. Blocker: none.
+
+- **`getCampaignLineage` collision — verify before acting.** Carried as an open thread, never
+  traced in code: the claim is that one served tree is addressed under a name that can resolve two
+  ways, and that the mint path has never been browser-verified. `id` alone is not a key (the address
+  is `(path, id)`, `webapp/CLAUDE.md` § Display-data sources) and inner `cycle_id`s collide across
+  sandboxes, so the failure would be silent. Action: **trace it first** — this entry is a lead, not
+  a finding, and the file's own bar is verification before an entry earns action.
+
+- **`HardSamplesHeatmap.tsx::liveMeasurements` spells "was this row graded" a second time.** Its
+  string branch asks the parsed mark (`HIT`/`MISS` only); its dict branch asks
+  `typeof s.fitness === "number"`; `lib/derivations/round-samples.ts::errorMark` asks the producer's
+  own `error` payload. All three agree today only because `round_buffer.py::append_sample` never
+  stamps `fitness` on an errored row — a producer invariant nothing on this path states, so the day
+  a scorer banks a graded 0.0 beside an error the strip paints a backend fault as a measured miss
+  while the table row beneath it does not. Action: one predicate, imported. Blocker: none.
+
 **Ray / lineage follow-ups** (named during the 2026-07-26 time-ray landing; none blocks the feature):
 
 - **`lib/hooks/usePoll.ts` — head-of-line blocking.** `inFlightRef` is a single boolean, and the lineage tick (`lib/lineage.tsx::LineageProvider`) `Promise.all`s every subscribed key — so one slow campaign's fetch delays every other key AND skips the next tick for all of them. Action: per-key in-flight accounting (a `usePoll` design change, not a caller patch). **Read the skip as a TRADE, not an oversight, or the fix will be wrong:** the hook's own comment argues it, because aborting a `/tree` tick slower than the 5 s interval would hang the surface on "Loading…" forever. `lib/workspace.tsx`'s two-cadence split is the existing caller-level mitigation of the same class; nothing does per-key accounting today.
@@ -157,6 +196,7 @@ root fixes that arc DID land (reasoning-token share on the ledger, provider-awar
 - `cleanup-empty-cycles` — `CleanupEmptyCyclesPayload(campaign_id, cycle_id)` → `dispatch_cycle_command`.
 - `replace-dataset` — `ReplaceDatasetPayload(slug)` → `dispatch_workspace_command`. On a slug collision the CLI tells the operator to pick a different name (`new.py::SlugTakenError`) where the browser offers version-and-repoint.
 - `step-cycle` — `StepCyclePayload(campaign_id, cycle_id, rounds=1)` → `dispatch_cycle_command`. Has NO client at all, browser included, so today it is reachable only by hand-rolled HTTP.
+- ⚠️ **The mirror is wider and shares this blocker: the browser can watch a run and not answer it.** `pause` is the only control-plane verb the webapp fires — `resume`, `resume --from N`, `--fork-on-divergence`, `set-budget` and the lifecycle verbs have no browser half at all. The spend ceiling is the sharp case, because the tier-3 deploy is where a cloud operator lives: its own budget halts their cycle and the only continuation is `set-budget` then `resume` from a terminal they may not have. One invariant breached in both directions, so the grouping decision settles both at once — and [`chat-foundation.md`](chat-foundation.md) already specifies the shape (decisions surface as buttons firing existing verbs), which makes this wiring rather than design.
 - **Blocker: the UI grouping is being reworked, and a CLI verb should not be pinned to a coordinate the surface is about to move.** Land them once the grouping settles, so the terminal's vocabulary and the browser's read as one product rather than two.
 - **Deliberately no test.** A missing verb fails LOUD — argparse answers "invalid choice" — which is the `tests/CLAUDE.md` bar for not writing one. This entry is the ledger.
 - ⚠️ **`set-sample-lookahead` is NOT on this list and must never join it** — browser-only is the deliberate `<entry-point-parity>` inversion, and the absence IS the boundary (root `CLAUDE.md` § Conventions).

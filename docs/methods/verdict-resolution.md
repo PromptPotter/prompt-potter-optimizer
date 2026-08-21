@@ -78,7 +78,8 @@ so it is not comparable across rounds or across arms within a round:
   a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
 
 So **a winner with lower accuracy than a rival, or than the previous round, is normally correct** —
-`elect_round_winner` ranks difficulty-adjusted ability, which corrects for both. When an operator
+`elect_round_winner` ranks difficulty-adjusted ability *against the noise it cleared*
+(`P(θ_cand > θ_parent)`, the same reading PoBB cuts on), which corrects for both. When an operator
 reads the accuracy column and calls the election wrong, say which column the election used; do not
 treat the inversion as a defect on their word.
 

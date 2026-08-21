@@ -42,7 +42,7 @@ owner-grouped signals** (`l1_wounds` = validation + runtime; `guard_breaches` = 
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
-| **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
+| **Score effect** | synthetic 0 (Path 1 in `score_one_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## The prompt-budget unit (a separate mechanism)
 
@@ -68,7 +68,7 @@ no-sidecar rule: both modes ride the `INJECTIONS` registry,
 
 `L1_SCHEMA_COMPLIANCE` (`application/optimization/validators/l1_strict.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, always locked), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, `forbidden_axis`, or `hallucinated_node` (the override named a node absent from the active schema — the node-name twin of `validate_l1_layout`'s unknown-placeholder wound; `build_l1_response_schema`'s node-name enum is advisory under `strict=False`).
 
-Failures land on `OptSearchPoint.wounds.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure. **Exception — `hallucinated_node` is non-fatal:** the phantom edit is stripped from the wire (`merge_pipeline_params` drops nodes outside `active_steps`), so the candidate's real edits still score; the reason-aware Path-1 gate skips synthetic-0 and the wound rides along only as routed signal (`l1_wounds` self-correction + the `validation_failure_rate` evaluator, i.e. hallucination-rate as an L4-visible quality axis).
+Failures land on `OptSearchPoint.wounds.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_one_candidate()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure. **Exception — `hallucinated_node` is non-fatal:** the phantom edit is stripped from the wire (`merge_pipeline_params` drops nodes outside `active_steps`), so the candidate's real edits still score; the reason-aware Path-1 gate skips synthetic-0 and the wound rides along only as routed signal (`l1_wounds` self-correction + the `validation_failure_rate` evaluator, i.e. hallucination-rate as an L4-visible quality axis).
 
 L1's own layout (`l1_layout`) renders the validation block inside the `{{l1_wounds}}` signal via `_r_l1_wounds()` (validation + runtime in one owner-grouped block) — L1 reads its own wounds and re-proposes toward the allowed region (the L2-briefs-L1 hop is gone). Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L1 gets fresh evidence.
 
@@ -177,7 +177,7 @@ Pick the storage stream by detector + score-effect (the four wounds); the owner 
 record type — you never wire a nurse by hand:
 
 - New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`; owner is L1 structurally (its own malformed output).
-- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `score_population`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can (a locked schema/model the in-loop layer can't reach).
+- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `l1/score/signal_effect.py`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can (a locked schema/model the in-loop layer can't reach).
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
 - New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`domain/l1_layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, and a new L2 check means either extending that validator or standing a registry up. Owner is L3 structurally either way (guard-breach stream → `escalate_l2`).
 

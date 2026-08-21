@@ -14,6 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import (
@@ -87,41 +89,55 @@ def test_rescore_results_projects_the_scorer_it_was_handed() -> None:
     assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
-def test_round_winner_replay_uses_rescored_origin() -> None:
-    """Rescoring preserves the recorded winner. The replay re-elects via the canonical θ-ability
-    rule (shared with the live scorer) against the RESCORED origin: c1 clears the samples the origin
-    misses → a confident difficulty-adjusted ability lift, c2 does not — so the replay re-derives c1
-    and flags no divergence, while the stale ``current_best_accuracy_at_record`` is never consulted.
-    The silent harm guarded: a resumed run that re-elects a *different* winner forks the lineage off
-    the recorded path with no error."""
+def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
+    """Rescoring preserves the recorded winner, and the panel it is re-ranked against is READ off
+    the decision instead of reconstructed: c1 clears the cells the parent misses → a confident
+    difficulty-adjusted ability lift, c2 does not.
+
+    The silent harm is the PARENT, not the rule. All three callers of one shared election supplied
+    their own panel and each supplied a different one, so a resume ranked round 3 against C0 while
+    the live scorer had ranked it against the round-2 winner — admitting arms the round refused,
+    and reporting a divergence with no scorer change behind it."""
 
     def _m(sid: int, hit: bool) -> dict:
         return {**_r(1.0 if hit else 0.0), "sample_id": sid}
 
+    inputs_ref = {"candidate_ids": ["c1", "c2"], "round_num": 0, "coverage_floor": 4}
     round_data = _round(
         round=0,
         all_candidate_results={
             "c1": [_m(i, i < 5) for i in range(6)],  # 5/6 — clears the hard tail
-            "c2": [_m(i, i < 1) for i in range(6)],  # 1/6 — below the origin
+            "c2": [_m(i, i < 1) for i in range(6)],  # 1/6 — below the parent
         },
     )
-    decisions = _decisions(
-        {
-            "kind": "round_winner",
-            "inputs_ref": {
-                "candidate_ids": ["c1", "c2"],
-                "round_num": 0,
-                "coverage_floor": 4,
-            },
-            "outcome": "c1",
-            "data": {"current_best_accuracy_at_record": 0.8},  # stale, never read
-        }
-    )
-    # Origin hits only the two easiest samples → c1's wins on the rest are real lift, c2's are not.
+    # The parent hit only the two easiest cells → c1's wins on the rest are real lift, c2's are not.
+    parent = [_m(i, i < 2) for i in range(6)]
     assert (
-        replay_decisions(round_data, decisions, origin_results=[_m(i, i < 2) for i in range(6)])
+        replay_decisions(
+            round_data,
+            _decisions(
+                {
+                    "kind": "round_winner",
+                    "inputs_ref": inputs_ref,
+                    "outcome": "c1",
+                    "data": {"parent_cells": parent},
+                }
+            ),
+        )
         is None
     )
+
+    # A decision carrying no parent is REFUSED, never answered against a reconstructed one —
+    # guessing quietly is the whole defect, so the replayer must raise rather than pick a panel.
+    from promptpotter.application.optimization.resume_and_fork.replayers import (
+        ReplayContext,
+        _replay_round_winner,
+    )
+
+    with pytest.raises(ValueError, match="parent_cells"):
+        _replay_round_winner(
+            ReplayContext(round_data=round_data, decisions=[], ruler=None), inputs_ref, {}
+        )
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
@@ -152,6 +168,57 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
+def test_a_collapse_cut_is_replayed_as_a_collapse_not_under_the_epsilon_rule() -> None:
+    """A collapse cut returns before ``elimination_p_best`` is ever reached, so it holds no
+    posterior and the ``epsilon`` / ``recorded_p_best`` on its record are placeholders. Re-derived
+    under the ε rule it computes a REAL p_best — this arm beats its prior 4 cells to 0 — reads
+    "not cut", and reports a divergence no scorer change caused.
+
+    Silent harm, in both directions: plain ``resume`` halts blaming a scorer that never moved, and
+    ``resume --fork-on-divergence`` mints a fork here and DISCARDS every round from this one on."""
+
+    def _cell(sid: int, gt: str) -> dict:
+        # One label for every cell IS the collapse; the truths vary, so it is detectable.
+        return {
+            "sample_id": sid,
+            "query": f"q{sid}",
+            "predicted": "FALSE",
+            "ground_truth": gt,
+            "fitness": 1.0 if gt == "FALSE" else 0.0,
+        }
+
+    truths = ["FALSE", "FALSE", "FALSE", "FALSE", "TRUE", "TRUE"]
+    round_data = _round(
+        round=3,
+        all_candidate_results={"c2": [_cell(i, gt) for i, gt in enumerate(truths)]},
+    )
+    decisions = _decisions(
+        {
+            "kind": "elimination_cut",
+            "round": 3,
+            # `gate` arrives off the ledger as its plain string, which is what a StrEnum compares to.
+            "inputs_ref": {
+                "candidate_id": "c2",
+                "gate": "collapsed",
+                "prior_candidate_ids": ["R2_winner"],
+                "queries_scored": 6,
+                "epsilon": 0.15,
+                "n_min": 6,
+                "round_num": 3,
+                "recorded_p_best": 0.0,
+            },
+            "outcome": True,
+            "data": {
+                "candidate_sample_ids": [str(i) for i in range(6)],
+                # Scored to make the ε rule re-derive the OPPOSITE answer, so this test fails the
+                # moment the gate dispatch is removed.
+                "prior_histories": {"R2_winner": {str(i): 0.0 for i in range(6)}},
+            },
+        }
+    )
+    assert replay_decisions(round_data, decisions) is None
+
+
 def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Stores) -> None:
     """A no-modification operator fork inherits its branch-point candidate's RECORDED
     accuracy as C0 (no re-score under a nondeterministic backend); an edited prompt
@@ -169,9 +236,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     fork = "cycle_inherit_parent_fork_abc123"
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
 
-    stores.campaigns.create(
-        CycleHop(campaign_id=_CAMPAIGN, cycle_id=parent), {"sibling_kind": "root"}
-    )
+    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=parent), {})
     stores.campaigns.save_round_file(
         CycleHop(campaign_id=_CAMPAIGN, cycle_id=parent),
         _round(
@@ -195,7 +260,6 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     stores.campaigns.create(
         CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         {
-            "sibling_kind": "fork",
             "parent_cycle_id": parent,
             "fork": {
                 "trigger": "operator_steered",
@@ -718,7 +782,7 @@ def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
     intact even after later records land (the scan doesn't assume it's the last line)."""
     stores = built_stores
     cyc = "cycle_seed_roundtrip"
-    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), {"sibling_kind": "root"})
+    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), {})
     assert (
         stores.campaigns.read_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc)) is None
     )  # unseeded → None
@@ -859,8 +923,10 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     from promptpotter.infrastructure.store.layout import CycleLayout
 
     store = built_stores.campaigns
-    parent = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_fork_decisions")
-    store.create(parent, {"sibling_kind": "root"})
+    # NOT `cycle_fork_decisions`: `_SIBLING_LAST_SEP_RE` matches `_fork_` anywhere, so that name
+    # read as a fork of a family rooted at `cycle` — a root fixture lying about its own kind.
+    parent = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_decisions")
+    store.create(parent, {})
     parent_ledger = CycleEventLog.open(CycleDir(store.cycle_dir(parent)))
     for rnd, kind in (
         (0, ResumeCheckpointKind.ROUND_WINNER),
@@ -869,8 +935,8 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     ):
         record_decision(parent_ledger, kind, {"round_num": rnd}, "x", round=rnd)
 
-    child = parent.model_copy(update={"cycle_id": "cycle_fork_decisions_fork_a"})
-    store.create(child, {"sibling_kind": "fork"})
+    child = parent.model_copy(update={"cycle_id": "cycle_decisions_fork_a"})
+    store.create(child, {})
     store.copy_parent_rounds_and_candidates(
         _CAMPAIGN, parent.cycle_id, child.cycle_id, before_round=2
     )

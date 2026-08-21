@@ -110,9 +110,9 @@ def _make_replay_verdict(
         rescore_results(rd.results, scorer)
         for items in rd.all_candidate_results.values():
             rescore_results(items, scorer)
-        found = replay_all_mismatches(
-            rd, rnd.decisions, origin_results=rnd.known_outcomes, ruler=ruler
-        )
+        # No anchor passed: `known_outcomes` pools rows from DIFFERENT configurations and its own
+        # docstring forbids scoring it. Each decision carries the anchor its election used.
+        found = replay_all_mismatches(rd, rnd.decisions, ruler=ruler)
         if not found:
             return VerdictOutcome(diverged=False)
         sink.extend(found)
