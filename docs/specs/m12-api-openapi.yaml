@@ -195,6 +195,12 @@ paths:
         nested-campaign backend even that is recovered, since a cancelled cell resumes from the
         rounds it had already banked.
 
+        **Either LAYER is armed by naming it.** An L4 inner cycle is addressed by the optional
+        `descend` tail rather than by the outer campaign, because the outer's arming is
+        deliberately not inherited downward — one press would otherwise multiply concurrency at
+        every nested level at once. So arming the outer releases N inner campaigns together,
+        and arming one of those inner runs holds N of its own rows in flight.
+
         Requires the host-admin `scoring.sample_lookahead` capability — it spends the box's shared
         provider rate bucket, so no tenant tier carries it. Deliberately has **no CLI verb**:
         the browser remote is the only surface, which is the boundary itself.
@@ -2760,6 +2766,18 @@ components:
                 ceiling rather than being rejected. An arming also ends on its own — after the
                 round that scores under it, or the group it released — so `1` is a cancel, not
                 the normal way it ends.
+            descend:
+              type: string
+              maxLength: 512
+              description: >
+                Inner-sandbox tail of the address, same grammar as the read side's `?descend=`
+                (`campaign::cycle`, `~`-joined, the hops BELOW the root named by `campaign_id` /
+                `cycle_id`). Absent addresses the root hop. The ONE command that takes it:
+                throughput is what an inner run answers for itself, whereas a pause or a skip
+                reaches an inner cycle by INHERITANCE from its owner, so widening the address
+                for those would build a second channel that contradicts the first. Refused with
+                422 on any other kind rather than ignored — a dropped address would apply the
+                command to the outer cycle.
 
     StepCyclePayload:
       allOf:

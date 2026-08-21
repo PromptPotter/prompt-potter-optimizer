@@ -269,7 +269,10 @@ async def init_services(
     if stores is None:
         stores = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
-    maintain_measurement_index(stores)
+    # Off-thread: this takes a CROSS-PROCESS lock on the tenant-global index, which no sandbox
+    # isolates — held on the event loop it blocks every other cell in the group and every
+    # heartbeat keeping them alive.
+    await asyncio.to_thread(maintain_measurement_index, stores)
 
     dataset_config_dir = readable_dataset_dir(stores, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)

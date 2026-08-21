@@ -233,6 +233,18 @@ class CyclePayload(CampaignPayload):
     cycle_id: str = Field(min_length=1, max_length=128)
 
 
+class DescendableCyclePayload(CyclePayload):
+    """Carries an address that may descend into an inner sandbox. Declaring it by INHERITANCE is
+    what makes "which kinds accept a descent" a type question — every other payload forbids the key
+    already. Narrow on purpose: an inner cycle inherits the outer's pause
+    (``runner/entry.py::_bind_run_controls``), so a second address for pause/skip would contradict a
+    working channel; throughput is what an inner run answers for itself."""
+
+    # Excluded from the dump: the router spends it resolving the leaf, after which `campaign_id` /
+    # `cycle_id` ARE the inner cycle's, so recording the tail would address the record twice.
+    descend: str | None = Field(default=None, max_length=512, exclude=True)
+
+
 class ForkCyclePayload(CyclePayload):
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
@@ -258,7 +270,7 @@ class PauseCyclePayload(CyclePayload):
     reason: str = Field(default="", max_length=512)
 
 
-class SetSampleLookaheadPayload(CyclePayload):
+class SetSampleLookaheadPayload(DescendableCyclePayload):
     cells: WireInt = Field(ge=1, description="1 disarms.")
 
 

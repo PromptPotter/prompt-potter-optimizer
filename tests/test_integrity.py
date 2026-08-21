@@ -2957,20 +2957,61 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert b["depths"] == [3, 3, 3, 1, 1, 1, 1, 1]
     assert b["rows"] == d1["rows"]
 
-    # 7. Pressing again while a group runs QUEUES the next group; it does not slide one in.
-    #    "Only after all finished is the next released" is the operator's own contract, and it
-    #    is what makes "which samples did my press pay for" answerable. Entry counts fall back
-    #    to 1 at each boundary — under a sliding window they would never come down.
+    # 7. A press landing while samples are in flight TOPS THE WINDOW UP rather than waiting for
+    #    them to drain — the press exists to shorten the wait. `hold` re-arms the instant the
+    #    arming is spent, i.e. an operator pressing again at every boundary. Asserted as the
+    #    INVARIANT, not the sequence: exact entry counts move with scheduling (clause 4), and
+    #    what separates topping up from queueing is that the window never drains back to 1.
     held = await _walk(
         dataset, armed=3, cut_at=None, max_cells=4, arming="batch", hold=True, slowest_last=True
     )
-    assert held["entries"] == [1, 2, 3, 1, 2, 3, 1, 2]
+    assert max(held["entries"]) == 3
+    assert min(held["entries"][3:]) > 1
     assert held["rows"] == d1["rows"]
 
     # 8. …and `round` arming does NOT self-consume here: it is spent by the round that scored
     #    under it (`l1/score/winner.py`), so the walk holds the depth to its own end.
     r = await _walk(dataset, armed=2, cut_at=None, max_cells=4, arming="round")
     assert r["depths"] == [2] * len(dataset)
+
+
+def test_a_descend_tail_arms_the_inner_cycle_and_never_the_outer() -> None:
+    """An inner cycle's id is content-addressed and repeats across sibling sandboxes, so the
+    ``(campaign_id, cycle_id)`` every command carries names the OUTER cycle at any depth. Dropping
+    the ``descend`` tail therefore does not fail — it silently arms the outer campaign instead of
+    the inner run the operator was looking at, and acks ``applied`` either way. Nothing downstream
+    can tell the two apart: both addresses resolve, both write a well-formed flag.
+    """
+    from pydantic import ValidationError
+
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.presentation.api.deps import decode_descend
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
+        DescendableCyclePayload,
+        PauseCyclePayload,
+        SetSampleLookaheadPayload,
+    )
+
+    outer = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_0")
+    wire: dict[str, Any] = {
+        "campaign_id": outer.campaign_id,
+        "cycle_id": outer.cycle_id,
+        "descend": "inner__ppself__aaaaaa::cycle_x",
+    }
+    armed = SetSampleLookaheadPayload(**wire, cells=3)
+    assert isinstance(armed, DescendableCyclePayload), "the tail is declared by TYPE"
+    path = (outer, *decode_descend(armed.descend))
+    assert path[-1] == CycleHop(campaign_id="inner__ppself__aaaaaa", cycle_id="cycle_x")
+
+    # A kind declaring no tail REFUSES one — `extra="forbid"`, so it needs no list of which
+    # kinds descend. Ignoring the key instead is the same misdirection by another route: the
+    # command would apply to the outer cycle with the operator's address discarded.
+    with pytest.raises(ValidationError):
+        PauseCyclePayload(**wire)
+
+    # The tail is spent on the address and never recorded: after resolution `campaign_id` /
+    # `cycle_id` ARE the inner cycle's, so a `descend` on the ledger would address it twice.
+    assert "descend" not in armed.model_dump()
 
 
 def _write_campaign(

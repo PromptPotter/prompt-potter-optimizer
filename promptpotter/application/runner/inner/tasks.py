@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from promptpotter.application.campaign_config import CampaignConfig, LivesConfig
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
@@ -72,6 +72,36 @@ class InnerTasks(StrictModel):
     inner_benchmark: str = Field(min_length=1)
     inner_benchmark_config: InnerBenchmarkConfig
     tasks: list[InnerTask] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _cells_are_distinct(self) -> InnerTasks:
+        """Two cells resolving to one spec are one cell wearing two names, and the panel is a
+        census. Refused at load because the run's answer is depth-dependent: `inner_campaign_id`
+        is content-addressed, so the twin either CONTINUES the first or trips the one-producer
+        guard, depending only on how many cells were in flight."""
+        seen_ids: set[str] = set()
+        seen_specs: dict[tuple[object, ...], str] = {}
+        for task in self.tasks:
+            if task.id in seen_ids:
+                raise ValueError(f"duplicate task id {task.id!r}")
+            seen_ids.add(task.id)
+            # The fields a CELL declares that reach `InnerTaskSpec`; the rest of the spec is
+            # shared by every cell on the panel, so matching on these is matching on the spec.
+            key = (
+                task.inner_dataset or self.inner_benchmark,
+                task.inner_dataset_seed,
+                task.n_inner_rounds,
+                task.inner_model,
+                task.inner_provider,
+            )
+            if (twin := seen_specs.get(key)) is not None:
+                raise ValueError(
+                    f"tasks {twin!r} and {task.id!r} resolve to the same inner campaign "
+                    f"(dataset={key[0]!r}, seed={key[1]}) — give one a different seed, or "
+                    "drop it; two names for one cell is not two cells."
+                )
+            seen_specs[key] = task.id
+        return self
 
 
 class InnerTaskSpec(StrictModel):

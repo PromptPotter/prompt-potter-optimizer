@@ -9,6 +9,7 @@ import contextvars
 import logging
 import time
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +34,7 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
@@ -79,7 +81,16 @@ INNER_RESULT_KEY = "final_ranking"
 # Per-round wall-clock allowance for ONE outer sample. Every await inside an inner campaign is
 # bounded but their SUM was not, so a 429 storm could stretch one sample across tens of minutes
 # and silently truncate how many outer rounds completed. It only ever EXCLUDES a stuck sample.
+# True only because `_give_back_unworked_time` hands back suspend + throttle stall, leaving the
+# cell's OWN work. Never make it depth-dependent: an outcome that moves with what else was in
+# flight is the one thing the concurrency control promises it never does.
 OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
+
+
+@dataclass
+class _UnworkedTime:
+    total: float = 0.0
+    announced: bool = False
 
 
 @dataclass(frozen=True)
@@ -699,9 +710,6 @@ async def _measure_inner_cell(
             lift = "best —"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
-    inner_task = asyncio.create_task(
-        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
-    )
     # The ONE bound on this sample's total wall clock. Awaiting `inner_task` DIRECTLY makes it
     # this coroutine's `_fut_waiter`, so the cancellation propagates and the campaign really
     # stops: never wrap it in `asyncio.shield` or `asyncio.wait`, both of which orphan it to
@@ -711,28 +719,51 @@ async def _measure_inner_cell(
     # round it needs to replay its priors and finalize.
     banked = _banked_inner_rounds(ctx, campaign_id)
     deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
-    # Constructed here, not inline in the `async with`, so the suspend hook below can close over
-    # it: `asyncio.timeout` fixes its absolute `when` at CALL time.
+    # Constructed before the task, not inline in the `async with`, so the give-back below can close
+    # over it AND be bound for the task to inherit: `asyncio.timeout` fixes its `when` at CALL time.
     deadline = asyncio.timeout(deadline_s)
+    unworked = _UnworkedTime()
 
-    def _give_back_suspended_time(overshoot: float) -> None:
-        """The deadline bounds how long this cell may SPEND, and a suspended machine spends nothing —
-        without this an overnight sleep hands the next tick a budget that expired while nothing ran."""
+    def _give_back_unworked_time(seconds: float, *, cause: str) -> None:
+        """The deadline bounds how long this cell may SPEND; a suspended machine and a queue behind
+        the shared limiter are both time it was not allowed to spend."""
         when = deadline.when()
         if when is None:  # pragma: no cover — only for `timeout(None)`, never used here
             return
         try:
-            deadline.reschedule(when + overshoot)
+            deadline.reschedule(when + seconds)
         except RuntimeError:
-            # The `async with` already exited; nothing left to extend.
+            # The `async with` has not started or already exited; nothing to extend.
             return
-        logger.warning(
-            "inner cell %s: machine suspended ~%.0fs mid-campaign; extending the "
-            "%.0fs wall-clock deadline by that much rather than charging it as work",
+        unworked.total += seconds
+        logger.debug(
+            "inner cell %s: +%.1fs deadline (%s); %.0fs given back of a %.0fs budget",
             query,
-            overshoot,
+            seconds,
+            cause,
+            unworked.total,
             deadline_s,
         )
+        # Past its whole budget in waiting, the wall is no longer measuring this cell. Said once:
+        # the give-back is working as intended, the volume is not.
+        if not unworked.announced and unworked.total > deadline_s:
+            unworked.announced = True
+            logger.warning(
+                "inner cell %s has now spent longer waiting (%.0fs) than its entire %.0fs "
+                "wall-clock budget — the box is oversubscribed, not the cell slow",
+                query,
+                unworked.total,
+                deadline_s,
+            )
+
+    # Bound BEFORE the task so its context copy carries it — a ContextVar set inside a task never
+    # reaches siblings, which is what stops two cells crediting each other's stalls.
+    set_throttle_stall_sink(
+        partial(_give_back_unworked_time, cause="queued behind the shared rate limiter")
+    )
+    inner_task = asyncio.create_task(
+        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
+    )
 
     heartbeat_task = asyncio.create_task(
         # NOT an optimizer node name: a whole campaign runs here, so naming it after one node
@@ -748,7 +779,7 @@ async def _measure_inner_cell(
             round_num=_CURRENT_ROUND.get(),
             start_monotonic=start,
             detail_fn=_inner_detail,
-            on_suspend=_give_back_suspended_time,
+            on_suspend=partial(_give_back_unworked_time, cause="the machine suspended"),
         )
     )
     # ``None`` once the deadline has bitten — the one state both exits below funnel into, so
@@ -797,7 +828,7 @@ async def _measure_inner_cell(
     # No exclusion decision here: `compute_outer_proxies` raises `InnerCycleUnscoreableError`,
     # which `measure_sample`'s catch-all turns into this sample's EXCLUDED row.
     proxies = compute_outer_proxies(result)
-    facts = inner_cell_facts(result, campaign_id)
+    facts = inner_cell_facts(result, campaign_id, unworked_s=unworked.total)
 
     data: dict[str, Any] = {
         # The connector's `_extract_experiment` sets `ground_truth` to the same `inner:{query}`

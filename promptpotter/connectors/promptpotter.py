@@ -24,6 +24,9 @@ INNER_ORIGIN_KEY = "inner_origin"
 
 # Most inner campaigns the operator may set running at once — a RESOURCE ceiling (peak RSS and
 # one shared provider key), never a scientific one: rows absorb in walk order at any depth.
+# The true peak only because `run_query_loop` pops and AWAITS a slot before `_absorb` runs, so a
+# PoBB backfill (itself a whole inner campaign) replaces the finished cell rather than adding to
+# it. Move `on_sample_pre_check` above the pop and this constant understates the peak.
 MAX_CELLS_IN_FLIGHT = 4
 
 

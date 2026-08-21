@@ -1,5 +1,6 @@
 """Rolling-window RPM/TPM throttle + 429 ``Retry-After`` handling (RFC 7231 §7.1.3). Blocks before
-sending when a cap would be exceeded; the ``chars//4`` estimate reconciles via ``record_actual()``."""
+sending when a cap would be exceeded; the ``chars//4`` estimate reconciles via the reservation's
+``close()``."""
 
 from __future__ import annotations
 
@@ -36,6 +37,31 @@ _ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar(
 # does not clear inside a multi-minute Retry-After. Blocking on these burns
 # wall-clock on a quota that needs a provider switch, not patience.
 _UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "daily", "hourly"})
+
+
+# Time this task spent BLOCKED in the shared throttle. Per-task because the limiter is
+# process-global: an attribute would credit a stall to whichever cycle read it. ``None`` discards.
+_THROTTLE_STALL_SINK: ContextVar[Callable[[float], None] | None] = ContextVar(
+    "rate_limit_throttle_stall_sink", default=None
+)
+
+
+def set_throttle_stall_sink(sink: Callable[[float], None] | None) -> None:
+    """Bind who is told about time this task spent queued behind the shared throttle. An L4 cell
+    binds it (``runner/inner/spawn.py``) so its wall-clock deadline measures its OWN work."""
+    _THROTTLE_STALL_SINK.set(sink)
+
+
+def _report_throttle_stall(seconds: float) -> None:
+    if seconds <= 0:
+        return
+    sink = _THROTTLE_STALL_SINK.get()
+    if sink is None:
+        return
+    try:
+        sink(seconds)
+    except Exception:  # pragma: no cover - a reporting path may not break the run
+        logger.debug("throttle-stall sink raised; continuing", exc_info=True)
 
 
 def set_abort_check(predicate: Callable[[], bool] | None) -> None:
@@ -170,24 +196,32 @@ async def wait_with_countdown(total_sec: float, label: str) -> None:
     """Sleep while emitting a countdown to stderr. Cooperatively abortable: a requested pause raises
     ``asyncio.CancelledError`` so the loop unwinds through its existing interrupt path."""
     abort = _ABORT_CHECK.get()
-    end = time.monotonic() + total_sec
-    while True:
-        if abort is not None and abort():
-            sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): aborted.{' ' * 30}{_RESET}\n")
+    started = time.monotonic()
+    end = started + total_sec
+    # Same give-back as `acquire`: under concurrency the traffic that filled the window is largely
+    # the neighbours'. Reported on EVERY exit, abort included — waiting is not working.
+    try:
+        while True:
+            if abort is not None and abort():
+                sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): aborted.{' ' * 30}{_RESET}\n")
+                sys.stderr.flush()
+                raise asyncio.CancelledError(f"rate-limit wait aborted ({label})")
+            remaining = max(0.0, end - time.monotonic())
+            mins_total, secs = divmod(int(remaining + 0.5), 60)
+            hours, mins = divmod(mins_total, 60)
+            stamp = f"{hours:d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
+            hint = "Ctrl+C / stop to abort" if abort is not None else "Ctrl+C to abort"
+            sys.stderr.write(
+                f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  ({hint}){_RESET}"
+            )
             sys.stderr.flush()
-            raise asyncio.CancelledError(f"rate-limit wait aborted ({label})")
-        remaining = max(0.0, end - time.monotonic())
-        mins_total, secs = divmod(int(remaining + 0.5), 60)
-        hours, mins = divmod(mins_total, 60)
-        stamp = f"{hours:d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
-        hint = "Ctrl+C / stop to abort" if abort is not None else "Ctrl+C to abort"
-        sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  ({hint}){_RESET}")
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(1.0, remaining))
+        sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): resuming.{' ' * 30}{_RESET}\n")
         sys.stderr.flush()
-        if remaining <= 0:
-            break
-        await asyncio.sleep(min(1.0, remaining))
-    sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): resuming.{' ' * 30}{_RESET}\n")
-    sys.stderr.flush()
+    finally:
+        _report_throttle_stall(time.monotonic() - started)
 
 
 def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
@@ -263,6 +297,15 @@ def apply_discovered_caps(
 
 
 @dataclass
+class _TokenReservation:
+    """One entry in the rolling token window, MUTABLE so its own caller reconciles estimate against
+    actual by IDENTITY — with calls outstanding concurrently, the last entry is someone else's."""
+
+    ts: float
+    tokens: int
+
+
+@dataclass
 class RateLimiter:
     """Rolling-window request/token limiter. `*_pinned` slots are caller-configured and never
     overwritten by `apply_discovered()`. `None` cap disables that axis.
@@ -275,7 +318,7 @@ class RateLimiter:
     tpm_pinned: bool = False
 
     _requests: deque[float] = field(default_factory=deque)
-    _tokens: deque[tuple[float, int]] = field(default_factory=deque)
+    _tokens: deque[_TokenReservation] = field(default_factory=deque)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
@@ -284,23 +327,25 @@ class RateLimiter:
         if tpm is not None and not self.tpm_pinned:
             self.tpm = tpm
 
-    async def acquire(self, estimated_tokens: int) -> None:
-        """Block until the request fits RPM+TPM; reserves both. Follow with `record_actual()`."""
-        async with self._lock:
-            while True:
-                now = time.monotonic()
-                self._prune(now)
-                wait = self._wait_needed(now, estimated_tokens)
-                if wait <= 0:
-                    self._requests.append(now)
-                    self._tokens.append((now, estimated_tokens))
-                    return
-                await asyncio.sleep(wait)
-
-    def record_actual(self, estimated: int, actual: int) -> None:
-        if self._tokens and self._tokens[-1][1] == estimated:
-            ts, _ = self._tokens[-1]
-            self._tokens[-1] = (ts, actual)
+    async def acquire(self, estimated_tokens: int) -> _TokenReservation:
+        """Block until the request fits RPM+TPM; reserves both. Timed from OUTSIDE ``_lock``, which
+        is held across the sleep — the convoy behind a throttled caller is most of the stall under
+        concurrency and is invisible from within it."""
+        started = time.monotonic()
+        try:
+            async with self._lock:
+                while True:
+                    now = time.monotonic()
+                    self._prune(now)
+                    wait = self._wait_needed(now, estimated_tokens)
+                    if wait <= 0:
+                        self._requests.append(now)
+                        entry = _TokenReservation(ts=now, tokens=estimated_tokens)
+                        self._tokens.append(entry)
+                        return entry
+                    await asyncio.sleep(wait)
+        finally:
+            _report_throttle_stall(time.monotonic() - started)
 
     async def acquire_with_estimation(
         self,
@@ -317,14 +362,14 @@ class RateLimiter:
                 limit=self.tpm,
                 requested=estimated,
             )
-        await self.acquire(estimated)
-        return RateLimitReservation(estimated=estimated, limiter=self)
+        entry = await self.acquire(estimated)
+        return RateLimitReservation(entry=entry)
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_s
         while self._requests and self._requests[0] < cutoff:
             self._requests.popleft()
-        while self._tokens and self._tokens[0][0] < cutoff:
+        while self._tokens and self._tokens[0].ts < cutoff:
             self._tokens.popleft()
 
     def _rpm_wait(self, now: float) -> float:
@@ -335,15 +380,15 @@ class RateLimiter:
     def _tpm_wait(self, now: float, estimated_tokens: int) -> float:
         if self.tpm is None:
             return 0.0
-        current = sum(t for _, t in self._tokens)
+        current = sum(t.tokens for t in self._tokens)
         if current + estimated_tokens <= self.tpm:
             return 0.0
         needed = current + estimated_tokens - self.tpm
         shed = 0
-        for ts, toks in self._tokens:
-            shed += toks
+        for entry in self._tokens:
+            shed += entry.tokens
             if shed >= needed:
-                return ts + self.window_s - now
+                return entry.ts + self.window_s - now
         return 0.0
 
     def _wait_needed(self, now: float, estimated_tokens: int) -> float:
@@ -354,11 +399,10 @@ class RateLimiter:
 class RateLimitReservation:
     """One outstanding throttle reservation — call ``close()`` after the response."""
 
-    estimated: int
-    limiter: RateLimiter
+    entry: _TokenReservation
 
     def close(self, actual: int) -> None:
-        self.limiter.record_actual(self.estimated, actual)
+        self.entry.tokens = actual
 
 
 def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
@@ -385,5 +429,6 @@ __all__ = [
     "parse_retry_after",
     "raise_if_request_too_large",
     "set_abort_check",
+    "set_throttle_stall_sink",
     "wait_with_countdown",
 ]

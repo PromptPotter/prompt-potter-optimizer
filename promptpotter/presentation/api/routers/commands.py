@@ -18,8 +18,10 @@ from promptpotter.application.jobs.launcher.checkin import (
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     ALL_DISPATCHED_KINDS,
     PAYLOAD_MODEL_FOR_KIND,
@@ -31,6 +33,7 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandPayload,
     CyclePayload,
     CycleScopedKind,
+    DescendableCyclePayload,
     EditDraftCampaignPayload,
     LifecycleKind,
     LifecyclePayload,
@@ -298,7 +301,22 @@ async def post_command(
         )
         return lifecycle_outcome.accepted
 
+    # Cycle-scoped. The address may descend into an inner sandbox where the payload TYPE declares
+    # one — same grammar as the read side's `?descend=`, and the leaf is a cycle in its own tree.
     cycle_payload = cast(CyclePayload, payload)
+    hops: tuple[CycleHop, ...] = (
+        CycleHop(campaign_id=cycle_payload.campaign_id, cycle_id=cycle_payload.cycle_id),
+    )
+    if isinstance(cycle_payload, DescendableCyclePayload):
+        hops = (*hops, *decode_descend(cycle_payload.descend))
+    stores, leaf = resolve_cycle_path(stores, hops)
+    # Re-pointed at the LEAF so the applier and the ledger record name the one cycle addressed.
+    cycle_payload = cycle_payload.model_copy(
+        update={"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id}
+    )
+    # Rebuilt on the RESOLVED store: a descent hands back a different workspace root, and the
+    # one above was bound to the caller's own.
+    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
     cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(
         kind=cycle_kind,

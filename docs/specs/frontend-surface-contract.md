@@ -187,18 +187,26 @@ controls:
         way to restart. Those are also the states where the readout is the answer rather than
         decoration, so ETA yields its slot to the stop reason.
         Client connection loss dims/labels it stale — it never unmounts while a last-known server
-        phase stands. While the viewed path is DEEPER than one hop the controls are inert with
-        the reason as their tooltip, never re-targeted: the command highway addresses one
-        CycleHop with no `descend`, so firing anyway hit the OUTER cycle instead (I3).
+        phase stands. While the viewed path is DEEPER than one hop these controls are inert
+        with the reason as their tooltip, never re-targeted: they address the ROOT CycleHop, so
+        firing anyway hit the OUTER cycle instead (I3). Look-ahead below is the exception — it
+        carries the path, so it follows the view rather than refusing it.
   - id: remote_sample_lookahead_arm
-    do: Arms sample look-ahead for the next round of scoring (2 samples in flight, ~half the
-        wall clock). An ARM button, not a switch — the arming is spent by one round and the
-        button unlights itself, so pressing it while lit is a cancel. Lit state reads
-        dashboard.json::sample_lookahead > 1 (I6 — never a local boolean, which would stay lit
-        after the round consumed it). Label carries the depth ("2×"), never colour alone. The
-        title reports sample_lookahead_discards, the arming's running cost. Host-admin only: a
-        non-admin identity 404s at the dispatcher, so the button is present but its press
-        reports a failure rather than being hidden — the surface does not encode authority.
+    do: Arms how many of a candidate's samples the scoring walk holds in flight, up to the
+        SERVED dashboard.json::max_cells_in_flight (1 disables the control WITH ITS REASON —
+        the browser cannot answer what one sample costs). Two forms, keyed on the served
+        dashboard.json::concurrency_arming, because what a press buys is the backend's to
+        declare: `round` is an ARM BUTTON spent by the round that scored under it, so pressing
+        it while lit is a cancel; `batch` is a NUMBER FIELD, committed on Enter or blur and
+        never per keystroke (a keystroke commit arms "1" — a disarm — on the way to "12"), and
+        the group it releases spends it. Lit state reads dashboard.json::sample_lookahead > 1
+        (I6 — never a local boolean, which would stay lit after the round consumed it). The
+        label carries the depth ("2×"), never colour alone. The title reports
+        sample_lookahead_discards, the arming's running cost. Addressed by PATH, so an inner
+        L4 run is armed by drilling into it — throughput is the one control a nested run
+        answers for itself. Host-admin only: a non-admin identity 404s at the dispatcher, so
+        the control is present but its press reports a failure rather than being hidden — the
+        surface does not encode authority.
 ```
 
 ### Auth modal

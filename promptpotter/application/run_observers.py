@@ -82,6 +82,10 @@ def build_campaign_emitter(
         resumed_from_round=resumed_from_round,
         recorder=recorder,
         seed_from_cycle_id=seed_from_cycle_id,
+        # The connector's own declarations, read at wiring — origin scoring runs before any
+        # phase event, so anything that waits for one is absent exactly when round 0 needs it.
+        max_cells_in_flight=session.backend_client.max_cells_in_flight,
+        concurrency_arming=session.backend_client.concurrency_arming,
     )
 
 

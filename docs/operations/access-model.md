@@ -41,15 +41,18 @@ which [ADR-0004](../adr/0004-operator-admin-channels.md) fixes as outbound-only 
 explicitly **not** an inbound API route. The set holds what that channel cannot express: a
 host privilege that is a **command against a running campaign**.
 
-Its one member today is **`scoring.sample_lookahead`** — arming the scoring walk to hold two
-samples in flight (`/commands/set-sample-lookahead`). It sits here rather than on a campaign
-tier because of *whose* resource it spends: not the campaign's budget but the **box's**
-shared provider key and rate bucket, so a tenant holding it would throttle every other
-tenant to finish sooner. It is deliberately **not** `campaign.babysit` either — babysit marks
+Its one member today is **`scoring.sample_lookahead`** — arming the scoring walk to hold
+several of a candidate's samples in flight (`/commands/set-sample-lookahead`). It sits here
+rather than on a campaign tier because of *whose* resource it spends: not the campaign's
+budget but the **box's** shared provider key and rate bucket, so a tenant holding it would
+throttle every other tenant to finish sooner. The ceiling and what one press buys are the
+CONNECTOR's declarations, not this tier's; the tier answers only who may press. It is deliberately **not** `campaign.babysit` either — babysit marks
 a cycle whose measurement an operator steered, and this verb cannot steer one (the overshoot
 sample is discarded precisely so the recorded rows stay identical at either depth).
 
-**It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. That
+**It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
+also the one command whose address may DESCEND (`payload.descend`), because the arming is not
+inherited into a nested run and each layer is therefore armed by naming it. That
 inverts `<entry-point-parity>` on purpose: the surfaces a capability is *absent* from are part
 of its gate, since the CLI is where automation and AI assistants operate. Adding a verb "for
 parity" removes the boundary. Noted in root `CLAUDE.md` § Conventions so it is not re-litigated

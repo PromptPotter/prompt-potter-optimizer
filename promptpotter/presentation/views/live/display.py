@@ -103,8 +103,10 @@ class LiveDisplay(DerivedView):
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
         self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
-        # Last look-ahead depth printed; the tape carries transitions, not the value.
-        self._sample_lookahead_depth = 1
+        # Last look-ahead depth printed; the tape carries transitions, not the value. ``None``
+        # until the first sample announces the depth the run OPENS at — seeded to 1, a run that
+        # opens sequential said nothing, so the operator learned the depth only by changing it.
+        self._sample_lookahead_depth: int | None = None
         # Live round-leader tracker, ordered by the shared `display_rank_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
@@ -265,12 +267,27 @@ class LiveDisplay(DerivedView):
             # else on the tape would show it. Per-sample repetition would bury the tape.
             depth = int(payload.get("sample_lookahead") or 1)
             if depth != self._sample_lookahead_depth:
+                opening = self._sample_lookahead_depth is None
                 self._sample_lookahead_depth = depth
-                self._write(
-                    f"  {DIM}⇉ sample look-ahead depth {depth}"
-                    f"{' (armed — expires when this round finishes scoring)' if depth > 1 else ' (back to sequential)'}"
-                    f"{RESET}"
-                )
+                if opening and depth <= 1:
+                    # The depth a run OPENS at, priced in the samples it serialises. Costed once,
+                    # here, because the press only lands at the next sample boundary: an operator
+                    # who reads the depth off the first sample can arm before it binds, and one
+                    # who waits for a transition line pays a whole sample to learn the default.
+                    tail = (
+                        f" — {qt} samples run one at a time; arm it from the browser to overlap them"
+                        if qt > 1
+                        else ""
+                    )
+                elif opening:
+                    tail = f" — up to {depth} of {qt} in flight (armed)" if qt else " (armed)"
+                else:
+                    tail = (
+                        " (armed — expires when this round finishes scoring)"
+                        if depth > 1
+                        else " (back to sequential)"
+                    )
+                self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
             return
         if ev == "sample_scored":
             self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)

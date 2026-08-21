@@ -507,7 +507,9 @@ def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
     written: ``rounds[].cumulative_theta`` reproduces the narrated origin and ending exactly on
     every cell on disk, but its PEAK and its length do not — so it is the adopted frontier at the
     endpoints and something else in between, and ``inner_peak_lift`` / ``inner_round_budget`` are
-    left ABSENT rather than filled from a series that disagrees. They fill in on the next live run.
+    left ABSENT rather than filled from a series that disagrees. ``inner_unworked_s`` is absent for
+    a harder reason: only the spawner holding the cell's deadline ever measured it, and no file
+    records it. All three fill in on the next live run; none is ever zeroed to look complete.
     """
     dash = read_json_tolerant(cycle_dir / "dashboard.json", {}) or {}
     index = read_json_tolerant(cycle_dir / "index.json", {}) or {}

@@ -64,6 +64,11 @@ class InnerCellFacts(StrictModel):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: str
+    # Seconds the cell was BLOCKED rather than working — machine suspend plus time queued behind
+    # the process-global rate limiter — and handed back to its wall-clock deadline. It is what
+    # says whether an expiry was this cell being slow or the box being oversubscribed, so a panel
+    # can be read against the conditions its cells actually ran under.
+    inner_unworked_s: float
     # REPORTING figures, and they enter no ledger. Billing is `_forward_inner_spend`'s DELTA onto
     # the outer ledger; these are the cell's cumulative total across attempts, so a reader that
     # treated them as a charge would bill a continued cell's history twice.
@@ -78,9 +83,14 @@ class InnerCellFacts(StrictModel):
 INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
 
 
-def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | None:
+def inner_cell_facts(
+    result: CycleResult, campaign_id: str, *, unworked_s: float
+) -> InnerCellFacts | None:
     """``None`` where the cycle has no trajectory to describe — a FLOORED cell adopted no levels
-    and an unscored origin is no floor to difference against. Absent, never zeroed."""
+    and an unscored origin is no floor to difference against. Absent, never zeroed.
+
+    ``unworked_s`` has no default: only the spawner holding the deadline can measure it, and a
+    caller that omitted it would report a fairly-run cell on a box that was thrashing."""
     levels = result.round_adopted_levels
     if result.origin_level is None or not levels:
         return None
@@ -92,6 +102,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_rounds_ran=result.n_l1_rounds,
         inner_round_budget=len(held_levels(result)),
         inner_stop_reason=str(result.stop_reason),
+        inner_unworked_s=unworked_s,
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
         inner_campaign_id=campaign_id,

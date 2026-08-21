@@ -184,7 +184,7 @@ routes reach it too). As-shipped tiers over the *real* verb set:
 | `campaign.budget` | `change-spend-budget` (raise a ceiling) | budget |
 | `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-allowed-models`, `set-campaign-label`, `replace-dataset` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4, SHIPPED) | privileged / provenance-tainting |
-| `scoring.lookahead` | `set-sample-lookahead` (SHIPPED) — **host-admin, not a campaign tier**: it spends the BOX's shared provider rate bucket, not the campaign's budget, so no delegate can hold it. Not `babysit` either — it taints nothing, because the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a | host privilege |
+| `scoring.sample_lookahead` | `set-sample-lookahead` (SHIPPED) — **host-admin, not a campaign tier**: it spends the BOX's shared provider rate bucket, not the campaign's budget, so no delegate can hold it. Not `babysit` either — it taints nothing, because the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a | host privilege |
 
 The ladder is the point: a delegate with `campaign.step` but **not** `campaign.run` can
 advance the search one bounded action at a time (each a small, checkable spend) but

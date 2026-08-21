@@ -88,8 +88,14 @@
   color:var(--color-background);
 }
 .remote-sample-lookahead.armed:hover:not(:disabled){filter:brightness(1.08)}
-/* The spinner form. Fixed width so the strip doesn't reflow when a spent group drops the value. */
-.remote-cells{width:3.4ch;border:none;background:none;color:inherit;font:inherit;font-weight:600}
+/* The `batch` form: the ⇉ mark beside the shared segmented control, never a button wrapper —
+   the segments ARE the buttons, so `.remote-btn` here would nest one control inside another. */
+.remote-cells-group{display:inline-flex;align-items:center;gap:var(--space-4)}
+.remote-cells-icon{color:var(--color-text-tertiary)}
+/* Armed, not yet released. Outlined rather than filled, so it reads as pending against the
+   solid `armed` fill the round form uses for what the loop is actually holding. */
+.remote-cells.pending{box-shadow:0 0 0 1px var(--color-accent)}
+.remote-cells.pending::after{content:"armed";margin-left:var(--space-4);color:var(--color-accent);font-size:var(--text-xs);font-weight:600}
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */

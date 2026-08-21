@@ -69,6 +69,7 @@ class PipelineData(LedgerPipelineData, total=False):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: str
+    inner_unworked_s: float
     inner_spend_usd: float | None
     inner_tokens: int | None
     inner_campaign_id: str

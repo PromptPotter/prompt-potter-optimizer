@@ -194,16 +194,22 @@ export async function postSkipSearchpoint(
 // its own — after the round that scored under it, or the group it released, per that backend's
 // `concurrency_arming`. Unlike skip it does NOT mark the cycle babysat: the in-flight
 // acquisition is discarded, so the measurement is identical at any depth. Host-admin only.
+//
+// The one command addressed by PATH rather than by the root hop: throughput is what an inner
+// run answers for itself, so an L4 inner cycle is armed by descending to it — the same
+// `descend` grammar the dashboard poll uses, empty at depth 1.
 // Per `m12-api-openapi.yaml::setSampleLookahead`.
 export async function postSetSampleLookahead(
-  campaignId: string,
-  cycleId: string,
+  path: CyclePath,
   cells: number,
 ): Promise<CommandAcceptedBody> {
+  const root = pathRoot(path);
+  const descend = encodeDescend(path);
   return postCommand("set-sample-lookahead", {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
+    campaign_id: root.campaignId,
+    cycle_id: root.cycleId,
     cells,
+    ...(descend ? { descend } : {}),
   });
 }
 // Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes

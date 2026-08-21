@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
+import { SegmentedControl } from "@/components/ui";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -126,11 +127,10 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     </>
   );
 
-  // The phase above is the LEAF's; the command highway addresses exactly one hop
-  // and has no `descend`, so an inner cycle cannot be commanded. Firing anyway
-  // sent Skip/Pause — enabled by the INNER run's `running` — at the outer cycle.
-  // Disabled with the reason as the tooltip, rather than re-targeted
-  // (I3_affordance_honest).
+  // The phase above is the LEAF's, and Skip/Pause address the ROOT hop, so firing them
+  // from an inner view sent a command the inner run's `running` had enabled at the outer
+  // cycle. Disabled with the reason as the tooltip, rather than re-targeted
+  // (I3_affordance_honest). Concurrency is the exception and descends — see below.
   const inner = !isOuterView;
   const innerReason = inner
     ? "Run control reaches the outer campaign only — back out of this inner run to use it."
@@ -198,13 +198,46 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   // it used to accept presses the engine silently pinned to depth 1.
   const maxCells = dash?.max_cells_in_flight ?? 1;
   const perGroup = dash?.concurrency_arming === "batch";
-  // The command already addresses the root hop; what an inner view breaks is the READOUT, since
-  // `dash` is then the inner run's and carries its own backend's ceiling.
-  const concurrencyReason = inner
-    ? "Concurrency belongs to the outer campaign — this readout is the inner run's. Use ↑ outer."
-    : maxCells <= 1
+  // Unlike Skip, this one follows the VIEWED path: the ceiling on screen and the cycle the press
+  // arms are the same run at either depth. The outer's arming is deliberately not inherited
+  // (`runner/entry.py`), so each layer is armed by looking at it.
+  const concurrencyReason =
+    maxCells <= 1
       ? "This backend runs one sample at a time — a single call has no latency to overlap."
       : undefined;
+  const armDisabled = Boolean(concurrencyReason) || runPhase !== "running" || pending !== null;
+  // SERVED: what the operator asked for and the walk has not spent yet. Between a press and the
+  // next launch boundary this is the only thing that says the press landed — `lookahead` is what
+  // the loop HELD and still reads 1.
+  const armedCells = dash?.sample_lookahead_armed ?? 1;
+  const armPending = armedCells > 1 && armedCells !== lookahead;
+  // The operator's effective choice across both phases: their pending request while it waits,
+  // then what the loop actually held once the group is released.
+  const shownCells = Math.max(armedCells, lookahead);
+  const concurrencyTitle =
+    concurrencyReason ??
+    `${
+      armPending
+        ? `${armedCells} armed — releasing together at the next sample boundary. `
+        : ""
+    }${
+      perGroup
+        ? "Releases this many samples together and waits for all of them; one press buys one group."
+        : `Runs the next round's scoring this many samples in flight, then disarms.`
+    } Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${
+      discards > 0 ? ` (${discards} discarded)` : ""
+    }.`;
+  // Clamped here as well as in the walk: the server records the request UNCLAMPED, so a value
+  // past the ceiling would read back as an arming the run never held.
+  const armCells = (raw: number | string) => {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) return;
+    const cells = Math.min(n, maxCells);
+    if (cells === shownCells) return;
+    void act("sample-lookahead", () =>
+      postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells),
+    );
+  };
 
   const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
     setPending(which);
@@ -327,46 +360,45 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
       </button>
-      {/* An ARM control, not a switch: it spends itself. `batch` swaps the label for a spinner,
-          because only there does the operator pick the number. */}
-      <button
-        type="button"
-        className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
-        onClick={() =>
-          void act("sample-lookahead", () =>
-            postSetSampleLookahead(campaignId, cycleId, sampleLookaheadArmed ? 1 : maxCells),
-          )
-        }
-        disabled={Boolean(concurrencyReason) || runPhase !== "running" || pending !== null}
-        aria-pressed={sampleLookaheadArmed}
-        aria-label={`Samples in flight, up to ${maxCells}`}
-        title={
-          concurrencyReason ??
-          `${perGroup ? `Release this many samples together and wait for all of them; one press buys one group.` : `Run the next round's scoring ${maxCells} samples in flight instead of 1, then it disarms.`} Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${discards > 0 ? ` (${discards} discarded)` : ""}.`
-        }
-      >
-        <span aria-hidden="true">⇉</span>
-        {perGroup ? (
-          <input
-            type="number"
-            className="remote-cells"
-            min={1}
-            max={maxCells}
-            // SERVED, so the field falls back on its own once a group spends the arming.
-            value={lookahead}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) =>
-              void act("sample-lookahead", () =>
-                postSetSampleLookahead(campaignId, cycleId, Number(e.target.value)),
-              )
-            }
+      {/* An ARM control, not a switch: it spends itself. `batch` is a FIELD rather than a
+          button, because only there does the operator pick the number — and an input nested
+          inside a button is neither valid nor operable. */}
+      {perGroup ? (
+        // An EXCLUSIVE choice over a range the connector caps at 4, so: the shared segmented
+        // control. One click is one press, which removes the commit question entirely.
+        <span className="remote-cells-group" title={concurrencyTitle}>
+          <span aria-hidden="true" className="remote-cells-icon">
+            ⇉
+          </span>
+          <SegmentedControl
+            ariaLabel={`Samples to release together, up to ${maxCells}`}
+            className={cx("remote-cells", armPending && "pending")}
+            value={String(shownCells)}
+            onChange={(v) => armCells(v)}
+            options={Array.from({ length: maxCells }, (_, i) => ({
+              value: String(i + 1),
+              label: String(i + 1),
+              disabled: armDisabled,
+              title: i === 0 ? "One at a time" : `Release ${i + 1} together`,
+            }))}
           />
-        ) : (
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
+          onClick={() => armCells(sampleLookaheadArmed ? 1 : maxCells)}
+          disabled={armDisabled}
+          aria-pressed={sampleLookaheadArmed}
+          aria-label={`Samples in flight, up to ${maxCells}`}
+          title={concurrencyTitle}
+        >
+          <span aria-hidden="true">⇉</span>
           <span className="remote-btn-label">
             {sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}
           </span>
-        )}
-      </button>
+        </button>
+      )}
       <span className="remote-status" aria-live="off">
         {/* The candidate label ("C2.3") already encodes the round (the 2), so
             show it INSTEAD of "R{n}" while scoring — round only when there's no

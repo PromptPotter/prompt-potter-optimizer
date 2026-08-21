@@ -185,6 +185,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     current_sample_id: null,
     sample_lookahead: 1,
     sample_lookahead_discards: 0,
+    sample_lookahead_armed: 1,
     max_cells_in_flight: 1,
     concurrency_arming: "round",
     last_query_elapsed_s: 0,

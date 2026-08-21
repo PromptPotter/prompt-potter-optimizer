@@ -523,6 +523,7 @@ export interface LiveDashboardState {
   current_sample_id: number | null;
   sample_lookahead: number;
   sample_lookahead_discards: number;
+  sample_lookahead_armed: number;
   max_cells_in_flight: number;
   concurrency_arming: 'round' | 'batch';
   last_query_elapsed_s: number;

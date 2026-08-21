@@ -231,6 +231,10 @@ class LiveDashboardState(StrictModel):
     sample_lookahead: int = 1
     # Samples launched then discarded unabsorbed — the arming's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
+    # The REQUEST — what the operator armed and the walk has not spent, read off
+    # `.runtime/sample_lookahead.json` exactly as the armed spend cap is. `sample_lookahead` above
+    # is what the loop HELD; between a press and the next launch boundary the two disagree.
+    sample_lookahead_armed: int = 1
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
     # says the control does not apply, and went unserved before, so the button took dead presses.

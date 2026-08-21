@@ -54,7 +54,7 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     roll_p_best_at_round_complete,
 )
-from promptpotter.infrastructure.runtime_flags import read_spend_caps
+from promptpotter.infrastructure.runtime_flags import read_armed_cells, read_spend_caps
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, session_dir_for
 from promptpotter.shared.clock import utcnow_iso
@@ -62,6 +62,7 @@ from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
+    from promptpotter.connectors.protocol import ConcurrencyArming
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
@@ -169,8 +170,9 @@ class LiveDashboardView(DerivedView):
         self._buffer = RoundBuffer()
         # Launched, not yet absorbed, in launch order: HEAD drives the in-flight markers, and
         # whatever remains at candidate close was discarded.
-        # sample_id -> (query_text, sample_idx, sample_total, candidate_idx, cand_total)
-        self._open_samples: dict[int, tuple[str, int, int, int, int]] = {}
+        # sample_id -> (query_text, sample_idx, sample_total, candidate_idx, cand_total, depth)
+        # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
+        self._open_samples: dict[int, tuple[str, int, int, int, int, int]] = {}
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
@@ -204,6 +206,8 @@ class LiveDashboardView(DerivedView):
         resumed_from_round: int | None = None,
         recorder: AuditTrailView | None = None,
         seed_from_cycle_id: str | None = None,
+        max_cells_in_flight: int | None = None,
+        concurrency_arming: ConcurrencyArming | None = None,
     ) -> LiveDashboardView | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
         the parent's trajectory up to the cut while counting its own copied round files."""
@@ -227,7 +231,7 @@ class LiveDashboardView(DerivedView):
         # Surfaces prior rounds' L1/L2/L3 outputs before the first new call lands.
         initial_llm_nodes = read_most_recent_round_nodes(audit_rounds_dir(Path(cycle_dir)))
 
-        return cls(
+        view = cls(
             cycle_dir,
             session_dir,
             hop=hop,
@@ -241,6 +245,14 @@ class LiveDashboardView(DerivedView):
             recorder=recorder,
             initial_llm_nodes=initial_llm_nodes,
         )
+        # Stamped at WIRING, not on a phase event: origin scoring runs before INIT fires, and the
+        # browser reads the `1` default as "this backend holds one sample" and disables the
+        # control. After `resume_from` — the live connector outranks a pair an older build wrote.
+        if max_cells_in_flight is not None:
+            view.state.max_cells_in_flight = max_cells_in_flight
+        if concurrency_arming is not None:
+            view.state.concurrency_arming = concurrency_arming
+        return view
 
     @classmethod
     def write_launch_stop(
@@ -472,6 +484,7 @@ class LiveDashboardView(DerivedView):
                     qt,
                     ci,
                     ct,
+                    self.state.sample_lookahead,
                 )
             self._refresh_open_sample_markers()
             self._set_state(DashboardState.SCORING)
@@ -497,10 +510,13 @@ class LiveDashboardView(DerivedView):
             )
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
-            # Still open at close ⇒ launched and never absorbed. Derived from records that already
-            # flow — launched-minus-scored at the one boundary where the difference is final.
+            # Still open at close ⇒ launched and never absorbed, but only a sample launched INTO
+            # an armed window is the ARMING's cost: at depth 1 exactly one sample is in flight, so
+            # one open here failed on its own and belongs to no control.
             if self._open_samples:
-                self.state.sample_lookahead_discards += len(self._open_samples)
+                self.state.sample_lookahead_discards += sum(
+                    1 for *_, depth in self._open_samples.values() if depth > 1
+                )
                 self._open_samples.clear()
             self._update_current_acc(scores)
             self._buffer.set_candidate_scores(ci, ct, scores)
@@ -547,11 +563,6 @@ class LiveDashboardView(DerivedView):
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
             config = data["config"]
-            # Off the live backend client, beside the config read above — the connector declares
-            # both, and neither can change once the run is wired.
-            backend = data["env"].backend_client
-            s.max_cells_in_flight = backend.max_cells_in_flight
-            s.concurrency_arming = backend.concurrency_arming
             # The formula is stamped once at INIT:enter and origin accuracy rides round 0 via
             # the standard ``close_round`` path, so INIT:exit carries only the run limits.
             opt = config.optimization
@@ -594,7 +605,7 @@ class LiveDashboardView(DerivedView):
             s.current_query_payload = None
             s.current_sample_id = None
             return
-        sid, (query_text, qi, qt, ci, ct) = next(iter(self._open_samples.items()))
+        sid, (query_text, qi, qt, ci, ct, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_sample_id = sid
         self._update_sample_markers(ci, ct, qi, qt)
@@ -851,6 +862,9 @@ class LiveDashboardView(DerivedView):
                 armed["token_budget"] = armed_tokens
             if armed:
                 s.run_limits = s.run_limits.model_copy(update=armed)
+        # Same shape as the spend caps above: the flag is the REQUEST and the loop reads it at
+        # its own cadence, so the browser learns a press landed here or not at all.
+        s.sample_lookahead_armed = read_armed_cells(self.cycle_dir)
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

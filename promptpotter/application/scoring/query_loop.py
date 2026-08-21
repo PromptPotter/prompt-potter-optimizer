@@ -371,58 +371,64 @@ async def run_query_loop(
         )
         submitted += 1
 
-    # `batch` releases a GROUP and refills only once the window is empty; `round` keeps the
-    # established sliding window, spent at `l1/score/winner.py`. Read once — a connector cannot
-    # change mid-walk.
+    # Both armings fill the window identically and differ only in WHERE the press is spent:
+    # `batch` on the group it released, just below; `round` at `l1/score/winner.py`. Read once —
+    # a connector cannot change mid-walk.
     batch = session.backend_client.concurrency_arming == "batch"
+
+    def _operator_stop() -> QueryLoopResult | None:
+        """The three run-control checkpoints, polled at the SAMPLE boundary rather than at a
+        launch: under group arming the loop blocks in `await slot.task` for a whole group, so a
+        check that only runs while refilling is a check a pause waits out."""
+        # Checked FIRST, so a one-shot skip never falls through to the sticky pause path. It cuts
+        # this searchpoint's remaining samples and consumes the flag, and the gateway takes the
+        # partial — no PAUSED phase, no cycle exit.
+        if session.skip_check and session.skip_check():
+            if session.skip_consume:
+                session.skip_consume()
+            logger.info(
+                "Operator skip after query %d/%d; accepting partial searchpoint.",
+                len(state.results),
+                n,
+            )
+            return QueryLoopResult(state.results, completed=False, stop_reason="skip")
+        # Between samples, where every ABSORBED result is already on disk, so this exits cleanly
+        # and `resume` continues into the remaining samples.
+        if pause_requested(session):
+            logger.debug("Pause after query %d/%d.", len(state.results), n)
+            declare_run_phase(session, RunPhase.PAUSED)
+            return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
+        # Same cadence, because the round-boundary gate cannot fire until the round closes — and
+        # for an L4 outer round every sample is an entire inner CAMPAIGN. `StopLoop` is the
+        # existing mid-round stop channel and carries the gate's own reason; unwinding via
+        # `graceful` would relabel a budget halt as an operator PAUSE.
+        if session.budget_tripped is not None and (stop := session.budget_tripped()) is not None:
+            logger.warning(
+                "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
+                len(state.results),
+                n,
+                stop.value,
+            )
+            raise StopLoop(stop)
+        return None
 
     try:
         while True:
-            # A partly-drained `batch` window is left alone: refilling it would slide, and sliding
-            # makes "which samples did my press pay for" unanswerable.
-            depth = 1 if (batch and window) else _armed_cells(session)
-            # Checkpoints poll once per LAUNCH, and the depth is re-read here so arming binds
-            # on the next sample rather than the next candidate.
+            if (stopped := _operator_stop()) is not None:
+                return stopped
+            # Binds on the NEXT LAUNCH, never on the next empty window: a press lands to shorten
+            # the wait, so a running sample is JOINED rather than waited out. Which samples a
+            # press paid for stays answerable — `sample_started` records its launch depth.
+            depth = _armed_cells(session)
+            launched = 0
             while submitted < n and len(window) < depth:
-                # Checked FIRST, so a one-shot skip never falls through to the sticky pause
-                # path. It cuts this searchpoint's remaining samples and consumes the flag, and
-                # the gateway takes the partial — no PAUSED phase, no cycle exit.
-                if session.skip_check and session.skip_check():
-                    if session.skip_consume:
-                        session.skip_consume()
-                    logger.info(
-                        "Operator skip after query %d/%d; accepting partial searchpoint.",
-                        len(state.results),
-                        n,
-                    )
-                    return QueryLoopResult(state.results, completed=False, stop_reason="skip")
-                # Between samples, where every ABSORBED result is already on disk, so this
-                # exits cleanly and `resume` continues into the remaining samples.
-                if pause_requested(session):
-                    logger.debug("Pause after query %d/%d.", len(state.results), n)
-                    declare_run_phase(session, RunPhase.PAUSED)
-                    return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
-                # Same cadence, because the round-boundary gate cannot fire until the round
-                # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
-                # `StopLoop` is the existing mid-round stop channel and carries the gate's own
-                # reason; unwinding via `graceful` would relabel a budget halt as an operator
-                # PAUSE.
-                if (
-                    session.budget_tripped is not None
-                    and (stop := session.budget_tripped()) is not None
-                ):
-                    logger.warning(
-                        "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
-                        len(state.results),
-                        n,
-                        stop.value,
-                    )
-                    raise StopLoop(stop)
                 _launch(depth)
+                launched += 1
 
             # Spent by the group it released, not at the round close — hours away for this shape.
-            # A press that armed nothing consumes nothing, so one landing between groups survives.
-            if batch and depth > 1 and session.sample_lookahead_consume is not None:
+            # `launched` guards both halves: a press that launched nothing survives to the next
+            # boundary, and consuming here is what stops the top-up repeating every iteration.
+            if batch and depth > 1 and launched and session.sample_lookahead_consume is not None:
                 logger.info("Released a group of %d sample(s); the arming is spent.", depth)
                 session.sample_lookahead_consume()
 
