@@ -386,6 +386,30 @@ if _undirected:
 del _undirected
 
 
+# WHAT MINTED this cycle, as the operator reads it — mapped from the trigger like the direction
+# above and checked the same way, so an unmapped trigger raises rather than badging as the
+# operator's.
+MintKind = Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
+
+MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
+    ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
+    ForkTrigger.L2_REBASE: "auto_rebase",
+    ForkTrigger.L3_REBASE: "auto_rebase",
+    ForkTrigger.OPERATOR_SWEEP: "user_fork",
+    ForkTrigger.OPERATOR_DIAG: "user_fork",
+    ForkTrigger.OPERATOR_STEERED: "user_fork",
+    ForkTrigger.OPERATOR_REWIND: "user_fork",
+}
+
+_unbadged = [t for t in ForkTrigger if t not in MINT_KIND_FOR_TRIGGER]
+if _unbadged:
+    raise RuntimeError(
+        f"ForkTrigger members missing from MINT_KIND_FOR_TRIGGER: {_unbadged}. An unbadged "
+        "trigger reads to the operator as a fork they made themselves."
+    )
+del _unbadged
+
+
 class ConfigOverrides(StrictModel):
     """Every field optional — absent inherits the parent — applied to the fork's snapshot at
     init; it never mutates the parent's frozen config."""
@@ -454,10 +478,10 @@ class CandidateMintedRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-# What the cycle's OWN ledger can answer about a candidate. `minted` = named, not yet scored;
-# `measured` = it has a number. Never `winner`: election is a round-close fact the ledger does
-# not carry, so an unclosed round's candidates stay `measured` and nothing invents a winner.
-CandidateState = Literal["minted", "measured"]
+# What the cycle's OWN ledger can answer about a candidate: `invalid` is rejected before it cost a
+# sample, so its stored 0.0 is `INVALID_SCORES`' synthetic one. Never `winner` — election is a
+# round-close fact the ledger does not carry, and an unclosed round must invent no crown.
+CandidateState = Literal["minted", "measured", "invalid"]
 
 
 class LedgerCandidate(StrictModel):

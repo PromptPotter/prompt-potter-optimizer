@@ -27,7 +27,7 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 
 | Field | Type | Notes |
 |---|---|---|
-| `kind` | string | Closed enum covering the **whole** `CycleRecord` union — `decision`, `phase`, `snapshot`, `token_usage`, `llm_call_start`, `llm_call_progress`, `llm_call`, `command`, `command_ack`, `error`, `round_warning`, `candidate_minted`, `cycle_seed` — plus the projection-only `stream_snapshot` synthesized by the tail. Coverage is not optional: see § Sequence semantics. |
+| `kind` | string | Closed enum covering the **whole** `CycleRecord` union — `domain/projection_envelope.py::ProjectionKind`, which raises at import on drift in either direction — plus the projection-only `stream_snapshot` synthesized by the tail. Coverage is not optional: see § Sequence semantics. |
 | `version` | integer | Envelope shape version. Bumps only on a breaking restructure (which requires a §0 amendment). Profile A ships v1. |
 | `cycle_id` | string | Target cycle. Redundant with the URL path, stamped per-frame so multi-cycle clients can demultiplex a fan-in subscription. |
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |

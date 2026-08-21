@@ -3,7 +3,7 @@ the webapp through the generated TS) and neither is live telemetry — that is t
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import Field
@@ -14,6 +14,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.run_records import MintKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import descend_store
@@ -106,14 +107,19 @@ class CycleListEntry(StrictModel):
     )
     dataset_name: str = ""
     backend_id: str = ""
-    sibling_kind: Literal["root", "fork", "diag", "sweep"]
-    # Operator-facing unit kind — see campaign_store/store.py::_unit_kind.
-    unit_kind: Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
+    # What minted this cycle — the badge `MINT_KIND_FOR_TRIGGER` declares per fork trigger,
+    # projected by `campaign_store/store.py::_mint_kind` off the id's own separator. The raw
+    # separator is NOT served beside it: the browser parses the id itself (`lib/ids.ts`).
+    mint_kind: MintKind
     is_root: bool
     # Precise terminal reason (StopReason value) once finished, else "active"
     # ("unreadable" for a malformed index). The display label + outcome derive
     # from the one STOP_REASON_INFO table; do not re-map per surface.
     status: str
+    superseded_by: str | None = Field(
+        default=None,
+        description="The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `status` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
+    )
     run_phase: RunPhase = Field(
         default=RunPhase.DETACHED,
         description="The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",

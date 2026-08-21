@@ -211,6 +211,13 @@ class PipelineNode(StrictModel):
         return [m.pipeline_key for m in self.observation_mappings]
 
     @property
+    def emits_ranking(self) -> bool:
+        """Does this node put a ranked list on the wire — the "a sample can be scored off it" signal.
+        Asked as a predicate rather than spelled as a set of names at each site, so a new ranking
+        node type is admitted here and nowhere else instead of being skipped in silence."""
+        return self.node_type in (NodeType.RANKER, NodeType.CANDIDATE_SOURCE)
+
+    @property
     def is_llm(self) -> bool:
         """Narrow on purpose: this is the "the dataset must declare a per-node ``model``" signal. An
         in-process optimizer prompt node runs an LLM but owns no model, so it stays exempt."""

@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from promptpotter.application.optimization.validators.behavior_base import CheckResult
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import L1_PARSE_FAILURE_CHARGED, RoundResult
 
 __all__ = ["HEADLINE_ACC", "L1Stats", "compute_l1_stats", "first_round_at_threshold"]
+
+# The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
+# arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
+RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
 
 
 # Headline-accuracy threshold for ``rounds_to_95``.
@@ -29,7 +34,7 @@ class L1Stats:
     # `l2_context` optimizer prompt conformance — None when L2 never fired, so the reader
     # doesn't have to cross-check `l2_fires` to know a 1.0 was vacuous.
     l2_behavior_pass_rate: float | None
-    round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
+    round_1_verdict: RoundOneVerdict
 
 
 def compute_l1_stats(
@@ -67,14 +72,20 @@ def _compute_round_1_verdict(
     rounds: list[RoundResult],
     *,
     round_1_behavior: list[CheckResult],
-) -> str:
+) -> RoundOneVerdict:
     """Conformance-only round-1 verdict — yield and lift are dataset-headroom-confounded. Zero failures out of
     ZERO checks is not ``healthy``: L1 emitting no variants at all is the worst outcome, not the cleanest."""
     if not rounds:
         return "unknown"
 
-    if rounds[0].l1_parse_failure is not None:
+    parse_failure = rounds[0].l1_parse_failure
+    if parse_failure in L1_PARSE_FAILURE_CHARGED:
         return "broken"
+    # The remaining reason is TOOLING — an empty or truncated provider response. This verdict is
+    # a CHARGE against the optimizer prompt and the L4 outer loop scores it, so grading provider
+    # flakiness `broken` would bank a prompt as bad for a round that never reached one.
+    if parse_failure is not None:
+        return "unknown"
     if not round_1_behavior:
         return "unknown"
 

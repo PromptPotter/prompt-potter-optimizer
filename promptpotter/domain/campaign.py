@@ -26,7 +26,9 @@ class Campaign(StrictModel):
     optimizer_prompt_hash: str = ""
     backend_id: str = ""
     owner_user_id: str = "default"
-    lifecycle_status: Literal["active", "archived", "deleted", "checkin"] = "active"
+    # VISIBILITY only — the authoring phase is NOT here. `.runtime/checkin.flag` on the root cycle
+    # owns it (`runtime_flags.py::is_checkin`), which is also what `derive_run_phase` serves.
+    lifecycle_status: Literal["active", "archived", "deleted"] = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
     config: dict[str, Any] = Field(default_factory=dict)

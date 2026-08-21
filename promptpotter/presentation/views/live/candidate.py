@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.candidate_diff import flatten_sp_summary
+from promptpotter.domain.results import EliminationGate
 from promptpotter.presentation.views.display import (
     CYAN,
     DIM,
@@ -106,28 +107,26 @@ def individual_summary_from_dict(
     elim = scores.get("elimination_context") or {}
     degrad = scores.get("degradation_context") or {}
 
-    # Three disjoint exit branches — operator can tell if cut by PoBB or DegradationCheck.
-    if elim.get("leader_locked"):
-        eq = int(elim.get("queries_scored", 0))
-        eqt = int(elim.get("total_queries", 0))
-        n_priors = int(elim.get("n_priors", 0))
-        prior_s = "" if n_priors == 1 else "s"
+    # One dispatch on the gate the PRODUCER named. Never on which keys survived: only ε and
+    # lock-in computed a posterior, so quoting one under any other gate invents it.
+    gate = elim.get("gate")
+    q = f"q{int(elim.get('queries_scored', 0))}/{int(elim.get('total_queries', 0))}"
+    n_priors = int(elim.get("n_priors", 0))
+    priors = f"(of {n_priors} prior{'' if n_priors == 1 else 's'})"
+    p_best = float(elim.get("p_best", 0.0))
+    if gate == EliminationGate.LOCK_IN:
+        detail_lines.append(f"{GREEN}✓ leader locked {q}{RESET}  p_best={p_best:.1%} {priors}")
+    elif gate == EliminationGate.COLLAPSED:
         detail_lines.append(
-            f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
-            f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
+            f"{YELLOW}✂ answer collapsed {q}{RESET}  "
+            "one label for every sample — no measurement of ability to score"
         )
-    elif scores.get("elimination_stopped") and elim:
-        eq = int(elim.get("queries_scored", 0))
-        eqt = int(elim.get("total_queries", 0))
-        n_priors = int(elim.get("n_priors", 0))
-        prior_s = "" if n_priors == 1 else "s"
-        leader_label = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
-        p_best_pct = float(elim.get("p_best", 0.0))
-        eps_pct = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
+    elif gate == EliminationGate.EPSILON:
+        leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
+        eps = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
         detail_lines.append(
-            f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
-            f"p_best={p_best_pct:.1%} < eps={eps_pct:.0%}  "
-            f"vs {leader_label} (of {n_priors} prior{prior_s})"
+            f"{YELLOW}✂ eliminated {q}{RESET}  p_best={p_best:.1%} < eps={eps:.0%}  "
+            f"vs {leader} {priors}"
         )
     elif scores.get("elimination_stopped") and degrad:
         dc = int(degrad.get("degraded_count", 0))

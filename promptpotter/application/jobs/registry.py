@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast, get_args
 
 from promptpotter.config.paths import user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
 
 JobStatus = Literal["pending", "running", "completed", "failed", "stopped"]
+_JOB_STATUSES: frozenset[str] = frozenset(get_args(JobStatus))
+# The two that still hold the machine slot — ``pending`` is the reserve→attach window, ``running``
+# the task itself. One name, because three sites spelled the pair: a fourth reader that forgot
+# ``pending`` would hand the slot out twice across that window and see nothing wrong.
+LIVE_JOB_STATUSES: frozenset[JobStatus] = frozenset({"pending", "running"})
 
 
 @dataclass(frozen=False)
@@ -232,10 +237,10 @@ class JobRegistry:
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
         out: list[Job] = []
         for j in self.list_all(user_id=user_id):
-            if j.status not in ("pending", "running"):
+            if j.status not in LIVE_JOB_STATUSES:
                 continue
             j = self._reap_if_orphaned(j)
-            if j.status in ("pending", "running"):
+            if j.status in LIVE_JOB_STATUSES:
                 out.append(j)
         return out
 
@@ -290,8 +295,7 @@ class JobRegistry:
                 raw = read_json(path)
             except (OSError, JSONDecodeError):
                 continue
-            status = raw.get("status")
-            if status not in ("pending", "running"):
+            if raw.get("status") not in LIVE_JOB_STATUSES:
                 continue
             raw["status"] = "stopped"
             raw["finished_at"] = now
@@ -304,14 +308,10 @@ class JobRegistry:
 
 
 def _coerce_status(raw: object) -> JobStatus:
-    if raw == "pending":
-        return "pending"
-    if raw == "running":
-        return "running"
-    if raw == "completed":
-        return "completed"
-    if raw == "failed":
-        return "failed"
+    """A status that did not survive its file reads ``stopped`` — an unreadable job is not one to
+    resume. Membership derives from the Literal, so a new status needs no arm here."""
+    if isinstance(raw, str) and raw in _JOB_STATUSES:
+        return cast(JobStatus, raw)
     return "stopped"
 
 

@@ -219,7 +219,7 @@ def _mint_fork(
             payload=payload,
         )
         campaign_store.write_fresh_sibling(
-            parent.campaign_id, parent.cycle_id, new_cycle_id, "diag", forked_at=now
+            parent.campaign_id, parent.cycle_id, new_cycle_id, forked_at=now
         )
     elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
         new_cycle_id = (
@@ -239,7 +239,7 @@ def _mint_fork(
         # ForkSpec provenance lands on index.json::fork via the single fork-block
         # writer below.
         campaign_store.write_fresh_sibling(
-            parent.campaign_id, parent.cycle_id, new_cycle_id, "fork", forked_at=now
+            parent.campaign_id, parent.cycle_id, new_cycle_id, forked_at=now
         )
         # The steered seed (edited searchpoint + reconciled limits) rides its own
         # read-once home; the ledger FORK_CUT still carries it as SoT.
@@ -270,7 +270,6 @@ def _mint_fork(
             parent.campaign_id,
             parent.cycle_id,
             new_cycle_id,
-            "sweep",
             sweep_batch_id=sweep_batch_id,
             forked_at=now,
         )
@@ -281,10 +280,10 @@ def _mint_fork(
         CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
         {"fork": payload.model_dump(mode="json", exclude={"seed"})},
     )
-    # THE LINE MOVED — said where the cut is made. An offshoot's parent keeps running, which
-    # is why this asks the DIRECTION, not merely whether a fork happened.
+    # THE LINE MOVED, and to WHERE — an offshoot's parent keeps running, hence the DIRECTION.
+    # Naming the successor is what lets a reader follow the line off an already-stopped parent.
     if FORK_DIRECTION.get(payload.trigger) is ForkDirection.SUPERSEDE:
-        campaign_store.mark_superseded(parent)
+        campaign_store.mark_superseded(parent, new_cycle_id)
     return new_cycle_id
 
 

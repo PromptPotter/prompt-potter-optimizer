@@ -166,11 +166,9 @@ function GateVerdictView({ verdict }: { verdict: DegradationHealth }) {
           </div>
         ) : null}
       </dl>
-      {verdict.reasons.length ? (
+      {verdict.cause ? (
         <ul className="chat-decision-reasons">
-          {verdict.reasons.map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
+          <li>{verdict.cause}</li>
         </ul>
       ) : null}
     </>

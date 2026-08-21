@@ -9,6 +9,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.scoring.formula import extract_item_label
+from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
@@ -292,8 +293,21 @@ class Evaluator:
     compute: Callable[..., float | None]
     # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
     direction: Literal["high", "low"] = "high"
-    node_type: str | None = None
-    applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
+    node_type: NodeType | None = None
+    # An extra structural requirement no node type can express (``has_limit_node``). The declared
+    # ``node_type`` is NOT restated here — ``applies`` asks it.
+    requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
+
+    def applies(self, schema: PipelineSchema) -> bool:
+        """Has this evaluator anything to measure on ``schema``. The declared ``node_type`` IS half
+        the test, asked here rather than re-spelled per entry as a lambda — a typo in such a copy
+        is an evaluator that silently never renders."""
+        if self.node_type is not None and not any(
+            n.node_type == self.node_type for n in schema.nodes
+        ):
+            return False
+        return self.requires(schema)
+
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
     # only ``results`` — no ``schema`` / ``node`` / ``opt_sp``). The read-side mask
     # recomputes exactly this subset from ``all_candidate_results`` at read time
@@ -345,24 +359,21 @@ _REGISTRY: list[Evaluator] = [
         description="Fraction of queries where GT appears in a candidate_source node's output.",
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="candidate_ranking"),
-        node_type="candidate_source",
-        applies=lambda s: any(n.node_type == "candidate_source" for n in s.nodes),
+        node_type=NodeType.CANDIDATE_SOURCE,
     ),
     Evaluator(
         name="candidate_recall",
         description="Fraction of queries where GT appears in a ranker node's final_ranking.",
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="final_ranking"),
-        node_type="ranker",
-        applies=lambda s: any(n.node_type == "ranker" for n in s.nodes),
+        node_type=NodeType.RANKER,
     ),
     Evaluator(
         name="cache_hit_rate",
         description="Fraction of queries resolved by a cache node (non-null timing).",
         scope="per_round",
         compute=compute_cache_hit_rate,
-        node_type="cache",
-        applies=lambda s: any(n.node_type == "cache" for n in s.nodes),
+        node_type=NodeType.CACHE,
     ),
     Evaluator(
         name="retrieval_shortfall",
@@ -372,14 +383,14 @@ _REGISTRY: list[Evaluator] = [
         ),
         scope="per_sample",
         compute=compute_retrieval_shortfall_per_sample,
-        applies=has_limit_node,
+        requires=has_limit_node,
     ),
     Evaluator(
         name="mean_retrieval_shortfall",
         description="Mean of retrieval_shortfall across the round's results.",
         scope="per_round",
         compute=compute_mean_retrieval_shortfall,
-        applies=has_limit_node,
+        requires=has_limit_node,
     ),
     Evaluator(
         name="pipeline_compactness",
@@ -419,7 +430,7 @@ def all_evaluators() -> list[Evaluator]:
 
 
 def evaluators_meta() -> list[dict[str, Any]]:
-    """JSON-serializable registry projection for the webapp What-If panel — drops ``compute``/``applies``."""
+    """JSON-serializable registry projection for the webapp What-If panel — drops ``compute``/``requires``."""
     return [
         {
             "name": ev.name,

@@ -105,10 +105,12 @@ class LineageNode(StrictModel):
     composite_fitness: float | None = None
     status: str = Field(
         default="",
-        description="Candidate: minted | measured — never 'winner' (that rides `is_winner`). "
+        description="Candidate: minted | measured | invalid — never 'winner' (that rides "
+        "`is_winner`). `invalid` was rejected before it cost a sample, so it carries no "
+        "accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. "
         "Course: `index.json::status`, the same StopReason value `/cycles` serves under this "
-        "same name. It was `state`, which is what `dashboard.json::state` calls the "
-        "fine-grained ACTIVITY phase — a different axis entirely, and one word for both.",
+        "same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY "
+        "phase — a different axis, and one word may not serve both.",
     )
     election_held: bool = Field(
         default=False,

@@ -19,7 +19,7 @@ def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
         return []
     keys: list[str] = []
     for node in schema.nodes:
-        if node.node_type in ("ranker", "candidate_source"):
+        if node.emits_ranking:
             keys.extend(node.output_keys)
     return keys
 
@@ -40,7 +40,7 @@ def terminal_ranking(r: Mapping[str, Any], schema: PipelineSchema | None) -> lis
     if not schema:
         return []
     for node in reversed(schema.nodes):
-        if node.node_type in ("ranker", "candidate_source"):
+        if node.emits_ranking:
             for key in node.output_keys:
                 if key in pd:
                     val = pd[key]

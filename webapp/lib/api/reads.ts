@@ -8,8 +8,8 @@
 // Three exceptions, each because the server has nothing to generate FROM, and each named so
 // the gap reads as a gap:
 //   - `HealthResponse` — `/health` returns a bare `dict[str, str]` with no `response_model`.
-//   - `LifecycleFilter` — the server's set is a module-private tuple and its members genuinely
-//     differ (it accepts `checkin`, and has no `all`), so this is a different closed set.
+//   - `LifecycleFilter` — a QUERY-param set (`manifests.py::_LIFECYCLE_FILTERS`), so there is no
+//     response model to generate from. It must MATCH that tuple member for member.
 //   - the three narrow aliases below are DERIVED from generated interfaces, not re-declared.
 
 import { API, jget, jgetIfModified, jgetIfNoneMatch, type Conditional } from "./client";
@@ -280,8 +280,10 @@ export function fetchDashboardByPath(
 
 // `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
 // "active" server-side; pass "archived" to surface the archived set
-// (deleted stays out of the default UI). "all" returns every status.
-export type LifecycleFilter = "active" | "archived" | "deleted" | "all";
+// (deleted stays out of the default UI). "all" returns every status. "checkin"
+// is not a status but the authoring PHASE — a narrowing of "active", which
+// already carries the origin-authoring set.
+export type LifecycleFilter = "active" | "archived" | "deleted" | "checkin" | "all";
 
 // The forest reads. `at` is the chain of cycles to descend INTO — `[]` (the
 // default) is the tenant's own tree, one hop is an L4 cycle's inner fan-out, two

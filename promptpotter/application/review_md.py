@@ -173,12 +173,7 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
     # The terminate-triggering round is the last completed (critical) round; reuse it
     # to name the dead node (the ended-critical path uses the same round).
     if last_critical is not None:
-        reasons = last_critical.reasons
-        tag = (
-            "evidence_starved"
-            if "evidence_starved" in reasons
-            else (reasons[0] if reasons else "critical")
-        )
+        tag = last_critical.cause or "critical"
         return {
             "tag": tag,
             "node": last_critical.dominant_node or "",
@@ -210,7 +205,9 @@ def _render_header(
     if hashes:
         parts.append("**Prompt hashes**")
         parts.append("")
-        for name in ("l1_generate", "l1_critique", "l2_context", "l3_plan"):
+        # Walk what the stamp CONTAINS, never a hand-listed subset: a name missing from the list
+        # renders two cycles under different optimizer prompts as identical hash blocks.
+        for name in sorted(hashes):
             short = (hashes.get(name) or "")[:8]
             if short:
                 parts.append(f"- `{name}`: `{short}`")

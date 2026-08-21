@@ -185,8 +185,8 @@ def list_campaigns(
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: str = Query(
         default="active",
-        description="Operator visibility filter — 'active' (default, includes "
-        "in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
+        description="'active' (default), 'archived' or 'deleted' — the visibility intent; "
+        "'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
     ),
     descend: str | None = Query(None),
 ) -> CampaignListResponse:
@@ -194,12 +194,11 @@ def list_campaigns(
 
     Filters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the
     visibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop
-    out of the default surface). The default ``active`` view ALSO surfaces
-    in-progress ``checkin`` campaigns (origin authoring is resumable progress, so
-    it belongs in the sidebar beside running work) — the only surface that unions
-    them, so origin/campaign-backed lists that ask the store for ``active``
-    directly stay free of the empty-hash check-ins. Cross-user campaigns are
-    invisible — the ``owner_user_id`` gate filters on ``store.identity.user_id``.
+    out of the default surface). A check-in campaign IS ``active`` — origin
+    authoring is resumable progress, so it belongs in the sidebar beside running
+    work — and ``?lifecycle=checkin`` narrows to that phase by asking the root
+    cycle's flag. This route unions nothing. Cross-user campaigns are invisible —
+    the ``owner_user_id`` gate filters on ``store.identity.user_id``.
 
     ``descend`` names the chain of cycles to descend INTO (see ``GET /cycles``);
     absent/empty is the tenant's own tree. It is the twin of the cycle list: a
@@ -214,10 +213,6 @@ def list_campaigns(
     leaf = descend_store(stores, decode_descend(descend))
     owner = str(leaf.identity.user_id)
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
-    if lifecycle == "active":
-        campaigns += leaf.campaigns.list_campaigns(
-            dataset, lifecycle="checkin", owner_user_id=owner
-        )
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     memo: dict[str, str] = {}
     return CampaignListResponse(

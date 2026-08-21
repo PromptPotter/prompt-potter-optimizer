@@ -29,7 +29,11 @@ from promptpotter.domain.results import HardSampleOrder, RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    campaign_cycles_dir,
+    sibling_kind,
+)
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import graceful
 
@@ -247,9 +251,10 @@ def from_disk_log(
 
 def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     final = fork_index.get("final") or {}
+    cycle_id = str(fork_index.get("cycle_id") or "")
     return ForkSummaryView(
-        cycle_id=str(fork_index.get("cycle_id") or ""),
-        mode=str(final.get("mode") or fork_index.get("sibling_kind") or ""),
+        cycle_id=cycle_id,
+        mode=str(final.get("mode") or (sibling_kind(cycle_id) if cycle_id else "")),
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
         origin_accuracy=origin_accuracy_of(fork_index) or 0.0,

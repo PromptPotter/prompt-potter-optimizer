@@ -261,10 +261,25 @@ class CycleLayout:
         return self.runtime / "spend_cap.json"
 
 
-# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake.
-_REPORT_NAMES = frozenset(
-    {"campaign.json", "dashboard.json", "index.json", "review.md", "log.md", "hard_samples.json"}
-)
+def _cycle_report_names() -> frozenset[str]:
+    """Every file ``CycleLayout`` declares DIRECTLY in a cycle dir — its human-readable tier, as
+    against everything nested under ``.runtime/`` or ``rounds/``. Derived rather than re-authored:
+    a hand-copy of these names drifted the moment ``export.json`` was added, so
+    ``delete --keep-results`` deleted the campaign's own answer while sparing ``dashboard.json``."""
+    probe = CycleLayout(Path("."))
+    return frozenset(
+        p.name
+        for name, attr in vars(CycleLayout).items()
+        if isinstance(attr, property)
+        and isinstance(p := getattr(probe, name), Path)
+        and p.parent == probe.cycle_dir
+        and p.suffix
+    )
+
+
+# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake. ``campaign.json``
+# is the campaign-root manifest, one level ABOVE any cycle, so no `CycleLayout` property finds it.
+_REPORT_NAMES = _cycle_report_names() | {"campaign.json"}
 
 
 class FileKind(Enum):

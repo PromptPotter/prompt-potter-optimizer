@@ -38,25 +38,15 @@ class BudgetGate:
 def origin_gate_tripped(
     health: DegradationHealth | None, mode: OriginGateMode
 ) -> StopReason | None:
-    """``ORIGIN_GATE`` when round 0's verdict warrants a halt — candidates would otherwise be measured
-    against a broken floor. ``strict`` spares a purely ``untested`` grade: that is uncertainty, not damage."""
+    """``ORIGIN_GATE`` when round 0's verdict warrants a halt — candidates would otherwise be
+    measured against a broken floor."""
     if mode == "off" or health is None:
         return None
     if health.grade == "critical":
         return StopReason.ORIGIN_GATE
-    # Strict also halts on a degraded floor — but only when the degradation is a
-    # corrupted measurement the gate's rescore remedy can re-measure away (transient
-    # backend noise, reason "degraded"). A degraded grade whose only reason is
-    # "untested" is the wide confidence interval of a small round-0 sample, not a
-    # broken floor: re-scoring the SAME samples can't narrow a CI and ``untested``
-    # stays true at round 0, so the gate would offer a non-remedy and deadlock.
-    # Statistical uncertainty isn't gate-worthy — the operator proceeds (or scores
-    # more samples); only a corrupted floor halts.
-    if (
-        mode == "strict"
-        and health.grade == "degraded"
-        and any(reason != "untested" for reason in health.reasons)
-    ):
+    # Strict also halts on a degraded floor: `degraded` carries exactly one cause
+    # (`results_health.py`) — transient backend noise the gate's rescore can re-measure away.
+    if mode == "strict" and health.grade == "degraded":
         return StopReason.ORIGIN_GATE
     return None
 
@@ -66,7 +56,7 @@ def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason 
     there is nothing to decide, only a corpse to grind, and halting turns six silent rounds into one."""
     if health is None:
         return None
-    if health.grade == "critical" and "backend_unreachable" in health.reasons:
+    if health.grade == "critical" and health.cause == "backend_unreachable":
         return StopReason.BACKEND_UNREACHABLE
     return None
 

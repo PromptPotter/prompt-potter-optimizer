@@ -45,7 +45,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
       hard_samples.json                # campaign-scope hard-sample artifact
       cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
-        index.json                     # phase, trials, final block, sibling_kind, parent_cycle_id (forks)
+        index.json                     # phase, trials, final block, parent_cycle_id (forks)
         export.json                    # the winner + its provenance, for a program that is not us
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
         rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
@@ -75,7 +75,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
-| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |
+| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
 | `export.json` | per cycle | The export artifact — the winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
@@ -410,7 +410,7 @@ There is **one** storage vocabulary, the operator's mental model. Every byte in 
 | **State** | Loop | the resume point — non-array remainder of `rounds/round_*.json` (the read-once cycle seed rides the ledger, so it lands in **History**) |
 | **Trace** | Loop | telemetry — `.runtime/streams/`, `prompts/`, `langfuse/{traces,observations,scores}/` |
 | **History** | Loop | the durable event spine — `.runtime/ledger.jsonl` |
-| **Reports** | Loop | readable output — `campaign.json`, `index.json`, `dashboard.json`, `log.md`, `review.md`, `hard_samples.json` |
+| **Reports** | Loop | readable output — the campaign manifest plus every top-level cycle surface, DERIVED from `CycleLayout` by `layout.py::_REPORT_NAMES`; the hand-copy it replaced had dropped `export.json`, so `--keep-results` deleted the campaign's answer |
 
 **The keepsake is not a leaf.** What `delete --keep-results` spares (Reports + the langfuse loop trace) is a cross-cutting subset, surfaced as a one-line UI note — never a summed figure, so the partition stays MECE. The lifecycle ladder is a plain binary (`keep_results: bool` → `_strip_to_keepsake`), independent of this taxonomy.
 

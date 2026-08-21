@@ -296,7 +296,6 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
             root_content_hash="",
             backend_id="",
             owner_user_id=str(stores.identity.user_id),
-            lifecycle_status="checkin",
             lifecycle_changed_at=now,
             config={},
         )
@@ -345,7 +344,6 @@ def finalize_checkin_to_active(
         combined_optimizer_prompt_hash,
     )
 
-    now = utcnow_iso()
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
     plan_origin_fields = cycle_plan.origin.prompt_field_dict()
 
@@ -368,8 +366,6 @@ def finalize_checkin_to_active(
             "root_content_hash": target_hash,
             "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
             "backend_id": session.backend_id,
-            "lifecycle_status": "active",
-            "lifecycle_changed_at": now,
             "config": freeze_campaign_config(campaign_config),
         },
     )

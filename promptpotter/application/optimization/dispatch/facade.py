@@ -282,6 +282,7 @@ def _arm_readings(latest_round: RoundResult | None) -> tuple[ArmReading, ...]:
             scored_samples=c.scored_samples,
             expected_samples=c.expected_samples,
             elimination_stopped=c.elimination_stopped,
+            gate=c.elimination_context.get("gate"),
         )
         for c in latest_round.candidate_scores
     )

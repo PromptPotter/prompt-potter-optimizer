@@ -42,6 +42,22 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
     return float((norm.ppf(1 - alpha / 2) + norm.ppf(power)) * se)
 
 
+def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
+    """``P(a > b)`` under independent normal posteriors — the point gap over the noise of the
+    DIFFERENCE, which is the noise a move actually has to clear.
+
+    What a RANKING wants wherever a raw gap misleads: a wide posterior cannot buy a place with a
+    margin it never measured, yet nothing is disqualified, since any positive gap stays above 0.5.
+    That is what separates it from subtracting an SE, which can turn a real gain negative."""
+    denom = math.sqrt(se_a * se_a + se_b * se_b)
+    if denom <= 1e-12:
+        return 1.0 if mean_a > mean_b else 0.0
+
+    from scipy.stats import norm
+
+    return float(norm.cdf((mean_a - mean_b) / denom))
+
+
 # --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
 
 

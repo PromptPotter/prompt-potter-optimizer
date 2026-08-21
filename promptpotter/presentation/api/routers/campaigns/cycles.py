@@ -16,6 +16,7 @@ from promptpotter.application.mask.verdicts import make_abort_verdict, make_scor
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
 from promptpotter.infrastructure.runtime_flags import (
@@ -41,12 +42,12 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
-# Abort-lens variants → the PoBB contributor(s) to switch off (the thin API-edge selector
-# for the abort verdict; see docs/operations/mask-projection.md).
+# Abort-lens variants → the PoBB gate(s) to switch off (the thin API-edge selector for the abort
+# verdict; see docs/operations/mask-projection.md). DERIVED from `EliminationGate`, so a gate added
+# there is switchable here rather than silently unsuppressable.
 _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
-    "epsilon_off": frozenset({"epsilon"}),
-    "lock_in_off": frozenset({"lock_in"}),
-    "all_off": frozenset({"epsilon", "lock_in"}),
+    **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
+    "all_off": frozenset(g.value for g in EliminationGate),
 }
 
 

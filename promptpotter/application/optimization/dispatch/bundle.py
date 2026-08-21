@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import CritiqueReadout, RoundResult
+from promptpotter.domain.results import CritiqueReadout, EliminationGate, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import DeltaRuler
 
@@ -200,6 +200,9 @@ class ArmReading:
     scored_samples: int
     expected_samples: int
     elimination_stopped: bool
+    # WHICH gate stopped it. Beside the bool, not replacing it: a degradation cut sets
+    # `elimination_stopped` and names no gate, so `gate is not None` would drop those arms.
+    gate: EliminationGate | None
 
 
 @dataclass(frozen=True)

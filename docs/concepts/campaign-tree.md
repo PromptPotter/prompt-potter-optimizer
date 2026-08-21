@@ -6,7 +6,7 @@ A **Campaign** owns `campaigns/{campaign_id}/`: a `campaign.json` manifest, a ca
 
 ## Primitive
 
-A cycle is a directory under a campaign's `cycles/`. A fork is a new cycle whose `index.json` carries `parent_cycle_id` and `sibling_kind`. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round; the new cycle's ledger inherits from the parent's history up to the cut.
+A cycle is a directory under a campaign's `cycles/`. A fork is a new cycle whose `index.json` carries `parent_cycle_id`; its KIND is stored nowhere, because the id already answers it. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round; the new cycle's ledger inherits from the parent's history up to the cut.
 
 ```
 campaigns/justlogic__a1b2c3/        # one Campaign
@@ -15,17 +15,17 @@ campaigns/justlogic__a1b2c3/        # one Campaign
   cycles/
     cycle_abc123/                   # root (no parent_cycle_id)
       dashboard.json                # this cycle's own live telemetry
-      index.json                    # sibling_kind: root
+      index.json                    # no parent_cycle_id — the id has no separator, so: root
       .runtime/ledger.jsonl         # …, FORK_CUT → fork_x, …
     cycle_abc123_fork_x/            # branch — flat alongside the root
       dashboard.json                # the fork's OWN telemetry (seeded from parent at the cut)
-      index.json                    # parent_cycle_id: cycle_abc123, sibling_kind: fork
+      index.json                    # parent_cycle_id: cycle_abc123
       .runtime/ledger.jsonl         # inherit_from(parent, offset_at_cut)
 ```
 
 Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
 
-**`unit_kind`** is the webapp sidebar label derived from `(sibling_kind, fork_trigger)` by `campaign_store/store.py::_unit_kind`, which enumerates the values; the served type restates them as a `Literal` on `routers/active.py::ActiveCycle`.
+**`mint_kind`** is the webapp sidebar label for what minted a cycle, derived from the id's own kind plus `index.json::fork.trigger` by `domain/run_records.py::MINT_KIND_FOR_TRIGGER`, which enumerates the values and refuses an unbadged trigger at import; `campaign_store/store.py::_mint_kind` projects it and `routers/active.py::CycleListEntry` serves that same type. The raw kind is **not** served beside it — the browser parses the id (`webapp/lib/ids.ts`), because it needs the family tail as well.
 
 ## Three callers, one primitive
 

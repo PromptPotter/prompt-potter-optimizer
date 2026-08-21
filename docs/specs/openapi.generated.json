@@ -1085,6 +1085,16 @@
             "title": "Is Root",
             "type": "boolean"
           },
+          "mint_kind": {
+            "enum": [
+              "session",
+              "divergent_resume",
+              "user_fork",
+              "auto_rebase"
+            ],
+            "title": "Mint Kind",
+            "type": "string"
+          },
           "n_rounds": {
             "default": 0,
             "title": "N Rounds",
@@ -1124,16 +1134,6 @@
             "default": "detached",
             "description": "The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label."
           },
-          "sibling_kind": {
-            "enum": [
-              "root",
-              "fork",
-              "diag",
-              "sweep"
-            ],
-            "title": "Sibling Kind",
-            "type": "string"
-          },
           "spawned_by": {
             "anyOf": [
               {
@@ -1149,15 +1149,17 @@
             "title": "Status",
             "type": "string"
           },
-          "unit_kind": {
-            "enum": [
-              "session",
-              "divergent_resume",
-              "user_fork",
-              "auto_rebase"
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Unit Kind",
-            "type": "string"
+            "description": "The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `status` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
+            "title": "Superseded By"
           },
           "updated_at": {
             "default": "",
@@ -1168,8 +1170,7 @@
         "required": [
           "campaign_id",
           "cycle_id",
-          "sibling_kind",
-          "unit_kind",
+          "mint_kind",
           "is_root",
           "status"
         ],
@@ -2509,7 +2510,7 @@
           },
           "status": {
             "default": "",
-            "description": "Candidate: minted | measured — never 'winner' (that rides `is_winner`). Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. It was `state`, which is what `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis entirely, and one word for both.",
+            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_winner`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
             "title": "Status",
             "type": "string"
           },
@@ -3517,13 +3518,16 @@
               "command",
               "command_ack",
               "cycle_seed",
+              "election",
               "error",
               "llm_call_progress",
               "llm_call",
               "llm_call_start",
               "phase",
               "round_warning",
+              "ruler",
               "snapshot",
+              "spend_tombstone",
               "token_usage",
               "stream_snapshot"
             ],
@@ -4324,7 +4328,7 @@
     },
     "/api/v1/campaigns": {
       "get": {
-        "description": "Every campaign in one store owned by the caller, newest first.\n\nFilters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the\nvisibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop\nout of the default surface). The default ``active`` view ALSO surfaces\nin-progress ``checkin`` campaigns (origin authoring is resumable progress, so\nit belongs in the sidebar beside running work) — the only surface that unions\nthem, so origin/campaign-backed lists that ask the store for ``active``\ndirectly stay free of the empty-hash check-ins. Cross-user campaigns are\ninvisible — the ``owner_user_id`` gate filters on ``store.identity.user_id``.\n\n``descend`` names the chain of cycles to descend INTO (see ``GET /cycles``);\nabsent/empty is the tenant's own tree. It is the twin of the cycle list: a\nforest is campaigns × cycles, and the sidebar groups runs by\n``root_cycle_id`` (their origin), so BOTH lists must be available at every\ndepth for one tree builder to serve L4, L5, and the top level alike.",
+        "description": "Every campaign in one store owned by the caller, newest first.\n\nFilters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the\nvisibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop\nout of the default surface). A check-in campaign IS ``active`` — origin\nauthoring is resumable progress, so it belongs in the sidebar beside running\nwork — and ``?lifecycle=checkin`` narrows to that phase by asking the root\ncycle's flag. This route unions nothing. Cross-user campaigns are invisible —\nthe ``owner_user_id`` gate filters on ``store.identity.user_id``.\n\n``descend`` names the chain of cycles to descend INTO (see ``GET /cycles``);\nabsent/empty is the tenant's own tree. It is the twin of the cycle list: a\nforest is campaigns × cycles, and the sidebar groups runs by\n``root_cycle_id`` (their origin), so BOTH lists must be available at every\ndepth for one tree builder to serve L4, L5, and the top level alike.",
         "operationId": "list_campaigns_api_v1_campaigns_get",
         "parameters": [
           {
@@ -4346,13 +4350,13 @@
             }
           },
           {
-            "description": "Operator visibility filter — 'active' (default, includes in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
+            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
             "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
               "default": "active",
-              "description": "Operator visibility filter — 'active' (default, includes in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
               "title": "Lifecycle",
               "type": "string"
             }

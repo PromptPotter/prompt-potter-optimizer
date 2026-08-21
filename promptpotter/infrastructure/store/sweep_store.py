@@ -65,13 +65,13 @@ class SweepStore:
         for entry in index["payloads"]:
             if entry["status"] != "pending":
                 continue
-            cid = cycle_by_source.get(entry["source_file"], "")
-            if cid:
-                # Per-payload status is a StopOutcome value (domain/phases.py).
-                entry["status"] = status_by_source.get(entry["source_file"], "success")
-            else:
-                entry["status"] = "skipped"
-            entry["cycle_id"] = cid
+            source = entry["source_file"]
+            # Two facts, kept apart. WAS IT ATTEMPTED decides the status — a payload the batch
+            # reached keeps its StopOutcome (domain/phases.py) even where its fork minted nothing,
+            # and only one the batch never reached is `skipped`. WHAT IT LEFT BEHIND is cycle_id.
+            attempted = status_by_source.get(source)
+            entry["status"] = attempted if attempted is not None else "skipped"
+            entry["cycle_id"] = cycle_by_source.get(source, "")
         write_json(path, index)
         return path
 

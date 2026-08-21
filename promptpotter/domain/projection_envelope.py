@@ -3,47 +3,58 @@ offset — a subscriber detects gaps by it and replays from the family ray, neve
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 
 
-# Closed enum mirroring ``ProjectionEnvelope.kind`` in
-# ``docs/specs/m12-events-asyncapi.yaml``. It MUST cover the whole ``CycleRecord``
-# union — all thirteen ``record_type`` literals — plus one projection-only kind.
-# Keep this set in sync with the YAML by hand — drift fails loud (an
-# unknown kind raises on dispatch); no standing test (see tests/CLAUDE.md).
+# Closed enum mirroring ``ProjectionEnvelope.kind`` in ``docs/specs/m12-events-asyncapi.yaml``.
 #
-# **A missing kind is a HOLE, not a filter, and that is why coverage is the rule.**
-# ``CycleLedgerTail.read_new`` advances ``_line_index`` for every line it reads,
-# including one whose kind it cannot map — so an unlisted record is skipped while
-# still consuming an offset, and the client sees a ``sequence`` gap and fires the
-# reconnect recipe in ``docs/developer/event-stream.md``. ``candidate_minted`` and
-# ``cycle_seed`` were absent here for exactly that reason and produced exactly that.
-# With full coverage, ``_to_envelope`` returns ``None`` only for a genuinely
-# malformed line — which IS a gap worth noticing.
+# **A missing kind is a HOLE, not a filter.** ``CycleLedgerTail.read_new`` advances
+# ``_line_index`` for every line it reads, including one whose kind it cannot map — so an
+# unlisted record is skipped while still consuming an offset, and the client sees a ``sequence``
+# gap and fires the reconnect recipe in ``docs/developer/event-stream.md``.
 ProjectionKind = Literal[
-    # record_type literals (13) — the complete `CycleRecord` union
+    # `record_type` literals — the complete `CycleRecord` union
     "candidate_minted",
     "decision",
     "command",
     "command_ack",
     "cycle_seed",
+    "election",
     "error",
     "llm_call_progress",
     "llm_call",
     "llm_call_start",
     "phase",
     "round_warning",
+    "ruler",
     "snapshot",
+    "spend_tombstone",
     "token_usage",
-    # projection-only (1) — synthesized by the ledger tail (``CycleLedgerTail``)
+    # projection-only — synthesized by the ledger tail (``CycleLedgerTail``)
     "stream_snapshot",
 ]
+
+# The coverage rule as an import-time raise, both directions: a `CycleRecord` arm with no kind is
+# the silent offset-burning hole above, and a kind naming no arm is a wire promise nothing sends.
+_PROJECTION_ONLY = frozenset({"stream_snapshot"})
+_record_types = {
+    arm.model_fields["record_type"].default for arm in get_args(get_args(CycleRecord)[0])
+}
+_declared = frozenset(get_args(ProjectionKind)) - _PROJECTION_ONLY
+if _declared != _record_types:
+    raise RuntimeError(
+        "ProjectionKind must cover the CycleRecord union exactly — "
+        f"missing {sorted(_record_types - _declared)}, "
+        f"unbacked {sorted(_declared - _record_types)}."
+    )
+del _record_types, _declared
 
 
 class ProjectionEnvelope(StrictModel):

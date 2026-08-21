@@ -4,7 +4,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.config.settings import NO_RESULT
-from promptpotter.domain.results import DegradationHealth, HealthGrade, RoundResult, WarningDict
+from promptpotter.domain.results import (
+    DegradationHealth,
+    HealthCause,
+    HealthGrade,
+    RoundResult,
+    WarningDict,
+)
 from promptpotter.domain.scoring import modal_answer_share
 
 # Degradation-health thresholds (explicit — no hidden defaults). The verdict
@@ -139,7 +145,7 @@ def compute_degradation_health(
         if is_origin:
             return DegradationHealth(
                 grade="critical",
-                reasons=["origin_unmeasured"],
+                cause="origin_unmeasured",
                 samples=0,
                 structural_count=0,
                 transient_count=0,
@@ -170,32 +176,32 @@ def compute_degradation_health(
     starved_node = evidence_starved_node(rates)
 
     grade: HealthGrade
-    reasons: list[str] = []
+    cause: HealthCause | None = None
     # Backend-down outranks every other verdict: an unreachable backend isn't a
     # pipeline problem the optimizer can move, it's a halt-and-restart condition.
     if unreachable_count / attempted >= BACKEND_UNREACHABLE_RATE:
-        grade, reasons = "critical", ["backend_unreachable"]
+        grade, cause = "critical", "backend_unreachable"
     elif structural_rate >= STRUCTURAL_FLAG_RATE:
-        grade, reasons = "critical", ["structural"]
+        grade, cause = "critical", "structural"
     elif no_result_rate >= UNSCOREABLE_RATE:
         # Pipeline succeeded but emitted no extractable label on a majority of
         # samples — a broken floor the backend's success/warning channel can't
         # see. Ranked below ``structural`` (a hard node failure is the more
         # specific, node-attributed cause) but above the softer signals.
-        grade, reasons = "critical", ["unscoreable"]
+        grade, cause = "critical", "unscoreable"
     elif hole_rate >= UNSCOREABLE_RATE:
         # Most of the round's cells never reported. There is nothing to grade and nothing
         # to optimize against — the remedy is to re-measure, not to change the prompt.
-        grade, reasons = "critical", ["holed"]
+        grade, cause = "critical", "holed"
     elif starved_node is not None:
-        grade, reasons = "critical", ["evidence_starved"]
+        grade, cause = "critical", "evidence_starved"
         dominant_node = starved_node
     elif untested and structural_count > 0:
-        grade, reasons = "critical", ["structural_untested"]
+        grade, cause = "critical", "structural_untested"
     elif consecutive_degraded_rounds >= CONSECUTIVE_DEGRADED_CRITICAL:
-        grade, reasons = "critical", ["persistent"]
+        grade, cause = "critical", "persistent"
     elif degraded_rate >= DEGRADED_RATE_FLAG:
-        grade, reasons = "degraded", ["degraded"]
+        grade, cause = "degraded", "degraded"
     else:
         grade = "healthy"
 
@@ -212,20 +218,20 @@ def compute_degradation_health(
     suggested_action: str | None = None
     if grade == "critical":
         where = f"{dominant_node} " if dominant_node else ""
-        if "backend_unreachable" in reasons:
+        if cause == "backend_unreachable":
             pct = round(unreachable_count / attempted * 100)
             suggested_action = (
                 f"backend unreachable on {pct}% of samples — it is down or overloaded, "
                 "not a pipeline fault; restart the backend and `resume`."
             )
-        elif "evidence_starved" in reasons:
+        elif cause == "evidence_starved":
             pct = round(rates.get(dominant_node or "", 0.0) * 100)
             suggested_action = (
                 f"{where}produced no evidence on {pct}% of samples — the enricher is "
                 f"starved (e.g. quota / rate-limit exhausted), not a prompt fault.{_reported_by(dominant_node)} "
                 "Fix the backend (restore quota) and `resume` — don't burn rounds chasing it."
             )
-        elif "unscoreable" in reasons:
+        elif cause == "unscoreable":
             pct = round(no_result_rate * 100)
             suggested_action = (
                 f"the pipeline produced no extractable answer on {pct}% of samples — "
@@ -234,7 +240,7 @@ def compute_degradation_health(
                 "answer_format so the model commits a single parseable label (or the "
                 "extraction contract), then rescore — don't optimize against it."
             )
-        elif "holed" in reasons:
+        elif cause == "holed":
             pct = round(hole_rate * 100)
             suggested_action = (
                 f"{pct}% of this round's cells returned no measurement at all — they were "
@@ -244,7 +250,7 @@ def compute_degradation_health(
                 "they keep failing, the cause is upstream of the prompt — read the row's "
                 "error text before changing anything."
             )
-        elif "persistent" in reasons:
+        elif cause == "persistent":
             suggested_action = (
                 f"{consecutive_degraded_rounds} consecutive degraded rounds — "
                 f"likely a persistent pipeline problem.{_reported_by(dominant_node)} "
@@ -260,7 +266,7 @@ def compute_degradation_health(
 
     return DegradationHealth(
         grade=grade,
-        reasons=reasons,
+        cause=cause,
         samples=attempted,
         structural_count=structural_count,
         transient_count=transient_count,

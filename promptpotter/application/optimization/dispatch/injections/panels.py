@@ -40,7 +40,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
-from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
+from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
 from promptpotter.shared.composite import render_composite_fitness_block
@@ -682,7 +682,13 @@ def _candidate_mutation(
 
 def _candidate_fate(cand: ScoredCandidate) -> str:
     """Not keyed on ``partial_reason``: its ``pobb`` arm is dead, so every eliminated candidate on
-    disk carries the empty string."""
+    disk carries the empty string.
+
+    ``elimination_stopped`` covers gates that mean OPPOSITE things to a generator, so it asks which
+    fired. ε stops BUYING — the idea may still be good and deserves re-proposing; a collapse is a
+    VERDICT, the arm having answered one label to everything. Rendered as the ε sentence, the
+    strongest rejection the loop has read as "not a verdict" and the dead idea stayed live in this
+    very panel — the failure ``answer_distribution`` exists to prevent, one panel over."""
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
     if cand.total == 0:
@@ -691,6 +697,8 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
         return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
+        if cand.elimination_context.get("gate") == EliminationGate.COLLAPSED:
+            return f"{cut} — answered ONE label to every sample; a VERDICT on this idea, not a stopped measurement"
         return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
     if cand.escalation_aborted:
         return "aborted mid-run"
@@ -936,11 +944,19 @@ def _r_sample_provenance(b: InjectionBundle) -> list[Item]:
         rows.append("FROZEN — every round is graded on the same campaign-start prefix")
     if d.prev_sample_ids:
         rows.append(f"{len(d.latest_sample_ids & d.prev_sample_ids)} also graded last round")
-    if cut := [a for a in d.arms if a.elimination_stopped]:
+    # "Graded on a harder prefix" is true of an ε, lock-in or degradation cut and FALSE of a
+    # collapse, which has no rate to read — and saying it invites the re-proposal `_candidate_fate`
+    # refuses, from the same prompt.
+    if cut := [a for a in d.arms if a.elimination_stopped and a.gate != EliminationGate.COLLAPSED]:
         stops = ", ".join(f"{a.label} at {a.scored_samples}/{a.expected_samples}" for a in cut[:4])
         rows.append(
             f"stopped early: {stops} — a cut arm was graded on a harder prefix, so its rate says "
             "where it stopped, not how good it is"
+        )
+    if gone := [a for a in d.arms if a.gate == EliminationGate.COLLAPSED]:
+        stops = ", ".join(f"{a.label} at {a.scored_samples}/{a.expected_samples}" for a in gone[:4])
+        rows.append(
+            f"stopped answering: {stops} — one label for every sample, so there is no rate to read"
         )
     return [Item("SAMPLE — what chose these rows:\n" + "\n".join(f"  {r}" for r in rows))]
 

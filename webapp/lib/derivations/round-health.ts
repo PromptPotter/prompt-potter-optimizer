@@ -9,7 +9,7 @@
 // Pure + reader-side: reads the backend-computed `health` verdict off each round
 // summary and never recomputes it (R-36). Sits in the Vitest derivation scope.
 
-import type { DegradationHealth } from "@/lib/api/types";
+import type { DegradationHealth, HealthCause } from "@/lib/api/types";
 import { fmtPct0 } from "@/lib/format";
 import type { DashboardSnapshot } from "@/lib/poll";
 
@@ -31,11 +31,11 @@ export interface DegradedRoundNotice {
 }
 
 function noticeDetail(
-  reasons: string[],
+  cause: HealthCause | null,
   dominantNode: string | null,
   degradedRate: number,
 ): string {
-  if (reasons.includes("untested")) {
+  if (cause === "structural_untested") {
     return "under-probed — too few samples for a confident read";
   }
   const where = dominantNode ? ` on ${dominantNode}` : "";
@@ -50,7 +50,7 @@ export function degradedRoundNotices(dash: DashboardSnapshot | null): DegradedRo
     if (r.health?.grade !== "degraded") continue;
     out.push({
       round: r.round,
-      detail: noticeDetail(r.health.reasons, r.health.dominant_node, r.health.degraded_rate),
+      detail: noticeDetail(r.health.cause, r.health.dominant_node, r.health.degraded_rate),
     });
   }
   out.sort((a, b) => a.round - b.round);

@@ -14,7 +14,14 @@ from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
 from promptpotter.domain.ruler import DeltaRuler
-from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord, RulerRecord
+from promptpotter.domain.run_records import (
+    MINT_KIND_FOR_TRIGGER,
+    CycleSeed,
+    CycleSeedRecord,
+    ForkTrigger,
+    MintKind,
+    RulerRecord,
+)
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.account_spend import (
@@ -90,16 +97,16 @@ def _apply_best(data: dict[str, Any]) -> None:
 def _fresh_sibling_index_blob(
     parent_index: dict[str, Any],
     parent_cycle_id: str,
-    sibling_kind: str,
     forked_at: str,
     **extras: Any,
 ) -> dict[str, Any]:
+    # Deliberately no ``sibling_kind``: the id's separator IS the kind (``layout.py``), and a
+    # stored copy is a second answer free to disagree with the id it sits under.
     return {
         "type": parent_index.get("type", "optimization_loop"),
         "header": parent_index.get("header", {}),
         "parent_cycle_id": parent_cycle_id,
         "parent_session_id": parent_index.get("parent_session_id", ""),
-        "sibling_kind": sibling_kind,
         "forked_from_round": 0,
         "forked_at": forked_at,
         "rounds": [],
@@ -138,14 +145,16 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
         rmtree_robust(sweeps)
 
 
-def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
-    if sibling_kind == "root":
+def _mint_kind(kind: str, fork_trigger: str | None) -> MintKind:
+    """``session`` for a root run, else the badge the TRIGGER declares. The fallback covers a fork
+    whose trigger is absent or unreadable ON DISK — never a trigger nobody classified, which
+    ``MINT_KIND_FOR_TRIGGER`` refuses at import."""
+    if kind == "root":
         return "session"
-    if fork_trigger == "scoring_divergence":
-        return "divergent_resume"
-    if fork_trigger in ("l2_rebase", "l3_rebase"):
-        return "auto_rebase"
-    return "user_fork"
+    try:
+        return MINT_KIND_FOR_TRIGGER[ForkTrigger(fork_trigger or "")]
+    except ValueError:
+        return "user_fork"
 
 
 class CampaignStore:
@@ -296,7 +305,10 @@ class CampaignStore:
         lifecycle: str = "active",
         owner_user_id: str | None = None,
     ) -> list[Campaign]:
-        """The sole lifecycle/owner filter gateway — API and CLI pass through, never re-filtering."""
+        """The sole lifecycle/owner filter gateway — API and CLI pass through, never re-filtering.
+
+        ``checkin`` is an AUTHORING PHASE, not a visibility state, so it is asked of the root
+        cycle's flag rather than the manifest. A check-in campaign is `active` and lists as one."""
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
@@ -304,7 +316,10 @@ class CampaignStore:
                 continue
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
-            if lifecycle != "all" and campaign.lifecycle_status != lifecycle:
+            if lifecycle == "checkin":
+                if not is_checkin(self.cycle_dir(campaign.root_hop)):
+                    continue
+            elif lifecycle != "all" and campaign.lifecycle_status != lifecycle:
                 continue
             if owner_user_id is not None and campaign.owner_user_id != owner_user_id:
                 continue
@@ -362,7 +377,11 @@ class CampaignStore:
         return True
 
     def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        if self.load_campaign(campaign_id) is None:
+        """Only an ARCHIVED campaign comes back. A `deleted` one has already banked its spend as
+        a `SpendTombstoneRecord`, so restoring it makes `_already_banked` answer for money the
+        resurrected campaign then spends again — and that second spend reaches no ledger."""
+        campaign = self.load_campaign(campaign_id)
+        if campaign is None or campaign.lifecycle_status != "archived":
             return False
         self.update_campaign(campaign_id, self._lifecycle_updates("active", changed_at, reason))
         return True
@@ -484,7 +503,6 @@ class CampaignStore:
             "type": "optimization_loop",
             "parent_session_id": existing.get("parent_session_id", ""),
             "parent_cycle_id": None,
-            "sibling_kind": sibling_kind(hop.cycle_id),
             "n_rounds": 0,
             "best_accuracy": 0.0,
             "rounds": [],
@@ -670,7 +688,10 @@ class CampaignStore:
 
     def reopen_for_continuation(self, hop: CycleHop) -> None:
         """The ONLY writer that removes ``finished_at``, which is a latch: ``derive_run_phase``
-        returns ``TERMINAL`` on it, and TERMINAL is the one phase the reaper will re-stamp."""
+        returns ``TERMINAL`` on it, and TERMINAL is the one phase the reaper will re-stamp.
+
+        ``superseded_by`` goes with it — consumers navigate it to find who answers NOW, so a stale
+        one points off the reopened running cycle onto its idle successor."""
         self.update(
             hop,
             {"status": "active"},
@@ -680,13 +701,21 @@ class CampaignStore:
                 "final",
                 "interrupted_round",
                 "crash_traceback",
+                "superseded_by",
             ],
         )
 
-    def mark_superseded(self, hop: CycleHop) -> bool:
-        """The line moved to a branch. Unstamped, a parent that stops BY DESIGN presents
-        exactly as a crashed one; ``reopen_for_continuation`` still clears the latch."""
-        return self._stamp_terminal(hop, StopReason.REBASED)
+    def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
+        """The line moved to *successor_cycle_id*. TWO facts, written apart because only one is
+        once-only: the relation is ALWAYS true and is what consumers navigate, while the terminal
+        stamp is skipped where one exists — overwriting a real ``stop_reason`` would destroy why
+        the cycle ended. A cut from an already-finished parent therefore still records its
+        successor. ``reopen_for_continuation`` clears the latch."""
+        from promptpotter.shared.errors import graceful
+
+        with graceful("Supersede relation write failed"):
+            self.update(hop, {"superseded_by": successor_cycle_id})
+        self._stamp_terminal(hop, StopReason.REBASED)
 
     def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
         data = read_json_optional(self._index_path(hop))
@@ -734,7 +763,6 @@ class CampaignStore:
             status = str(data.get("status", ""))
         header_raw = data.get("header")
         header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
-        sk = data.get("sibling_kind", kind)
         fork_raw = data.get("fork")
         fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
         # Derived from the one owner (campaign.json::dataset_name) — no per-cycle copy.
@@ -748,10 +776,10 @@ class CampaignStore:
             or (None if kind == "root" else root_cycle_id(cycle_id)),
             "dataset_name": dataset_name,
             "backend_id": header.get("backend_id", ""),
-            "sibling_kind": sk,
-            "unit_kind": _unit_kind(sk, fork_trigger),
+            "mint_kind": _mint_kind(kind, fork_trigger),
             "is_root": kind == "root",
             "status": status,
+            "superseded_by": data.get("superseded_by"),
             "run_phase": run_phase,
             "best_accuracy": data.get("best_accuracy"),
             "origin_accuracy": origin_accuracy_of(data),
@@ -823,7 +851,6 @@ class CampaignStore:
         campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
-        kind: str,
         *,
         forked_at: str,
         **blob_kwargs: Any,
@@ -833,9 +860,7 @@ class CampaignStore:
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
-        blob = _fresh_sibling_index_blob(
-            parent_index, parent_cycle_id, kind, forked_at, **blob_kwargs
-        )
+        blob = _fresh_sibling_index_blob(parent_index, parent_cycle_id, forked_at, **blob_kwargs)
         path = self._index_path(child)
         write_json(path, blob)
         return path
@@ -857,7 +882,6 @@ class CampaignStore:
         index = {
             **parent_index,
             "parent_cycle_id": parent_cycle_id,
-            "sibling_kind": "fork",
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
             "rounds": [_round_summary(rr) for rr in surviving_rounds],

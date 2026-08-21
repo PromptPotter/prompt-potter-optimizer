@@ -6,8 +6,11 @@
 # `promptpotter/domain/run_records.py::CycleRecord` or before a projection
 # emits it as an SSE frame from `CycleLedgerTail`.
 #
-# Drift detection: review + AsyncAPI Studio CLI lint (no `test_contracts.py` —
-# the structural/contract suite was cut to the silent-harm core, see tests/CLAUDE.md).
+# Drift detection: the Python half is enforced at import — `ProjectionKind` is
+# compared against the `CycleRecord` arms in `domain/projection_envelope.py` and
+# raises on either direction. THIS file is still checked by review + AsyncAPI
+# Studio CLI lint (no `test_contracts.py` — the structural/contract suite was cut
+# to the silent-harm core, see tests/CLAUDE.md).
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
@@ -204,6 +207,19 @@ components:
             # writer ``LiveDashboardView._handle_round_warning``
             # (``dashboard.json::recent_loop_warnings``).
             - round_warning
+            # The crown, stamped once per round by ``elect_round_winner`` on its
+            # own record so the tree can crown before the round closes
+            # (``ElectionRecord``). Absent here it burned one offset per round of
+            # every campaign — the most frequent instance of the hole above.
+            - election
+            # The cycle's δ scale, appended WHOLE at lock and after every
+            # extension (``RulerRecord``).
+            - ruler
+            # An account's banked spend, written before a delete takes the rows
+            # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
+            # so it reaches no cycle subscriber — listed because the enum's rule
+            # is the union, not the subset a given channel happens to carry.
+            - spend_tombstone
         version:
           type: integer
           minimum: 1

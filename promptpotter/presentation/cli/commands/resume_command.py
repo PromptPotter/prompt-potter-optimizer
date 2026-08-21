@@ -423,12 +423,14 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
     from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+    from promptpotter.infrastructure.runtime_flags import is_checkin
     from promptpotter.infrastructure.store.stores import build_stores
 
-    _campaign = build_stores(
+    _campaigns = build_stores(
         identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT
-    ).campaigns.load_campaign(ctx.campaign_id)
-    if _campaign is not None and _campaign.lifecycle_status == "checkin":
+    ).campaigns
+    _campaign = _campaigns.load_campaign(ctx.campaign_id)
+    if _campaign is not None and is_checkin(_campaigns.cycle_dir(_campaign.root_hop)):
         raise SystemExit(
             f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "
             "isn't authored yet, so there's nothing to resume.\n"

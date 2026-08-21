@@ -8,6 +8,7 @@ export interface DashboardCandidate {
   candidate_id: string | null;
   accuracy: number | null;
   composite_fitness: number | null;
+  invalid: boolean;
   scored_samples: number;
   cached_samples: number;
   expected_samples: number | null;
@@ -32,6 +33,7 @@ export interface RoundSummaryCandidate {
   candidate_id: string;
   accuracy: number;
   composite_fitness: number;
+  invalid: boolean;
   scored_samples: number;
   cached_samples: number;
   expected_samples: number;
@@ -53,7 +55,7 @@ export interface RoundSummaryCandidate {
 /** Context-aware degradation verdict for a round (origin included), computed */
 export interface DegradationHealth {
   grade: 'healthy' | 'degraded' | 'critical';
-  reasons: string[];
+  cause: 'origin_unmeasured' | 'backend_unreachable' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
   samples: number;
   structural_count: number;
   transient_count: number;
@@ -507,8 +509,8 @@ export interface LiveDashboardState {
   patience: string;
   hearts: number | null;
   rounds: RoundSummary[];
-  best: number;
-  current_acc: number;
+  best: number | null;
+  current_acc: number | null;
   ability_delta: number | null;
   composite_fitness_formula: string | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';
@@ -526,7 +528,7 @@ export interface LiveDashboardState {
   sample_lookahead_armed: number;
   max_cells_in_flight: number;
   concurrency_arming: 'round' | 'batch';
-  last_query_elapsed_s: number;
+  last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
   n_variants: number;
   sp_budget_ttest: number;
@@ -713,10 +715,16 @@ export interface CycleListEntry {
   parent_cycle_id: string | null;
   dataset_name: string;
   backend_id: string;
-  sibling_kind: 'root' | 'fork' | 'diag' | 'sweep';
-  unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
+  mint_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
   is_root: boolean;
   status: string;
+  /** The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a
+   * supersede cut. This is the successor pointer — follow it to find which
+   * cycle answers for the campaign; it is a fact of its own precisely so it
+   * survives on a parent that had already stopped for its own reason, which
+   * `status` cannot express. Null on a root, an offshoot, and any cycle still
+   * holding the line. */
+  superseded_by: string | null;
   /** The single run-state value (RunPhase). Computed once by derive_run_phase from
    * lifecycle + control flags + freshness; every picker dot and badge reads
    * this, none re-derive it. 'checkin' wins first (the campaign hasn't run);
@@ -1016,11 +1024,13 @@ export interface LineageNode {
   round: number | null;
   accuracy: number | null;
   composite_fitness: number | null;
-  /** Candidate: minted | measured — never 'winner' (that rides `is_winner`).
-   * Course: `index.json::status`, the same StopReason value `/cycles` serves
-   * under this same name. It was `state`, which is what
-   * `dashboard.json::state` calls the fine-grained ACTIVITY phase — a
-   * different axis entirely, and one word for both. */
+  /** Candidate: minted | measured | invalid — never 'winner' (that rides
+   * `is_winner`). `invalid` was rejected before it cost a sample, so it
+   * carries no accuracy: its stored 0.0 is synthetic and reads as getting
+   * every answer wrong. Course: `index.json::status`, the same StopReason
+   * value `/cycles` serves under this same name. Not `dashboard.json::state`,
+   * which names the fine-grained ACTIVITY phase — a different axis, and one
+   * word may not serve both. */
   status: string;
   /** This candidate's ROUND has held its election. The complement `is_winner`
    * cannot supply: a round that HELD crowned nobody, so every bar in it reads
@@ -1133,7 +1143,7 @@ export interface RayItem {
    * the two invert (records are stamped at construction but appended later). */
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
-  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'snapshot' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** The record's model_dump — ProjectionEnvelope.payload. */
   payload: Record<string, unknown>;
 }

@@ -206,8 +206,8 @@ wearing three names. What survives is *not* an entity:
   `dataset_config_dir`. It is services + identity, not a persisted tier.
 - **`active_session.json`** — the operator's *pointer/lens* into the
   Workspace: which tenant, campaign, and cycle are live.
-- **`unit_kind: "session"`** — the sidebar's label for a *root cycle*
-  (`campaign_store/store.py::_unit_kind`). A label, not a container.
+- **`mint_kind: "session"`** — the sidebar's label for a *root cycle*
+  (`campaign_store/store.py::_mint_kind`). A label, not a container.
 
 `new` mints a fresh Campaign + root cycle; `resume` follows the pointer;
 `fork` mints a sibling cycle inside the same campaign. Two `new` calls on
@@ -216,10 +216,10 @@ cycle id (content-addressed) and origin score (the dataset-scoped archive
 cache-hits every sample) — cross-campaign evidence pooling on a declaration
 rides the `measurements/` layer, not campaign identity.
 
-### `unit_kind` taxonomy
+### `mint_kind` taxonomy
 
-An operator-facing label, computed
-server-side from `(sibling_kind, fork_trigger)`, used by the webapp
+An operator-facing label for WHAT MINTED a cycle, computed
+server-side from the id's own kind plus the fork trigger, used by the webapp
 sidebar: `session` (a session root run — `resume` extends it),
 `divergent_resume` (a `resume --fork-on-divergence` branch),
 `user_fork` (any operator-initiated branch — HITL fork, diagnostic,
@@ -293,7 +293,7 @@ the in-flight heartbeat** (`dispatch/llm_call/heartbeat.py` —
 optimizer LLM calls, L4 inner-cycle awaits, and the backend scoring
 query), so a stale dashboard means a *dead* producer, never a quiet
 one — and a cycle that stops ON PURPOSE says so at the moment it does
-(a `supersede` cut retires its parent `REBASED` right at the cut,
+(a `supersede` cut stamps its parent right at the cut,
 `CampaignStore.mark_superseded`), so the reaper never has to interpret
 a deliberate silence; and the **liveness reaper** (`application/jobs/reaper.py`) is
 the single write-side reconciler stamping proven-dead cycles

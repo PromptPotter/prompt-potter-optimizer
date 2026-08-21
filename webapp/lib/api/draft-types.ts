@@ -199,14 +199,6 @@ export interface OriginLastResolution {
   next_action: { kind: string; questions: OriginQuestion[] };
   recap: string;
 }
-// Set only when the resolver turn degraded — the check-in model returned an
-// empty/truncated response that forced a paid repair retry, or produced nothing
-// usable. Stamped on the block by `resolve_origin_turn` (a `critical` turn raises
-// instead → 502). Drives the check-in panel's degradation warning + re-run.
-export interface OriginDegraded {
-  grade: "degraded" | "critical";
-  reasons: string[];
-}
 // One proposal the resolver left for the operator, already shaped as the command
 // a click would fire. The assistant offers; it never triggers. Derived server-side
 // from the turn's findings, so the model never names a command and every payload
@@ -224,7 +216,10 @@ export interface OriginResolutionBlock {
   gaps: OriginGap[];
   last_resolution?: OriginLastResolution;
   raised?: RaisedCommand[];
-  degraded?: OriginDegraded;
+  // Why the resolver turn came back thin — a paid repair retry after an empty or
+  // truncated first response (`origin_resolve.py::_degraded_cause`). A cause and no
+  // grade: a turn producing nothing usable raises → 502, so it never reaches here.
+  degraded_cause?: string;
 }
 export interface ResolveOriginResponse {
   resolution: OriginResolutionBlock;

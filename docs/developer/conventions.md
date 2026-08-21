@@ -61,11 +61,11 @@ collects everything else.
   `score_population()` synthetic-0 on `validation_failures`; load-boundary
   deprecated-sample gate (uses `classify_result()` fatal codes). Any new
   fallback must be documented alongside these.
-- **Optimizer LLM calls go through `llm_call()`**
-  (`application/optimization/dispatch/llm_call/call.py`), never `chat()`.
-- **Escalation flows via return value** (`QueryLoopResult.escalation_signal`),
-  not exception. Use `graceful()` (`shared/errors.py`) where exceptions must
-  escape.
+- **Where a return-value contract must let an exception escape, use `graceful()`**
+  (`shared/errors.py`). The contracts themselves — optimizer calls through
+  `llm_call()`, escalation through `QueryLoopResult.escalation_signal` — are owned
+  by [`../../promptpotter/application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
+  § Conventions.
 - **Schema field order IS generation order.** A response model's fields are
   emitted left-to-right, each becoming context for the next; a `description=`
   is prompt, not documentation (root `CLAUDE.md` forbids trimming them).
@@ -120,6 +120,8 @@ Bought by getting it wrong. Tells, not theory.
 - **One grep is not absence** — a second spelling, a second tool, a second channel.
 - **A green suite after a signature change is a zero.** Break it on purpose and watch it fail.
 - **A rename done twice leaves the MIDDLE name.** `anti-rot` checks that a claim resolves, not that a name exists.
+- **A synonym reads fine from inside its own file.** Nothing is locally wrong about a second word for a concept the repo already names; grep the WORD across subsystems, because that is the only place the collision shows.
+- **`.get()` on a `total=False` TypedDict cannot raise.** Delete the key and every guard reading it goes quietly falsy — the opposite decision, no error, green suite.
 - **A glob skips `.inner/`** — dot-directories are absent, not empty. `os.walk`.
 - **Ask what CHOSE the rows.** Pairing does not rescue an outcome-selected subset.
 - **Ledger first, mtimes last.** From outside, a deliberate pause looks exactly like a crash.
@@ -165,7 +167,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 **When you changed what the engine *decides* (a gate, metric, or state), or added a capability at any entry point → `<entry-point-parity>`:**
 
 <entry-point-parity>
-**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves every caller-facing half as a silent "later". Engine-correct is not product-complete. **There are five ways in — the CLI, an AI caller (the `/potter-run` skill), the embedded launch a host program drives (`application/embedded_run.py`: the notebooks, the BBEH harness, a packaged adapter), the REST API, and the webapp — and a capability that reaches only the one you happened to be editing is half-built.** This project is whitelabeled and user-facing; the forgotten surface is always the one sitting a layer past where the change was made, which is usually the webapp. Two rules:
+**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves every caller-facing half as a silent "later". Engine-correct is not product-complete. **There are five ways in — the CLI, an AI caller (the `/potter-run` skill), the embedded launch a host program drives (`application/embedded_run.py`: the notebooks, the BBEH harness, a packaged adapter), the REST API, and the webapp — and a capability that reaches only the one you happened to be editing is half-built.** This project is whitelabeled and user-facing; the forgotten surface is always the one sitting a layer past where the change was made, which is usually the webapp. Three rules:
 
 1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe every entry point that could ask for it a legible surface in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it from where they actually work, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
 2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a new statistic, a new mode) reaches the operator *taught*: a plain-language explainer, riding an **existing** surfacing channel (the lens/formula seam, not a new toggle), and **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the metric they chose. Teach from **one corpus** that serves the operator and the next AI reader alike — don't fork the prose.

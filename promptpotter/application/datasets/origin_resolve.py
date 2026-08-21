@@ -194,23 +194,12 @@ async def resolve_origin_turn(
     raised = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised)
 
-    # Degradation gate. The resolver LLM can return a structurally-valid but
-    # content-empty CheckinOutput (every field defaults ``""``), which
-    # ``_apply_findings`` silently no-ops on (``updated is draft``) — historically
-    # minting a thin origin while the only trace was a stdout warning. Grade the
-    # turn so a degraded/empty resolution is LOUD, not mute. ``critical`` (nothing
-    # usable produced) raises → the route's existing catch surfaces it as a 502 the
-    # webapp shows. ``degraded`` (e.g. a paid repair retry — the provider's first
-    # response was empty/truncated, ~2x cost+latency) rides the resolution block as
-    # ``degraded`` and the check-in panel renders it as a warning + re-run option.
-    degraded = _grade_resolution(
+    # Degradation gate. The resolver LLM can return a structurally-valid but content-empty
+    # CheckinOutput (every field defaults ``""``), which ``_apply_findings`` silently no-ops
+    # on (``updated is draft``) — a thin origin the draft must carry a cause for.
+    degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts
     )
-    if degraded is not None and degraded["grade"] == "critical":
-        raise RuntimeError(
-            "the check-in model returned an empty/degraded response — "
-            + "; ".join(degraded["reasons"])
-        )
 
     block = resolution_block(updated)
     block["last_resolution"] = _resolution_wire(raw)
@@ -222,34 +211,36 @@ async def resolve_origin_turn(
         for proposal in raised
         if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
     ]
-    if degraded is not None:
-        block["degraded"] = degraded
+    if degraded_cause is not None:
+        block["degraded_cause"] = degraded_cause
     save_checkin_draft(stores, updated, resolution=block)
 
     return OriginResolutionResult(resolution=block, draft=updated)
 
 
-def _grade_resolution(
-    *, output: CheckinOutput, applied: bool, repair_attempts: int
-) -> dict[str, Any] | None:
-    """Grade one turn: ``critical`` when it produced nothing usable, ``degraded`` when a schema-repair
-    retry was paid. Same vocabulary as ``DegradationHealth``, which is sample-shaped and not reusable."""
+def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:
+    """Why this turn came back thin, or ``None`` where it did not — the check-in panel's warning
+    text and the block on auto-mint.
+
+    A turn that produced nothing usable RAISES rather than returning one; the route's catch turns
+    that into the 502 the webapp shows. So no unusable turn ever reaches a client, which is why the
+    served fact is a cause and not a grade — every value a client can see means the same thing.
+    ``DegradationHealth`` grades SAMPLES and shares nothing with this but the word."""
     asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
     if not applied and not asking and not output.recap.strip():
-        reasons = ["the check-in produced no usable setup, recap, or question"]
+        reasons = ["it produced no usable setup, recap, or question"]
         if repair_attempts > 0:
             reasons.append(
                 "the retry after the empty/truncated first response also failed to recover"
             )
-        return {"grade": "critical", "reasons": reasons}
+        raise RuntimeError(
+            "the check-in model returned an empty/degraded response — " + "; ".join(reasons)
+        )
     if repair_attempts > 0:
-        return {
-            "grade": "degraded",
-            "reasons": [
-                "the model's first response was empty or truncated and was retried "
-                "(~2x cost and latency); the resulting setup may be thin"
-            ],
-        }
+        return (
+            "the model's first response was empty or truncated and was retried "
+            "(~2x cost and latency); the resulting setup may be thin"
+        )
     return None
 
 

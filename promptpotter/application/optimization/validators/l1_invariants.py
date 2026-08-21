@@ -24,7 +24,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, is_leader_eligible
+from promptpotter.domain.results import CandidateProposal, EliminationGate, is_leader_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +48,14 @@ class L1YieldStats:
     l1_parse_failure: str | None = None
 
 
-# The reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an LLM
-# call. The SET now lives in `domain/escalation_signals.py`; this module writes the reasons,
-# `RoundResult` reads them back to derive its collapse counts, and `presentation/views/display.py`
-# filters on them when ranking. Re-exported here because three call sites already import it
-# from this module and it is still the validator's own vocabulary.
+# The reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an LLM call.
+# The SET lives in `domain/escalation_signals.py`, re-exported here because it is this validator's
+# own vocabulary and three call sites import it from here.
 
 
 def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
     """Measured losses only: ``accuracy == 0.0`` on an unmeasured candidate is the absence of
-    evidence, not a defeat, and an ε-elimination IS the measurement while a lock-in is its opposite."""
+    evidence, not a defeat, and of the three cut gates only ε is a loss."""
     out: list[tuple[int, frozenset[str]]] = []
     for i, rr in enumerate(prior_rounds):
         parent = rr.prompt_fields
@@ -66,7 +64,9 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
             if not cand.total or not is_leader_eligible(cand):
                 continue
             if cand.elimination_stopped:
-                if cand.elimination_context.get("leader_locked"):
+                # ε alone measured this arm against its priors; LOCK_IN is the opposite verdict,
+                # COLLAPSED is no measurement, and a degradation cut names no gate at all.
+                if cand.elimination_context.get("gate") != EliminationGate.EPSILON:
                     continue
             elif cand.matched_parent_accuracy is None or (
                 cand.accuracy > cand.matched_parent_accuracy

@@ -2801,9 +2801,10 @@ class _OrderedFakeBackend:
         self.n = n
         self.calls: list[int] = []
         self._inflight = 0
-        # How many were ALREADY running as each call began. Depth alone cannot tell a barrier
-        # from a sliding window — both peak at the armed number — but only a barrier lets the
-        # count fall back to 1 at a group boundary.
+        # How many were ALREADY running as each call began — the backend's own witness that a
+        # window physically opened, which the walk's declared depth cannot supply. Read its PEAK
+        # only: a later reading also falls when a peer retires early, so on a loaded box the tail
+        # of this series measures the scheduler rather than the arming.
         self.entries: list[int] = []
 
     async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
@@ -2959,14 +2960,19 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
 
     # 7. A press landing while samples are in flight TOPS THE WINDOW UP rather than waiting for
     #    them to drain — the press exists to shorten the wait. `hold` re-arms the instant the
-    #    arming is spent, i.e. an operator pressing again at every boundary. Asserted as the
-    #    INVARIANT, not the sequence: exact entry counts move with scheduling (clause 4), and
-    #    what separates topping up from queueing is that the window never drains back to 1.
+    #    arming is spent, i.e. an operator pressing again at every boundary. Read against clause
+    #    6's identical walk: same arming, same ceiling, and the ONLY difference is the press, so
+    #    the two depth series bracket exactly what it buys — held tops up where unheld collapses.
+    #    Asserted on `depths` (the window the walk OPENED) rather than on backend-observed
+    #    overlap, which is a wall-clock race: an in-flight peer that retires early lowers the
+    #    reading without the window having closed, so a loaded box reported a press that never
+    #    landed. `entries` still carries the launch burst below — the half it can answer exactly.
     held = await _walk(
         dataset, armed=3, cut_at=None, max_cells=4, arming="batch", hold=True, slowest_last=True
     )
-    assert max(held["entries"]) == 3
-    assert min(held["entries"][3:]) > 1
+    assert max(held["entries"]) == 3, "the group never physically overlapped"
+    assert held["depths"] == [3] * len(dataset)
+    assert b["depths"] != held["depths"]
     assert held["rows"] == d1["rows"]
 
     # 8. …and `round` arming does NOT self-consume here: it is spent by the round that scored

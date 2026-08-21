@@ -1,15 +1,15 @@
 // Cycle-id helpers shared across the webapp.
 //
-// The Python side has `promptpotter.infrastructure.store.paths.root_cycle_id`
-// + `sibling_kind` for the same job. We mirror just enough here to avoid
-// round-tripping for every sidebar / lineage render — the regex is the same
-// one paths.py uses.
+// The Python side has `store/layout.py::root_cycle_id` + `::sibling_kind` for the
+// same job, and the id is the ONE authority for both — neither side stores the kind.
+// We mirror the regex rather than round-trip per sidebar / lineage render, and the
+// short label needs the family TAIL as well, which only the id carries.
 
 const SIBLING_LAST_SEP_RE = /_(fork|diag|sweep)_(?!.*_(?:fork|diag|sweep)_)([^/]*)$/;
 const SIBLING_FIRST_SEP_RE = /_(fork|diag|sweep)_/;
 
 // Family-root id for a sibling, or the id itself when already a root.
-// Mirrors `root_cycle_id()` in paths.py — uses the FIRST separator so
+// Mirrors `root_cycle_id()` in layout.py — uses the FIRST separator so
 // `cycle_X_fork_Y_sweep_Z` still roots at `cycle_X`.
 export function rootCycleId(cycleId: string): string {
   const m = cycleId.match(SIBLING_FIRST_SEP_RE);

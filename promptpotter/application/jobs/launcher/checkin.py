@@ -33,6 +33,7 @@ from promptpotter.application.jobs.quota import admit_launch, check_launch_quota
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import (
@@ -110,10 +111,8 @@ def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, 
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")
-    if campaign.lifecycle_status != "checkin":
-        raise LaunchError(
-            f"campaign {campaign_id} is not in check-in (lifecycle={campaign.lifecycle_status})"
-        )
+    if not is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
+        raise LaunchError(f"campaign {campaign_id} is not in check-in — its origin is committed")
     draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
         raise LaunchError(f"campaign {campaign_id} has no check-in working state to start")

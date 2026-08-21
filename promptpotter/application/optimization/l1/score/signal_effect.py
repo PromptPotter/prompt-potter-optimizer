@@ -15,7 +15,7 @@ from promptpotter.domain.escalation_signals import (
     NurseOwner,
     RuntimeFailure,
 )
-from promptpotter.domain.results import DegradationContext, EliminationContext
+from promptpotter.domain.results import DegradationContext, EliminationContext, EliminationGate
 from promptpotter.shared.errors import ErrorCategory
 
 # A scoring-error abort is a broken-for-all-queries fault the operator must fix
@@ -141,13 +141,13 @@ def decode_signal_effect(
     if (elimination_stopped or leader_locked_loose) and signal.check_name == "elimination":
         leader_id = str(cr.get("leader_id", ""))
         elim_ctx = {
+            "gate": EliminationGate(cr["gate"]),
             "p_best": float(cr.get("p_best", 0.0)),
             "epsilon": float(cr.get("epsilon", POBB_DEFAULT_EPSILON)),
             "leader_id": leader_id,
             "queries_scored": int(cr.get("queries_scored", len(results))),
             "total_queries": int(cr.get("total_samples", len(dataset))),
             "n_priors": int(cr.get("n_priors", 0)),
-            "leader_locked": leader_locked_loose,
         }
 
     # Degradation context — populated when DegradationCheck (or scoring-
@@ -181,6 +181,9 @@ def decode_signal_effect(
         elimination_decision = (
             {
                 "candidate_id": candidate_id,
+                # WHICH gate cut it, so the replayer re-derives the rule that fired. Only ε
+                # computed a posterior, so `epsilon`/`recorded_p_best` mean something only there.
+                "gate": cr["gate"],
                 "prior_candidate_ids": priors_at_test,
                 "queries_scored": queries_scored,
                 "epsilon": float(cr.get("epsilon", elim_check.epsilon)),

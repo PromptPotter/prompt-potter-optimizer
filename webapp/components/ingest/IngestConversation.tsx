@@ -261,7 +261,7 @@ export function IngestConversation({
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
   if (flow.phase.stage !== "ready") return null;
-  const { draft, resolution, raised, degraded } = flow.phase;
+  const { draft, resolution, raised, degradedCause } = flow.phase;
   // `blocked` mirrors the server gate alone — adding `gaps.length` is a second
   // definition whose divergent state is a dead Start with no explanation.
   const { complete: ready, gaps } = draft.readiness;
@@ -269,11 +269,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
   return (
     <div className="chat-msg ai ingest-ready">
-      {degraded ? (
+      {degradedCause ? (
         <div className="ingest-degraded" role="status">
           <p>
-            The check-in came back degraded — {degraded.reasons.join(" · ")}. Re-run
-            it, or adjust the setup below by hand before starting.
+            The check-in came back degraded — {degradedCause}. Re-run it, or adjust the
+            setup below by hand before starting.
           </p>
           <button
             type="button"

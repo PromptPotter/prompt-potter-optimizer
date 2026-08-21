@@ -92,7 +92,7 @@ def _warn_if_no_terminal_ranker(schema: PipelineSchema, status: Callable[[str], 
     NO_RESULT — so it is surfaced loudly at setup, on the status line, not at score time."""
     if not schema.nodes:
         return
-    if any(n.node_type in ("ranker", "candidate_source") and n.output_keys for n in schema.nodes):
+    if any(n.emits_ranking and n.output_keys for n in schema.nodes):
         return
     msg = (
         f"Pipeline {schema.name!r} has no terminal ranker — no node emits a ranked list, "

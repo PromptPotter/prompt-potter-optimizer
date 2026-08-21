@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from enum import StrEnum
 from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
 
 from pydantic import ConfigDict, Field, computed_field
@@ -61,17 +62,29 @@ __all__ = [
 ]
 
 
+class EliminationGate(StrEnum):
+    """WHICH gate stopped the candidate, named by the PRODUCER (``pobb/checks.py``) because only it
+    knows: re-derived downstream from whichever keys survived, a collapse cut reads as an ε cut.
+    These are the mask's abort contributors."""
+
+    EPSILON = "epsilon"  # posterior fell below ε — measurement stopped, NOT a verdict
+    LOCK_IN = "lock_in"  # the opposite verdict: far enough ahead to stop buying
+    COLLAPSED = "collapsed"  # one label for every sample — the ABSENCE of a measurement
+
+
 class EliminationContext(TypedDict, total=False):
     """Written by ``decode_signal_effect`` when the elimination check fires; empty when the
-    candidate was not cut. Disjoint from :class:`DegradationContext`."""
+    candidate was not cut. Disjoint from :class:`DegradationContext`.
 
+    ``gate`` says which of the rest are MEANT: only ε and lock-in ever computed a posterior."""
+
+    gate: EliminationGate
     p_best: float
     epsilon: float
     leader_id: str
     queries_scored: int
     total_queries: int
     n_priors: int
-    leader_locked: bool
     leader_label: str
 
 
@@ -485,6 +498,12 @@ def choose_overlap_set(
 L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
 L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
 L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
+# The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
+# never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
+# verdict the round never reached. A ROUTING reader is a different question and may ask either.
+L1_PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
+    {L1_PARSE_FAILURE_MALFORMED, L1_PARSE_FAILURE_WRONG_TYPE}
+)
 
 
 class RoundResult(StrictModel):
@@ -786,6 +805,20 @@ class WarningDict(TypedDict):
 
 HealthGrade = Literal["healthy", "degraded", "critical"]
 
+# WHY a round graded below healthy — one cause, closed set. Closed so that a reader branching on
+# a cause no producer emits is a type error rather than a notice that silently never renders.
+HealthCause = Literal[
+    "origin_unmeasured",
+    "backend_unreachable",
+    "structural",
+    "unscoreable",
+    "holed",
+    "evidence_starved",
+    "structural_untested",
+    "persistent",
+    "degraded",
+]
+
 # Which fitness number headlines the operator's surfaces. ONE owner, so `CampaignConfig` and
 # `LiveDashboardState` cannot drift into a wide `str` on one side and a closed union on the other.
 HeadlineMetric = Literal["accuracy", "composite", "ability"]
@@ -803,7 +836,9 @@ class DegradationHealth(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     grade: HealthGrade
-    reasons: list[str] = Field(default_factory=list)
+    # ONE cause, not a list: every producer branch assigns exactly one, and `None` is the
+    # `healthy` grade. A list invited readers to scan it for a name nobody wrote.
+    cause: HealthCause | None = None
     samples: int
     structural_count: int
     transient_count: int
@@ -835,8 +870,10 @@ class DegradationHealth(StrictModel):
 
 class PayloadOutcome(StrictModel):
     source_file: str
-    # A ``StopOutcome`` value for attempted forks — the one StopReason classification, never a
-    # sweep-private vocabulary — or the batch states skipped | skipped_already_forked.
+    # A ``StopOutcome`` value for every payload the batch ATTEMPTED — never a sweep-private
+    # vocabulary. The two batch states both mean not-attempted: ``skipped_already_forked`` (an
+    # earlier batch took it) and ``skipped`` (this batch halted first). Whether a cycle survived
+    # is ``cycle_id`` below — a separate fact, and never what decides this one.
     status: str
     cycle_id: str
 

@@ -1139,15 +1139,16 @@ paths:
       operationId: startCheckin
       summary: Start a CHECKIN campaign — gate the origin, commit the Dataset, mint the run.
       description: |
-        Terminal verb in the check-in lifecycle. The campaign already exists
-        durably (minted in the `checkin` lifecycle on the first ingest action —
-        `/datasets/ingest` or `/datasets/{name}/draft`); its working state lives
-        at `projects/{tenant}/campaigns/{campaign_id}/checkin/`. This verb flips
-        it to `active` and runs. Server:
-        1. Loads the campaign by `campaign_id`, asserts owned + still `checkin`,
+        Terminal verb in the check-in phase. The campaign already exists durably
+        (minted on the first ingest action — `/datasets/ingest` or
+        `/datasets/{name}/draft`); its working state lives at
+        `projects/{tenant}/campaigns/{campaign_id}/checkin/`, and the phase itself
+        is the root cycle's `.runtime/checkin.flag`. This verb clears that flag and
+        runs. Server:
+        1. Loads the campaign by `campaign_id`, asserts owned + flag still set,
            rehydrates the draft from `checkin/draft.json`.
-        2. Runs the deterministic origin-readiness gate (incomplete → 422; the
-           campaign stays `checkin` so the operator resolves + retries).
+        2. Runs the deterministic origin-readiness gate (incomplete → 422; the flag
+           stays set so the operator resolves + retries).
         3. Reserves the machine slot, then commits the origin: a fresh upload
            writes `projects/{tenant}/datasets/{slug}/` (the four Dataset files
            + sibling `campaign.yaml`) from the materialized bank; a draft derived
@@ -1246,9 +1247,10 @@ paths:
           in: query
           required: false
           description: |
-            Operator visibility filter — `active` (default; also surfaces
-            in-progress `checkin` campaigns), `archived`, `deleted`, `checkin`,
-            or `all`.
+            `active` (default), `archived`, `deleted` — the visibility intent —
+            or `all`. `checkin` is not a status but the authoring PHASE, read off
+            the root cycle's `.runtime/checkin.flag`; it narrows `active`, which
+            already carries the origin-authoring set.
           schema:
             type: string
             enum: [active, archived, deleted, checkin, all]
@@ -1280,7 +1282,7 @@ paths:
       operationId: getCampaignCheckin
       summary: Re-open a CHECKIN campaign — its draft wire + last resolver turn.
       description: |
-        The sidebar opens a `checkin`-lifecycle campaign through here instead of
+        The sidebar opens a check-in campaign through here instead of
         the dashboard (no `dashboard.json` exists pre-loop): the webapp rebuilds
         the ingest "ready" panel from `draft` and shows the prior `resolution`
         recap. Tenant-scoped — a cross-tenant id 404s. 404 when the campaign has
@@ -2640,7 +2642,7 @@ components:
 
     CycleListEntry:
       type: object
-      required: [campaign_id, cycle_id, sibling_kind, unit_kind, is_root, status]
+      required: [campaign_id, cycle_id, mint_kind, is_root, status]
       properties:
         campaign_id: { type: string }
         cycle_id: { type: string }
@@ -2650,8 +2652,7 @@ components:
           description: Immediate parent for siblings (forks/sweeps/diag); null for roots.
         dataset_name: { type: string, default: '' }
         backend_id: { type: string, default: '' }
-        sibling_kind: { type: string, enum: [root, fork, diag, sweep] }
-        unit_kind:
+        mint_kind:
           type: string
           enum: [session, divergent_resume, user_fork, auto_rebase]
         is_root: { type: boolean }
@@ -3825,19 +3826,15 @@ components:
             answer resolves so the panel applies it as a confirmed patch), and
             `recap` (set only on a `ready` turn). The turn's findings are NOT
             mirrored here: they ride `raised` above as clickable commands.
-        degraded:
-          type: object
-          required: [grade, reasons]
-          additionalProperties: false
-          properties:
-            grade: { type: string, enum: [degraded, critical] }
-            reasons: { type: array, items: { type: string } }
+        degraded_cause:
+          type: string
           description: |
-            Present only when the resolver turn degraded — the check-in model
-            returned an empty/truncated response that forced a paid repair retry,
-            or produced nothing usable. A `critical` turn
-            raises instead (502 `resolver_failed`); `degraded` rides here so the
-            check-in panel warns + offers a re-run rather than minting a thin origin.
+            Present only when the resolver turn came back thin — the check-in model
+            returned an empty/truncated response that forced a paid repair retry.
+            One cause, no grade: a turn that produced nothing usable raises instead
+            (502 `resolver_failed`), so every value that reaches a client means the
+            same thing. The check-in panel warns + offers a re-run on it rather than
+            minting a thin origin.
 
     ResolveOriginResponse:
       type: object

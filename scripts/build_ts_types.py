@@ -431,7 +431,9 @@ def _emit_evaluator_meta() -> str:
 
     rows = "\n".join(
         f"  {{ name: {m['name']!r}, scope: {m['scope']!r}, direction: {m['direction']!r},"
-        f" node_type: {repr(m['node_type']) if m['node_type'] else 'null'},"
+        # Through ``str`` first: a StrEnum member's ``repr`` is ``<NodeType.RANKER: 'ranker'>``,
+        # which emits as TS the compiler cannot parse. Every other emitter here renders ``.value``.
+        f" node_type: {repr(str(m['node_type'])) if m['node_type'] else 'null'},"
         f" description: {m['description']!r} }},"
         for m in evaluators_meta()
     )

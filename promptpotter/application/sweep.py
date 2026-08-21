@@ -129,7 +129,9 @@ async def run_sweep_batch(
         payloads=initial_payloads,
     )
 
-    new_cycle_ids: list[str] = []
+    # Keyed by payload NAME, never by position: a payload that was already forked, crashed at
+    # init or ran zero rounds mints nothing, so a positional list no longer lines up.
+    minted_by_source: dict[str, str] = {}
     status_by_source: dict[str, str] = {}
     interrupted = False
 
@@ -142,15 +144,12 @@ async def run_sweep_batch(
             root_ctx.session_id,
             CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id),
         )
-        cycle_by_source = {
-            p.name: cid for (p, _), cid in zip(sweep_payloads, new_cycle_ids, strict=False)
-        }
         store.sweeps.finalize_batch(
             campaign_id,
             batch_id,
             completed_at=completed_at,
             status_by_source=status_by_source,
-            cycle_by_source=cycle_by_source,
+            cycle_by_source=minted_by_source,
         )
         final_index = store.sweeps.load_batch(campaign_id, batch_id) or {}
         payload_rows = tuple(
@@ -171,7 +170,7 @@ async def run_sweep_batch(
                     family_root=family_root,
                     started_at=started_at,
                     completed_at=completed_at,
-                    n_minted=len(new_cycle_ids),
+                    n_minted=len(minted_by_source),
                     n_payloads=len(sweep_payloads),
                     payloads=payload_rows,
                 )
@@ -180,7 +179,7 @@ async def run_sweep_batch(
         logger.info(
             "Sweep batch %s closed: %d forks under %s; active pointer restored",
             batch_id,
-            len(new_cycle_ids),
+            len(minted_by_source),
             parent_cycle_id,
         )
         return SweepBatchResult(
@@ -189,7 +188,7 @@ async def run_sweep_batch(
             family_root=family_root,
             started_at=started_at,
             completed_at=completed_at,
-            fork_cycle_ids=new_cycle_ids,
+            fork_cycle_ids=list(minted_by_source.values()),
             payload_outcomes=[
                 PayloadOutcome(
                     source_file=row.source_file,
@@ -306,7 +305,7 @@ async def run_sweep_batch(
                     break
                 continue
 
-            new_cycle_ids.append(new_cycle_id)
+            minted_by_source[path.name] = new_cycle_id
             if outcome is StopOutcome.PAUSED:
                 # The pause flag halts the fork and returns PAUSED — halt the batch too.
                 logger.warning(
@@ -314,7 +313,7 @@ async def run_sweep_batch(
                     "batch. Resume the partial fork with `resume` against "
                     "that cycle, or re-run `new --sweep-batch` to pick up "
                     "remaining payloads.",
-                    len(new_cycle_ids),
+                    len(minted_by_source),
                     len(sweep_payloads),
                     new_cycle_id,
                     path.name,
@@ -323,7 +322,7 @@ async def run_sweep_batch(
                 break
             logger.info(
                 "Sweep fork %d/%d complete: %s (payload=%s)",
-                len(new_cycle_ids),
+                len(minted_by_source),
                 len(sweep_payloads),
                 new_cycle_id,
                 path.name,

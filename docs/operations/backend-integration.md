@@ -12,6 +12,8 @@ PromptPotter optimizes any backend that speaks three endpoints. It reads the pip
 
 Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md).
 
+**A gateway (OmniRoute, OpenRouter) is a backend like any other, and a campaign points at a pinned model — never at a router that chooses one per request.** A gateway picks per request on live heuristics where PromptPotter picks once on measured evidence; both choosing on the eval path means the rows were not measured on one model, and no fork or `verify` recovers that campaign.
+
 ## Connection security
 
 The client talks to each backend over HTTP(S) with optional bearer-token auth. Four layers, all set at registration time:

@@ -16,6 +16,7 @@ from promptpotter.application.scoring.selection import elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.rendering import classify_result
+from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
@@ -280,9 +281,9 @@ class PoBBCheck:
             return _eliminate(
                 self.name,
                 {
+                    "gate": EliminationGate.COLLAPSED,
                     "queries_scored": n,
                     "total_samples": self.n_samples,
-                    "answer_collapsed": True,
                 },
                 candidate_idx,
                 n_total_candidates,
@@ -335,6 +336,7 @@ class PoBBCheck:
             return _leader_locked(
                 self.name,
                 {
+                    "gate": EliminationGate.LOCK_IN,
                     "queries_scored": n,
                     "total_samples": self.n_samples,
                     "n_priors": len(paired_priors),
@@ -369,6 +371,7 @@ class PoBBCheck:
         return _eliminate(
             self.name,
             {
+                "gate": EliminationGate.EPSILON,
                 "queries_scored": n,
                 "total_samples": self.n_samples,
                 "n_priors": len(paired_priors),

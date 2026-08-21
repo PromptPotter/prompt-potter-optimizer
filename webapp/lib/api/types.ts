@@ -94,19 +94,26 @@ export type {
   WorkspaceStorageResponse,
 } from "./types.generated";
 
-// Literal-type unions — not derivable from Pydantic; hand-maintained.
-// Three named data scopes — same vocabulary as the heatmap artifacts and
+import type { CycleListEntry, DegradationHealth } from "./types.generated";
+
+// Three named data scopes — hand-maintained because `HeatmapScope` reaches the wire only as a
+// query param, so there is no response model to generate it from. Same vocabulary as the heatmap
+// artifacts and
 // the API's `scope` query param. `cycle` = one cycle's own Rasch fit;
 // `campaign` = the campaign's pooled fit; `dataset` = the cross-campaign
 // archive snapshot. A workspace-scope heatmap is meaningless (samples
 // differ per dataset), so the heatmap tier stops at `dataset`.
 export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 
-// Operator-facing unit kind — the time-horizon taxonomy the sidebar
-// badges by, derived server-side from (sibling_kind, fork trigger).
-// `session` = the root run (resume extends it); `divergent_resume` = a
-// fork-on-divergence branch; `user_fork` = any operator-initiated branch
-// (HITL fork, diagnostic, sweep); `auto_rebase` = an automatic layer-driven
-// rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
-export type UnitKind = "session" | "divergent_resume" | "user_fork" | "auto_rebase";
+// What minted this cycle, as the sidebar badges it — derived server-side from the cycle id's own
+// kind plus the fork trigger. READ BACK off the generated interface: `session` = the root run
+// (resume extends it); `divergent_resume` = a fork-on-divergence branch; `user_fork` = any
+// operator-initiated branch (HITL fork, diagnostic, sweep); `auto_rebase` = an automatic
+// layer-driven rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
+export type MintKind = CycleListEntry["mint_kind"];
+
+// WHY a round graded below healthy — one cause, closed server-side
+// (`domain/results.py::HealthCause`). READ BACK off the generated interface, never re-typed, so a
+// cause no producer emits cannot be branched on here. `null` is the `healthy` grade.
+export type HealthCause = NonNullable<DegradationHealth["cause"]>;
 

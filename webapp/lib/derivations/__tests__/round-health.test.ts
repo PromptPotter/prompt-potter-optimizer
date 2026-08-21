@@ -9,7 +9,7 @@ function health(
 ): DegradationHealth {
   return {
     grade,
-    reasons: grade === "degraded" ? ["degraded"] : [],
+    cause: grade === "healthy" ? null : "degraded",
     samples: 20,
     structural_count: 0,
     transient_count: 5,
@@ -61,11 +61,16 @@ describe("degradedRoundNotices", () => {
     expect(out[0]!.detail).toContain("25%");
   });
 
-  it("phrases the under-probed (untested) origin distinctly and sorts by round", () => {
+  // `structural_untested` is the name a PRODUCER writes (`results_health.py`) — a fixture
+  // inventing its own would pass while the notice never renders against a real verdict.
+  it("phrases the under-probed origin distinctly and sorts by round", () => {
     const out = degradedRoundNotices(
       dash([
         { round: 2, health: health("degraded") },
-        { round: 0, health: health("degraded", { reasons: ["untested"], dominant_node: null }) },
+        {
+          round: 0,
+          health: health("degraded", { cause: "structural_untested", dominant_node: null }),
+        },
       ]),
     );
     expect(out.map((d) => d.round)).toEqual([0, 2]);
