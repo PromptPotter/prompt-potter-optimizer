@@ -10,11 +10,19 @@ from pydantic import ConfigDict, Field, field_serializer
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 
-# Cross-layer protocol fields L1 cannot operate without. Dropping any fires
-# `l1_layout_missing_mandatory`, which routes to L3 rather than letting L2 starve L1 of
-# failure context.
+# What L2 may never excise: a field L1 cannot OPERATE without, or the sole carrier of a state L1
+# must not enter blind — `answer_distribution` is the second kind, and it self-suppresses where
+# there is no label to be constant about, so it costs nothing on the runs it cannot speak about.
+# Dropping any fires `l1_layout_missing_mandatory`, which rolls back rather than starving L1.
 L1_MANDATORY: frozenset[str] = frozenset(
-    {"plan", "task_context", "rendered_prompt", "pipeline_param_catalogue", "critique"}
+    {
+        "plan",
+        "task_context",
+        "rendered_prompt",
+        "pipeline_param_catalogue",
+        "critique",
+        "answer_distribution",
+    }
 )
 
 # Names L2 may pick from. Subset of the global registry; L2-internal signals are excluded so

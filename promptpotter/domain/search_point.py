@@ -22,6 +22,19 @@ PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
 """Per-node LLM-call tunable axes (non-prompt). Drives param-scope discipline + continuous_envelope."""
 
 
+def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
+    """SOLE writer of the strip, so no surface invents a second rule for what counts as config.
+
+    A node's ``prompt`` is the RENDER of ``prompt_fields``, never configuration — persist it and it
+    is stale the moment the fields move, while every reader rebuilds it. `promptpotter-self` is not
+    an exception: an optimizer node's evolved content rides the six ``PROMPT_STRING_FIELDS`` beside
+    this key, which survive."""
+    return {
+        node: ({k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg)
+        for node, cfg in (pipeline_params or {}).items()
+    }
+
+
 class SearchPoint(StrictModel):
     def render(self) -> str:
         raise NotImplementedError
@@ -56,13 +69,8 @@ class JobSearchPoint(SearchPoint):
     @property
     def config_params(self) -> dict[str, Any]:
         """``pipeline_params`` minus the per-node rendered prompt, which rides ``prompt_fields``
-        and :meth:`render`. Sole writer of the strip — the observe view reads it verbatim."""
-        return {
-            node: (
-                {k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg
-            )
-            for node, cfg in self.pipeline_params.items()
-        }
+        and :meth:`render`. The observe view reads it verbatim."""
+        return strip_rendered_prompt(self.pipeline_params)
 
     def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
         """Optimizer-side dedup over the SCHEMA-RESOLVED node configs, never the archive key.
@@ -203,4 +211,5 @@ __all__ = [
     "JobSearchPoint",
     "SearchPoint",
     "TaskDecomposition",
+    "strip_rendered_prompt",
 ]

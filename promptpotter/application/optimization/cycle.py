@@ -78,7 +78,7 @@ def _origin_round(
         matched_parent_accuracy=row.accuracy,
         matched_parent_composite=row.composite_fitness,
         prompt_fields=prompt_fields,
-        pipeline_params=sp.pipeline_params,
+        pipeline_params=sp.config_params,
         results=results,
         all_candidate_results={opt_sp.lineage.id: results},
         candidates_scored=1,

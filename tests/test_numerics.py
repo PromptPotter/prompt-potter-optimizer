@@ -2127,11 +2127,32 @@ def test_run_l3_output_validators_aggregates():
             L1Layout(task_intent=["task_context"], problem_description=["rendered_prompt"]),
             "l1_layout_missing_mandatory",
         ),
+        # The COLLAPSE DETECTOR alone, with every other mandatory name present. Nothing else in
+        # the prompt can say a pipeline has stopped reasoning and is emitting one label, so a
+        # layout edit that drops it leaves the run unable to see the state it is in.
+        (
+            L1Layout(
+                task_intent=["task_context"],
+                problem_description=[
+                    "rendered_prompt",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "critique",
+                ],
+            ),
+            "l1_layout_missing_mandatory",
+        ),
         # Unknown placeholder in a slot.
         (
             L1Layout(
                 task_intent=["task_context", "made_up_signal"],
-                problem_description=["rendered_prompt", "pipeline_param_catalogue", "plan"],
+                problem_description=[
+                    "rendered_prompt",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "critique",
+                    "answer_distribution",
+                ],
             ),
             "l1_layout_unknown_placeholder",
         ),
@@ -2139,7 +2160,13 @@ def test_run_l3_output_validators_aggregates():
         (
             L1Layout(
                 task_intent=["task_context", "task_context"],
-                problem_description=["rendered_prompt", "pipeline_param_catalogue", "plan"],
+                problem_description=[
+                    "rendered_prompt",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "critique",
+                    "answer_distribution",
+                ],
             ),
             "l1_layout_dups_within_slot",
         ),
@@ -2154,6 +2181,7 @@ def test_run_l3_output_validators_aggregates():
                     "pipeline_param_catalogue",
                     "plan",
                     "critique",
+                    "answer_distribution",
                 ],
                 thinking_style=["task_context"],
             ),
@@ -2165,6 +2193,40 @@ def test_layout_hard_failures(layout, expected_validator_id):
     result = validate_l1_layout(layout, spec=NODE_LAYOUTS["l1_generate"])
     assert result.is_valid is False
     assert expected_validator_id in {o.validator_id for o in result.outcomes}
+
+
+def test_persisted_params_drop_the_render_and_lose_nothing():
+    """The round document records CONFIG; the prompt is a render of `prompt_fields` that nothing
+    re-derives at the write, so persisting it is how a round comes to name a prompt its winner
+    never ran. Stripping is safe only because the render rebuilds identically from the fields —
+    that equality is what this asserts, not the strip itself."""
+    from promptpotter.domain.pipeline_schema import NodePromptInfo
+    from promptpotter.domain.search_point import strip_rendered_prompt
+
+    schema = PipelineSchema(
+        name="test",
+        available_models=["openai/gpt-oss-120b"],
+        nodes=[PipelineNode(name="llm_only", prompt_info=NodePromptInfo())],
+    )
+    osp = _opt_sp()
+    # A stale render beside a real config axis — the shape `current_sp` hands the round writer.
+    base = {"llm_only": {"temperature": 0.3, "prompt": "AN OLDER ROUND'S PROMPT"}}
+
+    stored = strip_rendered_prompt(base)
+    assert "prompt" not in stored["llm_only"]
+    assert stored["llm_only"]["temperature"] == 0.3
+    assert base["llm_only"]["prompt"] == "AN OLDER ROUND'S PROMPT"  # never mutated in place
+
+    # What every reader does with the stored params: the render comes back from the FIELDS, so
+    # the point built off the stripped record is the point built off the full one.
+    assert osp.to_job_search_point(base_pipeline_params=stored, schema=schema) == (
+        osp.to_job_search_point(base_pipeline_params=base, schema=schema)
+    )
+
+    # `promptpotter-self` is not an exception: an optimizer node's evolved content rides the
+    # PROMPT_STRING_FIELDS beside the render key, and the strip must not reach them.
+    inner = strip_rendered_prompt({"l1_generate": {"persona": "A", "prompt": "rendered"}})
+    assert inner["l1_generate"] == {"persona": "A"}
 
 
 def test_resolve_node_layout_l4_edit_and_guard_rail():

@@ -36,6 +36,7 @@ from promptpotter.domain.results import (
     is_leader_eligible,
 )
 from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.statistics import paired_reading
@@ -413,9 +414,13 @@ async def l1_score(
             **best_opt_sp.prompt_field_dict(),
             "lineage": best_opt_sp.lineage.model_dump(),
         },
-        pipeline_params=params_by_id.get(winner_id, pipeline_params)
-        if winner_id
-        else pipeline_params,
+        # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
+        # nothing re-renders at this write — persisting it makes the document claim a prompt the
+        # winner never ran. `prompt_fields` above is the winner's own, and every reader rebuilds
+        # the render from it through `to_job_search_point`.
+        pipeline_params=strip_rendered_prompt(
+            params_by_id.get(winner_id, pipeline_params) if winner_id else pipeline_params
+        ),
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),
