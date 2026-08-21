@@ -72,6 +72,10 @@ if TYPE_CHECKING:
 # per run in ``__init__``; ANSI-stripped per line. Captures the LiveDisplay stream only —
 # ``logging``-level warnings route through Python logging, not ``_write``.
 _READOUT_PATH = Path("logs/latest.log")
+# The run BEFORE this one. A relaunch is exactly when the previous readout is worth having —
+# it is the one that holds why the run stopped — and truncate-in-place destroyed it at the
+# moment of asking. One generation back, not a rotation series: two files answer the question.
+_PREVIOUS_READOUT_PATH = Path("logs/previous.log")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -80,6 +84,8 @@ def _open_readout() -> TextIO | None:
     never abort a costly run. Held open rather than reopened per line, and line-buffered so a hard kill still leaves them."""
     try:
         _READOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _READOUT_PATH.is_file():
+            _READOUT_PATH.replace(_PREVIOUS_READOUT_PATH)
         return _READOUT_PATH.open("w", encoding="utf-8", buffering=1)
     except OSError:
         return None

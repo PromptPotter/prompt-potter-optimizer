@@ -36,7 +36,13 @@ export interface ForkReconcileDefaults {
 }
 
 export function forkReconcileDefaults(dash: DashboardSnapshot | null): ForkReconcileDefaults {
-  const roundsConsumed = Array.isArray(dash?.rounds) ? dash.rounds.length : 0;
+  // L1 rounds only. `rounds[]` carries the ORIGIN at index 0 and `max_rounds` counts L1 rounds
+  // ("0 = measure the origin and stop"), so length prefilled every fork one round short — the
+  // engine applies the same correction at `restamp.py::_facts_from_inner_cycle`. A rewind clamps
+  // `rounds[]` below what the parent really spent, so this still under-reports there.
+  const roundsConsumed = Array.isArray(dash?.rounds)
+    ? dash.rounds.filter((r) => r.round > 0).length
+    : 0;
 
   const rawMax = dash?.run_limits?.max_rounds;
   const parentMaxRounds = typeof rawMax === "number" ? rawMax : null;
