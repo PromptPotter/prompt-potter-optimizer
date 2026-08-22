@@ -1,5 +1,0 @@
-reason: >-
-  Crossover #11: D002's 3-step answer_format (proven +21pp, n=20) composed with explicit rule-citation
-  per reasoning step (new gene). The 94 'unknown' misses correlate with the model abandoning the rule
-  system before deriving a contradiction. Forcing rule-citation in each step makes 'unknown' an outcome
-  of explicit rule-trace exhaustion rather than a fallback after free-form narration loses its way.

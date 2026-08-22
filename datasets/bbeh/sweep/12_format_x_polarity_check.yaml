@@ -1,6 +1,0 @@
-reason: >-
-  Crossover #12: D002's 3-step answer_format (proven +21pp, n=20) composed with explicit polarity-verification
-  before commit (new gene). Two miss classes survive even when the model commits to proved/disproved:
-  8 sign-flips (proved↔disproved swap, rare but high-confidence wrong) and 50 over-confident commits (pred=proved/disproved
-  when gt=unknown). Both are commit-time errors, not reasoning failures — the model derives something
-  but mislabels it relative to the question's polarity.

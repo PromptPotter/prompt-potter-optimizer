@@ -57,6 +57,7 @@ Delete on sight — don't ask, don't TODO, don't "remove later":
 
 <root-fix>
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
+A fix at N sites is the model serving the wrong shape — realign it and let the sites fall out; net prose growth in a bug-fix diff proves it was a patch.
 </root-fix>
 
 <dispatch-first>
@@ -125,7 +126,7 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 ## Pointers
 
 - **Architecture:** [`docs/architecture.md`](docs/architecture.md) §0/§0.5 — backbone primitives, five I/O kinds, the central loop + L1/L2/L3 escalation + L4-is-recursion, searchpoints, scoring, identity, token/cost ledger. **Extend primitives in place** — the wrong shape is meant to be hard to express, not policed by a test.
-- **What to pick up next:** [`docs/specs/code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md) — the open backlog, bucketed **Ready** (no blocker, pick up cold) / **Blocked** (blocker named) / **Considered, not debt** (settled — don't re-open). This is the file that answers "what should I do"; an item ships by being DELETED from it, so a mechanical fix goes here rather than into [`roadmap.md`](docs/specs/roadmap.md), which holds direction of travel and nothing smaller.
+- **What to pick up next:** [`docs/specs/code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md) — **multi-arc** work and **blocked** work, one line each. It answers "what should I do" when nothing is already in hand; an item ships by being DELETED from it. **Nothing smaller goes there** — a fix you could make in the pass that found it is made there, not filed, and an adjacent finding is part of the topic you are already on.
 - **Persistence:** [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md) — four-entity tree (Workspace → Dataset → Campaign → Cycle), `.promptpotter/` layout, `measurements/`, fork lineage, recovery.
 - **Per-layer contracts** — load only the layer you touch; each subpackage's own `CLAUDE.md` auto-loads by directory proximity. The index is [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md); the roster is that directory listing.
 - **Contracts:** the ADRs in [`docs/adr/`](docs/adr/) are the permanent constitutions. **The roster is that directory listing** — enumerating a subset anywhere is what let two of them go unindexed, and a second copy is what made the two indexes disagree. Index map: [`docs/CLAUDE.md`](docs/CLAUDE.md).

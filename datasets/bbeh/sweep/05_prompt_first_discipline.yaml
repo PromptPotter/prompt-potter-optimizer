@@ -1,4 +1,0 @@
-reason: >-
-  V1 — Prompt-first discipline. Past BBEH cycle stagnated by spending rounds on temperature/reasoning_effort
-  while the only +5pp lift came from a task_intent rewrite (cycle_2e758cd9442f round 2). Force L1 to spend
-  its variant budget on prompt strings before parameters.

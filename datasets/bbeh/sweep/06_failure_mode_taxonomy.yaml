@@ -1,4 +1,0 @@
-reason: >-
-  V2 — Failure-mode taxonomy. Past runs showed candidates failing silently at 0% with no per-sample reason;
-  L1 then re-emitted the same generic 'step-by-step' nudge. Force L1 to classify each failed sample before
-  proposing variants.

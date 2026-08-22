@@ -231,19 +231,19 @@ Breadth-first comparison of N L1-prompt hypotheses: instead of one trial cycle o
 
 **Per-fork protocol:** origin (cache-hit after the first) + 1 scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`.
 
-**Authoring.** One JSON file per candidate under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). Every field optional; `reason` is a label.
+**Authoring.** One `*.yaml` file per arm under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). `reason` is a label and changes nothing the fork runs, so **an arm setting no contrast lever is refused at load** (`application/sweep.py::load_sweep_payloads`, which names every offending arm at once): it would fork a copy of its parent and pay a full scored round to measure it.
 
-```json
-{
-  "reason": "step-by-step layout",
-  "l1_layout": {
-    "task_intent": ["task_context"],
-    "problem_description": ["rendered_prompt", "pipeline_param_catalogue", "plan", "diagnostics", "failures", "critique"]
-  }
-}
+```yaml
+reason: >-
+  Does the objective read better leading the prompt than buried mid-panel? Same evidence,
+  measurand and confounds moved to the front slot.
+l1_layout:
+  persona: [measurand, confounds]
+  problem_description: [rendered_prompt, pipeline_param_catalogue, plan, answer_distribution,
+    critique, failing_samples]
 ```
 
-`l1_layout` stamps per-slot signal-name lists onto the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Mandatory placeholders `{plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` must each appear somewhere across the four slots.
+`l1_layout` stamps per-slot signal-name lists onto the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Edit only the slots you mean to move; an omitted slot keeps what it holds (`domain/l1_layout.py::coerce_l1_layout`). The slots are `L1_LAYOUT_SLOTS` and the placeholders that must each appear somewhere across them are `NODE_LAYOUTS["l1_generate"].mandatory` — read both there, never a copy: a layout failing them raises only once the fork is minted and its origin paid for.
 
 ```bash
 python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
@@ -375,7 +375,7 @@ Gated by `applies(schema)` — present only when the matching node is active.
 
 Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `exp`, `pow`. Output clamped to `[0, 1]`; undefined names raise `NameError` — fail loud is the contract.
 
-The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs origin 0.5012)` per candidate, with the full formula text always in `log.md` (source of truth when reviewing finished cycles).
+The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs parent 0.5012)` per candidate — anchored on the row's matched parent, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md` (source of truth when reviewing finished cycles).
 
 ## Beta hosting state
 

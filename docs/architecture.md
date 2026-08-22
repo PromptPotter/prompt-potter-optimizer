@@ -689,9 +689,12 @@ the PR description.
     `application/origin.py`) — the same type every candidate is — so "the
     config the loop starts from" and "C0, the first candidate" are one
     statement, not two. For a fork it is the point the fork branches *from*.
-    Scoring it yields its **measurement** (round 0, `origin_accuracy`, via
-    `establish_campaign_origin`) — what you get by measuring C0, never a
-    rival sense of the word.
+    Scoring it yields its **measurement** (round 0, via
+    `establish_campaign_origin`; `origin_accuracy_of` derives it back off
+    `rounds[0]`) — what you get by measuring C0, never a rival sense of the
+    word. The name `origin_accuracy` survives only where the fact IS C0 —
+    `CycleResult`, the export, the campaign index. A round's own floor is
+    `RoundResult.parent_accuracy`.
   - **The origin arrives incomplete; check-in completes it and gates it.**
     The operator supplies what they have (a pipeline, some prompt fields);
     it is not a whole origin until the **required inputs** that pipeline

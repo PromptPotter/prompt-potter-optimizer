@@ -192,16 +192,26 @@ def _anti_rot(_: Sel) -> Outcome:
     return (1, "liveL1Candidates outside the spine:\n" + "\n".join(hits)) if hits else (0, "")
 
 
-def _ruff_format(sel: Sel) -> Outcome:
-    if sel.staged:
-        return _run(_py("ruff", "format", "--check", *sel.py_files), _REPO)
-    return _run(_py("ruff", "format", "--check", "promptpotter/", "tests/"), _REPO)
+# What ruff lints when the run is not scoped to staged files. ``scripts/`` is here for the
+# reason ``_mypy`` states below — a tracked module outside the package is still shipped code —
+# and it was absent, which made the two modes disagree: ``--staged`` passes the staged paths
+# verbatim, so the hook lints a script the full run never looks at. An import-order violation
+# in this very file passed `gate.py` and was then rejected by `gate.py --staged` seconds later.
+_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/")
 
 
-def _ruff_check(sel: Sel) -> Outcome:
-    if sel.staged:
-        return _run(_py("ruff", "check", *sel.py_files), _REPO)
-    return _run(_py("ruff", "check", "promptpotter/", "tests/"), _REPO)
+def _ruff(*argv: str) -> Callable[[Sel], Outcome]:
+    """One ruff invocation over the staged paths, or over the whole target set.
+
+    Both modes of both subcommands spelled once: as two near-identical functions the target
+    lists were free to drift from each other as well as from the staged half.
+    """
+
+    def check(sel: Sel) -> Outcome:
+        paths = sel.py_files if sel.staged else _RUFF_TARGETS
+        return _run(_py("ruff", *argv, *paths), _REPO)
+
+    return check
 
 
 def _tsc(_sel: Sel) -> Outcome:
@@ -293,8 +303,8 @@ def _mypy(_sel: Sel) -> Outcome:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff_format, staged=True),
-    Check("ruff-check", "py", _ruff_check, staged=True),
+    Check("ruff-format", "py", _ruff("format", "--check"), staged=True),
+    Check("ruff-check", "py", _ruff("check"), staged=True),
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
     Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),

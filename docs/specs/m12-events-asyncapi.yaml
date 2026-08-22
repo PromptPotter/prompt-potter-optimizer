@@ -457,10 +457,10 @@ components:
             - layer_parse_failure
             - optimizer_deadline_retry
             # The round measured cleanly and still resolved nothing: no arm's
-            # blocked lift over the origin excluded 0
+            # blocked lift over the parent excluded 0
             # (`ScoredCandidate.matched_parent_lift_ci_*`). The round's numbers
             # are real and its winner is the best of what it saw — but the
-            # panel cannot tell that winner from the origin, so the point
+            # panel cannot tell that winner from the parent, so the point
             # estimate must not be read as a result. Distinct from every kind
             # above: nothing failed, nothing was recovered from, and the round
             # looks identical on every other channel. That silence is the

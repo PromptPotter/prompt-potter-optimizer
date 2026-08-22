@@ -92,6 +92,18 @@ invariants:
                       while both are alive. Archived is not gone. The server side of this is
                       the same rule: `warming_up` means "no dashboard YET" and a missing cycle
                       dir means GONE, and one route must never answer both with the same body.'
+  I8_floor_named:     'A rendered Δ NAMES which floor it cleared, and the two floors are not
+                      interchangeable. ORIGIN is C0 — the campaign root, or a fork''s branch
+                      point: `origin_accuracy` on the campaign index (ForestRows, PanelCellRow,
+                      DatasetPickList, CandidatesCard), `ability_delta` (headline-stats,
+                      run-summary), and run_card.flips'' per-sample rows. PARENT is the round''s
+                      own floor — the origin at round 0, the prior winner after: every
+                      `matched_parent_*` field, wherever it surfaces (ScoringInspector,
+                      OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
+                      elects on the parent (architecture.md §0), so a pane labelling a
+                      `matched_parent_*` value "origin" states a comparison the run never made.
+                      Two references may share a box only when BOTH are labelled — run_card is
+                      the sanctioned case and says so at its own seam.'
 ```
 
 ## Surfaces
@@ -412,7 +424,7 @@ controls:
         measured, then origin-missed→shown-hits, then its regression twin, then the
         UNCHANGED remainder that makes them add up. The reference is stated because it is
         NOT the percent pair's: that floor is served matched_parent_accuracy, computed off
-        RoundParent.results, so it is the candidate's parent (the origin at round 1, the
+        RoundParent.results, so it is the candidate's parent (the origin at round 0, the
         prior winner after). These rows are the campaign origin — the only per-sample panel
         this app is served, since a round document's `results` carries the elected winner's
         rows when there is one. Both directions labelled in text. The denominator is

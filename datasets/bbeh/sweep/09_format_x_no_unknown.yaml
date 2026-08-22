@@ -1,5 +1,0 @@
-reason: >-
-  Crossover #09: D002's 3-step answer_format (proven +21pp on this family, n=20) + anti-'unknown'-cop-out
-  gene (new, derived from miss-pattern analysis: 94 of 189 family-wide misses are pred='unknown' when
-  gt is proved (37x) or disproved (57x); 80% wrong-rate when the model picks 'unknown'). Single-gene perturbations
-  have stalled at +21pp; a 2-gene composition targeting the dominant failure mode is the next move.

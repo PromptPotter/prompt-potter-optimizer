@@ -1,3 +1,0 @@
-reason: >-
-  Compactness — the default scorer already penalizes prompts past 4000 chars. Test whether explicitly
-  directing L1 toward terseness improves both fitness and prompt-length budget.

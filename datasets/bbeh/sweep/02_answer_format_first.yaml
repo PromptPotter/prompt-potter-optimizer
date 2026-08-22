@@ -1,3 +1,0 @@
-reason: >-
-  Answer-format-first — make answer_format the load-bearing section. Targets wrong-span extraction and
-  budget-exhaustion failures.
