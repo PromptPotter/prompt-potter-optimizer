@@ -764,7 +764,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     # Every decision reached the ledger exactly once, each stamped with the round that made it.
     on_disk = [
         (r.kind.value, r.round)
-        for r in CycleEventLog(ledger.path).iter()
+        for _offset, r in CycleEventLog(ledger.path).iter()
         if isinstance(r, ResumeCheckpointRecord)
     ]
     assert on_disk == [

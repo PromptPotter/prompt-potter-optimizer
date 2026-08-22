@@ -4626,7 +4626,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when nothing the\nbody depends on has advanced — keeps the 2 s webapp poll cheap during quiescent\nstretches. The validator is :func:`run_phase_validator_epoch`, which covers the\nderived phase: it turns ``detached`` on the clock, so an mtime-only validator\nwould 304 a dead producer at ``running``. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.",
+        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when nothing the\nbody depends on has advanced — keeps the 2 s webapp poll cheap during quiescent\nstretches. The validator is :func:`run_phase_validator_epoch`, which covers the\nderived phase: it turns ``detached`` on the clock, so an mtime-only validator\nwould 304 a dead producer at ``running``. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.\n\n``at`` is a ledger offset in the LEAF cycle's own ledger and asks for the state as of\nthat moment — the same fold, replayed off disk. It is the address a ray item carries,\nso a chronology step and a dashboard are the same coordinate rather than two.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -4661,6 +4661,23 @@
                 }
               ],
               "title": "Descend"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "At"
             }
           }
         ],

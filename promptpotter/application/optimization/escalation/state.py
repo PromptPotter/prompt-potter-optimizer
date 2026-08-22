@@ -324,7 +324,7 @@ class EscalationFSM:
         s = cls()
         if ledger is None:
             return s
-        for rec in ledger.iter():
+        for _offset, rec in ledger.iter():
             s.fold(rec, lives=lives)
         return s
 

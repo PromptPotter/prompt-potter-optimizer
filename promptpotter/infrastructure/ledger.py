@@ -17,7 +17,31 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog", "Projection", "branch_offset"]
+__all__ = ["CycleEventLog", "Projection", "branch_offset", "open_with_history"]
+
+
+def _fork_link(cycle_dir: CycleDir) -> tuple[str, int] | None:
+    """This cycle's branch point as ``(parent_cycle_id, offset)``, or ``None`` for a root.
+
+    One manifest read for both halves — they are one fact, and the two readers below wanted
+    different sides of it."""
+    index = CycleLayout(Path(cycle_dir)).manifest
+    if not index.is_file():
+        return None
+    data = json.loads(index.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return None
+    parent = data.get("parent_cycle_id")
+    if not isinstance(parent, str) or not parent:
+        return None
+    offset = data.get("forked_at_offset")
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        raise ValueError(
+            f"{index}: a fork carries no `forked_at_offset`, so where its history begins on "
+            "its parent's ledger is unknown and cannot be guessed. Re-mint the fork, or drop "
+            "the cycle — campaign state is disposable and the caches it reads are not."
+        )
+    return parent, offset
 
 
 def branch_offset(cycle_dir: CycleDir) -> int | None:
@@ -29,20 +53,36 @@ def branch_offset(cycle_dir: CycleDir) -> int | None:
     ``forked_at`` a wall clock, so neither addresses the ray. A FORK whose manifest predates the
     stamp raises rather than defaulting — inheriting ``0`` would silently serve a fork as though
     it began from nothing, which reads as a real (and much shorter) history."""
-    index = CycleLayout(Path(cycle_dir)).manifest
-    if not index.is_file():
-        return None
-    data = json.loads(index.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not data.get("parent_cycle_id"):
-        return None
-    offset = data.get("forked_at_offset")
-    if not isinstance(offset, int) or isinstance(offset, bool):
-        raise ValueError(
-            f"{index}: a fork carries no `forked_at_offset`, so where its history begins on "
-            "its parent's ledger is unknown and cannot be guessed. Re-mint the fork, or drop "
-            "the cycle — campaign state is disposable and the caches it reads are not."
-        )
-    return offset
+    link = _fork_link(cycle_dir)
+    return None if link is None else link[1]
+
+
+def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
+    """This cycle's ledger with its fork chain already bound, so ``iter()`` off disk walks the
+    same prefix a live run walks in process.
+
+    The binding existed only inside the forking process until the cut was stamped, so a reader
+    that had not run the fork saw a history beginning at the branch — real, and much shorter than
+    the truth. Cycles are FLAT under one ``cycles/`` (``store/layout.py``), so a parent resolves
+    as a sibling directory and no store is needed to find it. A parent naming a cycle already on
+    the chain is refused rather than followed: a cyclic manifest is corrupt data, and walking it
+    would hang the reader that asked an ordinary question."""
+    log = CycleEventLog.open(cycle_dir)
+    seen = {Path(cycle_dir).name}
+    child_dir, child_log = Path(cycle_dir), log
+    while (link := _fork_link(CycleDir(child_dir))) is not None:
+        parent_id, cut = link
+        if parent_id in seen:
+            raise ValueError(
+                f"{child_dir}: parent_cycle_id {parent_id!r} is already on this fork chain — "
+                "the manifests describe a cycle, which no walk can resolve."
+            )
+        seen.add(parent_id)
+        parent_dir = child_dir.parent / parent_id
+        parent_log = CycleEventLog.open(CycleDir(parent_dir))
+        child_log.inherit_from(parent_log, cut)
+        child_dir, child_log = parent_dir, parent_log
+    return log
 
 
 _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
@@ -116,39 +156,46 @@ class CycleEventLog:
                 )
         return offset
 
-    def iter(self, since: int = 0) -> Iterator[CycleRecord]:
-        """Yield records from ``since``, walking a fork's parent prefix first. **Two offset spaces exist and
-        MUST NOT be mixed** — ``since`` is virtual (parent + own); a tail's ``sequence`` is this file's line."""
-        produced = 0
+    def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
+        """The whole chain — a fork's parent prefix, then this ledger's own records — as
+        ``(offset, record)``, cut after ``own_limit`` of THIS ledger's own records.
+
+        The offset is the record's PHYSICAL line index in the file it lives in, the same space as
+        ``ProjectionEnvelope.sequence``, ``RayItem.offset`` and ``DerivedView.at_offset``. It was
+        dropped, so the one caller that wanted an address recovered it with ``enumerate`` and got a
+        VIRTUAL position instead — a number naming no line of any file, reported to clients as the
+        offset a record was appended at.
+
+        The cut is on OWN records because that is what ``forked_at_offset`` counts
+        (``campaign_store::_branch_offset`` reads the parent's ``next_offset``), and because that
+        is the address a caller holds: ``at_offset``, a ray item's, an SSE ``sequence``. The
+        parent bound was applied to the parent's whole CHAIN before, so a fork OF A FORK took the
+        first N records of its grandparent and dropped the parent entirely."""
         if self._inherit_parent is not None:
-            for rec in self._inherit_parent.iter():
-                if produced >= self._inherit_offset:
-                    break
-                if produced >= since:
-                    yield rec
-                produced += 1
+            yield from self._inherit_parent.iter(self._inherit_offset)
         if not self._path.exists():
             return
         with self._path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
+            for offset, line in enumerate(fh):
+                if own_limit is not None and offset >= own_limit:
+                    return
+                stripped = line.strip()
+                if not stripped:
                     continue
-                if produced >= since:
-                    try:
-                        yield _RECORD_ADAPTER.validate_json(line)
-                    except (ValidationError, ValueError):
-                        # A torn final line (append is not crash-atomic, ll. 87-88)
-                        # or a version-skewed record. Skip-and-continue the way the
-                        # sibling readers do (ledger_scan.py, event_stream.py) —
-                        # the ledger is the SoT, so one bad line must not abort the
-                        # whole read and blind every projection rebuild / fork lookup.
-                        logger.warning(
-                            "skipping unparseable ledger line at offset %d in %s",
-                            produced,
-                            self._path,
-                        )
-                produced += 1
+                try:
+                    yield offset, _RECORD_ADAPTER.validate_json(stripped)
+                except (ValidationError, ValueError):
+                    # A torn final line (append is not crash-atomic) or a version-skewed
+                    # record. Skip-and-continue the way the sibling readers do
+                    # (ledger_scan.py, event_stream.py) — the ledger is the SoT, so one bad
+                    # line must not abort the whole read and blind every projection rebuild
+                    # / fork lookup. The offset is still CONSUMED, exactly as `append`
+                    # assigned it, so a skipped line never shifts its successors' addresses.
+                    logger.warning(
+                        "skipping unparseable ledger line at offset %d in %s",
+                        offset,
+                        self._path,
+                    )
 
     def inherit_from(self, parent: CycleEventLog, offset: int) -> None:
         """Mark as a fork of *parent*; idempotent with the same args. Subscribers see only own appends —

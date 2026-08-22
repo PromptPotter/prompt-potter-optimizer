@@ -128,9 +128,11 @@ partial read is a compatibility shim, the ledger is the truth, and everything th
 top of it is re-derived forward. The SSE snapshot already answers the same question the same way —
 `dashboard_unreadable` is a served reason, not an exception.
 
-`DerivedView.on_record` (`projections/base.py`) owns the
-`isinstance(record, …)` dispatch; subclasses override hooks. There's no
-second dispatch path because the base class is the only one. Subscribers
+`DerivedView.on_record` (`projections/base.py`) owns the dispatch, off a `_ROUTES`
+table checked against the `CycleRecord` union at import — so an arm that names no
+hook is a DECLARED silence carrying its reason, never one that fell off the end of a
+chain. Subclasses override hooks. There's no second dispatch path because the base
+class is the only one. Subscribers
 MUST NOT write campaign artifacts beyond their declared allowlist (fails
 loud — an out-of-allowlist write shows up in the file tree; see
 [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).

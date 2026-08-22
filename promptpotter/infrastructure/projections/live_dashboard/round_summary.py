@@ -3,14 +3,19 @@ Deep audit stays in ``round_NNNN.json``, fetched on demand."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.results import RoundResult, is_electable, is_round_winner
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
+
+logger = logging.getLogger(__name__)
 
 # The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
 # minus the derived ``is_winner``. Deriving from ``model_fields`` keeps the copy set in
@@ -31,6 +36,27 @@ def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
     origin_id = next(iter(acr))  # round 0 is the single origin arm
     rows = acr.get(origin_id) or []
     return list(rows) if isinstance(rows, list) else []
+
+
+def round_result_from_disk(cycle_dir: Path, round_num: int) -> RoundResult | None:
+    """The closed round document, for a fold with no live producer behind it.
+
+    ``PhaseRecord.live_round_result`` is ``exclude=True``, so a ``round:display`` record read back
+    off the ledger carries the round's headline scalars and none of its arrays — which is why
+    ``rounds[]`` was the one served field a replay could not rebuild. It is the SAME document
+    either way: ``CampaignStore.save_round_file`` persists ``RoundResult.model_dump()``, so this
+    reads the record's own carrier from its other home rather than reconstructing it.
+
+    ``None`` when the file is absent or unreadable: ``delete --keep-results`` strips the tree, and
+    one missing round must not blind the whole chronology."""
+    doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(round_num))
+    if not isinstance(doc, dict):
+        return None
+    try:
+        return RoundResult.model_validate(doc)
+    except ValidationError:
+        logger.warning("round %d document at %s is unreadable — row skipped", round_num, cycle_dir)
+        return None
 
 
 def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
@@ -109,4 +135,4 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
     )
 
 
-__all__ = ["build_round_summary", "origin_rows_from_disk"]
+__all__ = ["build_round_summary", "origin_rows_from_disk", "round_result_from_disk"]

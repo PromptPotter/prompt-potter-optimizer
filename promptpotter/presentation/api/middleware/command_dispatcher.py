@@ -106,10 +106,16 @@ def _find_idempotent_command(
     died mid-apply) is not a replay either.
 
     O(n) over the cycle ledger: a ledger holds thousands of records, not millions, and
-    commands are operator-paced."""
+    commands are operator-paced.
+
+    The offset is the ledger's own — ``iter()`` yields it now. Recovered with ``enumerate`` it was
+    a VIRTUAL position over the fork chain, and that number went out to clients as
+    ``ledger_sequence``, whose contract is "the offset at which the `CommandRecord` was appended"
+    and whose stated use is aligning the SSE tail. The fresh-append branch beside it has always
+    returned the real one, so one field carried two different numbers."""
     keyed: dict[str, int] = {}
     applied: _IdempotentMatch | None = None
-    for offset, record in enumerate(ledger.iter()):
+    for offset, record in ledger.iter():
         if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
             keyed[record.command_id] = offset
         elif isinstance(record, CommandAckRecord) and record.status == "applied":

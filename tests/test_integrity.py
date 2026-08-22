@@ -3730,3 +3730,89 @@ def test_a_fold_carries_the_offset_it_is_of_and_the_tail_resumes_there(tmp_path:
     # still parks at end-of-file, which is what it did all along.
     layout.dashboard.write_text(_json.dumps({"declared_phase": "running"}), encoding="utf-8")
     assert CycleLedgerTail(tmp_path, hop).snapshot_frame().payload["snapshot_at_offset"] == 5
+
+
+def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_on_its_own(
+    tmp_path: Path,
+) -> None:
+    """A fold read back off disk must carry the same trajectory the live one did, and a fork's
+    prefix must be cut where the manifest says.
+
+    Two silent losses. ``round:display`` carries the whole ``RoundResult`` on an ``exclude=True``
+    field, so a replay saw the headline scalars and NO trajectory row — a past moment served with
+    an empty ``rounds[]`` looks like a campaign that measured nothing, and nothing errors. And
+    ``forked_at_offset`` counts the parent's OWN records while ``iter`` applied that bound to the
+    parent's whole CHAIN, so a fork OF A FORK replayed the first N of its grandparent and dropped
+    its parent entirely — a plausible, shorter history in place of the real one.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
+    from promptpotter.infrastructure.projections.live_dashboard.view import (
+        LiveDashboardView,
+        fold_at,
+    )
+    from promptpotter.infrastructure.store.io import write_json
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    from .factories import round_result
+
+    cycles = tmp_path / "campaigns" / "c__aaaaaa" / "cycles"
+    root_dir = cycles / "cycle_0"
+    hop = CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle_0")
+    root_layout = CycleLayout(root_dir)
+    view = LiveDashboardView(
+        CycleDir(root_dir),
+        state_path=root_layout.dashboard,
+        hop=hop,
+        session_id="s1",
+        l1_patience=3,
+        n_variants=2,
+        sp_budget_ttest=5,
+        headline_metric="accuracy",
+    )
+    log = CycleEventLog.open(CycleDir(root_dir))
+    log.bind(view)
+    for rnd in (0, 1):
+        rr = round_result(rnd)
+        # The round document is the OTHER carrier of what `live_round_result` holds in memory.
+        write_json(root_layout.round_file(rnd), rr.model_dump(), default=str)
+        log.append(
+            PhaseRecord(
+                phase="round",
+                event="display",
+                round=rnd,
+                live_round_result=rr,
+                payload={"round_result": {"round": rnd, "accuracy": rr.accuracy}},
+            )
+        )
+    live_rounds = [r.round for r in view.state.rounds]
+    assert live_rounds == [0, 1]
+
+    replayed = fold_at(root_dir)
+    assert replayed is not None
+    assert [r.round for r in replayed.rounds] == live_rounds, (
+        "the replay rebuilds the trajectory from the round documents, not from a prior dashboard"
+    )
+    assert replayed.at_offset == view.at_offset
+
+    # Chain: root(2 records) -> mid(cut at 2, 1 own record) -> leaf(cut at 1).
+    def _sibling(cycle_id: str, parent: str, cut: int) -> Path:
+        d = cycles / cycle_id
+        write_json(CycleLayout(d).manifest, {"parent_cycle_id": parent, "forked_at_offset": cut})
+        return d
+
+    mid_dir = _sibling("cycle_0_fork_1", "cycle_0", cut=2)
+    CycleEventLog.open(CycleDir(mid_dir)).append(
+        PhaseRecord(phase="round", event="display", round=2)
+    )
+    leaf_dir = _sibling("cycle_0_fork_1_fork_2", "cycle_0_fork_1", cut=1)
+    CycleEventLog.open(CycleDir(leaf_dir)).append(
+        PhaseRecord(phase="round", event="display", round=3)
+    )
+
+    walked = [rec.round for _offset, rec in open_with_history(CycleDir(leaf_dir)).iter()]
+    assert walked == [0, 1, 2, 3], (
+        "the grandparent's records come first WHOLE, then the parent's own up to the cut — "
+        "a bound read against the parent's chain would have stopped inside the grandparent"
+    )

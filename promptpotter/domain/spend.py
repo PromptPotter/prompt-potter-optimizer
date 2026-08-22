@@ -56,8 +56,8 @@ class SpendRollup(StrictModel):
     # — it is a floor, not the total.
     unpriced_tokens: int = 0
     # Both are FOLDED beside the USD totals (`live_dashboard/view.py::_absorb_token_usage`), never
-    # derived on read: a `@computed_field` serializes but does not round-trip, and
-    # `resolve_resume_state` re-validates this whole state out of `dashboard.json` on every resume.
+    # derived on read: a `@computed_field` serializes but does not round-trip, and a resume
+    # re-folds this whole state off the ledger (`resolve_resume_state`) before carrying it.
     # Serving them is also what keeps the gauge and the halt gate one computation.
 
     @property

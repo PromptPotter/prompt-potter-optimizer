@@ -1181,11 +1181,12 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
-    from promptpotter.infrastructure.store.layout import cycle_dir_for, session_dir_for
+    from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 
+    cycle_dir = CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1")))
     view = LiveDashboardView(
-        cycle_dir=CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1"))),
-        session_dir=session_dir_for(tmp_path, "s1"),
+        cycle_dir=cycle_dir,
+        state_path=CycleLayout(Path(cycle_dir)).dashboard,
         hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),
         session_id="s1",
         l1_patience=2,

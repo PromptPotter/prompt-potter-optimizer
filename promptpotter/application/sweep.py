@@ -83,7 +83,7 @@ def existing_fork_source_files(
     if not CycleLayout(parent_dir).ledger.exists():
         return out
     ledger = CycleEventLog.open(CycleDir(parent_dir))
-    for record in ledger.iter():
+    for _offset, record in ledger.iter():
         if (
             isinstance(record, ResumeCheckpointRecord)
             and record.kind == ResumeCheckpointKind.FORK_CUT

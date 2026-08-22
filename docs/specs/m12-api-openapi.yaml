@@ -1373,6 +1373,22 @@ paths:
             the previous hop's `.inner/<key>`. Absent/empty = the top-level cycle. Every
             component is validated against the id charset before any filesystem touch.
           schema: { type: string }
+        - name: at
+          in: query
+          required: false
+          description: |
+            A ledger offset in the LEAF cycle's own ledger — the space
+            `ProjectionEnvelope.sequence`, `RayItem.offset` and `dashboard.json::at_offset`
+            share, so a ray item taken from this course addresses a moment directly.
+            Present, the body is the same state REPLAYED to that moment rather than the
+            head's file: the same fold, given records off disk. Absent = the head, served
+            from the materialized file at no fold cost.
+
+            `run_phase` is still derived at read time — it answers what the producer is
+            doing NOW, which is a clock fact and not a property of the moment asked for.
+            The armed spend ceilings are NOT overlaid on a replay, because they are the
+            cap in force now and restating one as a past cap would be a fabrication.
+          schema: { type: integer, minimum: 0 }
         - name: If-Modified-Since
           in: header
           required: false

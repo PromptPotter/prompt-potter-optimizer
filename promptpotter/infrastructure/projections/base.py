@@ -1,11 +1,16 @@
-"""``DerivedView`` — typed-record dispatch for ledger subscribers, owning the ``isinstance`` routing in ONE place so a
+"""``DerivedView`` — typed-record dispatch for ledger subscribers, owning the routing in ONE place so a
 new record subtype touches one file. Default hooks are no-ops."""
 
 from __future__ import annotations
 
+from typing import get_args
+
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
+    CommandAckRecord,
+    CommandRecord,
     CycleRecord,
+    CycleSeedRecord,
     ElectionRecord,
     ErrorRecord,
     LLMCallProgressRecord,
@@ -14,11 +19,56 @@ from promptpotter.domain.run_records import (
     PhaseRecord,
     ResumeCheckpointRecord,
     RoundWarningRecord,
+    RulerRecord,
     SnapshotRecord,
+    SpendTombstoneRecord,
     TokenUsageRecord,
 )
 
 __all__ = ["DerivedView"]
+
+
+# Record → the hook it routes to, or ``None`` for one no projection folds. It replaced an
+# ``isinstance`` chain, which could only express the first half: a record naming no arm fell off
+# the end and was dispatched NOWHERE, in silence. That is not hypothetical — ``ElectionRecord``
+# sat here unrouted while a second channel covered for it, so the origin folded uncrowned on its
+# only arm and no surface said so. The `None` arms are the same statement made deliberately, and
+# the raise below makes an unanswered record impossible rather than merely discouraged.
+_ROUTES: dict[type, str | None] = {
+    PhaseRecord: "_handle_phase",
+    SnapshotRecord: "_handle_snapshot",
+    ResumeCheckpointRecord: "_handle_decision",
+    TokenUsageRecord: "_handle_token_usage",
+    LLMCallStartRecord: "_handle_llm_call_start",
+    LLMCallProgressRecord: "_handle_llm_call_progress",
+    LLMCallRecord: "_handle_llm_call",
+    ErrorRecord: "_handle_error",
+    RoundWarningRecord: "_handle_round_warning",
+    CandidateMintedRecord: "_handle_candidate_minted",
+    ElectionRecord: "_handle_election",
+    # Applied at the seam that wrote them (`middleware/command_dispatcher.py`), which answers the
+    # caller inline; the ledger pair is the audit trail, not an input to any view.
+    CommandRecord: None,
+    CommandAckRecord: None,
+    # Read once, by a scan, at the moment it is needed: the cycle seed at the runner seam
+    # (`scan_ledger_cycle_seed`) and the δ ruler on resume (`scan_ledger_ruler`). Folding either
+    # continuously would hold a second copy of a fact one reader wants once.
+    CycleSeedRecord: None,
+    RulerRecord: None,
+    # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
+    # about a cycle that no longer exists, so no live view of one can hold it.
+    SpendTombstoneRecord: None,
+}
+
+_arms = frozenset(get_args(get_args(CycleRecord)[0]))
+if frozenset(_ROUTES) != _arms:
+    raise RuntimeError(
+        "_ROUTES must answer for every CycleRecord arm — an unanswered one is dispatched "
+        "nowhere and nothing says so: "
+        f"missing {sorted(a.__name__ for a in _arms - frozenset(_ROUTES))}, "
+        f"unbacked {sorted(a.__name__ for a in frozenset(_ROUTES) - _arms)}."
+    )
+del _arms
 
 
 class DerivedView:
@@ -32,28 +82,9 @@ class DerivedView:
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
-        if isinstance(record, PhaseRecord):
-            self._handle_phase(record)
-        elif isinstance(record, SnapshotRecord):
-            self._handle_snapshot(record)
-        elif isinstance(record, ResumeCheckpointRecord):
-            self._handle_decision(record)
-        elif isinstance(record, TokenUsageRecord):
-            self._handle_token_usage(record)
-        elif isinstance(record, LLMCallStartRecord):
-            self._handle_llm_call_start(record)
-        elif isinstance(record, LLMCallProgressRecord):
-            self._handle_llm_call_progress(record)
-        elif isinstance(record, LLMCallRecord):
-            self._handle_llm_call(record)
-        elif isinstance(record, ErrorRecord):
-            self._handle_error(record)
-        elif isinstance(record, RoundWarningRecord):
-            self._handle_round_warning(record)
-        elif isinstance(record, CandidateMintedRecord):
-            self._handle_candidate_minted(record)
-        elif isinstance(record, ElectionRecord):
-            self._handle_election(record)
+        hook = _ROUTES.get(type(record))
+        if hook is not None:
+            getattr(self, hook)(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...

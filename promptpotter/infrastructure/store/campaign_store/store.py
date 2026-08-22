@@ -619,9 +619,9 @@ class CampaignStore:
                 len(displaced),
             )
 
-        # No dashboard.json repair here. `resolve_resume_state` cuts the surviving
-        # trajectory when the resumed run's view is constructed — the one cut, off the
-        # schema. A second writer here re-spelled that rule against the raw dict, with
+        # No dashboard.json repair here, and now nothing to repair: the resumed run's view
+        # is FOLDED off the ledger and cut there (`resolve_resume_state`) — the one cut, off
+        # the schema. A second writer here re-spelled that rule against the raw dict, with
         # its own `max(...)` fold in place of the domain helper.
         self._rebuild_round_index(hop, survivors)
 

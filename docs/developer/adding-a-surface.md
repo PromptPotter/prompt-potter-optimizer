@@ -49,8 +49,10 @@ impossible (the deep sites have nothing to call it on).
 
 1. Define `XxxRecord` in `domain/run_records.py` and add it to the `CycleRecord`
    discriminated union.
-2. Add an `isinstance(record, XxxRecord)` arm + matching `_handle_xxx` hook
-   (default no-op) to `DerivedView.on_record` (`infrastructure/projections/base.py`).
+2. Add the record to `_ROUTES` (`infrastructure/projections/base.py`) — either naming a
+   `_handle_xxx` hook (default no-op on `DerivedView`) or `None` with the reason no
+   projection folds it. There is no third option: the table is checked against the
+   `CycleRecord` union at import.
 3. **Writer:** either add a typed method on `RunCallbacks`, **or** a kwargs-only
    `emit_xxx` helper in `infrastructure/llm/telemetry.py` that calls `_append_record`.
 4. Override `_handle_xxx` on each projection that surfaces the fact
@@ -58,17 +60,18 @@ impossible (the deep sites have nothing to call it on).
    `LiveDisplay` for the CLI). Unhandled = silently dropped — which is exactly
    what the guard prevents.
 
-**Guard (no standing test — the structural suite was cut, see
-[`tests/CLAUDE.md`](../../tests/CLAUDE.md)):** a union member with no `on_record`
-arm is silently dropped from every projection, so check the arm exists when you
-add the record. Three members are deliberately unprojected: the control-plane pair
-`CommandRecord` / `CommandAckRecord` (applied by `CommandDispatcher`), plus
-`CycleSeedRecord` (read back by a pure ledger scan). `ElectionRecord` was listed
-here as a fourth, and that was this rule's own failure case: the crown reached no
-fold, and the phase-view workaround standing in for it could not crown round 0 —
-the origin is ADOPTED, runs no `l1_score` phase, and folded with `is_winner` false
-on its only arm. It has an arm now. A missing one does NOT always break loud: this
-one was invisible because a second channel was covering most of it.
+**Guard (an import-time raise, not a standing test — see
+[`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants):** `_ROUTES` must answer
+for every `CycleRecord` arm, and which arms are deliberately unfolded is stated there with
+each one's reason rather than here — a second list is what let the first one go wrong.
+
+This rule earned its teeth from its own failure case. The prose asked a reader to "check the
+arm exists", and `ElectionRecord` was listed as deliberately unprojected when it was not: the
+crown reached no fold, and the phase-view workaround standing in for it could not crown round
+0 — the origin is ADOPTED, runs no `l1_score` phase, and folded with `is_winner` false on its
+only arm. `CandidateMintedRecord` was the same shape and had no second channel at all, so
+`dashboard.json` never learned a candidate had been minted. **A missing arm does NOT break
+loud** — that claim was the error. It is checked now instead of asserted.
 
 **A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
 carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a

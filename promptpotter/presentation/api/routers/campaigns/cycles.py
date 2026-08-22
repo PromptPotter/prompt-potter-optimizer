@@ -19,6 +19,7 @@ from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
+from promptpotter.infrastructure.projections.live_dashboard.view import fold_at
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
     read_spend_caps,
@@ -52,10 +53,19 @@ _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
 
 
 def serve_dashboard_response(
-    request: Request, base_dir: WorkspaceDir, campaign_id: str, cycle_id: str
+    request: Request,
+    base_dir: WorkspaceDir,
+    campaign_id: str,
+    cycle_id: str,
+    at: int | None = None,
 ) -> Response:
     """The single dashboard-serving path — the outer route passes the caller's ``base_dir``, the inner a sandbox's. One
-    implementation, two roots, so 304 / warming / atomic-read semantics cannot drift between them."""
+    implementation, two roots, so 304 / warming / atomic-read semantics cannot drift between them.
+
+    ``at`` asks for a PAST moment: the same state replayed to that ledger offset instead of the
+    head's materialized file. One route rather than two, because "the dashboard" and "the
+    dashboard at a moment" are one question with a default, and a second route would be a second
+    answer to it."""
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
     cycle_path = cycle_dir_for(base_dir, hop)
     # WARMING is "no dashboard YET"; a cycle dir that isn't there is GONE. Answering
@@ -97,6 +107,17 @@ def serve_dashboard_response(
     body = read_json_tolerant(path) if present else None
     declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
     run_phase = str(derive_run_phase(cycle_path, declared=declared))
+    if at is not None:
+        # A replay. `run_phase` still rides — it answers what the producer is doing NOW, which is
+        # a clock fact rather than a property of the moment asked for, and the model declares it
+        # wire-only for exactly that reason. The armed ceilings deliberately do NOT: they are the
+        # cap in force now, and restating one as the cap of a past moment would be a fabrication.
+        folded = fold_at(cycle_path, at_offset=at)
+        if folded is None:
+            return JSONResponse(warming_payload(hop, run_phase=run_phase), headers=headers)
+        replay = folded.model_dump(mode="json")
+        replay["run_phase"] = run_phase
+        return JSONResponse(replay, headers=headers)
     if body is None:
         # Missing OR corrupt (half-written / truncated): degrade to the warming
         # placeholder rather than 500 on the 2 s poll. A present-but-unreadable
@@ -130,6 +151,7 @@ def get_cycle_dashboard(
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
+    at: int | None = Query(None, ge=0),
 ) -> Response:
     """Live telemetry for the viewed cycle — its own ``dashboard.json``.
 
@@ -149,19 +171,26 @@ def get_cycle_dashboard(
     ``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders
     "initialising" rather than appearing offline; a cycle that does not exist
     answers 404, because those are different facts.
+
+    ``at`` is a ledger offset in the LEAF cycle's own ledger and asks for the state as of
+    that moment — the same fold, replayed off disk. It is the address a ray item carries,
+    so a chronology step and a dashboard are the same coordinate rather than two.
     """
     stores, leaf = resolve_cycle_path(
         stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
-    return serve_dashboard_response(request, stores.base_dir, leaf.campaign_id, leaf.cycle_id)
+    return serve_dashboard_response(
+        request, stores.base_dir, leaf.campaign_id, leaf.cycle_id, at=at
+    )
 
 
 def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> int | None:
-    """Newest mtime across this course's lineage inputs. The LEDGER is the validator that matters —
-    it bumps when a candidate is minted and ``dashboard.json`` does not, because no handler that
-    arms its debounced persist sees a mint. Not that the file is slow: it moves within a quarter
-    second of any LLM-call, token-usage, error or warning record, and reading "only at round close"
-    off this line is what would make ``runtime_flags.py``'s freshness window look unfounded."""
+    """Newest mtime across this course's lineage inputs — the LEDGER first, since it is the one
+    input every fact passes through. It used to be the validator that mattered for a different
+    reason: a candidate mint bumped it and ``dashboard.json`` alone, because no handler arming the
+    debounced persist saw a mint. That hole is closed (``_handle_candidate_minted`` flushes), so
+    the two now move together on a mint as they always did on an LLM-call, token-usage, error or
+    warning record — within a quarter second, never "only at round close"."""
     layout = CycleLayout(
         cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     )
