@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
-import { isInFlight } from "@/lib/run-phase";
+import { hasLiveProducer } from "@/lib/run-phase";
 import { isSelfOptimization, runSummary } from "@/lib/derivations";
 import { Switch } from "@/components/ui";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
@@ -153,7 +153,7 @@ export function ChatPane({
         cycleId={leafCycleId}
         activity={live.activity}
         progress={live.progress}
-        listening={live.connected && isInFlight(dash?.run_phase)}
+        listening={live.connected && hasLiveProducer(dash?.run_phase)}
         decision={decision}
         hearts={dash?.hearts ?? null}
         livesCap={dash?.run_limits?.lives_cap ?? null}

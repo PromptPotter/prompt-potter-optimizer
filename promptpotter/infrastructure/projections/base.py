@@ -6,6 +6,7 @@ from __future__ import annotations
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CycleRecord,
+    ElectionRecord,
     ErrorRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -21,8 +22,16 @@ __all__ = ["DerivedView"]
 
 
 class DerivedView:
+    #: Ledger offset of the last record folded — the ADDRESS of the state this view holds,
+    #: and the same number as ``ProjectionEnvelope.sequence`` and ``RayItem.offset``. A fold
+    #: that materializes itself STAMPS this, so a reader can ask which moment the file is
+    #: of and a check can re-fold ``ledger[0..at_offset]`` against it. ``-1`` = nothing
+    #: folded yet. It was discarded here (``del offset``) for as long as this class existed,
+    #: which is why no materialized state on disk could say when it was true.
+    at_offset: int = -1
+
     def on_record(self, record: CycleRecord, offset: int) -> None:
-        del offset
+        self.at_offset = offset
         if isinstance(record, PhaseRecord):
             self._handle_phase(record)
         elif isinstance(record, SnapshotRecord):
@@ -43,8 +52,11 @@ class DerivedView:
             self._handle_round_warning(record)
         elif isinstance(record, CandidateMintedRecord):
             self._handle_candidate_minted(record)
+        elif isinstance(record, ElectionRecord):
+            self._handle_election(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
+    def _handle_election(self, record: ElectionRecord) -> None: ...
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
     def _handle_decision(self, record: ResumeCheckpointRecord) -> None: ...
     def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...

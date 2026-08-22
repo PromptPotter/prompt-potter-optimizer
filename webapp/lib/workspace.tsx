@@ -29,7 +29,7 @@ import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 import { isSelfOptimization } from "./derivations";
-import { isInFlight, dockPriority } from "./run-phase";
+import { hasLiveProducer, dockPriority } from "./run-phase";
 
 interface WorkspaceState {
   sessionId: string | null;
@@ -80,11 +80,11 @@ interface WorkspaceState {
   // of the prior tab's stale list.
   campaignsLoaded: boolean;
   cyclesError: string | null;
-  // The in-flight subset of `cycles` (running / gate / paused — `detached`
-  // is deliberately excluded, it means a dead producer, I6) — derived once
-  // here, membership AND order, so every "what's running" surface reads the
-  // same list instead of re-filtering or re-sorting its own copy.
-  liveCycles: CycleListEntry[];
+  // The subset of `cycles` a producer is driving (running / gate — `paused` has
+  // no worker and `detached` means a dead one, I6) — derived once here,
+  // membership AND order, so every "what's running" surface reads the same list
+  // instead of re-filtering or re-sorting its own copy.
+  runningCycles: CycleListEntry[];
   // Campaign manifests (GET /campaigns) — polled in the same tick as
   // /cycles. Carries the operator-editable `label`; surfaces resolve a
   // campaign's display name from here. Last-good list survives a failed tick.
@@ -376,16 +376,17 @@ export function WorkspaceProvider({
       : null;
   const datasetName = cycleEntry?.dataset_name ?? null;
 
-  // One workspace-wide "what is running" derivation — membership AND order,
-  // so every dock reader shares both for free instead of re-sorting its own
-  // copy (frontend-surface-contract I6: one shared ordering). Recomputed only
-  // when the list mutates.
+  // One workspace-wide "what is running" derivation — membership AND order, so every
+  // dock reader shares both for free instead of re-sorting its own copy
+  // (frontend-surface-contract I6: one shared ordering). Recomputed only when the list
+  // mutates. A PAUSED cycle is absent: nothing drives it, and it stays reachable as a
+  // sidebar row wearing its phase.
   //
   // Ordered by WHAT NEEDS YOU, not by what is busy — see `dockPriority`.
-  const liveCycles = useMemo(
+  const runningCycles = useMemo(
     () =>
       cycles
-        .filter((c) => isInFlight(c.run_phase))
+        .filter((c) => hasLiveProducer(c.run_phase))
         .sort((a, b) => dockPriority(a.run_phase) - dockPriority(b.run_phase)),
     [cycles],
   );
@@ -495,7 +496,7 @@ export function WorkspaceProvider({
     cyclesLoaded,
     campaignsLoaded: campaignsFilter === lifecycleFilter,
     cyclesError,
-    liveCycles,
+    runningCycles,
     campaigns,
     activeError,
     lifecycleFilter,

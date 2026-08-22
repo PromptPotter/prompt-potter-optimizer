@@ -19,14 +19,22 @@ _CONTROL_PHASE = "control"
 
 def declare_run_phase(
     session: Session,
-    phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE],
+    phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.TERMINAL],
+    *,
+    stop_reason: str = "",
 ) -> None:
     """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound. Idempotent
-    at the projection, so emitting ``paused`` from several checkpoints is cheap."""
+    at the projection, so emitting ``paused`` from several checkpoints is cheap.
+
+    ``TERMINAL`` carries the reason, and it belongs here for the same purpose the rest do: it was
+    pushed straight into the projection by ``LiveDashboardView.mark_stopped``, a side door past the
+    ledger, so a cycle could STOP and the record of it existed only in that projection's own output
+    and in ``index.json``. A reader folding the ledger saw a run still going."""
     ledger = session.state.ledger
     if ledger is None:
         return
-    ledger.append(PhaseRecord(phase=_CONTROL_PHASE, event=str(phase)))
+    payload = {"stop_reason": stop_reason} if stop_reason else {}
+    ledger.append(PhaseRecord(phase=_CONTROL_PHASE, event=str(phase), payload=payload))
 
 
 def pause_requested(session: Session) -> bool:

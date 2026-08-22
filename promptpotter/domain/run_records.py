@@ -85,18 +85,22 @@ class PhaseRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-def view_fields(record: PhaseRecord) -> dict[str, Any]:
-    """``payload["view"]`` as a mapping, and the ONLY sanctioned way to read one.
+def as_view_mapping(view: Any) -> dict[str, Any]:
+    """A phase view as a mapping, and the ONLY sanctioned way to read one.
 
     A ledger replay deserializes the view to a dict while the live in-process path still holds
     the frozen dataclass, so `getattr` works on one and silently returns the default on the
-    other — reporting a fact that is present as absent. Lives beside `PhaseRecord` because it
-    is a pure accessor on it, and because both an `application/` reader and an
-    `infrastructure/` projection need it; owning it in either would invert a layer."""
-    view = record.payload.get("view")
+    other — reporting a fact that is present as absent. Lives beside `PhaseRecord` because both
+    an `application/` reader and an `infrastructure/` projection need it; owning it in either
+    would invert a layer."""
     if is_dataclass(view) and not isinstance(view, type):
         return asdict(view)
     return view if isinstance(view, dict) else {}
+
+
+def view_fields(record: PhaseRecord) -> dict[str, Any]:
+    """``payload["view"]`` as a mapping — the by-record arity of :func:`as_view_mapping`."""
+    return as_view_mapping(record.payload.get("view"))
 
 
 class SnapshotRecord(StrictModel):

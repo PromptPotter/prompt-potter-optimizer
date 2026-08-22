@@ -352,11 +352,10 @@ class LiveDisplay(DerivedView):
             self._round_started_at = time.monotonic()
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
-        # Resume-rewind rebuild needs the live ``env``/``state`` objects, which
-        # exist only on the direct in-memory callback path — they're stripped
-        # from the persisted/streamed record (``RunCallbacks._DATA_KEYS_RUNTIME_ONLY``).
-        # On the ledger path ``env`` is absent and the display rebuilds from the
-        # replayed ``round:display`` records instead, so skip cleanly.
+        # Resume-rewind rebuild needs the live ``env``/``state`` objects, which exist only on
+        # the direct in-memory callback path — ``PhaseRecord.data`` is ``exclude=True`` and
+        # reaches no disk. On the ledger path ``env`` is absent and the display rebuilds from
+        # the replayed ``round:display`` records instead, so skip cleanly.
         env_obj = (
             event.data.get("env")
             if event.phase == CampaignPhase.INIT and event.event == "exit"

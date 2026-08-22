@@ -111,7 +111,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   // Hidden only for check-in (the ingest panel owns Start there) and a cycle with no phase
   // yet. It deliberately SURVIVES `terminal` and `detached`: `run-phase.ts::PHASE_ACTION`
   // maps both to "start", and this is `RunControlButton`'s only mount — gating on
-  // `isInFlight` left both of those arms declared and unreachable, so a budget-halted or
+  // `hasLiveProducer` left both of those arms declared and unreachable, so a budget-halted or
   // crashed cycle simply lost its play button. Those are also the two states where the
   // readout below matters most: what the run got, and what it cost.
   if (runPhase === null || runPhase === "checkin") return null;
@@ -174,11 +174,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   const deltaPerSpend =
     abilityDelta != null && usedUsd != null && usedUsd > 0 ? abilityDelta / usedUsd : null;
   const effChip = deltaPerSpend != null ? `${deltaPerSpend.toFixed(2)} θ/$` : "—";
-  // A finished run has no remaining work to project, so the third slot carries WHY it stopped
-  // instead of a duration nobody can act on.
-  const etaChip = terminal
-    ? runPhaseLabel(runPhase, dash?.stop_reason)
-    : etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
+  const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
   // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4"
   // and goes stale between rounds, so surface it only while the active node is
   // the scorer — that's the window where it's the live position. This is the
@@ -445,9 +441,14 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
           <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
           {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
         </span>
-        <span className="chip" title={terminal ? TERMS.newjob_bar_best : TERMS.newjob_bar_eta}>
-          <span className="chip-lbl">{terminal ? "Ended" : "ETA"}</span> <strong>{etaChip}</strong>
-        </span>
+        {/* A finished run has no remaining work to project, and WHY it stopped is already
+            the phase chip above — rendering it here too printed "Spend budget reached"
+            twice on one bar. Absent, so the slot never restates its neighbour. */}
+        {!terminal && (
+          <span className="chip" title={TERMS.newjob_bar_eta}>
+            <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
+          </span>
+        )}
         <span className="chip" title={TERMS.newjob_bar_eff}>
           <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
         </span>

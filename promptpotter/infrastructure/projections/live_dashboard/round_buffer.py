@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from promptpotter.domain.results import is_round_winner
 from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
@@ -111,19 +110,21 @@ class RoundBuffer:
         ``round_result.candidate_scores`` (same dict instance)."""
         self.slot(idx, total)["scores"] = scores
 
-    def mark_winner(self, winner_candidate_id: str) -> None:
-        """Crown the elected candidate, at the ELECTION rather than at round close. Matched on
-        ``candidate_id``: slot order is the launch order, not the election's. Every other slot
-        is re-stamped ``False`` in the same pass, so a re-fire cannot leave a stale crown beside
-        the new one.
+    def mark_winner(self, winner_label: str) -> None:
+        """Crown the elected candidate from the ``ElectionRecord`` — the crown's OWN record, at its
+        own coordinate. Every other slot is re-stamped ``False`` in the same pass, so a re-fire
+        cannot leave a stale crown beside the new one.
 
-        A HELD round crowns nobody because the id it carries is the RETAINED INCUMBENT's, which
-        belongs to no slot of this round — NOT because that id is empty, which it is not. The
-        no-crown case therefore rests on the match failing, which is exactly why this keys on
-        identity: a positional or prose match could accidentally succeed."""
+        Matched on ``label``, which is what that record carries and why: a resume re-mints
+        candidate ids, so the id is not stable across one. Within a round the label is the canonical
+        ``C{round}.{n}`` and unique, so this is an identity match, not the prose one
+        ``is_round_winner`` warns off — ``changes_description`` is the prose, and it can repeat.
+
+        A HELD round crowns nobody, and the record says so by carrying an EMPTY label rather than
+        the retained incumbent's, which belongs to no slot of this round."""
         for entry in self.candidates.values():
-            cid = str((entry.get("scores") or {}).get("candidate_id") or "")
-            entry["is_winner"] = is_round_winner(cid, winner_candidate_id)
+            label = str((entry.get("scores") or {}).get("label") or "")
+            entry["is_winner"] = bool(winner_label) and label == winner_label
 
     def update_p_best(
         self,

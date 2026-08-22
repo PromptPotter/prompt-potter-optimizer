@@ -145,12 +145,6 @@ async def execute_round(
         # is optional and which two candidates can share, so it cannot identify a row — and the
         # dashboard needs to crown one HERE, at the election, rather than wait for the round to
         # close two optimizer calls later.
-        #
-        # On a HELD round this is NOT empty: `winner_id` reads `prompt_fields.lineage.id`, and a
-        # held round's prompt_fields are the RETAINED INCUMBENT's (measured non-empty on 73 of
-        # 73 held rounds). Nobody is crowned because that id belongs to no candidate of this
-        # round, so the match fails — the emptiness is in the MATCH, never in the id.
-        winner_candidate_id=round_result.winner_id,
         winner_accuracy=round_result.accuracy,
         winner_composite_fitness=round_result.composite_fitness,
         winner_evaluators=dict(round_result.evaluators),

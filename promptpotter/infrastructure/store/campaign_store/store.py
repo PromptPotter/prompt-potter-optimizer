@@ -94,6 +94,20 @@ def _apply_best(data: dict[str, Any]) -> None:
     data["best_accuracy"], data["best_round"] = best_round_by_measured_accuracy(data["rounds"])
 
 
+def _branch_offset(parent_dir: Path) -> int:
+    """Where on the PARENT's ledger this fork's history begins — the cut, as an ADDRESS.
+
+    Stamped at the cut because that is the only moment it is true: a fork of a still-running parent
+    is a different number one record later. It was derived twice and stored zero times
+    (``run_observers.py`` recomputed it from the parent's length at run start), which is why a
+    fork's history could not be reconstructed off disk at all — ``forked_from_round`` is a round
+    and ``forked_at`` a wall clock, and neither addresses the ray. With it, ``(parent_path, N)``
+    names the branch and a reader can walk parent[0..N) then own, which is exactly what
+    ``CycleEventLog.iter`` does in memory and nothing could do from a file.
+    """
+    return CycleEventLog.open(CycleDir(parent_dir)).next_offset
+
+
 def _fresh_sibling_index_blob(
     parent_index: dict[str, Any],
     parent_cycle_id: str,
@@ -860,7 +874,13 @@ class CampaignStore:
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
-        blob = _fresh_sibling_index_blob(parent_index, parent_cycle_id, forked_at, **blob_kwargs)
+        blob = _fresh_sibling_index_blob(
+            parent_index,
+            parent_cycle_id,
+            forked_at,
+            forked_at_offset=_branch_offset(self.cycle_dir(parent)),
+            **blob_kwargs,
+        )
         path = self._index_path(child)
         write_json(path, blob)
         return path
@@ -884,6 +904,7 @@ class CampaignStore:
             "parent_cycle_id": parent_cycle_id,
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
+            "forked_at_offset": _branch_offset(self.cycle_dir(parent)),
             "rounds": [_round_summary(rr) for rr in surviving_rounds],
             "n_rounds": len(surviving_rounds),
             "status": "resumed",

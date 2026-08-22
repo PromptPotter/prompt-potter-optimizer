@@ -36,6 +36,32 @@ export interface DashboardCandidate {
   is_winner: boolean;
 }
 
+/** One scored sample as `dashboard.json` serves it — the rule `DashboardCandidate` states, */
+export interface DashboardSample {
+  /** Iteration position within the candidate's walk — the #000 column. */
+  qi: number;
+  /** Dataset sample id, which diverges from qi once the hard-sample sorter drives
+   * the order. Null where the row carries none. */
+  sample_id: number | null;
+  /** The grading verdict. */
+  status: 'HIT' | 'MISS' | 'ERR';
+  /** Pipeline node the row terminated at; the tape badges it. */
+  terminal_node: string;
+  /** Measurement reused from a prior identical searchpoint, not a fresh call. */
+  cached: boolean;
+  /** Recorded elapsed seconds. Null where the row never reached the pipeline —
+   * distinct from a cached replay's real 0.0. */
+  time_s: number | null;
+  /** Prediction, trimmed for display. */
+  predicted: string;
+  /** Ground truth, trimmed for display. */
+  ground_truth: string;
+  /** Query, trimmed for display. */
+  query: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
 /** A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`. */
 export interface RoundSummaryCandidate {
   label: string;
@@ -341,6 +367,7 @@ export interface OptSearchPoint {
 /** Per-round outcome — and the round document itself. */
 export interface RoundResult {
   round: number;
+  closed_at_offset: number | null;
   label: string;
   accuracy: number;
   composite_fitness: number;
@@ -447,7 +474,7 @@ export interface DashboardError {
   stop_reason: string;
 }
 
-/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:exit`` so a fork's */
+/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:enter`` off that */
 export interface RunLimits {
   max_rounds: number | null;
   l1_patience: number;
@@ -501,6 +528,7 @@ export interface LiveDashboardState {
   campaign_id: string;
   cycle_id: string;
   session_id: string;
+  at_offset: number;
   langfuse_trace_url: string | null;
   state: 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
   state_since: string;
@@ -690,10 +718,9 @@ export interface SpawnedBy {
   /** The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle
    * because a `cycle_id` is content-addressed on its origin and so is shared
    * by every campaign minted from that origin — the pair is the identity,
-   * either half alone is not. Null on a run minted before the stamp existed,
-   * which is why two pooled sandboxes on disk cannot be attributed after the
-   * fact. */
-  outer_campaign_id: string | null;
+   * either half alone is not, and a null here is why two pooled sandboxes on
+   * disk could not be attributed after the fact. */
+  outer_campaign_id: string;
   /** Outer round; 0 is the origin (C0). Null when the spawn came from outside any
    * round (the noise-floor diagnostic). */
   round: number | null;
@@ -709,8 +736,8 @@ export interface SpawnedBy {
    * `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate
    * fields do NOT identify a run: every task runs for every candidate, so one
    * candidate's spawns are as many as the panel has cells and are told apart
-   * only by this. Null on a run minted before the stamp existed. */
-  task: string | null;
+   * only by this. */
+  task: string;
 }
 
 export interface CycleListEntry {
@@ -750,10 +777,9 @@ export interface CycleListEntry {
    * orthogonal to run_phase. */
   human_intervened: boolean;
   /** Which outer work-item asked for this cycle, when it is an L4 inner
-   * measurement; null for an ordinary campaign. Lets the sidebar name an
-   * inner run by the candidate that produced it instead of by launch order.
-   * Null on inner cycles minted before the stamp existed — they fall back to
-   * their origin hash. */
+   * measurement; null for an ordinary campaign, which is the only reason it
+   * is null. Lets the sidebar name an inner run by the candidate that
+   * produced it instead of by launch order. */
   spawned_by: SpawnedBy | null;
 }
 
@@ -1167,6 +1193,25 @@ export interface RayResponse {
   cursor_prev: string | null;
 }
 
+/** One outbound SSE frame. Frozen wire shape — a receiver MUST treat an unknown field as a DRIFT SIGNAL, not as */
+export interface ProjectionEnvelope {
+  /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  /** Envelope shape version. Bump only on a breaking restructure of this class;
+   * payload churn is per-kind. */
+  version: number;
+  /** Target cycle the frame describes; redundant with the channel address but
+   * stamped per-frame for fan-in demux. */
+  cycle_id: string;
+  /** Ledger offset at append. Live-tail frames carry the record's offset; the
+   * leading stream_snapshot frame carries the offset captured at subscribe
+   * time. */
+  sequence: number;
+  /** Per-kind body. For record-derived kinds, the record's model_dump; for
+   * stream_snapshot, the dashboard.json content + snapshot_at_offset. */
+  payload: Record<string, unknown>;
+}
+
 /** One page of diagnostic-run records, newest first. */
 export interface DiagnosticRunListResponse {
   n: number;
@@ -1558,6 +1603,10 @@ export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' |
 
 // Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py).
 export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+
+// Kinds no activity item is ever made of — the ray drops them and the translator
+// returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
+export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'spend_tombstone' | 'token_usage';
 
 // Operator-facing label per terminal reason (StopReason). Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.

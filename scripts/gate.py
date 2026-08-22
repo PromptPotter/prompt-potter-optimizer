@@ -280,6 +280,7 @@ class Check:
     kind: str  # "py" — CI's `check` job; "web" — its `webapp` job
     run: Callable[[Sel], Outcome]
     staged: bool = False  # in the pre-commit fast set
+    after: str = ""  # a check this one reads the output of — see `_chains`
 
 
 _BBEH_DIR = "docs/research/bbeh-comparison"
@@ -335,7 +336,10 @@ CHECKS: tuple[Check, ...] = (
     Check("pytest", "py", lambda _: _run(_py("pytest", "tests/", "-n", str(_SLICE)), _REPO)),
     Check("lockfile", "web", _lockfile, staged=True),
     Check("eslint", "web", _eslint, staged=True),
-    Check("tsc", "web", _tsc, staged=True),
+    # tsconfig `include`s `.next/types`, which `next build` deletes and regenerates: run
+    # concurrently, tsc either read that directory mid-rewrite (TS2307 on 3 of 6 runs) or won
+    # the race and typechecked the PREVIOUS build's route signatures. Behind it, both ways.
+    Check("tsc", "web", _tsc, staged=True, after="next-build"),
     Check("anti-rot", "web", _anti_rot, staged=True),
     # vitest.config.ts keeps its own `maxWorkers` for a standalone `npm run test`;
     # under the gate the budget decides, because here it shares the box.
@@ -367,6 +371,32 @@ class Result:
     rc: int
     out: str
     secs: float
+
+
+def _chains(checks: Sequence[Check]) -> list[list[Check]]:
+    """The selection, grouped into serial chains that each occupy ONE pool slot.
+
+    A check declaring ``after`` runs on its predecessor's worker, immediately behind it, so
+    ordering costs no concurrency and needs no second budget; a predecessor the selection
+    dropped (``--only``, ``--staged``) leaves the dependent standing alone.
+    """
+    names = {c.name for c in checks}
+    chains = [[c] for c in checks if c.after not in names]
+    for chain in chains:
+        i = 0
+        while i < len(chain):
+            chain += [c for c in checks if c.after == chain[i].name]
+            i += 1
+    scheduled = sum(len(chain) for chain in chains)
+    if scheduled != len(checks):
+        # A cycle in `after` leaves every member headless, so it schedules NOTHING and the run
+        # still prints green over the checks that did survive — a verdict short of the checks it
+        # claims. Raise instead: the one failure mode of this function has no other symptom.
+        raise SystemExit(
+            f"gate: {len(checks) - scheduled} check(s) reachable from no chain head — "
+            "`after` describes a cycle."
+        )
+    return chains
 
 
 def _execute(check: Check, sel: Sel) -> Result:
@@ -444,7 +474,8 @@ def main() -> int:
 
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=_POOL) as pool:
-        results = list(pool.map(lambda c: _execute(c, sel), checks))
+        runs = list(pool.map(lambda chain: [_execute(c, sel) for c in chain], _chains(checks)))
+    results = [r for run in runs for r in run]
     total = time.monotonic() - started
     failed = [r for r in results if r.rc]
 
@@ -459,10 +490,12 @@ def main() -> int:
     if failed:
         print(f"\ngate[{scope}]: {len(results)} checks, {len(failed)} failed, {total:.1f}s")
         return 1
-    # The total is max(slowest check, sum of work / _POOL), so naming the slowest is
-    # naming the wall — without it a green run reports a number nobody can act on.
-    slowest = max(results, key=lambda r: r.secs, default=None)
-    wall = f" (slowest {slowest.check.name} {slowest.secs:.1f}s)" if slowest else ""
+    # The total is max(slowest chain, sum of work / _POOL), so naming the slowest is naming
+    # the wall — without it a green run reports a number nobody can act on. A chain holds one
+    # slot, so the wall is a chain's total and never a single check inside it.
+    slowest = max(runs, key=lambda run: sum(r.secs for r in run), default=[])
+    named = "+".join(r.check.name for r in slowest)
+    wall = f" (slowest {named} {sum(r.secs for r in slowest):.1f}s)" if slowest else ""
     print(f"gate[{scope}]: {len(results)} checks green in {total:.1f}s{wall}")
     return 0
 

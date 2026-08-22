@@ -106,8 +106,8 @@ class InFlightCall(StrictModel):
 
 
 class RunLimits(StrictModel):
-    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:exit`` so a fork's
-    reconcile dialog can default against them.
+    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:enter`` off that
+    phase's persisted view, so a fork's reconcile dialog can default against them.
 
     **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
     ``spend_cap.json`` at every persist (``view.py::_persist``). They were static, and that is
@@ -161,6 +161,15 @@ class LiveDashboardState(StrictModel):
     cycle_id: str
     session_id: str
 
+    # WHICH MOMENT this file is of — the ledger offset of the last record folded into it
+    # (``DerivedView.at_offset``), which is the same number as ``ProjectionEnvelope.sequence``
+    # and ``RayItem.offset``. It is this state's ADDRESS on the cycle's one chronology, and
+    # without it a holder of this file cannot say when it was true, cannot tell a lagging copy
+    # from a current one, and cannot join it to the event stream except by guessing — which is
+    # why the SSE snapshot had to invent a private ``snapshot_at_offset`` for itself. ``-1``
+    # until the first record lands.
+    at_offset: int = -1
+
     # Composed at construction because the webapp can't — LANGFUSE_HOST is backend-only.
     # None when Langfuse is disabled.
     langfuse_trace_url: str | None = None
@@ -210,7 +219,7 @@ class LiveDashboardState(StrictModel):
     ability_delta: float | None = None
     composite_fitness_formula: str | None = None
     # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
-    # headline toggle. Stamped at INIT:exit beside run_limits, so a fork carries its own.
+    # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
     headline_metric: HeadlineMetric = "accuracy"
 
     degraded_count: int = 0

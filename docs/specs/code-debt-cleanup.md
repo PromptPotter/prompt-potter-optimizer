@@ -65,18 +65,22 @@ decisions → [`../architecture.md`](../architecture.md).
   "Step 5" are closed (`git log`). Action: sweep for the *rule* — writers whose `0.0` default is
   indistinguishable from a measurement — rather than re-checking those five. Blocker: none.
 
-- **`/ray` has no vocabulary of its own.** `family_ray_views.py::RayItem.payload` is declared to BE the
-  record's `model_dump`, so there is no server-side shape to project onto — and that absence is why the
-  only definition of "what matters" ended up in TypeScript. **Measured over the banked corpus, so the
+- **`/ray` serves whole records where its readers want fields.** The by-KIND half of this entry
+  shipped: `domain/projection_envelope.py::RENDERS_AS_ACTIVITY` is the one declaration of the feed's
+  vocabulary and the ray's drop set derives from it, so `election` / `ruler` / `spend_tombstone` no
+  longer ride at all. What remains is by FIELD — `family_ray_views.py::RayItem.payload` is still
+  declared to BE the record's `model_dump`, so there is no server-side shape to project onto.
+  **Measured over the banked corpus, so the
   entry that stood here is corrected, not merely sharpened:** the "multi-MB window" claim is refuted as
   stated (real windows are a few hundred KB), but the window is bounded by ITEM COUNT and one existing
   family already exceeds a megabyte at `MAX_RAY_LIMIT`. Three named targets were wrong —
   `llm_call.payload.messages` does not exist (it is `template_fields`), `.reasoning` is not capped where
   claimed, and `cycle_seed.origin_prompt_fields` has zero records — while the two largest went unnamed:
-  `snapshot.payload.result` is near half the corpus, and `ruler.ruler` is entirely unread on the ray.
-  Applying the readers' true field set would keep a small fraction of the bytes. **Do NOT derive the
-  projection from the TypeScript readers** — a server filter whose correctness is defined by a client
-  file is the seam defect itself; `call_id` and `detail` are the two whose loss is silent, not visible.
+  `snapshot.payload.result`, near half the corpus and now the whole target, and `ruler.ruler`, which
+  left with its kind. Applying the readers' true field set would keep a small fraction of the bytes.
+  **Do NOT derive the projection from the TypeScript readers** — a server filter whose correctness is
+  defined by a client file is the seam defect itself; `call_id` and `detail` are the two whose loss is
+  silent, not visible.
 - **Five `export *` barrels re-export symbols that look file-local to a naive grep** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow`. Stripping an `export` there silently narrows the barrel's public surface. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind. **Recount before acting and never re-cite a headcount as current**; two traps in the recount itself are that relative-path importers (`from "./api"`, `"../api"`) miss an `@/…` grep, and that `lib/api/reads.ts` / `components/ingest/*` importing `"./types"` resolve to LEAF files, not the barrel.
 - **`RoundResult.results` drops the parent's panel on every round that promotes** — verified across the
   banked corpus: every round with a winner is byte-identical to that candidate's rows and every held

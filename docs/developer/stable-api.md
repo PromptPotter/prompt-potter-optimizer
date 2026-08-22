@@ -258,7 +258,7 @@ lifecycle, not cycle records). The record family — `PhaseRecord`,
 `domain/run_records.py`; each record's fields are its dataclass, read
 them there.
 
-Forks within a family share one event stream via `CycleEventLog.inherit_from(parent_offset)`. The forked cycle's ledger starts with the parent's records up to `parent_offset` plus a `ResumeCheckpointRecord` of kind `FORK_CUT`.
+Forks within a family share one event stream via `CycleEventLog.inherit_from(parent, offset)`. The forked cycle's ledger FILE holds only its own appends; `iter()` walks the parent's records up to `offset` in front of them, and the parent carries a `ResumeCheckpointRecord` of kind `FORK_CUT`. The cut address is `index.json::forked_at_offset`, so that walk is reproducible off disk — but it yields a VIRTUAL position (parent + own) that is not the `sequence` a tail reports, which is the file's own line. Address a record as `(path, offset)`, never by an integer alone.
 
 Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 

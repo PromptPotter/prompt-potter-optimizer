@@ -52,15 +52,17 @@ invariants:
                       can't swallow that — so the cure is not firing them. The auth/me 401 is the
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
-                      {running, gate, paused} (IN_FLIGHT, webapp/lib/run-phase.ts). detached
-                      means a dead producer (the heartbeat invariant, architecture.md §0 State +
-                      persistence) and never renders as in-flight. Client-side connection loss
-                      (failed poll, offline, hidden tab) is presented as connection state (offline /
-                      stale affordance) and MUST NOT impersonate a run phase or unmount run controls
-                      while the last-known server phase is in-flight. Every "running" surface — the
-                      sidebar-edge jobs dock (and its phone stand-in, the app bar's back-arrow
-                      dot), the RemoteControl, workspace liveCycles — reads this one set AND
-                      one shared ordering (executing before suspended). A surface that RENDERS the
+                      {running, gate} (hasLiveProducer, webapp/lib/run-phase.ts). paused is NOT
+                      one — the worker has exited — so a parked campaign kept the jobs dock lit and
+                      destroyed its all-quiet signal; a paused cycle stays reachable as a sidebar row
+                      wearing its phase. detached means a dead producer (the heartbeat invariant,
+                      architecture.md §0 State + persistence) and never renders as running.
+                      Client-side connection loss (failed poll, offline, hidden tab) is presented as
+                      connection state (offline / stale affordance) and MUST NOT impersonate a run
+                      phase or unmount run controls while the last-known server phase is running.
+                      Every "running" surface — the sidebar-edge jobs dock (and its phone stand-in,
+                      the app bar back-arrow dot), workspace runningCycles — reads this one set AND
+                      one shared ordering (what needs you first). A surface that RENDERS the
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
                       testing `=== "running"` renders half the vocabulary as nothing, which is how
                       a gate-held run — blocked on the operator, first in that ordering — read as
@@ -122,7 +124,7 @@ controls:
   - id: back
     do: Leave the campaign screen for the LIST screen. Touches nothing else — the viewed
         address, the tab and every pane's state survive, so re-entering returns to what
-        was open. Carries the live-run DOT: an accent mark whenever liveCycles is
+        was open. Carries the live-run DOT: an accent mark whenever runningCycles is
         non-empty, off the SAME set the desktop jobs dock reads (I6), with the count in
         its aria-label so the state is never colour alone. It replaces the dock on a
         phone rather than adding a second one.
@@ -180,7 +182,7 @@ controls:
         badge when several; ABSENT when idle (absence IS the "all quiet" signal). It FLOATS on
         the sidebar's outer edge, straddling the hairline and tracking --sidebar-width, so it
         rides a resize drag and the collapsed rail alike; it is mounted outside the sidebar
-        because that element clips its overflow and the popover is not portaled. Lists liveCycles
+        because that element clips its overflow and the popover is not portaled. Lists runningCycles
         (I6 membership + ordering). Ordered by WHAT NEEDS YOU, not by what is busy —
         gate > running > paused (lib/run-phase.ts::dockPriority): a gated unit makes no progress
         until the operator decides, so it leads. Both branches carry the phase class, so a held

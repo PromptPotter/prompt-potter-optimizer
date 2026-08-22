@@ -99,6 +99,9 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
 export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
   return {
     round: 0,
+    // No ledger behind a fixture, so the round closed at no offset — the same `null` a
+    // diagnostic replay writes, never 0, which is a real record.
+    closed_at_offset: null,
     label: "C0",
     accuracy: 0,
     composite_fitness: 0,
@@ -151,6 +154,9 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     campaign_id: "ds__000000",
     cycle_id: "cycle_0",
     session_id: "sess_0",
+    // A fixture folds no ledger, so it stands at the same pre-first-record offset the
+    // projection starts from.
+    at_offset: -1,
     langfuse_trace_url: null,
     state: "init",
     state_since: "",

@@ -14,7 +14,7 @@ from typing import Any, NamedTuple, cast, get_args
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
-from promptpotter.domain.projection_envelope import ProjectionKind
+from promptpotter.domain.projection_envelope import NON_ACTIVITY_KINDS, ProjectionKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import newest_mtime_ns
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -44,13 +44,13 @@ RayCursor = tuple[float, str, int]
 
 _VALID_KINDS: frozenset[str] = frozenset(get_args(ProjectionKind))
 
-# Dropped at EVERY depth — exactly the kinds the client's translator
-# (`webapp/lib/chat/activity.ts::projectionToActivity`) drops unconditionally BY KIND. At
-# depth 0 this filter must stay strictly COARSER than the client's: payload-inspecting
-# drops (a `snapshot` that is a `p_best_update`) stay the client's call, or the server
-# silently narrows what the ray can ever show. Depth >= 1 is a different regime — a
-# deliberate server-side milestone cut, finer than the client (see `_INNER_KINDS`).
-_NEVER_KINDS: frozenset[str] = frozenset({"token_usage", "decision"})
+# Dropped at EVERY depth: a kind no feed item is ever made of, so serving one is bytes the
+# renderer can only throw away. DERIVED from the single declaration rather than restated — this
+# was a hand-typed pair whose comment claimed to mirror the client's translator "exactly", and
+# the client had long since drifted to six. Payload-inspecting drops (a `snapshot` that is a
+# `p_best_update`) are the renderer's and stay there. Depth >= 1 is a different regime — a
+# deliberate server-side milestone cut (see `_INNER_KINDS`).
+_NEVER_KINDS: frozenset[str] = NON_ACTIVITY_KINDS
 
 # At depth >= 1 (an inner run) only milestones ride: an L4 outer round runs a panel of
 # whole inner campaigns, and their full ledgers would bury the outer story. `phase` covers
@@ -60,10 +60,16 @@ _NEVER_KINDS: frozenset[str] = frozenset({"token_usage", "decision"})
 _INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_warning", "error"})
 _INNER_PHASES: frozenset[str] = frozenset({"round", "control", "backend"})
 
-# A typo in a hand-typed kind silently never matches — fail at import instead.
-assert _NEVER_KINDS <= _VALID_KINDS and _INNER_KINDS <= _VALID_KINDS, (
-    f"curation names unknown ProjectionKinds: {sorted((_NEVER_KINDS | _INNER_KINDS) - _VALID_KINDS)}"
+# A typo in a hand-typed kind silently never matches — fail at import instead. `_NEVER_KINDS`
+# needs no such guard now: it is keyed off `ProjectionKind` itself.
+assert _INNER_KINDS <= _VALID_KINDS, (
+    f"curation names unknown ProjectionKinds: {sorted(_INNER_KINDS - _VALID_KINDS)}"
 )
+
+# The curation is a validator input too — it decides the body, and it is the one input that
+# moves on DEPLOY rather than on a write. Left out, a changed drop set 304s every client into
+# the body it was served before, forever on a campaign whose ledger will never move again.
+_CURATION_TAG = (sorted(_NEVER_KINDS), sorted(_INNER_KINDS), sorted(_INNER_PHASES))
 
 
 class RayItem(StrictModel):
@@ -241,9 +247,10 @@ def decode_ray_cursor(raw: str | None) -> RayCursor | None:
 def ray_validator_parts(
     courses: list[FamilyCourse], *, limit: int, before: str | None
 ) -> tuple[object, ...]:
-    """Everything the body depends on: the query, and each course's ledger + index mtimes. Deep windows
-    revalidate exactly like the head — claiming immutability would bet against a backdated append."""
-    parts: list[object] = ["ray", limit, before]
+    """Everything the body depends on: the curation, the query, and each course's ledger + index
+    mtimes. Deep windows revalidate exactly like the head — claiming immutability would bet
+    against a backdated append."""
+    parts: list[object] = ["ray", _CURATION_TAG, limit, before]
     for course in courses:
         layout = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1]))
         parts.append(encode_cycle_path(course.path))

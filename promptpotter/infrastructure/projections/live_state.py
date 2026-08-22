@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.run_records import as_view_mapping
 
 __all__ = [
     "LiveStateCore",
@@ -33,19 +34,23 @@ class LiveStateCore:
 
 
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> None:
-    """Update *core* from a ``PhaseEvent``. Origin is set once at ``INIT:exit`` and never re-anchored. ``view`` is read by
-    ATTRIBUTE, so this projection stays agnostic to the view classes without importing them upward."""
+    """Update *core* from a ``PhaseEvent``. Origin is set once at ``INIT:exit`` and never re-anchored.
+
+    Normalized here rather than at each caller: this reads the view of whichever half of the seam
+    it arrived on — the live frozen dataclass or a replay's dict — and an attribute read works on
+    the first while silently reporting the second's present facts as absent."""
     if event.round is not None:
         core.round_num = event.round
-    if view is None:
+    fields = as_view_mapping(view)
+    if not fields:
         return
     if event.phase == CampaignPhase.INIT and event.event == "exit":
-        new_origin: float = view.origin_acc
+        new_origin = float(fields["origin_acc"])
         core.origin_acc = new_origin
         if new_origin > core.best_acc:
             core.best_acc = new_origin
-    elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and view.improved:
-        winner: float = view.winner_accuracy
+    elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and fields.get("improved"):
+        winner = float(fields["winner_accuracy"])
         if winner > core.best_acc:
             core.best_acc = winner
 

@@ -61,12 +61,14 @@ impossible (the deep sites have nothing to call it on).
 **Guard (no standing test — the structural suite was cut, see
 [`tests/CLAUDE.md`](../../tests/CLAUDE.md)):** a union member with no `on_record`
 arm is silently dropped from every projection, so check the arm exists when you
-add the record. Four members are deliberately unprojected: the control-plane pair
+add the record. Three members are deliberately unprojected: the control-plane pair
 `CommandRecord` / `CommandAckRecord` (applied by `CommandDispatcher`), plus
-`CycleSeedRecord` (read back by a pure ledger scan) and `ElectionRecord` (consumed
-by `scan_ledger_elections`; the crown reaches `dashboard.json` through
-`LiveDashboardView._handle_phase`). A missing arm breaks loud in use (the fact
-never reaches `dashboard.json`).
+`CycleSeedRecord` (read back by a pure ledger scan). `ElectionRecord` was listed
+here as a fourth, and that was this rule's own failure case: the crown reached no
+fold, and the phase-view workaround standing in for it could not crown round 0 —
+the origin is ADOPTED, runs no `l1_score` phase, and folded with `is_winner` false
+on its only arm. It has an arm now. A missing one does NOT always break loud: this
+one was invisible because a second channel was covering most of it.
 
 **A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
 carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a

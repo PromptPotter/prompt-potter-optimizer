@@ -11,6 +11,8 @@ here would invert this module's one-way import."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
@@ -18,7 +20,53 @@ from promptpotter.domain.results import DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["DashboardCandidate", "RoundSummary", "RoundSummaryCandidate"]
+__all__ = [
+    "DashboardCandidate",
+    "DashboardSample",
+    "RoundSummary",
+    "RoundSummaryCandidate",
+    "SampleStatus",
+]
+
+#: The tape's three marks. ERR is a THIRD state, not a bad MISS — an errored row was never
+#: graded, so reading its absent fitness as one reports a backend fault as a wrong answer.
+SampleStatus = Literal["HIT", "MISS", "ERR"]
+
+
+class DashboardSample(StrictModel):
+    """One scored sample as `dashboard.json` serves it — the rule `DashboardCandidate` states,
+    applied to samples: ONE shape whatever the round's state.
+
+    Display-TRIMMED at the producer, because this rides a file polled every couple of seconds
+    and the untrimmed measurement already sits in `rounds/round_NNNN.json::results`. The tape
+    beside it (`sample_lines`) is a RENDERING of this row rather than a second source: the two
+    were branches of one key before, so the browser regexed the rendered half back into this
+    one and the column layout was a wire contract."""
+
+    qi: int = Field(description="Iteration position within the candidate's walk — the #000 column.")
+    sample_id: int | None = Field(
+        default=None,
+        description="Dataset sample id, which diverges from qi once the hard-sample sorter "
+        "drives the order. Null where the row carries none.",
+    )
+    status: SampleStatus = Field(description="The grading verdict.")
+    terminal_node: str = Field(
+        default="", description="Pipeline node the row terminated at; the tape badges it."
+    )
+    cached: bool = Field(
+        default=False,
+        description="Measurement reused from a prior identical searchpoint, not a fresh call.",
+    )
+    time_s: float | None = Field(
+        default=None,
+        description="Recorded elapsed seconds. Null where the row never reached the pipeline — "
+        "distinct from a cached replay's real 0.0.",
+    )
+    predicted: str = Field(default="", description="Prediction, trimmed for display.")
+    ground_truth: str = Field(default="", description="Ground truth, trimmed for display.")
+    query: str = Field(default="", description="Query, trimmed for display.")
+    input_tokens: int | None = Field(default=None)
+    output_tokens: int | None = Field(default=None)
 
 
 class DashboardCandidate(StrictModel):

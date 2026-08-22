@@ -10,7 +10,12 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["ProjectionEnvelope", "ProjectionKind"]
+__all__ = [
+    "NON_ACTIVITY_KINDS",
+    "RENDERS_AS_ACTIVITY",
+    "ProjectionEnvelope",
+    "ProjectionKind",
+]
 
 
 # Closed enum mirroring ``ProjectionEnvelope.kind`` in ``docs/specs/m12-events-asyncapi.yaml``.
@@ -54,6 +59,46 @@ if _declared != _record_types:
         f"missing {sorted(_record_types - _declared)}, "
         f"unbacked {sorted(_declared - _record_types)}."
     )
+
+# Whether a kind can EVER become an item in the activity feed — the ONE declaration of the
+# feed's vocabulary, which is why the ray needs none of its own. ``False`` is the licence not to
+# serve the record at all (``store/family_ray_views.py``); ``True`` still renders conditionally
+# on the payload — a ``snapshot`` that is a ``p_best_update`` yields nothing — and THAT decision
+# belongs to the renderer. Total over the RECORD kinds: ``stream_snapshot`` is synthesized by
+# the tail, reaches its own translator, and is on no ledger for the ray to filter.
+RENDERS_AS_ACTIVITY: dict[ProjectionKind, bool] = {
+    "candidate_minted": True,
+    "command": True,
+    "command_ack": True,
+    "cycle_seed": True,
+    "decision": False,
+    "election": False,
+    "error": True,
+    "llm_call": True,
+    "llm_call_progress": True,
+    "llm_call_start": True,
+    "phase": True,
+    "round_warning": True,
+    "ruler": False,
+    "snapshot": True,
+    "spend_tombstone": False,
+    "token_usage": False,
+}
+
+if frozenset(RENDERS_AS_ACTIVITY) != _declared:
+    raise RuntimeError(
+        "RENDERS_AS_ACTIVITY must answer for every record kind — an unanswered one is a record "
+        "the ray cannot decide about and the feed drops in silence: "
+        f"missing {sorted(_declared - frozenset(RENDERS_AS_ACTIVITY))}, "
+        f"unbacked {sorted(frozenset(RENDERS_AS_ACTIVITY) - _declared)}."
+    )
+
+#: The complement, as both consumers want it: the ray's drop set and the client's proof that
+#: nothing reaching its default arm was ever meant to render.
+NON_ACTIVITY_KINDS: frozenset[ProjectionKind] = frozenset(
+    kind for kind, renders in RENDERS_AS_ACTIVITY.items() if not renders
+)
+
 del _record_types, _declared
 
 

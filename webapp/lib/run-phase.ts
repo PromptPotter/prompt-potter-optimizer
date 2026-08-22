@@ -33,7 +33,6 @@ const RUN_PHASE_LABEL: Record<Exclude<RunPhase, "terminal">, string> = {
 //   gate    — blocked ON THE OPERATOR. It makes no progress until you decide, so
 //             every second it is not at the top is a second wasted.
 //   running — making progress without you. Interesting, not urgent.
-//   paused  — suspended by you; it is where you left it and will wait.
 //
 // The old order was "executing first", which reads as a status board rather than
 // a queue of work. That was harmless only while `gate` was unreachable: the server
@@ -42,9 +41,9 @@ const RUN_PHASE_LABEL: Record<Exclude<RunPhase, "terminal">, string> = {
 // (`runtime_flags.py::derive_run_phase`), "needs a decision" is finally a state the
 // dock can see, and it belongs first.
 //
-// Total over RunPhase: the three that are not dock entries sort last explicitly,
-// which is also what makes this the one place the runtime guard below can derive
-// "is this string a phase?" from — no second hand-written list of the members.
+// Every other phase sorts last: the dock lists PRODUCERS, so `paused` never reaches
+// this map through it. Total anyway — `isRunPhase` derives membership from the key
+// set, and a phase missing here would stop being recognised as a phase at all.
 const DOCK_PRIORITY: Record<RunPhase, number> = {
   gate: 0,
   running: 1,
@@ -58,35 +57,36 @@ function isRunPhase(v: string | null | undefined): v is RunPhase {
   return !!v && v in DOCK_PRIORITY;
 }
 
-// The one definition of "this cycle is a live, incomplete unit" — a genuine
-// entry in the OS-style dock of open units: running, its origin gate, and
-// paused (a suspended, resumable unit). `detached` is deliberately EXCLUDED:
-// post-heartbeat it means the producer is dead, not "alive but quiet". The
-// in-flight heartbeat (dispatch/llm_call/heartbeat.py, 15 s) bumps the ledger →
-// dashboard.json during any long await heartbeated today — the optimizer LLM
-// call, an L4 outer cycle awaiting a multi-minute inner campaign, and the
-// backend scoring query — so a genuinely-alive cycle can no longer go stale
-// past RUN_FRESH_S (30 s). A stale dashboard therefore means the producer
-// vanished (crash / kill / sleep); such a cycle is dead and gets reaped to
-// terminal, not shown as an open app. Every "is anything running" surface reads
-// THIS one map — the navbar dock, the RemoteControl, the workspace `liveCycles` — so
-// they can't disagree.
+// Is a PRODUCER attached and driving this cycle right now? `gate` counts — the
+// process is alive, holding for a decision — and `paused` does not: the worker has
+// exited, which is the whole difference between a suspended unit and a busy one.
+// `detached` is excluded for the opposite reason: post-heartbeat it means the
+// producer is DEAD, not alive but quiet. The in-flight heartbeat
+// (dispatch/llm_call/heartbeat.py, 15 s) bumps the ledger → dashboard.json through
+// every long await heartbeated today, so a live cycle can no longer go stale past
+// RUN_FRESH_S (30 s) and a stale one really has vanished.
 //
-// A booleans-per-phase map rather than a Set, because a Set of three strings can
-// go stale in silence: that is exactly how `gate` spent months declared by the
-// server and invisible to the dock. Here a new phase does not compile until
-// somebody decides whether it is an open unit.
-const IN_FLIGHT: Record<RunPhase, boolean> = {
+// A booleans-per-phase map rather than a Set, because a Set of three strings can go
+// stale in silence: that is how `gate` spent months declared by the server and
+// invisible to the dock. Here a new phase does not compile until somebody decides
+// which side it is on.
+const HAS_PRODUCER: Record<RunPhase, boolean> = {
   running: true,
   gate: true,
-  paused: true,
+  paused: false,
   checkin: false,
   detached: false,
   terminal: false,
 };
 
-export function isInFlight(runPhase: string | null | undefined): boolean {
-  return isRunPhase(runPhase) && IN_FLIGHT[runPhase];
+// "Something is happening" — the jobs dock and its phone stand-in, the chat's
+// listening state, whether a warming cycle's first snapshot is still coming. Its
+// predecessor counted `paused` as in-flight, so a parked campaign kept the dock lit
+// and the dock never went quiet; the absence of the dock IS the all-quiet signal, and
+// a suspended unit is not a run. A paused cycle is still reachable — it is a row in
+// the sidebar, wearing its phase — it just does not claim to be running.
+export function hasLiveProducer(runPhase: string | null | undefined): boolean {
+  return isRunPhase(runPhase) && HAS_PRODUCER[runPhase];
 }
 
 // What the play/pause control may DO from here. Total, and `none` is a real

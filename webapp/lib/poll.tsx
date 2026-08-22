@@ -21,7 +21,7 @@ import { ageTextSeconds } from "./format";
 import type { DashboardCandidate, LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation } from "./revalidate";
-import { isInFlight } from "./run-phase";
+import { hasLiveProducer } from "./run-phase";
 import { useWorkspace } from "./workspace";
 
 // `gone` is NOT a flavour of `offline`, and conflating them is the bug this
@@ -453,7 +453,7 @@ function useCycleStreamSource(
         // served phase is the one that knows: a producer that died before its first
         // flush leaves a cycle with no dashboard forever, and this branch used to
         // announce it as warming up for as long as the operator kept the tab open.
-        const stillComing = isInFlight((resp.data as WarmingSnapshot).run_phase);
+        const stillComing = hasLiveProducer((resp.data as WarmingSnapshot).run_phase);
         setState((prev) => ({
           ...prev,
           dash: null,

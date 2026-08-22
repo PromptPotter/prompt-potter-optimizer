@@ -12,6 +12,7 @@ from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
     CycleRecord,
+    ElectionRecord,
     ErrorRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -305,12 +306,6 @@ class LiveDashboardView(DerivedView):
         self.state.state = name
         self.state.state_since = utcnow_iso()
 
-    def mark_stopped(self, reason: str) -> None:
-        self.state.stop_reason = reason
-        self.state.declared_phase = RunPhase.TERMINAL
-        self._set_state(DashboardState.STOPPED)
-        self._flush_pending_persist()
-
     # -- Write coalesce -------------------------------------------------------
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
@@ -359,13 +354,19 @@ class LiveDashboardView(DerivedView):
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "control":
-            # The sole writer of `declared_phase` short of the terminal `mark_stopped` — and
-            # nothing here writes `run_phase`, which is wire-only and derived at the read.
-            # Flushing bumps the mtime, so the 304-cached route re-derives immediately.
+            # The SOLE writer of `declared_phase` — and nothing here writes `run_phase`, which is
+            # wire-only and derived at the read. Flushing bumps the mtime, so the 304-cached route
+            # re-derives immediately. TERMINAL arrives here like every other phase since the stop
+            # became a record; it used to be pushed in by `mark_stopped`, so a fold of the ledger
+            # reported a stopped cycle as still running.
             event_phase = RunPhase(record.event)
-            if self.state.declared_phase not in (RunPhase.TERMINAL, event_phase):
-                self.state.declared_phase = event_phase
-                self._flush_pending_persist()
+            if self.state.declared_phase == event_phase:
+                return
+            self.state.declared_phase = event_phase
+            if event_phase == RunPhase.TERMINAL:
+                self.state.stop_reason = str(record.payload.get("stop_reason") or "")
+                self._set_state(DashboardState.STOPPED)
+            self._flush_pending_persist()
             return
 
         if record.phase == "backend" and record.event == "warning":
@@ -410,14 +411,21 @@ class LiveDashboardView(DerivedView):
 
         if record.phase == "round" and record.event == "display":
             payload = record.payload
-            round_result = record.live_round_result  # persisted payload is the lean SSE form
             l1_stall = int(payload.get("l1_stall_count") or 0)
             hearts_raw = payload.get("hearts")
             hearts = None if hearts_raw is None else int(hearts_raw)
+            # The headline scalars come off the PERSISTED lean form — the same numbers the full
+            # result carries, so they fold whether or not a live producer is behind the record.
+            accuracy = (payload.get("round_result") or {}).get("accuracy")
+            if accuracy is not None:
+                self._absorb_round_complete(float(accuracy), l1_stall, hearts)
+            # The trajectory row needs the WHOLE `RoundResult`, which rides the in-memory-only
+            # field — so `rounds[]` is the one thing here a replay cannot rebuild, and it seeds
+            # from the prior `dashboard.json` instead (`resolve_resume_state`).
+            round_result = record.live_round_result
             if round_result is not None:
-                self._absorb_round_complete(round_result.accuracy, l1_stall, hearts)
                 if self._recorder is not None:
-                    self._recorder.set_l1_score(self._l1_score_block(live=False))
+                    self._recorder.set_l1_score(self._l1_score_block())
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
@@ -434,31 +442,28 @@ class LiveDashboardView(DerivedView):
                 self._flush_pending_persist()
             return
 
-        payload = record.payload
-        view = payload.get("view")
-        # ``record.data`` is in-memory-only (``exclude=True``): populated on the direct
-        # subscriber path, empty on a ledger replay, where ``view`` carries the same facts.
-        event = PhaseEvent(
-            phase=record.phase,
-            event=record.event,
-            round=record.round,
-            data=record.data,
-        )
+        # The view, never ``record.data``: the data bag is the phase builder's in-memory INPUT
+        # (``exclude=True``, empty off disk) and the view is the persisted output built from it,
+        # so every fact this fold needs is a declared field on the view or it does not survive.
+        view = view_fields(record)
+        event = PhaseEvent(phase=record.phase, event=record.event, round=record.round)
         self._apply_phase(event, view)
         # The buffer belongs to ONE round, so it clears when the round NUMBER moves, not at
         # `L1_GENERATE:enter` — `round:enter` advances the number first, which leaves the closed
         # round's candidates standing under the new number for the whole generate call.
         if self._buffer.round_num != self.state.round:
             self._buffer.reset(self.state.round)
-        # AFTER that reset, never before: the crown belongs to the round the buffer already
-        # holds, so stamping it earlier lets a round-boundary reset wipe it in the same handler.
-        # The election has ALREADY run — it is the last thing `l1_score` does, two optimizer
-        # calls before the round closes, so crowning at `round:display` lands the badge at a
-        # moment with no relation to the decision.
-        if record.phase == CampaignPhase.L1_SCORE and record.event == "exit":
-            # Through the mapping form, never `getattr`: a ledger replay deserializes the view
-            # to a DICT, on which `getattr` returns the default and silently crowns nobody.
-            self._buffer.mark_winner(str(view_fields(record).get("winner_candidate_id") or ""))
+        self._flush_pending_persist()
+
+    def _handle_election(self, record: ElectionRecord) -> None:
+        """The crown, from the record that IS the crown. It was read off ``L1_SCORE:exit``'s view
+        instead, which cannot reach round 0 — the origin is ADOPTED rather than elected, runs no
+        ``l1_score`` phase, and so folded with ``is_winner`` false on the one arm it has. The
+        election record fires for round 0 too, saying exactly that it adopted ``C0``.
+
+        Two channels for one fact, and this is the one with its own record. ``DerivedView`` had no
+        branch for it at all, so the crown reached no fold."""
+        self._buffer.mark_winner(record.winner_label)
         self._flush_pending_persist()
 
     @staticmethod
@@ -553,7 +558,7 @@ class LiveDashboardView(DerivedView):
 
     # -- Scalar mutations -----------------------------------------------------
 
-    def _apply_phase(self, event: PhaseEvent, view: Any) -> None:
+    def _apply_phase(self, event: PhaseEvent, view: dict[str, Any]) -> None:
         s = self.state
         if event.round is not None:
             s.round = event.round
@@ -563,42 +568,34 @@ class LiveDashboardView(DerivedView):
             if mapped is not None:
                 self._set_state(mapped)
 
-        phase, data = event.phase, event.data
-        if phase == CampaignPhase.INIT and event.event == "enter":
-            # Stamp the formula early — origin scoring runs before INIT:exit; What-If needs a ref.
-            if view is not None:
-                formula = getattr(view, "composite_fitness_formula", None)
-                if formula is not None:
-                    s.composite_fitness_formula = formula
-                short = getattr(view, "composite_fitness_formula_short", None)
-                if short is not None:
-                    self.short_formula_template = short
-        elif phase == CampaignPhase.INIT and event.event == "exit":
-            config = data["config"]
-            # The formula is stamped once at INIT:enter and origin accuracy rides round 0 via
-            # the standard ``close_round`` path, so INIT:exit carries only the run limits.
-            opt = config.optimization
-            self.patience_max = opt.l1_patience
-            s.patience = f"0/{self.patience_max}"
-            # The declared ceilings, not the live counter `patience` above. A fork re-emits this
-            # at its own INIT with the reconciled config, so its dashboard shows its own limits.
+        if event.phase == CampaignPhase.INIT and event.event == "enter" and view:
+            # Everything INIT declares is stamped at ENTER, because origin scoring runs before
+            # the exit fires: What-If needs the formula by then and the run strip its ceilings.
+            formula = view.get("composite_fitness_formula")
+            if formula is not None:
+                s.composite_fitness_formula = formula
+            short = view.get("composite_fitness_formula_short")
+            if short is not None:
+                self.short_formula_template = short
+            # The DECLARED ceilings, not the live `patience` counter beside them, which the
+            # constructor already stamps. A fork re-emits this at its own INIT with the
+            # reconciled config, so its dashboard shows its own limits. `max_rounds` round-trips
+            # through 0 — the view floors it, and in lives mode there is no round ceiling.
             s.run_limits = RunLimits(
-                max_rounds=opt.max_rounds,
-                l1_patience=opt.l1_patience,
-                l2_patience=opt.l2_patience,
-                l3_patience=opt.l3_patience,
-                pobb_epsilon=opt.pobb_epsilon,
-                spend_budget_usd=opt.spend_budget_usd,
-                token_budget=opt.token_budget,
-                lives_cap=opt.lives.cap if opt.lives else None,
+                max_rounds=view.get("max_rounds") or None,
+                l1_patience=int(view.get("patience") or 0),
+                l2_patience=view.get("l2_patience"),
+                l3_patience=view.get("l3_patience"),
+                pobb_epsilon=float(view.get("pobb_epsilon") or 0.0),
+                spend_budget_usd=view.get("spend_budget_usd"),
+                token_budget=view.get("token_budget"),
+                lives_cap=view.get("lives_cap"),
             )
-        elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            new_round = int(data.get("round", s.round) or 0)
-            s.round = new_round
+        elif event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.
-            s.rounds = [r for r in s.rounds if r.round < new_round]
+            s.rounds = [r for r in s.rounds if r.round < s.round]
 
         # Mirrored for LiveDisplay parity. The core's ``best_acc`` is a hard-first SUBSET score
         # and must NOT feed ``s.best``, whose sole writer is ``_absorb_round_complete``.
@@ -814,8 +811,8 @@ class LiveDashboardView(DerivedView):
 
     # -- Block builders (delegated to render.py) ------------------------------
 
-    def _l1_score_block(self, *, live: bool) -> dict[str, Any]:
-        return build_l1_score_block(self._buffer, self.short_formula_template, live=live)
+    def _l1_score_block(self) -> dict[str, Any]:
+        return build_l1_score_block(self._buffer, self.short_formula_template)
 
     # -- Internal --------------------------------------------------------------
 
@@ -839,7 +836,7 @@ class LiveDashboardView(DerivedView):
             if block.get("round") == self.state.round
         }
         if self._buffer.candidates:
-            blocks["l1_score"] = self._l1_score_block(live=True)
+            blocks["l1_score"] = self._l1_score_block()
         # Reading order, not execution order: generate and critique head the block because they
         # are what an operator opens the file for.
         ordered = {
@@ -851,6 +848,10 @@ class LiveDashboardView(DerivedView):
     def _persist(self) -> None:
         # Atomic tmp+rename via write_json — polling readers never see a torn payload.
         s = self.state
+        # Stamp the moment this write is OF, before composing anything from it. The write is
+        # debounced, so it lands after later records have already arrived — `at_offset` names
+        # the fold, never the file's mtime, and a reader joins the event stream from here.
+        s.at_offset = self.at_offset
         s.current_round = CurrentRound(
             # `state.round`, never the candidate buffer's, which only advances at
             # `L1_GENERATE:enter` — one behind from `round:enter` onward, so every reader

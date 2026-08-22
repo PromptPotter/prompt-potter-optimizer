@@ -7,9 +7,12 @@ or talks to a network without going through one of these seams.
 ## Persistence — one ingress, two projections
 
 **Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`).
-Forks via `CycleEventLog.inherit_from(parent, offset)` — an IN-PROCESS binding
-that writes nothing, so a later reader sees a fork's ledger begin at its own
-first append. Anything a fork must answer for ITSELF is appended to it: a
+Forks via `CycleEventLog.inherit_from(parent, offset)`, and the cut is STAMPED —
+`index.json::forked_at_offset`, read back by `ledger.py::branch_offset`. It wrote
+nothing until then, so where a fork's history began was known only inside the
+forking process; `forked_from_round` is a round and `forked_at` a clock, and
+neither addresses a ledger. A fork's own FILE still holds only its own appends —
+the parent's prefix is walked, not copied. Anything a fork must answer for ITSELF is appended to it: a
 repair's corrected rounds reach the branch via `repair.py::_rebank_on_branch`,
 because a round file written with no ingress behind it is invisible to every
 scan and readers silently fall back to the parent. The writer-side API
@@ -83,10 +86,11 @@ a convention:
 - **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is
   most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
   `round`: presence in the served map is the client's whole definition of "this node has fired".
-- **A live candidate is the same shape as a closed one** (`DashboardCandidate`,
-  `domain/dashboard_rows.py`). Two shapes for one
-  entity force the client to merge them field by field, which put a bar and its error whisker on
-  two different polls. **Each field lands at the moment its FACT exists, and none of them is the
+- **A live row is the same shape as a closed one** — candidates (`DashboardCandidate`) and
+  samples (`DashboardSample`), both `domain/dashboard_rows.py`. Two shapes for one entity force
+  the client to merge them field by field, which put a bar and its error whisker on two
+  different polls, and made it regex a rendered tape to recover the row the other branch of the
+  same key already held. **Each field lands at the moment its FACT exists, and none of them is the
   round close:** the value and its band at `candidate_scored`, the crown on its own
   `ElectionRecord`, written where the election runs. (θ stays null on a live row — it needs the round's joint fit,
   which is a different fact, not a late one.) A field held back to `round:display` surfaces

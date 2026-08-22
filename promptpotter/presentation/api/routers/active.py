@@ -72,9 +72,8 @@ class SpawnedBy(StrictModel):
     """
 
     outer_cycle_id: str = Field(description="The outer cycle that owns this inner sandbox")
-    outer_campaign_id: str | None = Field(
-        default=None,
-        description="The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not. Null on a run minted before the stamp existed, which is why two pooled sandboxes on disk cannot be attributed after the fact.",
+    outer_campaign_id: str = Field(
+        description="The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not, and a null here is why two pooled sandboxes on disk could not be attributed after the fact.",
     )
     round: int | None = Field(
         default=None,
@@ -91,9 +90,8 @@ class SpawnedBy(StrictModel):
         default=None,
         description="Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
     )
-    task: str | None = Field(
-        default=None,
-        description="The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
+    task: str = Field(
+        description="The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
     )
 
 
@@ -140,10 +138,9 @@ class CycleListEntry(StrictModel):
         default=None,
         description=(
             "Which outer work-item asked for this cycle, when it is an L4 inner "
-            "measurement; null for an ordinary campaign. Lets the sidebar name an inner "
-            "run by the candidate that produced it instead of by launch order. Null on "
-            "inner cycles minted before the stamp existed — they fall back to their "
-            "origin hash."
+            "measurement; null for an ordinary campaign, which is the only reason it is "
+            "null. Lets the sidebar name an inner run by the candidate that produced it "
+            "instead of by launch order."
         ),
     )
 

@@ -11,7 +11,7 @@ import s from "./MobileAppBar.module.css";
 // has at any width. The LIST screen is the sidebar at full width, which carries its
 // own brand, CTA, filter and footer, so it gets no bar and `←` moves between the two.
 //
-// `←` also carries the live-run dot, off the same `liveCycles` the desktop
+// `←` also carries the live-run dot, off the same `runningCycles` the desktop
 // sidebar-edge dock reads (I6, one server-owned answer) — not a second dock.
 
 interface Props {
@@ -32,7 +32,7 @@ function segmentsFor(tab: Tab): readonly Segment<Tab>[] {
 
 export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle }: Props) {
   const { status, openAuthPrompt } = useAuth();
-  const { campaignId, campaigns, liveCycles } = useWorkspace();
+  const { campaignId, campaigns, runningCycles } = useWorkspace();
 
   // The list screen is the sidebar; it is its own header.
   if (listScreen) return null;
@@ -40,6 +40,7 @@ export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle 
   const campaign = campaigns.find((c) => c.campaign_id === campaignId);
   const title = campaign?.label || campaign?.dataset_name || "PromptPotter";
   const anon = status === "unauthed";
+  const running = runningCycles.length;
 
   return (
     // `mobile-appbar` is the global marker shell.css keys the ≤bp-md reveal on;
@@ -48,12 +49,8 @@ export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle 
       <div className={s.row}>
         <button
           type="button"
-          className={cx(s.icon, liveCycles.length > 0 && s.dotted)}
-          aria-label={
-            liveCycles.length > 0
-              ? `Campaigns — ${liveCycles.length} active`
-              : "Campaigns"
-          }
+          className={cx(s.icon, running > 0 && s.dotted)}
+          aria-label={running > 0 ? `Campaigns — ${running} running` : "Campaigns"}
           onClick={onBack}
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

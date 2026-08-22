@@ -90,6 +90,15 @@ class InitEnterView:
     model: str = ""
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
+    # The rest of the declared ceilings `dashboard.json::run_limits` is built from — the four
+    # above are the half that already rode here. They are fields rather than loose keys because
+    # the fold read them off `PhaseEvent.data`, which is `exclude=True` and reaches no disk.
+    l2_patience: int | None = None
+    l3_patience: int | None = None
+    pobb_epsilon: float = 0.0
+    spend_budget_usd: float | None = None
+    token_budget: int | None = None
+    lives_cap: int | None = None
 
 
 @dataclass(frozen=True)
@@ -222,13 +231,6 @@ class RoundCompleteView:
     # "was 0.0%" on any round whose payload lacked the key.
     matched_parent_accuracy: float | None
     matched_parent_composite: float | None = None
-    # The elected winner's lineage id — the identity `winner_label` cannot carry (prose, optional,
-    # shareable). It rides the VIEW rather than the emit kwargs because those live on
-    # `PhaseRecord.data`, which is `exclude=True` and so exists only in the emitting process:
-    # anything reading this record off disk (the SSE tail, a re-projection, an audit reader)
-    # would find the crown missing. Read it with `run_records.py::view_fields`, never `getattr`
-    # — off disk the view is a dict.
-    winner_candidate_id: str = ""
 
 
 @dataclass(frozen=True)

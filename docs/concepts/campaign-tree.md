@@ -19,8 +19,8 @@ campaigns/justlogic__a1b2c3/        # one Campaign
       .runtime/ledger.jsonl         # …, FORK_CUT → fork_x, …
     cycle_abc123_fork_x/            # branch — flat alongside the root
       dashboard.json                # the fork's OWN telemetry (seeded from parent at the cut)
-      index.json                    # parent_cycle_id: cycle_abc123
-      .runtime/ledger.jsonl         # inherit_from(parent, offset_at_cut)
+      index.json                    # parent_cycle_id + forked_at_offset: WHERE on the parent
+      .runtime/ledger.jsonl         # own appends only; the parent's prefix is walked, not copied
 ```
 
 Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.

@@ -9,15 +9,16 @@ import { PotterMark } from "@/components/brand/PotterMark";
 // hairline: a run's existence is not a per-campaign fact, so it sits beside the
 // library rather than inside it. Absent when idle — the absence IS "all quiet".
 //
-// It reads the workspace's shared `liveCycles` (running / gate / paused, in the
-// shared `dockPriority` order so what needs a decision reads first) — the same
-// in-flight set the RemoteControl uses, so the two can't disagree. `detached` is a
-// dead producer rather than a live run, and never appears here.
+// It reads the workspace's shared `runningCycles` (running / gate, in the shared
+// `dockPriority` order so what needs a decision reads first). PRODUCERS only:
+// `paused` is a run the operator parked, so listing it kept the dock permanently lit
+// and destroyed the all-quiet signal — it stays reachable as a sidebar row wearing
+// its phase. `detached` is a dead producer, and never appears either.
 //
 // A direct child of `.shell`, NOT of `.sidebar`: the sidebar is `overflow:hidden`
 // and `Popover` is not portaled, so a dock in there loses its multi-run panel with
 // nothing on screen to say so. Desktop only — a phone shows the same signal as the
-// dot on the app bar's back arrow, off the same `liveCycles`.
+// dot on the app bar's back arrow, off the same `runningCycles`.
 
 interface Props {
   // Called after a running cycle is picked, so the shell can switch to the
@@ -28,8 +29,8 @@ interface Props {
 const POTTER_GLYPH = <PotterMark size={16} />;
 
 export function JobsDock({ onPicked }: Props) {
-  const { liveCycles, campaigns, selectCycle } = useWorkspace();
-  const n = liveCycles.length;
+  const { runningCycles, campaigns, selectCycle } = useWorkspace();
+  const n = runningCycles.length;
 
   // Missing dock === idle: the absence IS the signal.
   if (n === 0) return null;
@@ -45,7 +46,7 @@ export function JobsDock({ onPicked }: Props) {
   // Exactly one in flight → the button IS the direct link, and still carries its
   // phase class: a run held at the origin gate is blocked on the operator and must
   // not be pixel-identical to one making progress.
-  const c = n === 1 ? liveCycles[0] : undefined;
+  const c = n === 1 ? runningCycles[0] : undefined;
   if (c) {
     const label = labelFor(c.campaign_id, c.dataset_name);
     return (
@@ -86,9 +87,9 @@ export function JobsDock({ onPicked }: Props) {
       >
         {({ close }) => (
           <ul className="jobs-dock-list" role="menu" aria-label="Active jobs">
-            {/* liveCycles already carries the shared order (dockPriority) —
-                see workspace.tsx's liveCycles memo. */}
-            {liveCycles.map((c) => (
+            {/* runningCycles already carries the shared order (dockPriority) —
+                see workspace.tsx's runningCycles memo. */}
+            {runningCycles.map((c) => (
               <li key={`${c.campaign_id}/${c.cycle_id}`} role="none">
                 <button
                   type="button"

@@ -35,10 +35,21 @@ class CycleLedgerTail:
         self._line_index = 0
 
     def snapshot_frame(self) -> ProjectionEnvelope:
-        """The leading frame: the cycle's dashboard (or a warming shape) plus its offset. It also POSITIONS the tail cursor at
-        end-of-file, so the live tail begins exactly where the snapshot left off — no gap, no duplicate."""
-        offset = self._seek_to_eof()
+        """The leading frame: the cycle's dashboard (or a warming shape) plus where the tail picks up.
+
+        It picks up one PAST the offset the dashboard is a fold OF (``at_offset``), not at
+        end-of-file. The dashboard write is debounced, so records can land between the fold and the
+        file's mtime; parking at EOF meant the client never received those — the snapshot did not
+        carry them and the tail began after them. A body with no ``at_offset`` (a warming shape, or
+        a file written before the fold stamped one) still parks at EOF, which is what it did all
+        along."""
         body = self._read_dashboard()
+        folded = body.get("at_offset")
+        offset = (
+            self._seek_to_line(folded + 1)
+            if isinstance(folded, int) and not isinstance(folded, bool) and folded >= -1
+            else self._seek_to_eof()
+        )
         body["snapshot_at_offset"] = offset
         return ProjectionEnvelope(
             kind="stream_snapshot",
@@ -92,6 +103,26 @@ class CycleLedgerTail:
         if reason:
             warming["reason"] = reason
         return warming
+
+    def _seek_to_line(self, line: int) -> int:
+        """Park the cursor so the next read STARTS at ``line``; returns where it parked, clamped to
+        end-of-file. Counts bytes rather than trusting the number: a dashboard can name an offset
+        this file no longer has (a rewind, a fork's shorter ledger), and a cursor past the end
+        delivers nothing forever."""
+        if line <= 0 or not self._ledger_path.exists():
+            self._byte_pos = 0
+            self._line_index = 0
+            return 0
+        data = self._ledger_path.read_bytes()
+        pos = seen = 0
+        while seen < line:
+            nl = data.find(b"\n", pos)
+            if nl == -1:
+                break
+            pos, seen = nl + 1, seen + 1
+        self._byte_pos = pos
+        self._line_index = seen
+        return seen
 
     def _seek_to_eof(self) -> int:
         """Count complete lines and park the byte cursor after the last one.

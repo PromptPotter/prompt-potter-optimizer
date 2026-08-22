@@ -3,6 +3,7 @@ Forks are first-class: ``inherit_from(parent, offset)``, cut recorded as a ``FOR
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,7 +17,32 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog", "Projection"]
+__all__ = ["CycleEventLog", "Projection", "branch_offset"]
+
+
+def branch_offset(cycle_dir: CycleDir) -> int | None:
+    """Where this cycle's history begins on its PARENT's ledger — ``index.json::forked_at_offset``,
+    stamped at the cut by ``campaign_store``. ``None`` for a root, which inherits nothing.
+
+    The one copy of a number that used to be derived twice and stored never, and the reason a
+    fork's history could not be walked from disk: ``forked_from_round`` is a round and
+    ``forked_at`` a wall clock, so neither addresses the ray. A FORK whose manifest predates the
+    stamp raises rather than defaulting — inheriting ``0`` would silently serve a fork as though
+    it began from nothing, which reads as a real (and much shorter) history."""
+    index = CycleLayout(Path(cycle_dir)).manifest
+    if not index.is_file():
+        return None
+    data = json.loads(index.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not data.get("parent_cycle_id"):
+        return None
+    offset = data.get("forked_at_offset")
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        raise ValueError(
+            f"{index}: a fork carries no `forked_at_offset`, so where its history begins on "
+            "its parent's ledger is unknown and cannot be guessed. Re-mint the fork, or drop "
+            "the cycle — campaign state is disposable and the caches it reads are not."
+        )
+    return offset
 
 
 _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)

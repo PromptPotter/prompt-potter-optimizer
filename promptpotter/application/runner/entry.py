@@ -839,7 +839,6 @@ def _finalize_run(
     is_paused = info.outcome is StopOutcome.PAUSED
     halted_mid_round = info.halts_mid_round
     has_traceback = info.has_traceback
-    emitter = observers.dashboard
     if is_paused:
         # DECLARE the pause at the one point every paused exit converges on, rather than
         # trusting each raise site. Skipping the terminal writes below leaves `derive_run_phase`
@@ -901,10 +900,12 @@ def _finalize_run(
             final=final_block,
             export=_export_artifact(session, cycle_result, winner, formula=round_formula),
         )
-    # Drain AFTER mark_stopped, so dashboard.json's stopped state is in place before the audit
-    # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file.
-    if emitter is not None and not is_paused:
-        emitter.mark_stopped(str(stop_reason or ""))
+    # Declared BEFORE the drain, so dashboard.json's stopped state is in place before the audit
+    # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file. The
+    # append reaches the projection through the same door every other fact does — it is a
+    # subscriber — so there is no second path to keep in step with this one.
+    if not is_paused:
+        declare_run_phase(session, RunPhase.TERMINAL, stop_reason=str(stop_reason or ""))
     observers.audit._halted_mid_round = halted_mid_round
     observers.drain_all()
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.dashboard_rows import DashboardCandidate
+from promptpotter.domain.dashboard_rows import DashboardCandidate, DashboardSample, SampleStatus
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
@@ -44,27 +44,41 @@ def _partial_mean_fitness(samples: list[dict[str, Any]]) -> float | None:
     return sum(float(s.get("fitness") or 0.0) for s in graded) / len(graded)
 
 
-def fmt_sample_line(s: dict[str, Any]) -> str:
-    """One compact line per query for the in-flight samples list, keeping the dashboard scannable instead of bloating with
-    full query strings. The round-complete flush emits the full dicts."""
-    qi = int(s.get("qi", 0))
+def sample_row(s: dict[str, Any]) -> DashboardSample:
+    """One buffered sample as the dashboard serves it — the ONE place the tape's facts are
+    decided, and where the display trim happens."""
     sid = s.get("sample_id")
-    sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
-    # The `HIT `/`MISS`/`ERR ` mark is a PARSED CONTRACT with `webapp/lib/sample-line.ts`, which
-    # regexes this tape to drive the live heatmap. `ERR ` is a THIRD state, not a bad MISS: an
-    # errored row was never graded, and reading its absent fitness as one reports a backend
-    # fault as a candidate answering wrong.
-    errored = bool(s.get("error"))
-    cached = bool(s.get("cached"))
     time_s = s.get("time_s")
-    badge = _NODE_BADGES.get(s.get("terminal_node") or "", (s.get("terminal_node") or "?")[:2])
-    cache_icon = "📖" if cached else " "
-    mark = "ERR " if errored else ("HIT " if is_hit(s.get("fitness")) else "MISS")
-    query = _trim(s.get("query") or "", 42)
-    pred = _trim(s.get("prediction") or "", 28)
-    gt = _trim(s.get("ground_truth") or "", 20)
-    in_tok = s.get("input_tokens")
-    out_tok = s.get("output_tokens")
+    # `ERR` is asked BEFORE the grade: an errored row was never graded, so putting its absent
+    # fitness through `is_hit` reports a backend fault as a candidate answering wrong.
+    status: SampleStatus = (
+        "ERR" if s.get("error") else ("HIT" if is_hit(s.get("fitness")) else "MISS")
+    )
+    return DashboardSample(
+        qi=int(s.get("qi", 0)),
+        sample_id=None if sid is None else int(sid),
+        status=status,
+        terminal_node=str(s.get("terminal_node") or ""),
+        cached=bool(s.get("cached", False)),
+        time_s=float(time_s) if isinstance(time_s, int | float) else None,
+        predicted=_trim(s.get("prediction") or "", 28),
+        ground_truth=_trim(s.get("ground_truth") or "", 20),
+        query=_trim(s.get("query") or "", 42),
+        input_tokens=s.get("input_tokens"),
+        output_tokens=s.get("output_tokens"),
+    )
+
+
+def fmt_sample_line(row: DashboardSample) -> str:
+    """One compact line per query, keeping `dashboard.json` scannable for the folder-UI reader.
+
+    A RENDERING of the row beside it, never a second source. It was the only form the live block
+    carried, so the browser regexed it back into the row — which made this column layout a wire
+    contract that no formatting change could touch."""
+    sid_seg = f" sid:{row.sample_id:03d}" if row.sample_id is not None else ""
+    badge = _NODE_BADGES.get(row.terminal_node, row.terminal_node[:2] or "?")
+    cache_icon = "📖" if row.cached else " "
+    in_tok, out_tok = row.input_tokens, row.output_tokens
     tok_seg = ""
     if in_tok is not None or out_tok is not None:
         tok_seg = (
@@ -72,10 +86,10 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
         )
     # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
     # must stay distinguishable from a row that never reached the pipeline.
-    time_col = f"{time_s:4.1f}s" if isinstance(time_s, int | float) else "     "
+    time_col = f"{row.time_s:4.1f}s" if row.time_s is not None else "     "
     return (
-        f"  {time_col} #{qi:03d}{sid_seg} {mark} [{badge}]{cache_icon}"
-        f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
+        f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}"
+        f"{tok_seg} -> '{row.predicted}' gt:'{row.ground_truth}' q:'{row.query}'"
     )
 
 
@@ -136,16 +150,12 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
 def build_l1_score_block(
     buffer: RoundBuffer,
     short_formula_template: str | None,
-    *,
-    live: bool,
 ) -> dict[str, Any]:
     """The l1_score NODE block — what the node was handed and what it emitted, nothing else.
 
     The candidate VALUES left this block for ``current_round.candidates`` (:func:`build_candidate_rows`). What stays is
     node I/O the webapp reads (the sample tape, the seed-able input half) plus two facts only the FOLDER-UI reader has —
-    the value-inlined formula and the self-healing state — which no closed round has a twin for. ``live`` picks the tape
-    shape: compact parsed lines for the dashboard (``webapp/lib/sample-line.ts`` regexes them), full dicts for the audit
-    twin."""
+    the value-inlined formula and the self-healing state — which no closed round has a twin for."""
     input_candidates: list[dict[str, Any]] = []
     output_candidates: list[dict[str, Any]] = []
     for idx in sorted(buffer.candidates.keys()):
@@ -169,7 +179,7 @@ def build_l1_score_block(
                 "resolved_pipeline_params": cand.get("resolved_pipeline_params"),
             }
         )
-        samples = cand.get("samples") or []
+        rows = [sample_row(s) for s in cand.get("samples") or []]
         output_candidates.append(
             {
                 "idx": idx,
@@ -181,7 +191,12 @@ def build_l1_score_block(
                 ),
                 "invalid": served.get("invalid", False),
                 "validation_failures": served.get("validation_failures") or [],
-                "samples": [fmt_sample_line(s) for s in samples] if live else list(samples),
+                "samples": [row.model_dump() for row in rows],
+                # The tape BESIDE the rows, never instead of them: the browser reads `samples`,
+                # the operator reads this in the file, and one producer builds both so they
+                # cannot disagree. Two branches of `samples` is what forced the browser to
+                # regex a rendering to recover what the other branch already had.
+                "sample_lines": [fmt_sample_line(row) for row in rows],
             }
         )
     return {
@@ -212,4 +227,5 @@ __all__ = [
     "build_l1_score_block",
     "build_pobb_block",
     "fmt_sample_line",
+    "sample_row",
 ]

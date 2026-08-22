@@ -1202,7 +1202,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which outer work-item asked for this cycle, when it is an L4 inner measurement; null for an ordinary campaign. Lets the sidebar name an inner run by the candidate that produced it instead of by launch order. Null on inner cycles minted before the stamp existed — they fall back to their origin hash."
+            "description": "Which outer work-item asked for this cycle, when it is an L4 inner measurement; null for an ordinary campaign, which is the only reason it is null. Lets the sidebar name an inner run by the candidate that produced it instead of by launch order."
           },
           "status": {
             "title": "Status",
@@ -3769,16 +3769,9 @@
             "title": "Candidate Label"
           },
           "outer_campaign_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not. Null on a run minted before the stamp existed, which is why two pooled sandboxes on disk cannot be attributed after the fact.",
-            "title": "Outer Campaign Id"
+            "description": "The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not, and a null here is why two pooled sandboxes on disk could not be attributed after the fact.",
+            "title": "Outer Campaign Id",
+            "type": "string"
           },
           "outer_cycle_id": {
             "description": "The outer cycle that owns this inner sandbox",
@@ -3798,20 +3791,15 @@
             "title": "Round"
           },
           "task": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
-            "title": "Task"
+            "description": "The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
+            "title": "Task",
+            "type": "string"
           }
         },
         "required": [
-          "outer_cycle_id"
+          "outer_cycle_id",
+          "outer_campaign_id",
+          "task"
         ],
         "title": "SpawnedBy",
         "type": "object"

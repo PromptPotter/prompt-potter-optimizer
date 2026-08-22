@@ -518,6 +518,13 @@ class RoundResult(StrictModel):
 
     # --- checkpoint-critical scalars (no raw payloads) ---
     round: int
+    # WHERE ON THE LEDGER this round closed — the offset of its own ``round:complete`` record,
+    # which is this document's address on the cycle's one chronology. It is what lets a reader
+    # ask for the state AT this round rather than for a document somebody assembled, and what
+    # lets a check re-fold ``ledger[0..closed_at_offset]`` and compare. ``None`` where no ledger
+    # was bound (a diagnostic replay, an in-memory repair) — absent, never 0, which is a real
+    # offset and would name the cycle's first record.
+    closed_at_offset: int | None = None
     label: str
     accuracy: float
     composite_fitness: float = 0.0

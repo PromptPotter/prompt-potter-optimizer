@@ -77,6 +77,12 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         model=optimizer_model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
+        l2_patience=opt.l2_patience,
+        l3_patience=opt.l3_patience,
+        pobb_epsilon=opt.pobb_epsilon,
+        spend_budget_usd=opt.spend_budget_usd,
+        token_budget=opt.token_budget,
+        lives_cap=ctx.hearts_cap,
     )
 
 
@@ -193,7 +199,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # actually promoted (whose accuracy is `winner_accuracy`), so the verdict
     # line / SCOREBOARD `*` would disagree with the dashboard.
     winner_label = str(d.get("winner_label") or "?")
-    winner_candidate_id = str(d.get("winner_candidate_id") or "")
     winner_total = int(d.get("winner_total", 0))
 
     w_acc = float(d["winner_accuracy"])
@@ -221,7 +226,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         parent_acc=parent_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
-        winner_candidate_id=winner_candidate_id,
         winner_accuracy=w_acc,
         winner_composite_fitness=d.get("winner_composite_fitness"),
         winner_evaluators=dict(d["winner_evaluators"]),

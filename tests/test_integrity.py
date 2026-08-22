@@ -3678,3 +3678,55 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
     assert ability is not None
     assert ability.scale() == "ruler anchor-x, 3 cells, 1PL"
     assert "COLD RULER" not in _r_confounds(bundle)
+
+
+def test_a_fold_carries_the_offset_it_is_of_and_the_tail_resumes_there(tmp_path: Path) -> None:
+    """A materialized fold must say WHICH MOMENT it is of, or nothing can join it back to the
+    chronology it came from.
+
+    ``DerivedView.on_record`` opened with ``del offset`` for as long as the class existed, so no
+    state written to disk recorded where on the ledger it stood. The SSE snapshot is the one
+    consumer that needed the number, so it invented a private ``snapshot_at_offset`` — measuring a
+    DIFFERENT thing. ``snapshot_frame`` parked the tail at END-OF-FILE while the body it shipped
+    was a DEBOUNCED write reflecting an earlier offset, so every record between the two reached
+    neither half: the snapshot did not carry it and the tail began after it. Silent, and bounded
+    by nothing the reader controls — a client attaching mid-burst lost the whole burst.
+    """
+    import json as _json
+
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.phases import PhaseEvent
+    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.projections.base import DerivedView
+    from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    assert PhaseEvent  # the vocabulary these records speak
+    layout = CycleLayout(tmp_path)
+    log = CycleEventLog(layout.ledger)
+
+    fold = DerivedView()
+    assert fold.at_offset == -1, "nothing folded yet is not offset 0 — 0 is a real record"
+    log.bind(fold)
+    for i in range(5):
+        assert log.append(PhaseRecord(phase="round", event="complete", round=i)) == i
+    assert fold.at_offset == 4, "the fold knows the offset of the last record it folded"
+
+    # The body a debounced writer left behind: a fold of offsets 0..1, while the file already
+    # holds 0..4. The tail must pick up at 2 and deliver the three the body does not carry.
+    layout.dashboard.write_text(
+        _json.dumps({"declared_phase": "running", "at_offset": 1}), encoding="utf-8"
+    )
+    hop = CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle_0")
+    tail = CycleLedgerTail(tmp_path, hop)
+    frame = tail.snapshot_frame()
+    assert frame.payload["snapshot_at_offset"] == 2
+    assert [e.sequence for e in tail.read_new()] == [2, 3, 4], (
+        "the records the debounced body had not folded are DELIVERED, not skipped"
+    )
+
+    # A body naming no offset — a warming shape, or a file written before the fold stamped one —
+    # still parks at end-of-file, which is what it did all along.
+    layout.dashboard.write_text(_json.dumps({"declared_phase": "running"}), encoding="utf-8")
+    assert CycleLedgerTail(tmp_path, hop).snapshot_frame().payload["snapshot_at_offset"] == 5

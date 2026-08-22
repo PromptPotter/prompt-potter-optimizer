@@ -35,6 +35,7 @@ from promptpotter.application.evidence_metrics import MetricSpec
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
+    DashboardSample,
     RoundSummary,
     RoundSummaryCandidate,
 )
@@ -54,6 +55,7 @@ from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
     NodeSearchNarrowing,
 )
+from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
@@ -150,6 +152,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
     AbilityReading,
     DashboardCandidate,
+    DashboardSample,
     RoundSummaryCandidate,
     DegradationHealth,
     PanelPrecision,
@@ -229,6 +232,9 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- the time-ray (store/family_ray_views) ---
     RayItem,
     RayResponse,
+    # --- the SSE frame. Hand-mirrored in `chat/activity.ts` until now, with `kind: string`,
+    # so the translator's switch was exhaustive over nothing. ---
+    ProjectionEnvelope,
     # --- verify router ---
     DiagnosticRunListResponse,
     # --- auth router: the account modal (Profile / Security / Activity / Preferences).
@@ -405,6 +411,22 @@ def _emit_command_kinds() -> str:
     return f"// {note}\nexport type CommandKind = {members};"
 
 
+def _emit_non_activity_kinds() -> str:
+    """Emit the complement of ``RENDERS_AS_ACTIVITY`` (domain/projection_envelope.py) as a named
+    union. It is what lets the translator's default arm PROVE nothing renderable fell through it:
+    flip a kind to activity-bearing without writing its case and the assignment stops compiling.
+    A bare ``default: return null`` cannot — it swallows a new kind in silence, on the one surface
+    whose whole job is to not be silent."""
+    from promptpotter.domain.projection_envelope import NON_ACTIVITY_KINDS
+
+    members = " | ".join(repr(k) for k in sorted(NON_ACTIVITY_KINDS))
+    note = (
+        "Kinds no activity item is ever made of — the ray drops them and the translator\n"
+        "// returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY."
+    )
+    return f"// {note}\nexport type NonActivityKind = {members};"
+
+
 def _emit_stop_reason_labels() -> str:
     """Emit ``STOP_REASON_INFO`` (domain/phases.py) as a TS label const — the
     single label source, mirrored to the webapp without hand-maintained drift."""
@@ -498,6 +520,7 @@ def main() -> int:
         )
     )
     blocks.append(_emit_command_kinds())
+    blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_labels())
     blocks.append(_emit_evaluator_meta())
     content = _HEADER + "\n\n".join(blocks) + "\n"

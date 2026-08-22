@@ -19,7 +19,7 @@ from promptpotter.domain.run_records import (
     SnapshotRecord,
 )
 from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.ledger import CycleEventLog, branch_offset
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
     reset_cycle_ledger,
@@ -110,9 +110,14 @@ class RunCallbacks:
     _current_round: int = 0
     _round_token: Token[int | None] | None = field(default=None, init=False, repr=False)
 
-    def _emit(self, record: CycleRecord) -> None:
+    def _emit(self, record: CycleRecord) -> int | None:
+        """The offset the record landed at, ``None`` where the append failed. Returned rather
+        than left for a caller to infer off ``next_offset``: a counter that never moved reads
+        as the previous record, so an address would be stamped for an event nobody wrote."""
+        offset: int | None = None
         with graceful("ledger append failed"):
-            self.ledger.append(record)
+            offset = self.ledger.append(record)
+        return offset
 
     def on_phase(self, event: PhaseEvent) -> None:
         view = from_phase_event(event, self._phase_ctx)
@@ -151,13 +156,15 @@ class RunCallbacks:
             )
         )
 
-    def on_round_close(self, round_result: RoundResult) -> None:
+    def on_round_close(self, round_result: RoundResult) -> int | None:
         """The CLOSE — what the round knows and no candidate could: the frontier it advanced and
         the ability fit behind it. Every term here is RE-READ on each close, which is what lets
         round 0's second one (``runner/loop.py``, once the ruler warms) deliver a θ its own close
         could not have had. The crown is deliberately absent: it never moves, so it lands once, at
-        ``on_election``."""
-        self._emit(
+        ``on_election``.
+
+        Returns the offset this close landed at — the round document's address on the ledger."""
+        return self._emit(
             PhaseRecord(
                 phase="round",
                 event="complete",
@@ -469,8 +476,13 @@ def build_run_observers(
                 CycleHop(campaign_id=session.campaign_id, cycle_id=fork.parent_cycle_id)
             )
         )
-        fresh_parent = CycleEventLog.open(parent_dir)
-        ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
+        # The branch address as the CUT stamped it, never the parent's length re-read now: those
+        # are the same number only while the parent has stopped, and a fork of a live one inherits
+        # whatever it had appended by run start. The manifest is the one copy, so the in-memory
+        # walk and any off-disk reader begin at the same record.
+        cut = branch_offset(CycleDir(session.store.campaigns.cycle_dir(session.hop)))
+        if cut is not None:
+            ledger.inherit_from(CycleEventLog.open(parent_dir), cut)
 
     # `for_session` answers `None` on an incomplete address — the two halves the guard above
     # already covers, plus `tenant_root` / `session_id`. Binding that None to the ledger would
