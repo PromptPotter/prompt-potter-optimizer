@@ -266,13 +266,20 @@ export function fetchMeasurementSeries(
 // a plain per-cycle read — so `If-Modified-Since`/304 behavior is unchanged.
 // Pass the prior response's `Last-Modified` as `ifModifiedSince`; the
 // fresh-campaign warming_up payload arrives as a 200 `{warming_up: true, ...}`.
+//
+// `at` asks for a MOMENT: the same state folded from the ledger up to that physical offset
+// rather than read off the materialized head. One route rather than two, because "the
+// dashboard" and "the dashboard at a moment" are one question with a default. The offset is
+// the leaf cycle's own — the space `RayItem.offset` speaks, which is what makes a chronology
+// step an address the whole page can be moved to.
 export function fetchDashboardByPath(
   path: CyclePath,
   ifModifiedSince?: string | null,
   signal?: AbortSignal,
+  at?: number | null,
 ): Promise<Conditional<Record<string, unknown>>> {
   return jgetIfModified<Record<string, unknown>>(
-    cyclePathUrl(path, "/dashboard"),
+    cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`),
     ifModifiedSince,
     signal,
   );

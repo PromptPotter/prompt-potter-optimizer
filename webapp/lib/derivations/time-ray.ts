@@ -35,6 +35,11 @@ export interface RayStep {
   key: string;
   path: CyclePath;
   pathKey: string;
+  /** Physical offset in `path`'s OWN ledger — the moment this step stands at. A step on the
+   *  viewed course hands it to the dashboard route and the whole page folds to it; a step
+   *  below (a fork, an inner run) counts in a different ledger's space, so it is an address
+   *  to navigate to and never a moment to fold this course to. */
+  offset: number;
   /** Epoch ms of the step's effective timestamp. */
   at: number;
   /** Seconds of silence before this step. 0 = no gap, or nothing precedes it. */
@@ -144,6 +149,7 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
       steps[steps.length - 1] = {
         ...prev,
         key: prev.key,
+        offset: item.offset,
         at: parsed,
         cluster: prev.cluster + 1,
         activity,
@@ -156,6 +162,7 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
       key: `${pathKey}#${item.offset}`,
       path,
       pathKey,
+      offset: item.offset,
       at: parsed,
       gapBeforeS,
       cluster: 1,

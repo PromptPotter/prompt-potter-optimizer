@@ -1,26 +1,43 @@
 "use client";
-// Single live-stream store. One provider polls dashboard.json; every consumer
-// subscribes via `useCycleStream()`. The dashboard's `rounds[]` summary block
-// is the sole "completed rounds" surface — round_NNNN.json is deep-audit
-// only and fetched lazily via `useRoundFile`.
+// Single live-stream store. One provider, one timer, TWO reads of one ledger: the
+// chronology (`/ray` — what happened, in order) and the dashboard (a FOLD of that same
+// ledger). Consumers subscribe via `useCycleStream()`; the chronology via `useTimeRay()`.
+// The dashboard's `rounds[]` summary block is the sole "completed rounds" surface —
+// round_NNNN.json is deep-audit only and fetched lazily via `useRoundFile`.
+//
+// They share a timer because they share a FILE. Observed on unrelated cadences they drift,
+// and every surface reading one against the other then reports a disagreement that does not
+// exist on disk. `usePoll`'s two keys keep them independent where it matters: a slow window
+// fetch holds back nothing but itself.
+//
+// The viewed MOMENT (`at`) is the seam between them. A ray step names a physical offset in
+// the leaf cycle's own ledger; handing that offset to the dashboard route replays the fold
+// to it, so scrubbing the chronology moves every panel on the page. `null` is the head.
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { liveCandidateId } from "@/lib/candidate-label";
 import { reportIncident } from "@/lib/diagnostics";
-import { failureKind, fetchDashboardByPath } from "./api";
+import { failureKind, fetchDashboardByPath, fetchTimeRay } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
-import type { DashboardCandidate, DashboardSample, LiveDashboardState } from "./api/types";
+import type {
+  DashboardCandidate,
+  DashboardSample,
+  LiveDashboardState,
+  RayItem,
+} from "./api/types";
 import { usePoll } from "./hooks/usePoll";
-import { bumpRevalidation } from "./revalidate";
+import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
 import { useWorkspace } from "./workspace";
 
@@ -203,18 +220,26 @@ export interface CycleStreamState {
   statusHint: string;
   termKey: string;
   error: string | null;
-  // The optimizer is actively executing this cycle — the composition of the two
-  // orthogonal axes: the run declares `run_phase === "running"` AND the
-  // connection is fresh (`status === "live"`). A paused run declares "paused"
-  // → isLive false immediately (no 30 s freshness lag — the old bug). A
-  // silently-dead producer ("detached") keeps run_phase "running" on disk but
-  // its poll goes stale → isLive false. The single gate for every transient
-  // indicator (blinking rows, pulsing nodes, the round-strip "live" pill, the
-  // Pause affordance). Computed once here; consumers never re-derive it.
+  // The optimizer is actively executing this cycle — the composition of three
+  // orthogonal axes: the run declares `run_phase === "running"`, the connection
+  // is fresh (`status === "live"`), AND the page is showing the head rather than
+  // a replayed moment. A paused run declares "paused" → isLive false immediately
+  // (no 30 s freshness lag — the old bug). A silently-dead producer ("detached")
+  // keeps run_phase "running" on disk but its poll goes stale → isLive false. The
+  // single gate for every transient indicator (blinking rows, pulsing nodes, the
+  // round-strip "live" pill, the Pause affordance) — which is why the moment
+  // belongs in it: a past moment has no in-flight anything, so every one of those
+  // indicators goes quiet without a single panel testing `at` for itself.
+  // Composed once, in `useCycleStreamSource`; consumers never re-derive it.
   isLive: boolean;
   // `dash.state` lifted to the top level so transient indicators can gate on
   // the phase (e.g. only blink a sample row when `phase === "scoring"`).
   phase: string | null;
+  // The moment `dash` is OF: a physical offset in the leaf cycle's own ledger, or
+  // null for the head. Set by scrubbing the time-ray; part of the address, so it
+  // clears with it. Panels that name what they are showing read it; the rest do
+  // not have to, because it is already folded into `isLive`.
+  at: number | null;
 }
 
 const INITIAL_STATE: CycleStreamState = {
@@ -226,6 +251,7 @@ const INITIAL_STATE: CycleStreamState = {
   error: null,
   isLive: false,
   phase: null,
+  at: null,
 };
 
 // Consecutive stamp-mismatch drops before the banner surfaces the problem.
@@ -244,6 +270,55 @@ const GONE_CONFIRM_LIMIT = 3;
 // a downed server is retried efficiently (every 5 s) rather than hammered. See
 // the two-cadence note at the `usePoll` call.
 const RECONNECT_INTERVAL_MS = 5000;
+
+// How many chronology records one window carries.
+const RAY_WINDOW = 200;
+
+// The two reads sharing the loop. Module-scoped so the identity is stable — `usePoll` reads
+// it fresh each tick and must not see a new array every render.
+const POLL_KEYS = (): readonly string[] => ["dash", "ray"];
+
+// Two windows, two lifetimes: the HEAD is refetched every tick (new events land there, its
+// ETag rides the family's mtimes); OLDER windows are fetched on demand and held, since a
+// deeper page is strictly below the cursor by construction and the head never overlaps it.
+// No SSE join, no `since=` on the tail: one live channel, one history channel
+// (webapp/CLAUDE.md § "/ray is the CHRONOLOGY").
+interface RayWindows {
+  // Windows older than the head, oldest-first, already concatenated in order.
+  older: RayItem[];
+  head: RayItem[];
+  // Cursor for the window before everything loaded — null at the family's beginning.
+  cursor: string | null;
+  loaded: boolean;
+  failed: boolean;
+}
+
+const EMPTY_RAY: RayWindows = {
+  older: [],
+  head: [],
+  cursor: null,
+  loaded: false,
+  failed: false,
+};
+
+export interface TimeRayState {
+  /** The whole loaded span, oldest-first. */
+  items: RayItem[];
+  loaded: boolean;
+  failed: boolean;
+  /** Older records exist below what is loaded. */
+  hasMore: boolean;
+  loadOlder: () => void;
+  /** Wall clock, advanced once per poll tick — the input the head's age test needs. A pure
+   *  derivation cannot call `Date.now()`, and a 304 re-renders nothing, so without this the
+   *  "no progress for Xm" reading would freeze at whatever it said when progress stopped. */
+  nowMs: number;
+  /** Move the viewed moment: an offset in THIS course's ledger replays every dashboard panel
+   *  to it, null returns them to the head. A step belonging to a fork or an inner run is an
+   *  address rather than a moment — those ledgers have their own offsets, and mixing the two
+   *  spaces is the confusion `infrastructure/ledger.py::iter` documents on the writing side. */
+  setAt: (offset: number | null) => void;
+}
 
 // Status banner age buckets — same thresholds as vanilla setStatus call sites.
 export interface BucketResult {
@@ -311,6 +386,20 @@ export function useCycleStream(): CycleStreamState {
   return v;
 }
 
+// The chronology rides its OWN context off the same provider. Not a style choice: the ray
+// window changes identity on a different beat from `dash`, and folding both into one value
+// would re-render every memoized chart on a poll that only moved the strip
+// (webapp/CLAUDE.md § Render-cost guards).
+const TimeRayContext = createContext<TimeRayState | null>(null);
+
+export function useTimeRay(): TimeRayState {
+  const v = useContext(TimeRayContext);
+  if (!v) {
+    throw new Error("useTimeRay must be called inside <CycleStreamProvider>");
+  }
+  return v;
+}
+
 // Internal hook backing the provider. Polls the viewed cycle's dashboard.json
 // every `intervalMs` and resets on any change to the viewed PATH via the
 // prev-prop pattern so the prior cycle's snapshot can't linger during the new
@@ -320,8 +409,13 @@ export function useCycleStream(): CycleStreamState {
 function useCycleStreamSource(
   path: CyclePath | null,
   intervalMs: number,
-): CycleStreamState {
+): { stream: CycleStreamState; ray: TimeRayState } {
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
+  const [ray, setRay] = useState<RayWindows>(EMPTY_RAY);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  // The viewed MOMENT. Kept beside the dashboard state rather than inside it because the
+  // tick writes that and only the operator writes this.
+  const [at, setAtState] = useState<number | null>(null);
   // Poll only with a confirmed session; a 401 mid-run re-probes /auth/me so
   // the loop halts instead of storming the server (see useAuthGate).
   const { authed, onAuthError } = useAuthGate();
@@ -357,6 +451,17 @@ function useCycleStreamSource(
   // The viewed path, held in a ref so the tick reads it without re-subscribing;
   // set in the same unit-key guard below.
   const pathRef = useRef<CyclePath | null>(null);
+  // The viewed moment, same reason. Written by `setAt` and by the unit-key guard.
+  const atRef = useRef<number | null>(null);
+  // The head window's ETag, stamped WITH the key it belongs to. Stamping rather than
+  // clearing keeps this out of the render phase (`react-hooks/refs`): a mismatched stamp
+  // reads as "no validator", and only a tick ever writes. Replaying a stale ETag would
+  // 304 into an empty window.
+  const rayEtagRef = useRef<{ key: string | null; etag: string | null }>({
+    key: null,
+    etag: null,
+  });
+  const loadingOlderRef = useRef(false);
 
   // Change-detect on the whole viewed PATH. A cycle_id is unique only within
   // its campaign, and an inner descendant only within its parent's sandbox, so
@@ -377,12 +482,28 @@ function useCycleStreamSource(
     goneRef.current = 0;
     lastModifiedRef.current = null;
     lastPhaseRef.current = null;
+    // A moment is an offset into ONE cycle's ledger, so it means nothing anywhere else —
+    // carrying it across a switch would replay the new course to a position it may not
+    // even have reached.
+    atRef.current = null;
+    setAtState(null);
     // Identity changed — hard-reset every cycle-scoped field so the prior
-    // unit's dash snapshot and `● Live` badge can't linger for a frame
-    // while the first poll of the new unit is in flight.
+    // unit's dash snapshot, chronology and `● Live` badge can't linger for a
+    // frame while the first poll of the new unit is in flight.
     setState({ ...INITIAL_STATE, statusText: "Switching to active campaign…" });
+    setRay(EMPTY_RAY);
     setRevalCount((c) => c + 1);
   }
+
+  // Moving the moment re-addresses the dashboard read, so it clears that read's validator:
+  // the same file mtime answers "the head" and "offset N" differently, and replaying the
+  // stamp from the head would 304 the fold away before it was ever fetched.
+  const setAt = useCallback((offset: number | null) => {
+    atRef.current = offset;
+    lastModifiedRef.current = null;
+    setAtState(offset);
+    setRevalCount((c) => c + 1);
+  }, []);
 
   // No active campaign — the static prompt. The poll itself is gated off
   // via `enabled` on the usePoll call below.
@@ -397,12 +518,12 @@ function useCycleStreamSource(
     }
   }, [path]);
 
-  // The poll tick. `usePoll` owns the interval, the hidden-tab pause, and
-  // the per-tick AbortController; this fetches dashboard.json (via
+  // The dashboard half of the tick. `usePoll` owns the interval, the hidden-tab
+  // pause, and the per-key AbortController; this fetches dashboard.json (via
   // If-Modified-Since so unchanged ticks 304 cheaply) and guards its
   // identity stamp. The completed-round summary block rides this same
   // payload (`dash.rounds[]`) — no second fetch path.
-  const tick = async (signal: AbortSignal) => {
+  const tickDash = async (signal: AbortSignal) => {
     const id = cycleRef.current;
     const cmp = campaignRef.current;
     const p = pathRef.current;
@@ -411,8 +532,10 @@ function useCycleStreamSource(
       // One fetch for any depth: `fetchDashboardByPath` hits the root cycle's
       // dashboard route, riding `?descend=` for inner descendants. `cmp`/`id` are
       // the LEAF stamp ids the payload must self-report (inner ids when
-      // descended), so the identity guard below is depth-agnostic.
-      const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal);
+      // descended), so the identity guard below is depth-agnostic. `at` asks the
+      // same route for a past moment — the fold replayed to that offset, which the
+      // server rebuilds from the ledger rather than serving the materialized head.
+      const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal, atRef.current);
       if (signal.aborted) return;
       // Any answer at all proves the address exists, so only an UNBROKEN run of
       // 404s can reach the confirm limit.
@@ -576,22 +699,130 @@ function useCycleStreamSource(
     }
   };
 
-  // Two cadences. Reachable (live/stale) → the responsive `intervalMs` (2 s,
-  // mostly 304-cheap; user actions fire an immediate tick via `revalidateOn`).
-  // Offline → a steady 5 s reconnect probe, so a downed API recovers within
-  // ~5 s without hammering. `usePoll` restarts its timer when this changes.
-  const effectiveInterval = state.status === "offline" ? RECONNECT_INTERVAL_MS : intervalMs;
+  // The chronology half. It reports no `gone` of its own: the dashboard read is this
+  // address's authoritative existence oracle (webapp/CLAUDE.md § Failure handling), it
+  // already stops the shared loop, and a second voter would only be a second chance to
+  // kill a live view.
+  const tickRay = async (signal: AbortSignal) => {
+    const p = pathRef.current;
+    const key = unitKeyRef.current;
+    if (!p) return;
+    const known = rayEtagRef.current.key === key ? rayEtagRef.current.etag : null;
+    try {
+      const res = await fetchTimeRay(p, { limit: RAY_WINDOW }, known, signal);
+      if (signal.aborted || unitKeyRef.current !== key) return;
+      if (res.kind === "not_modified") {
+        setRay((prev) => (prev.loaded ? prev : { ...prev, loaded: true }));
+        return;
+      }
+      rayEtagRef.current = { key, etag: res.validator };
+      setRay((prev) => ({
+        // A refetch replaces the HEAD only: the head can only have grown at its newest
+        // end, and the cursor stays whatever the oldest loaded window reported — a fresh
+        // head window's cursor describes a boundary already paged past.
+        older: prev.older,
+        head: res.data.items,
+        cursor: prev.older.length > 0 ? prev.cursor : res.data.cursor_prev,
+        loaded: true,
+        failed: false,
+      }));
+    } catch (e) {
+      if (signal.aborted) return;
+      onAuthError(e);
+      reportIncident(e, { surface: "ray", address: key });
+      setRay((prev) => ({ ...prev, loaded: true, failed: true }));
+    }
+  };
+
+  // One timer, two keys. `usePoll` gives each its own AbortController and skips only the
+  // key still in flight, so a slow window fetch never delays the dashboard and neither
+  // holds the other to its own duration.
+  const tick = (signal: AbortSignal, key: string): Promise<void> => {
+    if (key === "ray") return tickRay(signal);
+    setNowMs(Date.now());
+    return tickDash(signal);
+  };
+
+  // Three cadences. Reachable at the head → the responsive `intervalMs` (2 s, mostly
+  // 304-cheap; user actions fire an immediate tick via `revalidateOn`). Offline → a steady
+  // 5 s reconnect probe, so a downed API recovers within ~5 s without hammering. REPLAYING
+  // → the same 5 s, because a past moment cannot change: the fold at an offset is immutable
+  // and only `run_phase` still moves, so re-folding a growing ledger at 2 s would buy
+  // nothing but server work. `usePoll` restarts its timer when this changes.
+  const effectiveInterval =
+    state.status === "offline" || at !== null ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
     intervalMs: effectiveInterval,
+    keys: POLL_KEYS,
     // A confirmed `gone` STOPS the loop — there is nothing to reconnect to, and a
     // retry cadence would be a lie about the state. The unit-key guard resets
     // `status` on any address change, so the poll re-arms the moment the view
     // moves somewhere real (including the unpin this verdict just triggered).
     enabled: !!path && authed && state.status !== "gone",
-    revalidateOn: revalCount,
+    // A mutation elsewhere (fork / stop / cleanup) re-ticks both halves at once, which is
+    // the point of sharing the loop: the chronology and the fold move together or they
+    // disagree about a run neither of them is wrong about.
+    revalidateOn: revalCount + useRevalidation(),
+    tickOnFocus: true,
   });
 
-  return state;
+  const cursor = ray.cursor;
+  const loadOlder = useCallback(() => {
+    const p = pathRef.current;
+    const key = unitKeyRef.current;
+    if (!p || !cursor || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    void fetchTimeRay(p, { limit: RAY_WINDOW, before: cursor })
+      .then((res) => {
+        if (res.kind !== "ok" || unitKeyRef.current !== key) return;
+        setRay((prev) => ({
+          ...prev,
+          older: [...res.data.items, ...prev.older],
+          cursor: res.data.cursor_prev,
+        }));
+      })
+      .catch((e: unknown) => onAuthError(e))
+      .finally(() => {
+        loadingOlderRef.current = false;
+      });
+  }, [cursor, onAuthError]);
+
+  const items = useMemo(() => [...ray.older, ...ray.head], [ray.older, ray.head]);
+
+  // The moment joins the tick's two axes HERE rather than inside it: the tick knows what the
+  // server said, this knows what the page is showing.
+  //
+  // It also OVERRIDES the age reading, and that is the point rather than a wrinkle. A fold
+  // stamps `wallclock_serialized_at` at the instant it is composed, so a replayed moment
+  // arrives looking a second old and the banner would read "Live · last write 0s ago" over a
+  // dashboard showing an hour-old round. The freshness question does not apply: nothing was
+  // written, a moment was rebuilt, and the banner has to say which of the two it is.
+  const stream = useMemo<CycleStreamState>(() => {
+    if (at === null) return { ...state, at };
+    return {
+      ...state,
+      at,
+      isLive: false,
+      status: "stale",
+      statusText: `Replaying · step ${at}`,
+      statusHint: "Every panel shows what was true at this step. Pick “now ›” to follow again.",
+      termKey: "status_replaying",
+    };
+  }, [state, at]);
+  const rayState = useMemo<TimeRayState>(
+    () => ({
+      items,
+      loaded: ray.loaded,
+      failed: ray.failed,
+      hasMore: cursor !== null,
+      loadOlder,
+      nowMs,
+      setAt,
+    }),
+    [items, ray.loaded, ray.failed, cursor, loadOlder, nowMs, setAt],
+  );
+
+  return { stream, ray: rayState };
 }
 
 export function CycleStreamProvider({
@@ -605,8 +836,10 @@ export function CycleStreamProvider({
   intervalMs?: number;
   children: ReactNode;
 }) {
-  const state = useCycleStreamSource(path, intervalMs);
+  const { stream, ray } = useCycleStreamSource(path, intervalMs);
   return (
-    <CycleStreamContext.Provider value={state}>{children}</CycleStreamContext.Provider>
+    <CycleStreamContext.Provider value={stream}>
+      <TimeRayContext.Provider value={ray}>{children}</TimeRayContext.Provider>
+    </CycleStreamContext.Provider>
   );
 }

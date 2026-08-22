@@ -15,14 +15,14 @@
 // markers for the silences. Time is not the x-axis; sequence is. A real time axis would
 // squash a whole night's work into a pixel and stretch one lunch break across the screen.
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";
 import { fmtGap } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useTimeRay } from "@/lib/hooks/useTimeRay";
+import { useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { useViewedLineage } from "@/lib/lineage";
 import { rayHead, raySteps, type RayStep } from "@/lib/derivations";
@@ -32,12 +32,23 @@ export const TimeRay = memo(function TimeRay() {
   const { viewedPath, selectCyclePath } = useWorkspace();
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
-  const { dash } = useDashboard();
+  const { dash, at } = useDashboard();
   const { pick } = useSelectNode(selectCyclePath);
-  const { items, loaded, failed, hasMore, loadOlder, nowMs } = useTimeRay(viewedPath, !!viewedPath);
+  const { items, loaded, failed, hasMore, loadOlder, nowMs, setAt } = useTimeRay();
 
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
   const steps = useMemo(() => raySteps(items, rootKey), [items, rootKey]);
+
+  // The newest event is the one you came to read, so the track opens at its RIGHT end and
+  // stays there as events land. It follows only while following the head: once a moment is
+  // picked, the operator owns the scroll and yanking it back would fight the gesture that
+  // set it. Scroll position is not derivable state — nothing but the DOM holds it.
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || at !== null) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [steps.length, at]);
 
   // Run-phase comes off the VIEWED cycle's dashboard poll — the one server-owned run state
   // (I6). The ray adds the other input the server cannot have: whether anything is actually
@@ -57,8 +68,12 @@ export const TimeRay = memo(function TimeRay() {
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;
 
-  // A step's click NAVIGATES — the operator's choice for this surface. Which axis it moves
-  // is read off the step, and every one of them is an axis that already exists:
+  // A step's click MOVES THE PAGE TO IT. Which axes it moves is read off the step, and every
+  // one of them already exists:
+  //   • the MOMENT — a step on this course names an offset in this course's ledger, so the
+  //     whole dashboard re-folds to it and every panel reports what was true then. A step
+  //     below (a fork, an inner run) counts in another ledger, so it returns this course to
+  //     its head instead of pretending its number means something here.
   //   • a candidate step → resolve the node off the served tree and fire the shared
   //     navigate+inspect gesture. Resolved rather than constructed because
   //     `SelectedCandidate` carries `accuracy`/`is_winner`, which a ray item cannot honestly
@@ -68,6 +83,7 @@ export const TimeRay = memo(function TimeRay() {
   //     fork and an inner run alike, because it takes a whole path).
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
+    setAt(elsewhere ? null : step.offset);
     if (step.candidateLabel) {
       // Join on `course_label`, the MINTING course's private position. `candidate_id` is
       // re-minted on every re-run, so an id join silently misses — and a fork's contribution
@@ -85,8 +101,11 @@ export const TimeRay = memo(function TimeRay() {
   };
 
   return (
-    <section className="dash-time-ray" aria-label="Time-ray — everything that happened, in order">
-      <div className="dash-time-ray-track" role="list">
+    <section
+      className="dash-time-ray"
+      aria-label="Time-ray — everything that happened, in order. Pick a step to read the dashboard as it stood then."
+    >
+      <div className="dash-time-ray-track" role="list" ref={trackRef}>
         {hasMore && (
           <button
             type="button"
@@ -104,8 +123,24 @@ export const TimeRay = memo(function TimeRay() {
           <span className="dash-time-ray-empty">Nothing recorded yet</span>
         )}
         {steps.map((step) => (
-          <Step key={step.key} step={step} rootKey={rootKey} onPick={onStep} />
+          <Step
+            key={step.key}
+            step={step}
+            rootKey={rootKey}
+            viewedOffset={at}
+            onPick={onStep}
+          />
         ))}
+        {at !== null && (
+          <button
+            type="button"
+            className="dash-time-ray-now"
+            onClick={() => setAt(null)}
+            title="Stop replaying and follow the run again."
+          >
+            now ›
+          </button>
+        )}
       </div>
       <HeadCap head={head} onGo={() => head.target && selectCyclePath(head.target, null)} />
     </section>
@@ -131,13 +166,18 @@ function Gap({ seconds }: { seconds: number }) {
 function Step({
   step,
   rootKey,
+  viewedOffset,
   onPick,
 }: {
   step: RayStep;
   rootKey: string;
+  viewedOffset: number | null;
   onPick: (step: RayStep) => void;
 }) {
   const elsewhere = step.pathKey !== rootKey;
+  // Lit only on this course: an offset from another ledger can coincide numerically with
+  // one of ours and mean nothing at all.
+  const viewing = !elsewhere && viewedOffset === step.offset;
   const when = new Date(step.at).toLocaleString();
   const where = elsewhere ? ` · in ${step.path[step.path.length - 1]?.cycleId ?? ""}` : "";
   const many = step.cluster > 1 ? ` · ${step.cluster} events here` : "";
@@ -151,7 +191,9 @@ function Step({
             "dash-time-ray-step",
             `tone-${step.activity.tone ?? "muted"}`,
             elsewhere && "is-elsewhere",
+            viewing && "is-viewing",
           )}
+          aria-current={viewing ? "true" : undefined}
           onClick={() => onPick(step)}
           title={`${step.activity.label}${step.activity.detail ? ` — ${step.activity.detail}` : ""}\n${when}${where}${many}`}
         >

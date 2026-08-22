@@ -241,6 +241,10 @@
 /* A step from a fork or an inner run — dashed, so "somewhere else in the family"
    is a SHAPE and not only a hue. */
 .dash-time-ray-step.is-elsewhere{border-style:dashed}
+/* The moment the whole page is folded to. Not a hover or a focus state — it persists
+   while every panel below reports what was true at this step. */
+.dash-time-ray-step.is-viewing{color:var(--color-accent);border-color:var(--color-accent);
+  box-shadow:inset 0 -2px 0 var(--color-accent)}
 .dash-time-ray-step.tone-good{color:var(--color-text-primary)}
 .dash-time-ray-step.tone-warn{color:var(--color-warn);border-color:var(--color-warn-border)}
 .dash-time-ray-step.tone-bad{color:var(--color-danger-border);border-color:var(--color-danger-border)}
@@ -253,6 +257,10 @@
   background:transparent;border:0.5px dashed var(--color-border);
   color:var(--color-text-tertiary);font-family:inherit;font-size:var(--text-xs)}
 .dash-time-ray-more:hover{color:var(--color-accent);border-color:var(--color-accent)}
+/* Rendered only while a moment is picked — the way back to following the run. */
+.dash-time-ray-now{flex-shrink:0;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
+  color:var(--color-accent);background:var(--color-background-primary);
+  border:0.5px solid var(--color-accent);font-size:var(--text-xs)}
 .dash-time-ray-empty{padding:var(--space-4) var(--space-6);color:var(--color-text-tertiary);font-size:var(--text-xs)}
 /* The head cap — where the ray points NOW. Sticky at the right edge because the
    newest event is the one you came to read; the track scrolls under it. */
