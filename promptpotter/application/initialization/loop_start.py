@@ -10,6 +10,8 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
@@ -98,6 +100,40 @@ def populate_session_scoring(
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
     session.scoring.scorer_round_formula = scoring_round_formula
+
+
+def arm_diagnostic_scoring(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    source: str,
+    log: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Resolve the pipeline and arm the scorer for a verb that scores OUTSIDE the runner —
+    ``verify`` / ``ab`` / ``noise-floor`` / ``seed-screen``. Returns the resolved pipeline params.
+
+    ``obs=None`` is what makes these one thing rather than four copies of three calls: the runner
+    arms its own scoring with a live ``ObservabilityBridge``, and a diagnostic has none to give.
+
+    ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
+    one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
+    provenance of the run being replayed rather than of the replay."""
+    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+    from promptpotter.application.scoring.formula import split_scoring_block
+
+    pipeline_params = configure_and_apply_pipeline(
+        session, campaign_config, log=log or (lambda *_a, **_k: None)
+    )
+    spec = split_scoring_block(campaign_config.scoring)
+    populate_session_scoring(
+        session,
+        obs=None,
+        scoring_formula=spec.per_sample,
+        scoring_round_formula=spec.per_round,
+        scorer_id=spec.scorer_id,
+        source=source,
+    )
+    return pipeline_params
 
 
 async def _emit_preflight_and_init_session(

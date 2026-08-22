@@ -69,9 +69,10 @@ def _roster_lines(ev: Evidence) -> list[str]:
     ]
     for r in ev.campaigns:
         value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
+        ruler = (r.ability.ruler_id if r.ability is not None else None) or "-"
         lines.append(
             f"{r.created_at[:10]:<10}  {r.campaign_id:<26}  {r.dataset_name[:18]:<18}  "
-            f"{(r.arm_id or '-')[:8]:<8}  {(r.ruler_id or '-')[:8]:<8}  {value}  "
+            f"{(r.arm_id or '-')[:8]:<8}  {ruler[:8]:<8}  {value}  "
             f"{fmt_ci(r.ci_lo, r.ci_hi, spec=spec):>20}  {r.n_cells:>5}  {r.n_unscorable:>6}  "
             f"{r.rounds_scored:>6}"
         )
@@ -137,22 +138,27 @@ def _variance_lines(ev: Evidence) -> list[str]:
         if v.arm_sd_below_noise
         else "so the arms differ by more than noise alone would produce"
     )
+    # These are spreads of the SELECTED metric's own cell values, so they read in its unit —
+    # the same one the roster and pairwise tables above already format through.
+    spec = _UNIT_SPEC[ev.metric.spec.unit]
     lines = [
         "",
         f"Variance over the {v.n_cells} cell(s) all {v.n_arms} campaigns measured:",
-        f"  cell effect {v.cell_effect_sd:.3f} | arm effect {v.arm_effect_sd:.3f} | "
-        f"residual {v.residual_sd:.3f}",
-        f"  under the null an arm mean still scatters by {v.null_arm_scatter:.3f} — {verdict}.",
+        f"  cell effect {spec.format(v.cell_effect_sd)} | "
+        f"arm effect {spec.format(v.arm_effect_sd)} | residual {spec.format(v.residual_sd)}",
+        f"  under the null an arm mean still scatters by "
+        f"{spec.format(v.null_arm_scatter)} — {verdict}.",
     ]
     if ev.power is not None:
         p = ev.power
         needed = "-" if p.cells_for_largest_gap is None else str(p.cells_for_largest_gap)
         lines += [
             "",
-            f"Resolving power at {p.cells_per_arm} cells/arm: paired SE {p.paired_se:.3f}, "
-            f"smallest detectable effect {p.min_detectable_effect:+.3f}.",
-            f"  the widest gap on the roster is {p.largest_arm_gap:+.3f}; resolving it would "
-            f"take ~{needed} cells per arm.",
+            f"Resolving power at {p.cells_per_arm} cells/arm: paired SE "
+            f"{spec.format(p.paired_se)}, smallest detectable effect "
+            f"{spec.format(p.min_detectable_effect)}.",
+            f"  the widest gap on the roster is {spec.format(p.largest_arm_gap)}; resolving it "
+            f"would take ~{needed} cells per arm.",
         ]
     oc = ev.order_confound
     if oc is not None and oc.level_vs_order is not None:

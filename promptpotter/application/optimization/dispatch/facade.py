@@ -351,7 +351,7 @@ def build_bundle(
     trajectory_results = merge_known_outcomes(list(cycle.tracking.current_results), latest_results)
     # The frontier absorb is about to fit, fit here over the same merge — so the ability the
     # prompt states and the ability the round document banks are one computation.
-    theta = cycle.cumulative_theta(trajectory_results)
+    ability = cycle.cumulative_ability(trajectory_results)
     # The round before *latest_round*, whichever path we are on: `cycle.rounds[-1]` IS
     # `latest_round` on the generate/L2/L3 path and the round before it on critique. Resolved
     # once here so "did the subset move?" cannot be right on one path and wrong on the other.
@@ -376,15 +376,11 @@ def build_bundle(
             prev_sample_ids=prev_sample_ids,
             composite_fitness=latest_round.composite_fitness if latest_round else None,
             evaluators=dict(latest_round.evaluators) if latest_round else {},
-            # From the CYCLE, never from *latest_round*: `absorb_round` stamps these four onto the
+            # From the CYCLE, never from *latest_round*: `absorb_round` stamps the reading onto the
             # round document only AFTER the critique call, so on that path the round still reads
             # cold. The cycle owns the ruler and absorb copies from it, so this is the same number
             # one step earlier and cannot be right on one path and wrong on the other.
-            cumulative_theta=theta[0] if theta else None,
-            cumulative_theta_se=theta[1] if theta else None,
-            ruler_id=cycle.ruler_id,
-            ruler_n=cycle.ruler_n,
-            calibration_model=cycle.calibration_model,
+            ability=ability,
             arms=_arm_readings(latest_round),
         ),
         axes=cycle.axes,
@@ -397,6 +393,7 @@ def build_bundle(
         rebase_capability=cycle.config.optimization.rebase_capability,
         terminate_capability=cycle.config.optimization.terminate_capability,
         schema_field_rename=cycle.config.optimization.schema_field_rename,
+        measured_unit=cycle.session.backend_client.measured_unit,
         is_origin_round=latest_round is cycle.origin_round,
     )
 

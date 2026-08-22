@@ -83,7 +83,7 @@ export interface HeadlineStats {
   // never format it with a percent. It is deliberately not `best − origin`: under
   // `per_round_resubset` each round draws a fresh subset, so that difference is the luckiest
   // draw minus the fullest one and read `+19%` off a cycle whose ability never moved. Ability
-  // is the only cross-round-comparable series (see `RoundSummary.cumulative_theta`).
+  // is the only cross-round-comparable series (see `RoundSummary.ability`).
   abilityDelta: number | null;
 }
 
@@ -131,16 +131,22 @@ export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
   servedBest?: number | null,
 ): FitnessTrend {
-  const points = (rounds ?? [])
-    .map((r) => ({
-      round: r.round,
-      composite: r.accuracy,
-      theta: r.cumulative_theta,
-      // Read off the winner's own row: the round-level count is not on this summary, and the
-      // arms of one round all measured the same draw.
-      n: r.candidates.find((c) => c.is_winner)?.scored_samples ?? null,
-    }))
-    .sort((a, b) => a.round - b.round);
+  const sorted = [...(rounds ?? [])].sort((a, b) => a.round - b.round);
+  // The series' ruler is the first one stamped. A round read on a different δ scale is a
+  // different quantity, so its θ is DROPPED rather than plotted — a mixed line is a chart of
+  // two rulers wearing one axis, and nothing on it says which point came from where.
+  const seriesRuler = sorted.find((r) => r.ability?.ruler_id != null)?.ability?.ruler_id ?? null;
+  const points = sorted.map((r) => ({
+    round: r.round,
+    composite: r.accuracy,
+    theta:
+      r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
+        ? r.ability.theta
+        : null,
+    // Read off the winner's own row: the round-level count is not on this summary, and the
+    // arms of one round all measured the same draw.
+    n: r.candidates.find((c) => c.is_winner)?.scored_samples ?? null,
+  }));
   const best: number[] = [];
   let runningBest = 0;
   for (const p of points) {

@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -301,7 +301,7 @@ RoundWarningKind = Literal[
     # fill the kill switch with "" while its actual output was a healthy steer.
     "layer_terminate_blank",
     # The odd one out, deliberately: nothing failed. The round measured cleanly and still
-    # resolved nothing — no arm's blocked lift over the origin excluded 0 — which looks
+    # resolved nothing — no arm's blocked lift over the parent excluded 0 — which looks
     # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.
     "round_not_separable",
 ]
@@ -528,8 +528,7 @@ class LedgerRoundClose(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     round: int
-    cumulative_theta: float | None = None
-    cumulative_theta_se: float | None = None
+    ability: AbilityReading | None = None
     abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
 
 
@@ -635,9 +634,24 @@ class RebaseRequest(StrictModel):
 
 
 class OperatorSweepFile(StrictModel):
-    """Operator JSON under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``."""
+    """Operator YAML under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``.
+    Every field but ``reason`` is a CONTRAST LEVER — ``reason`` is provenance and changes nothing
+    the fork runs."""
 
     model_config = ConfigDict(frozen=True)
 
     reason: str = ""
     l1_layout: dict[str, list[str]] | None = None
+
+    @model_validator(mode="after")
+    def _arm_pulls_a_lever(self) -> OperatorSweepFile:
+        """A lever-less arm forks a COPY of its parent and pays a full scored round to measure it, so
+        it fails here rather than at the end of the batch. The set is derived, never listed twice, and
+        the test is EMPTINESS — an empty ``l1_layout`` edits no slot and coerces back to its base."""
+        levers = sorted(set(type(self).model_fields) - {"reason"})
+        if not any(getattr(self, lever) for lever in levers):
+            raise ValueError(
+                "pulls no contrast lever, so it forks a copy of its parent and pays a full "
+                f"scored round to measure it; set one of: {', '.join(levers)}"
+            )
+        return self

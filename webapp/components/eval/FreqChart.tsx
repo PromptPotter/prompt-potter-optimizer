@@ -41,7 +41,6 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const out: ResultRow[] = [];
   for (const c of liveL1Candidates(dash)) {
     for (const raw of c.samples ?? []) {
-      if (typeof raw !== "string") continue;
       const p = parseSampleLine(raw);
       if (p.status === "HIT") out.push({ fitness: 1 });
       else if (p.status === "MISS") out.push({ fitness: 0 });

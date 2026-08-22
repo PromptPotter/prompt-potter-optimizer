@@ -1,26 +1,3 @@
-"""WHICH number a set of campaigns is compared on — the read-side measurand vocabulary.
-
-Everything here is evaluated PER CELL and aggregated afterwards, and that is the whole design
-constraint. A per-cell series gives both an interval on a campaign's mean and a BLOCKED paired
-difference against another campaign on the cells both measured; a campaign-level scalar gives
-neither, because cell difficulty never cancels. So a metric is a channel read off ONE row, or an
-expression over channels — never a number assembled from a second document, which would be a fact
-about the campaign rather than about the cell.
-
-Three rules this module exists to enforce, all of which have bitten on real data:
-
-- **A channel a row cannot answer is ABSENT, never zero.** ``total_time`` is 0.0 on a cached
-  replay while ``step_timings`` still carries the seconds that were paid for, and
-  ``formula/compiler.py::_build_namespace`` binds ``input_tokens = 0`` where a row has no
-  ``step_tokens`` at all. Both read as a measurement and are not one.
-- **Every channel is a fact about the CELL.** On the L4 recursion a cell IS a whole inner
-  campaign, so its lift, its origin, its cost and its round count are the seed's own — read off
-  the row that stands for it, never derived from what the outer campaign did afterwards.
-- **No unit clamp.** ``compile_scorer`` ends in ``clamp_unit_score`` because a fitness is a
-  fitness; seconds, token counts and a signed lift are none of those, and clamping would floor
-  every regression at zero.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

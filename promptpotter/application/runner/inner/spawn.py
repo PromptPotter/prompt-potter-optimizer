@@ -284,8 +284,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
         scored = [c for c in rnd.candidate_scores if not c.invalid]
         if scored:
-            # Rank by lift over the MATCHED origin, and never invent the comparison where there
-            # is none: `accuracy - 0.0` hands an arm that never covered the origin's panel its
+            # Rank by lift over the MATCHED parent, and never invent the comparison where there
+            # is none: `accuracy - 0.0` hands an arm that never covered the parent's panel its
             # whole accuracy as lift, floating the shortest prefix to the top of the very
             # sentence the outer optimizer learns from.
             top = max(
@@ -303,7 +303,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 else ""
             )
             versus = (
-                f" vs matched-origin {top.matched_parent_accuracy:.3f}"
+                f" vs matched-parent {top.matched_parent_accuracy:.3f}"
                 if top.matched_parent_accuracy is not None
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )

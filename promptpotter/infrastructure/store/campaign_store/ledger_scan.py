@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CycleSeed,
@@ -189,11 +189,13 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
         rnd, payload = rec.get("round"), rec.get("payload")
         if not isinstance(rnd, int) or not isinstance(payload, dict):
             continue
+        ability = payload.get("ability")
         try:
             out[rnd] = LedgerRoundClose(
                 round=rnd,
-                cumulative_theta=payload.get("cumulative_theta"),
-                cumulative_theta_se=payload.get("cumulative_theta_se"),
+                ability=AbilityReading.model_validate(ability)
+                if isinstance(ability, dict)
+                else None,
                 abilities=payload.get("abilities") or {},
             )
         except ValidationError:

@@ -18,14 +18,12 @@ import type { CandidateRow, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
 
-// Did this row carry the producer's error payload. One predicate for both readers, so a
-// live row and its settled twin cannot disagree about whether the row was ever graded.
-const errorMark = (e: unknown): boolean => e != null && e !== "";
-
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
-// only. Returns rows in source order; the caller decides if it wants
-// newest-first.
+// only — a TEXT tape (`render.py::build_l1_score_block` serves that block
+// `live=True`, always), so the producer's own `HIT`/`MISS`/`ERR` mark IS
+// the grading verdict here and nothing re-derives one. Returns rows in
+// source order; the caller decides if it wants newest-first.
 function liveSamplesFor(
   dash: DashboardSnapshot | null,
   round: number,
@@ -35,48 +33,22 @@ function liveSamplesFor(
   const c = liveCandidate(dash, round, candidate_id);
   if (!c) return out;
   (c.samples ?? []).forEach((raw, ord) => {
-    if (typeof raw === "string") {
-      const p = parseSampleLine(raw);
-      const sid = typeof p.sampleId === "number" ? p.sampleId : null;
-      out.push({
-        key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
-        round,
-        candidate_id,
-        sample_id: sid,
-        status: p.status ?? null,
-        cached: p.cached ?? false,
-        query: p.query ?? "",
-        predicted: p.predicted ?? "",
-        ground_truth: p.gt ?? "",
-        scorer: p.scorer ?? "",
-        elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
-        raw_line: p.raw,
-      });
-    } else if (raw && typeof raw === "object") {
-      const sid = typeof raw.sample_id === "number" ? raw.sample_id : null;
-      // The error is asked FIRST: an errored row carries no `fitness`, and reading that
-      // absence as a grade reports a backend fault as a wrong answer.
-      const status = errorMark(raw.error)
-        ? "ERR"
-        : typeof raw.fitness === "number"
-          ? isHit(raw.fitness)
-            ? "HIT"
-            : "MISS"
-          : null;
-      out.push({
-        key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
-        round,
-        candidate_id,
-        sample_id: sid,
-        status,
-        cached: raw.cached === true,
-        query: "",
-        predicted: typeof raw.prediction === "string" ? raw.prediction : "",
-        ground_truth: "",
-        scorer: "",
-        elapsed_s: typeof raw.time_s === "number" ? raw.time_s : null,
-      });
-    }
+    const p = parseSampleLine(raw);
+    const sid = typeof p.sampleId === "number" ? p.sampleId : null;
+    out.push({
+      key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
+      round,
+      candidate_id,
+      sample_id: sid,
+      status: p.status ?? null,
+      cached: p.cached ?? false,
+      query: p.query ?? "",
+      predicted: p.predicted ?? "",
+      ground_truth: p.gt ?? "",
+      scorer: p.scorer ?? "",
+      elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
+      raw_line: p.raw,
+    });
   });
   return out;
 }
@@ -92,6 +64,7 @@ interface RawHistoricalSample {
   elapsed_s?: number;
   time_s?: number;
   error?: unknown;
+  error_category?: unknown;
 }
 
 // Historical-mode samples for one candidate. Reads
@@ -113,13 +86,18 @@ function historicalSamplesFor(
   return list.map((sample, ord) => {
     const s = sample as RawHistoricalSample;
     const sid = typeof s.sample_id === "number" ? s.sample_id : null;
-    const status = errorMark(s.error)
-      ? "ERR"
-      : typeof s.fitness === "number"
-        ? isHit(s.fitness)
-          ? "HIT"
-          : "MISS"
-        : null;
+    // Asked FIRST: `rescore_results` stamps an errored row `fitness = 0.0` as a display
+    // convention, so the number IS present and reading it renders a backend fault as a miss.
+    // On `error_category`, the producer's typed channel — `error` is a human message that can
+    // be blank on a row that genuinely errored (`shared/errors.py::is_error_result`).
+    const status =
+      s.error_category != null
+        ? "ERR"
+        : typeof s.fitness === "number"
+          ? isHit(s.fitness)
+            ? "HIT"
+            : "MISS"
+          : null;
     const elapsed =
       typeof s.elapsed_s === "number"
         ? s.elapsed_s

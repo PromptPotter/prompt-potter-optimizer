@@ -22,7 +22,12 @@ function health(
     dominant_node: "web_search",
     node_failure_rates: {},
     node_warnings: {},
-    suggested_action: null,
+    // The producer fills this for `degraded` as well as `critical`; the notice renders it
+    // verbatim rather than composing one, which is how the structural/transient split got
+    // stated backwards in the browser.
+    suggested_action:
+      "web_search degraded on 25% of samples, all transient. The numbers are soft but " +
+      "usable; no action needed if the next round comes back clean.",
     ...over,
   };
 }
@@ -57,23 +62,16 @@ describe("degradedRoundNotices", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0]!.round).toBe(2);
-    expect(out[0]!.detail).toContain("web_search");
-    expect(out[0]!.detail).toContain("25%");
+    expect(out[0]!.detail).toBe(health("degraded").suggested_action);
   });
 
-  // `structural_untested` is the name a PRODUCER writes (`results_health.py`) — a fixture
-  // inventing its own would pass while the notice never renders against a real verdict.
-  it("phrases the under-probed origin distinctly and sorts by round", () => {
+  it("sorts by round", () => {
     const out = degradedRoundNotices(
       dash([
         { round: 2, health: health("degraded") },
-        {
-          round: 0,
-          health: health("degraded", { cause: "structural_untested", dominant_node: null }),
-        },
+        { round: 0, health: health("degraded") },
       ]),
     );
     expect(out.map((d) => d.round)).toEqual([0, 2]);
-    expect(out[0]!.detail).toContain("under-probed");
   });
 });

@@ -141,3 +141,30 @@ class DeltaRuler(StrictModel):
 def ruler_id(ruler: DeltaRuler | None) -> str:
     """The scale a θ was read ON. Two θ readings are comparable iff these match."""
     return FLAT_RULER_ID if ruler is None else ruler.anchor_id
+
+
+class AbilityReading(StrictModel):
+    """A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value.
+    ``ruler_id`` ``None`` names NO scale: that reading is comparable to nothing.
+
+    Beside :class:`DeltaRuler` rather than in ``results.py`` because ``run_records.py`` needs it
+    too, and ``results.py`` imports that module — the same constraint that put the ruler here.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    theta: float
+    se: float | None
+    ruler_id: str | None
+    # The ruler grows by anchored extension, so the id alone cannot say how much scale was real.
+    ruler_n: int
+    # ``None`` = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model.
+    calibration_model: CalibrationModel | None
+
+    def comparable_to(self, other: AbilityReading) -> bool:
+        return self.ruler_id is not None and self.ruler_id == other.ruler_id
+
+    def scale(self) -> str:
+        """The scale in words — the one rendering, so no surface reassembles it."""
+        model = f", {self.calibration_model}" if self.calibration_model else ""
+        return f"ruler {self.ruler_id or FLAT_RULER_ID}, {self.ruler_n} cells{model}"

@@ -136,7 +136,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     ``prompt_fields_override`` shape the model never emits made this test green while the feature
     mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
     against the round's parent ``prompt_fields``, kept only when ``mean_fitness_ci_lo`` clears the
-    matched origin, keyed by the run's answer-space signature so a logic block never reaches a
+    matched parent, keyed by the run's answer-space signature so a logic block never reaches a
     ranking run."""
     from collections import defaultdict
 
@@ -686,6 +686,7 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
         build_prompt_export,
         parse_prompt_export,
     )
+    from promptpotter.domain.ruler import AbilityReading
 
     shots = [{"input": "2+2", "output": "4", "explanation": None}]
     winner = round_result(
@@ -694,7 +695,9 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
         composite_fitness=0.81,
         total=28,
         matched_parent_lift=0.1,
-        cumulative_theta=0.42,
+        ability=AbilityReading(
+            theta=0.42, se=0.1, ruler_id="anchor-x", ruler_n=28, calibration_model="1PL"
+        ),
         prompt_fields={
             "persona": "P",
             "instruction": "I",
@@ -720,7 +723,10 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
 
     m = export.measurement
     assert (m.round, m.accuracy, m.composite_fitness, m.n) == (3, 0.75, 0.81, 28)
-    assert (m.matched_parent_lift, m.theta) == (0.1, 0.42)
+    # The exported θ names the ruler it was read on — without it no reader outside this cycle
+    # can say what the level is comparable to.
+    assert m.ability is not None
+    assert (m.matched_parent_lift, m.ability.theta, m.ability.ruler_id) == (0.1, 0.42, "anchor-x")
 
     # `steps` is wire scaffold and the rendered prompt is `prompt_fields` again — neither is a
     # tunable, and one artifact does not state a fact twice.
@@ -3515,7 +3521,10 @@ def _write_inner_cycle(
                     "total_used_usd": 0.5,
                     "backend": {"input_tokens": 10, "output_tokens": 5},
                 },
-                "rounds": [{"cumulative_theta": origin}, {"cumulative_theta": ended}],
+                "rounds": [
+                    {"ability": {"theta": origin}},
+                    {"ability": {"theta": ended}},
+                ],
             }
         ),
         encoding="utf-8",
@@ -3657,10 +3666,15 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         rounds=[round_result(0)],
         ruler=warm,
     )
-    # Exactly what `run_l1_critique` is handed: the round the loop has not folded in yet.
-    bundle = build_bundle(cycle, latest_round=round_result(1))
+    # Exactly what `run_l1_critique` is handed: the round the loop has not folded in yet — so it
+    # carries no reading of its own, and the digest's can only have come off the cycle.
+    latest = round_result(
+        1, results=[{"sample_id": s, "fitness": f} for s, f in ((1, 1.0), (2, 0.0), (3, 1.0))]
+    )
+    assert latest.ability is None
+    bundle = build_bundle(cycle, latest_round=latest)
 
-    assert bundle.digest.calibration_model == "1PL"
-    assert bundle.digest.ruler_id == "anchor-x"
-    assert bundle.digest.ruler_n == 3
+    ability = bundle.digest.ability
+    assert ability is not None
+    assert ability.scale() == "ruler anchor-x, 3 cells, 1PL"
     assert "COLD RULER" not in _r_confounds(bundle)

@@ -1,26 +1,3 @@
-"""The export artifact — the one thing a campaign hands to a program that is not us.
-
-Everything else this package writes answers *"how did the run go"*; this answers *"what did it
-find, and how good is it"*, for a reader that will never open the campaign tree. Three consumers
-share it — our own loader, the `promptpotteropt` DSPy adapter, an MLflow prompt registry — and
-each rule below is a defect of DSPy's own ``save()`` inverted:
-
-* **Fields by name.** ``Signature.dump_state`` writes them positionally and ``load_state`` zips
-  them back with ``strict=False``, so a signature that gained a field reloads a scrambled prompt
-  and raises nothing. Here the prompt is a mapping and :meth:`PromptExport.template` restores it
-  through ``PromptTemplate.from_prompt_fields`` — the same reader a resume uses.
-* **Provenance travels INSIDE.** The fitness under its named formula, n, the lift and its
-  interval, θ and its precision, the rows' own hash, the optimizer manifest that produced it.
-  This is the half we already compute and DSPy's artifact cannot: you can ask this file how good
-  the prompt is and how it knows.
-* **A version a reader can REFUSE on.** :func:`parse_prompt_export` raises rather than guessing;
-  we owe no back-compat (root ``CLAUDE.md`` § STOP), so refusing loudly is the whole feature.
-* **JSON and scalars, never pickle.**
-
-Pure over one :class:`RoundResult`, which is what keeps it here rather than a layer up — the
-projection can grow no file read and no session dependency.
-"""
-
 from __future__ import annotations
 
 import json
@@ -30,7 +7,8 @@ from pydantic import ConfigDict
 
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.results import CalibrationModel, RoundResult
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
 
 EXPORT_ARTIFACT_VERSION = 1
@@ -72,11 +50,9 @@ class ExportMeasurement(StrictModel):
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
-    # Subset-invariant ability on the cycle's fixed ruler, with the precision it was fit to.
-    # Both ``None`` while the ruler is cold — a level with no precision is not a reading.
-    theta: float | None = None
-    theta_se: float | None = None
-    calibration_model: CalibrationModel | None = None
+    # Subset-invariant ability, with the δ scale it was read on — an exported θ naming no ruler
+    # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
+    ability: AbilityReading | None = None
     origin_accuracy: float
     origin_composite_fitness: float
 
@@ -175,9 +151,7 @@ def build_prompt_export(
             matched_parent_lift=winner.matched_parent_lift,
             matched_parent_lift_ci_lo=winner.matched_parent_lift_ci_lo,
             matched_parent_lift_ci_hi=winner.matched_parent_lift_ci_hi,
-            theta=winner.cumulative_theta,
-            theta_se=winner.cumulative_theta_se,
-            calibration_model=winner.calibration_model,
+            ability=winner.ability,
             origin_accuracy=origin_accuracy,
             origin_composite_fitness=origin_composite_fitness,
         ),

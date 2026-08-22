@@ -54,8 +54,9 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         f"  origin {r.origin_accuracy:.3f} (spread {r.origin_spread:.3f} over {len(r.origin_reads)})"
         f"  hedge {'--' if r.answer_modal_share is None else f'{r.answer_modal_share:.0%}'}"
         f"  floor {r.class_floor:.3f}"
-        f"  {r.latency_median:.1f}s med/{r.latency_mean:.1f}s mean"
-        f"  ${r.cost_per_pass:.4f}/pass"
+        f"  {'--' if r.latency_median is None else f'{r.latency_median:.1f}s'} med"
+        f"/{'--' if r.latency_mean is None else f'{r.latency_mean:.1f}s'} mean"
+        f"  {'--' if r.cost_per_pass is None else f'${r.cost_per_pass:.4f}'}/pass"
         for r in rows
     )
     # A rejection requires a SETTLED margin. The floor is exact; the origin is not, so near the

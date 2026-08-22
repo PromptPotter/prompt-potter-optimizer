@@ -1,28 +1,4 @@
 "use client";
-// THE served lineage — one fetch owner for the whole app.
-//
-// This replaces a pair that fetched the same bodies independently: a root-scoped masked
-// provider (the forest, the bars) and a path-scoped mask-free hook (the sidebar, the L4
-// samples panel), with no shared cache. One campaign could have up to four poll loops over
-// three URLs, and the two disagreed on a candidate's LABEL, because the root tree renumbers
-// a fork's contributions onto the campaign timeline while a fork's own tree keeps its
-// private counter. The server now carries both (`label` + `course_label`), so one tree
-// answers everyone and the second fetch has nothing left to justify it.
-//
-// Two things were claimed to require the split, and neither survived:
-//
-//   - "the sidebar must be mask-free." A masked body is a strict SUPERSET: the server's
-//     overlay only ever writes `divergence` / `divergent` / `lens_value` /
-//     `sample_set_accuracy` / `sample_set_n`, and never touches `accuracy`,
-//     `composite_fitness`, `is_winner`, `theta`, `best_accuracy`, `origin_accuracy` or
-//     `run_phase` — i.e. everything the sidebar reads. The property came from the field
-//     set, not from a second request.
-//   - "the labels would not join." They join on `course_label`, which is the minting
-//     course's own position and is exactly what a per-cycle `dashboard.json` speaks.
-//
-// Shape: a keyed store of trees, ref-counted by interested subscribers, one poll per live
-// key. `useLineageTree(path, enabled)` is any campaign's tree; `useViewedLineage()` is the
-// viewed campaign's, carrying the lens / what-if / sample-set masks it alone owns.
 
 import {
   createContext,
@@ -213,54 +189,52 @@ export function LineageProvider({
     return subscribe(viewedKey, viewedPath, { lens: lensParam, samples: samplesParam });
   }, [viewedKey, viewedPath, subscribe, lensParam, samplesParam]);
 
-  // ONE tick for every subscribed key. Each replays its own ETag, so a quiescent campaign
+  // ONE loop, but every subscribed key runs and skips on its own — a tree slower than the
+  // interval delays nothing but itself. Each replays its own ETag, so a quiescent campaign
   // costs one conditional request per interval and no body. What to fetch is the key's own
   // latched spec — the tick never infers it from whose key this is.
   const tick = useCallback(
-    async (signal: AbortSignal) => {
-      const live = registry.live();
-      await Promise.all(
-        live.map(async ([key, spec]) => {
-          const prior = registry.etag(key);
-          try {
-            const res = await fetchLineageTree(spec.path, spec.opts, prior, signal);
-            if (signal.aborted) return;
-            // A key unsubscribed mid-flight must not be resurrected by its own response.
-            if (!registry.has(key)) return;
-            // 304 — the body we hold is still current; nothing to re-render, and the etag
-            // we sent is what proved it, so it stays untouched.
-            if (res.kind !== "ok") return;
-            registry.setEtag(key, res.validator);
-            setEntries((prev) => {
-              const next = new Map(prev);
-              next.set(key, { root: res.data, loaded: true, failed: false });
-              return next;
-            });
-          } catch (e) {
-            if (signal.aborted) return;
-            onAuthError(e);
-            reportIncident(e, { surface: "lineage", address: key });
-            // 404 — this tree's address does not exist. Retire the key so the tick
-            // stops asking; a transient failure keeps retrying, which is why the
-            // classification and not the bare catch decides. Whether the VIEW moves
-            // is not this poll's call: the dashboard read owns that verdict, and a
-            // subscriber here may be some other campaign's sidebar row.
-            if (failureKind(e) === "gone") registry.markGone(key);
-            // A failed tick invalidates the validator: the next attempt must ask for a
-            // full body rather than 304 into a tree it never received.
-            registry.setEtag(key, null);
-            setEntries((prev) => {
-              if (!registry.has(key)) return prev;
-              // Keep a last-good body; report FAILED only when there is nothing to keep.
-              // `loaded` with no tree would put a fetch error where a measurement goes.
-              if (prev.get(key)?.loaded) return prev;
-              const next = new Map(prev);
-              next.set(key, { ...EMPTY, failed: true });
-              return next;
-            });
-          }
-        }),
-      );
+    async (signal: AbortSignal, key: string) => {
+      const spec = registry.spec(key);
+      if (!spec) return;
+      const prior = registry.etag(key);
+      try {
+        const res = await fetchLineageTree(spec.path, spec.opts, prior, signal);
+        if (signal.aborted) return;
+        // A key unsubscribed mid-flight must not be resurrected by its own response.
+        if (!registry.spec(key)) return;
+        // 304 — the body we hold is still current; nothing to re-render, and the etag
+        // we sent is what proved it, so it stays untouched.
+        if (res.kind !== "ok") return;
+        registry.setEtag(key, res.validator);
+        setEntries((prev) => {
+          const next = new Map(prev);
+          next.set(key, { root: res.data, loaded: true, failed: false });
+          return next;
+        });
+      } catch (e) {
+        if (signal.aborted) return;
+        onAuthError(e);
+        reportIncident(e, { surface: "lineage", address: key });
+        // 404 — this tree's address does not exist. Retire the key so the tick
+        // stops asking; a transient failure keeps retrying, which is why the
+        // classification and not the bare catch decides. Whether the VIEW moves
+        // is not this poll's call: the dashboard read owns that verdict, and a
+        // subscriber here may be some other campaign's sidebar row.
+        if (failureKind(e) === "gone") registry.markGone(key);
+        // A failed tick invalidates the validator: the next attempt must ask for a
+        // full body rather than 304 into a tree it never received.
+        registry.setEtag(key, null);
+        setEntries((prev) => {
+          if (!registry.spec(key)) return prev;
+          // Keep a last-good body; report FAILED only when there is nothing to keep.
+          // `loaded` with no tree would put a fetch error where a measurement goes.
+          if (prev.get(key)?.loaded) return prev;
+          const next = new Map(prev);
+          next.set(key, { ...EMPTY, failed: true });
+          return next;
+        });
+      }
     },
     // Mask changes reach the poll as a re-keyed subscription (a registry version bump),
     // never through this callback's identity.
@@ -269,6 +243,7 @@ export function LineageProvider({
 
   usePoll(tick, {
     intervalMs: POLL_MS,
+    keys: registry.liveKeys,
     tickOnFocus: true,
     enabled: authed,
     revalidateOn: subsVersion + reval,

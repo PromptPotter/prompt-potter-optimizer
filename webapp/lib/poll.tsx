@@ -57,29 +57,18 @@ function isWarming(d: unknown): d is WarmingSnapshot {
 }
 
 // `current_round.nodes.l1_score.output.candidates[]` shape — the live in-flight
-// projection of the round in progress. Samples are compact strings during the
-// round (per `fmt_sample_line` in live_dashboard.py) and dicts once the round
-// completes. Every consumer drills into this same path; `liveL1Candidates`
-// narrows once so the call sites don't repeat the `as Record<...>` cast.
-export interface LiveSample {
-  sample_id?: number;
-  fitness?: number;
-  prediction?: string;
-  cached?: boolean;
-  time_s?: number;
-  // The producer's own "this row errored" fact (`round_buffer.py::append_sample`). Without
-  // it a reader has only `fitness`, whose absence is indistinguishable from a graded 0.
-  error?: unknown;
-  terminal_node?: string;
-  input_tokens?: number;
-  output_tokens?: number;
-}
+// projection of the round in progress. Every consumer drills into this same path;
+// `liveL1Candidates` narrows once so the call sites don't repeat the `as Record<...>` cast.
 
 export interface LiveCandidate {
   idx?: number;
   label?: string;
   model?: string;
-  samples?: (LiveSample | string)[];
+  // The tape is TEXT, always: `view.py` serves this block `live=True` and nothing else
+  // writes it, so the sample DICTS go only to the audit twin, which no tape reader reads.
+  // A union with that dict shape is what let a reader re-derive a grade the mark already
+  // states — and disagree with `fmt_sample_line` about which rows were ever graded.
+  samples?: string[];
   // No numbers here: they moved to `current_round.candidates`, in the same shape a closed
   // round serves, so no surface merges two shapes field by field. The tape is what this half
   // still owns. (The block also carries the value-inlined formula and the self-healing state

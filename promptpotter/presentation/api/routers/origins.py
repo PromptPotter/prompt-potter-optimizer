@@ -52,7 +52,9 @@ class OriginEntry(StrictModel):
     )
     dataset_name: str = Field(description="Dataset this origin starts from")
     label: str = Field(default="", description="Operator-supplied label, if any")
-    n_samples: int = Field(default=0, description="Dataset sample count (0 if unmaterialized)")
+    n_samples: int | None = Field(
+        default=None, description="Dataset sample count; ``null`` if unmaterialized"
+    )
     n_campaigns: int = Field(
         default=0,
         description="Active campaigns minted from this origin (0 = prepared, not yet run)",
@@ -119,7 +121,7 @@ def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
                 origin_id=origin_id,
                 dataset_name=canonical.dataset_name,
                 label=canonical.label,
-                n_samples=samples_by_dataset.get(canonical.dataset_name, 0),
+                n_samples=samples_by_dataset.get(canonical.dataset_name),
                 n_campaigns=len(group),
                 origin_accuracy=float(max(accs)) if accs else None,
                 prepared=False,
@@ -172,7 +174,7 @@ def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntr
     yet — so an edited-but-unrun config surfaces beside the dataset's older origins and folds in once run."""
     out: list[OriginEntry] = []
     for ref in list_readable_datasets(stores):
-        if ref.tier != "yours" or ref.n_samples <= 0:
+        if ref.tier != "yours" or not ref.n_samples:
             continue
         d = stores.tenant_datasets.dataset_dir(ref.name)
         # Ready = ships a prompts/ dir (any node-named or default.yaml prompt — the

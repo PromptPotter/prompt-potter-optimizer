@@ -5,6 +5,8 @@ import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
 import { cssRgba, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import type { HeadlineMetric } from "@/lib/derivations";
+import type { MeasuredUnit } from "@/lib/api/types";
+import { unitCount } from "@/lib/format";
 import type { CandidateView } from "@/lib/types";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
@@ -332,6 +334,7 @@ interface Props {
   // callback: it rides the `options` memo, so a fresh identity per render would
   // force a chart.update() on every poll tick.
   onGeometry: (g: PlotGeometry) => void;
+  unit: MeasuredUnit;
 }
 
 export const FitnessChart = memo(function FitnessChart({
@@ -344,6 +347,7 @@ export const FitnessChart = memo(function FitnessChart({
   divergenceBoundary,
   inFlightIndex,
   onGeometry,
+  unit,
 }: Props) {
   // Subscribe to theme so a flip re-runs this component and the data/options
   // memos below pick up the new getCss() values.
@@ -573,7 +577,7 @@ export const FitnessChart = memo(function FitnessChart({
       const n = views[idx]?.overlapN;
       return v == null
         ? `${OVERLAP_SERIES}: not on the winner trajectory`
-        : `${OVERLAP_SERIES}: ${v.toFixed(3)}${n ? ` on ${n} shared cells` : ""}`;
+        : `${OVERLAP_SERIES}: ${v.toFixed(3)}${n ? ` on ${unitCount(n, unit)} shared` : ""}`;
     }
     if (label === "ability") {
       const v = thetaRaw[idx];
@@ -584,7 +588,7 @@ export const FitnessChart = memo(function FitnessChart({
       // measurement, and only the measurement gets written down.
       const c = views[idx]?.cached_samples;
       const n = views[idx]?.n_samples;
-      return c == null || n == null ? "cached: —" : `cached: ${c} of ${n} samples`;
+      return c == null || n == null ? "cached: —" : `cached: ${c} of ${unitCount(n, unit)}`;
     }
     const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
     const v = src[idx];
@@ -651,17 +655,17 @@ export const FitnessChart = memo(function FitnessChart({
               const exp = views[idx]?.n_expected;
               lines.push(
                 exp != null && exp !== n
-                  ? `${n} of ${exp} samples scored`
-                  : `${n} sample${n === 1 ? "" : "s"} scored`,
+                  ? `${n} of ${unitCount(exp, unit)} scored`
+                  : `${unitCount(n, unit)} scored`,
               );
             }
             // Silent at 0 — the normal case, and noise on every bar.
             const cached = views[idx]?.cached_samples;
             if (cached != null && cached > 0 && n != null) {
-              lines.push(`${cached} of ${n} samples from cache`);
+              lines.push(`${cached} of ${unitCount(n, unit)} from cache`);
             }
             // Difficulty-adjusted ability — the metric the winner is elected on, so a
-            // shorter (lower-accuracy) winner bar reads as "won on harder samples".
+            // shorter (lower-accuracy) winner bar reads as "won on harder rows".
             const theta = views[idx]?.theta;
             if (typeof theta === "number") {
               const se = views[idx]?.theta_se;

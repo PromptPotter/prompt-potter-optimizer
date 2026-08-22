@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.connectors.protocol import ConcurrencyArming
+from promptpotter.connectors.protocol import ConcurrencyArming, MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
@@ -202,8 +202,8 @@ class LiveDashboardState(StrictModel):
     # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
     best: float | None = None
     current_acc: float | None = None
-    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's
-    # ``cumulative_theta`` minus the origin's. The ONE derivation — the webapp headline chip
+    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's ``ability``
+    # minus the origin's, ``None`` unless the two share a ruler. The ONE derivation — the chip
     # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
     # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each
     # round draws a fresh subset, so a max over rounds selects the luckiest draw.
@@ -242,6 +242,8 @@ class LiveDashboardState(StrictModel):
     # says the control does not apply, and went unserved before, so the button took dead presses.
     max_cells_in_flight: int = 1
     concurrency_arming: ConcurrencyArming = "round"
+    # The backend's own noun for a measured row, so the browser never picks one off a local flag.
+    measured_unit: MeasuredUnit = "sample"
 
     # ``None`` where the last row recorded no time at all — a cached replay's 0.0 is a real
     # reading and must stay separable from it (``domain/scoring.py::recorded_elapsed_s``).

@@ -87,13 +87,6 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 # retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-# Per-node ceiling on a COMPOSED optimizer prompt, ENFORCED by item selection: the hub spends this
-# taking each panel's next item in layout order until it runs out, so a panel is thinned rather than
-# a prompt overrun. It never CUTS — a whole item is dropped or kept, because slicing one chooses
-# which half the model sees. **The ONLY number bounding a composed prompt**: a panel that also
-# budgets itself hands the sum back to nobody, and a ceiling is then respected only while enough
-# panels happen to be silent. Per node rather than one shared number, which fires on every call and
-# teaches nothing. `checkin` runs around the loop and never composes here.
 OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
     "l1_generate": 11_400,
     # Above its L2/L3 siblings, and the transcript atom is why: a whole sample transcript is
@@ -112,14 +105,6 @@ OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
 # winners climb, measured on the archived round corpus.
 POBB_DEFAULT_EPSILON: float = 0.15
 
-# How many bank samples the origin is scored on when nothing declares otherwise. The single
-# default BOTH loops reference — ``CampaignConfig.sp_budget_origin`` and
-# ``InnerBenchmarkConfig.n_samples_origin`` — so the outer recursion and the inner instrument
-# cannot drift onto different rulers. Deliberately ABOVE the ``sp_budget_ttest`` default:
-# θ_origin is the term every candidate delta subtracts, so its variance lands in EVERY
-# comparison, and its rows are content-addressed cache paid for once per config. Candidate
-# breadth is paid per candidate per round for no shared-cache payback. A bank smaller than this
-# scores whole, which is the right answer there rather than an error.
 DEFAULT_ORIGIN_BUDGET: int = 40
 
 # UCB1 exploration weight for the lineage rewind pick. sqrt(2) is UCB1's regret-optimal constant

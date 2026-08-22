@@ -48,11 +48,9 @@ async def measure_noise_floor(
     from promptpotter.application.campaign_config import (
         load_campaign_config as validate_campaign_config,
     )
-    from promptpotter.application.initialization.loop_start import populate_session_scoring
+    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
     from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
     from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
-    from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
@@ -93,15 +91,8 @@ async def measure_noise_floor(
     publish_inner_spawn_context(session, campaign_config)
 
     log_fn = log or (lambda *_a, **_k: None)
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log_fn)
-    scoring_spec = split_scoring_block(campaign_config.scoring)
-    populate_session_scoring(
-        session,
-        obs=None,
-        scoring_formula=scoring_spec.per_sample,
-        scoring_round_formula=scoring_spec.per_round,
-        scorer_id=scoring_spec.scorer_id,
-        source=f"noise_floor:{hop.campaign_id}",
+    pipeline_params = arm_diagnostic_scoring(
+        session, campaign_config, source=f"noise_floor:{hop.campaign_id}", log=log_fn
     )
 
     schema = session.pipeline_schema

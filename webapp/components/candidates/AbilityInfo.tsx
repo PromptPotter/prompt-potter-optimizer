@@ -1,6 +1,6 @@
 "use client";
 
-import type { RoundSummary } from "@/lib/api/types.generated";
+import type { AbilityReading } from "@/lib/api/types.generated";
 
 // Teaches the one piece of vocabulary the fitness surface can't show as a bar:
 // difficulty-adjusted ability θ, the metric the round winner is actually elected
@@ -15,7 +15,7 @@ import type { RoundSummary } from "@/lib/api/types.generated";
 //
 // `model` is null while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so the
 // third string is a real state, not a placeholder. Never collapse it into "1PL".
-export function AbilityHelp({ model }: { model: RoundSummary["calibration_model"] }) {
+export function AbilityHelp({ model }: { model: AbilityReading["calibration_model"] }) {
   return (
     <div className="ability-help">
       <p>

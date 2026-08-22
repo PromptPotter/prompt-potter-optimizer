@@ -10,7 +10,8 @@
 // strip — clear/fill, per-round aggregate picks, and an opt-in trajectory drill.
 
 import { useState, type CSSProperties } from "react";
-import type { OverlapReading, RoundSummary } from "@/lib/api/types";
+import type { MeasuredUnit, OverlapReading, RoundSummary } from "@/lib/api/types";
+import { unitCount } from "@/lib/format";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   measuredUniverse,
@@ -45,9 +46,11 @@ function activeStyle(on: boolean): CSSProperties {
 export function SampleSetControl({
   rounds,
   overlap,
+  unit,
 }: {
   rounds: RoundSummary[];
   overlap: OverlapReading | null;
+  unit: MeasuredUnit;
 }) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [detailOpen, setDetailOpen] = useState(false);
@@ -148,7 +151,7 @@ export function SampleSetControl({
             type="button"
             aria-pressed={sameSampleSet(sampleSet, overlap.sample_ids)}
             onClick={() => setSelectionForSampleSet(overlap.sample_ids)}
-            title={`The ${overlap.sample_ids.length} cells every candidate on the winner trajectory has answered — the one basis C0 and each winner can be differenced on. Same set the trajectory bars use.`}
+            title={`The ${unitCount(overlap.sample_ids.length, unit)} every candidate on the winner trajectory has answered — the one basis C0 and each winner can be differenced on. Same set the trajectory bars use.`}
             style={activeStyle(sameSampleSet(sampleSet, overlap.sample_ids))}
           >
             trajectory · {overlap.sample_ids.length}
@@ -163,7 +166,7 @@ export function SampleSetControl({
             type="button"
             aria-pressed={sameSampleSet(sampleSet, rs.ids)}
             onClick={() => setSelectionForSampleSet(rs.ids)}
-            title={`${rs.ids.length} samples measured in round ${rs.round}`}
+            title={`${unitCount(rs.ids.length, unit)} measured in round ${rs.round}`}
             style={activeStyle(sameSampleSet(sampleSet, rs.ids))}
           >
             R{rs.round}

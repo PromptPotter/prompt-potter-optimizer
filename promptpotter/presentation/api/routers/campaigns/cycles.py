@@ -15,7 +15,7 @@ from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
@@ -157,8 +157,11 @@ def get_cycle_dashboard(
 
 
 def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> int | None:
-    """Newest mtime across this course's lineage inputs. The LEDGER is the validator that matters — it bumps when a candidate is
-    minted, which ``dashboard.json`` never did, since that only moves at round close."""
+    """Newest mtime across this course's lineage inputs. The LEDGER is the validator that matters —
+    it bumps when a candidate is minted and ``dashboard.json`` does not, because no handler that
+    arms its debounced persist sees a mint. Not that the file is slow: it moves within a quarter
+    second of any LLM-call, token-usage, error or warning record, and reading "only at round close"
+    off this line is what would make ``runtime_flags.py``'s freshness window look unfounded."""
     layout = CycleLayout(
         cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     )
@@ -208,14 +211,14 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 
 def _mask_records(
     stores: Stores, tree: LineageNode, samples: frozenset[int] | None
-) -> dict[tuple[CycleHop, ...], MaskRecord]:
+) -> dict[CyclePath, MaskRecord]:
     """One ``MaskRecord`` per campaign the tree spans, keyed by the course's OWN PATH.
 
     Keyed on ``campaign_id`` this served the wrong sandbox's numbers: an inner campaign id is
     content-addressed on the CELL, not on who asked, so one id is minted into several sibling
     ``.inner/`` sandboxes and the first visited won. ``cycle_id`` is no safer; the path is the
     only address that separates them, which is what ``lineage_views`` already applies."""
-    out: dict[tuple[CycleHop, ...], MaskRecord] = {}
+    out: dict[CyclePath, MaskRecord] = {}
 
     def visit(node: LineageNode) -> None:
         if node.kind == "course" and node.path:
@@ -231,37 +234,44 @@ def _mask_records(
 
 
 class _Overlay:
-    """The lens folded over the tree's records. Every index is keyed by ``(campaign_id, cycle_id, …)``, NEVER the cycle alone: a
-    cycle_id is content-addressed, so it repeats across campaigns and inside one ``.inner/`` sandbox."""
+    """The lens folded over the tree's records, keyed by the COURSE PATH the tree already serves —
+    exactly as :func:`_mask_records` keys the records it folds. ``(campaign_id, cycle_id)`` repeats
+    across sibling ``.inner/`` sandboxes, so re-keying on the pair collapses two of them onto one
+    node; a record is loaded AT one course, so every cycle it names shares that course's prefix."""
 
     def __init__(
         self,
-        records: dict[tuple[CycleHop, ...], MaskRecord],
+        records: dict[CyclePath, MaskRecord],
         lens: str | None,
         sample_ids: frozenset[int] | None,
     ):
         verdict, self.criterion = _resolve_lens(lens)
-        self.diverged: dict[tuple[str, str, int], LineageDivergence] = {}
-        self.subset: dict[tuple[str, str, str], tuple[float | None, int]] = {}
-        dimmed: set[tuple[str, str, int]] = set()
+        self.diverged: dict[tuple[CyclePath, int], LineageDivergence] = {}
+        self.subset: dict[tuple[CyclePath, str], tuple[float | None, int]] = {}
+        dimmed: set[tuple[CyclePath, int]] = set()
         for path, record in records.items():
-            campaign_id = path[-1].campaign_id
+            sandbox, campaign_id = path[:-1], path[-1].campaign_id
             result = find_divergences(record, verdict)
             for d in result.divergences:
-                self.diverged[(campaign_id, d.cycle_id, d.round)] = LineageDivergence(
+                hop = CycleHop(campaign_id=campaign_id, cycle_id=d.cycle_id)
+                self.diverged[((*sandbox, hop), d.round)] = LineageDivergence(
                     alternative_candidate_id=d.alternative_candidate_id
                 )
-            dimmed.update((campaign_id, cid, rnd) for cid, rnd in result.divergent)
+            dimmed.update(
+                ((*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cid)), rnd)
+                for cid, rnd in result.divergent
+            )
             if not sample_ids:
                 continue
             for cyc in record.cycles:
+                course = (*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cyc.cycle_id))
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.subset[(campaign_id, cyc.cycle_id, cand.candidate_id)] = (
+                        self.subset[(course, cand.candidate_id)] = (
                             cand.accuracy if cand.n_scored > 0 else None,
                             cand.n_scored,
                         )
-        self.dimmed: frozenset[tuple[str, str, int]] = frozenset(dimmed)
+        self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     @staticmethod
     def _rank_by_lens(kids: list[LineageNode]) -> list[LineageNode]:
@@ -283,9 +293,9 @@ class _Overlay:
         kids = self._rank_by_lens([self.apply(k) for k in node.children])
         if node.kind != "candidate" or node.round is None or not node.path:
             return node.model_copy(update={"children": kids})
-        hop = node.path[-1]
-        key = (hop.campaign_id, hop.cycle_id, node.round)
-        subset = self.subset.get((hop.campaign_id, hop.cycle_id, node.id))
+        course = tuple(node.path)
+        key = (course, node.round)
+        subset = self.subset.get((course, node.id))
         return node.model_copy(
             update={
                 "children": kids,

@@ -504,7 +504,7 @@ def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
 
     Read from the inner cycle rather than from the outer row's ``reasoning_trace`` sentence, which
     prints its levels at 2dp. Only the fields checked against that sentence cell-by-cell are
-    written: ``rounds[].cumulative_theta`` reproduces the narrated origin and ending exactly on
+    written: ``rounds[].ability.theta`` reproduces the narrated origin and ending exactly on
     every cell on disk, but its PEAK and its length do not — so it is the adopted frontier at the
     endpoints and something else in between, and ``inner_peak_lift`` / ``inner_round_budget`` are
     left ABSENT rather than filled from a series that disagrees. ``inner_unworked_s`` is absent for
@@ -514,9 +514,9 @@ def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
     dash = read_json_tolerant(cycle_dir / "dashboard.json", {}) or {}
     index = read_json_tolerant(cycle_dir / "index.json", {}) or {}
     levels = [
-        r["cumulative_theta"]
+        a["theta"]
         for r in (dash.get("rounds") or [])
-        if isinstance(r, dict) and isinstance(r.get("cumulative_theta"), int | float)
+        if isinstance(r, dict) and isinstance(a := r.get("ability"), dict)
     ]
     if len(levels) < 2:
         return {}

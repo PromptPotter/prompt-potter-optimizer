@@ -151,13 +151,12 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     return out
 
 
-def render_composite_fitness_oneliner(composite_fitness: float, origin: float | None = None) -> str:
-    """Per-row composite_fitness render, anchored against the campaign origin so the operator still sees
-    distance travelled at round 50. ``origin=None`` collapses to the bare value."""
-    if origin is None:
+def render_composite_fitness_oneliner(composite_fitness: float, parent: float | None = None) -> str:
+    """``parent=None`` collapses to the bare value."""
+    if parent is None:
         return f"composite_fitness={composite_fitness:.4f}"
-    delta = composite_fitness - origin
-    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs origin {origin:.4f})"
+    delta = composite_fitness - parent
+    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs parent {parent:.4f})"
 
 
 def _pairs_line(
@@ -176,14 +175,13 @@ def render_composite_fitness_block(
     evaluators: dict[str, float] | None,
     formula: str | None,
     *,
-    origin: float | None = None,
+    parent: float | None = None,
     use_short_names: bool = False,
 ) -> list[str]:
-    # Line 1: composite_fitness + trajectory anchor
     line1 = f"composite_fitness = {composite_fitness:.4f}"
-    if origin is not None:
-        delta = composite_fitness - origin
-        line1 += f"   origin={origin:.4f}  Δ{delta:+.4f}"
+    if parent is not None:
+        delta = composite_fitness - parent
+        line1 += f"   parent={parent:.4f}  Δ{delta:+.4f}"
 
     if not formula:
         return [f"{line1}  (formula unavailable)"]

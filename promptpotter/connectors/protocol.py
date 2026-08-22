@@ -30,6 +30,20 @@ ConnectorExecution = Literal["remote_http", "in_process"]
 # round is hours: the operator names how many launch together and the press is spent by them.
 ConcurrencyArming = Literal["round", "batch"]
 
+# What ONE MEASURED ROW is called on this backend: ``sample`` everywhere; ``cell`` on the
+# recursion, where one row is an entire inner campaign. DECLARED, never sniffed off a row.
+MeasuredUnit = Literal["sample", "cell"]
+
+
+def unit_plural(unit: MeasuredUnit) -> str:
+    return f"{unit}s"
+
+
+def unit_count(n: int, unit: MeasuredUnit) -> str:
+    """``1 cell`` / ``3 cells`` — the ONE place a measured row is counted in words."""
+    return f"{n} {unit if n == 1 else unit_plural(unit)}"
+
+
 # The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
@@ -107,21 +121,14 @@ class Connector:
     concurrency_arming: ConcurrencyArming = "round"
     """What one press of the concurrency control buys — see :data:`ConcurrencyArming`."""
 
+    measured_unit: MeasuredUnit = "sample"
+    """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
+
     in_process_run: InProcessRun | None = None
-    """The in-process execution arm — ``async (query, payload) -> {"data": {…}}``.
-    Required iff ``execution == "in_process"`` (the registry guard enforces the
-    pairing); ``None`` for a ``remote_http`` connector. ``promptpotter`` runs an
-    inner cycle (L4). ``BackendClient`` holds this and calls it from ``run_query``
-    when the mode is non-HTTP."""
 
     expected_revision: str | None = None
-    """Backend revision (git SHA, semver, …) this PromptPotter rev expects.
-    Paired with ``version_check`` — init WARNs on drift. ``None`` opts out."""
 
     version_check: VersionCheck | None = None
-    """Async ``(http, base_url) -> str | None`` — reads the backend's
-    self-reported revision. Mirrors :class:`SessionProtocol` shape so connectors
-    stay layer-clean (no ``BackendClient`` import). ``None`` opts out."""
 
     preflight: PreflightFn | None = None
     """Async ``(backend_url) -> None`` — reachability probe. Raises
@@ -130,14 +137,6 @@ class Connector:
     ``promptpotter`` have nothing to probe)."""
 
     auth_token: AuthTokenFn | None = None
-    """``() -> str | None`` — the bearer credential for THIS backend, sent as
-    ``Authorization: Bearer …`` by ``build_backend_client``. A credential is a
-    per-backend fact, so it is declared here beside the other per-backend facts
-    rather than read at the construction site: read there, every connector got
-    whichever token the site happened to name, and a second ``remote_http``
-    backend would have had the first one's secret POSTed to its host. ``None``
-    (default) = send no auth header — the right answer for an ``in_process``
-    connector, which has no wire at all (the registry guard enforces that)."""
 
     identity_config: Callable[[Path], dict[str, dict[str, Any]]] | None = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
@@ -165,10 +164,6 @@ class Connector:
     for the production benchmark but wrong for a tenant's first run."""
 
     default_exclude_nodes: tuple[str, ...] = ()
-    """Nodes the connector recommends excluding by default. Slotted into
-    the seed ``campaign.json::exclude_nodes`` block. Empty tuple means
-    "exclude nothing."
-    """
 
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Frozen ``(key, value)`` overrides slotted into the seed
@@ -209,8 +204,11 @@ __all__ = [
     "Connector",
     "ConnectorExecution",
     "InProcessRun",
+    "MeasuredUnit",
     "PreflightFn",
     "SessionProtocol",
     "VersionCheck",
     "WireAdapter",
+    "unit_count",
+    "unit_plural",
 ]

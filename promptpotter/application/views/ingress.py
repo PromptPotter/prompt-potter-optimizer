@@ -56,7 +56,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     ctx.l1_stall_count = 0
     ctx.hearts = opt.lives.start if opt.lives is not None else None
     ctx.hearts_cap = opt.lives.cap if opt.lives is not None else None
-    ctx.origin_accuracy = 0.0
+    ctx.parent_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
@@ -83,8 +83,8 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
 def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
-    ctx.origin_accuracy = cycle.tracking.current_accuracy
-    ctx.origin_composite_fitness = cycle.tracking.current_composite_fitness
+    ctx.parent_accuracy = cycle.tracking.current_accuracy
+    ctx.parent_composite_fitness = cycle.tracking.current_composite_fitness
     schema = session.pipeline_schema
     full, short = resolve_round_formula(session.scoring.scorer_round_formula, schema)
     ctx.composite_fitness_formula = full
@@ -108,7 +108,7 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
         l2_round=cycle.escalation.l2_round,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
-        origin_composite_fitness=ctx.origin_composite_fitness or 0.0,
+        origin_composite_fitness=ctx.parent_composite_fitness or 0.0,
     )
 
 
@@ -198,22 +198,27 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
 
     w_acc = float(d["winner_accuracy"])
     improved = bool(d["improved"])
-    origin_acc = ctx.origin_accuracy
-    # Matched-pair origin (winner-measured samples). Δ uses this so operator-visible Δ
+    parent_acc = ctx.parent_accuracy
+    # Matched-pair parent (winner-measured samples). Δ uses this so operator-visible Δ
     # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
-    # winners. Absent when the winner did not cover the origin's panel, and it stays absent —
-    # falling back to ``origin_acc`` publishes a prefix accuracy minus a full-panel rate.
+    # winners. Absent when the winner did not cover the parent's panel, and it stays absent —
+    # falling back to ``parent_acc`` publishes a prefix accuracy minus a full-panel rate.
     raw_matched = d.get("winner_matched_parent_accuracy")
     matched_parent_acc = None if raw_matched is None else float(raw_matched)
     matched_parent_composite = d.get("winner_matched_parent_composite")
     delta = None if matched_parent_acc is None else w_acc - matched_parent_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
-        ctx.origin_accuracy = w_acc
+        # BOTH move, or the candidate box renders an accuracy Δ against the new incumbent
+        # above a composite Δ against C0, under one word and with nothing to tell them apart.
+        ctx.parent_accuracy = w_acc
+        w_comp = d.get("winner_composite_fitness")
+        if isinstance(w_comp, int | float):
+            ctx.parent_composite_fitness = float(w_comp)
 
     return RoundCompleteView(
         round=ctx.round_num,
-        origin_acc=origin_acc,
+        parent_acc=parent_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_candidate_id=winner_candidate_id,
@@ -229,7 +234,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         l1_critique_text=format_l1_critique_for_prompt(d.get("critique")),
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
-        origin_composite_fitness=ctx.origin_composite_fitness,
         matched_parent_accuracy=matched_parent_acc,
         matched_parent_composite=matched_parent_composite,
     )

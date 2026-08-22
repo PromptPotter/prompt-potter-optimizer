@@ -44,7 +44,8 @@ class SeedReading:
     # call and no store — and without them the tool spends real money on the exact
     # comparison it cannot answer. One per backend call, across every pass.
     latencies: tuple[float, ...] = ()
-    cost_usd: float = 0.0
+    # ``None`` = the provider surfaced no wire price at all, which is not a price of zero.
+    cost_usd: float | None = None
     # How much of the model's OWN answering went to one label, over every pass
     # (``domain/scoring.py::modal_answer_share``); ``None`` where the answer space makes the
     # question meaningless. The bank-side twin of ``class_floor``: that says how much a
@@ -59,22 +60,24 @@ class SeedReading:
         return sum(self.origin_reads) / len(self.origin_reads)
 
     @property
-    def latency_median(self) -> float:
+    def latency_median(self) -> float | None:
         """The median, not the mean, is the route's normal speed: a cold first call and a provider
-        stall both land in the tail."""
-        return statistics.median(self.latencies) if self.latencies else 0.0
+        stall both land in the tail. ``None`` where no row reported a timing to take one over."""
+        return statistics.median(self.latencies) if self.latencies else None
 
     @property
-    def latency_mean(self) -> float:
+    def latency_mean(self) -> float | None:
         """Mean per-call wall-clock. Reported BESIDE the median rather than instead of it:
         the gap between the two IS the instability signal."""
-        return sum(self.latencies) / len(self.latencies) if self.latencies else 0.0
+        return sum(self.latencies) / len(self.latencies) if self.latencies else None
 
     @property
-    def cost_per_pass(self) -> float:
+    def cost_per_pass(self) -> float | None:
         """Wire cost of one pass over this bank — what a comparison between models is
-        actually denominated in."""
-        return self.cost_usd / len(self.origin_reads) if self.origin_reads else 0.0
+        actually denominated in, and ``None`` where nothing priced it."""
+        if self.cost_usd is None or not self.origin_reads:
+            return None
+        return self.cost_usd / len(self.origin_reads)
 
     @property
     def origin_spread(self) -> float:
@@ -145,11 +148,12 @@ def class_floor(bank: list[Sample]) -> float:
     return max(counts.values()) / len(bank) if bank else 0.0
 
 
-def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[float], float]:
+def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[float], float | None]:
     """Latency sums ``step_timings``, not ``total_time``, which reads 0.0 on a cache-served row.
-    Cost is the provider's own wire ``cost_usd`` — never a rate-table estimate."""
+    Cost is the provider's own wire ``cost_usd`` — never a rate-table estimate, so a route that
+    surfaced no price answers ``None``: a 0.0 there sorts the unpriced model as the free one."""
     latencies: list[float] = []
-    cost = 0.0
+    cost: float | None = None
     for row in rows:
         pd = row.get("pipeline_data") or {}
         seconds = sum(
@@ -159,7 +163,7 @@ def _call_cost_and_latency(rows: Sequence[Mapping[str, Any]]) -> tuple[list[floa
             latencies.append(seconds)
         for entry in (pd.get("step_tokens") or {}).values():
             if isinstance(entry, dict) and isinstance(entry.get("cost_usd"), int | float):
-                cost += float(entry["cost_usd"])
+                cost = (cost or 0.0) + float(entry["cost_usd"])
     return latencies, cost
 
 
@@ -186,12 +190,10 @@ async def screen_inner_seeds(
         dataset_campaign_path,
         read_campaign_config_file,
     )
-    from promptpotter.application.initialization.loop_start import populate_session_scoring
+    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
     from promptpotter.application.initialization.wiring import init_services
     from promptpotter.application.optimization.task_context import committed_task_context
     from promptpotter.application.origin import resolve_origin_opt_search_point
-    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-    from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.infrastructure.store.io import write_json
 
@@ -207,15 +209,8 @@ async def screen_inner_seeds(
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
     campaign_config = load_campaign_config(file_config)
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log_fn)
-    scoring_spec = split_scoring_block(campaign_config.scoring)
-    populate_session_scoring(
-        session,
-        obs=None,
-        scoring_formula=scoring_spec.per_sample,
-        scoring_round_formula=scoring_spec.per_round,
-        scorer_id=scoring_spec.scorer_id,
-        source=f"seed_screen:{dataset_name}",
+    pipeline_params = arm_diagnostic_scoring(
+        session, campaign_config, source=f"seed_screen:{dataset_name}", log=log_fn
     )
     # Same framing the run's C0 carries — a screen measures the BANK, so its origin must be the
     # prompt the campaign will actually score. Without it the screen's `reasoning_margin` grades a
@@ -232,7 +227,7 @@ async def screen_inner_seeds(
         reads: list[float] = []
         latencies: list[float] = []
         all_rows: list[Mapping[str, Any]] = []
-        cost_usd = 0.0
+        cost_usd: float | None = None
         n_scored = 0
         for i in range(max(1, repeat)):
             rows, _scores, _signal = await score_search_point(
@@ -268,7 +263,8 @@ async def screen_inner_seeds(
             n_scored = len(scored)
             pass_latencies, pass_cost = _call_cost_and_latency(rows)
             latencies += pass_latencies
-            cost_usd += pass_cost
+            if pass_cost is not None:
+                cost_usd = (cost_usd or 0.0) + pass_cost
             all_rows += rows
         reading = SeedReading(
             seed=seed,
@@ -286,8 +282,9 @@ async def screen_inner_seeds(
             f"seed {seed}: floor {reading.class_floor:.3f} origin {reading.origin_accuracy:.3f} "
             f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
             f"margin {reading.reasoning_margin:+.3f} +/-{reading.margin_se:.3f} "
-            f"lat {reading.latency_median:.1f}s/{reading.latency_mean:.1f}s "
-            f"${reading.cost_per_pass:.4f}/pass"
+            f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
+            f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
+            f"{'--' if reading.cost_per_pass is None else f'${reading.cost_per_pass:.4f}'}/pass"
             + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
         )
 

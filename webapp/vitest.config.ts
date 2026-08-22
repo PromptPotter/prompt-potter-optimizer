@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     include: [
+      // `lib/**` collects `.test.ts` ONLY — a jsdom `.test.tsx` filed there runs nowhere and
+      // passes by never running. Put one under `components/**/__tests__/` instead.
       "lib/**/__tests__/**/*.test.ts",
       "components/**/__tests__/**/*.test.{ts,tsx}",
     ],

@@ -38,11 +38,19 @@ function row(source: CandidateRow["source"]): CandidateRow {
   };
 }
 
+// The real tape (`render.py::fmt_sample_line`), not a dict: that block is served `live=True`
+// and nothing else writes it, so a dict fixture here pins a shape no producer emits.
 const liveDash = {
   current_round: {
     round: 1,
     nodes: {
-      l1_score: { output: { candidates: [{ idx: 0, samples: [{ sample_id: 2, fitness: 0 }] }] } },
+      l1_score: {
+        output: {
+          candidates: [
+            { idx: 0, samples: ["   1.2s #000 sid:002 MISS [tk] -> 'x' gt:'y' q:'z'"] },
+          ],
+        },
+      },
     },
   },
 } as unknown as DashboardSnapshot;

@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -26,6 +28,7 @@ from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -45,9 +48,22 @@ def resolve_sweep_dir(dataset_dir: Path | None) -> Path | None:
 
 
 def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]:
-    """Parse every ``*.yaml`` under ``sweep_dir``; ``extra='forbid'`` halts on typos."""
-    files = sorted(sweep_dir.glob("*.yaml"))
-    return [(p, OperatorSweepFile.model_validate(read_yaml(p))) for p in files]
+    """Parse every ``*.yaml`` under ``sweep_dir``, refusing the batch WHOLE before a single cell is paid
+    for — a typo (``extra='forbid'``) or an arm pulling no contrast lever names itself, and every other
+    arm is still read so one run fixes them all."""
+    payloads: list[tuple[Path, OperatorSweepFile]] = []
+    refused: list[str] = []
+    for path in sorted(sweep_dir.glob("*.yaml")):
+        try:
+            payloads.append((path, OperatorSweepFile.model_validate(read_yaml(path))))
+        except ValidationError as exc:
+            why = "; ".join(
+                f"{'.'.join(map(str, e['loc']))} {e['msg']}".strip() for e in exc.errors()
+            )
+            refused.append(f"{path.name}: {why}")
+    if refused:
+        raise PayloadInvalidError("sweep arms refused:\n  " + "\n  ".join(refused))
+    return payloads
 
 
 def existing_fork_source_files(

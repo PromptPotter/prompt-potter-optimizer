@@ -86,6 +86,7 @@ def build_campaign_emitter(
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
         concurrency_arming=session.backend_client.concurrency_arming,
+        measured_unit=session.backend_client.measured_unit,
     )
 
 
@@ -170,8 +171,14 @@ class RunCallbacks:
                     # way to move the bank, this says whether to move it at all.
                     "electable_count": round_result.electable_count,
                     "label": round_result.label,
-                    "cumulative_theta": round_result.cumulative_theta,
-                    "cumulative_theta_se": round_result.cumulative_theta_se,
+                    # WHOLE, not the θ alone: round 0's second close restamps this reading onto
+                    # the served summary, and a θ landing under the cold scale it replaced is
+                    # exactly the split `AbilityReading` exists to make unrepresentable.
+                    "ability": (
+                        round_result.ability.model_dump()
+                        if round_result.ability is not None
+                        else None
+                    ),
                     "abilities": _round_abilities(round_result),
                 },
             )

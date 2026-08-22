@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
+from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
@@ -100,11 +101,14 @@ class LiveDisplay(DerivedView):
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list[dict[str, Any]] | None = None,
+        measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._core = LiveStateCore(origin_acc=origin_acc)
         self.l1_patience = l1_patience
         self.pipeline_schema = pipeline_schema
         self.scoring_formula = scoring_formula
+        # The terminal's half of the one noun (`Connector.measured_unit`).
+        self.measured_unit = measured_unit
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
@@ -141,6 +145,7 @@ class LiveDisplay(DerivedView):
             l1_patience=campaign_config.optimization.l1_patience,
             pipeline_schema=session.pipeline_schema,
             scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
+            measured_unit=session.backend_client.measured_unit,
         )
 
     def _write(self, line: str) -> None:
@@ -374,7 +379,7 @@ class LiveDisplay(DerivedView):
                         # Same keys as `on_round_complete`'s builder below, and it is the same
                         # table they feed. This one carried a `hits` that `RoundResult` has never
                         # declared, so every rewind-resume raised `AttributeError` right here.
-                        "cumulative_theta": rr.cumulative_theta,
+                        "theta": rr.ability.theta if rr.ability is not None else None,
                         "total": rr.total,
                         "improved": rr.improved,
                         "results": rr.results,
@@ -486,10 +491,10 @@ class LiveDisplay(DerivedView):
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
-        origin_acc = self._phase_ctx.get("origin_accuracy", self.origin_acc)
-        origin_comp = self._phase_ctx.get("origin_composite_fitness")
+        parent_acc = self._phase_ctx.get("parent_accuracy", self.origin_acc)
+        parent_comp = self._phase_ctx.get("parent_composite_fitness")
         summary = individual_summary_from_dict(
-            scores, origin_acc, origin_composite_fitness=origin_comp
+            scores, parent_acc, parent_composite_fitness=parent_comp, unit=self.measured_unit
         )
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
@@ -502,7 +507,7 @@ class LiveDisplay(DerivedView):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        # Skip invalid + degradation-aborted candidates — partial accuracy can inflate above origin.
+        # Skip invalid + degradation-aborted candidates — partial accuracy can inflate above parent.
         if summary.status != "invalid" and not scores.get("degradation_context"):
             acc = scores.get("accuracy")
             comp = scores.get("composite_fitness")
@@ -511,35 +516,35 @@ class LiveDisplay(DerivedView):
                     self._fmt_round_leader(
                         label,
                         float(acc),
-                        origin_acc,
+                        parent_acc,
                         float(comp) if isinstance(comp, int | float) else None,
                     )
                 )
 
     def _fmt_round_leader(
-        self, label: str, acc: float, origin_acc: float, composite: float | None
+        self, label: str, acc: float, parent_acc: float, composite: float | None
     ) -> str:
         """Scoreboard one-liner, ordered by the shared ``display_rank_key``.
 
         Two arguments deliberately: mid-round no arm carries a θ and nobody is crowned, so the key
         degrades to the composite it always was. The θ-ordered scoreboard prints at round close,
         once the election has fit one."""
-        delta_origin = acc - origin_acc
+        delta_parent = acc - parent_acc
         key = display_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            if delta_origin > 0:
+            if delta_parent > 0:
                 return (
                     f"  {GREEN}★ leader: {label} {acc:.1%}  "
-                    f"(Δ +{delta_origin:.1%} vs origin){RESET}"
+                    f"(Δ +{delta_parent:.1%} vs parent){RESET}"
                 )
-            if delta_origin == 0:
-                return f"  {YELLOW}= ties origin: {label} {acc:.1%}  (Δ ±0.0% vs origin){RESET}"
+            if delta_parent == 0:
+                return f"  {YELLOW}= ties parent: {label} {acc:.1%}  (Δ ±0.0% vs parent){RESET}"
             return (
-                f"  {DIM}→ round-best: {label} {acc:.1%}  (Δ {delta_origin:.1%} vs origin){RESET}"
+                f"  {DIM}→ round-best: {label} {acc:.1%}  (Δ {delta_parent:.1%} vs parent){RESET}"
             )
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
@@ -557,7 +562,7 @@ class LiveDisplay(DerivedView):
                 # The progress table's series and the subset it was read over. Accuracy is
                 # subset-relative under `per_round_resubset`; θ is not, which is why the table
                 # differences this one and badges the other.
-                "cumulative_theta": round_result.cumulative_theta,
+                "theta": round_result.ability.theta if round_result.ability is not None else None,
                 "total": round_result.total,
                 "improved": round_result.improved,
                 "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),
@@ -583,21 +588,17 @@ class LiveDisplay(DerivedView):
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
         if formula_short or formula_full:
-            # Compare against the MATCHED origin (origin re-scored on this round's
-            # own subset) — always populated by the winner election (round 0 = full
-            # origin). Under per_round_resubset the round-0 origin composite is a
-            # different subset, so comparing against it reads draw difficulty as
-            # candidate lift; a legitimately 0.0 matched origin is a real floor, not
-            # an absent one, so there is no cross-subset fallback to slip through.
+            # Under per_round_resubset the round-0 composite is a different subset, so
+            # a cross-subset fallback would read draw difficulty as candidate lift.
             for line in render_composite_fitness_block(
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                origin=round_result.matched_parent_composite,
+                parent=round_result.matched_parent_composite,
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
-        if stats := render_round_stats(round_result, self.pipeline_schema):
+        if stats := render_round_stats(round_result, self.pipeline_schema, self.measured_unit):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)

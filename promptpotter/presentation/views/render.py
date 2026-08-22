@@ -111,7 +111,7 @@ def _render_round_start(v: RoundStartView) -> str:
             "",
             _node_block(
                 "GENERATE",
-                f"Current best    {v.current_acc:.1%}",
+                f"Incumbent       {v.current_acc:.1%}",
                 f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {v.n_variants}   Prior critique: {crit}",
                 f"Model           {v.model}",
@@ -163,15 +163,12 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
-    # The verdict line displays the comparison the gate actually used — matched-pair origin
-    # (origin restricted to the winner's measured samples). When the winner ran the full set
-    # that IS the round's origin, so the displayed value is unchanged. A winner that stopped
-    # short has no such floor and gets no "(was …)" clause: the full-set origin is a different
-    # sample basis, and subtracting it from a prefix accuracy publishes lift nobody measured.
+    # A winner that stopped short gets no "(was …)" clause rather than the full-set rate:
+    # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
     versus = (
         f"was {v.matched_parent_accuracy:.1%}, {_fmt_delta(v.delta)}"
         if v.matched_parent_accuracy is not None and v.delta is not None
-        else "no matched origin — winner stopped before covering the panel"
+        else "no matched parent — winner stopped before covering the panel"
     )
 
     if v.improved:
@@ -194,18 +191,12 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
 
     if not show_inline and v.winner_composite_fitness is not None:
-        # Composite block also compares against matched-pair origin composite
-        # so the displayed Δcomposite agrees with the gate.
-        origin_composite_for_display = (
-            v.matched_parent_composite
-            if v.matched_parent_composite is not None
-            else v.origin_composite_fitness
-        )
+        # No fallback to the cycle's origin composite — the substitution `versus` above refuses.
         for line in render_composite_fitness_block(
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            origin=origin_composite_for_display,
+            parent=v.matched_parent_composite,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")

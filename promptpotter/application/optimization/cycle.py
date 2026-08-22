@@ -25,7 +25,12 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     merge_known_outcomes,
 )
-from promptpotter.domain.ruler import FLAT_RULER_ID, CalibrationModel, DeltaRuler, ruler_id
+from promptpotter.domain.ruler import (
+    FLAT_RULER_ID,
+    AbilityReading,
+    DeltaRuler,
+    ruler_id,
+)
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
@@ -42,25 +47,36 @@ logger = logging.getLogger(__name__)
 __all__ = ["Cycle"]
 
 
+def _reading(theta: tuple[float, float] | None, ruler: DeltaRuler | None) -> AbilityReading | None:
+    """The SOLE stamping site: a θ pair and the scale it was read on, minted together, so no round
+    can carry an ability whose scale disagrees with the ruler that produced it."""
+    if theta is None:
+        return None
+    return AbilityReading(
+        theta=theta[0],
+        se=theta[1],
+        ruler_id=ruler_id(ruler),
+        ruler_n=len(ruler.delta) if ruler is not None else 0,
+        calibration_model=ruler.calibration_model if ruler is not None else None,
+    )
+
+
 def _origin_round(
     opt_sp: OptSearchPoint,
     sp: JobSearchPoint,
     *,
     report: ScoredCandidate,
     results: list[dict[str, Any]],
-    theta: tuple[float, float] | None,
-    calibration_model: CalibrationModel | None,
-    ruler_id: str,
-    ruler_n: int,
+    ability: AbilityReading | None,
 ) -> RoundResult:
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
-    add: its θ on the cycle's δ ruler, and a matched origin that is itself. Nothing re-derived."""
+    add: its θ on the cycle's δ ruler, and a matched parent that is itself. Nothing re-derived."""
     prompt_fields = {**opt_sp.prompt_field_dict(), "lineage": opt_sp.lineage.model_dump()}
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
     row = report.model_copy(
         update={
-            "theta": theta[0] if theta is not None else None,
-            "theta_se": theta[1] if theta is not None else None,
+            "theta": ability.theta if ability is not None else None,
+            "theta_se": ability.se if ability is not None else None,
             "prompt_fields": prompt_fields,
             "resolved_pipeline_params": sp.config_params,
             "matched_parent_accuracy": report.accuracy,
@@ -74,7 +90,7 @@ def _origin_round(
         composite_fitness=row.composite_fitness,
         total=row.total,
         improved=False,
-        origin_accuracy=row.accuracy,
+        parent_accuracy=row.accuracy,
         matched_parent_accuracy=row.accuracy,
         matched_parent_composite=row.composite_fitness,
         prompt_fields=prompt_fields,
@@ -84,12 +100,8 @@ def _origin_round(
         candidates_scored=1,
         candidate_scores=[row],
         deprecated=deprecated,
-        # Round 0's frontier θ IS the origin's, so the trend line starts on the θ scale too.
-        cumulative_theta=theta[0] if theta is not None else None,
-        cumulative_theta_se=theta[1] if theta is not None else None,
-        calibration_model=calibration_model,
-        ruler_id=ruler_id,
-        ruler_n=ruler_n,
+        # Round 0's frontier reading IS the origin's, so the trend line starts on the θ scale too.
+        ability=ability,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
         # C0's measurement is optimizer-independent but its critique is not, and a campaign
@@ -214,7 +226,8 @@ def _refuse_unreproducible_rounds(session: Session) -> None:
     if not rounds:
         return
     doc = read_json_tolerant(rounds[-1], {})
-    stamped = str((doc or {}).get("ruler_id") or "")
+    ability = (doc or {}).get("ability")
+    stamped = str(ability.get("ruler_id") or "") if isinstance(ability, dict) else ""
     if not stamped or stamped == FLAT_RULER_ID:
         return
     raise RulerUnpersistedError(
@@ -419,10 +432,7 @@ class Cycle:
                     sp,
                     report=origin_report,
                     results=list(origin_results or []),
-                    theta=origin_theta,
-                    calibration_model=ruler.calibration_model if ruler is not None else None,
-                    ruler_id=ruler_id(ruler),
-                    ruler_n=len(ruler.delta) if ruler is not None else 0,
+                    ability=_reading(origin_theta, ruler),
                 )
             ],
             tracking=CycleRoundState(
@@ -445,49 +455,21 @@ class Cycle:
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
 
-    @property
-    def ruler_id(self) -> str:
-        """DERIVED from the ruler, never stored beside it — a stamp that could disagree with the
-        scale it names is worse than none. It names the ANCHOR, so it is stable across the
-        extensions that grow the ruler's membership within one cycle."""
-        return ruler_id(self.ruler)
-
-    @property
-    def calibration_model(self) -> CalibrationModel | None:
-        """``None`` while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one lies."""
-        return self.ruler.calibration_model if self.ruler is not None else None
-
-    @property
-    def ruler_n(self) -> int:
-        """The size travelling with the id above. Third of one derived trio, and public for the
-        same reason the other two are: a round is stamped from the CYCLE, so anything describing
-        this round's scale before ``absorb_round`` has run must ask here."""
-        return len(self._ruler_cells)
-
-    def cumulative_theta(self, results: list[dict[str, Any]]) -> tuple[float, float] | None:
-        """The frontier's θ on THIS cycle's ruler. Bound here so a caller reading ability before
-        the round is absorbed computes the number absorb will stamp, rather than a second one."""
-        return _cumulative_theta(results, self.ruler)
+    def cumulative_ability(self, results: list[dict[str, Any]]) -> AbilityReading | None:
+        """The frontier's reading on THIS cycle's ruler. Bound here so a caller reading ability
+        before the round is absorbed computes what absorb will stamp, rather than a second one."""
+        return _reading(_cumulative_theta(results, self.ruler), self.ruler)
 
     def restamp_origin_round(self, parent: RoundParent) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
-        the run before the fix. θ is carried, not re-fit: the ruler is locked."""
+        the run before the fix. The reading is carried, not re-fit: the ruler is locked."""
         assert self.tracking.current_sp is not None
-        prior = self.origin_round
-        carried = (
-            None
-            if prior.cumulative_theta is None or prior.cumulative_theta_se is None
-            else (prior.cumulative_theta, prior.cumulative_theta_se)
-        )
         self.rounds[0] = _origin_round(
             self.opt_sp,
             self.tracking.current_sp,
             report=parent.report,
             results=list(parent.results),
-            theta=carried,
-            calibration_model=self.calibration_model,
-            ruler_n=self.ruler_n,
-            ruler_id=self.ruler_id,
+            ability=self.origin_round.ability,
         )
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
@@ -527,7 +509,7 @@ class Cycle:
         tr.best_composite_fitness = origin_rr.composite_fitness
         tr.best_accuracy = origin_rr.accuracy
         tr.best_round = origin_rr.round
-        tr.best_theta = origin_rr.cumulative_theta
+        tr.best_theta = origin_rr.ability.theta if origin_rr.ability is not None else None
         tr.best_sp = self.opt_sp.model_copy(
             update={f: origin_rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
         ).to_job_search_point(base_pipeline_params=origin_rr.pipeline_params, schema=schema)
@@ -548,9 +530,9 @@ class Cycle:
                 )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
-            cum = self.cumulative_theta(acc_cum)
-            if cum is not None and (tr.best_theta is None or cum[0] > tr.best_theta):
-                tr.best_theta = cum[0]
+            cum = self.cumulative_ability(acc_cum)
+            if cum is not None and (tr.best_theta is None or cum.theta > tr.best_theta):
+                tr.best_theta = cum.theta
         tr.current_results = acc_cum
         # Mirrors `absorb_round`: "current" is the last round's OWN measurement.
         tr.current_accuracy = last_rr.accuracy
@@ -602,14 +584,10 @@ class Cycle:
         """Every θ already taken on the flat ruler, re-read on the one just locked."""
         # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit must move
         # both, or the round file reports the origin at two abilities.
-        o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
-        self.origin_round.cumulative_theta = o_theta
-        self.origin_round.cumulative_theta_se = o_se
-        # The scale stamps follow the θ they describe. C0 was built cold, so leaving them behind
-        # reports a warm ability as unfitted — the exact confusion the ids exist to end.
-        self.origin_round.calibration_model = self.calibration_model
-        self.origin_round.ruler_id = self.ruler_id
-        self.origin_round.ruler_n = len(self.ruler.delta) if self.ruler is not None else 0
+        reading = _reading(origin_theta, self.ruler)
+        self.origin_round.ability = reading
+        o_theta = reading.theta if reading is not None else None
+        o_se = reading.se if reading is not None else None
         self.origin_round.candidate_scores = [
             c.model_copy(update={"theta": o_theta, "theta_se": o_se})
             for c in self.origin_round.candidate_scores
@@ -625,13 +603,7 @@ class Cycle:
                 # Only the cells the freshly-locked ruler carries: it was anchored on the origin
                 # and the archive, and a round that already walked past that is not on this scale.
                 on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in self._ruler_cells]
-                restamped = self.cumulative_theta(on_ruler)
-                rr.cumulative_theta, rr.cumulative_theta_se = (
-                    restamped if restamped is not None else (None, None)
-                )
-                rr.calibration_model = self.calibration_model
-                rr.ruler_id = self.ruler_id
-                rr.ruler_n = self.ruler_n
+                rr.ability = self.cumulative_ability(on_ruler)
 
     @property
     def _ruler_cells(self) -> set[int]:
@@ -697,16 +669,10 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
-        cur = self.cumulative_theta(tr.current_results)
-        if cur is not None and (tr.best_theta is None or cur[0] > tr.best_theta):
-            tr.best_theta = cur[0]
+        cur = self.cumulative_ability(tr.current_results)
+        if cur is not None and (tr.best_theta is None or cur.theta > tr.best_theta):
+            tr.best_theta = cur.theta
 
-        rr.cumulative_theta, rr.cumulative_theta_se = cur if cur is not None else (None, None)
-        rr.calibration_model = self.calibration_model
-        rr.ruler_id = self.ruler_id
-        # The size travels with the id it describes. Stamped only on the origin and the
-        # restamp path before, so every L1 round document reported `ruler_n=0` on a warm
-        # ruler — which `log.md` prints as "ruler: 0 cells" and a reader takes for cold.
-        rr.ruler_n = self.ruler_n
+        rr.ability = cur
         rr.opt_sp = self.opt_sp
         return rr

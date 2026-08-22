@@ -1,14 +1,19 @@
 "use client";
 // One polling primitive. Owns the lifecycle boilerplate every poll loop
 // repeated: the interval, a `visibilitychange` pause/resume, an optional
-// `focus` wake, cleanup, and a per-tick AbortController. The caller keeps
+// `focus` wake, cleanup, and a per-key AbortController. The caller keeps
 // its own `tick` body — `usePoll` never inspects or batches it.
 
 import { useCallback, useEffect, useRef } from "react";
 
+const SOLE_KEY: readonly string[] = [""];
+
 interface PollOptions {
   intervalMs: number;
-  // Pause the timer (and abort the in-flight tick) while the tab is hidden.
+  // The keys this loop fans out over, read fresh each tick; omitted is one anonymous key.
+  // Each runs and skips on its own, so a slow fetch holds back nothing but itself.
+  keys?: () => readonly string[];
+  // Pause the timer (and abort the in-flight ticks) while the tab is hidden.
   pauseWhenHidden?: boolean; // default true
   // Fire an extra tick the instant the window regains focus.
   tickOnFocus?: boolean; // default false
@@ -20,42 +25,46 @@ interface PollOptions {
 }
 
 export function usePoll(
-  tick: (signal: AbortSignal) => void | Promise<void>,
+  tick: (signal: AbortSignal, key: string) => void | Promise<void>,
   opts: PollOptions,
 ): void {
   const {
     intervalMs,
+    keys,
     pauseWhenHidden = true,
     tickOnFocus = false,
     enabled = true,
     revalidateOn,
   } = opts;
 
-  // Latest tick in a ref — the caller's closure changes identity every
-  // render (it closes over poll state), but the interval must NOT reset
+  // Latest tick + key source in refs — the caller's closures change identity every
+  // render (they close over poll state), but the interval must NOT reset
   // each render. Only `intervalMs`/`enabled`/… restart the timer.
   const tickRef = useRef(tick);
+  const keysRef = useRef(keys);
   useEffect(() => {
     tickRef.current = tick;
+    keysRef.current = keys;
   });
 
-  // The single in-flight AbortController; teardown (stop) aborts it.
-  const abortRef = useRef<AbortController | null>(null);
-  // Is a tick still running? A timer that fires mid-tick SKIPS rather than aborting —
-  // else a tick slower than `intervalMs` (a large `/tree` under load: ~10s vs a 5s poll)
-  // is killed before it can ever resolve, and the surface hangs on "Loading…" forever.
-  // A unit switch still refreshes: the render-guarded consumer ignores a stale-key result,
-  // and the next timer tick (once this one settles) fetches the new key.
-  const inFlightRef = useRef(false);
+  // One in-flight AbortController per RUNNING key; teardown (stop) aborts them all. A timer
+  // firing while a key still runs SKIPS THAT KEY rather than aborting it — else a fetch
+  // slower than `intervalMs` (a large `/tree` under load: ~10s vs a 5s poll) is killed
+  // before it can ever resolve and the surface hangs on "Loading…" forever, while skipping
+  // the whole tick would hold every other key to the slowest one's cadence. A unit switch
+  // still refreshes: the render-guarded consumer ignores a stale-key result, and the next
+  // timer tick (once this one settles) fetches the new key.
+  const inFlightRef = useRef(new Map<string, AbortController>());
 
   const runTick = useCallback(() => {
-    if (inFlightRef.current) return;
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    inFlightRef.current = true;
-    void Promise.resolve(tickRef.current(ctrl.signal)).finally(() => {
-      inFlightRef.current = false;
-    });
+    for (const key of keysRef.current?.() ?? SOLE_KEY) {
+      if (inFlightRef.current.has(key)) continue;
+      const ctrl = new AbortController();
+      inFlightRef.current.set(key, ctrl);
+      void Promise.resolve(tickRef.current(ctrl.signal, key)).finally(() => {
+        if (inFlightRef.current.get(key) === ctrl) inFlightRef.current.delete(key);
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -71,11 +80,10 @@ export function usePoll(
         clearInterval(timer);
         timer = null;
       }
-      abortRef.current?.abort();
-      abortRef.current = null;
-      // The aborted tick is no longer in flight — clear synchronously so a following
-      // start() (tab re-show / re-enable) isn't skipped waiting on the abort's `.finally`.
-      inFlightRef.current = false;
+      // An aborted key is no longer in flight — clear synchronously so a following
+      // start() (tab re-show / re-enable) isn't skipped waiting on an abort's `.finally`.
+      for (const c of inFlightRef.current.values()) c.abort();
+      inFlightRef.current.clear();
     };
     const onVis = () => {
       if (!pauseWhenHidden) return;

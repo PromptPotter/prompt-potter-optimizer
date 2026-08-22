@@ -1,26 +1,4 @@
 "use client";
-// Single source of truth for workspace identity. One provider polls the
-// server's active pointer (`/sessions/active`) on the live 2 s beat and the
-// heavier cycle list (`/cycles`) + campaign registry (`/campaigns`) on a 10 s
-// floor; every surface — AppShell, CyclePicker, Sidebar — subscribes here via
-// `useWorkspace()` instead of fetching those endpoints on its own. The two
-// cadences are deliberate: the active pointer is staleness-critical (a CLI mint
-// must yank the viewed unit over promptly), the registry list is not.
-//
-// "What am I looking at?" has ONE answer: `viewedPath`, a `CyclePath` (see
-// `lib/ids.ts`) — the chain of `(campaign, cycle)` hops from the top-level root
-// down to the leaf. A top-level cycle is a 1-hop path; an L4 inner loop is a
-// 2-hop path (outer → inner); L5+ nests deeper. The DASHBOARD stream re-roots to
-// the LEAF hop; chat, selection, dataset, and files bind to the ROOT hop (the
-// `campaignId`/`cycleId` exports) — so the conversation stays on the outer thread
-// while the dashboard follows an inner loop, with no separate state axis.
-//
-// `following` is the explicit follow-vs-pin state. While following, the viewed
-// path tracks the server's active pointer (always a top-level 1-hop cycle —
-// inner runs are sandboxed and never rewrite the global pointer). Picking a unit
-// pins an explicit `pinnedPath` (`following=false`); `followActive()` resumes.
-// The URL `?path=` param is written ONLY while pinned and stripped while
-// following.
 
 import {
   createContext,

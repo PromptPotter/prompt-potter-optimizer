@@ -238,7 +238,7 @@ async def execute_round(
     # The election, banked. AFTER the panel gate on purpose: a round halted on a holed panel is
     # unwound and re-run, so crowning it would put a winner on the timeline for a round that
     # never stood. Still a whole `l1_critique` call before the close, which is the point — the
-    # crown and the matched-origin floor both exist HERE, and rode the close only because that
+    # crown and the matched-parent floor both exist HERE, and rode the close only because that
     # was the record that happened to have a payload.
     callbacks.on_election(round_result)
 

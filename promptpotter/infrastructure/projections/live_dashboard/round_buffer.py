@@ -96,9 +96,10 @@ class RoundBuffer:
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": None if query_time is None else round(query_time, 2),
-                # The producer's own "this row errored" fact. Without it the tape has only
-                # `fitness`, whose absence it cannot tell from a graded miss.
+                # Two channels, deliberately: `error` is the human message the tape RENDERS,
+                # `error_category` the typed one `is_error_result` ASKS (`shared/errors.py`).
                 "error": result.get("error"),
+                "error_category": result.get("error_category"),
                 "terminal_node": pd.get("terminal_node") or "",
                 "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
                 "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,

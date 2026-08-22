@@ -6,7 +6,7 @@ import { currentRound, dash, liveRow } from "@/lib/test-fixtures";
 // The live candidate as `dashboard.json` carries it — BOTH halves, because the projection
 // writes both: the ROW under `current_round.candidates` (what a bar plots) and the tape under
 // the l1_score node block (what the walk reads).
-const live = (samples: unknown[], currentSampleId: number | null = null): DashboardSnapshot =>
+const live = (samples: string[], currentSampleId: number | null = null): DashboardSnapshot =>
   dash({
     current_sample_id: currentSampleId,
     current_round: currentRound({
@@ -50,15 +50,6 @@ describe("sampleWalk", () => {
     const w = sampleWalk(live(tape, 419), null, true);
     expect(w.ids).toEqual([99, 455, 419]);
     expect(w.cursor).toBe(2);
-  });
-
-  it("reads the dict tape shape too", () => {
-    const w = sampleWalk(
-      live([{ sample_id: 99, fitness: 1 }, { sample_id: 455, fitness: 0 }], 419),
-      null,
-      true,
-    );
-    expect(w.ids).toEqual([99, 455, 419]);
   });
 
   it("has no axis when the tape carries no sample ids and nothing is in flight", () => {

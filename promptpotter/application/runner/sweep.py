@@ -41,7 +41,7 @@ async def run_sweep_generation_only(
             # A generation-only round IS a round — same document, `status` telling every
             # reader it was never scored. The scoring scalars below are structural zeros
             # (no measurement happened), not measurements of zero; `health` and the
-            # matched-origin pair stay None because a degradation verdict and an
+            # matched-parent pair stay None because a degradation verdict and an
             # origin-restricted-to-the-winner's-samples both need scored samples.
             session.store.campaigns.save_round_file(
                 session.hop,

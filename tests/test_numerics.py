@@ -63,7 +63,13 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
-from promptpotter.domain.ruler import FLAT_RULER_ID, DeltaRuler, anchor_id_of, ruler_id
+from promptpotter.domain.ruler import (
+    FLAT_RULER_ID,
+    AbilityReading,
+    DeltaRuler,
+    anchor_id_of,
+    ruler_id,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
@@ -261,7 +267,7 @@ def test_compile_scorer_accepts_known_formulas() -> None:
         assert compile_scorer(f) is not None
 
 
-# 3. Evaluator registry + composite fitness + matched-origin subset
+# 3. Evaluator registry + composite fitness + matched-parent subset
 
 
 def _eval_result(
@@ -1827,7 +1833,7 @@ def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts(
 def test_an_idea_that_beat_its_origin_is_not_grounds_for_rejection():
     """Refining a winner is the search working. Only measured LOSSES close a direction off."""
     parent = _parent()
-    won = lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched origin 0.5
+    won = lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched parent 0.5
     proposals = [
         _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
         _child(parent, persona="A terse logician who commits to a label."),
@@ -2838,8 +2844,10 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
 def test_degradation_health_is_context_aware(
     attempted, structural, transient, prior_clean, consec, grade, cause
 ):
-    """The verdict grades the SAME degradation differently by track record, and only a
-    ``critical`` grade carries an operator-facing suggested action (never auto-stops)."""
+    """The verdict grades the SAME degradation differently by track record, and every GRADED
+    round carries its own operator-facing sentence (never auto-stops). ``degraded`` earns one
+    too: it fires on structural and transient together, so a reader left to compose the
+    sentence from the fields it happens to hold states the split backwards."""
     from promptpotter.domain.results_health import compute_degradation_health
 
     h = compute_degradation_health(
@@ -2853,7 +2861,7 @@ def test_degradation_health_is_context_aware(
     assert h is not None
     assert h.grade == grade
     assert h.cause == cause
-    assert (h.suggested_action is not None) is (grade == "critical")
+    assert (h.suggested_action is not None) is (grade != "healthy")
 
 
 def test_origin_verdict_is_first_in_the_l1_track_record():
@@ -3609,6 +3617,8 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
                     axes=None,
                     origin_per_sample=origin,
                     trajectory_results=rows,
+                    # The recursion DECLARES its noun; the panel never sniffs one off a row.
+                    measured_unit="cell",
                 )
             )
         )
@@ -3831,7 +3841,9 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
             dataset_name="d",
             created_at="",
             arm_id="a",
-            ruler_id=ruler,
+            ability=AbilityReading(
+                theta=0.0, se=None, ruler_id=ruler, ruler_n=1, calibration_model=None
+            ),
             spend_usd=None,
             rounds_scored=0,
             values={"q1": 0.0},
@@ -3967,9 +3979,9 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
             elimination_context={"queries_scored": 6, "total_queries": 28, **ctx},
         )
 
-    collapsed = _candidate_fate(cand("collapsed", gate=EliminationGate.COLLAPSED))
+    collapsed = _candidate_fate(cand("collapsed", gate=EliminationGate.COLLAPSED), "sample")
     epsilon_cut = _candidate_fate(
-        cand("eps", p_best=0.03, epsilon=0.15, gate=EliminationGate.EPSILON)
+        cand("eps", p_best=0.03, epsilon=0.15, gate=EliminationGate.EPSILON), "sample"
     )
 
     # What the GENERATOR is handed must invert between the two, and quote no ε number it lacks.

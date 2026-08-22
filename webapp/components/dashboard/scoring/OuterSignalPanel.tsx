@@ -2,7 +2,7 @@
 // Outer signal — is the L4 panel resolving anything yet, and is it getting sharper?
 //
 // Two stacked reads, both served, neither recomputed here:
-//   1. the leading arm's blocked lift over the origin, one row per round on a SHARED axis, so
+//   1. the leading arm's blocked lift over its PARENT, one row per round on a SHARED axis, so
 //      round-over-round tightening is a shape rather than three numbers to hold in your head;
 //   2. the panel's precision — how sharply each cell was measured against how far apart the cells
 //      landed — which is the lever the spread above calls for.
@@ -130,9 +130,9 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
               {latest.lo > 0 ? "separated" : latest.hi < 0 ? "worse" : "inconclusive"}
             </Badge>{" "}
             Round {latest.round}&rsquo;s leading arm lifts <strong>{fmt(latest.lift)}</strong> [
-            {fmt(latest.lo)}, {fmt(latest.hi)}] over the origin, on the cells both measured.
+            {fmt(latest.lo)}, {fmt(latest.hi)}] over its parent, on the cells both measured.
             {latest.lo <= 0 && latest.hi >= 0
-              ? " The interval spans 0 — this panel cannot yet tell that arm from the origin, and the point estimate above should not be read as a win."
+              ? " The interval spans 0 — this panel cannot yet tell that arm from its parent, and the point estimate above should not be read as a win."
               : ""}
           </p>
           {/* The pattern the eye is meant to learn: does the whisker shorten, and does it clear

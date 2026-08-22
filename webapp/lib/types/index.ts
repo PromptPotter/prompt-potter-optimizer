@@ -19,6 +19,5 @@ export type {
   LiveDashboardState,
   L1ScoreOutput,
   LiveCandidate,
-  LiveSample,
   StatusKind,
 } from "./dashboard";

@@ -100,6 +100,24 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   hosted/multi-tenant worker mode: a new `execution` value, dispatched on
   uniformly, with no core-loop edit.
 
+## The measured unit — declared, never sniffed
+
+A connector declares what ONE measured row IS via `Connector.measured_unit` (`MeasuredUnit`):
+`sample` by default, `cell` on `promptpotter`, where one outer row is a whole inner campaign. It
+rides the same declared-capability channel as `execution` — `Connector` → `build_backend_client` →
+`BackendClient.measured_unit` → the dispatch bundle, the terminal readout and
+`dashboard.json::measured_unit` — so **no prompt panel, CLI line or browser surface holds a literal
+`"cell"` / `"sample"` beside a count**. Pluralising and counting are `unit_plural` / `unit_count` on
+the producer, never an f-string at the render site.
+
+**A renderer may not infer it.** `_r_inner_narratives` read `mean_round_delta` off the rows to work
+out which world it was in — a statistical field deciding vocabulary is the shape this field deletes.
+
+Two places keep their own word on purpose: the **evidence** surface calls every row a cell because a
+selection there spans campaigns, datasets and backends, so no single connector's noun applies; and
+`ruler_n` / `DeltaRuler` count **ruler cells**, a δ-scale membership that is the same on every
+backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)).
+
 ## Registering a connector
 
 **Declare a built-in as a data row in the `_BUILTIN` dict in `__init__.py` — never a

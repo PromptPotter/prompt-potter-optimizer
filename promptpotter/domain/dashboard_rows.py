@@ -14,7 +14,8 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.results import CalibrationModel, DegradationHealth, OverlapReading
+from promptpotter.domain.results import DegradationHealth, OverlapReading
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["DashboardCandidate", "RoundSummary", "RoundSummaryCandidate"]
@@ -95,26 +96,21 @@ class RoundSummaryCandidate(DashboardCandidate):
 
 class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
-    Top-level `accuracy` is what the round MEASURED; `cumulative_theta` is the invariant series."""
+    Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
 
     model_config = ConfigDict(frozen=True)
 
     round: int
     accuracy: float
     composite_fitness: float
-    # The cross-round-comparable series: ability on the cycle's fixed δ ruler, subset-invariant
-    # where `accuracy`/`composite_fitness` above are subset-relative — under
-    # `per_round_resubset` those swing on each fresh draw, reading as a false
-    # "great start → decay". The trend/sparkline plot THIS series; the per-round measured
-    # number stays on `candidates[]`, badged with its count. Never add a `cumulative_accuracy`
-    # beside it: a mean over rows from DIFFERENT configurations fabricates a number no
-    # individual scored. Mirrors `RoundResult.cumulative_theta`.
-    cumulative_theta: float | None = None
-    # And no `cumulative_theta_se` beside it: the interval that IS read is per candidate
-    # (`theta_se`), and the round-level SE stays on the ledger and the round document, which is
-    # where a reader for it would come from.
-    # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
-    calibration_model: CalibrationModel | None = None
+    # The cross-round-comparable series and the scale that makes it one: ability on the cycle's
+    # fixed δ ruler, subset-invariant where `accuracy`/`composite_fitness` above are
+    # subset-relative — under `per_round_resubset` those swing on each fresh draw, reading as a
+    # false "great start → decay". The trend/sparkline plot THIS series, dropping any point whose
+    # ruler differs; the per-round measured number stays on `candidates[]`, badged with its count.
+    # Never add a `cumulative_accuracy` beside it: a mean over rows from DIFFERENT configurations
+    # fabricates a number no individual scored. Mirrors `RoundResult.ability`.
+    ability: AbilityReading | None = None
     # The round's verdict and the evidence it rests on — the two bits that decide how long the
     # cycle lives. `improved` moves the stall counter and the life bank; `electable_count`
     # decides whether the bank moves AT ALL, since a round no candidate reached measured

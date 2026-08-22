@@ -1,15 +1,13 @@
 // Quiet per-round degradation notices — the webapp twin of the CLI's yellow
 // "round degraded" line (`presentation/views/live/phase.py`). The loud
 // cross-tab banner (`critical-alert.ts`) only surfaces the `critical` grade; a
-// `degraded` round (transient backend noise on an otherwise-sound pipeline) is
-// real and operator-relevant but NOT abort-worthy, so it stays quiet — an amber
-// chip per round, never a banner. Without this the `degraded` grade was
-// CLI-visible and webapp-invisible, breaking graded-surfacing parity.
+// `degraded` round is real and operator-relevant but NOT abort-worthy, so it
+// stays quiet — an amber chip per round, never a banner.
 //
 // Pure + reader-side: reads the backend-computed `health` verdict off each round
 // summary and never recomputes it (R-36). Sits in the Vitest derivation scope.
 
-import type { DegradationHealth, HealthCause } from "@/lib/api/types";
+import type { DegradationHealth } from "@/lib/api/types";
 import { fmtPct0 } from "@/lib/format";
 import type { DashboardSnapshot } from "@/lib/poll";
 
@@ -30,18 +28,6 @@ export interface DegradedRoundNotice {
   detail: string;
 }
 
-function noticeDetail(
-  cause: HealthCause | null,
-  dominantNode: string | null,
-  degradedRate: number,
-): string {
-  if (cause === "structural_untested") {
-    return "under-probed — too few samples for a confident read";
-  }
-  const where = dominantNode ? ` on ${dominantNode}` : "";
-  return `transient backend noise${where} on ${fmtPct0(degradedRate)} of samples — fine to keep going`;
-}
-
 // Rounds the backend graded `degraded`, oldest→newest. `critical` is owned by
 // the banner; `healthy` and unmeasured (`null`) rounds yield nothing.
 export function degradedRoundNotices(dash: DashboardSnapshot | null): DegradedRoundNotice[] {
@@ -50,7 +36,11 @@ export function degradedRoundNotices(dash: DashboardSnapshot | null): DegradedRo
     if (r.health?.grade !== "degraded") continue;
     out.push({
       round: r.round,
-      detail: noticeDetail(r.health.cause, r.health.dominant_node, r.health.degraded_rate),
+      // The verdict's own sentence. Composing one here got the structural/transient
+      // split wrong, because the browser is not handed what decided the grade.
+      detail:
+        r.health.suggested_action ??
+        `degraded on ${fmtPct0(r.health.degraded_rate)} of samples`,
     });
   }
   out.sort((a, b) => a.round - b.round);

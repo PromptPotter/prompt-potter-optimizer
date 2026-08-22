@@ -9,6 +9,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import HeadlineMetric, candidate_label
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -63,7 +64,7 @@ from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import ConcurrencyArming
+    from promptpotter.connectors.protocol import ConcurrencyArming, MeasuredUnit
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
@@ -116,18 +117,20 @@ if set(_STATE_TO_NODE) != set(DashboardState):
 def _ability_delta(rounds: list[RoundSummary]) -> float | None:
     """Latest round carrying an ability, over the origin — never the max (winner's curse in logit
     space). Skipping only unfit rounds is ``adopted_level_trajectory``'s own carry-forward rule."""
-    origin = next((r.cumulative_theta for r in rounds if r.round == 0), None)
+    origin = next((r.ability for r in rounds if r.round == 0 and r.ability is not None), None)
     if origin is None:
         return None
     latest = next(
         (
-            r.cumulative_theta
+            r.ability
             for r in sorted(rounds, key=lambda r: r.round, reverse=True)
-            if r.cumulative_theta is not None
+            if r.ability is not None
         ),
         None,
     )
-    return None if latest is None else round(latest - origin, 4)
+    if latest is None or not latest.comparable_to(origin):
+        return None
+    return round(latest.theta - origin.theta, 4)
 
 
 class LiveDashboardView(DerivedView):
@@ -212,6 +215,7 @@ class LiveDashboardView(DerivedView):
         seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
         concurrency_arming: ConcurrencyArming | None = None,
+        measured_unit: MeasuredUnit | None = None,
     ) -> LiveDashboardView | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
         the parent's trajectory up to the cut while counting its own copied round files."""
@@ -256,6 +260,8 @@ class LiveDashboardView(DerivedView):
             view.state.max_cells_in_flight = max_cells_in_flight
         if concurrency_arming is not None:
             view.state.concurrency_arming = concurrency_arming
+        if measured_unit is not None:
+            view.state.measured_unit = measured_unit
         return view
 
     @classmethod
@@ -391,12 +397,11 @@ class LiveDashboardView(DerivedView):
             # Candidate ids are ROUND-SCOPED, so a P(best) map carried into the next round would
             # rank a candidate against a stranger.
             roll_p_best_at_round_complete(self._core)
-            theta = record.payload.get("cumulative_theta")
-            if isinstance(theta, int | float):
-                se = record.payload.get("cumulative_theta_se")
-                theta_se = float(se) if isinstance(se, int | float) else None
+            raw = record.payload.get("ability")
+            if isinstance(raw, dict):
+                ability = AbilityReading.model_validate(raw)
                 self.state.rounds = [
-                    self._restamp_theta(r, float(theta), theta_se) if r.round == record.round else r
+                    self._restamp_ability(r, ability) if r.round == record.round else r
                     for r in self.state.rounds
                 ]
                 self.state.ability_delta = _ability_delta(self.state.rounds)
@@ -457,7 +462,7 @@ class LiveDashboardView(DerivedView):
         self._flush_pending_persist()
 
     @staticmethod
-    def _restamp_theta(r: RoundSummary, theta: float, theta_se: float | None) -> RoundSummary:
+    def _restamp_ability(r: RoundSummary, ability: AbilityReading) -> RoundSummary:
         """The warm-ruler correction, applied to the round AND to round 0's candidate row.
 
         Round 0 holds no election fit of its own, so the round's θ IS its one candidate's; later
@@ -465,11 +470,14 @@ class LiveDashboardView(DerivedView):
         patched here before, so ``rounds[0].candidates[0].theta`` stayed null forever while the
         round file carried the warm value."""
         candidates = (
-            [c.model_copy(update={"theta": theta, "theta_se": theta_se}) for c in r.candidates]
+            [
+                c.model_copy(update={"theta": ability.theta, "theta_se": ability.se})
+                for c in r.candidates
+            ]
             if r.round == 0
             else r.candidates
         )
-        return r.model_copy(update={"cumulative_theta": theta, "candidates": candidates})
+        return r.model_copy(update={"ability": ability, "candidates": candidates})
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event

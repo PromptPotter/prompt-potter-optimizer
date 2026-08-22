@@ -1,6 +1,66 @@
 {
   "components": {
     "schemas": {
+      "AbilityReading": {
+        "additionalProperties": false,
+        "description": "A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value.\n``ruler_id`` ``None`` names NO scale: that reading is comparable to nothing.\n\nBeside :class:`DeltaRuler` rather than in ``results.py`` because ``run_records.py`` needs it\ntoo, and ``results.py`` imports that module — the same constraint that put the ruler here.",
+        "properties": {
+          "calibration_model": {
+            "anyOf": [
+              {
+                "enum": [
+                  "1PL",
+                  "2PL"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Model"
+          },
+          "ruler_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ruler Id"
+          },
+          "ruler_n": {
+            "title": "Ruler N",
+            "type": "integer"
+          },
+          "se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se"
+          },
+          "theta": {
+            "title": "Theta",
+            "type": "number"
+          }
+        },
+        "required": [
+          "theta",
+          "se",
+          "ruler_id",
+          "ruler_n",
+          "calibration_model"
+        ],
+        "title": "AbilityReading",
+        "type": "object"
+      },
       "AcceptTermsBody": {
         "additionalProperties": false,
         "description": "The version the client is accepting — must equal the live TERMS_VERSION.",
@@ -480,6 +540,16 @@
         "additionalProperties": false,
         "description": "One campaign, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same campaign, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
+          "ability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AbilityReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "arm_id": {
             "anyOf": [
               {
@@ -537,17 +607,6 @@
             "title": "Rounds Scored",
             "type": "integer"
           },
-          "ruler_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ruler Id"
-          },
           "spend_usd": {
             "anyOf": [
               {
@@ -583,7 +642,7 @@
           "dataset_name",
           "created_at",
           "arm_id",
-          "ruler_id",
+          "ability",
           "spend_usd",
           "rounds_scored",
           "values",
@@ -1230,10 +1289,16 @@
         "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.\n\nWire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.",
         "properties": {
           "n_samples": {
-            "default": 0,
-            "description": "Sample bank size from ``cache.json``; ``0`` when the cache hasn't been materialized yet.",
-            "title": "N Samples",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sample bank size from ``cache.json``; ``null`` when the cache has not been materialized, which is not the same as a dataset holding zero usable rows.",
+            "title": "N Samples"
           },
           "name": {
             "description": "Slug used as the path segment under `datasets/`.",
@@ -1323,9 +1388,16 @@
             "type": "integer"
           },
           "n_obs": {
-            "description": "Times this sample has been tried",
-            "title": "N Obs",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Times this sample has been tried. ``null`` where the row is not in this scope's Rasch artifact at all — the same absence its `delta` / `delta_se` / `p_hat` neighbours already report, and not a fit that observed it zero times.",
+            "title": "N Obs"
           },
           "p_hat": {
             "anyOf": [
@@ -1375,8 +1447,7 @@
           "sample_id",
           "query",
           "ground_truth",
-          "hard_sample_rank",
-          "n_obs"
+          "hard_sample_rank"
         ],
         "title": "DatasetItem",
         "type": "object"
@@ -3232,10 +3303,16 @@
             "type": "integer"
           },
           "n_samples": {
-            "default": 0,
-            "description": "Dataset sample count (0 if unmaterialized)",
-            "title": "N Samples",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dataset sample count; ``null`` if unmaterialized",
+            "title": "N Samples"
           },
           "origin_accuracy": {
             "anyOf": [

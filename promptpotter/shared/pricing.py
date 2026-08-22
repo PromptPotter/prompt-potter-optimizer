@@ -3,10 +3,12 @@ by choice: the table is vendored from LiteLLM's public price backup (MIT, BerriA
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import urllib.error
@@ -114,15 +116,19 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
 
     stripped = _strip_upstream(raw)
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # tmp + ``os.replace``: a torn write used to be caught downstream by the freshness check
-    # parsing the file, and that check no longer parses. Hand-rolled rather than through
-    # ``store/io.py::write_json`` because this module is stdlib-only and one layer below it.
-    tmp = CACHE_PATH.with_name(f"{CACHE_PATH.name}.tmp")
-    tmp.write_text(
-        json.dumps({"models": stripped}, indent=0, separators=(",", ":")),
-        encoding="utf-8",
-    )
-    os.replace(tmp, CACHE_PATH)
+    # Hand-rolled rather than through ``store/io.py::write_json`` because this module is
+    # stdlib-only and one layer below it. The tmp name must be UNIQUE: this runs on a daemon
+    # thread per launch and an L4 run starts one per inner campaign, so a fixed name lets two
+    # writers interleave into one file — and a torn table then ages as FRESH off its own mtime.
+    fd, tmp = tempfile.mkstemp(dir=CACHE_PATH.parent, prefix=f"{CACHE_PATH.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
+        os.replace(tmp, CACHE_PATH)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
     load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True

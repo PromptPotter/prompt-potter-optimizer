@@ -2,7 +2,17 @@
 // formatting the dashboard repeats across panels. Import from here; never
 // re-inline a copy.
 
-import type { MetricSpec } from "@/lib/api/types";
+import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
+
+// The browser's half of the engine's one noun for a measured row
+// (`dashboard.json::measured_unit`): never pick it off a local flag, never pluralise inline.
+export function unitPlural(unit: MeasuredUnit): string {
+  return `${unit}s`;
+}
+
+export function unitCount(n: number, unit: MeasuredUnit): string {
+  return `${n} ${n === 1 ? unit : unitPlural(unit)}`;
+}
 
 // Percentage, one decimal — "42.0%". Non-finite → "—".
 export function fmtPct1(v: number | null | undefined): string {

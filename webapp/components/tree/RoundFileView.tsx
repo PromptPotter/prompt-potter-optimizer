@@ -46,22 +46,22 @@ export function RoundFileView({ doc, raw }: Props) {
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
   // Matched first, full-set only as the fallback, and the label says which — an
-  // unlabelled "(origin 18%)" beside a subset accuracy of 58% is a lift nothing measured.
+  // unlabelled "(parent 18%)" beside a subset accuracy of 58% is a lift nothing measured.
   const matched = typeof doc.matched_parent_accuracy === "number" ? doc.matched_parent_accuracy : null;
-  const originShown = matched ?? (typeof doc.origin_accuracy === "number" ? doc.origin_accuracy : null);
-  const originLabel = matched != null ? "matched origin" : "origin, full set";
+  const parentShown = matched ?? (typeof doc.parent_accuracy === "number" ? doc.parent_accuracy : null);
+  const parentLabel = matched != null ? "matched parent" : "parent, full set";
 
   return (
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge>round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {originShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The origin re-scored on the samples this round's winner measured — the floor the promotion gate used." : "The origin's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({originLabel} {fmtPct1(originShown)})</span>)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
-          {typeof doc.cumulative_theta === "number" && (
+          {typeof doc.ability?.theta === "number" && (
             <span title="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
-              θ {fmtTheta(doc.cumulative_theta)}{typeof doc.ruler_n === "number" && doc.ruler_n > 0 ? ` (${doc.ruler_n} cells)` : ""}
+              θ {fmtTheta(doc.ability.theta)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
             </span>
           )}
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}

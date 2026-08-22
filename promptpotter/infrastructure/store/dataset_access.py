@@ -26,7 +26,7 @@ class DatasetAccessError(NotFoundError):
 class DatasetRef:
     name: str
     title: str | None
-    n_samples: int
+    n_samples: int | None
     tier: str  # "yours" | "install"
 
 
@@ -138,17 +138,18 @@ def _read_title(dataset_dir: Path) -> str | None:
     return None
 
 
-def _read_n_samples(stores: Stores, name: str) -> int:
-    """``row_count`` off the resolved rows (falls back to ``items`` length); ``0`` when
-    unmaterialized — a benchmark nobody has fetched yet, or a pipeline-only L4 dataset."""
+def _read_n_samples(stores: Stores, name: str) -> int | None:
+    """``row_count`` off the resolved rows (falls back to ``items`` length); ``None`` when
+    unmaterialized — a benchmark nobody has fetched yet, or a pipeline-only L4 dataset. NOT ``0``,
+    which is the one state that should stop an operator from minting an origin on it."""
     raw = readable_dataset_rows(stores, name)
     if raw is None:
-        return 0
+        return None
     row_count = raw.get("row_count")
     if isinstance(row_count, int):
         return row_count
     items = raw.get("items")
-    return len(items) if isinstance(items, list) else 0
+    return len(items) if isinstance(items, list) else None
 
 
 __all__ = [

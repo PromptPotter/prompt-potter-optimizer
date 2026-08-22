@@ -48,6 +48,8 @@ def _unwrap_optional(annotation: object) -> object:
 
 
 def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = None) -> int:
+    """A ``list[Model]`` or ``dict[str, Model]`` field is a whole nested surface, not one leaf —
+    counting it as one is how a model grows unwatched under a ratcheted row."""
     seen = _seen if _seen is not None else set()
     if model in seen:
         return 0
@@ -57,8 +59,13 @@ def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = N
         inner = _unwrap_optional(field.annotation)
         if isinstance(inner, type) and issubclass(inner, BaseModel):
             total += _count_leaves(inner, seen)
-        else:
-            total += 1
+            continue
+        nested = [
+            arg
+            for arg in typing.get_args(inner)
+            if isinstance(arg, type) and issubclass(arg, BaseModel)
+        ]
+        total += sum(_count_leaves(n, seen) for n in nested) if nested else 1
     return total
 
 
@@ -188,6 +195,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.config import settings as settings_mod
     from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import CycleResult
 
     py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
@@ -200,6 +208,9 @@ def compute_ledger() -> dict[str, int]:
         "settings_env": len(Settings.model_fields),
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
+        # The mirror of the row above: what a run PRODUCES, rooted at the one model that
+        # reaches every round and candidate, so no hand-listed roster can drift from it.
+        "cycle_result_fields": _count_leaves(CycleResult),
         "any_params": _count_any_params(py_files),
         "domain_any_maps": _count_domain_any_maps(py_files),
         "models_lax": _count_lax_models(py_files),

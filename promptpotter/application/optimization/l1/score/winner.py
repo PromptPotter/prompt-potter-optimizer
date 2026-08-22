@@ -135,7 +135,7 @@ def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> 
             f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
             f"has a lift interval spanning 0 (best reaches {widest.matched_parent_lift_ci_hi:+.3f} "
             "at its upper bound). A winner was still elected — read it as the best of what this "
-            "round saw, not as a measured improvement over the origin"
+            "round saw, not as a measured improvement over the parent"
         ),
         detail={"arms": len(bracketed), "best_ci_hi": widest.matched_parent_lift_ci_hi},
     )
@@ -233,7 +233,7 @@ async def l1_score(
     best_comp = parent.report.composite_fitness
     # Must share the headline's sample basis, or a held round renders a phantom lift. No winner
     # ⇒ both are the incumbent's standing; a winner keeps the matched reference set below.
-    best_origin_accuracy = parent.report.accuracy
+    best_parent_accuracy = parent.report.accuracy
     best_opt_sp: OptSearchPoint = parent.opt_sp
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
     best_label = parent.report.label
@@ -243,16 +243,8 @@ async def l1_score(
     # Not seeded from the parent like its two neighbours: the parent's lift over ITSELF is 0 by
     # construction, and a round that crowned nobody publishing "+0.000" reads as a measured tie.
     best_lift: tuple[float | None, float | None, float | None] = (None, None, None)
-    # Elect on confident improvement over the MATCHED origin, never raw accuracy vs origin's
-    # full-set rate: elimination truncates candidates at different depths of one shared round
-    # order, so the full-set rate is inflated by samples the candidate never reached.
-    # ``elect_round_winner`` is the ONE election rule, shared with the resume divergence
-    # replayer so a resumed run re-elects the same winner.
-    # An under-probed candidate cannot win — a subset thinner than the elimination floor is too
-    # noisy to trust over a fully-probed incumbent. Clamped so a tiny dataset stays electable.
+    # Clamped so a tiny dataset stays electable.
     coverage_floor = min(pobb_config.n_min, len(dataset))
-    # Composite + evaluators are computed ONCE in the scoring gateway and ride on the
-    # `ScoredCandidate`; only the matched-origin floor is added here.
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     matched_by_id: dict[str, dict[str, Any] | None] = {}
     electable: list[str] = []
@@ -261,9 +253,6 @@ async def l1_score(
         if cs_idx is None:
             continue
         cand_results = all_candidate_results[ind.lineage.id]
-        # ``None`` unless this candidate covered the origin's whole panel: the round order is
-        # stratified on the incumbent's grades, so the origin's rate on a truncated prefix is
-        # decided by where PoBB stopped it, not by the data. A cut candidate's standing is its θ.
         matched = matched_parent_stats(
             cast("list[QueryMeasurement]", parent.results),
             cand_results,
@@ -271,10 +260,8 @@ async def l1_score(
             round_scorer=session.scoring.round_scorer,
         )
         matched_by_id[ind.lineage.id] = matched
-        # The floor and the INTERVAL on the lift over it are stamped together — a point estimate
-        # without its error bar is what lets a six-cell panel read as a verdict. Unconditional
-        # on ``matched``: the lift is defined on the cells both reached, so a truncated arm gets
-        # an honest (wider) interval instead of nothing.
+        # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
+        # truncated arm gets an honest (wider) interval instead of nothing.
         lift = matched_parent_lift(cand_results, cast("list[QueryMeasurement]", parent.results))
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
@@ -285,12 +272,8 @@ async def l1_score(
                 "matched_parent_lift_ci_hi": lift[2] if lift else None,
             }
         )
-        # The admission rule, spelled once in the domain so the election and the ruler cannot
-        # drift apart. Its collapse clause is why an arm can be scored here and still not enter:
-        # a candidate answering ONE label to everything carries no measurement of ability, its
-        # accuracy is decided by how much of that label the subset contains, and fitting θ to
-        # that artifact drags the round below origin. It keeps its matched-origin stamp, so the
-        # record stays honest; the round-level fact is charged to the L4 floor instead.
+        # A collapsed arm is scored here and still refused entry — it keeps its matched stamp,
+        # and the round-level fact is charged to the L4 floor instead.
         if not is_electable(candidate_scores[cs_idx], cand_results):
             continue
         # …and the COVERAGE half of the same rule `elect_round_winner` applies below: an arm under
@@ -356,7 +339,7 @@ async def l1_score(
         matched = matched_by_id[winner_id]
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
-        best_origin_accuracy = parent.report.accuracy
+        best_parent_accuracy = parent.report.accuracy
         best_opt_sp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
@@ -405,7 +388,7 @@ async def l1_score(
         improved=improved,
         p_value=p_value,
         verdict_reason=verdict_reason,
-        origin_accuracy=best_origin_accuracy,
+        parent_accuracy=best_parent_accuracy,
         matched_parent_accuracy=best_matched_parent_acc,
         matched_parent_composite=best_matched_parent_composite,
         matched_parent_lift=best_lift[0],

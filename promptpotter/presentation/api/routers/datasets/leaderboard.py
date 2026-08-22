@@ -283,7 +283,14 @@ class DatasetItem(StrictModel):
         "an ordering is a score and a locally-sorted one silently answers a different "
         "question in the same slot. Rows measured in this scope rank first; the rest trail.",
     )
-    n_obs: int = Field(description="Times this sample has been tried")
+    n_obs: int | None = Field(
+        default=None,
+        description=(
+            "Times this sample has been tried. ``null`` where the row is not in this scope's "
+            "Rasch artifact at all — the same absence its `delta` / `delta_se` / `p_hat` "
+            "neighbours already report, and not a fit that observed it zero times."
+        ),
+    )
     pick_score: float | None = Field(
         default=None,
         description=(
@@ -415,7 +422,7 @@ def get_dataset_preview(
             ground_truth=sample_lookup[sid]["ground_truth"],
             task=sample_lookup[sid].get("task"),
             hard_sample_rank=rank,
-            n_obs=page.n_obs_map.get(sid, 0),
+            n_obs=page.n_obs_map.get(sid),
             delta=page.delta_map.get(sid),
             delta_se=page.delta_se_map.get(sid),
             p_hat=_p_hat(sid),

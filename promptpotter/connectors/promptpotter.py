@@ -115,26 +115,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
     # is code, so nothing above reaches it — see `injection_source_digest`.
     panel_text = injection_source_digest()
-    # The inner-run config is part of the inner origin's effective behavior, so it
-    # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
-    # knob) invalidates outer-sample rows measured under the prior value instead of
-    # reusing them stale (the identity-joined plumbing l4-outer-loop.md § item 5 named).
-    # The WHOLE inner spec defines the inner baseline — the benchmark NAME and its task list
-    # (which bank + which seeds/cells), not only the numeric config. Switching
-    # Switching the inner benchmark keeps the same `inner_benchmark_config` knobs but changes
-    # what is measured; hashing only the knobs let a d23-banked origin be served against a d234
-    # candidate — a stale-vs-fresh comparison that fabricates outer signal (the exact bug this
-    # fingerprint exists to prevent).
     inner_tasks = read_yaml_optional(dataset_dir / "inner_tasks.yaml") or {}
-    # ...and the inner benchmark's OWN node configs, which the name above does not carry.
-    # `inner_tasks.yaml` pins a per-cell `inner_model`/`inner_provider` and those ride the
-    # spec, but the DATASET DEFAULT — `datasets/{benchmark}/pipeline.yaml::nodes.*.config`,
-    # where the worker model, temperature, reasoning_effort and output schema actually live —
-    # escaped entirely. Repointing that model left this fingerprint unchanged, so every banked
-    # outer cell still matched: a pp-self run would replay cells measured on the OLD worker
-    # and report them as the new one's, having run nothing. Same stale-vs-fresh bug the rest
-    # of this fingerprint exists to prevent, one file further down.
-    #
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
@@ -145,12 +126,6 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     benchmark = inner_tasks.get("inner_benchmark")
     benchmark_dir = dataset_dir.parent / str(benchmark) if benchmark else None
     inner_pipeline = read_yaml_optional(benchmark_dir / "pipeline.yaml") if benchmark_dir else None
-    # ...and the benchmark's CAMPAIGN config, which `_run_inner_campaign` reads to build every
-    # cell's `CampaignConfig`. Its `scoring` block is the formula each inner fitness is computed
-    # under and its selection knobs (`elimination_n_min`, `pobb_epsilon`) decide which
-    # candidate a round adopts — so editing it changes
-    # what `mean_round_delta` MEANS while leaving every other input here untouched. It escaped
-    # the fingerprint entirely; nothing would have reported the pooling.
     inner_campaign = read_yaml_optional(benchmark_dir / "campaign.yaml") if benchmark_dir else None
     inner_spec = {
         "benchmark": benchmark,
@@ -264,6 +239,7 @@ CONNECTOR = Connector(
     # provider — and a round is hours, so the group is the only unit that can bound a press.
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
     concurrency_arming="batch",
+    measured_unit="cell",
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",

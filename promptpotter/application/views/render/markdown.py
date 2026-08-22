@@ -81,10 +81,10 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         f"- samples: {rd.total}",
         f"- composite_fitness: `{rd.composite_fitness:.4f}`",
     ]
-    if rd.cumulative_theta is not None:
+    if rd.ability is not None:
         # The cross-round series, with the ruler it was read on beside it: accuracy above is
         # subset-relative and this is not, so they can move in opposite directions legitimately.
-        parts.append(f"- ability θ: `{rd.cumulative_theta:+.3f}` (ruler: {rd.ruler_n} cells)")
+        parts.append(f"- ability θ: `{rd.ability.theta:+.3f}` ({rd.ability.scale()})")
     if series := overlap_series(rd.overlap):
         # The one row two rounds can be differenced on — `accuracy` above is read on whatever
         # subset this round bought, and the acquisition does not hold it still.
@@ -110,7 +110,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         formula,
         # THIS round's matched floor, the same one the terminal compares against — the two
         # printed different Δ for one round while this read the whole-cycle origin composite.
-        origin=rd.matched_parent_composite,
+        parent=rd.matched_parent_composite,
         use_short_names=False,
     )
     if composite_fitness_block:

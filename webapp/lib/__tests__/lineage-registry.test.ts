@@ -17,14 +17,14 @@ describe("createRegistry", () => {
     reg.setEtag("k", 'W/"x"');
 
     un1();
-    expect(reg.has("k")).toBe(true);
+    expect(reg.spec("k")).not.toBeNull();
     expect(reg.etag("k")).toBe('W/"x"');
     expect(dropped).toEqual([]);
 
     un2();
-    // `has()` flipping false is the tick's mid-flight guard: a response landing after this
+    // `spec()` going null is the tick's mid-flight guard: a response landing after this
     // moment must not resurrect the key.
-    expect(reg.has("k")).toBe(false);
+    expect(reg.spec("k")).toBeNull();
     expect(reg.etag("k")).toBe(null);
     expect(dropped).toEqual(["k"]);
   });
@@ -35,9 +35,10 @@ describe("createRegistry", () => {
     const reg = createRegistry(() => {});
     reg.subscribe("k", PATH, { lens: "score:accuracy", samples: [1, 2] });
     reg.subscribe("k", PATH);
-    expect(reg.live()).toEqual([
-      ["k", { path: PATH, opts: { lens: "score:accuracy", samples: [1, 2] } }],
-    ]);
+    expect(reg.spec("k")).toEqual({
+      path: PATH,
+      opts: { lens: "score:accuracy", samples: [1, 2] },
+    });
   });
 
   it("bumps the version on every membership change so the poll revalidates", () => {
@@ -59,10 +60,10 @@ describe("createRegistry", () => {
     reg.setEtag("k", 'W/"x"');
 
     reg.markGone("k");
-    expect(reg.live()).toEqual([]);
+    expect(reg.liveKeys()).toEqual([]);
     expect(reg.isGone("k")).toBe(true);
     // Still subscribed — the component did not unmount.
-    expect(reg.has("k")).toBe(true);
+    expect(reg.spec("k")).not.toBeNull();
     // The validator went with it; a body we will never fetch cannot leave an ETag
     // behind to 304 against.
     expect(reg.etag("k")).toBe(null);
@@ -75,7 +76,7 @@ describe("createRegistry", () => {
     // A second subscriber (another surface opening the same address) must not
     // un-kill it — the address is still gone.
     const un2 = reg.subscribe("k", PATH);
-    expect(reg.live()).toEqual([]);
+    expect(reg.liveKeys()).toEqual([]);
 
     // But once nobody holds it, the mark dies with the body: a later subscribe is a
     // fresh question, and a leaked mark would make it silently unfetchable.
@@ -83,7 +84,7 @@ describe("createRegistry", () => {
     un2();
     reg.subscribe("k", PATH);
     expect(reg.isGone("k")).toBe(false);
-    expect(reg.live()).toHaveLength(1);
+    expect(reg.liveKeys()).toEqual(["k"]);
   });
 
   it("ignores markGone for a key nobody subscribes", () => {

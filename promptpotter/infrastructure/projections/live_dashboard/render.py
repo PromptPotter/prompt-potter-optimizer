@@ -10,6 +10,7 @@ from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
@@ -34,11 +35,13 @@ def _trim(text: str, n: int) -> str:
 
 
 def _partial_mean_fitness(samples: list[dict[str, Any]]) -> float | None:
-    """Running mean fitness over samples scored so far, bridging the gap before a candidate's final ``accuracy`` lands. That
-    accuracy IS mean fitness, so this converges on it."""
-    if not samples:
+    """Running mean fitness over the samples GRADED so far, bridging the gap before a candidate's final ``accuracy``
+    lands. An errored row's ``fitness`` is a display convention no estimator may read (``formula/rescore.py``), so it
+    leaves BOTH halves — counted, it put a candidate whose cells all failed on the bar at 0%."""
+    graded = [s for s in samples if not is_error_result(s)]
+    if not graded:
         return None
-    return sum(float(s.get("fitness") or 0.0) for s in samples) / len(samples)
+    return sum(float(s.get("fitness") or 0.0) for s in graded) / len(graded)
 
 
 def fmt_sample_line(s: dict[str, Any]) -> str:

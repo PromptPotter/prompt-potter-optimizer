@@ -194,7 +194,7 @@ export function cellFor(
           `Info gain ${item.pick_score.toFixed(6)} nats\n` +
           `${dLine}\n` +
           `${pLine}\n` +
-          `${item.n_obs} tries\n` +
+          `${item.n_obs ?? "—"} tries\n` +
           `High = contested, the measurement separates good prompts from bad. ` +
           `Near-zero = always-hit or always-miss — predictable, uninformative.`,
       };
@@ -251,6 +251,10 @@ export function cellFor(
       // Measurements feeding the Rasch fit. Disambiguates the EB
       // tight-se(δ) artefact — a tight se(δ) at n=2 is the prior talking,
       // not the data.
+      // Null = this row is not in the artifact at all, like its δ / se(δ) / p̂ neighbours.
+      if (item.n_obs == null) {
+        return { text: "—", raw: null, title: "Not in this scope's Rasch fit." };
+      }
       return {
         text: String(item.n_obs),
         raw: item.n_obs,

@@ -176,6 +176,7 @@ export function RoundSamplesView() {
           cycleId={leafCycleId}
           onSelectCandidate={onSelectCandidate}
           panel={isL4 ? panel : null}
+          unit={dash?.measured_unit ?? "sample"}
           onOpenRun={openRun}
         />
       )}

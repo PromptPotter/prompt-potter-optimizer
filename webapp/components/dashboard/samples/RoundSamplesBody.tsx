@@ -3,7 +3,8 @@ import { isSelectedCandidate, type CandidateRow, type SampleRow, type SampleStat
 import type { LineageNode } from "@/lib/api";
 import { SampleRowItem } from "./SampleRowItem";
 import { PanelCellRow } from "./PanelCellRow";
-import { fmtPct0 } from "@/lib/format";
+import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
+import type { MeasuredUnit } from "@/lib/api/types";
 import { panelCellKey } from "@/lib/derivations";
 import { SegmentedControl, type Segment } from "@/components/ui";
 
@@ -46,6 +47,10 @@ interface Props {
   // Null vs empty is a real distinction — empty means L4 with the sandbox not yet
   // read, and the cells still list.
   panel: ReadonlyMap<string, LineageNode> | null;
+  // SERVED (`dashboard.json::measured_unit`). Separate from `panel` on purpose: that flag says
+  // what a row RENDERS AS, this says what it is CALLED — reading one off the other made the
+  // noun a property of client view state.
+  unit: MeasuredUnit;
   onOpenRun: (run: LineageNode) => void;
 }
 
@@ -65,6 +70,7 @@ export function RoundSamplesBody({
   cycleId,
   onSelectCandidate,
   panel,
+  unit,
   onOpenRun,
 }: Props) {
   return (
@@ -93,9 +99,7 @@ export function RoundSamplesBody({
             ariaLabel="Sample status filter"
           />
         )}
-        <span className="rsv-count">
-          {totalRows} {panel ? "cells" : "samples"}
-        </span>
+        <span className="rsv-count">{unitCount(totalRows, unit)}</span>
       </div>
       <div className="rsv-groups">
         {groups.map((g) => {
@@ -123,7 +127,7 @@ export function RoundSamplesBody({
                 <span className="rsv-tally">
                   {panel ? (
                     <span className="tag-cached" title="Each cell is an inner campaign">
-                      {g.samples.length} {g.samples.length === 1 ? "cell" : "cells"}
+                      {unitCount(g.samples.length, unit)}
                     </span>
                   ) : (
                     /* Both numbers are SERVED and share ONE denominator: the
@@ -140,7 +144,7 @@ export function RoundSamplesBody({
                   {cached > 0 && (
                     <span
                       className="tag-cached"
-                      title="Samples reused from a prior identical searchpoint — no fresh backend call"
+                      title={`Reused ${unitPlural(unit)} from a prior identical searchpoint — no fresh backend call`}
                     >
                       📖 {cached === g.samples.length ? "all cached" : `${cached} cached`}
                     </span>
@@ -148,7 +152,7 @@ export function RoundSamplesBody({
                 </span>
               </button>
               {g.samples.length === 0 ? (
-                <div className="rsv-empty-row">No matching samples.</div>
+                <div className="rsv-empty-row">No matching {unitPlural(unit)}.</div>
               ) : (
                 <div className="rsv-rows">
                   {display.map((s) =>

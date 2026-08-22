@@ -50,9 +50,12 @@ class DatasetIndexEntry(StrictModel):
             "anyone using the install. A ``yours`` slug shadows an ``install`` one."
         ),
     )
-    n_samples: int = Field(
-        default=0,
-        description="Sample bank size from ``cache.json``; ``0`` when the cache hasn't been materialized yet.",
+    n_samples: int | None = Field(
+        default=None,
+        description=(
+            "Sample bank size from ``cache.json``; ``null`` when the cache has not been "
+            "materialized, which is not the same as a dataset holding zero usable rows."
+        ),
     )
 
 

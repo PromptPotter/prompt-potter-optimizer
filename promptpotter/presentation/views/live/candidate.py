@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+from promptpotter.connectors.protocol import MeasuredUnit, unit_count
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.results import EliminationGate
 from promptpotter.presentation.views.display import (
@@ -55,9 +56,10 @@ class IndividualSummary:
 
 def individual_summary_from_dict(
     scores: dict[str, Any],
-    origin_acc: float,
+    parent_acc: float,
     *,
-    origin_composite_fitness: float | None = None,
+    parent_composite_fitness: float | None = None,
+    unit: MeasuredUnit = "sample",
 ) -> IndividualSummary:
     """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok."""
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
@@ -86,7 +88,7 @@ def individual_summary_from_dict(
     n = scores.get("total", 0)
     # The served composite interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
-    delta = acc - origin_acc
+    delta = acc - parent_acc
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
     tag = f"{acc:.1%} {ci}"
 
@@ -94,14 +96,14 @@ def individual_summary_from_dict(
     if aborted:
         scored_q = scores.get("scored_samples", n)
         expected_q = scores.get("expected_samples", n)
-        n_str = f"{scored_q} samples {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
+        n_str = f"{unit_count(scored_q, unit)} {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
     else:
-        n_str = f"{n} samples"
+        n_str = unit_count(n, unit)
     # 📖 is the per-sample tape's cache mark; this is its total for the candidate.
     n_cached = int(scores.get("cached_samples") or 0)
     if n_cached:
         n_str += f" ({n_cached}📖)"
-    body_line = f"{mutations_chunk}{n_str}  vs origin: {_fmt_delta(delta)}"
+    body_line = f"{mutations_chunk}{n_str}  vs parent: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
@@ -119,7 +121,7 @@ def individual_summary_from_dict(
     elif gate == EliminationGate.COLLAPSED:
         detail_lines.append(
             f"{YELLOW}✂ answer collapsed {q}{RESET}  "
-            "one label for every sample — no measurement of ability to score"
+            f"one label for every {unit} — no measurement of ability to score"
         )
     elif gate == EliminationGate.EPSILON:
         leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
@@ -143,7 +145,7 @@ def individual_summary_from_dict(
 
     if comp is not None:
         detail_lines.append(
-            render_composite_fitness_oneliner(comp, origin=origin_composite_fitness)
+            render_composite_fitness_oneliner(comp, parent=parent_composite_fitness)
         )
     if degraded:
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")

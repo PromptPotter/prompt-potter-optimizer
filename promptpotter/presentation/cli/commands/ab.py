@@ -20,26 +20,19 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
-    from promptpotter.application.initialization.loop_start import populate_session_scoring
+    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
     from promptpotter.application.optimization.resume_and_fork.ab_replay import ab_replay_cycle
-    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-    from promptpotter.application.scoring.formula import split_scoring_block
 
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
     bind_session_identity(session, ctx)
 
     campaign_config = ctx.campaign_config
-    configure_and_apply_pipeline(
-        session, campaign_config, log=logger.info if get_verbose() else (lambda *_a, **_k: None)
-    )
-    scoring_spec = split_scoring_block(campaign_config.scoring)
-    populate_session_scoring(
+    arm_diagnostic_scoring(
         session,
-        obs=None,
-        scoring_formula=scoring_spec.per_sample,
-        scoring_round_formula=scoring_spec.per_round,
-        scorer_id=scoring_spec.scorer_id,
+        campaign_config,
+        source=f"ab:{session.campaign_id}:{ctx.cycle_id}",
+        log=logger.info if get_verbose() else None,
     )
 
     report = ab_replay_cycle(

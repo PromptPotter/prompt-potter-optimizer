@@ -13,66 +13,12 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.scoring import modal_answer_share
 
-# Degradation-health thresholds (explicit — no hidden defaults). The verdict
-# distinguishes a structurally-broken pipeline (abort-worthy) from transient
-# backend noise (keep going), weighted by track record. See
-# ``compute_degradation_health``.
 STRUCTURAL_FLAG_RATE: float = 0.30
-"""Fraction of samples whose pipeline node *hard-failed* (``step_statuses``
-``failed`` — e.g. a schema/json break) at/above which the round is structurally
-broken → ``critical``, regardless of track record."""
-
 DEGRADED_RATE_FLAG: float = 0.20
-"""Fraction of samples that degraded at all (failed OR soft) at/above which a
-round with a clean track record is at least ``degraded``."""
-
 CONSECUTIVE_DEGRADED_CRITICAL: int = 3
-"""Consecutive degraded rounds at/above which persistence alone escalates to
-``critical`` — a sustained problem, not a one-round blip."""
-
 BACKEND_UNREACHABLE_RATE: float = 0.50
-"""Fraction of a round's samples that hit a backend-down signal (CONNECTION error
-or the per-candidate consecutive-error circuit-breaker skip) at/above which the
-round is graded ``critical`` with reason ``backend_unreachable``. Unlike a
-structural node fault, an unreachable backend carries NO ``diagnostics.warnings``
-(its ``pipeline_data`` is empty), so ``classify_sample_failure`` can't see it — it
-was the blind spot that let a dead-backend round grade ``healthy`` and the loop
-grind zero-accuracy rounds against a corpse. This is not an optimization signal:
-the operator must restart the backend and ``resume``."""
-
 UNSCOREABLE_RATE: float = 0.50
-"""Fraction of a round's samples that SUCCEEDED yet produced no extractable
-prediction (``predicted == NO_RESULT`` — empty terminal ranking) at/above which
-the round is graded ``critical`` with reason ``unscoreable``. The distinct floor
-nothing else catches: the backend reports the generation a ``success`` and stamps
-no ``diagnostics.warning`` (its output simply carries no parseable label), so
-``classify_sample_failure`` is blind to it — an all-``NO_RESULT`` origin grades
-``healthy`` and sails into L1, where the optimizer wastes rounds mutating a prompt
-whose every output is unscoreable (the answer-format / extraction mismatch that
-left every JustLogic sample ``NO_RESULT``). PP owns this signal because PP, not the
-backend, decides the prediction is empty (``sample_measurement`` → ``NO_RESULT``).
-A majority-unscoreable round is structurally broken regardless of track record;
-the origin gate then halts so the operator fixes the format before optimizing.
-Distinct from a wrong-but-extractable miss (a hard task scoring 0% but emitting
-real labels is NOT flagged — that's a measurement, not a broken floor)."""
-
 EVIDENCE_STARVED_RATE: float = 0.40
-"""Fraction of a round's samples for which a SINGLE pipeline node failed (hard
-``failed`` status OR a failure warning — structural *or* transient) at/above which
-the round is graded ``critical`` with reason ``evidence_starved`` and that node
-becomes the ``dominant_node``. This is the ROUND-level aggregate PP owns: a
-per-sample ``transient`` (a rate-limited search IS recoverable for one sample) is
-correct in isolation, but a flood of the SAME enricher's transients across a round
-is systemic — the enricher is starved (e.g. Brave quota exhausted), the round is
-noise, and no prompt change recovers it. 0.40 catches the observed campaign where
-an evidence node failed ~48% of one round while the dashboard read ``healthy`` and
-the loop ground on. **Routes, never stops (R-48):** this grade is a *weak preemptor*
-— ``evidence_starved_node`` feeds the ``l1_evidence_starved`` escalation rule, which
-fires L2 (bypassing l1_patience so the loop doesn't grind more dead rounds) but never
-itself stops. L2 reads the evidence, then self-heals (refine ``task_context``) or, when
-the fault is unfixable by any prompt move, emits ``terminate_proposal`` — the HITL exit
-that halts carrying the human-action request (the operator banner supplies the verbatim
-reason). The stop authority stays with the LLM tier, not a deterministic tripwire."""
 
 
 def classify_sample_failure(
@@ -216,8 +162,8 @@ def compute_degradation_health(
         return f" Reported by {node}: «{'; '.join(msgs[:2])}»."
 
     suggested_action: str | None = None
+    where = f"{dominant_node} " if dominant_node else ""
     if grade == "critical":
-        where = f"{dominant_node} " if dominant_node else ""
         if cause == "backend_unreachable":
             pct = round(unreachable_count / attempted * 100)
             suggested_action = (
@@ -262,6 +208,22 @@ def compute_degradation_health(
                 f"{where}failing structurally on {pct}% of samples — likely a config/schema "
                 f"fault, not noise.{_reported_by(dominant_node)} "
                 "Consider aborting, fixing config, and re-minting."
+            )
+    elif grade == "degraded":
+        # This grade fires on structural AND transient together, so a reader told "transient"
+        # is told something the split here can contradict.
+        pct = round(degraded_rate * 100)
+        if structural_count:
+            suggested_action = (
+                f"{where}degraded on {pct}% of samples, {structural_count} of them failing "
+                f"STRUCTURALLY — under the abort bar, but not noise.{_reported_by(dominant_node)} "
+                "Read the node's error before trusting this round's numbers."
+            )
+        else:
+            suggested_action = (
+                f"{where}degraded on {pct}% of samples, all transient."
+                f"{_reported_by(dominant_node)} The numbers are soft but usable; no action "
+                "needed if the next round comes back clean."
             )
 
     return DegradationHealth(

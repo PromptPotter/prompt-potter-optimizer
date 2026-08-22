@@ -40,6 +40,7 @@ from promptpotter.application.scoring.formula.compiler import (
     ScoringFormulaError,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_rows_from_disk,
@@ -151,9 +152,10 @@ class CampaignReading(StrictModel):
     # fact a roster listing campaigns cannot show. `None` where round 0 carries no hashes: the arm
     # is UNKNOWN, which groups with nothing — least of all with every other unstamped campaign.
     arm_id: str | None
-    # Which δ scale this origin's θ was read on. Campaigns whose ids differ measured on different
-    # rulers, so their ABSOLUTE levels are not comparable however well paired the cells are.
-    ruler_id: str | None
+    # This origin's own reading, carried for the scale on it: campaigns whose rulers differ
+    # measured on different scales, so their ABSOLUTE levels are not one quantity however well
+    # paired the cells are. `None` where round 0 carries no reading at all.
+    ability: AbilityReading | None
     spend_usd: float | None
     rounds_scored: int
     values: dict[str, float]
@@ -530,6 +532,7 @@ def _reading_row(
     # The configuration the campaign ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
     hashes = doc.get("optimizer_prompt_hashes")
+    raw = doc.get("ability")
     ordered = [values[c] for c in sorted(values)]
     bracketed = mean_ci_t(ordered)
     return CampaignReading(
@@ -540,7 +543,7 @@ def _reading_row(
         # nothing. Collapsing the two onto one hash makes `_replicates` report every unstamped
         # campaign as a replicate of the rest, spread and all, over a shared absence.
         arm_id=_state_hash({"": dict(hashes)}) if isinstance(hashes, dict) and hashes else None,
-        ruler_id=doc.get("ruler_id"),
+        ability=(AbilityReading.model_validate(raw) if isinstance(raw, dict) else None),
         spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
         rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
         values=values,
@@ -573,8 +576,8 @@ def _replicates(rows: list[CampaignReading]) -> list[ArmReplicate]:
 
 def _comparability(rows: list[CampaignReading]) -> Comparability:
     datasets = sorted({r.dataset_name for r in rows if r.dataset_name})
-    rulers = {r.ruler_id for r in rows}
-    known = {r for r in rulers if r is not None}
+    readings = [r.ability for r in rows]
+    stamped = [a for a in readings if a is not None and a.ruler_id is not None]
     reason: ComparabilityReason
     verdict: bool | None
     note: str
@@ -587,14 +590,14 @@ def _comparability(rows: list[CampaignReading]) -> Comparability:
             "things. The values are not one quantity and no pairing rescues them; the roster and "
             "spend still compare, the numbers do not."
         )
-    elif not rulers or None in rulers:
+    elif not readings or len(stamped) != len(readings):
         reason, verdict = "ruler_unstamped", None
         note = (
             "Comparability UNKNOWN — at least one origin predates the ruler stamp, which is not "
             "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
             "do not read the value column across campaigns."
         )
-    elif len(known) > 1:
+    elif not all(a.comparable_to(stamped[0]) for a in stamped):
         reason, verdict = "rulers_differ", False
         note = (
             "Comparability NO — these origins were measured on different δ rulers, so their "
@@ -607,7 +610,11 @@ def _comparability(rows: list[CampaignReading]) -> Comparability:
             "directly comparable."
         )
     return Comparability(
-        verdict=verdict, reason=reason, datasets=datasets, n_rulers=len(known), note=note
+        verdict=verdict,
+        reason=reason,
+        datasets=datasets,
+        n_rulers=len({a.ruler_id for a in stamped}),
+        note=note,
     )
 
 

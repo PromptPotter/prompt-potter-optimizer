@@ -82,7 +82,7 @@ export function DatasetPickList({
                   <span className="ingest-pick-name">
                     {d.title ? `${d.name} — ${d.title}` : d.name}
                   </span>
-                  <span className="ingest-pick-meta">{d.n_samples}</span>
+                  <span className="ingest-pick-meta">{d.n_samples ?? "—"}</span>
                 </button>
               </li>
             ))}

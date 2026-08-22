@@ -28,6 +28,7 @@ import {
 import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
+import { unitCount } from "@/lib/format";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { WhatIfGrid } from "./WhatIfGrid";
@@ -104,6 +105,7 @@ export function CandidatesCard() {
   // Self-sourced: live snapshot from the cycle stream, (campaignId, cycleId)
   // from the workspace. `cycleId` scopes the one-shot evaluator-seed.
   const { dash, isLive } = useDashboard();
+  const unit = dash?.measured_unit ?? "sample";
   const {
     campaignId,
     cycleId,
@@ -435,7 +437,7 @@ export function CandidatesCard() {
         meanFitnessCiLo: sliced ? null : (m.mean_fitness_ci_lo ?? null),
         meanFitnessCiHi: sliced ? null : (m.mean_fitness_ci_hi ?? null),
         // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR,
-        // and a lift interval is not a bar geometry either. The matched origin and the blocked
+        // and a lift interval is not a bar geometry either. The matched parent and the blocked
         // lift are per-candidate numbers the inspector renders for the one row it selected
         // (`ScoringInspector`, off `roundCandidates`), so filling them in here would put a second
         // writer on a chart nothing reads them from. The election record DOES carry all five —
@@ -756,7 +758,7 @@ export function CandidatesCard() {
                   How candidates are ranked
                 </MenuCheck>
                 {showTheta && (
-                  <AbilityHelp model={history.at(-1)?.calibration_model ?? null} />
+                  <AbilityHelp model={history.at(-1)?.ability?.calibration_model ?? null} />
                 )}
               </>
             )}
@@ -766,7 +768,9 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
-        {sampleSet && !barsAreCourses && <SampleSetControl rounds={history} overlap={overlap} />}
+        {sampleSet && !barsAreCourses && (
+          <SampleSetControl rounds={history} overlap={overlap} unit={unit} />
+        )}
         {/* Legend + chart + genealogy wrapped so they share one width — the
             dendrogram's x-alignment depends on sitting in the same box as the
             canvas it hangs under. */}
@@ -786,7 +790,7 @@ export function CandidatesCard() {
               )}
               {showWhatIf && <span><span className="dot whatif" />what-if</span>}
               {overlap != null && (
-                <span title={`Every candidate on the winner trajectory, read on the same ${overlap.sample_ids.length} cells — the only pair of bars here that can be differenced`}>
+                <span title={`Every candidate on the winner trajectory, read on the same ${unitCount(overlap.sample_ids.length, unit)} — the only pair of bars here that can be differenced`}>
                   <span className="dot overlap" />trajectory · {overlap.sample_ids.length}
                 </span>
               )}
@@ -807,6 +811,7 @@ export function CandidatesCard() {
             selectedKey={selectedKey}
             onSelect={onSelect}
             onGeometry={onGeometry}
+            unit={unit}
           />
           {/* The forest toggle lives HERE, not in the header — it reveals the tree,
               so it sits with the tree. Tiny and quiet on purpose: most campaigns

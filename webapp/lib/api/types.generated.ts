@@ -2,6 +2,15 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
+/** A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value. */
+export interface AbilityReading {
+  theta: number;
+  se: number | null;
+  ruler_id: string | null;
+  ruler_n: number;
+  calibration_model: '1PL' | '2PL' | null;
+}
+
 /** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
 export interface DashboardCandidate {
   label: string;
@@ -99,8 +108,7 @@ export interface RoundSummary {
   round: number;
   accuracy: number;
   composite_fitness: number;
-  cumulative_theta: number | null;
-  calibration_model: '1PL' | '2PL' | null;
+  ability: AbilityReading | null;
   improved: boolean | null;
   electable_count: number | null;
   verdict_reason: string | null;
@@ -348,14 +356,10 @@ export interface RoundResult {
   matched_parent_lift: number | null;
   matched_parent_lift_ci_lo: number | null;
   matched_parent_lift_ci_hi: number | null;
-  cumulative_theta: number | null;
-  cumulative_theta_se: number | null;
-  calibration_model: '1PL' | '2PL' | null;
-  ruler_id: string | null;
-  ruler_n: number;
+  ability: AbilityReading | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
-  origin_accuracy: number;
+  parent_accuracy: number;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
   candidates_scored: number;
@@ -528,6 +532,7 @@ export interface LiveDashboardState {
   sample_lookahead_armed: number;
   max_cells_in_flight: number;
   concurrency_arming: 'round' | 'batch';
+  measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
   n_variants: number;
@@ -551,8 +556,11 @@ export interface DatasetItem {
    * answers a different question in the same slot. Rows measured in this
    * scope rank first; the rest trail. */
   hard_sample_rank: number;
-  /** Times this sample has been tried */
-  n_obs: number;
+  /** Times this sample has been tried. ``null`` where the row is not in this
+   * scope's Rasch artifact at all — the same absence its `delta` / `delta_se`
+   * / `p_hat` neighbours already report, and not a fit that observed it zero
+   * times. */
+  n_obs: number | null;
   /** Queue-mechanism's blended objective on this sample for a brand-new candidate
    * (prior N(0, sigma_theta**2)) vs the best fitted candidate. The live
    * adaptive queue mechanism re-evaluates per step. None when unmeasured. */
@@ -899,7 +907,7 @@ export interface CampaignReading {
   dataset_name: string;
   created_at: string;
   arm_id: string | null;
-  ruler_id: string | null;
+  ability: AbilityReading | null;
   spend_usd: number | null;
   rounds_scored: number;
   values: Record<string, number>;
@@ -1283,9 +1291,10 @@ export interface DatasetIndexEntry {
    * (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable
    * by anyone using the install. A ``yours`` slug shadows an ``install`` one. */
   tier: 'yours' | 'install';
-  /** Sample bank size from ``cache.json``; ``0`` when the cache hasn't been
-   * materialized yet. */
-  n_samples: number;
+  /** Sample bank size from ``cache.json``; ``null`` when the cache has not been
+   * materialized, which is not the same as a dataset holding zero usable
+   * rows. */
+  n_samples: number | null;
 }
 
 export interface DatasetIndexResponse {
@@ -1300,8 +1309,8 @@ export interface OriginEntry {
   dataset_name: string;
   /** Operator-supplied label, if any */
   label: string;
-  /** Dataset sample count (0 if unmaterialized) */
-  n_samples: number;
+  /** Dataset sample count; ``null`` if unmaterialized */
+  n_samples: number | null;
   /** Active campaigns minted from this origin (0 = prepared, not yet run) */
   n_campaigns: number;
   /** The origin's C0 score, from the canonical campaign's index.json */

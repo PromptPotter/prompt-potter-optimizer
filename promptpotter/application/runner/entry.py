@@ -371,9 +371,9 @@ async def _prepare_run(
 def _level_of(rr: RoundResult) -> tuple[float, float] | None:
     """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if never fit. The halves are
     written and read together: one alone is a level with no precision."""
-    if rr.cumulative_theta is None or rr.cumulative_theta_se is None:
+    if rr.ability is None or rr.ability.se is None:
         return None
-    return rr.cumulative_theta, rr.cumulative_theta_se
+    return rr.ability.theta, rr.ability.se
 
 
 def _build_cycle_result(

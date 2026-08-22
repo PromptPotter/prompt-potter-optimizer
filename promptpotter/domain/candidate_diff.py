@@ -81,25 +81,6 @@ def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
 
 
 # --- the IDEA a delta carries ----------------------------------------------
-#
-# `candidate_delta` answers "what changed". This answers "is that the same thing we already
-# tried" — which is a different question, because a re-proposal never arrives as a repeated
-# string. It arrives as the same idea rewritten into a DIFFERENT FIELD. Measured on
-# `justlogic-d234`: one idea ("exhaust modus tollens / disjunctive syllogism before answering
-# Uncertain") was proposed in 8 consecutive rounds, landing in `instruction`, then
-# `thinking_style`, then `output_schema_descriptions.reasoning`, then `task_intent`. Every
-# exact-match mechanism in the loop saw eight distinct mutations.
-#
-# The signal that survives the rewrite is vocabulary: an idea keeps its content words when it
-# changes field and phrasing. So the fingerprint is the content-word SET of the VALUES written
-# — never the field names (that inverts the test into "touched the same field") and never the
-# render stem (sized for a human to recognise a row, far too short to carry an idea).
-#
-# Deliberately a blunt lexical test, not a semantic one: it runs on every candidate and every
-# render with no LLM call. It lives here, beside `candidate_delta`, because all three consumers
-# of "already tried" must share one definition — the round-local dedup, the cross-round repeat
-# gate (`detect_invariants`), and the ALREADY TRIED panel. Split, they drift, and a re-proposal
-# rejected by one is rendered as new by another.
 IDEA_STOPWORDS: frozenset[str] = frozenset(
     [
         "about",

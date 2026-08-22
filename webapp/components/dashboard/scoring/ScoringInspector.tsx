@@ -133,10 +133,10 @@ export function ScoringInspector({ selected, onClose }: Props) {
         </div>
         {typeof row?.matchedParentAccuracy === "number" && (
           <div className="inspector-row">
-            <span className="inspector-key">vs origin</span>
+            <span className="inspector-key">vs parent</span>
             <span
               className="inspector-val"
-              title="The origin re-scored on the samples THIS candidate measured — the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the origin's full-set rate is the wrong comparison and would read as a phantom lift."
+              title="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
             >
               {fmtPct1(row.matchedParentAccuracy)}
             </span>

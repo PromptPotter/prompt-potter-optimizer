@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.connectors.protocol import MeasuredUnit, unit_count
 from promptpotter.domain.rendering import display_fitness, display_rank_key
 from promptpotter.domain.results import is_round_winner, overlap_series
 from promptpotter.presentation.views.display import (
@@ -53,7 +54,7 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
 
     # Trend and the plateau banner read ABILITY, never accuracy. Under `per_round_resubset` each
     # round scores a fresh hard-first draw, so consecutive accuracies belong to different exams
-    # and their difference is mostly which cells were drawn. `cumulative_theta` is the cycle's
+    # and their difference is mostly which cells were drawn. The frontier θ is the cycle's
     # one subset-invariant series. Accuracy stays on the table — it is a true fact about the
     # round — but it is badged with the `n` it was measured over rather than differenced, and
     # nothing here may average it across rounds: that mean names a number no configuration scored.
@@ -61,7 +62,7 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
     prev: float | None = None
     for rd in rounds:
         acc = rd.get("accuracy") or 0
-        theta = rd.get("cumulative_theta")
+        theta = rd.get("theta")
         theta = float(theta) if isinstance(theta, int | float) else None
         if theta is None:
             th_str, trend = "---", "-"
@@ -94,6 +95,7 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
 def render_round_stats(
     round_result: RoundResult,
     pipeline_schema: PipelineSchema | None,
+    unit: MeasuredUnit = "sample",
 ) -> str:
     lines: list[str] = []
     accuracy = round_result.accuracy
@@ -130,12 +132,12 @@ def render_round_stats(
             # Was `hits: 12/20`. The integer pair is the small readability cost of
             # dropping a scalar that meant nothing on a graded scorer; the percentage
             # is the same number the round reports everywhere else.
-            f"accuracy: {accuracy:.1%} of {total} samples{suffix}  |  evaluated: "
+            f"accuracy: {accuracy:.1%} of {unit_count(total, unit)}{suffix}  |  evaluated: "
             f"{round_result.candidates_scored} candidates"
         )
     )
 
-    # The winner's blocked lift over the matched origin WITH its interval — the served
+    # The winner's blocked lift over the matched parent WITH its interval — the served
     # `RoundResult` pair, not a recomputation. The header above prints a point estimate and every
     # other line reads the same on a round that resolved nothing as on one that resolved
     # something; this is the line that separates them. Silent when the round crowned nobody or the
@@ -165,12 +167,7 @@ def render_round_stats(
     if h is not None and h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
     elif h is not None and h.grade == "degraded":
-        # One arm, not two: ``degraded`` now requires ``degraded_rate >= FLAG``, which
-        # cannot hold with zero degraded samples. The old "under-probed (CI …)" arm
-        # belonged to the deleted untested-CI clause — a wide interval is a fact about
-        # n, and it is reported as one beside the candidate, not as a health verdict.
-        why = f"{h.structural_count + h.transient_count}/{h.samples} samples degraded"
-        lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {why}; numbers soft{RESET}"))
+        lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {h.suggested_action}{RESET}"))
 
     if not round_result.results:
         return "\n".join(lines)

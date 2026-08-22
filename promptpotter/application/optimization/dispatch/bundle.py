@@ -8,11 +8,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import CritiqueReadout, EliminationGate, RoundResult
+from promptpotter.domain.results import (
+    CritiqueReadout,
+    EliminationGate,
+    RoundResult,
+)
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
@@ -30,27 +35,10 @@ PRECISION_ARM_ROWS = 3
 BAND_COLLAPSE_RATIO = 0.20
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
-# Complete failing samples the `sample_transcripts` panel shows the distiller — full premises
-# plus the model's own reasoning. Kept small: critique-input growth is what pushes a small
-# model into long-tail latencies.
-#
-# Each cap sits just above its OWN median, which is what balances them against what the panel
-# is for. Measured over 7,767 banked samples: query median 1,004, reasoning median 2,007. The
-# previous 2200/1200 ran one at 2.2x its median and the other at 0.6x, so the QUERY cap clipped
-# 1% while the REASONING cap clipped 73% — the panel spent its budget on the question, which is
-# never short of room, and elided the model's own reasoning, the half its header orders the
-# critique to quote. Rebalancing is budget-NEUTRAL per transcript; widening would be spending.
 TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_REASONING_CAP = 2200
-# 200 was never a bound: the widest `predicted` in the whole archive is 36 chars and the median
-# is 9, because this slot holds a label, not prose. Sized to the measurement, so an answer that
-# suddenly runs long is CLIPPED and visible rather than silently widening every transcript.
 TRANSCRIPT_PREDICTED_CAP = 60
-# The L4 outer generator's raw evidence: what each inner campaign tried, what steered it and
-# what moved, one per outer sample. The outer round's whole sample set IS those runs, and a
-# generator that never sees them re-proposes what the inner loop already measured.
-# Weakest-PAIRED-lift first, so a byte overrun drops the seeds that least need attention.
 INNER_NARRATIVE_CAP = 1150
 # How many cells keep the WHOLE story. A cell that is doing fine narrates the same thing every
 # round, so it is near-identical bytes; an optimizer prompt edit is aimed at the cells that are
@@ -60,9 +48,6 @@ INNER_NARRATIVE_SUMMARY_CAP = 160
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
-# How many prior rounds L1 sees itself in. The value STEM, never the LLM's own
-# `changes_description`: that prose is optional, can be empty, and two candidates can carry the
-# same words for different mutations. What changed is a fact; what it was called is not.
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
 # Value-stem chars per changed field. Short by design: the stem exists so the generator
@@ -228,13 +213,7 @@ class RoundDigest:
     # PREVIOUS round there. Every panel that states an objective or a precision reads these.
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
-    cumulative_theta: float | None = None
-    cumulative_theta_se: float | None = None
-    # The scale those θ were read ON. Two θ are comparable iff these match; `calibration_model`
-    # absent is the COLD state, where θ is logit-accuracy on the arm's own subset.
-    ruler_id: str | None = None
-    ruler_n: int = 0
-    calibration_model: str | None = None
+    ability: AbilityReading | None = None
     arms: tuple[ArmReading, ...] = ()
 
 
@@ -276,6 +255,8 @@ class InjectionBundle:
     # The round under render IS the origin, so `origin_per_sample` and `trajectory_results` are
     # the same rows. Any panel differencing the two would render a cell against itself.
     is_origin_round: bool = False
+    # `Connector.measured_unit` — every panel counting rows renders through it.
+    measured_unit: MeasuredUnit = "sample"
 
 
 @dataclass(frozen=True)

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         Connector,
         ConnectorExecution,
         InProcessRun,
+        MeasuredUnit,
     )
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
 
@@ -47,6 +48,7 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
         in_process_run=connector.in_process_run,
         max_cells_in_flight=connector.max_cells_in_flight,
         concurrency_arming=connector.concurrency_arming,
+        measured_unit=connector.measured_unit,
         auth_token=connector.auth_token() if connector.auth_token else None,
     )
 
@@ -81,6 +83,7 @@ class BackendClient:
         in_process_run: InProcessRun | None = None,
         max_cells_in_flight: int = 2,
         concurrency_arming: ConcurrencyArming = "round",
+        measured_unit: MeasuredUnit = "sample",
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -98,6 +101,7 @@ class BackendClient:
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
         self._concurrency_arming: ConcurrencyArming = concurrency_arming
+        self._measured_unit: MeasuredUnit = measured_unit
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
@@ -126,6 +130,10 @@ class BackendClient:
     @property
     def concurrency_arming(self) -> ConcurrencyArming:
         return self._concurrency_arming
+
+    @property
+    def measured_unit(self) -> MeasuredUnit:
+        return self._measured_unit
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"params": params} if params else {}

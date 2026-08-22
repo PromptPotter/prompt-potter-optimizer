@@ -22,8 +22,10 @@ export interface Registry {
   subscribe: (key: string, path: CyclePath, opts?: TreeFetchOpts) => () => void;
   onVersionChange: (listener: () => void) => () => void;
   version: () => number;
-  live: () => [string, { path: CyclePath; opts: TreeFetchOpts }][];
-  has: (key: string) => boolean;
+  /** The keys the poll fans out over — every subscribed key the server still answers for. */
+  liveKeys: () => string[];
+  /** The key's latched fetch spec, and by its absence the answer to "still subscribed?". */
+  spec: (key: string) => { path: CyclePath; opts: TreeFetchOpts } | null;
   etag: (key: string) => string | null;
   setEtag: (key: string, value: string | null) => void;
   /**
@@ -74,11 +76,11 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
       return () => listeners.delete(listener);
     },
     version: () => version,
-    live: () =>
-      [...counts]
-        .filter(([k]) => !gone.has(k))
-        .map(([k, v]) => [k, { path: v.path, opts: v.opts }]),
-    has: (key) => counts.has(key),
+    liveKeys: () => [...counts.keys()].filter((k) => !gone.has(k)),
+    spec: (key) => {
+      const v = counts.get(key);
+      return v ? { path: v.path, opts: v.opts } : null;
+    },
     etag: (key) => etags.get(key) ?? null,
     setEtag: (key, value) => {
       if (value) etags.set(key, value);

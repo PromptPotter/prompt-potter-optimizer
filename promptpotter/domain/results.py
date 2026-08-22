@@ -16,7 +16,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.ruler import CalibrationModel
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.spend import SpendRollup
@@ -27,7 +27,6 @@ __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
-    "CalibrationModel",
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
@@ -111,7 +110,10 @@ class CritiqueReadout(TypedDict, total=False):
 
 
 def candidate_label(round_num: int, idx: int) -> str:
-    """Sole writer of the label — every surface reads this rather than re-deriving the format."""
+    """Sole writer of the label, and readers take it off the row. The browser re-derives the format
+    only for the in-flight slot that carries none yet (``webapp/lib/candidate-label.ts``), where it
+    diverges deliberately at round 0 — ``C0`` here, ``C0.{n}!`` there — so that string is never a
+    join key."""
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
@@ -285,8 +287,8 @@ class ScoreboardRow(StrictModel):
     composite_fitness: float
     total: int
     escalation_aborted: bool
-    # ``None`` for a row that did not cover the origin's panel — see ``ScoredCandidate``: the
-    # file carries the absence rather than a 0.0 that reads as a verdict the origin never gave.
+    # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
+    # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
     matched_parent_accuracy: float | None
     matched_parent_composite: float | None
     mean_fitness_ci_lo: float | None
@@ -521,7 +523,7 @@ class RoundResult(StrictModel):
     composite_fitness: float = 0.0
     total: int
     improved: bool
-    # One-sided two-proportion p-value vs origin; drives the IMPROVED gate. None ⇒ no test ran.
+    # One-sided two-proportion p-value vs the parent; drives the IMPROVED gate. None ⇒ no test ran.
     p_value: float | None = None
     # WHY this round ended the way it did, in the numbers it was decided on — the elected arm's θ,
     # the parent's, the margin and its SE, or on a held round the best arm that still failed to
@@ -545,35 +547,18 @@ class RoundResult(StrictModel):
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
-    # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
-    # on the cycle's fixed δ ruler, so a drifting per-round subset cannot inflate the outer
-    # fitness signal. None when the ruler is cold. There is deliberately no
+    # Subset-invariant peer of this round's own `accuracy`: the cumulative frontier's ability,
+    # with the scale it was read on, so a drifting per-round subset cannot inflate the outer
+    # fitness signal. `None` = never fit. The SE inside is a precision, never a penalty: the spec
+    # forbids it in the election rank key or as a `mean - λ·se` haircut. There is deliberately no
     # `cumulative_accuracy` beside it — pooling rows of mixed provenance is modelled against an
     # explicit per-sample δ, while a plain mean over them silently attributes one
     # configuration's score to another.
-    cumulative_theta: float | None = None
-    # How sharply THIS round measured the frontier — a precision, never a penalty: the spec
-    # forbids it in the election rank key or as a `mean - λ·se` haircut, which discards good
-    # candidates on wide posteriors. The panel's `λ·std` slot is cross-seed OUTCOME dispersion,
-    # not this.
-    cumulative_theta_se: float | None = None
-    # None = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model, and the
-    # state a hardcoded "1PL" would misreport.
-    calibration_model: CalibrationModel | None = None
-    # WHICH δ scale the θs above were read on (`intelligence/exploration.py::ruler_id`). Every
-    # cycle refits its ruler from an archive that grows between runs, so a θ is only comparable
-    # to one carrying the same id — without it, incomparability is un-derivable and cross-campaign
-    # readings silently mix scales. `None` names NO scale: that θ is comparable to nothing.
-    ruler_id: str | None = None
-    # HOW MANY cells that ruler carried for this reading. The ruler grows by anchored extension,
-    # so `ruler_id` alone cannot say how much of the scale was real when the round was read —
-    # and a round scored mostly OFF the ruler renders identically to one scored on it.
-    ruler_n: int = 0
+    ability: AbilityReading | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
-    # Prior round's accuracy (or campaign origin for round 0).
-    origin_accuracy: float = 0.0
+    parent_accuracy: float = 0.0
     # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundParent.results``).
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.

@@ -26,11 +26,11 @@ export interface RunSummary {
   // so counting it would claim work the run did not do.
   rounds: number;
   championLabel: string | null;
-  // The champion's own measured accuracy, and the origin floor it was JUDGED
-  // against. `null` where the candidate never covered the origin's panel — an
+  // The champion's own measured accuracy, and the PARENT floor it was JUDGED
+  // against. `null` where the candidate never covered the parent's panel — an
   // absent floor is not a zero.
   accuracy: number | null;
-  originAccuracy: number | null;
+  parentAccuracy: number | null;
   // Served lift over origin, in logits. Format as θ, never as a percent.
   abilityDelta: number | null;
   usedUsd: number | null;
@@ -67,7 +67,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     rounds: closed.length,
     championLabel: target?.courseLabel ?? null,
     accuracy: champion?.accuracy ?? null,
-    originAccuracy: champion?.matched_parent_accuracy ?? null,
+    parentAccuracy: champion?.matched_parent_accuracy ?? null,
     abilityDelta,
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",

@@ -11,7 +11,6 @@ export type {
   DashboardSnapshot,
   L1ScoreOutput,
   LiveCandidate,
-  LiveSample,
   StatusKind,
 } from "@/lib/poll";
 

@@ -58,31 +58,17 @@ function liveMeasurements(
   const round = dashRound ?? 0;
   liveL1Candidates(dash).forEach((c, ci) => {
     for (const s of c.samples ?? []) {
-      let sid: number | null = null;
-      let fitness: number | null = null;
-      if (typeof s === "string") {
-        // The live tape is TEXT, so it carries only the HIT/MISS mark the terminal
-        // renders — the grade itself never survives the line. Reconstruct the two
-        // endpoints; the dict branch below has the real number. An ERR row was never
-        // graded, so it contributes no cell rather than a red one.
-        const p = parseSampleLine(s);
-        if (p.sampleId != null && (p.status === "HIT" || p.status === "MISS")) {
-          sid = p.sampleId;
-          fitness = p.status === "HIT" ? 1 : 0;
-        }
-      } else if (s && typeof s === "object") {
-        if (typeof s.sample_id === "number" && typeof s.fitness === "number") {
-          sid = s.sample_id;
-          fitness = s.fitness;
-        }
-      }
-      if (sid == null || fitness == null) continue;
+      // The producer already graded the row: `fmt_sample_line` marks one it never graded
+      // `ERR`, so an ERR (or unparsable) line contributes no cell rather than a red one.
+      // The tape is TEXT, so only the two endpoints survive it.
+      const p = parseSampleLine(s);
+      if (p.sampleId == null || (p.status !== "HIT" && p.status !== "MISS")) continue;
       // ``live/…`` prefix sorts after every archive ord (timestamps + 04d
       // round numbers start with digits) so in-flight cells land at the
       // right edge of the roster.
       const ord = `live/${round.toString().padStart(4, "0")}/${ci.toString().padStart(2, "0")}`;
-      if (!out.has(sid)) out.set(sid, []);
-      out.get(sid)!.push({ fitness, ord });
+      if (!out.has(p.sampleId)) out.set(p.sampleId, []);
+      out.get(p.sampleId)!.push({ fitness: p.status === "HIT" ? 1 : 0, ord });
     }
   });
   return out;

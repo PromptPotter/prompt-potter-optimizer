@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.domain.results import HardSampleOrder, OverlapReading
+from promptpotter.domain.ruler import AbilityReading
 
 __all__ = [
     "AnyView",
@@ -50,8 +51,8 @@ class ViewContext:
     # The bank's ceiling — the denominator every ♥ readout renders against. A bare count
     # is scaleless, and in lives mode there is no ``max_rounds`` to fall back on.
     hearts_cap: int | None = None
-    origin_accuracy: float = 0.0
-    origin_composite_fitness: float | None = None
+    parent_accuracy: float = 0.0
+    parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     original_sp_flat: dict[str, str] = field(default_factory=dict)
@@ -62,8 +63,8 @@ class ViewContext:
         """The four scalars a ledger subscriber re-syncs from (``LiveDisplay._phase_ctx``). Not
         ``asdict``: that re-emitted both whole ``*_sp_flat`` prompts per candidate and per round."""
         return {
-            "origin_accuracy": self.origin_accuracy,
-            "origin_composite_fitness": self.origin_composite_fitness,
+            "parent_accuracy": self.parent_accuracy,
+            "parent_composite_fitness": self.parent_composite_fitness,
             "composite_fitness_formula": self.composite_fitness_formula,
             "composite_fitness_formula_short": self.composite_fitness_formula_short,
         }
@@ -193,7 +194,7 @@ class RoundCompleteView:
     """L1 score exit — round summary. Round-trip invariant target."""
 
     round: int
-    origin_acc: float
+    parent_acc: float
     scores: tuple[ScoreEntry, ...]
     winner_label: str
     winner_accuracy: float
@@ -212,11 +213,10 @@ class RoundCompleteView:
     l1_critique_text: str
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
-    origin_composite_fitness: float | None
-    # Origin restricted to the winner's measured samples; verdict line + Δ read these so
-    # operator-facing "Δ vs origin" matches the ``l1_score`` gate. ``None`` when the winner
-    # did not cover the origin's panel — the verdict then states the winner's own rate and
-    # drops the "(was …)" clause rather than quoting the full-set origin, which is a
+    # The parent restricted to the winner's measured samples; verdict line + Δ read these so
+    # operator-facing "Δ vs parent" matches the ``l1_score`` gate. ``None`` when the winner
+    # did not cover the parent's panel — the verdict then states the winner's own rate and
+    # drops the "(was …)" clause rather than quoting the full-set parent, which is a
     # different sample basis and would read as lift the winner never earned.
     # No default: the one builder resolves it, and a ``0.0`` sitting here would render
     # "was 0.0%" on any round whose payload lacked the key.
@@ -341,10 +341,9 @@ class RoundDigestView:
     # from the terminal for the same round. ``None`` where the round matched nothing, and there
     # is no fallback to the cycle origin: that is a different sample basis, not a default.
     matched_parent_composite: float | None = None
-    # The subset-invariant series and how much ruler was real when it was read, so a reader can
-    # see a round scored mostly off the scale. Mirrors ``RoundResult``.
-    cumulative_theta: float | None = None
-    ruler_n: int = 0
+    # The subset-invariant series and the scale it was read on, so a reader can see a round
+    # scored mostly off that scale. Mirrors ``RoundResult``.
+    ability: AbilityReading | None = None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
     verdict_reason: str | None = None
     # The adopted line read on ONE shared set of cells — the only row in this view two rounds can

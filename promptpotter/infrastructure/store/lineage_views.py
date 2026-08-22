@@ -375,8 +375,12 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
             is_winner=won,
             theta=ability.theta,
             theta_se=ability.theta_se,
-            # The frontier belongs to the spine: only the adopted candidate advanced it.
-            cumulative_theta=close.cumulative_theta if won and close is not None else None,
+            # The frontier belongs to the spine: only the adopted candidate advanced it. A LEVEL
+            # is projected out of the reading on purpose — the tree plots one and never differences
+            # across cycles, which is the only reading `AbilityReading` does not have to guard.
+            cumulative_theta=(
+                close.ability.theta if won and close is not None and close.ability else None
+            ),
         )
     return out
 

@@ -159,11 +159,8 @@ function fmtTheta(v: number | null): string {
 // INCUMBENT's lift over origin — served per cycle, not per candidate. Showing it beside
 // another candidate's rate would caption one individual with another's number.
 //
-// The pair is subset-matched, which is why it may be read as a before/after at all. Its
-// floor is served `matched_parent_accuracy`, and that name is a round-0 fossil: the
-// engine computes it from `RoundParent.results`, so the floor is the candidate's PARENT
-// — the origin at round 1, the prior round's winner after it. The copy says parent for
-// that reason, and the flips line below names its own reference for the same one.
+// The pair is subset-matched, which is why it may be read as a before/after at all. The
+// flips line below deliberately names a DIFFERENT floor, and says so.
 // An absent floor prints nothing rather than a zero, and a searchpoint with no measured
 // rate falls back to θ so the lift is never simply missing.
 //
@@ -174,13 +171,13 @@ function fmtTheta(v: number | null): string {
 // `expected_samples` lands at round close, so an in-flight candidate shows nothing.
 function Lift({
   accuracy,
-  originAccuracy,
+  parentAccuracy,
   theta,
   scored,
   expected,
 }: {
   accuracy: number | null;
-  originAccuracy: number | null;
+  parentAccuracy: number | null;
   theta: number | null;
   scored: number | null;
   expected: number | null;
@@ -218,8 +215,8 @@ function Lift({
     >
       <span className="run-headline-acc" tabIndex={0}>
         {fmtPct0(accuracy)}
-        {originAccuracy != null ? (
-          <span className="run-headline-was"> from {fmtPct0(originAccuracy)}</span>
+        {parentAccuracy != null ? (
+          <span className="run-headline-was"> from {fmtPct0(parentAccuracy)}</span>
         ) : null}
         {cut ? (
           <span className="run-headline-cut">
@@ -280,7 +277,7 @@ function ConfigBox({
           </span>
           <Lift
             accuracy={shownRow?.accuracy ?? null}
-            originAccuracy={shownRow?.matchedParentAccuracy ?? null}
+            parentAccuracy={shownRow?.matchedParentAccuracy ?? null}
             theta={observe.state === "best" ? summary.abilityDelta : null}
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}
@@ -549,8 +546,8 @@ export function RunSummaryItem({ summary }: { summary: RunSummary }) {
       <span className="run-summary-line">
         {summary.championLabel ? `${summary.championLabel} · ` : ""}
         {summary.accuracy != null ? fmtPct0(summary.accuracy) : "—"}
-        {summary.accuracy != null && summary.originAccuracy != null
-          ? ` from ${fmtPct0(summary.originAccuracy)}`
+        {summary.accuracy != null && summary.parentAccuracy != null
+          ? ` from ${fmtPct0(summary.parentAccuracy)}`
           : ""}
         {` · ${summary.rounds} rounds`}
         {summary.usedUsd != null ? ` · ${fmtUsd(summary.usedUsd)}` : ""}

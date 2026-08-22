@@ -16,6 +16,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
+from promptpotter.connectors.protocol import unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
@@ -231,7 +232,7 @@ _TERMINATE_CAPABILITY_TEXT = (
 # The starvation coaching, rendered only in the round it describes — see `_r_terminate_capability`.
 _TERMINATE_STARVED_TEXT = (
     " THIS ROUND, EVALUATE IT FIRST, BEFORE ANY REFINEMENT: '{node}' failed across ~all of this "
-    "round's samples (a backend quota or rate-limit exhausted), so the measurement itself is "
+    "round's {unit} (a backend quota or rate-limit exhausted), so the measurement itself is "
     "unreliable and this round's failure clusters — critique.failure_highlights and the "
     "axis-memory cluster, often a downstream matcher — are CASCADE NOISE from that dead node, "
     "not real targets. Do NOT chase them with a refinement: no framing nudge recovers a starved "
@@ -254,6 +255,10 @@ def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
     return [
         Item(
             _TERMINATE_CAPABILITY_TEXT
-            + (_TERMINATE_STARVED_TEXT.format(node=starved) if starved else "")
+            + (
+                _TERMINATE_STARVED_TEXT.format(node=starved, unit=unit_plural(b.measured_unit))
+                if starved
+                else ""
+            )
         )
     ]

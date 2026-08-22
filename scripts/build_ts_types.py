@@ -63,6 +63,7 @@ from promptpotter.domain.results import (
     ScoreboardRow,
     ScoredCandidate,
 )
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.infrastructure.projections.live_dashboard.state import (
@@ -147,6 +148,7 @@ from promptpotter.presentation.api.routers.verify import DiagnosticRunListRespon
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
+    AbilityReading,
     DashboardCandidate,
     RoundSummaryCandidate,
     DegradationHealth,

@@ -280,13 +280,17 @@ function Readings({ evidence }: { evidence: Evidence }) {
   const v = evidence.variance;
   const p = evidence.power;
   const oc = evidence.order_confound;
+  // Every number below is a spread or an SD of the SELECTED metric's own cell values, so it
+  // carries that metric's unit — on `usd` the roster table read `$0.4200` while this card read
+  // `+0.420` for the same quantity.
+  const unit = evidence.metric.spec.unit;
   return (
     <CardFrame title="What this selection can settle" headingTag="h2">
       {evidence.replicates.map((r) => (
         <p className="l4-note" key={r.arm_id}>
           Arm <code>{r.arm_id.slice(0, 8)}</code> ran {r.campaign_ids.length} times — a{" "}
-          <strong>replicate</strong>, spread {fmtSigned(r.level_spread)}. That spread is noise, not an
-          effect.
+          <strong>replicate</strong>, spread {fmtMetricValue(unit, r.level_spread)}. That spread is
+          noise, not an effect.
         </p>
       ))}
       {!v ? (
@@ -302,23 +306,23 @@ function Readings({ evidence }: { evidence: Evidence }) {
           <dl className="l4-readings">
             <div>
               <dt>cell effect</dt>
-              <dd>{v.cell_effect_sd.toFixed(3)}</dd>
+              <dd>{fmtMetricValue(unit, v.cell_effect_sd)}</dd>
             </div>
             <div>
               <dt>arm effect</dt>
               <dd className={cx(v.arm_sd_below_noise && "l4-dim")}>
-                {v.arm_effect_sd.toFixed(3)}
+                {fmtMetricValue(unit, v.arm_effect_sd)}
               </dd>
             </div>
             <div>
               <dt>residual</dt>
-              <dd>{v.residual_sd.toFixed(3)}</dd>
+              <dd>{fmtMetricValue(unit, v.residual_sd)}</dd>
             </div>
           </dl>
           <p className="l4-lede">
             Over the {v.n_cells} cell{v.n_cells === 1 ? "" : "s"} all {v.n_arms} campaigns
-            measured. Under the null an arm mean still scatters by {v.null_arm_scatter.toFixed(3)}{" "}
-            —{" "}
+            measured. Under the null an arm mean still scatters by{" "}
+            {fmtMetricValue(unit, v.null_arm_scatter)} —{" "}
             {v.arm_sd_below_noise ? (
               <strong>so nothing here is distinguishable from noise.</strong>
             ) : (
@@ -329,9 +333,9 @@ function Readings({ evidence }: { evidence: Evidence }) {
       )}
       {p && (
         <p className="l4-lede">
-          At {p.cells_per_arm} cells/arm the paired SE is {p.paired_se.toFixed(3)}, so the smallest
-          detectable effect is {fmtSigned(p.min_detectable_effect)}. The widest gap on the roster is{" "}
-          {fmtSigned(p.largest_arm_gap)}
+          At {p.cells_per_arm} cells/arm the paired SE is {fmtMetricValue(unit, p.paired_se)}, so
+          the smallest detectable effect is {fmtMetricValue(unit, p.min_detectable_effect)}. The
+          widest gap on the roster is {fmtMetricValue(unit, p.largest_arm_gap)}
           {p.cells_for_largest_gap !== null && (
             <> — resolving it would take ~{p.cells_for_largest_gap} cells per arm</>
           )}

@@ -35,7 +35,7 @@ describe("runSummary", () => {
     expect(s?.championLabel).toBe("C2.2");
     expect(s?.accuracy).toBe(0.74);
     // The floor it was JUDGED against, not round 0's full-set rate.
-    expect(s?.originAccuracy).toBe(0.6);
+    expect(s?.parentAccuracy).toBe(0.6);
     expect(s?.changes).toBe("step-by-step thinking style");
   });
 
@@ -62,7 +62,7 @@ describe("runSummary", () => {
       }),
     );
     expect(s?.accuracy).toBe(0.5);
-    expect(s?.originAccuracy).toBeNull();
+    expect(s?.parentAccuracy).toBeNull();
   });
 
   // The fact that keeps "Best = origin" from reading as a broken surface: a run where

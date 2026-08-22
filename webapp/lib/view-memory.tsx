@@ -1,40 +1,4 @@
 "use client";
-// Per-campaign view memory — "put me back where I was, if I was here recently".
-//
-// This REPLACES the single global `promptpotter.sidebar.collapsedNodes` blob, which was
-// one Set for every campaign at once, never pruned, and carried nothing but the sidebar's
-// expand/collapse. Everything else an operator arranges — which candidate they were
-// inspecting, which round, whether the forest was open, which lanes were expanded — was
-// dropped on every campaign switch and rebuilt by hand on the way back.
-//
-// The blob had to be global for one reason: `collapsedNodes` was a flat Set with no owner in
-// it. But a node key is `{kind}:{address}`, and an address names the record it belongs to
-// (`ids.ts::ownerOfNodeAddress`) — so the keys were ALREADY partitioned and the Set never
-// needed to be shared. Splitting per owner is what makes the rest of this possible; it is
-// not a new mechanism beside the old one.
-//
-// An OWNER is a campaign for every axis here but one: the sidebar's origin tier groups the
-// runs of a declaration ACROSS campaigns, so it is filed under its own `cycle_<hash>` id.
-// Same store, same TTL and LRU — the two id shapes cannot collide.
-//
-// WHAT IS DELIBERATELY NOT REMEMBERED, and why — the rule is that memory may restore a
-// VIEW, never a claim about a measurement:
-//   - `lens` / what-if weights / `sampleSet`. A lens is a counterfactual the operator
-//     opened to ask a question. Silently restoring one means a returning operator reads
-//     masked numbers believing they are the record. `lib/lineage.tsx` resets the lens per
-//     campaign on purpose; that stays.
-//   - `datasetFilter` / `lifecycleFilter` — workspace-scoped, not campaign-scoped.
-//   - `following` — restoring a pin would fight the active-pointer auto-snap
-//     (`workspace.tsx`), which exists so a CLI-minted run yanks the view over.
-//
-// NOTHING STORED HERE IS A MEASUREMENT. Every field is an id, a boolean, or a UI key, so a
-// restore can never render a number the operator reads as current. That rules out the
-// INSPECTION axis (`SelectionContext.candidate`): it carries `accuracy` and `is_winner`,
-// and `ScoringInspector` renders `is_winner` — restoring a stored one would claim a
-// candidate won a round it may since have lost. Re-deriving it needs the served tree, which
-// arrives after this record does. What IS restored is the NAVIGATION axis — `viewedPath` +
-// `viewedCandidateId` — which parks the tree on the same node and re-plots the same bars;
-// only the lit bar and the inspector come back empty.
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { isNodeOpen, nodeKey, type NodeKind } from "@/components/shell/sidebar/grouping";

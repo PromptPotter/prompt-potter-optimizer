@@ -59,9 +59,9 @@ def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
                 # A round that never CLOSED contributes no ability, and inventing 0.0 for it
                 # would hand UCB a real-looking datum for a simulation that never finished.
                 theta_by_round={
-                    rnd: close.cumulative_theta
+                    rnd: close.ability.theta
                     for rnd, close in closes.items()
-                    if close.cumulative_theta is not None
+                    if close.ability is not None
                 },
             )
         )
