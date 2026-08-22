@@ -13,6 +13,7 @@ import {
   dash,
   roundDoc,
   scored,
+  servedLabel,
   summaryCandidate,
   summaryRound,
 } from "@/lib/test-fixtures";
@@ -139,7 +140,11 @@ describe("bestObserveTarget — the incumbent", () => {
     summaryRound({
       round,
       candidates: Array.from({ length: n }, (_, i) =>
-        summaryCandidate({ candidate_id: `r${round}c${i}`, is_winner: i === winnerIdx }),
+        summaryCandidate({
+          candidate_id: `r${round}c${i}`,
+          label: servedLabel(round, i),
+          is_winner: i === winnerIdx,
+        }),
       ),
     });
 
@@ -181,12 +186,17 @@ describe("latestClosedTarget — the newest searchpoint that closed", () => {
     const t = latestClosedTarget(
       dash({
         rounds: [
-          summaryRound({ round: 1, candidates: [summaryCandidate({ candidate_id: "a", is_winner: true })] }),
+          summaryRound({
+            round: 1,
+            candidates: [
+              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_winner: true }),
+            ],
+          }),
           summaryRound({
             round: 2,
             candidates: [
-              summaryCandidate({ candidate_id: "b", is_winner: true }),
-              summaryCandidate({ candidate_id: "c" }),
+              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "c", label: servedLabel(2, 1) }),
             ],
           }),
         ],

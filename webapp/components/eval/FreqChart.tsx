@@ -3,7 +3,6 @@ import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import { parseSampleLine } from "@/lib/sample-line";
 import {
   liveL1Candidates,
   type DashboardSnapshot,
@@ -34,16 +33,15 @@ function bucketScores(results: ResultRow[]): number[] {
   return buckets;
 }
 
-// Parse the live sample lines from in-flight candidates into pseudo-results
-// so the chart can bucket per-sample HIT/MISS without waiting for round
-// completion. Live lines carry only HIT/MISS → 1.0 / 0.0 fitness.
+// The in-flight candidates' served sample rows as pseudo-results, so the chart can bucket
+// per-sample HIT/MISS without waiting for round completion. The live row carries a verdict,
+// not a fitness, so only the two graded marks become a bucket.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const out: ResultRow[] = [];
   for (const c of liveL1Candidates(dash)) {
-    for (const raw of c.samples ?? []) {
-      const p = parseSampleLine(raw);
-      if (p.status === "HIT") out.push({ fitness: 1 });
-      else if (p.status === "MISS") out.push({ fitness: 0 });
+    for (const s of c.samples ?? []) {
+      if (s.status === "HIT") out.push({ fitness: 1 });
+      else if (s.status === "MISS") out.push({ fitness: 0 });
     }
   }
   return out;

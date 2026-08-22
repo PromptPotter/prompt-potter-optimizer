@@ -3,6 +3,7 @@ import { samplesForRow } from "../round-samples";
 import type { CandidateRow } from "@/lib/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
+import { sampleRow } from "@/lib/test-fixtures";
 
 // `samplesForRow` is the single live-vs-historical source switch every sample
 // surface rides (candidates-card bars, RoundSamplesView groups). It SELECTS one
@@ -38,8 +39,8 @@ function row(source: CandidateRow["source"]): CandidateRow {
   };
 }
 
-// The real tape (`render.py::fmt_sample_line`), not a dict: that block is served `live=True`
-// and nothing else writes it, so a dict fixture here pins a shape no producer emits.
+// The served row (`render.py::sample_row`) — already graded, so the fixture states a verdict
+// rather than a rendering for the reader to recover one from.
 const liveDash = {
   current_round: {
     round: 1,
@@ -47,7 +48,12 @@ const liveDash = {
       l1_score: {
         output: {
           candidates: [
-            { idx: 0, samples: ["   1.2s #000 sid:002 MISS [tk] -> 'x' gt:'y' q:'z'"] },
+            {
+              idx: 0,
+              samples: [
+                sampleRow({ qi: 0, sample_id: 2, status: "MISS", terminal_node: "token_matching" }),
+              ],
+            },
           ],
         },
       },

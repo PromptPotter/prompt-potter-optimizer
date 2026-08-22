@@ -127,7 +127,6 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     if (isHeartbeat(item)) continue;
     const activity = projectionToActivity({
       kind: item.kind,
-      cycle_id: item.path[item.path.length - 1]?.cycle_id ?? "",
       sequence: item.offset,
       payload: item.payload,
     });

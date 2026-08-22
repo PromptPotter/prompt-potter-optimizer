@@ -13,7 +13,7 @@ function row(sample_id: number | null, status: SampleStatus | null, predicted = 
     query: "",
     predicted,
     ground_truth: "",
-    scorer: "",
+    terminal_node: "",
     elapsed_s: null,
   };
 }

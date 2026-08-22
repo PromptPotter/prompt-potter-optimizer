@@ -87,11 +87,9 @@ export function RoundSamplesView() {
     return byRound.get(effectiveRound) ?? [];
   }, [byRound, effectiveRound]);
 
-  // Build per-candidate samples lists. Live mode pulls directly from
-  // the in-flight projection (compact string lines parsed once via
-  // `parseSampleLine`); historical mode pulls from the round file's
-  // `all_candidate_results`. Both readers return the same `SampleRow`
-  // shape so the renderer below stays source-agnostic.
+  // Build per-candidate samples lists. Live mode pulls the served rows off the in-flight
+  // projection; historical mode pulls from the round file's `all_candidate_results`. Both
+  // readers return the same `SampleRow` shape so the renderer below stays source-agnostic.
   const groups = useMemo(() => {
     if (effectiveRound == null) return [];
     const out: { candidate: CandidateRow; samples: SampleRow[] }[] = [];

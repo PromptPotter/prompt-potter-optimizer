@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runSummary } from "../run-summary";
-import { dash, summaryCandidate, summaryRound } from "@/lib/test-fixtures";
+import { dash, servedLabel, summaryCandidate, summaryRound } from "@/lib/test-fixtures";
 
 describe("runSummary", () => {
   const finished = dash({
@@ -10,16 +10,24 @@ describe("runSummary", () => {
     rounds: [
       summaryRound({
         round: 0,
-        candidates: [summaryCandidate({ candidate_id: "c0", accuracy: 0.62, is_winner: true })],
+        candidates: [
+          summaryCandidate({
+            candidate_id: "c0",
+            label: servedLabel(0, 0),
+            accuracy: 0.62,
+            is_winner: true,
+          }),
+        ],
       }),
       // Closed but empty — an L2/L3-terminal round measured nothing.
       summaryRound({ round: 1 }),
       summaryRound({
         round: 2,
         candidates: [
-          summaryCandidate({ candidate_id: "a" }),
+          summaryCandidate({ candidate_id: "a", label: servedLabel(2, 0) }),
           summaryCandidate({
             candidate_id: "b",
+            label: servedLabel(2, 1),
             accuracy: 0.74,
             matched_parent_accuracy: 0.6,
             changes_description: "step-by-step thinking style",
@@ -79,12 +87,17 @@ describe("runSummary", () => {
         rounds: [
           summaryRound({
             round: 0,
-            candidates: [summaryCandidate({ candidate_id: "c0", is_winner: true })],
+            candidates: [
+              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_winner: true }),
+            ],
           }),
           summaryRound({
             round: 1,
             improved: false,
-            candidates: [summaryCandidate({ candidate_id: "a" }), summaryCandidate({ candidate_id: "b" })],
+            candidates: [
+              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0) }),
+              summaryCandidate({ candidate_id: "b", label: servedLabel(1, 1) }),
+            ],
           }),
         ],
       }),

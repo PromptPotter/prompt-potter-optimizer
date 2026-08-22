@@ -27,12 +27,13 @@ export function candidateLabel(
   return `C${r}.${i + 1}`;
 }
 
-// Canonical in-flight candidate id `r{round}_{idx}` — the selection-routing
-// id minted backend-side by `_RoundBuffer` for a candidate still scoring (one
-// that has no persisted hash id yet). Peer of `candidateLabel`: the id↔label
-// pair is the candidate's identity projection, so both live here and no caller
-// hand-builds the string. Used to construct ids for in-flight candidates and
-// to match a selection against the live candidate slots.
+// The in-flight candidate id `r{round}_{idx}` — a BROWSER-LOCAL selection-routing key for
+// a candidate still scoring, which has no persisted hash id yet. No Python produces this
+// string: `RoundBuffer` (`live_dashboard/round_buffer.py`) seeds the slot positionally and
+// stores no id for it, so a served row cannot be joined on one. Peer of `candidateLabel` —
+// the id↔label pair is the candidate's identity projection, so both live here and no caller
+// hand-builds the string. Used to construct ids for in-flight candidates and to match a
+// selection against the live candidate slots.
 export function liveCandidateId(
   round: number | null | undefined,
   idx: number | null | undefined,

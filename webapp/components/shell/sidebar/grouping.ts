@@ -16,7 +16,6 @@
 //   closes, and L5 is the same loop one turn deeper. Nothing here is depth-aware.
 
 import type { CampaignSummary, CycleListEntry } from "@/lib/api";
-import { rootCycleId } from "@/lib/ids";
 
 // One run: the campaign manifest, its single root cycle, and every fork / diag /
 // sweep descending from it. A campaign mints exactly one root (`{dataset}__{rand6}`
@@ -88,8 +87,8 @@ function answeringCycle(root: CycleListEntry, branches: CycleListEntry[]): Cycle
 }
 
 // Build one store's runs. Campaigns are the real manifests from `GET /campaigns`;
-// cycles come from `/cycles`, split per campaign into its root
-// (`rootCycleId(id) === id`) and the siblings descending from it. A cycle whose
+// cycles come from `/cycles`, split per campaign into its root (the served
+// `is_root`) and the siblings descending from it. A cycle whose
 // campaign isn't in the campaign list is dropped — the registry is the source of
 // truth for what's a campaign. A campaign whose root cycle dir isn't on disk yet
 // can't be navigated, so it's dropped too rather than rendered as a headless
@@ -108,7 +107,7 @@ function groupRuns(
   const runs: RunGroup[] = [];
   for (const campaign of campaigns) {
     const own = cyclesByCampaign.get(campaign.campaign_id) ?? [];
-    const root = own.find((cyc) => rootCycleId(cyc.cycle_id) === cyc.cycle_id);
+    const root = own.find((cyc) => cyc.is_root);
     if (!root) continue;
     const branches = own
       .filter((cyc) => cyc.cycle_id !== root.cycle_id)
@@ -138,9 +137,7 @@ export function buildForest(
 ): OriginGroup[] {
   const byOrigin = new Map<string, RunGroup[]>();
   for (const run of groupRuns(campaigns, cycles)) {
-    // Prefer the manifest's `root_cycle_id`; fall back to deriving it off the
-    // root cycle so a manifest written before the field existed still groups.
-    const originId = run.campaign.root_cycle_id || rootCycleId(run.root.cycle_id);
+    const originId = run.campaign.root_cycle_id;
     const arr = byOrigin.get(originId) ?? [];
     arr.push(run);
     byOrigin.set(originId, arr);

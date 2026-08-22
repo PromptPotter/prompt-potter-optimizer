@@ -8,12 +8,32 @@
 import type {
   CurrentRound,
   DashboardCandidate,
+  DashboardSample,
   LiveDashboardState,
   RoundResult,
   RoundSummary,
   RoundSummaryCandidate,
   ScoredCandidate,
 } from "@/lib/types";
+
+// One served sample row. `status` defaults to HIT because most tests care about the id or the
+// position, not the verdict; the ones that care pass it.
+export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
+  return {
+    qi: 0,
+    sample_id: null,
+    status: "HIT",
+    terminal_node: "",
+    cached: false,
+    time_s: null,
+    predicted: "",
+    ground_truth: "",
+    query: "",
+    input_tokens: null,
+    output_tokens: null,
+    ...over,
+  };
+}
 
 // `current_round` is a MODEL now, not a free-form dict, so a test naming one or two of its
 // keys still has to produce the whole shape. This fills the rest inert.
@@ -216,6 +236,14 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
 // The `dash.rounds[]` display row and its candidate — the summary shapes, distinct
 // from the `round_NNNN.json` document above. Same rule: every field the server
 // always sends is filled inert here so a test names only what it is about.
+// What the server stamps on a candidate row (`domain/results.py::candidate_label`) — round 0
+// is `C0` for EVERY arm, and only from round 1 does the position get a suffix. Spelled here
+// because a fixture stands in for a RESPONSE; production code reads this off the row. Left
+// unset, every builder below returns the same default label whatever round it is placed in,
+// so an assertion naming the position's label was only ever testing a client re-derivation.
+export const servedLabel = (round: number, idx: number) =>
+  round === 0 ? "C0" : `C${round}.${idx + 1}`;
+
 export function summaryCandidate(
   over: Partial<RoundSummaryCandidate> = {},
 ): RoundSummaryCandidate {

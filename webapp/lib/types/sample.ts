@@ -1,14 +1,17 @@
-// Unified per-sample row. Both live-mode (compact string lines parsed
-// from `dashboard.json::current_round.nodes.l1_score.output.candidates[].samples[]`)
-// and historical-mode (structured dicts from
-// `round_NNNN.json::all_candidate_results[candidate_id][]`) collapse
-// to this shape. Renderers see one shape; the two source readers live
-// in `lib/derivations/round-samples.ts`.
+// Unified per-sample row, plus the view-local address a renderer keys on. Live mode is the
+// served `DashboardSample` (`dashboard.json::current_round.nodes.l1_score.output.candidates[]
+// .samples[]`); historical mode is the structured dicts in
+// `round_NNNN.json::all_candidate_results[candidate_id][]`. Both readers live in
+// `lib/derivations/round-samples.ts`.
 
-// The tape's three marks (`live_dashboard/render.py::fmt_sample_line`). `ERR` is a THIRD
-// state, not a bad `MISS`: an errored row was never graded, so it belongs on neither side
-// of a hit/miss partition and must not reach one as a zero.
-export type SampleStatus = "HIT" | "MISS" | "ERR";
+import type { DashboardSample } from "@/lib/api/types";
+
+// The served row surfaces through this module, beside the view shape built from it.
+export type { DashboardSample };
+
+// Read back off the served row rather than re-declared — a closed set belongs on the server
+// (`domain/dashboard_rows.py::SampleStatus`).
+export type SampleStatus = DashboardSample["status"];
 
 export interface SampleRow {
   // Stable React key — `${round}|${candidate_id}|${sample_id ?? ord}`.
@@ -17,9 +20,10 @@ export interface SampleRow {
   round: number;
   // Owning candidate.
   candidate_id: string;
-  // Dataset sample id when present; null when the line is unparsable
-  // or pre-stamped with only an ordinal.
+  // Dataset sample id when present; null where the source carries only an ordinal.
   sample_id: number | null;
+  // Null only in historical mode, where a row can carry neither a fitness nor an error
+  // category. The live row is served already graded.
   status: SampleStatus | null;
   // True when this measurement was reused from a prior identical searchpoint
   // (📖) rather than a fresh backend call. Both source readers populate it.
@@ -27,12 +31,8 @@ export interface SampleRow {
   query: string;
   predicted: string;
   ground_truth: string;
-  // Scorer label (`[ai]📖`, etc. in the compact line). Empty when
-  // the historical dict doesn't carry one.
-  scorer: string;
+  // Pipeline node the row terminated at. Empty when the historical dict omits it.
+  terminal_node: string;
   // Wall-clock duration in seconds; null when the source omits it.
   elapsed_s: number | null;
-  // The raw compact line (live mode only) — kept for the fallback
-  // render when `parseSampleLine` couldn't match the regex.
-  raw_line?: string;
 }

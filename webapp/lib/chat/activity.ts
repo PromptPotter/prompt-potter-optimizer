@@ -16,16 +16,19 @@
 // Items carry stable ids so the snapshot paint, the candidate start/scored, and
 // the per-sample running update all upsert to one row.
 //
-// `projectionToActivity` has a SECOND caller now: the time-ray (`lib/derivations/time-ray.ts`)
+// `projectionToActivity` has a SECOND caller: the time-ray (`lib/derivations/time-ray.ts`)
 // maps a `RayItem` through it unchanged, because a RayItem's `kind` + `payload` are
-// byte-identical to an envelope's. That is deliberate — one curated event vocabulary, two
-// surfaces — and it means a change here moves the ray too. At depth 0 the server's ray
-// filter is kept strictly COARSER than this one (it drops only by kind, never by payload)
-// so this file stays the single place deciding what is worth showing; at depth >= 1 the
-// server deliberately cuts inner runs to milestones (`store/family_ray_views.py`).
+// byte-identical to an envelope's. One vocabulary, two surfaces.
+//
+// WHICH kinds can be items is the server's — `domain/projection_envelope.py`, one declaration
+// total over `ProjectionKind`, whose complement arrives here as `NonActivityKind` and is what
+// the default arm proves nothing renderable fell through. What this file decides is how a
+// bearing kind LOOKS, and whether one PAYLOAD is worth a row (a `snapshot` that is a
+// `p_best_update` is not). Those two questions were one before, split across two languages.
 
 import { candidateLabel } from "@/lib/candidate-label";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
+import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 
 // THE SCORING ORDER, and the only channel that carries it.
 //
@@ -49,17 +52,9 @@ export function sampleOrderFrom(env: ProjectionEnvelope): number[] | null {
   return order.length > 0 ? order : null;
 }
 
-// One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
-// `payload` is the underlying record's `model_dump` (so a record's own nested
-// `payload` field is reached at `envelope.payload.payload`); for stream_snapshot
-// it is the cycle's dashboard.json body + `snapshot_at_offset`.
-export interface ProjectionEnvelope {
-  kind: string;
-  version?: number;
-  cycle_id: string;
-  sequence: number;
-  payload: Record<string, unknown>;
-}
+// `payload` is the underlying record's `model_dump`, so a record's own nested `payload` field
+// is reached at `envelope.payload.payload`; for stream_snapshot it is the cycle's
+// dashboard.json body + `snapshot_at_offset`.
 
 // State pairs an icon AND a label (never colour alone) per the frontend
 // accessibility invariant; `tone` is a styling hint layered on top.
@@ -195,9 +190,15 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
   return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
 }
 
-// Map one live tailed envelope to at most one item. `null` = a deliberately
-// dropped kind (firehose / non-item). Every `ProjectionKind` is handled.
-export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | null {
+// What the translator actually reads — an SSE envelope, or a ray item adapted into one.
+// Narrower than `ProjectionEnvelope` deliberately: a `RayItem` carries no `version` and no
+// `cycle_id` (its address is a whole `path`), so asking for the full shape would make the ray
+// adapter fabricate both.
+export type ActivitySource = Pick<ProjectionEnvelope, "kind" | "sequence" | "payload">;
+
+// Map one record to at most one item. `null` = a kind the server declares non-bearing, or a
+// payload this kind has no row for.
+export function projectionToActivity(env: ActivitySource): ActivityItem | null {
   const p = env.payload;
   const id = `${env.kind}-${env.sequence}`;
   switch (env.kind) {
@@ -301,8 +302,18 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
         tone: "muted",
       };
     }
-    // token_usage, decision, stream_snapshot — non-items here.
-    default:
+    case "stream_snapshot": {
+      // Synthesized by the tail, not a ledger record: `useCycleEvents` routes it to
+      // `snapshotToActivity` before this runs, and the ray can never carry one.
       return null;
+    }
+    default: {
+      // Everything the server declares activity-bearing has a case above; what reaches here
+      // is a kind it declared non-bearing. Flip one and forget its case, and this assignment
+      // stops compiling — which a bare `return null` could only swallow.
+      const nonBearing: NonActivityKind = env.kind;
+      void nonBearing;
+      return null;
+    }
   }
 }

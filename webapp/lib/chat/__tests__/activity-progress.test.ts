@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { projectionToActivity, type ProjectionEnvelope } from "../activity";
+import { projectionToActivity } from "../activity";
+import type { ProjectionEnvelope } from "@/lib/api/types";
 
 // The L4 fix: an `llm_call_progress` heartbeat carrying `detail` (the inner
 // campaign's live "inner rX/Y · best Z%") becomes ONE ticking progress chip so
@@ -8,6 +9,7 @@ import { projectionToActivity, type ProjectionEnvelope } from "../activity";
 function progressEnv(detail: unknown): ProjectionEnvelope {
   return {
     kind: "llm_call_progress",
+    version: 1,
     cycle_id: "c1",
     sequence: 7,
     payload: { call_id: "inner:justlogic-d67/seed-0", node: "l1_critique", elapsed_s: 30, detail },

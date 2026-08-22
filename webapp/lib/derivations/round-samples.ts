@@ -13,17 +13,15 @@ import {
   liveCandidate,
   type DashboardSnapshot,
 } from "@/lib/poll";
-import { parseSampleLine } from "@/lib/sample-line";
 import type { CandidateRow, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
-// from `dashboard.json::current_round.nodes.l1_score.output.candidates`
-// only — a TEXT tape (`render.py::build_l1_score_block` serves that block
-// `live=True`, always), so the producer's own `HIT`/`MISS`/`ERR` mark IS
-// the grading verdict here and nothing re-derives one. Returns rows in
-// source order; the caller decides if it wants newest-first.
+// `dashboard.json::current_round.nodes.l1_score.output.candidates[].samples[]`, which the
+// producer serves already graded (`render.py::sample_row`), so its `HIT`/`MISS`/`ERR` IS
+// the verdict and nothing re-derives one. Returns rows in source order; the caller decides
+// if it wants newest-first.
 function liveSamplesFor(
   dash: DashboardSnapshot | null,
   round: number,
@@ -32,22 +30,19 @@ function liveSamplesFor(
   const out: SampleRow[] = [];
   const c = liveCandidate(dash, round, candidate_id);
   if (!c) return out;
-  (c.samples ?? []).forEach((raw, ord) => {
-    const p = parseSampleLine(raw);
-    const sid = typeof p.sampleId === "number" ? p.sampleId : null;
+  (c.samples ?? []).forEach((s, ord) => {
     out.push({
-      key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
+      key: `${round}|${candidate_id}|${s.sample_id ?? `o${ord}`}`,
       round,
       candidate_id,
-      sample_id: sid,
-      status: p.status ?? null,
-      cached: p.cached ?? false,
-      query: p.query ?? "",
-      predicted: p.predicted ?? "",
-      ground_truth: p.gt ?? "",
-      scorer: p.scorer ?? "",
-      elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
-      raw_line: p.raw,
+      sample_id: s.sample_id,
+      status: s.status,
+      cached: s.cached,
+      query: s.query,
+      predicted: s.predicted,
+      ground_truth: s.ground_truth,
+      terminal_node: s.terminal_node,
+      elapsed_s: s.time_s,
     });
   });
   return out;
@@ -60,7 +55,7 @@ interface RawHistoricalSample {
   ground_truth?: string;
   fitness?: number;
   cached?: boolean;
-  scorer?: string;
+  pipeline_data?: { terminal_node?: unknown };
   elapsed_s?: number;
   time_s?: number;
   error?: unknown;
@@ -114,7 +109,10 @@ function historicalSamplesFor(
       query: typeof s.query === "string" ? s.query : "",
       predicted: typeof s.predicted === "string" ? s.predicted : "",
       ground_truth: typeof s.ground_truth === "string" ? s.ground_truth : "",
-      scorer: typeof s.scorer === "string" ? s.scorer : "",
+      // `pipeline_data`, not a top-level key: no round document has ever carried one, so the
+      // node tag read blank on every closed round while the live half showed it.
+      terminal_node:
+        typeof s.pipeline_data?.terminal_node === "string" ? s.pipeline_data.terminal_node : "",
       elapsed_s: elapsed,
     };
   });

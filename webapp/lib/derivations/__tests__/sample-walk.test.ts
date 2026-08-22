@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { sampleBucket, sampleSpread, sampleWalk } from "../sample-walk";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { currentRound, dash, liveRow } from "@/lib/test-fixtures";
+import { currentRound, dash, liveRow, sampleRow } from "@/lib/test-fixtures";
+import type { DashboardSample } from "@/lib/api/types";
 
 // The live candidate as `dashboard.json` carries it — BOTH halves, because the projection
-// writes both: the ROW under `current_round.candidates` (what a bar plots) and the tape under
-// the l1_score node block (what the walk reads).
-const live = (samples: string[], currentSampleId: number | null = null): DashboardSnapshot =>
+// writes both: the ROW under `current_round.candidates` (what a bar plots) and the served
+// sample rows under the l1_score node block (what the walk reads).
+const live = (
+  samples: DashboardSample[],
+  currentSampleId: number | null = null,
+): DashboardSnapshot =>
   dash({
     current_sample_id: currentSampleId,
     current_round: currentRound({
@@ -17,11 +21,11 @@ const live = (samples: string[], currentSampleId: number | null = null): Dashboa
   });
 
 describe("sampleWalk", () => {
-  // The real tape shape (`fmt_sample_line`). `#NNN` is the loop POSITION; the dataset
-  // id rides `sid:` — a line without one carries no sample id at all.
+  // `qi` is the loop POSITION; the dataset id rides `sample_id` — a row without one carries
+  // no sample id at all.
   const tape = [
-    "  0.4s #001 sid:099 HIT  [ai] -> 'TRUE' gt:'TRUE' q:'a'",
-    "  0.5s #002 sid:455 MISS  [ai] -> 'FALSE' gt:'TRUE' q:'b'",
+    sampleRow({ qi: 1, sample_id: 99, status: "HIT" }),
+    sampleRow({ qi: 2, sample_id: 455, status: "MISS" }),
   ];
   const order = [99, 455, 419, 271];
 
@@ -53,9 +57,8 @@ describe("sampleWalk", () => {
   });
 
   it("has no axis when the tape carries no sample ids and nothing is in flight", () => {
-    expect(sampleWalk(live(["  0.4s #001 HIT", "  0.5s #002 MISS"], null), null, true).ids).toEqual(
-      [],
-    );
+    const idless = [sampleRow({ qi: 1 }), sampleRow({ qi: 2, status: "MISS" })];
+    expect(sampleWalk(live(idless, null), null, true).ids).toEqual([]);
   });
 
   // `current_round` candidates linger after a stop, so liveness has to gate this or a

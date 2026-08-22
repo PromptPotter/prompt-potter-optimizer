@@ -8,7 +8,6 @@ import {
 } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { fmtPct0 } from "@/lib/format";
-import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
@@ -32,10 +31,10 @@ interface Props {
   // all campaigns on the dataset) is owned by AppShell and re-fetches
   // this map; the heat-map merges live mid-round samples on top.
   archivePerSample: Map<number, SampleSeries>;
-  // Served roster-wide outcome totals for the scope in view. The headline reads
-  // these rather than folding the strip's dots down: the live tail merged into
-  // the strip is TEXT-reconstructed to 0/1 endpoints (see `liveMeasurements`),
-  // so summing it would mix reconstructed endpoints into a graded rate.
+  // Served roster-wide outcome totals for the scope in view. The headline reads these rather
+  // than folding the strip's dots down: the live tail merged into the strip carries a VERDICT,
+  // flattened to 0/1 endpoints here (see `liveMeasurements`), so summing it would mix
+  // endpoints into a graded rate.
   datasetTotals: SeriesTotals | null;
   // True while the displayed dataset slice is from a prior (unit, scope).
   datasetStale: boolean;
@@ -47,9 +46,8 @@ interface Props {
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
 
-// Fold in live mid-round measurements that haven't landed in the archive
-// yet. Live samples are compact strings ("0.0s #000 HIT ..."); the parser
-// yields idx + status. They sit at the right edge of each row.
+// Fold in live mid-round measurements that haven't landed in the archive yet — the served
+// sample rows, already graded. They sit at the right edge of each row.
 function liveMeasurements(
   dash: DashboardSnapshot | null,
   dashRound: number | null,
@@ -58,17 +56,15 @@ function liveMeasurements(
   const round = dashRound ?? 0;
   liveL1Candidates(dash).forEach((c, ci) => {
     for (const s of c.samples ?? []) {
-      // The producer already graded the row: `fmt_sample_line` marks one it never graded
-      // `ERR`, so an ERR (or unparsable) line contributes no cell rather than a red one.
-      // The tape is TEXT, so only the two endpoints survive it.
-      const p = parseSampleLine(s);
-      if (p.sampleId == null || (p.status !== "HIT" && p.status !== "MISS")) continue;
+      // The producer already graded the row and marks one it never graded `ERR`, so an ERR
+      // contributes no cell rather than a red one. Only the two endpoints reach a heat cell.
+      if (s.sample_id == null || (s.status !== "HIT" && s.status !== "MISS")) continue;
       // ``live/…`` prefix sorts after every archive ord (timestamps + 04d
       // round numbers start with digits) so in-flight cells land at the
       // right edge of the roster.
       const ord = `live/${round.toString().padStart(4, "0")}/${ci.toString().padStart(2, "0")}`;
-      if (!out.has(p.sampleId)) out.set(p.sampleId, []);
-      out.get(p.sampleId)!.push({ fitness: p.status === "HIT" ? 1 : 0, ord });
+      if (!out.has(s.sample_id)) out.set(s.sample_id, []);
+      out.get(s.sample_id)!.push({ fitness: s.status === "HIT" ? 1 : 0, ord });
     }
   });
   return out;

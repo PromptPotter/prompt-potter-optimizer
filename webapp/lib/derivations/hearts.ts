@@ -2,7 +2,7 @@
 //
 // Three surfaces render hearts (TopStrip, lineage cycle nodes, the chat live segment).
 // Each re-deriving `filled`/`empty` from `(hearts, cap)` is how they drift, so they all
-// call this instead. Mirrors `presentation/views/render/text.py::_heart_bar` — the CLI
+// call this instead. Mirrors `presentation/views/render.py::_heart_bar` — the CLI
 // and the webapp must not disagree about what "nearly dead" looks like.
 
 export type HeartPips = {

@@ -177,8 +177,8 @@ export function candidateObserveConfig(
 // (does such a candidate exist), while the config is a fetch that may not have
 // landed — conflating them made a button flicker with its own round file.
 //
-// `courseLabel` is the POSITIONAL join key `candidateObserveConfig` needs;
-// `label` is the decorated header string and must never be joined on.
+// `courseLabel` is the SERVED join key `candidateObserveConfig` needs; `label` is the
+// decorated header string and must never be joined on.
 export interface ObserveTarget {
   round: number;
   idx: number;
@@ -187,8 +187,17 @@ export interface ObserveTarget {
   candidateId: string;
 }
 
-function targetAt(round: number, idx: number, candidateId: string, prefix: string): ObserveTarget {
-  const courseLabel = candidateLabel(round, idx);
+// The label comes off the row, never off the position. `domain/results.py::candidate_label`
+// is the sole writer of the format and answers `C0` for EVERY round-0 arm, where re-deriving
+// it positionally answers `C0.2` from index 1 on — a join key matching no served row, and the
+// miss is silent because `find` simply returns undefined.
+function targetAt(
+  round: number,
+  idx: number,
+  candidateId: string,
+  courseLabel: string,
+  prefix: string,
+): ObserveTarget {
   return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
 }
 
@@ -211,7 +220,13 @@ export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget
     if (!w?.candidate_id) continue;
     // Only badge `best` as a win when the round it won had rivals — round 0 crowns
     // its sole arm by default and must not claim an election.
-    return targetAt(r.round, idx, w.candidate_id, wasElected(true, r.candidates.length) ? "best" : "origin");
+    return targetAt(
+      r.round,
+      idx,
+      w.candidate_id,
+      w.label,
+      wasElected(true, r.candidates.length) ? "best" : "origin",
+    );
   }
   return null;
 }
@@ -227,5 +242,5 @@ export function latestClosedTarget(dash: DashboardSnapshot | null): ObserveTarge
   const idx = last.candidates.length - 1;
   const c = last.candidates[idx];
   if (!c?.candidate_id) return null;
-  return targetAt(last.round, idx, c.candidate_id, "latest");
+  return targetAt(last.round, idx, c.candidate_id, c.label, "latest");
 }

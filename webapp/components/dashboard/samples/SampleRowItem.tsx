@@ -6,18 +6,10 @@ function truncate(s: string | undefined, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-// One per-sample row inside a candidate group. A raw (unparsed) line renders
-// as a flat body; a parsed row expands to query / ground-truth / predicted.
-// Pure renderer — extracted from RoundSamplesView, which owns the source +
+// One per-sample row inside a candidate group, expanding to query / ground-truth /
+// predicted. Pure renderer — extracted from RoundSamplesView, which owns the source +
 // selection state.
 export function SampleRowItem({ row }: { row: SampleRow }) {
-  if (row.status == null && row.raw_line) {
-    return (
-      <div className="rsv-row rsv-row-raw">
-        <span className="body">{row.raw_line}</span>
-      </div>
-    );
-  }
   // Three marks, three tags — `ERR` shares no colour with `MISS`
   // (`lib/types/sample.ts::SampleStatus`).
   const tag =
@@ -33,7 +25,7 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
         {row.elapsed_s != null && (
           <span className="elapsed">{row.elapsed_s.toFixed(1)}s</span>
         )}
-        {row.scorer && <span className="scorer">{row.scorer}</span>}
+        {row.terminal_node && <span className="scorer">{row.terminal_node}</span>}
         {row.cached && (
           <span
             className="rsv-cached"

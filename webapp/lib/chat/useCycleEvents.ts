@@ -9,8 +9,8 @@ import {
   sampleScoredCandidate,
   snapshotToActivity,
   type ActivityItem,
-  type ProjectionEnvelope,
 } from "./activity";
+import type { ProjectionEnvelope } from "@/lib/api/types";
 
 // The webapp's first SSE consumer. Subscribes to the cycle event stream
 // `GET /campaigns/{c}/cycles/{cy}/events:subscribe`

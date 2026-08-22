@@ -18,7 +18,7 @@ import { failureKind, fetchDashboardByPath } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
-import type { DashboardCandidate, LiveDashboardState } from "./api/types";
+import type { DashboardCandidate, DashboardSample, LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
@@ -64,11 +64,13 @@ export interface LiveCandidate {
   idx?: number;
   label?: string;
   model?: string;
-  // The tape is TEXT, always: `view.py` serves this block `live=True` and nothing else
-  // writes it, so the sample DICTS go only to the audit twin, which no tape reader reads.
-  // A union with that dict shape is what let a reader re-derive a grade the mark already
-  // states — and disagree with `fmt_sample_line` about which rows were ever graded.
-  samples?: string[];
+  // ONE shape, whatever the round's state — the served row, already graded by the producer,
+  // so no reader re-derives a verdict the row states. It was a string tape here and dicts in
+  // the audit twin, which is what forced the browser to regex a rendering.
+  samples?: DashboardSample[];
+  // The same rows rendered for the operator reading the file. No component reads it; it is
+  // declared so the folder-UI half of this block is visible to anyone typing `dash.`.
+  sample_lines?: string[];
   // No numbers here: they moved to `current_round.candidates`, in the same shape a closed
   // round serves, so no surface merges two shapes field by field. The tape is what this half
   // still owns. (The block also carries the value-inlined formula and the self-healing state
