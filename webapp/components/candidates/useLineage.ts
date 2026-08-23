@@ -56,9 +56,8 @@ export interface Lineage {
   // Same-key overlay of difficulty-adjusted ability θ — painted into node tooltips so a
   // θ-elected winner shown below a higher-accuracy sibling is explainable in place.
   thetaByKey: ReadonlyMap<string, number | null>;
-  // The card's primary metric — what a node LABEL shows. The bars can plot
-  // several metrics at once; a node paints one number, so it takes the first
-  // selected in canonical order.
+  // The card's primary metric — what a node LABEL shows. The bars can plot several at once;
+  // a node paints one, and it is the one the campaign elects on wherever that is shown.
   metric: HeadlineMetric;
   // candidate id → the child COURSE NODE hanging off it (in-view cycle only) — drives the
   // ⑂ mark in the Sequence view, whose click frees the hierarchy into the Forest. The
@@ -70,10 +69,15 @@ export interface Lineage {
   // In-place expand/collapse toggle for one course's lane (pure view state —
   // never changes the dashboard's selected cycle).
   onLaneActivate: (courseKey: string) => void;
-  // THE write path for `showForest`: applies it and records it in one call, so no toggle
+  // A write path for `showForest`: applies it and records it in one call, so no toggle
   // site can set the store without the memory write (a missed record re-seeds stale state
   // on the next campaign switch).
   setShowForest: (open: boolean) => void;
+  // The other one — reveal the forest with a lane already open, which is the whole of the ⑂
+  // click. Here rather than at the call site because `showForest` and `expanded` have to move
+  // together with ONE memory record; the caller that spelled both writes itself was a second
+  // write path past the pairing this hook exists to guarantee.
+  revealLane: (courseKey: string) => void;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
   viewedHasRounds: boolean;
@@ -86,9 +90,13 @@ export function useLineage({
   campaignId,
   cycleId,
   path,
+  electedMetric,
 }: {
   campaignId: string | null;
   cycleId: string | null;
+  // Served `dash.headline_metric` — passed in rather than read here, because this hook
+  // deliberately touches no `dashboard.json`.
+  electedMetric: HeadlineMetric;
   // The VIEWED course's address. `cycleId` alone cannot name a node: inner ids repeat
   // across sibling sandboxes, so every tree lookup and every overlay key rides this.
   path: CyclePath | null;
@@ -101,7 +109,7 @@ export function useLineage({
   // changes here so the next visit opens the same way.
   const { viewFor, recordView } = useViewMemory();
   const { metrics, expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
-  const metric = primaryMetric(metrics);
+  const metric = primaryMetric(metrics, electedMetric);
 
   // The viewed course's address — what every lookup into the tree index is keyed by.
   const viewedKey = path ? encodeCyclePath(path) : "";
@@ -159,6 +167,18 @@ export function useLineage({
       recordView(campaignId, { showForest: open });
     },
     [campaignId, recordView],
+  );
+
+  // `expanded` holds LANE KEYS (`nodeKeyOf` = `{encoded path}|{id}`), which is what
+  // `forest-layout::layout` matches on. A raw cycle id here grows the set a key the layout
+  // can never match, and the click then opens an unexpanded forest in silence.
+  const revealLane = useCallback(
+    (courseKey: string) => {
+      const next = new Set(expanded).add(courseKey);
+      setCandidatesState({ showForest: true, expanded: next });
+      recordView(campaignId, { showForest: true, expandedLanes: [...next] });
+    },
+    [expanded, campaignId, recordView],
   );
 
   // Every course, root first — the index preserves the walk's DFS order.
@@ -284,6 +304,7 @@ export function useLineage({
     expanded,
     onLaneActivate,
     setShowForest,
+    revealLane,
     totalDescendants: tree ? countDescendants(tree) : 0,
     viewedHasRounds,
     isInheritedSibling,

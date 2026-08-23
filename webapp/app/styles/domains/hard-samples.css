@@ -34,7 +34,7 @@
    changing tile size. */
 .st-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
 .st-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
-.st-mini-cell.new{background:#3b82f6}
+.st-mini-cell.new{background:var(--color-new)}
 .st-mini-cell.gained{background:var(--color-success)}
 .st-mini-cell.lost{background:var(--color-warn)}
 .st-mini-cell.kept{background:var(--color-text-tertiary);opacity:.5}

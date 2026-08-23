@@ -20,20 +20,11 @@ import { Bar, Line } from "react-chartjs-2";
 import type { CampaignReading, Evidence } from "@/lib/api";
 import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
 import type { MetricUnit } from "@/lib/format";
-import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, useThemeVersion } from "@/lib/theme";
+import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
 
 export type CompareView = "grouped" | "overlaid" | "lines" | "merged";
-
-// Cycled per selected campaign. Defined as :root custom properties in
-// `app/styles/domains/compare.css` so canvas and DOM read one palette and a theme flip moves
-// both — `getCss` cannot resolve a `var()` inside a canvas paint.
-const SERIES_SLOTS = 8;
-
-export function seriesColor(index: number): string {
-  return getCss(`--cmp-series-${(index % SERIES_SLOTS) + 1}`);
-}
 
 // Both chart forms share an axis pair and differ only by `stacked`. The y axis carries the
 // metric's NAME: without it a composed expression plots as bare numbers and nothing on screen

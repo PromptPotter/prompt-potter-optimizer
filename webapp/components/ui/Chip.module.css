@@ -80,12 +80,15 @@
 }
 
 /* On = an inset frame plus a fat underline. No fill swap: the chips sit in one
-   box, and repainting a cell's background inside it reads as a stray button. */
+   box, and repainting a cell's background inside it reads as a stray button.
+   The underline takes the chip's own `ink` where it has one, which is what lets a
+   group of chips BE the legend for what they switch — a separate swatch row
+   restating the same three names is the duplication that bought. */
 .joined .on {
   background: var(--color-background-tint-active);
   color: var(--color-accent);
   box-shadow: inset 0 0 0 1px rgba(var(--color-accent-rgb), 0.35);
-  border-bottom-color: var(--color-accent);
+  border-bottom-color: var(--ink, var(--color-accent));
 }
 
 .groupLabel {

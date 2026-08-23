@@ -1,9 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
 import { CANVAS_W, CANVAS_H, DOT_R, EDGES, INTENTIONALLY_UNPLACED, LAYOUT } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
-import { getCss } from "@/lib/theme";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -65,31 +63,15 @@ export function WorkflowCanvas({ pipeline }: Props) {
     showsCurrent: viewingLive,
     loading: nodesLoading,
   } = useRoundNodes();
-  // Bumped by the MutationObserver below on `data-theme` flips; drives the
-  // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
-  const [themeTick, setThemeTick] = useState(0);
-
-  useEffect(() => {
-    const obs = new MutationObserver(() => setThemeTick((n) => n + 1));
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => obs.disconnect();
-  }, []);
-
-  // Re-derived on every render — `themeTick` bumps cause the re-render,
-  // which re-reads CSS vars fresh. No memo: 5 var reads is cheap, and
-  // useMemo would need themeTick in its deps even though the body doesn't
-  // reference it (tripping react-hooks/exhaustive-deps).
-  void themeTick;
-  const colors =
-    typeof window === "undefined"
-      ? { txt: "#525252", ok: "#1a8265", acc: "#090C9B", esc: "#060888", bg: "#F5F1EA" }
-      : {
-          txt: getCss("--color-text-secondary"),
-          ok: getCss("--color-success"),
-          acc: getCss("--color-accent"),
-          esc: getCss("--color-accent-strong"),
-          bg: getCss("--color-background-tertiary"),
-        };
+  // This is INLINE svg, not a canvas, so its presentation attributes resolve `var()` off the
+  // document cascade — a theme flip repaints with no read, no subscription and no re-render.
+  const colors = {
+    txt: "var(--color-text-secondary)",
+    ok: "var(--color-success)",
+    acc: "var(--color-accent)",
+    esc: "var(--color-accent-strong)",
+    bg: "var(--color-background-tertiary)",
+  };
 
   if (!view) {
     return (

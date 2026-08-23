@@ -51,16 +51,16 @@
 /* Chart frame: fills the card's width so 5 → 25 bars all read; height stays
    compact. Chart.js handles the bar fan-out within its responsive options. */
 .fitness-chart-frame{position:relative;height:160px;width:100%;max-width:100%;margin:0 auto;min-width:0}
-.fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
-.fitness-legend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
-.fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
-.fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
-.fitness-legend .dot.ability{background:var(--color-text-tertiary)}
-.fitness-legend .dot.whatif{background:var(--color-accent-strong)}
-.fitness-legend .dot.overlap{background:var(--color-overlap)}
-/* A dashed rule, not a dot — a swatch would imply a fifth bar series. */
-.fitness-legend .dash{display:inline-block;width:16px;height:0;margin-right:5px;vertical-align:middle;border-top:1.5px dashed transparent}
-.fitness-legend .dash.cached{border-top-color:var(--color-cache)}
+/* Only the channels with no chip in the header reach this row, so on the default view it
+   does not render at all. The swatch takes its colour from the series' own `--ink`, set
+   inline from the ONE token `series.ts` names — six per-channel colour rules used to live
+   here, each a second declaration of a colour the chart also spelled for itself. */
+.fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
+.fitness-legend .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:var(--space-4);vertical-align:middle;background:var(--ink)}
+/* Hollow, matching the bar: corroboration of a series, not a rival of it. */
+.fitness-legend .swatch.hollow{background:transparent;border:1.5px solid var(--ink)}
+/* A dashed rule, not a swatch — a filled block would imply another bar series. */
+.fitness-legend .swatch.line{width:16px;height:0;border-radius:0;background:transparent;border-top:1.5px dashed var(--ink)}
 
 /* The genealogy strip — the whole point of the merge. Its box is inset by the
    chart's own plot-area gutters (inline padding, set from the published plot
@@ -130,16 +130,6 @@
    flex children fill the card width instead of hugging their max-content (the
    ~455px what-if grid row), which would overflow a narrow card. */
 @media (max-width:960px){
-  .cand-card.whatif-open{display:flex;flex-direction:column;align-items:stretch}
-  .cand-card.whatif-open > .card-title{max-width:none}
-  .cand-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
-  .cand-card.whatif-open .fitness-chart-wrap{width:100%}
-  .cand-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
-}
-/* Same stack keyed on the card's CONTAINER width (the `.job-whatif` cell) not
-   the viewport — in the chat pane the @media query above never fires (wide
-   viewport, narrow cell). No-op elsewhere (no `whatif` container). */
-@container whatif (max-width:760px){
   .cand-card.whatif-open{display:flex;flex-direction:column;align-items:stretch}
   .cand-card.whatif-open > .card-title{max-width:none}
   .cand-card.whatif-open > .fitness-body{display:flex;flex-direction:column}

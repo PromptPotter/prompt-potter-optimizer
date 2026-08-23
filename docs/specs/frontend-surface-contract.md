@@ -509,18 +509,49 @@ controls:
         measured thing, so a click lights it, lights its dendrogram dot, and scopes the
         inspector/samples; none of them move the chart. The bracket dendrogram sits beneath
         the course view on the SAME x-axis.
+        The INCUMBENT - the last crowned bar on the spine, not one per advancing round, which is
+        the dendrogram's job - carries a crown above its group and a lit x-axis label; before this
+        a win showed only as a filled dendrogram dot and the bars said nothing. Deliberately no
+        ring: on the elected series the bar's fill already IS the accent. The crown captions the
+        SERVED `matched_parent_lift` - the blocked lift over the floor the promotion gate judged
+        it against - and ONLY where the 95% interval excludes 0. An interval spanning 0 means the
+        round could not separate the winner from its parent, so a point estimate there would
+        report a win the measurement does not support; the number and the interval stay in the
+        tooltip either way, which says "could not separate" in words.
+        The per-bar sample count is painted ONLY where it is news - a bar under its own announced
+        budget, or one whose panel is shorter than the fullest in its round (an eliminated arm).
+        Every bar's count stays in the tooltip footer, which is the denominator of record;
+        painting it on all 25 was noise that hid the one arm that stopped short.
   - id: lineage.forest
     do: Its OWN card, revealed by the toggle beside the dendrogram (and by a ⑂ fork mark, which
         opens it with that sibling expanded). The multi-cycle cladogram — the only surface that
         draws siblings. Empty note before round 1. Separate card because it shares no axis with
         the bars, so it must not be bound to their width.
   - id: candidates.metric
-    do: ONE multi-select (Acc/Comp/θ) driving the bar series AND every node label in both views.
+    do: ONE multi-select (%/∑/θ - the notation each number is written in, from the single
+        `HEADLINE_METRICS` row) driving the bar series AND every node label in both views.
         Never empty. θ rides a right-hand axis and stays sparse (a missing θ is never a 0 bar).
+        Each chip's lit underline wears its OWN series ink, so the group IS the legend for the
+        bars it switches - the legend row carries only channels with no chip, and on the default
+        view it does not render at all. The ink is decided PER CAMPAIGN off the served
+        `headline_metric`: the metric the engine elects on reads at full accent and its siblings
+        recede into the same hue, so the loud bar is the DECIDING bar, not merely the familiar one.
   - id: candidates.overlap
     do: The `trajectory` bar series — every candidate on the adopted line (C0 and each winner)
         read on the ONE set of cells all of them answered, served as `RoundSummary.overlap`.
-        Auto-appears whenever a round carries a reading and stays sparse: an off-line candidate
+        Its own chip beside the metric axis (the `∩` glyph — the trajectory IS the intersection
+        of the cells every candidate on the line answered), seeded ON the render a reading first
+        appears. That chip is a three-rung LADDER, not a toggle, because its two on-states are one
+        idea at two strengths: SHOW the reading, then RE-BASE every bar onto those same cells
+        (`candidates.sample_set`), then off. The series folds out at rung 2 by the suppression
+        rule below, and that is the point — once all the bars are on that set, a separate "read on
+        the shared set" series is the same bars twice.
+        **Where no reading exists the ladder is TWO rungs and must say so in ink**: the line is C0
+        alone until a round promotes, so rung 1 has nothing to draw and the first press goes
+        straight to the slice. The chip therefore wears the ink of what it put ON SCREEN — teal
+        only while the series is up, the sample-set ink at rung 2 — because a chip lit in the
+        series colour with no series drawn reads as data still loading, and nothing is pending.
+        Stays sparse: an off-line candidate
         has none, and a coerced 0 there would claim it scored nothing rather than that it was
         never read on the set. It is NOT a rival of the accuracy bar beside it — that one is read
         on whatever subset its own round bought, and these are the only two bars on this chart
@@ -528,13 +559,18 @@ controls:
         rate carries its own count in the tooltip; the set drifts as the line grows, so the legend
         and the strip below name the size. Suppressed while the Fixed sample set re-bases the
         bars, like every other served aggregate.
+  - id: candidates.sample_set
+    do: Rung 2 of the `candidates.overlap` chip, NOT a menu item - re-bases every bar onto one
+        fixed set of cells so the candidates compare on one basis. The set it opens on is the
+        trajectory's OWN `overlap.sample_ids` where there are any, so the series and the slice
+        are the same cells by construction rather than by agreement; the full measured universe
+        only where no reading exists yet. Its strip carries the engine's shared set as a one-click
+        pick plus an underline on the cells in it. The whole ladder is disabled when the bars are
+        courses - a run is not a scored row, so there is nothing to slice.
   - id: candidates.menu
     do: The ⋯ overflow, lit while any member is active. Lens re-projects under an alternative
         criterion (served); What-If reveals evaluator checkboxes and becomes the master lens;
-        Fixed sample set re-bases every bar on one set (off when the bars are courses — a run
-        is not a scored row), and its strip carries the engine's own shared set as a one-click
-        pick plus an underline on the cells in it — the same set `candidates.overlap` plots, so
-        the two cannot name different cells; Loaded from cache draws the dashed replayed-share line, off by
+        Loaded from cache draws the dashed replayed-share line, off by
         default and NEVER disabled — a banked C0 is the usual replay, so greying out on it
         hides the case the control exists for.
   - id: samples

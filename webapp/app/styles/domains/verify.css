@@ -30,6 +30,6 @@
 .verify-bar-cell{width:160px;padding:var(--space-6) var(--space-12) !important}
 .verify-bar{position:relative;height:14px;width:140px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:3px;overflow:hidden}
 .verify-bar-source{position:absolute;top:0;left:0;bottom:0;background:var(--color-text-tertiary);opacity:0.4}
-.verify-bar-workspace{position:absolute;top:0;left:0;bottom:0;background:#e74c3c;opacity:0.85}
-.verify-bar-workspace.held{background:#27ae60}
+.verify-bar-workspace{position:absolute;top:0;left:0;bottom:0;background:var(--color-danger);opacity:0.85}
+.verify-bar-workspace.held{background:var(--color-success)}
 

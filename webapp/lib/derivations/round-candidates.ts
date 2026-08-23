@@ -22,8 +22,8 @@ import { liveCandidateId } from "@/lib/candidate-label";
 import { liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import type { DashboardCandidate } from "@/lib/api/types";
 import type {
-  CandidateRow,
   CandidateSource,
+  ElectedRow,
   RoundCandidates,
   RoundSummary,
 } from "@/lib/types";
@@ -86,7 +86,7 @@ function rowOf(
   idx: number,
   candidateId: string,
   source: CandidateSource,
-): CandidateRow {
+): ElectedRow {
   return {
     key: `R${round}.${idx}`,
     round,
@@ -118,8 +118,8 @@ function rowOf(
   };
 }
 
-export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] {
-  const out: CandidateRow[] = [];
+export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
+  const out: ElectedRow[] = [];
 
   for (const r of sortedRounds(dash)) {
     // Skip empty historical entries (L2/L3-terminal rounds) — they carry no
@@ -153,7 +153,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
 // takes the rows so the caller (`useRoundCandidates`) computes the spine once
 // per snapshot and groups the same array, rather than running the full merge
 // twice. Round 0 holds the origin row when it exists.
-export function groupByRound(rows: CandidateRow[]): RoundCandidates {
+export function groupByRound(rows: ElectedRow[]): RoundCandidates {
   const map: RoundCandidates = new Map();
   for (const row of rows) {
     const bucket = map.get(row.round);

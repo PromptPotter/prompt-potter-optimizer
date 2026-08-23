@@ -4,12 +4,6 @@
 
 import type { CSSProperties } from "react";
 
-// Fixed accent for the "newly added" / "first appearance" semantic in the
-// Series view. Distinct from success/danger so add ≠ gained-position.
-export const NEW_COLOR = "#3b82f6";
-export const NEW_BG = "rgba(59, 130, 246, 0.14)";
-export const NEW_BORDER = "rgba(59, 130, 246, 0.42)";
-
 const SQ_BASE: CSSProperties = {
   width: 26,
   height: 26,
@@ -41,9 +35,9 @@ export const SQ_ADD: CSSProperties = {
 
 export const SQ_NEW: CSSProperties = {
   ...SQ_BASE,
-  color: NEW_COLOR,
-  borderColor: NEW_BORDER,
-  background: NEW_BG,
+  color: "var(--color-new)",
+  borderColor: "var(--color-new-border)",
+  background: "var(--color-new-bg)",
 };
 
 export const SQ_GAINED = SQ_ADD;
@@ -96,9 +90,9 @@ export const POP_COMPUTED: CSSProperties = {
 };
 export const POP_CURRENT: CSSProperties = {
   ...POP_CHIP,
-  color: NEW_COLOR,
-  borderColor: NEW_BORDER,
-  background: NEW_BG,
+  color: "var(--color-new)",
+  borderColor: "var(--color-new-border)",
+  background: "var(--color-new-bg)",
 };
 export const POP_PLANNED: CSSProperties = {
   ...POP_CHIP,

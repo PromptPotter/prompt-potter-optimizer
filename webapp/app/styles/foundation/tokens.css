@@ -28,6 +28,24 @@
      accuracy axis beside bars measured on a DIFFERENT basis, so it must read as its own
      reading rather than as a better or worse version of the one next to it. */
   --color-overlap:#2dd4bf;
+  /* Candidate bar-series ink, by ROLE not by channel — `components/candidates/series.ts`
+     resolves the role per campaign off the served `headline_metric`, so the metric the
+     engine actually elects on is the loud bar and its siblings recede into the same hue.
+     Named rather than inline rgba() because the legend swatch and the canvas must read ONE
+     name: the chart used to spell `cssRgba("--color-accent-rgb",0.95)` while the legend
+     spelled `rgba(var(--color-accent-rgb),0.95)` beside it — two declarations of one colour.
+     Three steps is the ceiling: at 25 bars × 3 series a bar is ~6px, and a fourth alpha is
+     not distinguishable there. They derive from --color-accent, so they follow the theme. */
+  --series-elected:var(--color-accent);
+  --series-reading:rgba(var(--color-accent-rgb),0.45);
+  --series-counterfactual:rgba(var(--color-accent-rgb),0.70);
+  /* Categorical slots — the Nth arbitrary series (a campaign in Compare, a model in
+     Activity). Read through `theme.ts::seriesColor`, never inline: a canvas paint cannot
+     resolve var(), so a hardcoded copy beside these is a palette that never flips theme. */
+  --chart-series-1:#4f8ef7; --chart-series-2:#e8833a;
+  --chart-series-3:#3fb27f; --chart-series-4:#c9639e;
+  --chart-series-5:#d4b02c; --chart-series-6:#6f6bd8;
+  --chart-series-7:#4bb3c4; --chart-series-8:#b5603f;
   /* Dashboard layout — one source for the centred spines. NarrowSpine
      wraps the header + diagnostics; WideSpine wraps the panel grids. */
   --dash-narrow-max:980px;
@@ -126,12 +144,20 @@
   --color-success:#10b981; --color-success-rgb:16,185,129;
   --color-danger:#C53030;  --color-danger-rgb:197,48,48;
   --color-warn:#f59e0b;    --color-warn-rgb:245,158,11;
+  /* The fourth member says WHICH cell, never how good it is: new to the subset,
+     current, or selected. It rides the family so all four tint alike. */
+  --color-new:#3b82f6;     --color-new-rgb:59,130,246;
+  /* Inline hyperlink. Browser-blue here because the dark accent is orange and an orange link
+     reads as a button; on paper the accent IS cobalt, so light hands these back to it. */
+  --color-link:#3b82f6; --color-link-hover:#60a5fa;
   --color-success-bg:rgba(var(--color-success-rgb),var(--status-tint));
   --color-success-border:rgba(var(--color-success-rgb),var(--status-edge));
   --color-danger-bg:rgba(var(--color-danger-rgb),var(--status-tint));
   --color-danger-border:rgba(var(--color-danger-rgb),var(--status-edge));
   --color-warn-bg:rgba(var(--color-warn-rgb),var(--status-tint));
   --color-warn-border:rgba(var(--color-warn-rgb),var(--status-edge));
+  --color-new-bg:rgba(var(--color-new-rgb),var(--status-tint));
+  --color-new-border:rgba(var(--color-new-rgb),var(--status-edge));
   --border-radius-sm:4px; --border-radius-md:6px; --border-radius-lg:10px;
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   /* Mono stack: Cascadia Mono first so Windows ClearType gets the heaviest

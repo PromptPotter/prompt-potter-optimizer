@@ -56,7 +56,6 @@ export interface DendroStub {
   xf: number;
   y1: number;
   y2: number;
-  kind: "parent" | "child";
 }
 
 export interface DendroBracket {
@@ -169,8 +168,8 @@ export function dendrogram(
       const d = place(parent.xf, lastKid.xf);
       const y = FIRST_ROW_Y + d * ROW_H;
       brackets.push({ round, x1f: parent.xf, x2f: lastKid.xf, y, parentKey: parent.key });
-      stubs.push({ xf: parent.xf, y1: NODE_ROW_Y, y2: y, kind: "parent" });
-      for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y, kind: "child" });
+      stubs.push({ xf: parent.xf, y1: NODE_ROW_Y, y2: y });
+      for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y });
     }
 
     const winner = kids.find((n) => n.isWinner);

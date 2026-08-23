@@ -25,8 +25,6 @@ function row(source: CandidateRow["source"]): CandidateRow {
     theta_se: null,
     meanFitnessCiLo: null,
     meanFitnessCiHi: null,
-    matchedParentAccuracy: null,
-    matchedParentComposite: null,
     matchedParentLift: null,
     matchedParentLiftCiLo: null,
     matchedParentLiftCiHi: null,

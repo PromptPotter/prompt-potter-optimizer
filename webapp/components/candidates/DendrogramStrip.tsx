@@ -98,7 +98,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {geo.stubs.map((s, i) => (
           <line
             key={`s${i}`}
-            className={cx("cand-dendro-stub", s.kind)}
+            className="cand-dendro-stub"
             x1={pct(s.xf)}
             y1={s.y1}
             x2={pct(s.xf)}

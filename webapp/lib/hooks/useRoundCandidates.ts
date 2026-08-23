@@ -10,10 +10,10 @@
 import { useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import { roundCandidates, groupByRound } from "@/lib/derivations";
-import type { CandidateRow, RoundCandidates } from "@/lib/types";
+import type { ElectedRow, RoundCandidates } from "@/lib/types";
 
 interface RoundCandidatesHookState {
-  all: CandidateRow[];
+  all: ElectedRow[];
   byRound: RoundCandidates;
 }
 

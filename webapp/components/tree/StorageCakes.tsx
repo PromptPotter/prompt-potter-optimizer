@@ -2,6 +2,7 @@
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchStorageByDataset, type DatasetStorageEntry } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
+import { seriesColor, useThemeVersion } from "@/lib/theme";
 
 // Workspace storage "cakes" on the Files view: one donut per storage CATEGORY
 // (On disk + the six MECE leaves), and within each cake the slices are DATASETS
@@ -22,25 +23,6 @@ const CATEGORIES = [
   { key: "reports_bytes", label: "Reports" },
 ] as const;
 
-// Per-dataset colour, assigned by rank and reused across every cake.
-const PALETTE = [
-  "var(--color-accent)",
-  "#16a34a",
-  "#d97706",
-  "#9333ea",
-  "#0891b2",
-  "#db2777",
-  "#65a30d",
-  "#dc2626",
-  "#7c3aed",
-  "#0d9488",
-];
-
-// Rank → colour, wrapping the palette. The modulo keeps the index in range.
-function colorAt(rank: number): string {
-  return PALETTE[rank % PALETTE.length]!;
-}
-
 const R = 26;
 const STROKE = 11;
 const C = 2 * Math.PI * R;
@@ -58,7 +40,7 @@ function Cake({
   const denom = total || 1;
   const arcs = datasets.map((d, i) => {
     const value = Number(d[field]) || 0;
-    return { name: d.dataset_name, value, seg: (value / denom) * C, color: colorAt(i) };
+    return { name: d.dataset_name, value, seg: (value / denom) * C, color: seriesColor(i) };
   });
   const slices = arcs.map((a, i) => ({
     ...a,
@@ -103,11 +85,13 @@ function Cake({
 }
 
 export function StorageCakes() {
+  // The slices paint resolved literals, so a theme flip has to re-run this to re-read them.
+  useThemeVersion();
   const { data, error } = useFetch((signal) => fetchStorageByDataset(signal), []);
   if (error || !data || data.datasets.length === 0) return null;
 
-  // Backend returns datasets fattest-first; `colorAt` pins the hue to that rank
-  // so a dataset is the same colour in every cake.
+  // Backend returns datasets fattest-first, and colour is `seriesColor(rank)` — so a dataset is
+  // the same colour in every cake, from the palette Compare and Activity also read.
   const datasets = data.datasets;
 
   return (
@@ -117,7 +101,7 @@ export function StorageCakes() {
         <ul className="cakes-legend">
           {datasets.map((d, i) => (
             <li key={d.dataset_name} title={d.dataset_name}>
-              <span className="cakes-swatch" style={{ background: colorAt(i) }} aria-hidden="true" />
+              <span className="cakes-swatch" style={{ background: seriesColor(i) }} aria-hidden="true" />
               {d.dataset_name}
             </li>
           ))}

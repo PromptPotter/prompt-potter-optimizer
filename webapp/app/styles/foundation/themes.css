@@ -31,6 +31,10 @@
   --color-success-rgb:26,130,101;
   --color-warn:#55251D;                      /* oxblood — warn (no orange in light) */
   --color-warn-rgb:85,37,29;
+  --color-new:#1D4ED8;                       /* azure, deepened for paper — clear of cobalt by lightness */
+  --color-new-rgb:29,78,216;
+  --color-link:var(--color-accent);          /* cobalt already reads as a link on paper */
+  --color-link-hover:var(--color-accent-strong);
   --scrollbar-thumb:rgba(85,37,29,0.30);     /* oxblood-tinted scrollbar */
   --scrollbar-thumb-hover:rgba(85,37,29,0.55);
   --scrollbar-thumb-active:rgba(9,12,155,0.65);

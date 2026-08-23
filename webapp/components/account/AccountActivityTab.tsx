@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { fmtCompact, fmtUsd } from "@/lib/format";
+import { seriesColor, useThemeVersion } from "@/lib/theme";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
   fetchActivity,
@@ -25,6 +26,8 @@ const ACTIVITY_WINDOWS: { id: ActivityWindow; label: string }[] = [
 ];
 
 export function AccountActivityTab() {
+  // The SVG paints literal fills, so a theme flip has to re-run this component to re-read them.
+  useThemeVersion();
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
   // useFetch blanks data on the (window, group_by) key change in-render, so the
@@ -32,7 +35,7 @@ export function AccountActivityTab() {
   const { data, error } = useFetch(() => fetchActivity(window, groupBy), [window, groupBy]);
 
   const labels = data?.series_labels ?? [];
-  const palette = _palette(labels.length);
+  const palette = labels.map((_, i) => seriesColor(i));
   return (
     <>
       <div className="activity-window-row">
@@ -184,22 +187,3 @@ function ActivityBarChart({
   );
 }
 
-const _CHART_PALETTE = [
-  "#3b82f6",
-  "#7c5cff",
-  "#00b894",
-  "#f59e0b",
-  "#ef4444",
-  "#06b6d4",
-  "#ec4899",
-  "#84cc16",
-  "#a855f7",
-  "#14b8a6",
-];
-
-function _palette(n: number): string[] {
-  // Repeat the palette when there are more labels than colours; rare in practice.
-  const out: string[] = [];
-  while (out.length < n) out.push(..._CHART_PALETTE.slice(0, n - out.length));
-  return out;
-}

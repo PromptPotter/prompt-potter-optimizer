@@ -38,7 +38,12 @@ export function ForestCard() {
     isInheritedSibling,
     parentId,
     cleanup,
-  } = useLineage({ campaignId, cycleId, path: viewedPath });
+  } = useLineage({
+    campaignId,
+    cycleId,
+    path: viewedPath,
+    electedMetric: dash?.headline_metric ?? "accuracy",
+  });
 
   return (
     <CardFrame

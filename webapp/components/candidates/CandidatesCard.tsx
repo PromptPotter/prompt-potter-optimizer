@@ -1,12 +1,6 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  buildRows,
-  whatifIdentifiersInFormula,
-  weightsFromFormula,
-  type Row,
-} from "./meta";
-import { EVALUATOR_META } from "@/lib/api/types.generated";
+import { useCallback, useMemo, useState, type CSSProperties } from "react";
+import { activeSeries, metricInkToken, type SeriesCtx } from "./series";
 import { FitnessChart, type PlotGeometry, geomEqual } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
 import { AbilityHelp } from "./AbilityInfo";
@@ -28,7 +22,6 @@ import {
 import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
-import { unitCount } from "@/lib/format";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { WhatIfGrid } from "./WhatIfGrid";
@@ -37,10 +30,12 @@ import type { LineageNode } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
+  barsAreCourses,
+  candidateViews,
+  forkKeysOf,
   HEADLINE_METRICS,
   headlineMetricLabel,
   nodeKeyOf,
-  panelCellLabel,
   pathOf,
   sortedRounds,
   type HeadlineMetric,
@@ -48,13 +43,11 @@ import {
 import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
-import { useViewMemory } from "@/lib/view-memory";
 import { useLineage } from "./useLineage";
+import { useWhatIf } from "./useWhatIf";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
-import { useConnector } from "@/lib/hooks/useConnector";
-import { targetNodeIds } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import type { CandidateView } from "@/lib/types";
 
@@ -71,24 +64,6 @@ import type { CandidateView } from "@/lib/types";
 // cost it the width and height it actually wants. The quiet toggle beside the
 // dendrogram opens it; that toggle is the only trace of it here.
 //
-// The metric glyphs. `%` and `∑` and `θ` ARE the icons — they're the notation the
-// numbers are already written in, so drawing a picture of them would be a
-// translation nobody asked for.
-const METRIC_GLYPH: Record<HeadlineMetric, string> = {
-  accuracy: "%",
-  composite: "∑",
-  ability: "θ",
-};
-
-// The latest `verify` run for a candidate, in the shape the chart paints.
-function diagView(
-  d: DiagnosticRunRecord | undefined,
-): { accuracy: number; workspaceN: number; samplesAdded: number } | undefined {
-  return d
-    ? { accuracy: d.workspace_accuracy, workspaceN: d.workspace_n, samplesAdded: d.samples_added }
-    : undefined;
-}
-
 // `heading` rows are optgroup labels; the rest are pickable. One flat list, so the
 // menu markup stays a map() instead of nested groups.
 const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
@@ -114,8 +89,6 @@ export function CandidatesCard() {
     viewedCandidateId,
     selectCyclePath,
   } = useWorkspace();
-  // Per-campaign view memory — the card records what the operator arranges here.
-  const { recordView } = useViewMemory();
   // Shared candidate selection — driving any of {bar, dendrogram node, forest
   // stub} sets this context slot; every other surface re-renders highlighted, and
   // the round axis in the optimizer card follows to the round that produced it.
@@ -130,33 +103,18 @@ export function CandidatesCard() {
     showForest,
     metrics,
     metricsSeededForCycle,
-    showWhatIf,
-    selected,
-    weights,
-    seededForCycle,
+    showTrajectory,
+    trajectorySeededForCycle,
     showCache,
   } = useCandidatesState();
-  const seeded = seededForCycle != null && seededForCycle === cycleId;
-  const setShowWhatIf = (v: boolean) => setCandidatesState({ showWhatIf: v });
-  const setSelected = (s: Set<string>) => setCandidatesState({ selected: s });
-  const setWeight = (name: string, w: number) =>
-    setCandidatesState({ weights: { ...weights, [name]: w } });
+  // The metric this campaign's ENGINE elects on (served `CampaignConfig.headline_metric`,
+  // usually θ). It seeds the second bar AND decides which series reads at full accent, so
+  // the loudest bar on the chart is the one the round was actually decided on.
+  const electedMetric: HeadlineMetric = dash?.headline_metric ?? "accuracy";
 
-  const meta = EVALUATOR_META;
-
-  // Pipeline shape from the connector view. A single-node (llm_only) pipeline has
-  // no candidate_source / ranker / cache node, so the node-type-bound evaluators
-  // (source_recall / candidate_recall / cache_hit_rate) can never apply — they must
-  // not surface as live tiles before the first round lands. Mirrors
-  // PipelineSchema.is_single_node (targetNodeIds drops the io ports).
-  const cv = useConnector();
-  const singleNode = targetNodeIds(cv.view).length <= 1;
-
-  // ── 1. In-flight candidates from the live dashboard. Memoized on `dash`
-  // so identity is stable across polls (and across no-op 304 ticks): the
-  // downstream Set chain (realApplicable→viewApplicable→inActive) only
-  // rebuilds when `dash` actually changes, so the seed + prune guards below
-  // converge instead of looping setState every render.
+  // ── 1. In-flight candidates from the live dashboard. Memoized on `dash` so identity is
+  // stable across polls (and across no-op 304 ticks), which is what lets the evaluator hook
+  // below converge instead of looping setState every render.
   const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
 
   // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
@@ -194,76 +152,10 @@ export function CandidatesCard() {
     return m;
   }, [diagRunsResp, campaignId, cycleId]);
 
-  // ── 3. The applicable evaluator set unions every candidate we plot. The
-  // origin row has no evaluators; in-flight stats and historical
-  // round-summary candidates both carry the full dict.
-  const realApplicable = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of inflightCandidates) {
-      for (const k of Object.keys(c.evaluators)) set.add(k);
-    }
-    for (const h of history) {
-      for (const c of h.candidates) {
-        for (const k of Object.keys(c.evaluators)) set.add(k);
-      }
-    }
-    return set;
-  }, [inflightCandidates, history]);
-
-  const isPrestaging = realApplicable.size === 0;
-
-  const viewApplicable = useMemo(() => {
-    if (!isPrestaging) return realApplicable;
-    const set = new Set<string>();
-    for (const m of meta) set.add(m.name);
-    return set;
-  }, [isPrestaging, realApplicable, meta]);
-
-  // The realized composite formula in effect. Drives both `inActive` (which evaluators it
-  // references) and the what-if weight seed (their coefficients). One field: the per-candidate
-  // copy this used to fall back to was the SAME string, stamped onto every row of every round
-  // from this very value — a second channel carrying one fact, and it is gone from the wire.
-  const compositeFormula =
-    (dash as { composite_fitness_formula?: string | null } | null)?.composite_fitness_formula ??
-    null;
-
-  const inActive = useMemo(() => {
-    let parsed: Set<string> | null = compositeFormula
-      ? whatifIdentifiersInFormula(compositeFormula)
-      : null;
-    if (parsed == null) {
-      parsed = new Set<string>();
-      for (const c of inflightCandidates) {
-        for (const k of Object.keys(c.evaluators)) parsed.add(k);
-      }
-    }
-    // Drop phantom tokens (`min`, `weight`, …) parsed from formula arithmetic so the assembly-memo equality short-circuit is honest.
-    const out = new Set<string>();
-    for (const k of parsed) if (viewApplicable.has(k)) out.add(k);
-    return out;
-  }, [compositeFormula, inflightCandidates, viewApplicable]);
-
-  const rows = useMemo(() => {
-    const built = isPrestaging
-      ? meta.map<Row>((m) => ({
-          displayName: m.name,
-          registryName: m.name,
-          // Shape-agnostic evaluators (node_type == null) always apply; a
-          // node-type-bound one applies pre-staging only if the pipeline could
-          // carry that node — never on a single-node llm_only run.
-          applicable: m.node_type == null || !singleNode,
-          description: m.description,
-          direction: m.direction,
-        }))
-      : buildRows(meta, realApplicable);
-    const bucketOf = (r: Row) => {
-      if (!r.applicable) return 3;
-      if (inActive.has(r.displayName)) return 0;
-      if (selected.has(r.displayName)) return 1;
-      return 2;
-    };
-    return built.slice().sort((a, b) => bucketOf(a) - bucketOf(b));
-  }, [meta, realApplicable, inActive, selected, isPrestaging, singleNode]);
+  // ── 3. The What-If ablation's evaluator machinery. Called UNCONDITIONALLY — see the hook's
+  // own warning: `lib/lineage.tsx` reads the same store to build the tree's `?lens=` mask, so
+  // a seed deferred to the panel's mount costs an unmasked refetch and one wrong frame.
+  const whatIf = useWhatIf({ cycleId, dash, inflightCandidates, history });
 
   // Render-phase seed of the metric axis, once per cycle. Two bars per candidate by
   // default: accuracy (a candidate is rarely bad on it, and it's the universal read)
@@ -274,55 +166,10 @@ export function CandidatesCard() {
   // forced — the engine always GATES on θ regardless of what's displayed here.
   if (cycleId && dash && metricsSeededForCycle !== cycleId) {
     setCandidatesState({
-      metrics: new Set<HeadlineMetric>(["accuracy", dash.headline_metric ?? "accuracy"]),
+      metrics: new Set<HeadlineMetric>(["accuracy", electedMetric]),
       metricsSeededForCycle: cycleId,
     });
   }
-
-  // Render-phase seed: when the cycle binds applicable evaluators for the
-  // first time (or the cycle changes), seed `selected` from the formula's
-  // inActive set so the operator opens to "what's actually scored" as the
-  // default. `seededForCycle` (the store flag read as `seeded`) is the single
-  // guard: it fires the seed once per cycle and — unlike a component-local flag
-  // — persists across the New Job ↔ View Results remount, so a tab swap doesn't
-  // re-seed. The store write below flips `seeded` true on the next render
-  // (`useSyncExternalStore`, tear-free), so the guard converges after one fire.
-  // The render loop is held off upstream — `inflightCandidates` is a stable
-  // ref, so the Set chain feeding this condition doesn't churn every render.
-  // Bail when `cycleId == null` (no active campaign yet).
-  if (cycleId && viewApplicable.size > 0 && !seeded) {
-    const seed = new Set<string>();
-    for (const r of rows) {
-      if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
-    }
-    // Seed each evaluator's slider from its realized composite coefficient, so the
-    // What-If opens ≈ the realized criterion and reweighting reveals divergence.
-    setCandidatesState({
-      selected: seed,
-      weights: weightsFromFormula(compositeFormula),
-      seededForCycle: cycleId,
-    });
-  }
-
-  // Prune: when the applicable evaluator set shrinks (e.g. a node was
-  // disabled and its evaluators dropped out), remove selections that fell
-  // off. The effect only removes from `selected`, never adds, so it
-  // terminates after one render (next pass: drop.length === 0).
-  useEffect(() => {
-    if (!seeded) return;
-    const drop = [...selected].filter((n) => !viewApplicable.has(n));
-    if (!drop.length) return;
-    const next = new Set(selected);
-    for (const n of drop) next.delete(n);
-    setCandidatesState({ selected: next });
-  }, [seeded, viewApplicable, selected]);
-
-  const toggle = (name: string) => {
-    const next = new Set(selected);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    setSelected(next);
-  };
 
   // The adopted line's shared reading, off the LATEST round that has one: the set drifts as
   // the line grows, and the newest round names the basis the bars are on now. Served
@@ -379,118 +226,32 @@ export function CandidatesCard() {
     [inflightCandidates],
   );
 
-  // The mask re-scores a candidate's measured ROWS. A course is a run, not a scored row, so
-  // a view whose bars are courses (an L4 candidate's inner cells) has nothing to slice — the
-  // server decorates candidates only. Reading `sample_set_accuracy` off a course yielded null,
-  // which `started` then rendered as "never ran": the one lie this card must not tell. Bars
-  // stay on their own measured value here and the control below says why. Children strictly
-  // alternate, so this is all-or-nothing and the basis never mixes within one chart.
-  const barsAreCourses = useMemo(
-    () => (viewedNode?.children ?? []).some((n) => n.kind === "course"),
-    [viewedNode],
-  );
+  // Bars stay on their own measured value when they are courses, and the control below says
+  // why — the rule itself lives with the assembly it constrains.
+  const areCourses = useMemo(() => barsAreCourses(viewedNode), [viewedNode]);
 
-  const views = useMemo<CandidateView[]>(() => {
-    const sliced = sampleSet != null && !barsAreCourses;
-    // ONE half per bar, ALL-OR-NOTHING, chosen once here: the tree, unless it has no
-    // measurement for this candidate yet. That single condition is the whole rule now — the
-    // ledger mints a candidate before it measures one, but only snapshots the score at
-    // completion, so a bar mid-scoring is the one thing the tree cannot answer.
-    //
-    // It used to also prefer the live half for the whole of an OPEN round, because the crown
-    // rode the round's CLOSE record while `elect_round_winner` decides at the end of SCORING —
-    // a whole `l1_critique` call earlier. The election has its own ledger record at its own
-    // coordinate now, so the tree crowns when the election does and that window is gone.
-    return (viewedNode?.children ?? []).map<CandidateView>((n, i) => {
-      const isCourse = n.kind === "course";
-      // A course shows what it reached, else what it started from. A cut that broke before
-      // measuring anything has no number and must render blank, never as its origin's.
-      const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
-      const live = isCourse ? undefined : inflightByLabel.get(n.label);
-      // An INVALID candidate was rejected before it cost a sample, and the served row reports
-      // `INVALID_SCORES`' synthetic 0.0. The tree withholds that number, so falling back to the
-      // live half would put the fabricated one back on the bar.
-      const useLive = live != null && !live.invalid && own == null;
-      // The chosen half. Every measured number below reads off THIS, so a bar and its whisker
-      // can never come from two different polling clocks.
-      const m = useLive ? live : n;
-      // Slice mode reads the SERVED scorer-faithful value. Election aggregates can't be
-      // re-sliced per sample, so they are suppressed rather than shown on a different basis
-      // than the bar beside them.
-      const accuracy = sliced
-        ? n.sample_set_accuracy
-        : isCourse
-          ? (own ?? null)
-          : (m.accuracy ?? null);
-      const label = isCourse ? (n.task ? panelCellLabel(n.task) : n.dataset_name) : n.label;
-      return {
-        key: nodeKeyOf(n),
-        round: n.round ?? 0,
-        idx: i,
-        candidate_id: n.id,
-        label,
-        accuracy,
-        composite: sliced || isCourse ? null : (m.composite_fitness ?? null),
-        theta: sliced ? null : (m.theta ?? null),
-        theta_se: sliced ? null : (m.theta_se ?? null),
-        // From the same row as the bar above it, whichever half that was.
-        meanFitnessCiLo: sliced ? null : (m.mean_fitness_ci_lo ?? null),
-        meanFitnessCiHi: sliced ? null : (m.mean_fitness_ci_hi ?? null),
-        // Inherited from `CandidateRow` and unset here because NOTHING PLOTS A FLOOR ON A BAR,
-        // and a lift interval is not a bar geometry either. The matched parent and the blocked
-        // lift are per-candidate numbers the inspector renders for the one row it selected
-        // (`ScoringInspector`, off `roundCandidates`), so filling them in here would put a second
-        // writer on a chart nothing reads them from. The election record DOES carry all five —
-        // `ScoreboardRow` and `RoundSummaryCandidate` both serve them — this half simply has no
-        // use for them; `/tree` is a genealogy, not a verdict surface.
-        matchedParentAccuracy: null,
-        matchedParentComposite: null,
-        matchedParentLift: null,
-        matchedParentLiftCiLo: null,
-        matchedParentLiftCiHi: null,
-        evaluators: n.evaluators,
-        is_winner: m.is_winner ?? false,
-        n_samples: sliced ? n.sample_set_n : (m.scored_samples ?? null),
-        n_expected: sliced ? (sampleSet?.length ?? null) : (m.expected_samples ?? null),
-        cached_samples: sliced ? null : (m.cached_samples ?? null),
-        source: useLive ? "inflight" : "history",
-        whatif: sliced ? null : n.lens_value,
-        // Ranks follow their values exactly: suppressed on the same two conditions, or a
-        // bar would carry a position in an ordering whose number it is not showing.
-        compositeRank: sliced || isCourse ? null : n.composite_rank,
-        whatifRank: sliced ? null : n.lens_rank,
-        started: accuracy != null,
-        // SERVED, not inferred from whether the round has closed. `is_winner: false` says
-        // nothing on its own — a round that HELD crowned nobody and every bar in it reads the
-        // same as one still scoring — and the browser used to guess between them off
-        // `dash.rounds[]`, which reported every held round as undecided for the rest of the run.
-        electionPending: !isCourse && !n.election_held,
-        diag: diagView(diagByLabel.get(label)),
-        // Suppressed while sliced or on a course, exactly like the other served aggregates: this
-        // is a rate over the LINE's own set, and re-basing the bars onto a different one leaves
-        // it describing cells the chart is no longer showing.
-        overlapAccuracy: sliced || isCourse ? null : (overlapByCandidate.get(n.id)?.accuracy ?? null),
-        overlapN: sliced || isCourse ? null : (overlapByCandidate.get(n.id)?.total ?? null),
-      };
-    });
-  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel, overlapByCandidate]);
-
-  // A fork's attempt is a course under the hood — the ⑂ marks lead there.
-  const forkKeys = useMemo(
+  const views = useMemo<CandidateView[]>(
     () =>
-      new Set(
-        (viewedNode?.children ?? []).filter((n) => n.course_kind != null).map((n) => nodeKeyOf(n)),
-      ),
-    [viewedNode],
+      candidateViews({
+        viewedNode,
+        inflightByLabel,
+        sampleSet,
+        diagByLabel,
+        overlapByCandidate,
+      }),
+    [viewedNode, inflightByLabel, sampleSet, diagByLabel, overlapByCandidate],
   );
+
+  const forkKeys = useMemo(() => forkKeysOf(viewedNode), [viewedNode]);
 
   // Only what the BARS need from the lineage: the metric they paint, the fork
   // marks on the dendrogram, and the descendant count on the forest toggle. The
   // tree itself — forests, overlays, cleanup — moved out with `ForestCard`.
-  const { metric, forkedFrom, expanded, setShowForest, totalDescendants } = useLineage({
+  const { metric, forkedFrom, revealLane, setShowForest, totalDescendants } = useLineage({
     campaignId,
     cycleId,
     path: viewedPath,
+    electedMetric,
   });
 
   // The bar chart's plot geometry, published by its `xBridge` plugin — the one
@@ -536,20 +297,14 @@ export function CandidatesCard() {
 
   // The ⑂ click: free the hierarchy. The bars plot one cycle, so a sibling has
   // nowhere to be drawn among them — reveal the forest below (which can draw it),
-  // with that cycle expanded and in view. The bars stay put.
-  //
-  // `expanded` holds LANE KEYS (`nodeKeyOf` = `{encoded path}|{id}`), which is what
-  // `forest-layout::layout` matches on. This used to add the raw cycle id, so the set grew
-  // a key the layout could never match and the click silently did nothing but open an
-  // unexpanded forest. Navigation likewise rides the node's own path.
+  // with that cycle expanded and in view. The bars stay put. Navigation rides the
+  // node's own path, never a bare cycle id.
   const onFreeHierarchy = useCallback(
     (course: LineageNode) => {
-      const next = new Set(expanded).add(nodeKeyOf(course));
-      setCandidatesState({ showForest: true, expanded: next });
-      recordView(campaignId, { showForest: true, expandedLanes: [...next] });
+      revealLane(nodeKeyOf(course));
       selectCyclePath(pathOf(course), null);
     },
-    [expanded, campaignId, recordView, selectCyclePath],
+    [revealLane, selectCyclePath],
   );
 
   const selectedKey = useMemo(
@@ -594,6 +349,72 @@ export function CandidatesCard() {
 
   const lensActive = lens !== "" && !whatifActive;
 
+  // Read off the SERVED reading, not off the bars: slicing nulls every candidate's
+  // `overlapAccuracy`, so asking the views would say "no trajectory" for the one state that
+  // exists because of it.
+  const hasTrajectory = overlap != null && !areCourses;
+
+  // Seeded ON the render a reading first appears, so the default view is what it always was.
+  // Latched per cycle, like the metric axis — the operator can then turn it off and it stays
+  // off for that cycle.
+  if (cycleId && overlap != null && trajectorySeededForCycle !== cycleId) {
+    setCandidatesState({ showTrajectory: true, trajectorySeededForCycle: cycleId });
+  }
+
+  // ONE control, three rungs, because its two on-states are the same idea at two strengths:
+  // SHOW the adopted line's reading on the cells all of it answered, then put EVERY bar on
+  // those same cells. That is also why the series itself drops out at rung 2 — once all the
+  // bars are read on that set, a separate "read on the shared set" series is the same bars
+  // twice. The rung is DERIVED: the slice is `SelectionContext.sampleSet`, which already
+  // owns "which cells are the bars on", so this reads it rather than keeping a second copy.
+  const sliceOn = sampleSet != null && !areCourses;
+  const rung = sliceOn ? 2 : showTrajectory && hasTrajectory ? 1 : 0;
+  const trajectoryDisabled = areCourses || (!hasTrajectory && sampleUniverse.length === 0);
+  const stepTrajectory = () => {
+    if (rung === 2) {
+      setSelectionForSampleSet(null);
+      setCandidatesState({ showTrajectory: false });
+    } else if (rung === 1 || !hasTrajectory) {
+      // The cells the bars move onto are the trajectory's OWN where there are any, so the
+      // series and the slice are the same set by construction rather than by agreement.
+      setSelectionForSampleSet(overlap?.sample_ids ?? sampleUniverse);
+      setCandidatesState({ showTrajectory: hasTrajectory });
+    } else {
+      setCandidatesState({ showTrajectory: true });
+    }
+  };
+  // What the NEXT press does, per rung. With no trajectory reading yet, rung 1 does not
+  // exist and the first press goes straight to the slice — so it must not promise a series
+  // the campaign cannot draw, and it says WHY there is none: a run reads as "still loading"
+  // otherwise, when in fact nothing is pending.
+  const trajectoryNext = [
+    hasTrajectory
+      ? "Show the winner trajectory — every candidate on the adopted line, read on the one set of cells all of them answered."
+      : "Re-base every bar onto one fixed set of cells so the candidates compare on the same basis. There is no trajectory to show yet: the adopted line is still C0 alone, and a second member arrives with the first round that promotes a winner — a held round leaves nothing to read C0 against.",
+    "Re-base every bar onto those same cells, so all the candidates compare on one basis. The trajectory series folds in — at that point it would be the same bars twice.",
+    "Back to each candidate's own measured subset.",
+  ];
+
+  // What the chart is currently painting, and the half of it the header does not already
+  // name. `metric == null` IS "has no chip" — the registry answers it, so this row can never
+  // fall out of step with the chips above it.
+  const seriesCtx = useMemo<SeriesCtx>(
+    () => ({
+      metrics,
+      showWhatIf: whatIf.open,
+      showCache,
+      showTrajectory: rung === 1,
+      views,
+      unit,
+      electedMetric,
+    }),
+    [metrics, whatIf.open, showCache, rung, views, unit, electedMetric],
+  );
+  const legend = useMemo(
+    () => activeSeries(seriesCtx).filter((s) => s.metric == null),
+    [seriesCtx],
+  );
+
   // Rides the menu label as a count, never as a gate: a disabled control cannot tell you C0
   // was replayed, which is the answer the origin is most often opened for.
   const cacheHitCount = useMemo(
@@ -628,7 +449,7 @@ export function CandidatesCard() {
     <CardFrame
       className={cx(
         "cand-card",
-        showWhatIf && "whatif-open",
+        whatIf.open && "whatif-open",
       )}
       // ONE short row, and only what the operator reads constantly: which number
       // am I looking at (Metric), and the escape hatches (⋯, copy). Everything
@@ -659,42 +480,69 @@ export function CandidatesCard() {
             </Badge>
           )}
           <ToolbarSep />
-          {/* ONE metric axis for the whole card: it picks the bar series AND the
-              number painted on every node, in both views. Multi-select — Acc+Comp
-              plots them side by side. The engine always GATES on θ; this is pure
-              display, seeded from the campaign default so θ is offered, never forced.
-              It stays in the header because "which number is this?" is the question
-              you ask on every glance. */}
-          {/* `joined`: these are three facets of ONE axis, not three switches —
-              one frame, no borders between them, the on ones underlined. */}
-          <ChipGroup label="Metric" joined>
+          {/* WHICH BARS — four facets of one question, hence `joined`. The first three are
+              the metric axis, which also names every dendrogram node; the fourth is the
+              trajectory, not a fourth number but `accuracy` on a fixed basis, which is why
+              it keeps its own ink and stays out of `metrics`. Each chip's underline wears
+              that ink, so this group IS the legend for what it switches and the row below
+              carries only the chipless channels. Display only — the engine gates on θ
+              whatever is lit here. */}
+          <ChipGroup label="Bars" joined>
             {HEADLINE_METRICS.map((m) => (
               <Chip
                 key={m.id}
                 icon
                 on={metrics.has(m.id)}
+                ink={`var(${metricInkToken(m.id, electedMetric)})`}
                 ariaLabel={headlineMetricLabel(m.id)}
                 title={m.title}
                 onClick={() => toggleMetric(m.id)}
               >
-                {METRIC_GLYPH[m.id]}
+                {m.glyph}
               </Chip>
             ))}
+            {/* `∩` — the trajectory IS the intersection: the cells every candidate on the
+                adopted line answered. Notation, like the three beside it. Teal ink, because
+                it is not a fourth number but `accuracy` on a fixed basis, and it stays out
+                of `metrics` for the same reason (that set names the dendrogram's node
+                labels, and most candidates were never read on this set at all). */}
+            <Chip
+              icon
+              on={rung > 0}
+              // The chip wears the ink of what it put ON SCREEN, so it can never imply a series
+              // the campaign has not drawn: teal while the trajectory series is up, and the
+              // sample-set ink once every bar is on the slice — which is the colour of the panel
+              // that press opens. A run that has held every round has NO second line member, so
+              // its trajectory rung does not exist and teal must never appear for it.
+              ink={rung === 2 ? "var(--color-new)" : "var(--color-overlap)"}
+              disabled={trajectoryDisabled}
+              ariaLabel={
+                rung === 2
+                  ? "Every bar is on one shared set of cells; press to leave"
+                  : rung === 1
+                    ? "Trajectory shown — press to put every bar on its cells"
+                    : hasTrajectory
+                      ? "Show the winner trajectory"
+                      : "Compare every candidate on one fixed set of cells"
+              }
+              title={
+                areCourses
+                  ? "These bars are runs, not scored cells — open a run to compare its candidates."
+                  : trajectoryNext[rung]
+              }
+              onClick={stepTrajectory}
+            >
+              ∩
+            </Chip>
           </ChipGroup>
           <ToolbarSpacer />
           <Menu
             renderTrigger={({ open, toggle }) => (
               <Chip
                 icon
-                on={
-                  open ||
-                  lensActive ||
-                  showWhatIf ||
-                  showCache ||
-                  (sampleSet != null && !barsAreCourses)
-                }
+                on={open || lensActive || whatIf.open || showCache}
                 ariaLabel="More candidate options"
-                title="Lens, What-If, sample set, cache overlay, and the θ explainer"
+                title="Lens, What-If, cache overlay, and the θ explainer"
                 onClick={toggle}
               >
                 <IconMore />
@@ -719,23 +567,11 @@ export function CandidatesCard() {
                 />
                 <MenuSep />
                 <MenuCheck
-                  on={showWhatIf}
-                  onClick={() => setShowWhatIf(!showWhatIf)}
+                  on={whatIf.open}
+                  onClick={() => whatIf.setOpen(!whatIf.open)}
                   title="Pick evaluators and reweight them to recompute every score under a criterion you choose."
                 >
                   What-If ablation
-                </MenuCheck>
-                <MenuCheck
-                  on={sampleSet != null && !barsAreCourses}
-                  disabled={sampleUniverse.length === 0 || barsAreCourses}
-                  onClick={() => setSelectionForSampleSet(sampleSet ? null : sampleUniverse)}
-                  title={
-                    barsAreCourses
-                      ? "These bars are runs, not scored samples — pick a run to slice its candidates."
-                      : "Recompute every bar over one fixed set of samples so candidates compare on the same basis."
-                  }
-                >
-                  Fixed sample set{sampleSet && !barsAreCourses ? ` · ${sampleSet.length}` : ""}
                 </MenuCheck>
                 {/* Never disabled — the origin is normally the cached one, so greying out
                     when only C0 was replayed hides the case this is opened for. */}
@@ -768,43 +604,34 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
-        {sampleSet && !barsAreCourses && (
+        {sampleSet && !areCourses && (
           <SampleSetControl rounds={history} overlap={overlap} unit={unit} />
         )}
         {/* Legend + chart + genealogy wrapped so they share one width — the
             dendrogram's x-alignment depends on sitting in the same box as the
             canvas it hangs under. */}
         <div className="fitness-chart-wrap">
-          {/* `showCache` forces the legend on even at one metric: the dashed line rides the
-              accuracy axis, so without a key 0.50 reads as a score. */}
-          {(metrics.size > 1 || showWhatIf || showCache || overlap != null) && (
+          {/* Only the channels with no chip. A metric restating `headlineMetricLabel` under
+              its own lit, ink-matched chip is a second row answering a question the header
+              already answered — so on the default view this is empty and does not render. */}
+          {legend.length > 0 && (
             <div className="fitness-legend">
-              {metrics.has("accuracy") && (
-                <span><span className="dot accuracy" />accuracy</span>
-              )}
-              {metrics.has("ability") && (
-                <span><span className="dot ability" />ability θ</span>
-              )}
-              {metrics.has("composite") && (
-                <span><span className="dot composite" />composite</span>
-              )}
-              {showWhatIf && <span><span className="dot whatif" />what-if</span>}
-              {overlap != null && (
-                <span title={`Every candidate on the winner trajectory, read on the same ${unitCount(overlap.sample_ids.length, unit)} — the only pair of bars here that can be differenced`}>
-                  <span className="dot overlap" />trajectory · {overlap.sample_ids.length}
+              {legend.map((s) => (
+                <span key={s.key} title={s.hint?.(seriesCtx)}>
+                  <span
+                    className={cx("swatch", s.kind === "line" && "line", s.hollow && "hollow")}
+                    style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
+                  />
+                  {s.legend?.(seriesCtx)}
                 </span>
-              )}
-              {showCache && (
-                <span title="Share of each candidate's scored panel that was replayed from the archive">
-                  <span className="dash cached" />share from cache
-                </span>
-              )}
+              ))}
             </div>
           )}
           <FitnessChart
             views={views}
             metrics={metrics}
-            showWhatIf={showWhatIf}
+            showWhatIf={whatIf.open}
+            showTrajectory={rung === 1}
             showCache={showCache}
             divergenceBoundary={divergenceBoundary}
             inFlightIndex={inFlightIndex}
@@ -812,6 +639,7 @@ export function CandidatesCard() {
             onSelect={onSelect}
             onGeometry={onGeometry}
             unit={unit}
+            electedMetric={electedMetric}
           />
           {/* The forest toggle lives HERE, not in the header — it reveals the tree,
               so it sits with the tree. Tiny and quiet on purpose: most campaigns
@@ -834,16 +662,8 @@ export function CandidatesCard() {
             {forestToggle}
           </div>
         </div>
-        {showWhatIf && !viewedCandidateId && (
-          <WhatIfGrid
-            rows={rows}
-            selected={selected}
-            inActive={inActive}
-            weights={weights}
-            views={views}
-            onToggle={toggle}
-            onWeight={setWeight}
-          />
+        {whatIf.open && !viewedCandidateId && (
+          <WhatIfGrid whatIf={whatIf} views={views} />
         )}
       </div>
     </CardFrame>

@@ -17,7 +17,7 @@
 .account-close:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .account-pane-body{padding:var(--space-18) var(--space-24);display:flex;flex-direction:column;overflow-y:auto}
 .account-loading,.account-muted{color:var(--color-text-tertiary);font-size:var(--text-base)}
-.account-error{color:#e74c3c;font-size:var(--text-sm);margin:0 0 var(--space-12) 0}
+.account-error{color:var(--color-danger);font-size:var(--text-sm);margin:0 0 var(--space-12) 0}
 /* Label/value row. flex-wrap, not a fixed 170px grid track: when the value
    can no longer make its minimum the label keeps its width and the value
    drops to its own line, instead of both being crushed. Identical to the old
@@ -60,7 +60,7 @@
 /* Security pane (Phase 6 round 2 — provider badge + quota + sign-out) */
 .account-badge-strong{font-size:var(--text-xs);letter-spacing:0.05em;background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-border);font-weight:500}
 .account-signout{align-self:flex-start;background:transparent;border:0.5px solid var(--color-border);border-radius:5px;padding:var(--space-6) var(--space-14);color:var(--color-text-primary);cursor:pointer;font-size:var(--text-base)}
-.account-signout:hover:not(:disabled){background:var(--color-background-hover);border-color:#e74c3c;color:#e74c3c}
+.account-signout:hover:not(:disabled){background:var(--color-background-hover);border-color:var(--color-danger);color:var(--color-danger)}
 .account-signout:disabled{opacity:0.55;cursor:not-allowed}
 /* auto-fit, not repeat(3,1fr): three quota cells across a 375px screen give
    each ~105px, which the numbers overflow. This is still three across wherever
@@ -140,7 +140,7 @@
 .wstorage-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-12)}
 .wstorage-name{font-size:var(--text-base);color:var(--color-text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wstorage-tag{margin-left:7px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;padding:1px var(--space-6);border-radius:999px;background:var(--color-background-hover);color:var(--color-text-tertiary);border:0.5px solid var(--color-border)}
-.wstorage-tag.deleted{color:#e74c3c}
+.wstorage-tag.deleted{color:var(--color-danger)}
 .wstorage-bytes{font-size:var(--text-base);font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .wstorage-bar{height:5px;border-radius:3px;background:var(--color-background-secondary);overflow:hidden}
 .wstorage-bar-fill{height:100%;border-radius:3px;background:var(--color-accent)}

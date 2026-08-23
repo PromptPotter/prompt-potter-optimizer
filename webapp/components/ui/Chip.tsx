@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Chip.module.css";
 
@@ -15,6 +15,7 @@ export function Chip({
   disabled,
   ariaLabel,
   icon,
+  ink,
   children,
 }: {
   on: boolean;
@@ -26,12 +27,18 @@ export function Chip({
   ariaLabel?: string;
   // Square, icon-sized. The label then lives in `title` + `ariaLabel` only.
   icon?: boolean;
+  // A colour this chip's lit state should wear instead of the accent — for a chip that
+  // switches something DRAWN, so the control carries the same ink as the thing it turns
+  // on and needs no legend entry of its own. Only the `joined` underline reads it; state
+  // is still carried by `aria-pressed`, never by colour.
+  ink?: string;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       className={cx(s.chip, icon && s.icon, on && s.on)}
+      style={ink ? ({ "--ink": ink } as CSSProperties) : undefined}
       aria-pressed={on}
       aria-label={ariaLabel}
       title={title}

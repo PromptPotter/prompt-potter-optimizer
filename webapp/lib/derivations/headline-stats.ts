@@ -25,25 +25,28 @@ export type HeadlineMetric = "accuracy" | "composite" | "ability";
 // The toggle's options, in display order, each with the teaching tooltip that
 // keeps θ from reading as an unexplained jargon number (the `AbilityInfo`
 // popover carries the long form).
-// Display order — accuracy first (always shown; a candidate is rarely bad on it),
-// then ability θ (the metric the winner is elected on, the usual second bar), then
-// composite. `primaryMetric` reads this order too, so accuracy is the node-label
-// metric whenever it is shown.
-export const HEADLINE_METRICS: { id: HeadlineMetric; chip: string; title: string }[] = [
+// Display order — accuracy first (always shown; a candidate is rarely bad on it), then ability θ
+// (usually the metric the winner is elected on), then composite. `primaryMetric` reads this order
+// as its TIE-BREAK only: the elected metric wins when it is on.
+//
+// `glyph` is the notation each number is already written in, which is why it IS the icon rather
+// than a picture of one. It lives here because this table is the one owner of a metric's name,
+// prose and order — `candidates/series.ts` joins to it rather than restating any of the three.
+export const HEADLINE_METRICS: { id: HeadlineMetric; glyph: string; title: string }[] = [
   {
     id: "accuracy",
-    chip: "Acc",
+    glyph: "%",
     title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
   },
   {
     id: "ability",
-    chip: "θ",
+    glyph: "θ",
     title:
       "Difficulty-adjusted ability θ — the metric the winner is actually elected on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.",
   },
   {
     id: "composite",
-    chip: "Comp",
+    glyph: "∑",
     title:
       "Composite fitness under the active scoring formula (equals accuracy when no formula is set).",
   },
@@ -53,11 +56,18 @@ export function headlineMetricLabel(m: HeadlineMetric): string {
   return m === "ability" ? "ability θ" : m === "composite" ? "composite" : "accuracy";
 }
 
-// The candidates card's metric axis is a SET (the bars can pair several series),
-// but a node LABEL is one number. Take the first selected metric in canonical
-// `HEADLINE_METRICS` order — deterministic, and it feeds `fmtHeadlineValue`
-// unchanged, so the tree renderers need no new formatter.
-export function primaryMetric(metrics: ReadonlySet<HeadlineMetric>): HeadlineMetric {
+// The candidates card's metric axis is a SET (the bars can pair several series), but a node
+// LABEL is one number. Prefer the metric the campaign ELECTS on where it is shown — the bars
+// paint that one at full accent, and a node printing a different number under a bar that
+// loud is the card disagreeing with itself. Accuracy is always seeded on and sorts first in
+// canonical order, so without `elected` this silently answered "accuracy" forever, whatever
+// the engine was deciding on. Canonical order is the fallback, and `fmtHeadlineValue` takes
+// the result unchanged, so the tree renderers need no new formatter.
+export function primaryMetric(
+  metrics: ReadonlySet<HeadlineMetric>,
+  elected?: HeadlineMetric,
+): HeadlineMetric {
+  if (elected && metrics.has(elected)) return elected;
   return HEADLINE_METRICS.find((m) => metrics.has(m.id))?.id ?? "accuracy";
 }
 

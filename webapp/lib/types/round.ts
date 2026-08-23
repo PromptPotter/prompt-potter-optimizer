@@ -2,7 +2,7 @@
 // Fitness, Samples, and Inspector together; this file freezes the
 // shapes that travel along it.
 
-import type { CandidateRow } from "./candidate";
+import type { ElectedRow } from "./candidate";
 
 // The round document and its rows are GENERATED from the Pydantic models
 // (`RoundResult.model_dump()` IS `rounds/round_NNNN.json`). They were hand-mirrored
@@ -64,7 +64,7 @@ export interface NodeBlock {
 // order. Round 0 holds the single origin row. The dashboard's current
 // round may carry in-flight candidates that haven't closed into
 // `dash.rounds[]` yet; the derivation merges them in once, here.
-export type RoundCandidates = Map<number, CandidateRow[]>;
+export type RoundCandidates = Map<number, ElectedRow[]>;
 
 // What a round-picker surface needs to render its axis.
 export interface RoundAxis {

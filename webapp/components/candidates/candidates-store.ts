@@ -1,11 +1,11 @@
 "use client";
 // Cross-mount view state for the candidates card (bars + genealogy + forest).
 //
-// Both ChatPane (New Job tab) and the Dashboard render their own
-// <CandidatesCard/>, but only one tab is mounted at a time — local component
-// state would reset on every tab swap. This module-scoped store keeps the view,
-// the metric axis, the what-if picks and the expanded lanes coherent across
-// remounts.
+// Module-scoped rather than a context because TWO SUBTREES read it and they are not in an
+// ancestor/descendant relation: the card itself, and `lib/lineage.tsx`, which turns the
+// What-If picks into the served tree's `?lens=` mask. There is no component that contains
+// both, so there is nothing to hold this state. It survives the card's own remounts as a
+// side effect, not as its reason.
 //
 // Seeding is scoped to the cycle: the `*ForCycle` latches record which cycle the
 // current selection was seeded for, so binding a fresh cycle re-seeds against
@@ -34,6 +34,19 @@ interface CandidatesState {
   // Invariant: never empty. Unsetting the last chip is a no-op.
   metrics: ReadonlySet<HeadlineMetric>;
   metricsSeededForCycle: string | null;
+
+  // The trajectory series — every candidate on the adopted line read on the ONE set of cells
+  // all of them answered. A peer of the metric chips rather than a member: it is not a
+  // fourth number, it is `accuracy` on a fixed basis, which is why it carries its own ink
+  // and stays out of `metrics` (that set decides the node LABEL, and a node labelled with a
+  // rate most candidates were never read on would be blank for most of the tree).
+  //
+  // The step ABOVE it — re-basing every bar onto that same set — is not stored here: it is
+  // `SelectionContext.sampleSet`, which already owns "which cells are the bars on". Two
+  // writers on one fact is what this store exists to avoid, so the chip reads that one and
+  // this flag together and derives its rung.
+  showTrajectory: boolean;
+  trajectorySeededForCycle: string | null;
 
   // What-If ablation. A lens, not a metric — it re-projects the record under an
   // alternative criterion rather than picking a different served number.
@@ -64,6 +77,8 @@ let state: CandidatesState = {
   showForest: false,
   metrics: new Set<HeadlineMetric>(["accuracy"]),
   metricsSeededForCycle: null,
+  showTrajectory: false,
+  trajectorySeededForCycle: null,
   showWhatIf: false,
   selected: new Set<string>(),
   weights: {},

@@ -7,8 +7,8 @@
 .auth-chip-gold{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-text-on-accent)}
 .auth-chip-rust{background:var(--color-accent-strong);border-color:var(--color-accent-strong);color:#fff}
 /* Default-browser-style blue hyperlinks used inside the auth prompt. */
-.auth-link{color:#3b82f6;text-decoration:underline}
-.auth-link:hover{color:#60a5fa}
+.auth-link{color:var(--color-link);text-decoration:underline}
+.auth-link:hover{color:var(--color-link-hover)}
 .auth-legal-row{display:flex;justify-content:center;align-items:center;gap:var(--space-8);font-size:var(--text-sm);color:var(--color-text-tertiary)}
 
 /* Shared auth core — the sign-in controls + copy reused by the /login page and

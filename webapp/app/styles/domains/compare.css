@@ -2,20 +2,6 @@
    (imported just above this file) rather than restating it; only what is genuinely new to
    this surface lives here. Theme-aware, operator-dense. */
 
-/* Per-campaign series palette. On :root because a canvas paint cannot resolve `var()` —
-   `theme.ts::getCss` reads these off the root at paint time, so the DOM swatch and the chart
-   line are one palette and a theme flip moves both. */
-:root {
-  --cmp-series-1: #4f8ef7;
-  --cmp-series-2: #e8833a;
-  --cmp-series-3: #3fb27f;
-  --cmp-series-4: #c9639e;
-  --cmp-series-5: #d4b02c;
-  --cmp-series-6: #6f6bd8;
-  --cmp-series-7: #4bb3c4;
-  --cmp-series-8: #b5603f;
-}
-
 .cmp-layout {
   display: grid;
   grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);

@@ -4,7 +4,7 @@ import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1, fmtSigned } from "@/lib/format";
-import type { CandidateRow, SelectedCandidate } from "@/lib/types";
+import type { ElectedRow, SelectedCandidate } from "@/lib/types";
 import { liveCandidateRow } from "@/lib/poll";
 import {
   candidateObserveConfig,
@@ -69,7 +69,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const { byRound } = useRoundCandidates();
   // Arms in this candidate's round — the same rows the sample list slices below.
   const arms = selected ? (byRound.get(selected.round) ?? []).length : 0;
-  const row = useMemo<CandidateRow | undefined>(() => {
+  const row = useMemo<ElectedRow | undefined>(() => {
     if (!selected) return undefined;
     return (byRound.get(selected.round) ?? []).find(
       (c) => c.candidate_id === selected.candidate_id,

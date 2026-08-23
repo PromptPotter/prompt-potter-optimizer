@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitnessTrend } from "@/lib/derivations";
+import { fitnessTrend, primaryMetric } from "@/lib/derivations";
 import type { RoundSummary } from "@/lib/api/types";
 
 const round = (r: number, accuracy: number, composite_fitness: number): RoundSummary =>
@@ -38,5 +38,22 @@ describe("fitnessTrend", () => {
   it("running-best folds over the measured series", () => {
     const { best } = fitnessTrend([round(0, 0.4, 0.4), round(1, 0.9, 0.9), round(2, 0.3, 0.3)]);
     expect(best).toEqual([0.4, 0.9, 0.9]);
+  });
+});
+
+describe("primaryMetric", () => {
+  // A node paints ONE number, and it has to be the one the bars are shouting. Accuracy is
+  // always seeded on and sorts first in canonical order, so before the `elected` argument
+  // this answered "accuracy" forever — every dendrogram node labelled with a rate while the
+  // crown beside it was decided on θ.
+  it("prefers the metric the campaign elects on", () => {
+    expect(primaryMetric(new Set(["accuracy", "ability"]), "ability")).toBe("ability");
+    expect(primaryMetric(new Set(["accuracy", "composite"]), "composite")).toBe("composite");
+  });
+
+  it("falls back to canonical order when the elected metric is not shown", () => {
+    expect(primaryMetric(new Set(["accuracy", "composite"]), "ability")).toBe("accuracy");
+    expect(primaryMetric(new Set(["composite"]), "ability")).toBe("composite");
+    expect(primaryMetric(new Set())).toBe("accuracy");
   });
 });

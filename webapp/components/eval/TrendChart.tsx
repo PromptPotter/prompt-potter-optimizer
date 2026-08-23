@@ -9,6 +9,7 @@ import {
   useThemeVersion,
 } from "@/lib/theme";
 import { CardFrame } from "@/components/ui";
+import { metricInkToken } from "@/components/candidates/series";
 import { degradedRoundNotices, fitnessTrend } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
@@ -33,17 +34,24 @@ export const TrendChart = memo(function TrendChart() {
   // twin of the CLI's yellow degraded line. `critical` stays on the loud banner.
   const degraded = degradedRoundNotices(dash);
 
+  // Ink by ROLE, from the ONE declaration the candidates card reads — the metric the engine
+  // elects on is the loud line here too, so the operator learns each channel's colour once.
+  const elected = dash?.headline_metric ?? "accuracy";
+  const accuracyInk = getCss(metricInkToken("accuracy", elected));
   // Two axes, deliberately. `y` is accuracy, pinned to 0..1 and unlabelled. `theta` is a LOGIT —
   // unbounded, signed, and the series the round is actually won on — so it cannot share that
   // scale and gets its own VISIBLE axis on the right. Drawing it against 0..1 would clip every
   // negative ability to the floor and read as a run that never started.
+  //
+  // Best-so-far and this-round are one metric, so they share one ink and differ by FILL — the
+  // envelope-vs-line device, not a second hue.
   const data = {
     labels,
     datasets: [
-      { data: bestData, borderColor: getCss("--color-accent"), backgroundColor: cssRgba("--color-accent-rgb", 0.08), tension: 0.3, pointRadius: 2, fill: true, borderWidth: 1.5, yAxisID: "y", label: "best accuracy" },
-      { data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "y", label: "round accuracy" },
+      { data: bestData, borderColor: accuracyInk, backgroundColor: cssRgba("--color-accent-rgb", 0.08), tension: 0.3, pointRadius: 2, fill: true, borderWidth: 1.5, yAxisID: "y", label: "best accuracy" },
+      { data: curData, borderColor: accuracyInk, tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "y", label: "round accuracy" },
       ...(hasTheta
-        ? [{ data: thetaData, borderColor: getCss("--color-text-secondary"), borderDash: [4, 3], tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "theta", label: "ability θ", spanGaps: true }]
+        ? [{ data: thetaData, borderColor: getCss(metricInkToken("ability", elected)), borderDash: [4, 3], tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "theta", label: "ability θ", spanGaps: true }]
         : []),
     ],
   };

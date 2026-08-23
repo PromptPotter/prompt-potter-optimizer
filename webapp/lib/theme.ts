@@ -67,6 +67,15 @@ export function cssRgba(rgbVar: string, alpha: number): string {
   return `rgba(${getCss(rgbVar)},${alpha})`;
 }
 
+// Ink for the Nth arbitrary series — a campaign in Compare, a model in Activity. The palette is
+// `--chart-series-1..8` in tokens.css and cycles past the eighth; every categorical chart reads
+// it through here, because a hardcoded copy beside a canvas is a palette that never flips theme.
+const SERIES_SLOTS = 8;
+
+export function seriesColor(index: number): string {
+  return getCss(`--chart-series-${(index % SERIES_SLOTS) + 1}`);
+}
+
 // Updates Chart.defaults to the current theme's CSS-var colours. Called
 // once on mount and re-called on every theme flip via bumpThemeVersion.
 export function applyChartDefaults(): void {

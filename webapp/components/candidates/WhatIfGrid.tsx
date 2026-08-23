@@ -1,34 +1,20 @@
 "use client";
 import { TERMS } from "@/lib/terms";
-import { type Row } from "./meta";
 import { whatifIconFor } from "./icons";
+import type { WhatIf } from "./useWhatIf";
 import { DEFAULT_WHATIF_WEIGHT } from "./fitness-bars";
 import type { CandidateView } from "@/lib/types";
 import { FitnessRankSummary } from "./FitnessRankSummary";
-
-interface Props {
-  rows: Row[];
-  selected: Set<string>;
-  inActive: Set<string>;
-  weights: Readonly<Record<string, number>>;
-  views: CandidateView[];
-  onToggle: (name: string) => void;
-  onWeight: (name: string, weight: number) => void;
-}
 
 // The what-if ablation widget: pick evaluators + set each one's weight to
 // recompute candidate scores as a weighted sum (the bar twin of the served
 // `?mask=` formula) and watch the ranking shift. The on-disk composite is
 // untouched. Weights seed from the realized composite coefficients.
-export function WhatIfGrid({
-  rows,
-  selected,
-  inActive,
-  weights,
-  views,
-  onToggle,
-  onWeight,
-}: Props) {
+//
+// One prop for the whole evaluator half — the six fields arrive from `useWhatIf`, which owns
+// them, so a new one reaches this grid without a signature edit at the card in between.
+export function WhatIfGrid({ whatIf, views }: { whatIf: WhatIf; views: CandidateView[] }) {
+  const { rows, selected, inActive, weights, toggle: onToggle, setWeight: onWeight } = whatIf;
   return (
     <div className="fitness-whatif">
       <div className="whatif-legend">

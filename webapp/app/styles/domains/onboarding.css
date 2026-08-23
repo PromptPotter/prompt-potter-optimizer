@@ -14,7 +14,7 @@
 .new-campaign-field span{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
 .new-campaign-field select,.new-campaign-field input{padding:var(--space-8) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base)}
 .new-campaign-loading{color:var(--color-text-tertiary);font-style:italic;font-size:var(--text-sm)}
-.new-campaign-error{color:#e74c3c;font-size:var(--text-sm);margin:0}
+.new-campaign-error{color:var(--color-danger);font-size:var(--text-sm);margin:0}
 .new-campaign-field textarea{padding:var(--space-8) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base);font-family:inherit;resize:vertical}
 .new-campaign-field button{align-self:flex-end;padding:var(--space-6) var(--space-12);border-radius:5px;border:0.5px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-size:var(--text-sm);cursor:pointer}
 .new-campaign-field button:hover:not(:disabled){background:var(--color-background-hover)}

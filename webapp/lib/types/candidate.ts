@@ -39,18 +39,13 @@ export interface CandidateRow {
   // it too, and it does not wait for round close. ONE band, one writer, every arm.
   meanFitnessCiLo: number | null;
   meanFitnessCiHi: number | null;
-  // The floor this candidate was JUDGED against — the origin restricted to the samples
-  // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
-  // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
-  // the promotion gate used. `null` for candidates outside the election fit — nothing
-  // matched them.
-  matchedParentAccuracy: number | null;
-  matchedParentComposite: number | null;
-  // The blocked lift over that floor WITH its 95% interval — served, and sharper than the mean
-  // band above because pairing removes the parent's cell-to-cell variation instead of carrying
-  // it as noise. An interval spanning 0 means the round could not separate this candidate from
-  // its parent, which a bare difference of two accuracies cannot say. `null` below two shared
-  // cells: an interval from one pair is a fiction.
+  // The blocked lift over the floor this candidate was JUDGED against, WITH its 95% interval —
+  // served, and the only comparable answer to "by how much": under `per_round_resubset` a bare
+  // difference of two accuracies is the luckiest draw minus the fullest one. Sharper than the
+  // mean band above, because pairing removes the parent's cell-to-cell variation instead of
+  // carrying it as noise. An interval spanning 0 means the round could not separate this
+  // candidate from its parent — which is why nothing may render the point estimate alone.
+  // `null` below two shared cells: an interval from one pair is a fiction.
   matchedParentLift: number | null;
   matchedParentLiftCiLo: number | null;
   matchedParentLiftCiHi: number | null;
@@ -68,6 +63,18 @@ export interface CandidateRow {
   // Which source the row came from. Lets renderers tag in-flight bars,
   // and lets the derivation layer prove its own dedup discipline.
   source: CandidateSource;
+}
+
+// The spine row PLUS the two matched-parent FLOORS — the origin restricted to the cells one
+// candidate measured. Only the round document carries them (`ScoreboardRow` /
+// `RoundSummaryCandidate`); `/tree` is a genealogy and serves the lift verdict without the
+// floors it was taken over, so a row assembled from the tree is not an elected row.
+export interface ElectedRow extends CandidateRow {
+  // Under elimination a candidate may have run 8 of 20, so its `accuracy` is NOT comparable
+  // to the origin's full-set rate; this is the number the promotion gate used. `null` for
+  // candidates outside the election fit — nothing matched them.
+  matchedParentAccuracy: number | null;
+  matchedParentComposite: number | null;
 }
 
 // The spine row PLUS the overlays the candidates card paints on it. ONE array

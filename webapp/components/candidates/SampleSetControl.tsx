@@ -21,7 +21,6 @@ import {
   toggleInSet,
 } from "@/lib/sample-set";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
-import { NEW_BG, NEW_BORDER, NEW_COLOR } from "@/components/dashboard/samples/trajectoryStyles";
 
 const BTN: CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -37,9 +36,9 @@ const BTN: CSSProperties = {
 function activeStyle(on: boolean): CSSProperties {
   return {
     ...BTN,
-    borderColor: on ? NEW_BORDER : "var(--color-border)",
-    background: on ? NEW_BG : "transparent",
-    color: on ? NEW_COLOR : "var(--color-text-secondary)",
+    borderColor: on ? "var(--color-new-border)" : "var(--color-border)",
+    background: on ? "var(--color-new-bg)" : "transparent",
+    color: on ? "var(--color-new)" : "var(--color-text-secondary)",
   };
 }
 
@@ -81,9 +80,8 @@ export function SampleSetControl({
         gap: 6,
         padding: "6px 8px",
         marginBottom: 6,
-        border: "0.5px solid var(--color-border)",
+        border: "0.5px solid var(--color-new-border)",
         borderRadius: 3,
-        background: "rgba(59, 130, 246, 0.08)",
       }}
     >
       {/* MAIN INFO — every campaign sample; highlighted = in the set the bars
@@ -120,9 +118,9 @@ export function SampleSetControl({
                 textDecoration: shared.has(sid) ? "underline" : "none",
                 textDecorationColor: "var(--color-overlap)",
                 textUnderlineOffset: 2,
-                borderColor: on ? "rgba(59,130,246,0.55)" : "var(--color-border)",
-                background: on ? "rgba(59,130,246,0.18)" : "var(--color-background-secondary)",
-                color: on ? NEW_COLOR : everywhere ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
+                borderColor: on ? "var(--color-new-border)" : "var(--color-border)",
+                background: on ? "var(--color-new-bg)" : "var(--color-background-secondary)",
+                color: on ? "var(--color-new)" : everywhere ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
                 fontWeight: on ? 600 : 400,
                 opacity: everywhere ? 1 : 0.55,
               }}

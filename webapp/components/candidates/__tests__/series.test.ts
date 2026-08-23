@@ -1,0 +1,166 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  CANDIDATE_SERIES,
+  SERIES_INK_TOKENS,
+  activeSeries,
+  metricInkToken,
+  seriesColumn,
+  whiskerAnchor,
+  type SeriesCtx,
+} from "../series";
+import type { CandidateView } from "@/lib/types";
+
+// The registry is a table, so these are table facts — and every one of them is silent when
+// broken: a fabricated θ renders as a plausible bar, an absent whisker renders as no whisker,
+// and a token that does not exist renders as `transparent`.
+
+function view(over: Partial<CandidateView>): CandidateView {
+  return {
+    key: "k",
+    round: 1,
+    idx: 0,
+    candidate_id: "a",
+    label: "C1.1",
+    accuracy: null,
+    composite: null,
+    theta: null,
+    theta_se: null,
+    meanFitnessCiLo: null,
+    meanFitnessCiHi: null,
+    matchedParentLift: null,
+    matchedParentLiftCiLo: null,
+    matchedParentLiftCiHi: null,
+    evaluators: {},
+    is_winner: false,
+    n_samples: null,
+    n_expected: null,
+    cached_samples: null,
+    source: "history",
+    whatif: null,
+    compositeRank: null,
+    whatifRank: null,
+    started: false,
+    electionPending: false,
+    overlapAccuracy: null,
+    overlapN: null,
+    ...over,
+  };
+}
+
+const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
+  metrics: new Set(["accuracy", "ability"]),
+  showWhatIf: false,
+  showCache: false,
+  showTrajectory: false,
+  views: [],
+  unit: "sample",
+  electedMetric: "ability",
+  ...over,
+});
+
+const spec = (key: string) => CANDIDATE_SERIES.find((s) => s.key === key)!;
+
+describe("a missing value renders as a gap or a floor, never as a measurement", () => {
+  // A candidate that has STARTED but has no number yet gets a stub, so "still computing"
+  // reads differently from "not yet started".
+  it("floors accuracy, composite and what-if once scoring has begun", () => {
+    const started = [view({ started: true })];
+    for (const key of ["accuracy", "composite", "what-if"]) {
+      expect(seriesColumn(spec(key), started)).toEqual([0]);
+      expect(seriesColumn(spec(key), [view({ started: false })])).toEqual([null]);
+    }
+  });
+
+  // θ is a LOGIT: 0 is a real, middling ability, so a floored θ is a fabricated
+  // measurement rather than an empty slot. Same for the two sparse evidence channels — a
+  // floored 0 there claims a candidate scored nothing rather than that it was never read.
+  it("never floors θ, trajectory or verify — not even on a started bar", () => {
+    const started = [view({ started: true })];
+    for (const key of ["ability", "trajectory", "verify"]) {
+      expect(seriesColumn(spec(key), started)).toEqual([null]);
+    }
+  });
+
+  it("reads its own served number and nothing else", () => {
+    const v = view({ accuracy: 0.7, theta: -1.5, overlapAccuracy: 0.5, cached_samples: 3, n_samples: 6 });
+    expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
+    expect(seriesColumn(spec("trajectory"), [v])).toEqual([0.5]);
+    // Provenance is a share of a served pair, and it is the only computed number here.
+    expect(seriesColumn(spec("cached"), [v])).toEqual([0.5]);
+    // A zero denominator is a gap, not a division.
+    expect(seriesColumn(spec("cached"), [view({ cached_samples: 0, n_samples: 0 })])).toEqual([null]);
+  });
+});
+
+describe("the axis and sign facts the chart cannot re-derive", () => {
+  it("puts exactly θ on its own logit axis, and only θ is signed", () => {
+    expect(CANDIDATE_SERIES.filter((s) => s.axis === "y1").map((s) => s.key)).toEqual(["ability"]);
+    expect(CANDIDATE_SERIES.filter((s) => s.signed).map((s) => s.key)).toEqual(["ability"]);
+  });
+
+  it("keeps provenance a line, drawn last", () => {
+    const lines = CANDIDATE_SERIES.filter((s) => s.kind === "line");
+    expect(lines.map((s) => s.key)).toEqual(["cached"]);
+    expect(CANDIDATE_SERIES.at(-1)?.key).toBe("cached");
+  });
+
+  it("gives a chip only to the three metric channels", () => {
+    expect(CANDIDATE_SERIES.filter((s) => s.metric).map((s) => s.key)).toEqual([
+      "accuracy",
+      "ability",
+      "composite",
+    ]);
+    // Everything else must carry its own legend text, or it appears unlabelled.
+    for (const s of CANDIDATE_SERIES) {
+      if (!s.metric) expect(s.legend).toBeTypeOf("function");
+    }
+  });
+});
+
+describe("what is on screen", () => {
+  it("shows the trajectory only when elected AND a reading exists", () => {
+    const withReading = [view({ overlapAccuracy: 0.5 })];
+    const on = (c: Partial<SeriesCtx>) => activeSeries(ctx(c)).map((s) => s.key);
+    expect(on({ showTrajectory: true, views: withReading })).toContain("trajectory");
+    // Elected but nothing measured on the shared set yet.
+    expect(on({ showTrajectory: true, views: [view({})] })).not.toContain("trajectory");
+    // A reading exists but the operator stepped the control off.
+    expect(on({ showTrajectory: false, views: withReading })).not.toContain("trajectory");
+  });
+});
+
+describe("the confidence band", () => {
+  // The band is a [0,1] mean interval, so it cannot be drawn against θ's logit axis — and
+  // when nothing on the percent axis is showing there is no bar to hang it from.
+  it("anchors on a percent-axis bar, and reports NOTHING rather than guessing", () => {
+    expect(whiskerAnchor(ctx({ electedMetric: "ability" }))).toBe("accuracy");
+    expect(whiskerAnchor(ctx({ electedMetric: "composite", metrics: new Set(["composite"]) })))
+      .toBe("composite");
+    // θ alone on screen: no percent bar exists, so the band must not be drawn.
+    expect(whiskerAnchor(ctx({ metrics: new Set(["ability"]) }))).toBeNull();
+  });
+});
+
+// The guard that keeps "no hardcoded colour in this chart" true rather than merely true
+// today: a token the table names but the stylesheet does not define resolves to the empty
+// string at runtime and paints nothing, silently.
+it("names only tokens that tokens.css actually defines", () => {
+  const css = readFileSync(
+    join(__dirname, "..", "..", "..", "app", "styles", "foundation", "tokens.css"),
+    "utf8",
+  );
+  const c = ctx();
+  const named = new Set<string>(SERIES_INK_TOKENS);
+  for (const s of CANDIDATE_SERIES) {
+    for (const elected of ["accuracy", "ability", "composite"] as const) {
+      named.add(s.ink({ ...c, electedMetric: elected }));
+    }
+  }
+  for (const token of named) expect(css).toContain(`${token}:`);
+  // And the chips read the same names the bars do — a chip lit in a colour its series does
+  // not use is a legend that lies.
+  expect(metricInkToken("ability", "ability")).toBe("--series-elected");
+  expect(metricInkToken("accuracy", "ability")).toBe("--series-reading");
+});

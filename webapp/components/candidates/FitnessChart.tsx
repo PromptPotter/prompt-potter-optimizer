@@ -3,11 +3,20 @@ import { memo, useMemo } from "react";
 // `Chart`, not `Bar`: the cache overlay is a line dataset on a bar chart, and the per-type
 // `Bar` wrapper types its data as bar-only. Both controllers register in `lib/theme.ts`.
 import { Chart } from "react-chartjs-2";
-import { cssRgba, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
-import type { HeadlineMetric } from "@/lib/derivations";
+import { ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
+import { partialPanels, type HeadlineMetric } from "@/lib/derivations";
 import type { MeasuredUnit } from "@/lib/api/types";
-import { unitCount } from "@/lib/format";
+import { fmtSigned, unitCount } from "@/lib/format";
 import type { CandidateView } from "@/lib/types";
+import {
+  activeSeries,
+  seriesByKey,
+  seriesColumn,
+  whiskerAnchor,
+  type SeriesCtx,
+  type SeriesKey,
+  type SeriesSpec,
+} from "./series";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
@@ -43,18 +52,18 @@ export function geomEqual(a: PlotGeometry | null, b: PlotGeometry): boolean {
   );
 }
 
-// Per-bar sample count painted above each candidate's bar group. The metric
-// (accuracy / composite / what-if) is computed over `n_samples` samples — a
-// 0.6 over 5 samples is far noisier than a 0.6 over 20, and PoBB leader-lock
-// routinely stops a candidate on a partial set. The count makes that visible.
 declare module "chart.js" {
   // Type param arity must match chart.js's own declaration to merge; unused here.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
-    sampleCount?: { counts: (number | null)[] };
+    barCaps?: { counts: (number | null)[]; incumbent: number | null; crown: string };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     meanFitnessCiWhisker?: {
+      // The series the band brackets, or null when it is not on screen. A KEY, not a
+      // literal — this join used to be the string "accuracy", so turning that series off
+      // made every band vanish with nothing on screen to say so.
+      anchor: SeriesKey | null;
       ciLo: (number | null)[];
       ciHi: (number | null)[];
     };
@@ -62,38 +71,60 @@ declare module "chart.js" {
   }
 }
 
-// Four sites join on this label — the dataset, the sample-count plugin's bars-only
-// filter, and both tooltip callbacks.
-const CACHE_SERIES = "cached";
-// The adopted line on one shared set of cells. Joined by the dataset and its tooltip.
-const OVERLAP_SERIES = "trajectory";
-
-const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
-  id: "sampleCount",
+// The strip above the bars — one pass, because both marks answer "what does this group need
+// said above it": the CROWN on the incumbent (one mark, not one per advancing round; the
+// per-round crowns are the dendrogram's job), and the sample COUNT only where
+// `partialPanels` judges it news.
+const CROWN = "♛";
+const barCapsPlugin: Plugin<
+  "bar",
+  { counts: (number | null)[]; incumbent: number | null; crown: string }
+> = {
+  id: "barCaps",
   afterDatasetsDraw(chart, _args, opts) {
     const counts = opts?.counts;
     const xScale = chart.scales.x;
     if (!counts || !xScale) return;
     const { ctx, chartArea } = chart;
-    ctx.save();
-    ctx.font = "10px Cascadia Mono, SF Mono, Menlo, Consolas, monospace";
-    ctx.fillStyle = getCss("--color-text-secondary");
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    counts.forEach((n, i) => {
-      if (n == null) return;
-      // Highest (smallest y) bar top across every series for this candidate. BARS only —
-      // letting the cache line into this minimum drags the count label onto the dash.
+    // Highest (smallest y) bar top across this candidate's group. BARS only — letting the
+    // cache line into the minimum drags the caption onto the dash.
+    const topOf = (i: number): number => {
       let topY = Infinity;
-      chart.data.datasets.forEach((ds, di) => {
-        if (ds.label === CACHE_SERIES) return;
-        const el = chart.getDatasetMeta(di).data[i] as { y?: number } | undefined;
+      chart.data.datasets.forEach((_ds, di) => {
+        const meta = chart.getDatasetMeta(di);
+        if (meta.type !== "bar") return;
+        const el = meta.data[i] as { y?: number } | undefined;
         if (el && typeof el.y === "number" && el.y < topY) topY = el.y;
       });
+      return topY;
+    };
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    const mono = getCss("--font-mono");
+    counts.forEach((n, i) => {
+      if (n == null) return;
+      const topY = topOf(i);
       if (!Number.isFinite(topY)) return;
-      const labelY = Math.max(topY - 4, chartArea.top + 10);
-      ctx.fillText(String(n), xScale.getPixelForValue(i), labelY);
+      ctx.font = `${getCss("--text-xs")} ${mono}`;
+      ctx.fillStyle = getCss("--color-text-tertiary");
+      ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
     });
+    const w = opts?.incumbent;
+    if (w != null && w >= 0) {
+      const topY = topOf(w);
+      if (Number.isFinite(topY)) {
+        ctx.font = `12px ${mono}`;
+        ctx.fillStyle = getCss("--color-accent");
+        // Above the count when both land on one group — the crown is the louder fact.
+        const capY = counts[w] != null ? topY - 15 : topY - 4;
+        ctx.fillText(
+          `${CROWN}${opts?.crown ?? ""}`,
+          xScale.getPixelForValue(w),
+          Math.max(capY, chartArea.top + 10),
+        );
+      }
+    }
     ctx.restore();
   },
 };
@@ -104,23 +135,25 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
 // show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
 // CI are skipped.
 //
-// ONE band per candidate, on the accuracy bar, always. There is no scale to resolve: a single
-// writer stamps it when the candidate finishes scoring. It used to be two estimators sharing
-// one field pair, discriminated by a served `ci_scale` and matched here against a dataset
-// label — so a band whose series was hidden drew nothing, silently, and since only arms an
-// election reached ever got relabelled, the whisker came and went by gating rather than by
-// evidence. Do not reintroduce a per-bar scale; make the one band mean one thing instead.
+// ONE band per candidate, on ONE percent-axis bar. There is no scale to resolve: a single
+// writer stamps it when the candidate finishes scoring. Do not reintroduce a per-bar scale;
+// make the one band mean one thing instead.
+//
+// WHICH bar is `whiskerAnchor(ctx)`, and it is a `SeriesKey` for a reason. This used to be
+// the bare literal `"accuracy"`, so turning that one series off left every band undrawn with
+// nothing on screen to say so — the second time this exact failure shipped. A key cannot
+// drift from the dataset it names without the compiler noticing.
 const meanFitnessCiWhiskerPlugin: Plugin<
   "bar",
-  { ciLo: (number | null)[]; ciHi: (number | null)[] }
+  { anchor: SeriesKey | null; ciLo: (number | null)[]; ciHi: (number | null)[] }
 > = {
   id: "meanFitnessCiWhisker",
   afterDatasetsDraw(chart, _args, opts) {
     const ciLo = opts?.ciLo;
     const ciHi = opts?.ciHi;
     const yScale = chart.scales.y;
-    if (!ciLo || !ciHi || !yScale) return;
-    const meta = chart.data.datasets.findIndex((ds) => ds.label === "accuracy");
+    if (!ciLo || !ciHi || !yScale || !opts?.anchor) return;
+    const meta = chart.data.datasets.findIndex((ds) => ds.label === opts.anchor);
     if (meta < 0) return;
     const bars = chart.getDatasetMeta(meta);
     const { ctx } = chart;
@@ -178,7 +211,7 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
       const step = xScale.getPixelForValue(1) - xScale.getPixelForValue(0);
       x = Math.max(chartArea.left, c - (Number.isFinite(step) ? step : 0) / 2);
     }
-    const red = getCss("--color-danger") || "#C53030";
+    const red = getCss("--color-danger");
     ctx.save();
     ctx.strokeStyle = red;
     ctx.lineWidth = 2;
@@ -252,7 +285,7 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
       return;
     }
     const t = 0.5 + 0.5 * Math.sin((Date.now() / PULSE_PERIOD_MS) * Math.PI * 2);
-    const glow = getCss("--color-success") || "#1a8265";
+    const glow = getCss("--color-success");
     ctx.save();
     ctx.strokeStyle = glow;
     ctx.globalAlpha = 0.55 + 0.4 * t;
@@ -302,7 +335,7 @@ const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = 
 
 // Stable identity — passing a fresh array each render churns the chart.
 const CHART_PLUGINS = [
-  sampleCountPlugin,
+  barCapsPlugin,
   divergenceLinePlugin,
   inFlightPulsePlugin,
   meanFitnessCiWhiskerPlugin,
@@ -321,6 +354,8 @@ interface Props {
   showWhatIf: boolean;
   // Draw the dashed cache-provenance line at each candidate's replayed share.
   showCache: boolean;
+  // Draw the adopted line's reading on the cells all of it answered.
+  showTrajectory: boolean;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
   // Bar index where the active mask first diverges from the realized record —
@@ -335,6 +370,9 @@ interface Props {
   // force a chart.update() on every poll tick.
   onGeometry: (g: PlotGeometry) => void;
   unit: MeasuredUnit;
+  // The metric this campaign's ENGINE elects on (served). It decides which bar reads at
+  // full accent — so the loud bar is the DECIDING bar, not merely the familiar one.
+  electedMetric: HeadlineMetric;
 }
 
 export const FitnessChart = memo(function FitnessChart({
@@ -342,12 +380,14 @@ export const FitnessChart = memo(function FitnessChart({
   metrics,
   showWhatIf,
   showCache,
+  showTrajectory,
   selectedKey,
   onSelect,
   divergenceBoundary,
   inFlightIndex,
   onGeometry,
   unit,
+  electedMetric,
 }: Props) {
   // Subscribe to theme so a flip re-runs this component and the data/options
   // memos below pick up the new getCss() values.
@@ -358,45 +398,12 @@ export const FitnessChart = memo(function FitnessChart({
   // shows two 28px bars centered, not two stretched-to-fill bars).
   const labels = useMemo(() => views.map((v) => v.label), [views]);
 
-  const showAccuracy = metrics.has("accuracy");
-  const showComposite = metrics.has("composite");
+  const ctx = useMemo<SeriesCtx>(
+    () => ({ metrics, showWhatIf, showCache, showTrajectory, views, unit, electedMetric }),
+    [metrics, showWhatIf, showCache, showTrajectory, views, unit, electedMetric],
+  );
+  const active = useMemo(() => activeSeries(ctx), [ctx]);
   const showAbility = metrics.has("ability");
-
-  // Two parallel arrays per series: *Raw drives the tooltip; *Plot pushes
-  // null → 0 only for bars whose scoring has begun (so `minBarLength`
-  // paints a stub). Unstarted bars stay null so chart.js leaves the slot
-  // blank — distinguishing "still computing" from "not yet started".
-  const {
-    accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, overlapRaw, accPlot, compPlot, whatifPlot,
-  } = useMemo(() => {
-    const aR: (number | null)[] = [];
-    const cR: (number | null)[] = [];
-    const wR: (number | null)[] = [];
-    const vR: (number | null)[] = [];
-    const tR: (number | null)[] = [];
-    const oR: (number | null)[] = [];
-    for (let i = 0; i < labels.length; i++) {
-      aR.push(views[i]?.accuracy ?? null);
-      cR.push(views[i]?.composite ?? null);
-      wR.push(views[i]?.whatif ?? null);
-      vR.push(views[i]?.diag?.accuracy ?? null);
-      tR.push(views[i]?.theta ?? null);
-      oR.push(views[i]?.overlapAccuracy ?? null);
-    }
-    const coerce = (v: number | null, i: number): number | null =>
-      v == null ? (views[i]?.started ? 0 : null) : v;
-    // verify, θ and the overlap stay strictly sparse — NO started-floor coercion. For verify a
-    // 0-height stub on every column would read as a red dot everywhere. For θ it
-    // is worse: on the 0–1 percent axis a coerced 0 reads as "nothing yet", but θ
-    // is a logit where 0 is a REAL, middling ability — coercing a missing θ to 0
-    // renders a fabricated measurement. The overlap is sparse by nature: only the adopted line
-    // is measured on the shared set, so most bars have none and a floored 0 would claim they
-    // scored nothing on it rather than that they were never read on it.
-    return {
-      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR, thetaRaw: tR, overlapRaw: oR,
-      accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
-    };
-  }, [views, labels]);
 
   // Per-bar border overlay — picks out the bar matching the shared
   // SelectionContext. Driven by --color-selection (app/styles/foundation/themes.css)
@@ -411,189 +418,96 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [views, selectedKey, themeVersion]);
 
-  const hasVerify = useMemo(() => views.some((v) => v.diag != null), [views]);
-  const hasOverlap = useMemo(() => views.some((v) => v.overlapAccuracy != null), [views]);
+  // The INCUMBENT — the last bar on the spine wearing a crown. Not `findIndex`: this chart
+  // plots a whole timeline, so every advancing round has a winner and the first one is C0.
+  // The per-round crowns stay legible as filled dots on the dendrogram directly beneath; up
+  // here one mark answers "who holds the title now", which is the question the card is for.
+  // Null on a view with nothing crowned — a held round, a course, a round still scoring.
+  const incumbentIdx = useMemo(() => {
+    for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_winner) return i;
+    return null;
+  }, [views]);
 
-  // Origin INCLUDED — a banked C0 is the most common replay, and the first thing this is
-  // opened for. `null` is a GAP (no measured panel: a course, a sliced bar); a measured 0 is
-  // plotted on the floor, because "every sample was paid for" is an answer.
-  const cacheShare = useMemo(
-    () =>
-      views.map((v) => {
-        if (v.cached_samples == null) return null;
-        const n = v.n_samples;
-        return n != null && n > 0 ? v.cached_samples / n : null;
-      }),
-    [views],
-  );
+  // "…and by how much" — the SERVED blocked lift over the floor the promotion gate judged this
+  // candidate against. Claimed ONLY where the 95% interval excludes 0: an interval spanning it
+  // means the round could not separate the winner from its parent, and a bare point estimate
+  // there would report a win the measurement does not support. The number is in the tooltip
+  // either way; the crown alone is the honest caption when the round cannot say.
+  const crown = useMemo(() => {
+    const v = incumbentIdx == null ? undefined : views[incumbentIdx];
+    const { matchedParentLift: lift, matchedParentLiftCiLo: lo, matchedParentLiftCiHi: hi } =
+      v ?? {};
+    if (lift == null || lo == null || hi == null || (lo <= 0 && hi >= 0)) return "";
+    return ` ${fmtSigned(lift, 2)}`;
+  }, [views, incumbentIdx]);
 
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     // BAR series only — the cache line sits on top of the group rather than inside it, so
     // counting it would narrow every bar the moment the overlay appeared.
-    const seriesCount =
-      metrics.size + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0) + (hasOverlap ? 1 : 0);
-    const cat =
-      seriesCount <= 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
+    const bars = active.filter((s) => s.kind === "bar").length;
+    const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
     // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
     // wide layouts, so 25 bars × 3 series should leave room without
     // clipping. Scale max thickness down as the bar count grows; min 6.
     const barCount = Math.max(1, labels.length);
-    const maxBar = Math.max(
-      6,
-      Math.min(28, Math.round(640 / (barCount * Math.max(1, seriesCount)))),
-    );
-    const accent = cssRgba("--color-accent-rgb", 0.95);
-    const accentDim = cssRgba("--color-accent-rgb", 0.55);
-    const accentStrong = getCss("--color-accent-strong");
-    const muted = getCss("--color-text-tertiary");
-    const borderArr = (base: string): string[] | string => {
-      if (!selectionBorder) return base;
-      return labels.map((_, i) => (i === selectionBorder.idx ? selectionBorder.colour : base));
+    const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
+    // Per-bar outline. A hollow series keeps its own edge; the selected bar overrides it (it
+    // must match the dendrogram dot beneath). The incumbent deliberately gets none: on the
+    // elected series its fill already IS the accent, so a ring would be invisible and any
+    // other colour would compete with the selection stroke and the in-flight pulse. Its
+    // marks — the crown and the lit x-axis label — sit off the bar, where contrast is free.
+    const outline = (spec: SeriesSpec, ink: string) => {
+      const base = spec.hollow ? ink : "transparent";
+      const baseW = spec.hollow ? 1.5 : 0;
+      if (!selectionBorder) return { borderColor: base, borderWidth: baseW };
+      return {
+        borderColor: labels.map((_, i) =>
+          i === selectionBorder.idx ? selectionBorder.colour : base,
+        ),
+        borderWidth: labels.map((_, i) => (i === selectionBorder.idx ? 3 : baseW)),
+      };
     };
-    const widthArr = (): number[] | number => {
-      if (!selectionBorder) return 0;
-      return labels.map((_, i) => (i === selectionBorder.idx ? 3 : 0));
+    return {
+      labels,
+      datasets: active.map((spec) => {
+        const ink = getCss(spec.ink(ctx));
+        const data = seriesColumn(spec, views);
+        if (spec.kind === "line") {
+          return {
+            type: "line" as const,
+            label: spec.key,
+            data,
+            borderColor: ink,
+            borderDash: [6, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            fill: false,
+            // Bridging a gap claims a share for a candidate that has none.
+            spanGaps: false,
+            yAxisID: spec.axis,
+            // ON TOP of the bars, and the sign is counterintuitive: chart.js sorts metasets
+            // ASCENDING by `order` and then draws them in REVERSE (`Chart#_drawDatasets`), so
+            // the LOWEST order paints last. Raising this to +1 hides the line behind the bars.
+            order: -1,
+          };
+        }
+        return {
+          label: spec.key,
+          data,
+          backgroundColor: spec.hollow ? "transparent" : ink,
+          ...outline(spec, ink),
+          yAxisID: spec.axis,
+          barPercentage: 0.95,
+          categoryPercentage: cat,
+          maxBarThickness: maxBar,
+          // A signed series gets no minimum length: chart.js applies it as an absolute
+          // length, so a negative logit's stub would land on the wrong side of zero.
+          ...(spec.signed ? {} : { minBarLength: 2 }),
+        };
+      }),
     };
-    const shared = {
-      barPercentage: 0.95,
-      categoryPercentage: cat,
-      maxBarThickness: maxBar,
-      minBarLength: 2,
-    };
-    const datasets: ChartData<"bar" | "line">["datasets"] = [];
-    if (showAccuracy) {
-      datasets.push({
-        label: "accuracy",
-        data: accPlot,
-        backgroundColor: accent,
-        borderColor: borderArr(accent),
-        borderWidth: widthArr(),
-        ...shared,
-      });
-    }
-    if (showAbility) {
-      // Second bar by default (the metric the winner is elected on). θ is a LOGIT,
-      // not a percent — it rides its own right-hand axis, which auto-ranges and may go
-      // negative. No `minBarLength`: on a negative θ that would paint a stub on the
-      // wrong side of zero.
-      datasets.push({
-        label: "ability",
-        data: thetaRaw,
-        yAxisID: "y1",
-        backgroundColor: muted,
-        borderColor: borderArr(muted),
-        borderWidth: widthArr(),
-        barPercentage: 0.95,
-        categoryPercentage: cat,
-        maxBarThickness: maxBar,
-      });
-    }
-    if (showComposite) {
-      datasets.push({
-        label: "composite",
-        data: compPlot,
-        backgroundColor: accentDim,
-        borderColor: borderArr(accentDim),
-        borderWidth: widthArr(),
-        ...shared,
-      });
-    }
-    if (showWhatIf) {
-      datasets.push({
-        label: "what-if",
-        data: whatifPlot,
-        backgroundColor: accentStrong,
-        borderColor: borderArr(accentStrong),
-        borderWidth: widthArr(),
-        ...shared,
-      });
-    }
-    if (hasOverlap) {
-      // The adopted line on ONE set of cells — the only bars here two rounds can be differenced
-      // on, since every other series is read on whatever subset its own round bought. Populated
-      // for C0 and the winners and nobody else; teal keeps it out of the accent register so it
-      // does not read as a rival reading of the accuracy bar beside it.
-      datasets.push({
-        label: OVERLAP_SERIES,
-        data: overlapRaw,
-        backgroundColor: getCss("--color-overlap"),
-        borderColor: borderArr(getCss("--color-overlap")),
-        borderWidth: widthArr(),
-        ...shared,
-      });
-    }
-    if (hasVerify) {
-      // Workspace-verify overlay — populated only on bars with a matching
-      // DiagnosticRunRecord. Red is the only series colour outside the
-      // accent palette: this is the operator's "did the verdict hold on
-      // more samples?" signal, intentionally visually distinct.
-      datasets.push({
-        label: "verify",
-        data: verifyRaw,
-        backgroundColor: "#e74c3c",
-        borderColor: "#e74c3c",
-        borderWidth: 0,
-        ...shared,
-      });
-    }
-    if (showCache) {
-      // Provenance, not a metric — a LINE over the group rather than another bar beside
-      // them. `spanGaps:false`: bridging a gap claims a share for a candidate that has none.
-      datasets.push({
-        type: "line" as const,
-        label: CACHE_SERIES,
-        data: cacheShare,
-        borderColor: getCss("--color-cache"),
-        borderDash: [6, 4],
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: false,
-        spanGaps: false,
-        yAxisID: "y",
-        // ON TOP of the bars, and the sign is counterintuitive: chart.js sorts metasets
-        // ASCENDING by `order` and then draws them in REVERSE (`Chart#_drawDatasets`), so the
-        // LOWEST order paints last. Raising this to +1 hides the line behind the bars.
-        order: -1,
-      });
-    }
-    return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, overlapRaw, cacheShare, metrics, showAccuracy, showComposite, showAbility, showWhatIf, showCache, hasVerify, hasOverlap, themeVersion, selectionBorder]);
-
-  const tooltipFor = (label: string, idx: number): string => {
-    if (label === "verify") {
-      const v = verifyRaw[idx];
-      if (v == null) return "verify: —";
-      const diag = views[idx]?.diag;
-      const tail = diag
-        ? ` (workspace acc on n=${diag.workspaceN}, +${diag.samplesAdded} fresh)`
-        : "";
-      return `verify: ${v.toFixed(3)}${tail}`;
-    }
-    if (label === OVERLAP_SERIES) {
-      const v = overlapRaw[idx];
-      // The COUNT travels with the rate. Without it the bar is a percentage over an unnamed
-      // denominator, which is the exact reading this series exists to replace.
-      const n = views[idx]?.overlapN;
-      return v == null
-        ? `${OVERLAP_SERIES}: not on the winner trajectory`
-        : `${OVERLAP_SERIES}: ${v.toFixed(3)}${n ? ` on ${unitCount(n, unit)} shared` : ""}`;
-    }
-    if (label === "ability") {
-      const v = thetaRaw[idx];
-      return `ability θ: ${v == null ? "—" : v.toFixed(2)}`;
-    }
-    if (label === CACHE_SERIES) {
-      // The served integers, never the share: the height is geometry, the counts are the
-      // measurement, and only the measurement gets written down.
-      const c = views[idx]?.cached_samples;
-      const n = views[idx]?.n_samples;
-      return c == null || n == null ? "cached: —" : `cached: ${c} of ${unitCount(n, unit)}`;
-    }
-    const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
-    const v = src[idx];
-    return `${label}: ${v == null ? "—" : v.toFixed(3)}`;
-  };
+  }, [labels, views, active, ctx, themeVersion, selectionBorder]);
 
   const rotate = labels.length > ROTATE_THRESHOLD;
   const options = useMemo<ChartOptions<"bar">>(() => ({
@@ -617,7 +531,10 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements?.[0] ? "pointer" : "default";
     },
     scales: {
-      x: { grid: { display: false }, ticks: { font: { size: rotate ? 10 : 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
+      // The incumbent's own label lights up — the second half of its mark, and the half that
+      // works: it sits in the axis gutter, so unlike a ring on a filled bar it has nothing to
+      // lose contrast against, at any bar count and in either theme.
+      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === incumbentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === incumbentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
       // θ's own axis, declared only while the ability series shows — otherwise the
       // right-hand gutter (which every dendrogram fraction is measured against)
@@ -645,7 +562,11 @@ export const FitnessChart = memo(function FitnessChart({
       legend: { display: false },
       tooltip: {
         callbacks: {
-          label: (ctx) => tooltipFor(String(ctx.dataset.label ?? ""), ctx.dataIndex),
+          label: (item) => {
+            const v = views[item.dataIndex];
+            const spec = seriesByKey(String(item.dataset.label ?? ""));
+            return v && spec ? spec.tip(v, ctx) : "";
+          },
           footer: (items) => {
             const idx = items[0]?.dataIndex;
             if (idx == null) return "";
@@ -677,6 +598,17 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
+            // The gate's own verdict. Says "could not separate" out loud rather than leaving
+            // an interval that spans 0 to be read as a win.
+            const lift = views[idx]?.matchedParentLift;
+            const lLo = views[idx]?.matchedParentLiftCiLo;
+            const lHi = views[idx]?.matchedParentLiftCiHi;
+            if (lift != null && lLo != null && lHi != null) {
+              const flat = lLo <= 0 && lHi >= 0 ? " — could not separate from its parent" : "";
+              lines.push(
+                `lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
+              );
+            }
             // Say why there is no crown and no θ, rather than leaving the absence to be
             // read as a loss: an arm in a round nothing has won yet has nothing to have
             // lost to. Keyed on the ELECTION, not on the round close — those are two
@@ -688,17 +620,18 @@ export const FitnessChart = memo(function FitnessChart({
           },
         },
       },
-      sampleCount: { counts: views.map((v) => v.n_samples) },
+      barCaps: { counts: partialPanels(views), incumbent: incumbentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       meanFitnessCiWhisker: {
+        anchor: whiskerAnchor(ctx),
         ciLo: views.map((v) => v.meanFitnessCiLo),
         ciHi: views.map((v) => v.meanFitnessCiHi),
       },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, onGeometry]);
+  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, incumbentIdx, crown, onGeometry]);
 
   return (
     <div className="fitness-chart-frame">

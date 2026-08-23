@@ -54,6 +54,7 @@ export type {
   MeasurementSeriesResponse,
   NodeConfigParam,
   NodeOutputSchema,
+  OverlapMember,
   OverlapReading,
   PanelPrecision,
   RayItem,

@@ -2,6 +2,7 @@
 // One module per file; barrel re-exports them all (names are collision-free).
 
 export * from "./allowedModels";
+export * from "./candidate-views";
 export * from "./candidateSearchPoint";
 export * from "./connector-state";
 export * from "./critical-alert";
