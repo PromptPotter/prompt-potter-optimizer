@@ -278,6 +278,12 @@ class LiveDashboardView(DerivedView):
             view.state.measured_unit = measured_unit
         return view
 
+    def stamp_run_limits(self, limits: RunLimits) -> None:
+        """The ceilings are WIRING, but they are not knowable at wiring: the wallet and the
+        operator's carried ceiling compose into the config AFTER this view is built. Published at
+        that seam instead — still before the origin scores, which is the whole point."""
+        self.state.run_limits = limits
+
     @classmethod
     def write_launch_stop(
         cls,
@@ -618,23 +624,11 @@ class LiveDashboardView(DerivedView):
             short = view.get("composite_fitness_formula_short")
             if short is not None:
                 self.short_formula_template = short
-            # The DECLARED ceilings, not the live `patience` counter beside them, which the
-            # constructor already stamps. A fork re-emits this at its own INIT with the
-            # reconciled config, so its dashboard shows its own limits. `max_rounds` round-trips
-            # through 0 — the view floors it, and in lives mode there is no round ceiling.
-            # Also re-seats `patience_max`, so the "N/M" reading survives a fold that never got
-            # the constructor's copy — a replay off disk has only the ledger.
+            # Re-seats `patience_max`, so the "N/M" reading survives a fold that never got the
+            # constructor's copy — a replay off disk has only the ledger. The ceilings themselves
+            # are WIRING (`run_limits`): they were declared at launch, and this record arrives
+            # after the whole origin has already scored.
             self.patience_max = int(view.get("patience") or 0)
-            s.run_limits = RunLimits(
-                max_rounds=view.get("max_rounds") or None,
-                l1_patience=self.patience_max,
-                l2_patience=view.get("l2_patience"),
-                l3_patience=view.get("l3_patience"),
-                pobb_epsilon=float(view.get("pobb_epsilon") or 0.0),
-                spend_budget_usd=view.get("spend_budget_usd"),
-                token_budget=view.get("token_budget"),
-                lives_cap=view.get("lives_cap"),
-            )
         elif event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
@@ -657,10 +651,12 @@ class LiveDashboardView(DerivedView):
         if not self._open_samples:
             s.current_query_payload = None
             s.current_sample_id = None
+            s.open_sample_ids = []
             return
         sid, (query_text, qi, qt, ci, ct, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_sample_id = sid
+        s.open_sample_ids = list(self._open_samples)
         self._update_sample_markers(ci, ct, qi, qt)
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:

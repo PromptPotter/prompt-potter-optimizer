@@ -77,12 +77,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         model=optimizer_model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
-        l2_patience=opt.l2_patience,
-        l3_patience=opt.l3_patience,
-        pobb_epsilon=opt.pobb_epsilon,
-        spend_budget_usd=opt.spend_budget_usd,
-        token_budget=opt.token_budget,
-        lives_cap=ctx.hearts_cap,
     )
 
 

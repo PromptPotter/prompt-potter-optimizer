@@ -29,6 +29,7 @@ from promptpotter.application.run_observers import (
     ForkInfo,
     RunObservers,
     build_run_observers,
+    run_limits_from,
 )
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
@@ -333,6 +334,10 @@ async def _prepare_run(
     campaign_config = _compose_run_ceilings(
         campaign_config, operator=carried, wallet=(spend_budget_usd, token_budget)
     )
+    # The composed ceilings are the ones that bind, and this is the first moment they exist —
+    # `_build_budget_gate` below reads the same object. Published before origin scoring, which is
+    # where the operator spends the longest stretch of the run.
+    observers.dashboard.stamp_run_limits(run_limits_from(campaign_config))
     if launch_cycle_dir is not None and carried != (None, None):
         # Re-land what the sweep dropped, so the raise outlives THIS launch too — otherwise it is
         # the same dead end one relaunch further out. Composed, not raw: `_build_budget_gate`

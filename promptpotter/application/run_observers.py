@@ -27,6 +27,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+from promptpotter.infrastructure.projections.live_dashboard.state import RunLimits
 from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
@@ -47,6 +48,7 @@ __all__ = [
     "RunObservers",
     "build_campaign_emitter",
     "build_run_observers",
+    "run_limits_from",
 ]
 
 
@@ -87,6 +89,24 @@ def build_campaign_emitter(
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
         concurrency_arming=session.backend_client.concurrency_arming,
         measured_unit=session.backend_client.measured_unit,
+    )
+
+
+def run_limits_from(config: CampaignConfig) -> RunLimits:
+    """The declared ceilings, read off ONE config — the same object ``_build_budget_gate`` takes
+    its arms from, so the number on screen is the number that halts. Stamped by the run at
+    ``_compose_run_ceilings``: earlier is the pre-wallet config, and the ledger's own INIT record
+    lands after the entire origin has scored."""
+    opt = config.optimization
+    return RunLimits(
+        max_rounds=opt.max_rounds or None,
+        l1_patience=opt.l1_patience,
+        l2_patience=opt.l2_patience,
+        l3_patience=opt.l3_patience,
+        pobb_epsilon=opt.pobb_epsilon,
+        spend_budget_usd=opt.spend_budget_usd,
+        token_budget=opt.token_budget,
+        lives_cap=opt.lives.cap if opt.lives is not None else None,
     )
 
 

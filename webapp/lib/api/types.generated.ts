@@ -474,7 +474,7 @@ export interface DashboardError {
   stop_reason: string;
 }
 
-/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:enter`` off that */
+/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective */
 export interface RunLimits {
   max_rounds: number | null;
   l1_patience: number;
@@ -555,6 +555,7 @@ export interface LiveDashboardState {
   total_backend_calls: number;
   current_query_payload: string | null;
   current_sample_id: number | null;
+  open_sample_ids: number[];
   sample_lookahead: number;
   sample_lookahead_discards: number;
   sample_lookahead_armed: number;

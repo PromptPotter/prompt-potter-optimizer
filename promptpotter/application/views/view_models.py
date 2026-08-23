@@ -90,15 +90,6 @@ class InitEnterView:
     model: str = ""
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    # The rest of the declared ceilings `dashboard.json::run_limits` is built from — the four
-    # above are the half that already rode here. They are fields rather than loose keys because
-    # the fold read them off `PhaseEvent.data`, which is `exclude=True` and reaches no disk.
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float = 0.0
-    spend_budget_usd: float | None = None
-    token_budget: int | None = None
-    lives_cap: int | None = None
 
 
 @dataclass(frozen=True)

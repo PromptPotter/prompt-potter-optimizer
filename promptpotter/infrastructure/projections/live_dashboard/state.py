@@ -106,8 +106,10 @@ class InFlightCall(StrictModel):
 
 
 class RunLimits(StrictModel):
-    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at ``INIT:enter`` off that
-    phase's persisted view, so a fork's reconcile dialog can default against them.
+    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective
+    ``campaign_config``, so a fork's reconcile dialog can default against them. It rode
+    ``INIT:enter`` and that record lands after the whole origin has scored, so the operator watched
+    the longest phase of the run with no ceiling on screen at all.
 
     **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
     ``spend_cap.json`` at every persist (``view.py::_persist``). They were static, and that is
@@ -236,6 +238,11 @@ class LiveDashboardState(StrictModel):
     # look-ahead leaves more than one open (``view.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
     current_sample_id: int | None = None
+    # EVERY sample in flight, oldest first — the membership test `current_sample_id` cannot
+    # answer. That one is the walk's CURSOR and is right to name a single position; asking it
+    # "is this row running?" lit one row of N under look-ahead, silently, since the arming is
+    # exactly when the operator is watching. Two questions, so two fields.
+    open_sample_ids: list[int] = Field(default_factory=list)
 
     # What the LOOP held in flight, never what the operator asked for (that is
     # `.runtime/sample_lookahead.json`); the two differ for up to one sample.
@@ -288,6 +295,7 @@ class LiveDashboardState(StrictModel):
         "max_cells_in_flight",
         "concurrency_arming",
         "measured_unit",
+        "run_limits",
     )
 
     @classmethod
@@ -324,5 +332,6 @@ class LiveDashboardState(StrictModel):
             "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,
+            "open_sample_ids": [],
         }
         return prior.model_copy(update=mine) if prior is not None else cls(**mine)

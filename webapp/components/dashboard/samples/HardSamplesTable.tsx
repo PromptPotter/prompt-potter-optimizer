@@ -1,5 +1,5 @@
 "use client";
-import { useRef, type CSSProperties } from "react";
+import { useMemo, useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type DatasetItem,
@@ -68,9 +68,14 @@ export function HardSamplesTable({
   datasetStale,
 }: Props) {
   // `isLive` (status === "live") gates the row-scoring blink. When the
-  // optimizer process dies, `current_sample_id` is stranded in dashboard.json;
+  // optimizer process dies, the open set is stranded in dashboard.json;
   // `isLive` goes false once freshness lapses, so the blink stops on its own.
   const { dash, isLive } = useDashboard();
+  // Every sample in flight, so look-ahead blinks all N rows rather than the cursor's one.
+  const openSampleIds = useMemo(
+    () => new Set(dash?.open_sample_ids ?? []),
+    [dash?.open_sample_ids],
+  );
   const m = useHardSamplesTableModel({ datasetItems, perSample, servedSeries });
   const {
     stablePerSample,
@@ -219,14 +224,12 @@ export function HardSamplesTable({
               // Mark every cell in the row currently being scored so the
               // soft-blink keyframe (app/styles/domains/hard-samples.css) animates the whole row,
               // not just one cell. Independent of the sort-sync toggle.
-              // Gated on `isLive` + the scoring phase so a stranded
-              // `current_sample_id` (process killed mid-sample, or a
-              // non-scoring phase) never blinks.
+              // Gated on `isLive` + the scoring phase so a stranded open set (process killed
+              // mid-sample, or a non-scoring phase) never blinks. Membership rides
+              // `open_sample_ids`, not `current_sample_id`: that one is the walk's CURSOR and
+              // names the OLDEST open sample, so under look-ahead it lit one row of N.
               const isRunning =
-                isLive &&
-                dash?.state === "scoring" &&
-                typeof dash.current_sample_id === "number" &&
-                item.sample_id === dash.current_sample_id;
+                isLive && dash?.state === "scoring" && openSampleIds.has(item.sample_id);
               return (
                 <div
                   key={item.sample_id}
