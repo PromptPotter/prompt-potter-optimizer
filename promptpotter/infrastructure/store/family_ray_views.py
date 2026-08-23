@@ -16,8 +16,11 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import NON_ACTIVITY_KINDS, ProjectionKind
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import newest_mtime_ns
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    course_validator_ns,
+    cycle_dir_for,
+)
 from promptpotter.infrastructure.store.lineage_views import FamilyCourse
 
 logger = logging.getLogger(__name__)
@@ -247,14 +250,13 @@ def decode_ray_cursor(raw: str | None) -> RayCursor | None:
 def ray_validator_parts(
     courses: list[FamilyCourse], *, limit: int, before: str | None
 ) -> tuple[object, ...]:
-    """Everything the body depends on: the curation, the query, and each course's ledger + index
-    mtimes. Deep windows revalidate exactly like the head — claiming immutability would bet
-    against a backdated append."""
+    """Everything the body depends on: the curation, the query, and each course's own freshness.
+    Deep windows revalidate exactly like the head — claiming immutability would bet against a
+    backdated append."""
     parts: list[object] = ["ray", _CURATION_TAG, limit, before]
     for course in courses:
-        layout = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1]))
         parts.append(encode_cycle_path(course.path))
-        parts.append(newest_mtime_ns(layout.ledger, layout.manifest))
+        parts.append(course_validator_ns(cycle_dir_for(course.store.base_dir, course.path[-1])))
     return tuple(parts)
 
 

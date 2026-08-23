@@ -32,7 +32,7 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
-    scan_ledger_max_round_complete,
+    scan_ledger_round_closes,
     scan_ledger_ruler,
 )
 from promptpotter.infrastructure.store.io import (
@@ -69,16 +69,12 @@ from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundE
 logger = logging.getLogger(__name__)
 
 
-def _round_summary(rr: RoundResult) -> dict[str, Any]:
-    return {
-        "round_id": rr.round_id,
-        "round": rr.round,
-        "label": rr.label,
-        "accuracy": rr.accuracy,
-        "total": rr.total,
-        "improved": rr.improved,
-        "status": rr.status,
-    }
+def _index_round(rr: RoundResult) -> dict[str, Any]:
+    """One closed round, as the LISTING path needs it — the two facts every reader of this list
+    asks for. It carried five more that nothing read, `label` among them, which is the winner's
+    whole `changes_description`: prose duplicated per round into a manifest the sidebar, the tree
+    and every resume open. The round DOCUMENT is where a round is read in full."""
+    return {"round": rr.round, "accuracy": rr.accuracy}
 
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
@@ -578,7 +574,7 @@ class CampaignStore:
         ledger_path = layout.ledger
         if not ledger_path.exists():
             raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
-        max_complete = scan_ledger_max_round_complete(ledger_path)
+        max_complete = max(scan_ledger_round_closes(ledger_path), default=-1)
         if after_round > max_complete:
             raise BadRequestError(
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
@@ -634,7 +630,7 @@ class CampaignStore:
         data = read_json(index_path)
 
         data["rounds"] = [
-            _round_summary(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
+            _index_round(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
         ]
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
@@ -905,7 +901,7 @@ class CampaignStore:
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
             "forked_at_offset": _branch_offset(self.cycle_dir(parent)),
-            "rounds": [_round_summary(rr) for rr in surviving_rounds],
+            "rounds": [_index_round(rr) for rr in surviving_rounds],
             "n_rounds": len(surviving_rounds),
             "status": "resumed",
             "updated_at": forked_at,
@@ -1006,7 +1002,7 @@ class CampaignStore:
         data = read_json(index_path)
 
         data["rounds"] = [t for t in data["rounds"] if t.get("round") != rr.round]
-        data["rounds"].append(_round_summary(rr))
+        data["rounds"].append(_index_round(rr))
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
         data["updated_at"] = utcnow_iso()

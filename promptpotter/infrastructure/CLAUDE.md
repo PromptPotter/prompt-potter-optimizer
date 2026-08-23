@@ -154,10 +154,10 @@ the one closing signature. Round 0 closes through the same path as any round via
 `emit_origin_round`, so it carries `(phase="round", event="complete", round=0)` — **twice**: it
 closes again when the ruler warms at round 1 (`runner/loop.py`), since the origin's θ cannot be fit
 before a second arm exists, and only that SECOND record carries the usable θ. A max-scan is safe; a
-count, a first-match, or a reader that updates on `display` alone is not. The pure ledger scan
-lives in `scan_ledger_max_round_complete` (`store/campaign_store/ledger_scan.py`)
-and never instantiates `CycleEventLog`, so no subscribers fire during
-admissibility checks.
+count, a first-match, or a reader that updates on `display` alone is not. `max()` over
+`scan_ledger_round_closes` (`store/campaign_store/ledger_scan.py`) answers it — a second scan
+asking only for the maximum was the same pass under another name. It never instantiates
+`CycleEventLog`, so no subscribers fire during admissibility checks.
 
 ## The lineage tree — one timeline per campaign
 

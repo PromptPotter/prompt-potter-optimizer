@@ -18,15 +18,22 @@ from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import RoundScorer
-from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
+from promptpotter.infrastructure.projections.live_dashboard.state import (
+    LiveDashboardState,
+    warming_payload,
+)
 from promptpotter.infrastructure.projections.live_dashboard.view import fold_at
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
     read_spend_caps,
     run_phase_validator_epoch,
 )
-from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    course_validator_ns,
+    cycle_dir_for,
+)
 from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,
@@ -108,15 +115,17 @@ def serve_dashboard_response(
     declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
     run_phase = str(derive_run_phase(cycle_path, declared=declared))
     if at is not None:
-        # A replay. `run_phase` still rides — it answers what the producer is doing NOW, which is
-        # a clock fact rather than a property of the moment asked for, and the model declares it
-        # wire-only for exactly that reason. The armed ceilings deliberately do NOT: they are the
-        # cap in force now, and restating one as the cap of a past moment would be a fabrication.
-        folded = fold_at(cycle_path, at_offset=at)
-        if folded is None:
-            return JSONResponse(warming_payload(hop, run_phase=run_phase), headers=headers)
-        replay = folded.model_dump(mode="json")
+        # A replay. Two overlays, for the same reason and neither optional: `run_phase` answers
+        # what the producer is doing NOW, a clock fact rather than a property of the moment; the
+        # wiring constants ride no record, so the fold returns them at their defaults and only
+        # this file has the live ones. The armed ceilings deliberately get NEITHER — they are the
+        # cap in force now, and restating one as a past moment's cap would be a fabrication.
+        replay = fold_at(cycle_path, hop, at_offset=at).model_dump(mode="json")
         replay["run_phase"] = run_phase
+        if isinstance(body, dict):
+            for field in LiveDashboardState.WIRING_FIELDS:
+                if field in body:
+                    replay[field] = body[field]
         return JSONResponse(replay, headers=headers)
     if body is None:
         # Missing OR corrupt (half-written / truncated): degrade to the warming
@@ -182,19 +191,6 @@ def get_cycle_dashboard(
     return serve_dashboard_response(
         request, stores.base_dir, leaf.campaign_id, leaf.cycle_id, at=at
     )
-
-
-def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> int | None:
-    """Newest mtime across this course's lineage inputs — the LEDGER first, since it is the one
-    input every fact passes through. It used to be the validator that mattered for a different
-    reason: a candidate mint bumped it and ``dashboard.json`` alone, because no handler arming the
-    debounced persist saw a mint. That hole is closed (``_handle_candidate_minted`` flushes), so
-    the two now move together on a mint as they always did on an LLM-call, token-usage, error or
-    warning record — within a quarter second, never "only at round close"."""
-    layout = CycleLayout(
-        cycle_dir_for(base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-    )
-    return newest_mtime_ns(layout.ledger, layout.manifest)
 
 
 class _Lens(NamedTuple):
@@ -381,7 +377,7 @@ def get_lineage_tree(
     # ONE conditional path for every query: the validator folds the mask in with the
     # mtime, so a masked read gets its own 304 (see `_conditional.py`). A 304 costs two
     # `stat()`s.
-    mtime_ns = _subtree_mtime(stores.base_dir, leaf.campaign_id, leaf.cycle_id)
+    mtime_ns = course_validator_ns(cycle_dir_for(stores.base_dir, leaf))
     etag = weak_etag(mtime_ns, lens, samples)
     headers = {"ETag": etag}
     if mtime_ns is not None and client_has_etag(request.headers.get("if-none-match"), etag):

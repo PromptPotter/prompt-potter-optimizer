@@ -3789,8 +3789,7 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
     live_rounds = [r.round for r in view.state.rounds]
     assert live_rounds == [0, 1]
 
-    replayed = fold_at(root_dir)
-    assert replayed is not None
+    replayed = fold_at(root_dir, hop)
     assert [r.round for r in replayed.rounds] == live_rounds, (
         "the replay rebuilds the trajectory from the round documents, not from a prior dashboard"
     )

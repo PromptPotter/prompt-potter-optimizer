@@ -385,10 +385,6 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
     return out
 
 
-def _float_or_none(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
 def _course_scalars(
     stores: Stores, hop: CycleHop, index: dict[str, object], reads: _Reads
 ) -> dict[str, object]:

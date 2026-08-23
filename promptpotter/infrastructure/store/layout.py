@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.io import newest_mtime_ns, validate_path_component
 
 # The roots (``REPO_ROOT`` + its two derivatives) moved to
 # ``promptpotter/config/paths.py``. They were a ``parents[3]`` walk, which is I/O
@@ -331,12 +331,20 @@ def classify(rel: Path) -> FileKind:
     return FileKind.LOOP_TELEMETRY  # prompts/, sweeps/summary.md, residual → loop telemetry
 
 
+def course_validator_ns(cycle_dir: Path) -> int | None:
+    """When a course last moved, for `/tree` and `/ray` alike — a file added to one copy of this
+    and not the other 304s a client into a body that has since changed."""
+    layout = CycleLayout(cycle_dir)
+    return newest_mtime_ns(layout.ledger, layout.manifest)
+
+
 __all__ = [
     "CycleLayout",
     "FileKind",
     "campaign_root_dir_for",
     "campaigns_root_dir_for",
     "classify",
+    "course_validator_ns",
     "cycle_dir_for",
     "inner_sandbox_dir",
     "inner_sandbox_key",

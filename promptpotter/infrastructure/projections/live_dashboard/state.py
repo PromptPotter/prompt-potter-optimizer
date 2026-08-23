@@ -3,7 +3,7 @@ through this model at every ``_persist()``, so writer/schema drift raises at wri
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field
 
@@ -275,6 +275,20 @@ class LiveDashboardState(StrictModel):
 
     # Sole writer ``LiveDashboardView._handle_error``; absent on normal stops.
     error: DashboardError | None = None
+
+    # Stamped at run start and riding no ledger record, so a fold off disk cannot answer for them
+    # and the serving route stamps the head file's over the replay. Everything NOT in here moves
+    # over a run and is folded.
+    WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
+        "session_id",
+        "n_variants",
+        "sp_budget_ttest",
+        "headline_metric",
+        "langfuse_trace_url",
+        "max_cells_in_flight",
+        "concurrency_arming",
+        "measured_unit",
+    )
 
     @classmethod
     def for_run(

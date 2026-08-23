@@ -5,8 +5,6 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import ValidationError
-
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
@@ -66,7 +64,7 @@ from promptpotter.infrastructure.projections.live_state import (
     roll_p_best_at_round_complete,
 )
 from promptpotter.infrastructure.runtime_flags import read_armed_cells, read_spend_caps
-from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     ROUND_GLOB,
     CycleLayout,
@@ -241,14 +239,14 @@ class LiveDashboardView(DerivedView):
 
         root = WorkspaceDir(Path(tenant_root))
         cycle_dir = CycleDir(cycle_dir_for(root, hop))
-        seed_dir = (
-            cycle_dir_for(root, CycleHop(campaign_id=hop.campaign_id, cycle_id=seed_from_cycle_id))
+        seed_hop = (
+            CycleHop(campaign_id=hop.campaign_id, cycle_id=seed_from_cycle_id)
             if seed_from_cycle_id
-            else Path(cycle_dir)
+            else hop
         )
-
         resume_from = resolve_resume_state(
-            seed_dir,
+            cycle_dir_for(root, seed_hop),
+            seed_hop,
             Path(cycle_dir),
             resumed_from_round,
         )
@@ -293,14 +291,9 @@ class LiveDashboardView(DerivedView):
         """Stamps a cycle whose run stopped BEFORE the projection bound, so the tree shows what
         happened. Pair with ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
         cycle_path = Path(cycle_dir)
-        state = resolve_resume_state(cycle_path, cycle_path, None) or LiveDashboardState(
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            session_id=session_id,
-            state_since=utcnow_iso(),
-            n_variants=0,
-            sp_budget_ttest=0,
-        )
+        state = resolve_resume_state(cycle_path, hop, cycle_path, None)
+        if session_id:
+            state.session_id = session_id
         if interrupted:
             state.declared_phase = RunPhase.PAUSED
         else:
@@ -629,9 +622,12 @@ class LiveDashboardView(DerivedView):
             # constructor already stamps. A fork re-emits this at its own INIT with the
             # reconciled config, so its dashboard shows its own limits. `max_rounds` round-trips
             # through 0 — the view floors it, and in lives mode there is no round ceiling.
+            # Also re-seats `patience_max`, so the "N/M" reading survives a fold that never got
+            # the constructor's copy — a replay off disk has only the ledger.
+            self.patience_max = int(view.get("patience") or 0)
             s.run_limits = RunLimits(
                 max_rounds=view.get("max_rounds") or None,
-                l1_patience=int(view.get("patience") or 0),
+                l1_patience=self.patience_max,
                 l2_patience=view.get("l2_patience"),
                 l3_patience=view.get("l3_patience"),
                 pobb_epsilon=float(view.get("pobb_epsilon") or 0.0),
@@ -946,9 +942,10 @@ class LiveDashboardView(DerivedView):
 
 def resolve_resume_state(
     seed_dir: Path,
+    seed_hop: CycleHop,
     active_cycle_dir: Path,
     resumed_from_round: int | None,
-) -> LiveDashboardState | None:
+) -> LiveDashboardState:
     """The state a resuming or forking run carries forward, FOLDED from the seed cycle's ledger.
 
     It read the prior ``dashboard.json`` instead, which made a projection an input to itself: a
@@ -958,9 +955,7 @@ def resolve_resume_state(
 
     **The one place the trajectory is CUT**: rounds at or past ``resumed_from_round`` drop and
     ``best`` is RE-DERIVED, because a carried rolling max keeps a peak the rewind just discarded."""
-    prior = fold_at(seed_dir)
-    if prior is None:
-        return None
+    prior = fold_at(seed_dir, seed_hop)
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
@@ -975,7 +970,7 @@ def resolve_resume_state(
     )
 
 
-def fold_at(cycle_dir: Path, *, at_offset: int | None = None) -> LiveDashboardState | None:
+def fold_at(cycle_dir: Path, hop: CycleHop, *, at_offset: int | None = None) -> LiveDashboardState:
     """The cycle's dashboard state as of ledger offset *at_offset* — ``None`` for the head. The
     SAME fold the runner drives, given records off disk instead of off an append.
 
@@ -985,42 +980,23 @@ def fold_at(cycle_dir: Path, *, at_offset: int | None = None) -> LiveDashboardSt
     front of it and is NOT in that space, which is why the cut rides ``iter(own_limit=…)`` rather
     than a comparison inside the loop.
 
-    Cycle CONSTANTS are read from the head ``dashboard.json`` and stamped over the replay:
-    ``session_id``, ``n_variants``, ``sp_budget_ttest``, ``headline_metric``,
-    ``langfuse_trace_url``, and the connector's three arming declarations. They are stamped at
-    WIRING and ride no record, so the ledger cannot answer for them — a hole in the ledger rather
-    than a property of folding, and the one thing stopping this from being all a past moment
-    needs. Everything that MOVES over a run is folded.
-
-    ``None`` when the cycle has no readable ``dashboard.json``: one that has never written a
-    dashboard is ``warming_up``, and has no past moment to serve."""
-    head_raw = read_json_tolerant(CycleLayout(cycle_dir).dashboard)
-    if not isinstance(head_raw, dict):
-        return None
-    try:
-        head = LiveDashboardState.model_validate(head_raw)
-    except ValidationError:
-        # Dropped WHOLE and loudly, exactly as `resolve_resume_state` drops it: the model is
-        # `extra="forbid"`, so a file an earlier build wrote fails on the field that moved, and a
-        # partial read would be a compatibility shim.
-        logger.exception("unreadable dashboard.json at %s — no fold to serve", cycle_dir)
-        return None
-
+    The ledger is the ONLY input. The wiring constants (``WIRING_FIELDS``) are stamped at run
+    start and ride no record, so they come back at their model defaults here and the serving route
+    stamps the live ones over them — the same overlay it already does for ``run_phase``. Reading
+    them from the head ``dashboard.json`` instead made a projection depend on its own output, and
+    it is what kept every OTHER consumer of a past round — the lineage tree, the mask spine — from
+    folding rather than re-deriving."""
     view = LiveDashboardView(
         CycleDir(cycle_dir),
         state_path=None,
-        hop=CycleHop(campaign_id=head.campaign_id, cycle_id=head.cycle_id),
-        session_id=head.session_id,
-        l1_patience=head.run_limits.l1_patience if head.run_limits is not None else 0,
-        n_variants=head.n_variants,
-        sp_budget_ttest=head.sp_budget_ttest,
-        headline_metric=head.headline_metric,
-        langfuse_trace_url=head.langfuse_trace_url,
+        hop=hop,
+        # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
+        session_id="",
+        l1_patience=0,
+        n_variants=0,
+        sp_budget_ttest=0,
+        headline_metric="accuracy",
     )
-    view.state.max_cells_in_flight = head.max_cells_in_flight
-    view.state.concurrency_arming = head.concurrency_arming
-    view.state.measured_unit = head.measured_unit
-
     limit = None if at_offset is None else at_offset + 1
     for offset, record in open_with_history(CycleDir(cycle_dir)).iter(limit):
         view.on_record(record, offset)

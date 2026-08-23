@@ -31,20 +31,6 @@ _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
 }
 
 
-def scan_ledger_max_round_complete(ledger_path: Path) -> int:
-    """Highest round with a closing ``PhaseRecord``; ``-1`` if none closed. Round 0 closes through it
-    too — ``emit_origin_round`` sends the origin down the same ``close_round`` seam."""
-    max_complete = -1
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
-        if rec.get("record_type") != "phase":
-            continue
-        if rec.get("phase") == "round" and rec.get("event") == "complete":
-            rnd = rec.get("round")
-            if isinstance(rnd, int) and rnd > max_complete:
-                max_complete = rnd
-    return max_complete
-
-
 def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     """The cycle's own seed, or ``None`` when it carries none (sweep / diag). Written once at mint, but
     the LAST match wins so a re-seed supersedes."""
@@ -181,14 +167,18 @@ def scan_ledger_elections(ledger_path: Path) -> dict[int, ElectionRecord]:
 
 def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     """``round -> LedgerRoundClose`` for every round that CLOSED; last write per round wins, so a rewind
-    supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one."""
+    supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one.
+    A close with no readable payload is still a close; requiring one made this answer a narrower
+    question than its name, so rewind admissibility grew a second full pass of its own."""
     out: dict[int, LedgerRoundClose] = {}
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
         if rec.get("phase") != "round" or rec.get("event") != "complete":
             continue
-        rnd, payload = rec.get("round"), rec.get("payload")
-        if not isinstance(rnd, int) or not isinstance(payload, dict):
+        rnd = rec.get("round")
+        if not isinstance(rnd, int):
             continue
+        payload = rec.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
         ability = payload.get("ability")
         try:
             out[rnd] = LedgerRoundClose(
@@ -208,6 +198,5 @@ __all__ = [
     "scan_ledger_cycle_seed",
     "scan_ledger_decisions",
     "scan_ledger_elections",
-    "scan_ledger_max_round_complete",
     "scan_ledger_round_closes",
 ]
