@@ -45,6 +45,12 @@ INNER_NARRATIVE_CAP = 1150
 # NOT, which lead and keep their detail while the rest cost a line each.
 INNER_NARRATIVE_FULL_CELLS = 3
 INNER_NARRATIVE_SUMMARY_CAP = 160
+# How many cells render AT ALL. Only the depth was tiered before, so every seed still cost a
+# section and the panel grew with the panel's WIDTH: measured at ~315 chars/seed, which is 1.9k
+# at six seeds and ~7.6k at the pp-self default of twenty-four. The tail is the weakest evidence
+# by the panel's own ranking, and where nothing separates from the origin the header already says
+# the order carries no information — so the tail is filler in exactly the round it is longest.
+INNER_NARRATIVE_RENDER_CAP = 6
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
@@ -314,6 +320,7 @@ __all__ = [
     "FENCE_OVERHEAD",
     "INNER_NARRATIVE_CAP",
     "INNER_NARRATIVE_FULL_CELLS",
+    "INNER_NARRATIVE_RENDER_CAP",
     "INNER_NARRATIVE_SUMMARY_CAP",
     "MEMORY_FIELD_CAP",
     "MEMORY_ROUND_CAP",

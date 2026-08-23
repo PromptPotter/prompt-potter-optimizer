@@ -148,10 +148,16 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                     )
                 ],
                 l2_guard_breaches=[
-                    ValidatorOutcome(validator_id="l2_verbatim_self_repeat", evidence={})
+                    ValidatorOutcome(validator_id="l2_verbatim_self_repeat", evidence={}),
+                    ValidatorOutcome(
+                        validator_id="l1_layout_dups_across_slots",
+                        evidence={"duplicates": ["critique"], "unknown": [poisoned_value]},
+                    ),
                 ],
                 l3_guard_breaches=[
-                    ValidatorOutcome(validator_id="l3_plan_verbatim_repeat", evidence={})
+                    ValidatorOutcome(
+                        validator_id="l3_plan_verbatim_repeat", evidence={"plan": poisoned_query}
+                    )
                 ],
             ),
         ),
@@ -178,11 +184,16 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert poisoned_value in wounds_text
     assert poisoned_warning in wounds_text
 
-    # guard_breaches (L2 + L3 post-parse) is plain — controlled validator ids only.
+    # guard_breaches (L2 + L3 post-parse) is plain — controlled ids, and evidence values only where
+    # they name a signal or a slot. An LLM-authored placeholder or plan reports its size instead, so
+    # naming WHICH signals breached never costs the block its unfenced status.
     guards_text = DispatchHub.render("guard_breaches", bundle)
     assert "UNTRUSTED" not in guards_text
     assert "l2_verbatim_self_repeat" in guards_text
     assert "l3_plan_verbatim_repeat" in guards_text
+    assert "duplicates: critique" in guards_text
+    assert poisoned_value not in guards_text
+    assert poisoned_query not in guards_text
 
     plan_text = DispatchHub.render("plan", bundle)
     assert "UNTRUSTED" not in plan_text

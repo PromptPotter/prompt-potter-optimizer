@@ -10,6 +10,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     BAND_COLLAPSE_RATIO,
     INNER_NARRATIVE_CAP,
     INNER_NARRATIVE_FULL_CELLS,
+    INNER_NARRATIVE_RENDER_CAP,
     INNER_NARRATIVE_SUMMARY_CAP,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
@@ -437,8 +438,8 @@ def _paired_cell(
 @signal(
     "inner_narratives",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative, so
-    # a per-section overrun is a safety rail rather than an expected drop.
+    # Bounded by the render cap and the two per-section caps rather than by a total, so the
+    # panel's size follows its evidence instead of the seed count.
     char_cap=None,
     citable=True,
 )
@@ -470,9 +471,17 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
     cells.sort(key=lambda c: c[0])
     n_worse = sum(1 for c in cells if c[0] < 0.0)
     unit = b.measured_unit
+    # The weakest earn their section; the tail is named, never silently dropped — a panel that
+    # says "24 inner campaigns" and renders six has told the generator something false.
+    shown = cells[:INNER_NARRATIVE_RENDER_CAP]
+    held = (
+        f", the {len(shown)} weakest shown and {len(cells) - len(shown)} not rendered"
+        if len(shown) < len(cells)
+        else ""
+    )
     if b.is_origin_round:
         header = (
-            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns, one per outer {unit}. This is "
+            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns, one per outer {unit}{held}. This is "
             "the ORIGIN round: the optimizer prompts are UNEDITED, so each number is that seed's "
             "own lift under them and ± is its error bar. There is no edit to compare against yet, "
             "so do not read these as gains over anything. Weakest first — those are the ones with "
@@ -482,7 +491,8 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         full_cells = INNER_NARRATIVE_FULL_CELLS
     else:
         header = (
-            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns this round, one per outer {unit}. "
+            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns this round, one per outer "
+            f"{unit}{held}. "
             "Each number is that seed's lift MINUS what the same seed scored under the unedited "
             "optimizer prompts, so the seed's own difficulty is already subtracted; ± is the error "
             "bar on that difference)"
@@ -497,7 +507,7 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         )
         full_cells = min(n_worse, INNER_NARRATIVE_FULL_CELLS)
     sections = [Item(header)]
-    for i, (_upper, d, bar, r) in enumerate(cells):
+    for i, (_upper, d, bar, r) in enumerate(shown):
         label = str(r.get("query") or r.get("sample_id") or "inner")[:80]
         mark = f"{d:+.3f}" + (f" ±{bar:.3f}" if bar is not None else " (unpriced)")
         trace = str((r.get("pipeline_data") or {}).get("reasoning_trace") or "")

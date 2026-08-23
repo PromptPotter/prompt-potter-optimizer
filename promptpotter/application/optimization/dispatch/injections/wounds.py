@@ -15,8 +15,13 @@ from promptpotter.application.optimization.dispatch.bundle import (
     signal,
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure
+from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1_POSSIBLE
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
+
+# Evidence values safe to render into an UNFENCED panel: a signal name or a slot name, both closed
+# vocabularies. An LLM-authored placeholder or plan is neither, and reports its size instead.
+_PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS)
 
 
 def _rf_matches_current_config(
@@ -102,6 +107,25 @@ def _r_l1_wounds(b: InjectionBundle) -> list[Item]:
     return [Item(blk, trusted=False) for blk in (_validation_block(b), _runtime_block(b)) if blk]
 
 
+def _guard_evidence(evidence: dict[str, Any]) -> str:
+    """WHICH signals breached, not merely that something did. The id alone left L2 unable to see that
+    the slot it OMITTED was holding the duplicates it was being told to remove — every layout edit
+    that moves a signal trips the same guard, and it re-sent the same edit for three rounds."""
+    parts: list[str] = []
+    for key, value in evidence.items():
+        items = list(value) if isinstance(value, list | tuple) else [value]
+        if all(
+            isinstance(v, bool | int | float)
+            or (isinstance(v, str) and v in _PLAIN_EVIDENCE_VALUES)
+            for v in items
+        ):
+            parts.append(f"{key}: {', '.join(str(v) for v in items)}")
+        else:
+            size = len(items) if isinstance(value, list | tuple) else f"{len(str(value))} chars"
+            parts.append(f"{key}: ({size} withheld)")
+    return "; ".join(parts)
+
+
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     """Post-parse guard-breach list — programmatic guards on a layer's LLM output, distinct from
     `validation_failures` / `runtime_failures` (pipeline evidence). No untrusted content.
@@ -109,7 +133,9 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     if not outcomes:
         return ""
     lines = [f"{layer} GUARD BREACHES (post-parse guards on {layer}'s output caught thrashing):"]
-    lines.extend(f"  • {o.validator_id}" for o in outcomes)
+    for o in outcomes:
+        detail = _guard_evidence(o.evidence)
+        lines.append(f"  • {o.validator_id}" + (f" — {detail}" if detail else ""))
     return "\n".join(lines)
 
 
