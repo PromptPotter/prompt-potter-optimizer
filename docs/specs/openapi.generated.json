@@ -2467,6 +2467,40 @@
             ],
             "title": "Lives Cap"
           },
+          "matched_parent_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candidate's blocked lift over the floor it was JUDGED against — the origin restricted to the cells this candidate actually measured — with its 95% interval. The election's own verdict, and the only comparable answer to 'by how much': under `per_round_resubset` a bare difference of two accuracies is the luckiest draw minus the fullest one. An interval spanning 0 means the round could not separate this candidate from its parent. `None` below two shared cells, outside the election fit, and on any round that has not elected yet.",
+            "title": "Matched Parent Lift"
+          },
+          "matched_parent_lift_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Parent Lift Ci Hi"
+          },
+          "matched_parent_lift_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Parent Lift Ci Lo"
+          },
           "mean_fitness_ci_hi": {
             "anyOf": [
               {

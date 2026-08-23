@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from promptpotter.application.optimization.dispatch.bundle import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
@@ -22,10 +23,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
-from promptpotter.config.settings import (
-    OPTIMIZER_CALL_DEADLINE_S,
-    OPTIMIZER_PROMPT_BUDGET_CHARS,
-)
+from promptpotter.config.settings import OPTIMIZER_CALL_DEADLINE_S
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.run_records import (
     LLMCallRecord,
@@ -247,15 +245,14 @@ async def llm_call(
         )
         # What the ceiling COST, on the normal path rather than the alarm one: selection keeps the
         # prompt under budget, so the fact worth reading is which panel gave way to keep it there.
-        # Reported because a thinned panel is otherwise indistinguishable from a quiet one.
-        thinned = (
-            " · thinned: "
-            + ", ".join(
-                f"{name} -{n}"
-                for name, n in sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])[:3]
-            )
-            if context.injection_dropped
-            else ""
+        # Never one line for both: a panel the ceiling refused WHOLE is absent, and the node
+        # reasons as though it had nothing to report; a thinned one showed less and says so.
+        refused = {n for n in context.injection_dropped if n not in context.injection_chars}
+        by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
+        no_room = [n for n, _ in by_size if n in refused][:4]
+        thinned = [f"{n} -{c}" for n, c in by_size if n not in refused][:3]
+        dropped = (" · NO ROOM: " + ", ".join(no_room) if no_room else "") + (
+            " · thinned: " + ", ".join(thinned) if thinned else ""
         )
         log(
             "→ optimizer call: %s · %s · %d-char prompt%s%s%s",
@@ -264,7 +261,7 @@ async def llm_call(
             prompt_chars,
             f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
             heaviest,
-            thinned,
+            dropped,
         )
         # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
         # Cancelled on every path by the `finally` below.

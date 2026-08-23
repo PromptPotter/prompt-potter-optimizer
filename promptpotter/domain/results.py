@@ -611,6 +611,8 @@ class RoundResult(StrictModel):
     # else a resume re-renders depends on live cycle state. Resume diverges at the FIRST round
     # that disagrees, which is what lets a prompt edit fork a sibling rather than condemn the
     # campaign. Empty ⇒ the round predates the stamp and cannot be asked.
+    # IDENTITY, NOT A FIRE RECORD — every optimizer node is named on every round, including ones
+    # that never run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
     # "generation_only" for a sweep round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.

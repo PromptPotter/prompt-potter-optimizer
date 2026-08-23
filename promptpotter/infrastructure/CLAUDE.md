@@ -191,7 +191,12 @@ whole `l1_critique` call before the round closes, and `election_held` is what se
 that HELD from one still scoring (`is_winner: false` reads identically for both). θ and the
 frontier are RESTAMPED when the ruler warms, so they stay on `round:complete`, which round 0
 reaches twice for exactly that reason. Move either half to the other record and nothing raises:
-round 0 silently reverts to its cold θ, or the served crown goes late again.
+round 0 silently reverts to its cold θ, or the served crown goes late again. The election's
+**lift** is the third case and the one with a trap: `l1_score` stamps it AFTER the ledger's
+`candidate_scored` snapshot is written, so `LedgerCandidate` cannot carry it — declaring it
+there, which that model's docstring invites, yields an all-null column on every live run and a
+value only on repaired rounds. It is folded from the course's own `dashboard.json` rounds,
+joined on the MINTING label (`_lifts`).
 
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut

@@ -31,10 +31,10 @@ if TYPE_CHECKING:
 
 SECTION_SEP = "\n\n"
 
-# Reserved per thinnable panel for the "showed N of M" line this module appends when one is thinned.
-# Held back during selection rather than added after it: a line appended past the ceiling would
-# break the one guarantee this module exists to make. A panel that ends up whole never spends its
-# reserve, which leaves the composition under budget — the safe direction.
+# Reserved for the "showed N of M" line this module appends when a panel is thinned. Held back
+# during selection rather than added after it: a line appended past the ceiling would break the one
+# guarantee this module exists to make. A panel that ends up whole never spends its reserve, which
+# leaves the composition under budget — the safe direction.
 COUNT_LINE_ALLOWANCE = 56
 
 
@@ -51,6 +51,13 @@ class PanelCoverage:
     @property
     def dropped(self) -> int:
         return self.produced - self.placed
+
+
+def _fence_runs(items: list[Item]) -> int:
+    """Fences ``_emit`` will open for *items* — one per CONTIGUOUS untrusted run."""
+    return sum(
+        1 for i, it in enumerate(items) if not it.trusted and (i == 0 or items[i - 1].trusted)
+    )
 
 
 def _emit(items: list[Item], *, produced: int) -> str:
@@ -88,13 +95,19 @@ def select(
     budget: int,
     *,
     exempt: frozenset[str] = frozenset(),
+    first: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, str], dict[str, PanelCoverage]]:
     """Round-robin over *order*, taking one item per panel per pass until *budget* is spent.
 
-    Layout order IS the priority — a second ordering here would be a rival authority on the same
-    question. Every panel places its first item before any places its second, which is the whole
-    anti-dominance property: size alone cannot crowd the package. A panel whose next item will not
-    fit is SKIPPED, not stopped, so a smaller one behind it still gets its turn.
+    Layout order IS the priority among peers. Every panel places its first item before any places
+    its second, which is the whole anti-dominance property: size alone cannot crowd the package. A
+    panel whose next item will not fit is SKIPPED, not stopped, so a smaller one behind it still
+    gets its turn.
+
+    *first* is a FLOOR beneath that, not a rival ordering: those panels clear both passes before
+    anything else spends. Ordering alone cannot serve them, because an indivisible panel is placed
+    in an earlier pass than a divisible one whatever the layout says — so a mandatory panel that
+    happens to be divisible loses to every discretionary panel that happens not to be.
 
     *exempt* names the panels placed whole or not at all; the caller derives it from
     ``InjectionKind.divisible`` rather than this looking it up, so this stays a pure allocator.
@@ -102,52 +115,54 @@ def select(
     pools = {name: list(items) for name in order if (items := rendered.get(name))}
     taken: dict[str, list[Item]] = {name: [] for name in pools}
     cursor = dict.fromkeys(pools, 0)
-    fenced: set[str] = set()
+    reserved: set[str] = set()
     spent = 0
 
     def cost(name: str, chunk: list[Item]) -> int:
-        """What placing *chunk* adds. The fence is charged once per panel, on the first untrusted
-        item it places, because ``_emit`` groups the run rather than wrapping each row."""
+        """What placing *chunk* adds. Both surcharges price what ``_emit`` will write: the fence
+        per contiguous untrusted RUN, the count-line reserve on the panel's first placement."""
+        placed = taken[name]
         extra = sum(len(i.text) + len(SECTION_SEP) for i in chunk)
-        if name not in fenced and any(not i.trusted for i in chunk):
-            extra += FENCE_OVERHEAD + len(FENCE_CLOSE)
+        opened = _fence_runs(placed + chunk) - _fence_runs(placed)
+        extra += opened * (FENCE_OVERHEAD + len(FENCE_CLOSE))
+        if name not in reserved and name not in exempt and len(pools[name]) > 1:
+            extra += COUNT_LINE_ALLOWANCE
         return extra
 
-    # A panel that may be thinned holds back the line that would report the thinning.
-    spent += sum(COUNT_LINE_ALLOWANCE for n, p in pools.items() if n not in exempt and len(p) > 1)
+    def serve(names: list[str]) -> None:
+        nonlocal spent
+        for name in names:
+            if name in pools and name in exempt:
+                whole = pools[name]
+                if spent + cost(name, whole) <= budget:
+                    spent += cost(name, whole)
+                    taken[name] = list(whole)
+                cursor[name] = len(whole)  # whole or nothing; never half a panel carrying state
 
-    for name in order:
-        if name in pools and name in exempt:
-            whole = pools[name]
-            if spent + cost(name, whole) <= budget:
-                spent += cost(name, whole)
-                taken[name] = list(whole)
-                if any(not i.trusted for i in whole):
-                    fenced.add(name)
-            cursor[name] = len(whole)  # whole or nothing; never half a panel that carries state
+        placed_any = True
+        while placed_any:
+            placed_any = False
+            for name in names:
+                items = pools.get(name)
+                if items is None or name in exempt:
+                    continue
+                at = cursor[name]
+                if at >= len(items):
+                    continue
+                # A panel's opening item is its header, and a header alone teaches nothing — it
+                # promises rows that the budget then refused. So a panel's FIRST turn buys its
+                # header and its first row together, or buys neither.
+                chunk = items[at : at + 2] if at == 0 and len(items) > 1 else items[at : at + 1]
+                if spent + cost(name, chunk) > budget:
+                    continue
+                spent += cost(name, chunk)
+                reserved.add(name)
+                taken[name].extend(chunk)
+                cursor[name] = at + len(chunk)
+                placed_any = True
 
-    placed_any = True
-    while placed_any:
-        placed_any = False
-        for name in order:
-            items = pools.get(name)
-            if items is None or name in exempt:
-                continue
-            at = cursor[name]
-            if at >= len(items):
-                continue
-            # A panel's opening item is its header, and a header alone teaches nothing — it
-            # promises rows that the budget then refused. So a panel's FIRST turn buys its header
-            # and its first row together, or buys neither.
-            chunk = items[at : at + 2] if at == 0 and len(items) > 1 else items[at : at + 1]
-            if spent + cost(name, chunk) > budget:
-                continue
-            spent += cost(name, chunk)
-            if any(not i.trusted for i in chunk):
-                fenced.add(name)
-            taken[name].extend(chunk)
-            cursor[name] = at + len(chunk)
-            placed_any = True
+    serve([n for n in order if n in first])
+    serve([n for n in order if n not in first])
 
     # EVERY name in the layout gets an entry, silent ones as "". The caller indexes this by
     # placeholder, and a panel missing from it is a KeyError rather than an empty slot.

@@ -50,14 +50,15 @@ decisions → [`../architecture.md`](../architecture.md).
   nothing on screen says so. Action: name the surface each one writes to *before* adding a surface;
   `descend=` may already answer the L4 half. Blocker: none.
 
-- **Accuracy is the prominent headline where the round is won on θ.** The root `CLAUDE.md` carries a
-  standing ⚠ about exactly this, which is the tell: a *recurring human* misreading is a layout
-  problem, not a doc problem, and the doc has not stopped it. `trajectory` is the ruler-free answer
-  to "is this working" — C0 and every winner since on one shared cell set — and the three states
-  where θ is not ability (an arm at 0.0 on every cell, a cold ruler, a collapsed selection band) are
-  all backend-decidable. Action: promote `trajectory`, and render the not-ability states beside the
-  number they invalidate. Note the second half is a **served** field, not a client derivation
-  (§ Scoring authority, `webapp/CLAUDE.md`). Blocker: none.
+- **The three states where θ is NOT ability are not rendered beside the θ they invalidate.** The
+  layout half of this entry shipped: `trajectory` is a first-class chip on the candidates card with
+  its own ladder, and the elected metric — served `headline_metric`, not a client guess — is now the
+  loud bar and the dendrogram's label (`candidates/series.ts::metricInkToken`,
+  `headline-stats.ts::primaryMetric`). What remains is the second half: an arm at 0.0 on every cell,
+  a cold ruler, and a collapsed selection band are each backend-decidable, and a θ read under any of
+  them is a number the screen currently vouches for. Action: **serve** the state (§ Scoring
+  authority, `webapp/CLAUDE.md` — this is not a client derivation) and render it on the θ it
+  invalidates. Blocker: none.
 
 - **Absent-vs-zero is a rule, and only its named instances have been fixed.** Every number reaches
   the screen as measured / not-measured / not-applicable and may not lose which one on the way; the
@@ -97,6 +98,25 @@ decisions → [`../architecture.md`](../architecture.md).
   was recorded, so there is no before/after. Action: sweep + record one pass.
 
 ## Blocked — named blocker
+
+**`l1_generate`'s ceiling cannot carry its own floor layout, so the back of the layout starves.**
+11,400 − a 5,249-char static template = 6,151 for panels, of which the four whole-or-nothing ones
+(`task_context`, `rendered_prompt`, `plan`, `critique`) measure ~4,000 — leaving ~2,100 for fifteen
+thinnable panels through an allocator whose priority is layout order. Measured over the 71 calls
+since `bef1e022`: `failing_samples` placed 6 / refused whole 63, `mutation_memory` 2 / 54,
+`diagnostics` 1 / 28, `axis_memory` 1 / 17, both value-space catalogues absent from ~60–70%. The
+frame panels place in nearly every call, so the generator keeps its instruments and loses its
+evidence. `l1_critique` fits and is unaffected.
+- Three exits, not equivalent: **raise the ceiling** toward the ~14k the floor renders (input tokens
+  on every call); **shrink the static template** (46% of the ceiling — free per call, but it is the
+  artifact L4 evolves); **give the catalogues row granularity** — [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md)
+  already states the rule they break (one large block can only be starved whole), against which a
+  thinned "use only these — do not invent" menu is a menu that lies.
+- **Blocker: all three void banked origins, and which to spend is the operator's call.** The
+  accounting bugs underneath it are fixed — the fence is priced per contiguous untrusted run and the
+  count-line reserve is charged on first placement, so the ceiling now actually binds; `compose` and
+  the ceiling constant are inside `injection_source_digest`; and `NO ROOM:` prints separately from
+  `thinned:` so a starved panel no longer reads like a thinned one.
 
 **Entry-point parity — five wired verbs the browser can fire and the terminal cannot:**
 - Each is already whole on the server: a payload model in `PAYLOAD_MODEL_FOR_KIND`, a capability in `CAP_FOR_KIND`, a declared operation in `m12-api-openapi.yaml`. Missing is only the CLI half — one `sub.add_parser` row in `cli/parsers.py`, one `COMMANDS` row in `cli/campaign_runner.py` (an import-time assert pins the two together, so they land in one commit), and one handler beside the existing shells in `cli/commands/lifecycle.py`, which already owns `_refused`, `_resolve_target` and `resolve_campaign_hint`. No new orchestration: every one is a `CommandDispatcher` call.
@@ -156,7 +176,7 @@ decisions → [`../architecture.md`](../architecture.md).
   been asked, only asserted — and the L2↔L4 hunt found one real collision underneath it
   (`NodeLayoutSpec.editor` claiming two owners of `l1_generate`'s layout, fixed `d1d792b0`).
 
-- **THREE numbers are computed in the browser, against § Scoring authority** — each verified by tracing, not suspected. **Both re-checks moved a target, so fix the aim before the code:** the `cached_samples / n` division is in `candidates/FitnessChart.tsx`, NOT `CandidatesCard.tsx`, which only counts and passes the field through; and the `θ/$` chip is minted in `shell/RemoteControl.tsx`, NOT `chat/ChatPane.tsx`. **A fourth entry was struck, not fixed:** `ScoringInspector.tsx` never subtracted anything — it renders served `matchedParentAccuracy` and served `matchedParentLift` with its interval. The rest: `HardSamplesHeatmap.tsx` folds per-sample measurements into a mean and thresholds it at **`>= 0.5`**, which matches neither `lib/fitness.ts::HIT_THRESHOLD = 1.0` nor `sample-walk.ts::sampleBucket`'s 0/1 boundaries — so the mini heat strip and the table row directly beneath it can colour one sample differently on a graded scorer, while the served `series.mean_fitness` is already read by two sibling files and `archivePerSample` is already a prop; `dashboard/scoring/OuterSignalPanel.tsx::leadingArm` falls back to a browser-side argmax over `composite_fitness` when the engine elects on **θ**, disagreeing with `forest-layout.ts::pickWinner` (deliberately no-fallback, and its comment says why) exactly on HELD rounds — so it can draw a lift interval attributed to an arm the round never crowned; and `shell/RemoteControl.tsx` mints `abilityDelta / usedUsd` and ships it as a headline `θ/$` KPI chip. All three need **serving**, not deleting, so each wants a backend field first.
+- **THREE numbers are computed in the browser, against § Scoring authority** — each verified by tracing, not suspected. **Every re-check has moved a target, so fix the aim before the code:** the `cached_samples / n` division now lives in `candidates/series.ts` (the series registry owns it — it was in `FitnessChart.tsx` and, before that, was filed against `CandidatesCard.tsx`); and the `θ/$` chip is minted in `shell/RemoteControl.tsx`, NOT `chat/ChatPane.tsx`. **A fourth entry was struck, not fixed:** `ScoringInspector.tsx` never subtracted anything — it renders served `matchedParentAccuracy` and served `matchedParentLift` with its interval. The rest: `HardSamplesHeatmap.tsx` folds per-sample measurements into a mean and thresholds it at **`>= 0.5`**, which matches neither `lib/fitness.ts::HIT_THRESHOLD = 1.0` nor `sample-walk.ts::sampleBucket`'s 0/1 boundaries — so the mini heat strip and the table row directly beneath it can colour one sample differently on a graded scorer, while the served `series.mean_fitness` is already read by two sibling files and `archivePerSample` is already a prop; `dashboard/scoring/OuterSignalPanel.tsx::leadingArm` falls back to a browser-side argmax over `composite_fitness` when the engine elects on **θ**, disagreeing with `forest-layout.ts::pickWinner` (deliberately no-fallback, and its comment says why) exactly on HELD rounds — so it can draw a lift interval attributed to an arm the round never crowned; and `shell/RemoteControl.tsx` mints `abilityDelta / usedUsd` and ships it as a headline `θ/$` KPI chip. All three need **serving**, not deleting, so each wants a backend field first.
 
 - **`idea_fingerprint` cannot see a SEMANTIC re-proposal, and the gate built on it is the only
   cross-round one.** `domain/candidate_diff.py::idea_fingerprint` matches content-word overlap
@@ -207,7 +227,7 @@ decisions → [`../architecture.md`](../architecture.md).
 - **Check-in "ready" ≠ "mintable" for prompt template-vars** — `origin_readiness(draft)` gates columns/framing/node-models but not whether the committed prompt carries each node's required `{{template vars}}`; that check lives only at mint (`config.py::configure_and_apply_pipeline`, `pipeline_config_invalid` 422). Surfacing it earlier (at the resolve turn) needs the live `GET /pipeline` schema threaded into the deliberately-I/O-free resolve path (`origin_readiness` is pure-over-draft; `resolve_origin_turn`/`POST /resolve-origin` carry no backend client + the draft no base_url). **Operator decided: keep the 422 backstop, don't add pre-mint backend I/O.** It's non-destructive (draft preserved, retry) and names the exact missing vars + fix; a bad origin never runs. Revisit only if check-in UX timing becomes a felt pain.
 - **`LLMResponse.reasoning` has no code reader, and that is the design — never file it as write-only surface.** It is the model's own thinking channel (`message.reasoning` on the OpenAI-compat wire). It looks exactly like the "fields declared/written never read" pattern in the hunt list below, and it has already been surfaced that way once (2026-07-26, by the audit that deleted the `llm_only` connector — whose `resp.reasoning[:4000]` had been its only reader). **A model with nowhere to put its internal process answers without one** — give it a bare classification slot and it emits the label with no reasoning behind it, measurably worse. So the slot is part of the ask, capturing what lands there is part of the contract, and the value of the field is not "who reads it in Python." It now rides the ledger payload → `nodes[*].output.reasoning` (audit twin + live dashboard) → the operator's node-detail "Thinking" pane. **Hard invariant: analytical only** — it must never reach a gate, metric, validator, scorer, escalation signal or cache key, because scoring narration teaches the loop to narrate. Full rationale is the field note in `infrastructure/llm/response.py`; the principle is `docs/concepts/structured-output.md` § A place to think is part of the ask. Same call applies to a `reasoning` slot in any node's `output_schema`.
 - **MLflow + Langfuse sinks** — the observability-nexus *core capability*: PromptPotter drops into a team's EXISTING local MLflow / cloud Langfuse instance (flip a flag / add `.env` creds). Off-by-default ≠ dead. See `docs/architecture.md` §0.5 Tracing. Do not propose for deletion.
-- **L2/L3's shared `fork_proposal` + `terminate_proposal` is ONE seam with two entry points** — L3's layout already teaches it both. Don't re-file as duplication. The fact worth carrying: **`l3_plan` has never fired in a banked ledger**, so every L3-side claim in this repo is design intent, not measurement ([`l4-outer-loop.md`](l4-outer-loop.md)).
+- **L2/L3's shared `fork_proposal` + `terminate_proposal` is ONE seam with two entry points** — L3's layout already teaches it both. Don't re-file as duplication. **The "`l3_plan` has never fired in a banked ledger" line that stood here is REFUTED** — re-measured against the audit twins (`.runtime/cache/rounds/`, the per-node LLM I/O), `l3_plan` made **43 real calls across 14.6% of banked rounds**, every one carrying a plan, reasoning and usage, and effectively all of them inside inner L4 campaigns. Two traps that made the old reading survive: the round document's `optimizer_prompt_hashes` names all five nodes on EVERY round (it is measurement identity, not a fire record), and the twin lives under a **dot-directory**, which a bare glob skips. L3-side claims are measurable now; measure them there. Two capability-gated peers are the reverse case — `rebase_capability` / `terminate_capability` render empty across the whole corpus because no banked campaign set the bit, which measures the corpus, not the code.
 
 - **Citability is DERIVED — never re-introduce a citable-panel list.** `EVIDENCE_GROUNDING_FIELDS` was a hand-maintained frozenset the validator checked *set membership* against, so a variant could cite a panel the prompt never rendered and pass clean. It had already drifted twice: the phantom `parent_panel`/`sibling_yield` names were excised 2026-07-02, and by 2026-07-13 four of its nine names (`sample_transcripts`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`) rendered nothing on `l1_generate`'s floor while two rendered panels (`l1_wounds`, `origin_strengths`) were uncitable. Deleted: `@signal(citable=…)` declares evidence-vs-menu at each renderer, and `citable_fields(layout, exploration_budget)` intersects that with the node's **live layout** — one derivation feeding the prompt's `{{citable_fields}}` menu, the wire-schema enum, and `evidence_grounding_present`. **A citable panel that never renders invites a fabricated citation; the only defence that holds is deriving one from the other.**
 

@@ -1090,6 +1090,17 @@ export interface LineageNode {
   evaluators: Record<string, number>;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
+  /** The candidate's blocked lift over the floor it was JUDGED against — the origin
+   * restricted to the cells this candidate actually measured — with its 95%
+   * interval. The election's own verdict, and the only comparable answer to
+   * 'by how much': under `per_round_resubset` a bare difference of two
+   * accuracies is the luckiest draw minus the fullest one. An interval
+   * spanning 0 means the round could not separate this candidate from its
+   * parent. `None` below two shared cells, outside the election fit, and on
+   * any round that has not elected yet. */
+  matched_parent_lift: number | null;
+  matched_parent_lift_ci_lo: number | null;
+  matched_parent_lift_ci_hi: number | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather

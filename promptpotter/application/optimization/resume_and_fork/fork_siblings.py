@@ -194,6 +194,15 @@ def _mint_fork(
             forked_at=now,
             forked_from_round=fork_from_round,
         )
+        # BEFORE the copy: the rounds it copies are the documents naming this ruler, and
+        # `read_ruler` scans only THIS cycle, so without it a fork cannot reproduce its own δ scale.
+        parent_ruler = campaign_store.read_ruler(parent)
+        if parent_ruler is not None:
+            campaign_store.write_ruler(
+                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
+                parent_ruler,
+                round_num=fork_from_round,
+            )
         campaign_store.copy_parent_rounds_and_candidates(
             parent.campaign_id,
             parent.cycle_id,

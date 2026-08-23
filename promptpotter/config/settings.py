@@ -87,18 +87,6 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 # retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
-    "l1_generate": 11_400,
-    # Above its L2/L3 siblings, and the transcript atom is why: a whole sample transcript is
-    # indivisible, so this ceiling decides how many the distiller sees. The caps inside one are
-    # balanced against their own medians (`bundle.py`), so buying another transcript by re-cutting
-    # them clips the model's reasoning — the half the panel header orders the critique to quote.
-    # Set where TWO whole transcripts still fit beside the frame.
-    "l1_critique": 10_150,
-    "l2_context": 7_500,
-    "l3_plan": 7_500,
-}
-
 # PoBB elimination — a candidate stops when its P(best) drops below ε. The runtime value is
 # ``CampaignConfig.pobb_epsilon``; this is the single default every entry point references so
 # the number cannot drift. Set at the most aggressive threshold before false-cuts of true
@@ -242,7 +230,6 @@ __all__ = [
     "LOCK_TIMEOUT",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",
-    "OPTIMIZER_PROMPT_BUDGET_CHARS",
     "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
     "TASK_CONTEXT_OVERRIDES",

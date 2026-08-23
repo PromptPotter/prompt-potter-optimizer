@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimization.dispatch.bundle import (
+    OPTIMIZER_PROMPT_BUDGET_CHARS,
     ArmReading,
     CycleSlice,
     InjectionBundle,
@@ -33,7 +34,6 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolve_node_layout,
 )
 from promptpotter.application.scoring.evaluators import resolve_round_formula
-from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
@@ -195,7 +195,12 @@ class DispatchHub:
         # Which panels may be thinned is a property of what they CARRY, so it is asked of the kind
         # each signal already declares rather than kept as a second list here.
         whole = frozenset(n for n in order if (sig := INJECTIONS.get(n)) and not sig.kind.divisible)
-        rendered, coverage = compose_select(items, order, budget, exempt=whole)
+        # A mandatory name is a promise about the prompt the node RECEIVES, so it takes the
+        # ceiling's first claim; the slot loop below reads `layout.slot`, so nothing moves.
+        spec = NODE_LAYOUTS.get(node or "")
+        rendered, coverage = compose_select(
+            items, order, budget, exempt=whole, first=spec.mandatory if spec else frozenset()
+        )
 
         update: dict[str, str] = {}
         for slot in L1_LAYOUT_SLOTS:

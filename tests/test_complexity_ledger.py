@@ -13,7 +13,7 @@ LEDGER_BASELINE = {
     "reexport_shims": 6,
     "config_leaf_fields": 39,
     "settings_env": 31,
-    "settings_const": 15,
+    "settings_const": 14,
     "opt_search_point_fields": 39,
     "cycle_result_fields": 154,
     "any_params": 50,

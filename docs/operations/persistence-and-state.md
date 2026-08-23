@@ -79,7 +79,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `export.json` | per cycle | The export artifact — the winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
-| `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |
+| `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. **It is also the only surface that says which optimizer node actually RAN, and what each dispatch panel cost it**: the `llm_call` record carries `prompt_chars` plus `injection_chars` / `injection_dropped` / `injection_silent` (`dispatch/facade.py`). The round document cannot answer either — its `optimizer_prompt_hashes` names every node on every round by construction. |
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
@@ -332,8 +332,9 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner
    optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its
    resolved response schema, which is prompt text riding every call as `response_format`, and
-   its config), plus the per-node information-flow layouts, **the injection renderers' own
-   source** (`injection_source_digest`), **the estimator's own source**
+   its config), plus the per-node information-flow layouts, **the source that decides what a node
+   is handed** (`injection_source_digest` — the renderers, plus the per-panel caps and the
+   composition that selects under a node ceiling), **the estimator's own source**
    (`_measurement_source_digest`), the dataset's whole `inner_tasks.yaml`, and the inner
    benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the
    scoring formula included, since either changes what every cell measures. Both source digests

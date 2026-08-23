@@ -1146,6 +1146,101 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
     assert all(k.label == k.course_label for k in kids if k.id.startswith("root-"))
 
 
+def test_lineage_serves_the_election_lift_joined_on_the_minting_label(built_stores) -> None:
+    """The gate's verdict reaches the tree, and each course answers with its OWN numbers.
+
+    `matched_parent_lift` is stamped during the ELECTION — a phase after the ledger already
+    wrote its `candidate_scored` snapshot — so `LedgerCandidate` cannot carry it and declaring
+    it there would yield an all-null column on every live run. It is folded from the course's
+    own `dashboard.json` rounds instead, joined on the MINTING label.
+
+    Silent both ways if the join slips: a wrong key serves `None` everywhere, and a join
+    against the parent's projection would caption one course's crown with another course's
+    lift. Neither raises.
+    """
+    import json
+
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.lineage_views import build_lineage_tree
+
+    campaign_id, root = "lift__aaaaaa", "cycle_lift0"
+    base = built_stores.base_dir / "campaigns" / campaign_id
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "campaign.json").write_text(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name="demo",
+            created_at="2026-01-01T00:00:00",
+            root_cycle_id=root,
+        ).model_dump_json()
+    )
+
+    def write(cycle_id: str, lift: float | None, **index: object) -> None:
+        cdir = base / "cycles" / cycle_id
+        (cdir / ".runtime").mkdir(parents=True, exist_ok=True)
+        (cdir / "index.json").write_text(json.dumps({"status": "finished", **index}))
+        (cdir / ".runtime" / "ledger.jsonl").write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "record_type": "candidate_minted",
+                        "round": rnd,
+                        "idx": 0,
+                        "candidate_id": f"{cycle_id}-c{rnd}",
+                        "parent_id": None if rnd == 0 else f"{cycle_id}-c0",
+                        "label": f"C{rnd}.1" if rnd else "C0",
+                    }
+                )
+                + "\n"
+                for rnd in (0, 1)
+            )
+        )
+        (cdir / "dashboard.json").write_text(
+            json.dumps(
+                {
+                    "rounds": [
+                        {
+                            "round": 1,
+                            "candidates": [
+                                {
+                                    "label": "C1.1",
+                                    "matched_parent_lift": lift,
+                                    "matched_parent_lift_ci_lo": None if lift is None else 0.04,
+                                    "matched_parent_lift_ci_hi": None if lift is None else 0.2,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        )
+
+    write(root, 0.12)
+    # A fork carries its OWN dashboard, with a different number in the same slot.
+    write(
+        f"{root}_fork_beef",
+        0.31,
+        parent_cycle_id=root,
+        fork={"from_candidate_id": f"{root}-c0"},
+    )
+
+    kids = build_lineage_tree(
+        built_stores, (CycleHop(campaign_id=campaign_id, cycle_id=root),)
+    ).children
+    by_id = {k.id: k for k in kids}
+
+    own = by_id[f"{root}-c1"]
+    assert (own.matched_parent_lift, own.matched_parent_lift_ci_lo) == (0.12, 0.04)
+    # The fork's attempt is RENUMBERED onto this timeline, so the label the campaign shows it
+    # under is no longer the one its own projection speaks. It must still read its own 0.31 —
+    # a join on the renumbered `label` would silently hand it the root's 0.12.
+    contributed = by_id[f"{root}_fork_beef-c1"]
+    assert contributed.matched_parent_lift == 0.31
+    # Round 0 elects nothing, so nothing captions it.
+    assert by_id[f"{root}-c0"].matched_parent_lift is None
+
+
 def test_two_inner_runs_of_one_benchmark_cell_both_reach_the_tree(built_stores) -> None:
     """A cycle_id is not an identity, and inside an L4 sandbox that is not a corner case.
 
@@ -3630,6 +3725,99 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
                 f"{name} placed {c.placed}/{c.produced} items at budget {squeeze} — "
                 "an indivisible panel was served in half"
             )
+
+    # Overrunning the ceiling is silent — the prompt just grows and the round completes — so both
+    # surcharges must be priced off what `_emit` writes. An alternating panel is written one fence
+    # per run, and only a panel that places something can be thinned.
+    alternating = [Item("t" * 80) if i % 2 else Item("u" * 80, trusted=False) for i in range(8)]
+    squeezed = {"diagnostics": alternating, **rendered}
+    for tight in range(200, 3_400, 37):
+        picked4, _ = select(squeezed, ["diagnostics", *order], budget=tight)
+        assert sum(len(t) for t in picked4.values()) <= tight, (
+            f"composition overran its {tight}-char ceiling"
+        )
+        for text in picked4.values():
+            assert text.count(FENCE_OPEN_PREFIX) == text.count(FENCE_CLOSE)
+
+
+def test_a_mandatory_panel_outranks_a_discretionary_indivisible_one() -> None:
+    """A mandatory name is a promise about the prompt the node RECEIVES. Layout order alone cannot
+    keep it: whole panels are placed in an earlier pass than divisible ones, so a mandatory
+    DIVISIBLE panel loses to every discretionary INDIVISIBLE one wherever the layout puts it.
+    Nothing raises when that happens — a refused panel reads exactly like a quiet one.
+    """
+    from promptpotter.application.optimization.dispatch.bundle import Item
+    from promptpotter.application.optimization.dispatch.compose import select
+
+    order = ["mutation_memory", "answer_distribution"]
+    rendered = {
+        "mutation_memory": [Item("m" * 600)],
+        "answer_distribution": [Item("header"), Item("a" * 200), Item("b" * 200)],
+    }
+    exempt = frozenset({"mutation_memory"})
+
+    # The trap must be live, or the assertion below passes without the floor doing anything.
+    starved, _ = select(rendered, order, 800, exempt=exempt)
+    assert not starved["answer_distribution"], "vacuous — the panel fits without a first claim"
+
+    served, coverage = select(
+        rendered, order, 800, exempt=exempt, first=frozenset({"answer_distribution"})
+    )
+    assert served["answer_distribution"], "a mandatory panel was refused whole"
+    assert coverage["answer_distribution"].placed >= 2, "a header alone promises rows it never buys"
+    assert sum(len(t) for t in served.values()) <= 800
+
+
+def test_a_rewritable_prompt_field_declares_its_ceiling_only_where_it_runs_long() -> None:
+    """A model rewriting a prompt field imitates the length it was shown, so it shrinks only when
+    handed a number — and the number is prompt text, so it is declared only where the field runs
+    long. Both nodes below declare the same params and differ only in carrying a layout, so this
+    fails if the ceiling reaches every node and fails if it reaches none.
+    """
+    from promptpotter.application.optimization.dispatch.bundle import (
+        OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
+    )
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+    )
+    from promptpotter.domain.l1_layout import NODE_LAYOUTS
+    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+
+    bounded, unbounded = "instruction", "persona"
+    assert bounded in OPTIMIZER_PROMPT_FIELD_MAX_CHARS
+    assert unbounded not in OPTIMIZER_PROMPT_FIELD_MAX_CHARS
+
+    def node(name: str) -> PipelineNode:
+        return PipelineNode(
+            name=name,
+            wire_type="llm",
+            node_type="",
+            param_keys=[bounded, unbounded],
+            param_types={bounded: "string", unbounded: "string"},
+        )
+
+    optimizer = next(n for n in NODE_LAYOUTS)
+    ordinary = "llm_only"
+    assert NODE_LAYOUTS.get(ordinary) is None
+    schema = build_l1_response_schema(
+        PipelineSchema(name="t", version="1", nodes=[node(optimizer), node(ordinary)]),
+        citable_fields=["critique"],
+        n_variants=1,
+    )
+    per_node = schema["properties"]["variants"]["items"]["properties"]["pipeline_params_override"][
+        "properties"
+    ]
+
+    ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS[bounded]
+    assert per_node[optimizer]["properties"][bounded].get("maxLength") == ceiling
+    assert "maxLength" not in per_node[ordinary]["properties"][bounded], (
+        "an ordinary node's instruction stays under 650c unasked — declaring a ceiling there "
+        "spends prompt text on a bound that never binds"
+    )
+    assert "maxLength" not in per_node[optimizer]["properties"][unbounded], (
+        "a field the corpus shows is already short takes no entry, and the table is the only "
+        "thing that decides which do"
+    )
 
 
 def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None:

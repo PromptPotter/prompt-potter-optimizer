@@ -15,6 +15,12 @@ import copy
 from collections.abc import Sequence
 from typing import Any, cast
 
+from promptpotter.application.optimization.dispatch.bundle import (
+    OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
+    SCHEMA_DESCRIPTIONS_INSTRUCTION,
+    SCHEMA_RENAME_INSTRUCTION,
+)
 from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_override
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
@@ -28,7 +34,6 @@ from promptpotter.domain.pipeline_schema import (
 )
 
 __all__ = [
-    "SCHEMA_DESCRIPTION_MAX_CHARS",
     "build_l1_response_schema",
     "effective_l1_field_names",
 ]
@@ -65,30 +70,6 @@ def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str])
         variant["required"] = [field_names.get(k, k) for k in required]
 
 
-# Per-field ceiling on the description prose L1 writes. Sized off the shipped ones (the
-# widest, `llm_only.answer` on justlogic, is ~230 chars): generous for a sentence that has
-# to sit beside a slot, tight enough that the lever cannot become a second instruction.
-SCHEMA_DESCRIPTION_MAX_CHARS = 400
-
-_SCHEMA_DESCRIPTIONS_INSTRUCTION = (
-    "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
-    "schema. This prose sits adjacent to the slot it governs, inside the field-"
-    "filling loop, so it steers the model harder per token than the instruction "
-    "does. Keys are the node's existing field names and are FIXED — you describe a "
-    "field, you never rename or add one. Describe only where the current prose "
-    "underspecifies what the field should hold."
-)
-
-_SCHEMA_RENAME_INSTRUCTION = (
-    "Rename a field on the inner optimizer's own output schema. The model holds "
-    "strong priors about what belongs under a given key, so the name steers "
-    "before a single token of the value is written. Keys are the existing field "
-    "names; values are the new wire names. Rename only when the current name "
-    "misdescribes what the field should hold — a rename the model then fails to "
-    "honour makes the round unparseable and scores it maximally dirty."
-)
-
-
 def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | None:
     """Each lever is keyed by a CLOSED set, so the optimizer can edit but never invent; ``None``
     where the node declares none."""
@@ -98,7 +79,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
             return None
         return {
             "type": "object",
-            "description": _SCHEMA_DESCRIPTIONS_INSTRUCTION,
+            "description": SCHEMA_DESCRIPTIONS_INSTRUCTION,
             # Bounded HERE, the only production site this prose has. It rides forward — the
             # winner's descriptions become the next round's parent — so an unbounded one
             # compounds exactly like `l3_plan.plan` did.
@@ -114,7 +95,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
     if param == SCHEMA_RENAME_PARAM and NODE_LAYOUTS.get(node.name) is not None:
         return {
             "type": "object",
-            "description": _SCHEMA_RENAME_INSTRUCTION,
+            "description": SCHEMA_RENAME_INSTRUCTION,
             "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
             "additionalProperties": False,
         }
@@ -179,6 +160,11 @@ def build_l1_response_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
+            # Only on a node carrying a layout — an optimizer node, whose `instruction` is the
+            # long-form artifact. Elsewhere the declaration is prompt text that never binds.
+            ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
+            if ceiling is not None and NODE_LAYOUTS.get(node.name) is not None:
+                param_props[param]["maxLength"] = ceiling
         # The field-NAME lever is the strongest and the only one that can break a parser,
         # so the campaign must unlock it: dropped from the emitted schema when locked, and
         # the LLM cannot emit a key the schema omits. Structural, never policed per round.

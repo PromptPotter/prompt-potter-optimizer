@@ -141,6 +141,18 @@ class LineageNode(StrictModel):
     )
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
+    matched_parent_lift: float | None = Field(
+        default=None,
+        description="The candidate's blocked lift over the floor it was JUDGED against — the "
+        "origin restricted to the cells this candidate actually measured — with its 95% "
+        "interval. The election's own verdict, and the only comparable answer to 'by how "
+        "much': under `per_round_resubset` a bare difference of two accuracies is the "
+        "luckiest draw minus the fullest one. An interval spanning 0 means the round could "
+        "not separate this candidate from its parent. `None` below two shared cells, outside "
+        "the election fit, and on any round that has not elected yet.",
+    )
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -300,6 +312,10 @@ def _block(index: dict[str, object], key: str) -> dict[str, object]:
     return block if isinstance(block, dict) else {}
 
 
+def _float_or_none(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) else None
+
+
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -350,6 +366,36 @@ class _RoundFacts(NamedTuple):
     cumulative_theta: float | None = None
 
 
+class _Lift(NamedTuple):
+    value: float | None = None
+    ci_lo: float | None = None
+    ci_hi: float | None = None
+
+
+_NO_LIFT = _Lift()
+
+
+def _lifts(dash: dict[str, object]) -> dict[str, _Lift]:
+    """``label -> _Lift``, folded from the course's OWN ``dashboard.json`` rounds. Not the ledger:
+    ``l1_score`` stamps the lift during the ELECTION, after the ``candidate_scored`` snapshot, so
+    :class:`LedgerCandidate` would serve an all-null column on every live run."""
+    out: dict[str, _Lift] = {}
+    rounds = dash.get("rounds")
+    if not isinstance(rounds, list):
+        return out
+    for entry in rounds:
+        rows = entry.get("candidates") if isinstance(entry, dict) else None
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or not isinstance(label := row.get("label"), str):
+                continue
+            out[label] = _Lift(
+                _float_or_none(row.get("matched_parent_lift")),
+                _float_or_none(row.get("matched_parent_lift_ci_lo")),
+                _float_or_none(row.get("matched_parent_lift_ci_hi")),
+            )
+    return out
+
+
 def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
     """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger. **The join stays on
     ``label``**: ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it."""
@@ -386,12 +432,14 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
 
 
 def _course_scalars(
-    stores: Stores, hop: CycleHop, index: dict[str, object], reads: _Reads
+    stores: Stores,
+    hop: CycleHop,
+    index: dict[str, object],
+    reads: _Reads,
+    dash: dict[str, object],
 ) -> dict[str, object]:
     """The course's own facts: topology from ``index.json``, live ♥ from the dashboard."""
     layout = _layout(stores, hop)
-    dash = read_json_optional(layout.dashboard)
-    dash = dash if isinstance(dash, dict) else {}
 
     fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
     limits = dash.get("run_limits") if isinstance(dash.get("run_limits"), dict) else {}
@@ -665,6 +713,7 @@ def _candidate_node(
     cand: LedgerCandidate,
     *,
     close: _RoundFacts,
+    lift: _Lift,
     children: list[LineageNode],
     retired_by: str | None,
     hops: list[CycleHop],
@@ -688,6 +737,9 @@ def _candidate_node(
         # second one to prefer over it.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
         mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
+        matched_parent_lift=lift.value,
+        matched_parent_lift_ci_lo=lift.ci_lo,
+        matched_parent_lift_ci_hi=lift.ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,
@@ -727,7 +779,10 @@ def rank_by_composite(kids: list[LineageNode]) -> list[LineageNode]:
 def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
     leaf = path[-1]
     index = _read_index(stores, leaf)
-    ledger_path = _layout(stores, leaf).ledger
+    layout = _layout(stores, leaf)
+    ledger_path = layout.ledger
+    dash = read_json_optional(layout.dashboard)
+    dash = dash if isinstance(dash, dict) else {}
     candidates = scan_ledger_candidates(ledger_path)
     children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
@@ -739,6 +794,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     hops = list(path)
 
     decided = _round_facts(ledger_path, candidates)
+    lifts = _lifts(dash)
 
     # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
@@ -761,6 +817,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
                 _candidate_node(
                     cand,
                     close=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
+                    lift=lifts.get(cand.label, _NO_LIFT),
                     children=[
                         _build(c.store, c.path, depth=depth - 1, reads=reads)
                         for c in buckets.get(cand.candidate_id, [])
@@ -776,7 +833,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
         )
     )
 
-    scalars = _course_scalars(stores, leaf, index, reads)
+    scalars = _course_scalars(stores, leaf, index, reads, dash)
     # A course whose line MOVED does not answer for run-state; the LAST such cut speaks, and
     # each branch delegates onward, so a chain resolves to its tip. `origin_accuracy` stays
     # OURS — round 0 is the shared prefix, not the cut.

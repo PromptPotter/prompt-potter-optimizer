@@ -23,6 +23,47 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
 
 
+# Every constant below decides what a prompt RECEIVES, and `injection_source_digest` hashes this
+# module: one shaping a prompt from outside that hash pools corpora the fingerprint keeps apart.
+OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
+    # Its mandatory floor is not ours to bound — `rendered_prompt` and `task_context` are the
+    # dataset's — so this is set above the widest floor seen, not derived from one.
+    "l1_generate": 13_000,
+    # A whole sample transcript is indivisible, so this ceiling alone decides how many the
+    # distiller sees; set where two still fit beside the frame.
+    "l1_critique": 10_150,
+    "l2_context": 7_500,
+    "l3_plan": 7_500,
+}
+
+
+# Declared to the model in the wire schema so it can aim at a length rather than be trimmed to one.
+# A cap on growth, not pressure to compress; a field with no entry is emitted unbounded.
+OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
+    "instruction": 3_200,
+}
+
+SCHEMA_DESCRIPTION_MAX_CHARS = 400
+
+SCHEMA_DESCRIPTIONS_INSTRUCTION = (
+    "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
+    "schema. This prose sits adjacent to the slot it governs, inside the field-"
+    "filling loop, so it steers the model harder per token than the instruction "
+    "does. Keys are the node's existing field names and are FIXED — you describe a "
+    "field, you never rename or add one. Describe only where the current prose "
+    "underspecifies what the field should hold."
+)
+
+SCHEMA_RENAME_INSTRUCTION = (
+    "Rename a field on the inner optimizer's own output schema. The model holds "
+    "strong priors about what belongs under a given key, so the name steers "
+    "before a single token of the value is written. Keys are the existing field "
+    "names; values are the new wire names. Rename only when the current name "
+    "misdescribes what the field should hold — a rename the model then fails to "
+    "honour makes the round unparseable and scores it maximally dirty."
+)
+
+
 # Per-injection caps — bound LLM-authored output to keep individual blocks tight.
 AXES_ENUM_PREVIEW = 4
 # How many arms `precision` quotes an interval for. The leader and its nearest rivals answer

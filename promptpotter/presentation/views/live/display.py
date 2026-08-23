@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.dispatch.bundle import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.application.views.view_models import AnyView
-from promptpotter.config.settings import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
