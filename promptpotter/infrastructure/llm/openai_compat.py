@@ -271,7 +271,6 @@ class OpenAICompatibleClient(LLMClientBase):
             # bind — keeps the repair: there, showing the model its own error is the
             # informative move, and the output is small enough that re-sending it is cheap.
             clean_reask = first_finish_reason == "length" or content_len < MIN_CONTENT_CHARS
-            retry_kind = RETRY_CLEAN_REASK if clean_reask else RETRY_SCHEMA_REPAIR
             cause = (
                 "truncated at max_tokens — the prompt asks for more than the budget carries"
                 if first_finish_reason == "length"
@@ -279,95 +278,116 @@ class OpenAICompatibleClient(LLMClientBase):
                 if content_len < MIN_CONTENT_CHARS
                 else "response is schema-noncompliant"
             )
-            logger.warning(
-                "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
-                "Retrying via %s (second full call; cost + latency ~2x).",
-                self._provider_name,
-                schema_name,
-                validation_err.error_count(),
-                content_len,
-                first_finish_reason,
-                request_params.get("model", "?"),
-                cause,
-                retry_kind,
+            repair_params = {
+                **request_params,
+                "messages": [
+                    *request_params["messages"],
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response failed schema validation. Errors:\n"
+                            f"{truncate(str(validation_err), 600)}\n\n"
+                            "Return ONLY a JSON object that strictly matches the "
+                            "requested schema. No prose, no markdown fences, no "
+                            "extra fields."
+                        ),
+                    },
+                ],
+            }
+            # Noncompliance gets the repair AND THEN a clean re-ask, because one failed repair
+            # is not evidence the PROMPT is at fault — and the re-ask is the rung that actually
+            # rescues a flaky provider, by the same independent-sample argument made above. It
+            # also gives this branch a `reproduced` reading, which is what separates a bad
+            # prompt from a bad moment. A size- or emptiness-driven failure still gets the clean
+            # re-ask alone: the repair is the move that cannot help there.
+            ladder = (
+                [(RETRY_CLEAN_REASK, dict(request_params))]
+                if clean_reask
+                else [
+                    (RETRY_SCHEMA_REPAIR, repair_params),
+                    (RETRY_CLEAN_REASK, dict(request_params)),
+                ]
             )
-            if clean_reask:
-                retry_params = dict(request_params)
-            else:
-                retry_params = {
-                    **request_params,
-                    "messages": [
-                        *request_params["messages"],
-                        {"role": "assistant", "content": content},
-                        {
-                            "role": "user",
-                            "content": (
-                                "Your previous response failed schema validation. Errors:\n"
-                                f"{truncate(str(validation_err), 600)}\n\n"
-                                "Return ONLY a JSON object that strictly matches the "
-                                "requested schema. No prose, no markdown fences, no "
-                                "extra fields."
-                            ),
-                        },
-                    ],
-                }
-            result = await self._one_attempt(client, retry_params, response_model, response_schema)
-            schema_repair_attempts = 1
-            if isinstance(result, LLMResponse):
-                result.schema_repair_attempts = schema_repair_attempts
-                # Fold the failed first attempt's tokens onto the salvaged repair response.
-                result.usage["prompt_tokens"] += first.prompt
-                result.usage["completion_tokens"] += first.completion
-                result.usage["reasoning_tokens"] = (
-                    result.usage.get("reasoning_tokens", 0) + first.reasoning
-                )
-                result.usage["cache_read_tokens"] = (
-                    result.usage.get("cache_read_tokens", 0) + first.cache_read
-                )
-                result.usage["cache_write_tokens"] = (
-                    result.usage.get("cache_write_tokens", 0) + first.cache_write
-                )
-                result.usage["total_tokens"] = (
-                    result.usage["prompt_tokens"] + result.usage["completion_tokens"]
-                )
-                result.cost_usd = _billed_cost(first_cost, result.cost_usd)
-                # Reconcile the rolling-window reservation with the ACTUAL two-round-trip
-                # total, not the cheap chars//4 estimate — else the TPM self-throttle
-                # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
-                if reservation is not None:
-                    reservation.close(result.usage["total_tokens"])
-                return result
-            response, content, validation_err, parsed = result
-            if validation_err is not None:
-                err = OptimizerPromptParseError(
-                    raw=content,
-                    error=validation_err,
-                    attempts=2,
-                    first_finish_reason=first_finish_reason,
-                    first_content_chars=content_len,
-                    first_completion_tokens=first.completion,
-                    first_reasoning_tokens=first.reasoning,
-                    retry_kind=retry_kind,
-                    **_failure_diagnostics(response, first.prompt, first.completion),
-                )
-                # The cause names the FIRST attempt's failure — the repair's own emptiness
-                # is downstream of it and is already in `diagnosis()`.
-                #
-                # This layer does NOT say what the caller will do about it — that is true only
-                # for `l1_generate`. An `l1_critique` failure is swallowed by `graceful(...)`
-                # and an L2/L3 one never touches candidates, so naming a consequence here
-                # misreports most of these lines as zero-candidate rounds.
-                logger.error(
-                    "%s: %s parse failed AGAIN after repair retry (%d errors, "
-                    "%d content chars on the repair) — %s. Raising to the caller. [%s]",
+            for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
+                logger.warning(
+                    "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
+                    "Retrying via %s (rung %d of %d; each is a full call).",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
-                    len(content.strip()),
+                    content_len,
+                    first_finish_reason,
+                    request_params.get("model", "?"),
                     cause,
-                    err.diagnosis(),
+                    retry_kind,
+                    attempt_no,
+                    len(ladder),
                 )
-                raise err from validation_err
+                result = await self._one_attempt(
+                    client, retry_params, response_model, response_schema
+                )
+                schema_repair_attempts = attempt_no
+                if isinstance(result, LLMResponse):
+                    result.schema_repair_attempts = schema_repair_attempts
+                    # Fold every failed attempt's tokens onto the salvaged response.
+                    result.usage["prompt_tokens"] += first.prompt
+                    result.usage["completion_tokens"] += first.completion
+                    result.usage["reasoning_tokens"] = (
+                        result.usage.get("reasoning_tokens", 0) + first.reasoning
+                    )
+                    result.usage["cache_read_tokens"] = (
+                        result.usage.get("cache_read_tokens", 0) + first.cache_read
+                    )
+                    result.usage["cache_write_tokens"] = (
+                        result.usage.get("cache_write_tokens", 0) + first.cache_write
+                    )
+                    result.usage["total_tokens"] = (
+                        result.usage["prompt_tokens"] + result.usage["completion_tokens"]
+                    )
+                    result.cost_usd = _billed_cost(first_cost, result.cost_usd)
+                    # Reconcile the rolling-window reservation with the ACTUAL multi-round-trip
+                    # total, not the cheap chars//4 estimate — else the TPM self-throttle
+                    # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
+                    if reservation is not None:
+                        reservation.close(result.usage["total_tokens"])
+                    return result
+                response, content, validation_err, parsed = result
+                if validation_err is None:
+                    break
+                if attempt_no == len(ladder):
+                    err = OptimizerPromptParseError(
+                        raw=content,
+                        error=validation_err,
+                        attempts=attempt_no + 1,
+                        first_finish_reason=first_finish_reason,
+                        first_content_chars=content_len,
+                        first_completion_tokens=first.completion,
+                        first_reasoning_tokens=first.reasoning,
+                        retry_kind=retry_kind,
+                        **_failure_diagnostics(response, first.prompt, first.completion),
+                    )
+                    # The cause names the FIRST attempt's failure — a later rung's own emptiness
+                    # is downstream of it and is already in `diagnosis()`.
+                    #
+                    # This layer does NOT say what the caller will do about it — that is true
+                    # only for `l1_generate`. An `l1_critique` failure is swallowed by
+                    # `graceful(...)` and an L2/L3 one never touches candidates, so naming a
+                    # consequence here misreports most of these lines as zero-candidate rounds.
+                    logger.error(
+                        "%s: %s parse failed on every rung (%d errors, %d content chars on the "
+                        "last) — %s. Raising to the caller. [%s]",
+                        self._provider_name,
+                        schema_name,
+                        validation_err.error_count(),
+                        len(content.strip()),
+                        cause,
+                        err.diagnosis(),
+                    )
+                    raise err from validation_err
+                # This rung is spent; carry its account so the next one's billing still sums.
+                first = first + _attempt_usage(response)
+                first_cost = _billed_cost(first_cost, _attempt_cost(response))
 
         usage = response.usage
         if reservation is not None and usage is not None:
