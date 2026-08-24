@@ -539,6 +539,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         last_event = live.observe_round(
             improved=improved,
             compared=electable > 0,
+            separable=None,
             current_accuracy=0.5,
             l1_patience=99,
             lives=cfg,
@@ -582,15 +583,83 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     assert replay.l1_stall_count == live.l1_stall_count == 3
     # And exhausting the bank on the resumed FSM stops with the same reason the live loop uses.
     replay.observe_round(
-        improved=False, compared=True, current_accuracy=0.5, l1_patience=99, lives=cfg
+        improved=False,
+        compared=True,
+        separable=None,
+        current_accuracy=0.5,
+        l1_patience=99,
+        lives=cfg,
     )
     exhaust = replay.observe_round(
-        improved=False, compared=True, current_accuracy=0.5, l1_patience=99, lives=cfg
+        improved=False,
+        compared=True,
+        separable=None,
+        current_accuracy=0.5,
+        l1_patience=99,
+        lives=cfg,
     )
     assert replay.lives == 0
     assert exhaust.next_action is NextAction.STOP_LIVES
     assert exhaust.stop_reason is StopReason.LIVES_EXHAUSTED
     assert last_event is not None  # streak never stopped mid-sequence
+
+
+def test_unresolved_round_stalls_and_replays_as_one() -> None:
+    """A round that crowned a winner and resolved NOTHING must advance L1 patience, live and on
+    replay alike. Silent twice over: the round sets ``improved`` so every surface reads it as a
+    win, and the escalation it should have triggered simply never happens — the loop spends its
+    whole budget re-asking a question the panel could not answer, with no error anywhere. If the
+    replay disagrees with the live run, a resumed cycle escalates on a different round than the
+    one it interrupted, which silently changes what the campaign measured."""
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.domain.run_records import PhaseRecord
+
+    # (improved, separable) — a resolved win, then two wins that told no arm from the parent.
+    sequence = [(True, True), (True, False), (True, False)]
+
+    live = EscalationFSM()
+    for improved, separable in sequence:
+        live.observe_round(
+            improved=improved,
+            compared=True,
+            separable=separable,
+            current_accuracy=0.5,
+            l1_patience=99,
+        )
+    # Two unresolved rounds banked as stalls despite `improved` — at l1_patience 2 this is the
+    # fire the loop was missing.
+    assert live.l1_stall_count == 2
+
+    replay = EscalationFSM()
+    for i, (improved, separable) in enumerate(sequence, start=1):
+        replay.fold(
+            PhaseRecord(
+                phase="round",
+                event="complete",
+                round=i,
+                payload={
+                    "improved": improved,
+                    "electable_count": 2,
+                    "separable": separable,
+                },
+            ),
+            lives=None,
+        )
+    assert replay.l1_stall_count == live.l1_stall_count
+
+    # A round whose arms carried no interval is UNREADABLE, not unresolved: it banks on
+    # `improved` alone, so an old record that names no verdict replays as it was decided.
+    unreadable = EscalationFSM()
+    unreadable.fold(
+        PhaseRecord(
+            phase="round",
+            event="complete",
+            round=1,
+            payload={"improved": True, "electable_count": 2},
+        ),
+        lives=None,
+    )
+    assert unreadable.l1_stall_count == 0
 
 
 def test_l2_l3_escalation_state_survives_resume() -> None:

@@ -554,6 +554,14 @@ class RoundResult(StrictModel):
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
+    # Did the round resolve anything — did ANY electable arm's lift interval clear 0? `improved`
+    # beside it is the point estimate, and the two answer different questions: a round can crown a
+    # winner (`improved`) out of arms none of which separated from the parent, which is the best of
+    # what it saw rather than a measured advance. Escalation reads BOTH, so a round that resolved
+    # nothing counts as a stall and reaches L2 instead of resetting its patience. `None` when no arm
+    # carries an interval — below two shared cells there is nothing to be inconclusive ABOUT, and
+    # that is not the same fact as a round that measured cleanly and tied.
+    separable: bool | None = None
     # Subset-invariant peer of this round's own `accuracy`: the cumulative frontier's ability,
     # with the scale it was read on, so a drifting per-round subset cannot inflate the outer
     # fitness signal. `None` = never fit. The SE inside is a precision, never a penalty: the spec

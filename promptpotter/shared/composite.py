@@ -27,7 +27,7 @@ SHORT_NAMES: dict[str, str] = {
     "error_rate": "err",
     "degraded_rate": "degr",
     "runtime_failure_rate": "rf",
-    "latency_norm": "lat",
+    "mean_latency_s": "lat",
     "prompt_compactness": "pc",
     "pipeline_compactness": "ppl",
     "source_recall": "src",

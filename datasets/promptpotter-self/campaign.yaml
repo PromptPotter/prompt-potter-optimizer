@@ -30,7 +30,21 @@ campaign_config:
   # change; leave it. Narrowing to use more of the range is what the previous window did, and 5
   # of these 50 cells clear the +1.0 where it clipped. Re-check here, not by intuition, if the
   # measurand moves again.
-  scoring: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
+  # PER-ROUND, over those cell fitnesses: what the edit delivered, PRICED IN TIME. An edit buys
+  # its lift by making every inner round longer, and until now nothing charged it for that —
+  # round 1 elected an arm 1.43x slower than C0 (704.8s/cell vs 491.5s) for +0.05 accuracy that
+  # its own CI could not separate from zero, while the arm that was 0.89x FASTER placed last.
+  # The time spread was the only axis carrying signal and the formula was blind to it.
+  #
+  # 500 is the ANCHOR, near C0's measured 491.5s/cell — and it is deliberately a fixed number
+  # rather than the running parent's cost. A parent-relative ratio lets each round cost 1.15x the
+  # last and never trip; four such rounds double the clock with every round reading clean. Anchored,
+  # the debt is cumulative and a slow arm stays slow. RATIO, not a capped budget: a cap charges
+  # slowdowns but pays nothing for speed, which lands the 0.89x arm level with a 1.15x one.
+  # Re-fit it here if the inner round budget moves; a stale anchor silently stops charging.
+  scoring:
+    per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
+    per_round: max(0.0, min(1.0, accuracy * 500.0 / max(1.0, mean_latency_s)))
   headline_metric: ability
   # = the panel size in inner_tasks.yaml. Above it the engine warns and the adaptive queue is
   # inert (there is nothing to select from); below it a variant is judged on a subset of cells.

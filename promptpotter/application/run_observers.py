@@ -197,6 +197,10 @@ class RunCallbacks:
                     # round identically on resume (`EscalationFSM.fold`): `improved` says which
                     # way to move the bank, this says whether to move it at all.
                     "electable_count": round_result.electable_count,
+                    # The third of the same set: whether the round could tell its arms apart at
+                    # all. The stall counter gates on it, so a resume that could not read it here
+                    # would rebuild a different patience than the live run spent.
+                    "separable": round_result.separable,
                     "label": round_result.label,
                     # WHOLE, not the θ alone: round 0's second close restamps this reading onto
                     # the served summary, and a θ landing under the cold scale it replaced is

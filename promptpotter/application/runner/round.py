@@ -225,6 +225,7 @@ async def post_round(
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
         compared=round_result.electable_count > 0,
+        separable=round_result.separable,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         lives=config.optimization.lives,

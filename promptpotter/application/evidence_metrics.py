@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import computed_field
 
@@ -10,6 +10,7 @@ from promptpotter.application.scoring.formula.compiler import (
     compile_expression,
 )
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
+from promptpotter.domain.scoring import QueryMeasurement, recorded_cost_s
 from promptpotter.domain.strict_model import StrictModel
 
 # The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
@@ -66,20 +67,6 @@ def _number(value: object) -> float | None:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
-def _finite_sum(values: object) -> float | None:
-    """``None`` unless *values* is a non-empty map of numbers. An empty ``step_timings`` is a row
-    that recorded no timing, which is absent — summing it to 0.0 is the fabrication this guards."""
-    if not isinstance(values, dict) or not values:
-        return None
-    total = 0.0
-    for entry in values.values():
-        number = _number(entry)
-        if number is None:
-            return None
-        total += number
-    return total
-
-
 def _step_tokens_sum(pipeline_data: Mapping[str, Any], *keys: str) -> float | None:
     steps = pipeline_data.get("step_tokens")
     if not isinstance(steps, dict) or not steps:
@@ -110,9 +97,7 @@ def _row_channels(row: Mapping[str, Any]) -> dict[str, float]:
     put("fitness", _number(row.get("fitness")))
     put("rank", _number(row.get("ground_truth_rank")))
 
-    # `step_timings`, never `total_time`: the latter is THIS replay's wall clock, so a cache hit
-    # banks 0.0 while the work it replays took minutes. On L4 it is the inner campaign's own span.
-    put("latency", _finite_sum(pd.get("step_timings")))
+    put("latency", recorded_cost_s(cast("QueryMeasurement", row)))
 
     # The seed's own trajectory. `lift` is what the outer loop SCORES — the mean over the round
     # budget — while `final_lift` is where it actually ended and `peak_lift` the best it reached;

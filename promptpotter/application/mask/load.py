@@ -82,7 +82,7 @@ def _candidates(
     round_file: dict[str, Any], samples: frozenset[int] | None, winner_label: str
 ) -> list[MaskCandidate]:
     # The per-sample rows already on disk. The row-derivable evaluator subset
-    # (accuracy, output_compactness, latency_norm, …) is recomputed from these and
+    # (accuracy, output_compactness, mean_latency_s, …) is recomputed from these and
     # merged over the stored snapshot — present on every record regardless of when it
     # was written. A sample-set mask filters the rows to the selected subset first, so
     # those same evaluators (accuracy especially) re-score on the subset and a What-If

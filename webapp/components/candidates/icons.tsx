@@ -40,7 +40,7 @@ const ICONS: Record<string, ReactNode> = {
       <path d="m8 8 8 8M16 8l-8 8" />
     </svg>
   ),
-  latency_norm: (
+  mean_latency_s: (
     <svg {...COMMON} aria-hidden="true">
       <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" fillOpacity={0.15} />
     </svg>

@@ -290,8 +290,7 @@ def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> N
         if layout is None:
             raise ValueError(
                 f"Fork payload l1_layout is unparseable: {payload.l1_layout!r}. "
-                "Expect a dict whose keys are L1 layout slots and values are lists of "
-                "placeholder names."
+                "Expect a dict mapping each placeholder name to the L1 layout slot it moves to."
             )
         result = validate_l1_layout(
             layout, spec=NODE_LAYOUTS["l1_generate"], prior_layout=opt_sp.memory.l1_layout
@@ -526,6 +525,8 @@ def _trigger_payload(
         "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
         "best_theta_at_entry": getattr(esc, f"{layer}_best_theta_at_entry"),
         "best_theta_this_round": cycle.tracking.best_theta,
+        # Which of the two pairs above the stall verdict actually read.
+        "comparator": getattr(esc, f"{layer}_comparator"),
     }
     return inputs_ref, data
 

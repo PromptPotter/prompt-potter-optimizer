@@ -332,6 +332,9 @@ def _finalize_loop_state(
         # Idempotent — runner.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
+        # First moment the lock from `Cycle.start` has an id to be written under, and round 0 is
+        # already stamped with it.
+        cycle.persist_ruler()
     session.state.tracing_campaign_id = tracing_campaign_id
     # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_ttest``.
     session.scoring.scoring_set = list(dataset)

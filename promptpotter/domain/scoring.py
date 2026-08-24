@@ -164,11 +164,28 @@ def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
     A cached replay's ``0.0`` is a true reading (``_materialize_cached`` stamps it; nothing was
     spent), while a row that never reached the pipeline has no time at all. Two display sites
     each wrote ``pd.get("total_time", 0.0) or 0.0``, which made those two identical and painted
-    the second as an instant success. What a cell COST is a different question with a different
-    answer — ``step_timings``, read by ``evidence_metrics.py``, which survives the cache stamp."""
+    the second as an instant success. What a cell COST is the question ``recorded_cost_s``
+    answers, off ``step_timings``, which survives the cache stamp."""
     pd = result.get("pipeline_data") or {}
     total = pd.get("total_time")
     return float(total) if isinstance(total, int | float) else None
+
+
+def recorded_cost_s(result: QueryMeasurement) -> float | None:
+    """What producing this row COST in seconds, or ``None`` where it recorded no timing.
+
+    The cache-surviving half of the pair above: ``step_timings`` holds what the work took the
+    first time it ran, so a replay still prices the cell it replays. Summing an EMPTY map to
+    ``0.0`` would report an unpriced cell as a free one, so absent stays absent."""
+    timings = (result.get("pipeline_data") or {}).get("step_timings")
+    if not isinstance(timings, dict) or not timings:
+        return None
+    total = 0.0
+    for entry in timings.values():
+        if not isinstance(entry, int | float) or isinstance(entry, bool):
+            return None
+        total += float(entry)
+    return total
 
 
 class ScoringSpec(NamedTuple):

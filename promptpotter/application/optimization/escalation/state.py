@@ -47,10 +47,12 @@ class EscalationFSM:
         "_l1_stall_count",
         "_l2_best_composite_fitness_at_entry",
         "_l2_best_theta_at_entry",
+        "_l2_comparator",
         "_l2_round",
         "_l2_stall_count",
         "_l3_best_composite_fitness_at_entry",
         "_l3_best_theta_at_entry",
+        "_l3_comparator",
         "_l3_round",
         "_l3_stall_count",
         "_lives",
@@ -71,6 +73,12 @@ class EscalationFSM:
         self._l3_stall_count = 0
         self._l3_best_composite_fitness_at_entry = 0.0
         self._l3_best_theta_at_entry: float | None = None
+        # WHICH scale the last stall verdict was read on. `_improved` picks between two, and the
+        # four numbers behind that choice were already recorded while the choice itself was not —
+        # so a reader had to re-derive it from where the Nones fell. Named, it is a state; unnamed,
+        # it was the silent one. Not persisted: it describes the last comparison, not the cycle.
+        self._l2_comparator: str | None = None
+        self._l3_comparator: str | None = None
 
     # ---- Read-only access (telemetry, decision payloads, prompt vars) ----
 
@@ -93,10 +101,23 @@ class EscalationFSM:
             return max(0, min(lives.cap, base))
         return max(0, min(lives.cap, base + (1 if improved else -1)))
 
-    def _bank_round(self, improved: bool, lives: LivesConfig | None, *, compared: bool) -> None:
+    def _bank_round(
+        self, improved: bool, lives: LivesConfig | None, *, compared: bool, separable: bool | None
+    ) -> None:
         """Advance the L1 accumulators — live ``observe_round`` and resume ``fold`` both land here. They
-        diverge on ``compared``: an uncompared round still advances the STALL counter, at no life cost."""
-        self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
+        diverge on ``compared``: an uncompared round still advances the STALL counter, at no life cost.
+
+        Only an ADVANCE clears the stall. A round crowns a winner whenever one arm out-ranks the
+        parent on θ, which is a point estimate — so a round whose arms all bracket 0 sets
+        ``improved`` and resolved nothing, and resetting patience on it spends the whole budget
+        re-asking a question the panel cannot answer. ``separable is None`` means the round could
+        not be read either way (no arm carried an interval), and an unreadable round is not
+        evidence of a stall, so it banks as ``improved`` alone decides."""
+        advanced = improved and separable is not False
+        self._l1_stall_count = 0 if advanced else self._l1_stall_count + 1
+        # The life bank still reads `improved` alone: patience asks "does L1 need help", which a
+        # round that resolved nothing answers yes to, while the bank asks "was this round worth
+        # another", and moving both on one edit would leave neither reading attributable.
         if lives is not None:
             self._lives = self._bank_life(self._lives, improved, lives, compared=compared)
 
@@ -126,6 +147,10 @@ class EscalationFSM:
         return self._l2_best_theta_at_entry
 
     @property
+    def l2_comparator(self) -> str | None:
+        return self._l2_comparator
+
+    @property
     def l3_round(self) -> int:
         return self._l3_round
 
@@ -141,6 +166,10 @@ class EscalationFSM:
     def l3_best_theta_at_entry(self) -> float | None:
         return self._l3_best_theta_at_entry
 
+    @property
+    def l3_comparator(self) -> str | None:
+        return self._l3_comparator
+
     # ---- Improvement comparator: difficulty-adjusted θ when the ruler is live ----
 
     @staticmethod
@@ -149,12 +178,20 @@ class EscalationFSM:
         entry_comp: float,
         current_theta: float | None,
         entry_theta: float | None,
-    ) -> bool:
-        """Did the cycle's best advance since a layer fired? Difficulty-adjusted θ when the per-cycle ruler
-        is live, else composite. The ruler is fixed per cycle, so the choice never flips mid-cycle."""
+    ) -> tuple[bool, str]:
+        """Did the cycle's best advance since a layer fired, and ON WHICH SCALE — θ when both readings
+        carry one, composite otherwise.
+
+        The scale is NOT fixed per cycle, which the previous wording claimed: ``entry_theta`` is
+        captured when the layer FIRES, so a layer entering before the ruler warms compares composites
+        for the rest of the run while a later layer compares θ. That ``theta_appeared`` case is the
+        one worth seeing — θ is available and the verdict is not using it — and composite is only
+        comparable to its own past while the formula holds (`persistence-and-state.md` § Changing the
+        composite formula), which is why the caller records the answer rather than inferring it."""
         if current_theta is not None and entry_theta is not None:
-            return current_theta > entry_theta
-        return current_comp > entry_comp
+            return current_theta > entry_theta, "theta"
+        scale = "theta_appeared" if current_theta is not None else "composite"
+        return current_comp > entry_comp, scale
 
     # ---- Observations: the only mutation surface ----
 
@@ -163,6 +200,7 @@ class EscalationFSM:
         *,
         improved: bool,
         compared: bool,
+        separable: bool | None,
         current_accuracy: float,
         l1_patience: int,
         lives: LivesConfig | None = None,
@@ -178,7 +216,7 @@ class EscalationFSM:
             decide_escalation,
         )
 
-        self._bank_round(improved, lives, compared=compared)
+        self._bank_round(improved, lives, compared=compared, separable=separable)
 
         inputs = EscalationInputs(
             current_accuracy=current_accuracy,
@@ -205,7 +243,7 @@ class EscalationFSM:
         """L2 escalation requested. First-invocation grace: stall only advances after a layer has fired at
         least once, and the entry θ/composite is the comparator."""
         if self._l2_round > 0:
-            l2_improved = self._improved(
+            l2_improved, self._l2_comparator = self._improved(
                 current_composite_fitness,
                 self._l2_best_composite_fitness_at_entry,
                 current_theta,
@@ -217,7 +255,7 @@ class EscalationFSM:
             return EscalationEvent(next_action=NextAction.FIRE_L2)
 
         if self._l3_round > 0:
-            l3_improved = self._improved(
+            l3_improved, self._l3_comparator = self._improved(
                 current_composite_fitness,
                 self._l3_best_composite_fitness_at_entry,
                 current_theta,
@@ -284,10 +322,17 @@ class EscalationFSM:
             # TWICE, so folding it stepped the stall counter by two on every resume.
             if record.round == 0:
                 return
+            # `separable` reads OPTIONAL where its two neighbours are required, and that is the
+            # field's own third state rather than a tolerance: a round whose arms carried no
+            # interval records `None`, and a round closed before the field existed is unreadable
+            # in exactly the same way. Both bank on `improved` alone, which is what those rounds
+            # were decided on.
+            sep = record.payload.get("separable")
             self._bank_round(
                 bool(record.payload["improved"]),
                 lives,
                 compared=int(record.payload["electable_count"]) > 0,
+                separable=None if sep is None else bool(sep),
             )
         elif record.phase == CampaignPhase.REFINE_STRATEGY and record.event == "exit":
             escalation_state = view_fields(record)

@@ -578,7 +578,7 @@ class Cycle:
         obs = observations_from_results(measured)
         if obs:
             self.ruler = extend_ruler(self.ruler, obs)
-        self._persist_ruler()
+        self.persist_ruler()
 
     def _restamp_on_warm(self, origin_theta: tuple[float, float] | None) -> None:
         """Every θ already taken on the flat ruler, re-read on the one just locked."""
@@ -609,10 +609,15 @@ class Cycle:
     def _ruler_cells(self) -> set[int]:
         return set(self.ruler.delta) if self.ruler is not None else set()
 
-    def _persist_ruler(self) -> None:
+    def persist_ruler(self) -> None:
         """The ruler lands on the cycle ledger BEFORE the round document that names it. A crash
         between them leaves a ruler carrying cells no round mentions, which is harmless; the
-        reverse leaves a round whose θ nothing can reproduce, which is the state being removed."""
+        reverse leaves a round whose θ nothing can reproduce, which is the state being removed.
+
+        Called from run init as well as from every extension: ``Cycle.start`` locks the anchoring
+        fit while the cycle still has no id to write it under, and round 0 is stamped and saved
+        from that lock — so waiting for the first ``calibrate_ruler`` puts a whole round of
+        scoring between the stamp and the record."""
         if self.ruler is None or not self.session.state.cycle_id:
             return
         self.session.store.campaigns.write_ruler(

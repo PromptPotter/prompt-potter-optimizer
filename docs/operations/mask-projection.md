@@ -78,7 +78,7 @@ summary fields instead and still serves such a cycle.
   computable from the record. *Adding* one the run lacked is not — lock-in keys off the
   leader's per-step `p_best` trajectory, which the per-candidate snapshot does not carry.
   That question is answered by running a real sibling cycle on the policy-scope fork path.
-- **No backfill, structurally.** Row-derivable evaluators (`accuracy`, `latency_norm`, …)
+- **No backfill, structurally.** Row-derivable evaluators (`accuracy`, `mean_latency_s`, …)
   are recomputed from persisted per-sample rows at read time, so they are never "missing"
   from an old record; snapshot-only evaluators resolve to honest absence. No tool rewrites
   a stored round file.
@@ -115,7 +115,8 @@ summary fields instead and still serves such a cycle.
   on its *own* stored evaluator namespace, and the recorded eligibility filter is reused
   verbatim — so a higher-scoring but ineligible candidate is still not named leader. This is
   the self-consistency gate, and it holds by construction rather than by test.
-- **Non-stationary realized criterion.** `per_round` formulas hot-swap mid-campaign; diff
+- **Non-stationary realized criterion.** A `per_round` formula changes by FORK, never mid-cycle
+  (`persistence-and-state.md` § Changing the composite formula), so a mask spanning forks diffs
   against the formula in effect at each round.
 - **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
   never move.

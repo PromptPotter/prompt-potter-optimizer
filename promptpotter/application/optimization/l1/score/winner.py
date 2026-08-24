@@ -116,18 +116,22 @@ def _verdict_reason(
     )
 
 
-def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> None:
-    """The round measured cleanly and resolved nothing — the one degradation that is SILENT on
-    every other channel, because a winner was still crowned and every number still reads."""
-    # Deliberately not a decision: the winner stands, and this only says the reader may not
-    # treat the margin as a result. Silent when no arm carries an interval — below two shared
-    # cells there is nothing to be inconclusive ABOUT.
+def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | None:
+    """Did the round resolve anything — did any arm's lift interval clear 0? ``None`` when no arm
+    carries one: below two shared cells there is nothing to be inconclusive ABOUT.
+
+    The winner still stands either way; what this decides is whether the margin may be READ as a
+    result. It used to only warn, so the one degradation silent on every other channel — a winner
+    was crowned and every number reads — was also silent on the loop's own control path, and a
+    round that resolved nothing reset L1's patience exactly as a round that advanced did."""
     bracketed = [c for c in electable if c.matched_parent_lift_ci_lo is not None]
-    if not bracketed or any(
+    if not bracketed:
+        return None
+    if any(
         (c.matched_parent_lift_ci_lo or 0.0) > 0.0 or (c.matched_parent_lift_ci_hi or 0.0) < 0.0
         for c in bracketed
     ):
-        return
+        return True
     widest = max(bracketed, key=lambda c: c.matched_parent_lift_ci_hi or 0.0)
     emit_round_warning(
         kind="round_not_separable",
@@ -139,6 +143,7 @@ def _warn_if_not_separable(round_num: int, electable: list[ScoredCandidate]) -> 
         ),
         detail={"arms": len(bracketed), "best_ci_hi": widest.matched_parent_lift_ci_hi},
     )
+    return False
 
 
 async def l1_score(
@@ -318,7 +323,7 @@ async def l1_score(
         candidate_scores[cs_idx] = cs.model_copy(
             update={"theta": theta_c, "theta_se": abilities.theta_se[cid]}
         )
-    _warn_if_not_separable(round_num, [candidate_scores[cs_by_id[cid]] for cid in electable])
+    separable = _separability(round_num, [candidate_scores[cs_by_id[cid]] for cid in electable])
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,
@@ -394,6 +399,9 @@ async def l1_score(
         matched_parent_lift=best_lift[0],
         matched_parent_lift_ci_lo=best_lift[1],
         matched_parent_lift_ci_hi=best_lift[2],
+        # Over the whole electable field, not the winner's own interval: the question is whether
+        # THIS ROUND told the arms apart, and one arm's bracket cannot answer that.
+        separable=separable,
         prompt_fields={
             **best_opt_sp.prompt_field_dict(),
             "lineage": best_opt_sp.lineage.model_dump(),

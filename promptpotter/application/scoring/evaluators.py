@@ -1,5 +1,6 @@
-"""Evaluator registry + materializers. A compute fn returns a float in [0, 1], or ``None`` when the
-round/sample carried nothing to measure — a zero is a verdict, an absence is not."""
+"""Evaluator registry + materializers. A compute fn returns a float — in [0, 1] wherever a yardstick
+exists to normalize against, RAW in its own unit where none does (``mean_latency_s``) — or ``None``
+when the round/sample carried nothing to measure: a zero is a verdict, an absence is not."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.scoring.formula import extract_item_label
 from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.scoring import recorded_cost_s
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
@@ -22,19 +24,18 @@ if TYPE_CHECKING:
 Scope = Literal["per_sample", "per_round"]
 
 
-# Cost/latency yardsticks for the cost-shaped evaluators. Intentionally fixed
-# module constants, NOT per-campaign knobs: these normalize cross-dataset cost
-# terms onto one comparable [0,1] scale, so a dataset with long prompts SHOULD
-# read a lower compactness — that's the signal, not a miscalibration. Make them
-# tunable only if a real per-dataset need appears (then they move to
-# campaign.json::scoring); until then, one yardstick keeps comparisons honest.
-LATENCY_BUDGET_MS = 10_000.0  # ≥ budget → 0.0, 0 → 1.0
+# Size yardsticks for the cost-shaped evaluators. Intentionally fixed module
+# constants, NOT per-campaign knobs: these normalize cross-dataset cost terms
+# onto one comparable [0,1] scale, so a dataset with long prompts SHOULD read a
+# lower compactness — that's the signal, not a miscalibration. TIME had one too
+# and could not have one: a yardstick spanning a seconds-long pipeline call and
+# a minutes-long L4 cell does not exist, so `mean_latency_s` reports raw seconds
+# and the formula naming it carries its own budget.
 PROMPT_BUDGET_CHARS = 4_000  # ≈ 1000 tokens; soft linear ceiling
 OUTPUT_TOKEN_BUDGET = 12_000  # generation-cost soft ceiling; ≥ budget → 0.0
 
 
 __all__ = [
-    "LATENCY_BUDGET_MS",
     "OUTPUT_TOKEN_BUDGET",
     "PROMPT_BUDGET_CHARS",
     "Evaluator",
@@ -129,21 +130,12 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     )
 
 
-def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    latencies: list[float] = []
-    for r in results:
-        pd = r.get("pipeline_data") or {}
-        t = pd.get("total_time")
-        if t is None:
-            continue
-        try:
-            latencies.append(float(t))
-        except (TypeError, ValueError):
-            continue
-    if not latencies:
-        return None
-    mean_ms = sum(latencies) / len(latencies)
-    return max(0.0, 1.0 - mean_ms / LATENCY_BUDGET_MS)
+def compute_mean_latency_s(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+    """Seconds one cell cost, meaned. RAW, because no yardstick fits every dataset: a TermNorm
+    call is seconds and one L4 cell is minutes, so a formula naming this states its own budget
+    (``accuracy * min(1.0, 600 / mean_latency_s)``) where the operator can read it."""
+    costs = [c for r in results if (c := recorded_cost_s(r)) is not None]
+    return sum(costs) / len(costs) if costs else None
 
 
 def _compute_recall(
@@ -346,12 +338,14 @@ _REGISTRY: list[Evaluator] = [
     # Self-healers — one Evaluator per SELF_HEALERS spec; combined weight ~0.30 in default formula.
     *(_make_self_healer_evaluator(spec) for spec in SELF_HEALERS),
     Evaluator(
-        name="latency_norm",
+        name="mean_latency_s",
         description=(
-            "Mean latency normalized against LATENCY_BUDGET_MS (1.0 = instant, 0.0 = ≥ budget)."
+            "Mean seconds one scored cell cost, off step_timings — so a cached replay still "
+            "prices the work it replays. Larger is worse; a formula supplies the budget."
         ),
         scope="per_round",
-        compute=compute_latency_norm,
+        compute=compute_mean_latency_s,
+        direction="low",
         from_rows=True,
     ),
     Evaluator(
