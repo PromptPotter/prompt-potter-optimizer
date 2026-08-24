@@ -112,11 +112,12 @@ invariants:
 
 ### Mobile app bar — chrome, ≤bp-md only
 
-**There is no top bar on a desktop.** The sidebar is the only primary nav surface
-above `--bp-md`; below it the phone gets two full-screen screens, one at a time,
-and this bar is the CAMPAIGN screen's chrome. The LIST screen is the sidebar at
-full width — it carries its own brand, CTA, filter and footer, so it has no bar
-of its own and this surface renders nothing there.
+**The view axis is not here** — the unit header carries it at every width, so this
+bar holds only what is specific to the phone's two-screen flow. Below `--bp-md` the
+phone gets two full-screen screens, one at a time, and this bar is the CAMPAIGN
+screen's chrome. The LIST screen is the sidebar at full width — it carries its own
+brand, CTA, filter and footer, so it has no bar of its own and this surface renders
+nothing there.
 
 ```yaml
 surface: mobile_appbar   # components/shell/MobileAppBar.tsx; renders iff !listScreen
@@ -131,16 +132,10 @@ controls:
   - id: title
     do: The viewed campaign's display label (falling back to its dataset name, then the
         brand). Truncates; never pushes the trailing controls off a 375px screen.
-  - id: view_segment
-    do: Chat | Dashboard, the two primary views (lib/view-tab.ts::PRIMARY_TABS), as the
-        shared SegmentedControl. While a DEMOTED view is active it renders as a third
-        segment, so "exactly one is always on" stays true and the active view is never
-        unrepresented; it disappears again on return to a primary view.
   - id: overflow
     do: The campaign ⋯ — the SAME CampaignMenu the sidebar rows use (variant=standalone,
-        so it takes focus, unlike the in-row copy), with Verify / Files folded in above
-        its lifecycle verbs. One campaign-verb menu in the app, never two that drift.
-        Absent when no campaign is resolved.
+        so it takes focus, unlike the in-row copy). One campaign-verb menu in the app,
+        never two that drift. Absent when no campaign is resolved.
   - id: new_campaign
     do: Open the New campaign modal. Absent when anon.
   - id: auth.{login,signup}
@@ -148,26 +143,41 @@ controls:
         landing surface, so the entry chips must not be buried in a menu.
 ```
 
-### Sidebar chrome — the desktop's only nav surface
+### Unit header — chrome, every view, every width
+
+**The view axis is on the page, not in a rail.** One header over the whole main
+column: what unit am I looking at, and which view of it. It is `main` chrome rather
+than a pane's first child, because the strip is the only way to switch views and one
+that scrolls out of reach on a long dashboard is no nav at all.
+
+```yaml
+surface: unit_header   # components/shell/RunMasthead.tsx + ViewTabs.tsx; above every pane
+controls:
+  - id: title.picker
+    do: The cycle picker restyled as the title line, with the leaf cycle id beneath in
+        mono. Unit identity and selection live HERE and nowhere else (the remote bar
+        carries run state, never a second copy of the address).
+  - id: view_strip.{chat,dashboard,records}
+    do: Switch the main pane, as the shared SegmentedControl at its page scale. Its value
+        is the GROUP (lib/view-tab.ts::groupOf), not the tab — one segment stands for the
+        three Records views, so "exactly one is always on" holds without the active view
+        ever being unrepresented. Entering Records from a primary view opens RECORDS_ENTRY;
+        pressing it while already inside Records is a no-op, so re-clicking the segment
+        cannot bounce Files back to Compare.
+  - id: view_strip.records_members
+    do: Compare | Verify | Files (lib/view-tab.ts::RECORDS_TABS) as a second, smaller row,
+        rendered ONLY while one of them is the view. Each keeps its own address word, so
+        every existing deep link still resolves; the grouping is a rendering, not a route.
+  - id: view_strip.overflow
+    do: NONE. The strip scrolls rather than compressing or hiding a segment — a squeezed
+        strip is how a narrow column silently loses its last nav.
+```
+
+### Sidebar chrome — the campaign forest's own controls
 
 ```yaml
 surface: sidebar_chrome   # workspace-level controls, not per-campaign; see also surface: sidebar
 controls:
-  - id: view_nav.{chat,dashboard}
-    do: Switch the main pane. A vertical nav, not a tab strip — the active row carries
-        aria-current="page" (there is no role=tabpanel on any pane for a tablist to name).
-  - id: view_nav.more
-    do: A muted disclosure holding Verify + Files (lib/view-tab.ts::MORE_TABS) — real but
-        rarely opened, so rationed for attention rather than hidden. Persists to
-        localStorage promptpotter.sidebar.more. The RENDERED state is derived: a view
-        inside the group forces it open, so the active view can never be invisible, and
-        returning to a primary view restores the operator's own preference unchanged.
-        While a demoted view is active the toggle is DISABLED and says which one — a
-        collapse that would hide the pane in front of you is not offered (I3).
-  - id: view_nav.collapsed
-    do: The 36px rail keeps ALL FOUR views as icons and drops the disclosure. The
-        hierarchy rations horizontal TEXT and a rail has none; more importantly this is
-        now the only way to switch views, so hiding it would strand a collapsed sidebar.
   - id: search.analytics
     do: Disabled until analytics ships; label states "coming soon". Sidebar footer.
   - id: theme.toggle
@@ -193,8 +203,8 @@ controls:
     do: The ONE surface answering "what is this run doing and costing" — play/pause, skip,
         look-ahead, round/spend, babysat tag, a Lift / ETA / Δ-per-$ readout, an upward-opening
         panel carrying identity, spend and the finishing criteria, and an inner/outer drill
-        toggle. Unit identity and selection live in the run masthead's picker (ONE header shared
-        by Chat and Dashboard), never a second copy here.
+        toggle. Unit identity and selection live in the unit header's picker, never a second
+        copy here.
         Mounted for the VIEWED cycle whenever its server run_phase exists and is not `checkin`
         (I6) — INCLUDING `terminal` and `detached`, where the action maps to "start": this is
         RunControlButton's only mount, so gating on in-flight left a budget-halted cycle with no
@@ -394,15 +404,29 @@ controls:
         STARTS from, output contract — plus the viewed round's I/O where the audit twin speaks
         for that level. Every rail owning a scope opens it, not only the campaign's own; a
         node's detail is the node's, never the tab's. "declares no configurable params" when none.
-  - id: composer.{attach,input,send}
+  - id: composer.{attach,input,tools,send}
     do: Gated on the INGEST FLOW phase, not on campaign+auth. input/send enabled only while
         flow.awaitingContext (send also needs non-empty text); attach disabled while flow.busy.
         Chat input is disabled outside ingest — selecting an active campaign does NOT enable it.
-  - id: settings.{extended_thinking,web_search,code_execution,optimize_switch}
-    do: Coming-soon features — render as a disabled ui/Switch (role=switch, aria-disabled,
-        aria-label "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
-    note: optimize_switch is deliberately locked like its three neighbours — do not
-          "restore" it to a live-looking toggle (I3)
+        `tools` is the exception and is never flow-gated: it is what this chat CAN do, so it
+        opens whatever the thread is doing. It lives INSIDE the field's bottom-right corner
+        and whispers — no border, no fill, tertiary ink at .55 — because three of its four
+        rows are coming-soon and the fourth is a switch nobody turns off. It is a label about
+        this chat, not a control in the row; Send owns the emphasis. On touch its hit box
+        reaches 44px while the ink stays put.
+  - id: tools.{extended_thinking,web_search,code_execution}
+    do: Coming-soon features — a disabled ui/Switch (role=switch, aria-disabled, aria-label
+        "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
+  - id: tools.optimize_switch
+    do: Mirrors the run. It reads `run_phase` off the ordinary poll and fires the same
+        pause/start commands the dashboard's play/pause does — one verb, `useRunControl`,
+        two surfaces. Held (aria-disabled) while a command is in flight or the run is
+        somewhere this control does not speak for — the origin gate, check-in, warming —
+        and the row's own line states which, never a bare dead switch (I3).
+        ON is the DEFAULT and it renders ON wherever nothing has turned it off, held states
+        included: optimizing while you use it is what the product IS, and an OFF before the
+        first run says the app is not doing the one thing it does. Only a control speaking
+        for a real run may render OFF — a paused cycle does, because someone paused it.
   - id: welcome_illustration
     do: Empty chat (no thread yet) shows the welcome illustration, not a scripted fake
         conversation. There is no demo thread. Suppressed once ANY tail content exists —
@@ -411,7 +435,9 @@ controls:
     do: Last item in the thread; renders only with a cycle bound and something measured.
         TWO untitled boxes — what the run cost and changed, then where it is in the data.
         LIVE it pins to the bottom of the scrollport and is height-capped; stopped it un-pins
-        and stays put. On the live→stopped edge the thread gains ONE frozen `run` record per
+        and stays put. The cap budgets the SUMMARY, so opening a disclosure spends it — the
+        card un-pins and uncaps on both axes, or a 492px table scrolls inside a 460px card
+        inside the thread's own scroll. On the live→stopped edge the thread gains ONE frozen `run` record per
         cycle holding captured values — a `resume` must leave it saying what the finished run
         ended at. Every number is served (runSummary).
         The visible lift is the PERCENT pair — the shown candidate and matched_parent_accuracy
@@ -451,7 +477,9 @@ controls:
         stepped back onto the cursor, and drops entirely when the candidate changes. The
         never/partly/always counts stack beside the rows and are themselves the control
         that opens the full table. Colour is a second carrier only — every bucket keeps its
-        word, every row its label.
+        word, every row its label. The table opens INLINE above --bp-sm and as a full-screen
+        sheet below it — a ~1192px grid in a phone's ~330px thread is a spreadsheet you pan
+        through a slot, so on a phone it takes the viewport and leaves the card its height.
   - id: run_card.searchpoint
     do: best | latest | selected — same picker, same resolution, as the pipeline node
         detail (one hook). An UNAVAILABLE state is DROPPED, never rendered disabled, and a

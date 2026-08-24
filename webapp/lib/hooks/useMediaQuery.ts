@@ -48,3 +48,11 @@ export function useMediaQuery(query: string): boolean {
 export function useIsPortraitPhone(): boolean {
   return useMediaQuery("(orientation: portrait) and (max-width: 767px)");
 }
+
+// True on a phone at any orientation. The threshold is `--bp-sm` (640px) — the
+// same value the chat's `@media` block restyles the composer at, so the sheet
+// and the styles around it flip together. Drives the hard-samples table's
+// full-screen form, where the inline one is a 1192px grid in a ~330px window.
+export function useIsPhone(): boolean {
+  return useMediaQuery("(max-width: 640px)");
+}

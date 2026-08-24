@@ -1,6 +1,9 @@
 
-.content{flex:1;overflow-y:auto;padding:var(--space-18);container-type:inline-size;container-name:content}
-#content-dashboard{padding-top:0}
+/* `both-edges` so the centred spine sits at the same x as the unit header above it,
+   which has no scrollbar of its own. A gutter on one edge only would still bias the
+   centre by half a scrollbar, and reserving none moves the content sideways the
+   moment a pane grows past the fold. */
+.content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18);container-type:inline-size;container-name:content}
 
 /* Dashboard spine — the single width tier wrapping diagnostics + panel grids.
    Centered in the MAIN COLUMN (max-width + auto margins), the one method the

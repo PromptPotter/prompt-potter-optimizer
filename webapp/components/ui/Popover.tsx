@@ -10,6 +10,9 @@ interface Props {
   /** Floating panel content. Call `close` after an action to dismiss. */
   children: (args: { close: () => void }) => ReactNode;
   align?: "left" | "right";
+  /** Which side of the trigger the panel opens on. A trigger at the bottom of
+      its scrollport (the chat composer) opens upward or the panel is offscreen. */
+  side?: "bottom" | "top";
   className?: string;
 }
 
@@ -17,7 +20,13 @@ interface Props {
 // hand-rolled menu re-implements: click-outside and Escape both close, and the
 // listeners are mounted only while open. Markup is the caller's (render props),
 // so triggers and panels keep their own classes/aria.
-export function Popover({ renderTrigger, children, align = "left", className }: Props) {
+export function Popover({
+  renderTrigger,
+  children,
+  align = "left",
+  side = "bottom",
+  className,
+}: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -43,7 +52,7 @@ export function Popover({ renderTrigger, children, align = "left", className }: 
     <div className={cx(s.wrap, className)} ref={ref}>
       {renderTrigger({ open, toggle })}
       {open && (
-        <div className={cx(s.panel, align === "right" && s.alignRight)}>
+        <div className={cx(s.panel, align === "right" && s.alignRight, side === "top" && s.sideTop)}>
           {children({ close })}
         </div>
       )}

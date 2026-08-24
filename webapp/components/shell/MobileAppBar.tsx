@@ -2,35 +2,26 @@
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
-import { MORE_TABS, PRIMARY_TABS, isMoreTab, tabLabel, type Tab } from "@/lib/view-tab";
-import { SegmentedControl, type Segment } from "@/components/ui";
 import { CampaignMenu } from "@/components/shell/sidebar/CampaignMenu";
 import s from "./MobileAppBar.module.css";
 
-// The phone's app bar — the CAMPAIGN screen's chrome, and the only top bar this app
-// has at any width. The LIST screen is the sidebar at full width, which carries its
+// The phone's app bar — the CAMPAIGN screen's chrome: back to the list, the campaign's
+// name, and its verbs. The LIST screen is the sidebar at full width, which carries its
 // own brand, CTA, filter and footer, so it gets no bar and `←` moves between the two.
+//
+// The VIEW axis is not here. The unit header's strip (components/shell/ViewTabs) owns
+// it at every width, so this bar has no segments and no views in its `⋯`.
 //
 // `←` also carries the live-run dot, off the same `runningCycles` the desktop
 // sidebar-edge dock reads (I6, one server-owned answer) — not a second dock.
 
 interface Props {
-  tab: Tab;
-  onSelectTab: (tab: Tab) => void;
   listScreen: boolean;
   onBack: () => void;
   onNewCycle: () => void;
 }
 
-// The two primary views, PLUS whichever demoted view is active — that third segment
-// is what keeps `SegmentedControl`'s "exactly one is always on" true while the
-// operator reads Verify or Files, the same reason `› more` opens around it.
-function segmentsFor(tab: Tab): readonly Segment<Tab>[] {
-  const shown: Tab[] = isMoreTab(tab) ? [...PRIMARY_TABS, tab] : [...PRIMARY_TABS];
-  return shown.map((t) => ({ value: t, label: tabLabel(t) }));
-}
-
-export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle }: Props) {
+export function MobileAppBar({ listScreen, onBack, onNewCycle }: Props) {
   const { status, openAuthPrompt } = useAuth();
   const { campaignId, campaigns, runningCycles } = useWorkspace();
 
@@ -69,30 +60,8 @@ export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle 
           </>
         ) : (
           <>
-            {/* ONE campaign menu in the app — the same component the sidebar rows
-                use, with the two demoted views folded in above its verbs. */}
-            {campaign ? (
-              <CampaignMenu
-                campaign={campaign}
-                variant="standalone"
-                leading={({ close }) =>
-                  MORE_TABS.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      role="menuitem"
-                      className="campaign-menu-item"
-                      onClick={() => {
-                        close();
-                        onSelectTab(t);
-                      }}
-                    >
-                      {tabLabel(t)}
-                    </button>
-                  ))
-                }
-              />
-            ) : null}
+            {/* ONE campaign menu in the app — the same component the sidebar rows use. */}
+            {campaign ? <CampaignMenu campaign={campaign} variant="standalone" /> : null}
             <button
               type="button"
               className={s.icon}
@@ -108,15 +77,6 @@ export function MobileAppBar({ tab, onSelectTab, listScreen, onBack, onNewCycle 
           </>
         )}
       </div>
-      {/* The two views read constantly. Verify and Files are in the ⋯ above —
-          same hierarchy as the sidebar, one source (lib/view-tab.ts). */}
-      <SegmentedControl
-        className={s.segments}
-        options={segmentsFor(tab)}
-        value={tab}
-        onChange={onSelectTab}
-        ariaLabel="Campaign view"
-      />
     </div>
   );
 }

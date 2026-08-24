@@ -3,7 +3,6 @@ import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
 import { DashSpine } from "./DashSpine";
-import { RunMasthead } from "@/components/shell/RunMasthead";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
@@ -37,7 +36,6 @@ export function DashboardTab() {
 
   return (
     <div className="content" id="content-dashboard">
-      <RunMasthead />
       <DashSpine>
         <RunErrorBanner />
         <TopStrip />

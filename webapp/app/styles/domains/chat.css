@@ -258,12 +258,13 @@
    squeezed hero clips its SVG against the tab's `overflow:hidden` rather than
    scaling — no scrollbar, nothing on screen to say so. */
 .chat-content > *:not(.chat-grid){flex:0 0 auto}
-.chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:var(--space-24);justify-content:center;flex:1;min-height:0;padding:0 var(--space-18)}
-/* One column — the settings card stacks UNDER the thread, and a tab that cannot
-   scroll would put it out of reach. So below this width the page scrolls again and
-   the thread takes a height of its own rather than the viewport's. */
+/* ONE column at every width. The 360px settings rail that used to sit beside the
+   thread is gone — its switches are the composer's Tools popover now, which is
+   reachable without scrolling past the input on a phone. */
+.chat-grid{display:grid;grid-template-columns:minmax(0,600px);gap:var(--space-24);justify-content:center;flex:1;min-height:0;padding:0 var(--space-18)}
+/* Below this width the page scrolls again and the thread takes a height of its own
+   rather than the viewport's. */
 @media (max-width:980px){
-  .chat-grid{grid-template-columns:1fr}
   .chat-content{overflow-y:auto}
   .chat-panel{min-height:620px}
 }
@@ -289,9 +290,28 @@
 .chat-attach{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:0;width:40px;height:40px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .chat-attach:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
 .chat-attach:disabled{opacity:.55;cursor:not-allowed}
-.chat-input{flex:1;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;padding:var(--space-10) var(--space-12);font-family:var(--font-sans);font-size:var(--text-md);color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none;transition:border-color .15s}
-.chat-input:focus{border-color:var(--color-accent)}
+/* The FIELD is the frame — border, fill, focus ring — and the textarea inside it is
+   bare, so Tools can sit in the corner of the input rather than beside it. */
+.chat-field{flex:1;min-width:0;display:flex;align-items:flex-end;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;transition:border-color .15s}
+.chat-field:focus-within{border-color:var(--color-accent)}
+.chat-input{flex:1;min-width:0;background:transparent;border:0;padding:var(--space-10) var(--space-12);font-family:var(--font-sans);font-size:var(--text-md);color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none}
 .chat-input:disabled{opacity:.55;cursor:not-allowed}
+/* Tools — a WHISPER in the field's bottom-right corner, not a control in the row.
+   Its rows are three coming-soon features and one switch nobody turns off, so it
+   reads as a note about what this chat can do; anything louder would promise a
+   decision that is not there.
+   In FLOW, not absolute: `Popover.module.css` owns `position` on this wrap, so an
+   absolute here is a specificity fight that the module wins — and it cost the
+   textarea both the chip's width and the padding reserved to clear it. */
+.chat-tools-wrap{margin:0 var(--space-6) var(--space-8) 0}
+.chat-tools{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4);background:transparent;border:0;border-radius:5px;color:var(--color-text-tertiary);opacity:.55;font-family:var(--font-sans);font-size:var(--text-xs);line-height:1;cursor:pointer;white-space:nowrap;transition:opacity .15s,color .15s}
+.chat-tools:hover{opacity:1;color:var(--color-text-secondary)}
+.chat-tools[aria-expanded="true"]{opacity:1;color:var(--color-accent)}
+.chat-tools:focus-visible{opacity:1;outline:2px solid var(--color-accent);outline-offset:1px}
+/* Wider than the popover default: these rows carry a name, a description and a
+   switch. Capped to the viewport so a phone never opens it off-screen. */
+.chat-tools-panel{width:min(340px,calc(100vw - 32px));padding:var(--space-6) var(--space-12) var(--space-10)}
+.chat-tools-err{margin:var(--space-6) 0 0;font-size:var(--text-sm);color:var(--color-danger)}
 .chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-10) var(--space-18);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-send:disabled{opacity:.55;cursor:not-allowed}
@@ -300,6 +320,10 @@
 @media (pointer:coarse){
   .chat-input{font-size:var(--text-xl);min-height:44px}
   .chat-attach,.chat-send{min-height:44px}
+  /* The touch floor grows Tools' HIT BOX, never its ink — the button reaches 44px
+     and sits flush in the field's bottom corner, so the field stays 44px too. */
+  .chat-tools-wrap{margin-bottom:0}
+  .chat-tools{padding:0 var(--space-8)}
 }
 .chat-msg.user-file{padding:var(--space-6)}
 .chat-msg.user-file .file-chip{
@@ -389,42 +413,20 @@
 .ingest-dependency-select{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-8);font-size:var(--text-base);color:var(--color-text-primary);min-width:140px}
 .ingest-dependency-select:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .ingest-dependency .chat-cta-btn{align-self:flex-end}
-/* Scrolls itself, now that the tab does not: a tall settings column would
-   otherwise be clipped with nothing on screen to say so. */
-.chat-settings{display:flex;flex-direction:column;gap:var(--space-14);min-height:0;overflow-y:auto}
-.chat-settings-card{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-18)}
-.chat-settings-card.optimize{border-color:var(--color-accent);box-shadow:0 0 15px var(--color-accent-glow)}
-.chat-settings-title{font-size:var(--text-sm);letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:10px;font-weight:600}
+/* One tool per row, in the composer's Tools popover. */
 .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);padding:var(--space-8) 0}
-.row-separator{height:0;border-top:1px solid var(--color-border);margin:var(--space-10) 0 var(--space-14)}
+.row-separator{height:0;border-top:1px solid var(--color-border);margin:var(--space-8) 0 var(--space-10)}
+/* The one row that is not coming-soon. Marked by an accent frame and the wand,
+   and marked ONCE: it used to pulse and throw eight sparkles, which is a lot to
+   fire every time a small popover opens. */
 .toggle-row.wand-row{
   position:relative;border:1px solid var(--color-accent);border-radius:10px;padding:var(--space-10) var(--space-12);
-  margin:0 -12px;
+  margin:0 calc(-1 * var(--space-6));
   background:radial-gradient(circle at center,rgba(var(--color-accent-rgb),0.10) 0%,rgba(var(--color-accent-rgb),0.02) 70%,transparent 100%);
-  box-shadow:0 0 14px rgba(var(--color-accent-rgb),0.40),inset 0 0 8px rgba(var(--color-accent-rgb),0.15);
-  overflow:visible;
-  animation:wand-frame-pulse 3.2s ease-in-out infinite;
+  box-shadow:0 0 10px rgba(var(--color-accent-rgb),0.28),inset 0 0 8px rgba(var(--color-accent-rgb),0.12);
 }
-.toggle-row.wand-row .row-icon{color:var(--color-accent);width:34px;height:34px}
-.toggle-row.wand-row .row-icon svg{width:32px;height:32px}
-/* Position, phase and size are per-sparkle data (ChatPane's `SPARKLES`); one rule
-   animates all eight. */
-.toggle-row.wand-row .sparkle{
-  position:absolute;width:var(--sparkle-size);height:var(--sparkle-size);border-radius:50%;
-  background:var(--color-accent);
-  box-shadow:0 0 6px var(--color-accent),0 0 12px rgba(var(--color-accent-rgb),0.6);
-  opacity:0;pointer-events:none;
-  animation:wand-sparkle var(--sparkle-dur) ease-in-out var(--sparkle-delay) infinite;
-}
-@keyframes wand-sparkle{
-  0%,100%{opacity:0;transform:scale(.3)}
-  40%{opacity:1;transform:scale(1.4)}
-  65%{opacity:.55;transform:scale(.9)}
-}
-@keyframes wand-frame-pulse{
-  0%,100%{box-shadow:0 0 14px rgba(var(--color-accent-rgb),0.40),inset 0 0 8px rgba(var(--color-accent-rgb),0.20)}
-  50%{box-shadow:0 0 22px rgba(var(--color-accent-rgb),0.65),inset 0 0 12px rgba(var(--color-accent-rgb),0.30)}
-}
+.toggle-row.wand-row .row-icon{color:var(--color-accent);width:26px;height:26px}
+.toggle-row.wand-row .row-icon svg{width:24px;height:24px}
 .toggle-row .row-text{display:flex;align-items:center;gap:var(--space-10);min-width:0;flex:1}
 .toggle-row .row-icon{flex-shrink:0;color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;width:20px;height:20px}
 .toggle-row .row-body{min-width:0}
@@ -489,7 +491,8 @@
 
    LIVE it pins to the bottom of the scrollport (`.chat-messages` is the
    scroll container) and is height-capped, so a tall card cannot eat the
-   conversation it belongs to; stopped, it un-pins and sits in the log.
+   conversation it belongs to; stopped, it un-pins and sits in the log. The
+   cap budgets the SUMMARY — a disclosure spends it, and gets both axes.
    The columns wrap via auto-fit — no breakpoint of its own, which keeps
    this out of the css-breakpoints allowlist. */
 /* Two boxes SIDE BY SIDE, and no titles on either: the card gets about six
@@ -507,6 +510,12 @@
    for a summary and the wrong size for a prompt or a 400-row table, and the
    thing the reader just opened is the thing that should get the width. */
 .run-box:has(.run-diff[open]),.run-box:has(.hsp-full){flex-basis:100%}
+/* …and the height with it. `.hs-block` is 492px on its own, so the live cap could
+   never hold the table it hides: the card scrolled inside the thread's scroll and
+   the table inside that. Un-pinned too — a sticky card at full height buries the
+   log it sits in, which is what stopping the run already does to it. */
+.run-card.is-live:has(.run-diff[open]),
+.run-card.is-live:has(.hsp-full){position:static;max-height:none;overflow:visible}
 /* The head is ONE row and stays one — the picker and the copy button hold their
    width, the numbers give theirs up first. */
 .run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:nowrap;min-height:20px}

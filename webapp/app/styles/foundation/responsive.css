@@ -68,13 +68,11 @@
      day someone retunes the scale. */
   .chat-input{font-size:16px;min-height:44px}
   .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
-
-  /* Settings card — wand-row has `margin:0 -12px` for its overhang
-     glow; on a narrow card that pushes content past the panel edge. */
-  .chat-settings-card{padding:var(--space-14)}
+  /* Tools rows — the wand frame's overhang is halved so it stays inside a
+     viewport-width popover. */
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
   .toggle-row .name{font-size:var(--text-base)}
-  .toggle-row.wand-row{margin:0 -6px;padding:var(--space-10)}
+  .toggle-row.wand-row{margin:0 -2px;padding:var(--space-10)}
 
   /* Welcome lockout modal — now class-driven (no inline overrides),
      so !important is unnecessary. Drop overlay padding (24px eats

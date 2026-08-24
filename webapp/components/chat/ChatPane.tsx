@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -9,7 +9,6 @@ import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { hasLiveProducer } from "@/lib/run-phase";
 import { isSelfOptimization, runSummary } from "@/lib/derivations";
-import { Switch } from "@/components/ui";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
@@ -20,21 +19,6 @@ import { useCycleEvents } from "@/lib/chat/useCycleEvents";
 import { deriveDecision } from "@/lib/chat/decision";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard } from "@/components/chat/RunCard";
-import { RunMasthead } from "@/components/shell/RunMasthead";
-
-// Fireflies orbiting the wand frame. Offset, phase and size are all that differ
-// between them, so they are data rather than eight near-identical CSS rules.
-type SparkleStyle = CSSProperties & Record<`--sparkle-${string}`, string>;
-const SPARKLES: SparkleStyle[] = [
-  { top: "-3px", left: "18%", "--sparkle-delay": "0s", "--sparkle-dur": "2.1s", "--sparkle-size": "4px" },
-  { top: "30%", right: "-3px", "--sparkle-delay": ".7s", "--sparkle-dur": "3.3s", "--sparkle-size": "4px" },
-  { bottom: "-3px", right: "25%", "--sparkle-delay": "1.5s", "--sparkle-dur": "2.7s", "--sparkle-size": "4px" },
-  { bottom: "40%", left: "-3px", "--sparkle-delay": ".4s", "--sparkle-dur": "3.6s", "--sparkle-size": "3px" },
-  { top: "-2px", right: "30%", "--sparkle-delay": "2.0s", "--sparkle-dur": "2.4s", "--sparkle-size": "3px" },
-  { bottom: "-2px", left: "38%", "--sparkle-delay": "1.2s", "--sparkle-dur": "3.0s", "--sparkle-size": "3px" },
-  { top: "60%", right: "-3px", "--sparkle-delay": "1.8s", "--sparkle-dur": "3.5s", "--sparkle-size": "3px" },
-  { top: "20%", left: "-3px", "--sparkle-delay": ".9s", "--sparkle-dur": "2.8s", "--sparkle-size": "3px" },
-];
 
 interface Props {
   datasetName: string | null;
@@ -64,10 +48,12 @@ interface Props {
   onMinted: OnMinted;
 }
 
-// The Chat surface. The pipeline hero + settings card are display-only. The live
-// interactive path is dataset ingest, rendered by the shared `IngestConversation` (same
-// surface as the "New campaign" modal): drop/pick → ask context if missing → one check-in
-// → Start. Run status and control live on the shell's RemoteControl, not here.
+// The Chat surface. The pipeline hero is display-only; the live interactive path is
+// dataset ingest, rendered by the shared `IngestConversation` (same surface as the
+// "New campaign" modal): drop/pick → ask context if missing → one check-in → Start.
+// Run status lives on the shell's RemoteControl, and what this chat can DO is the
+// composer's Tools popover — one column of settings beside the thread was a card a
+// phone had to scroll past its own input to reach.
 export function ChatPane({
   datasetName,
   datasetItems,
@@ -188,7 +174,6 @@ export function ChatPane({
 
   return (
     <div className="content chat-content" id="content-chat">
-      <RunMasthead />
       {/* One anchor on top of the chat: the pipeline hero. The job-bar that used to sit in
           its header row is gone — cycle picker, KPI chips and the status/spend panel are all
           on the shell's RemoteControl now, which renders on every tab rather than this one. */}
@@ -272,70 +257,6 @@ export function ChatPane({
               )
             }
           />
-        </div>
-
-        <div className="chat-settings">
-          <div className="chat-settings-card">
-            <div className="chat-settings-title">Settings</div>
-            <div className="toggle-row">
-              <div className="row-text">
-                <span className="row-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <circle cx="8" cy="8" r="6" opacity=".3" />
-                    <path d="M8 4v4l3 2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-                  </svg>
-                </span>
-                <div className="row-body"><div className="name">Extended thinking<span className="soon-tag">Soon</span></div></div>
-              </div>
-              <Switch checked={false} locked label="Extended thinking" />
-            </div>
-            <div className="toggle-row">
-              <div className="row-text">
-                <span className="row-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" fill="none" />
-                    <path d="M2 8h12M8 2c2 1.8 2 10.2 0 12M8 2c-2 1.8-2 10.2 0 12" stroke="currentColor" strokeWidth="1.1" fill="none" />
-                  </svg>
-                </span>
-                <div className="row-body"><div className="name">Web search<span className="soon-tag">Soon</span></div></div>
-              </div>
-              <Switch checked={false} locked label="Web search" />
-            </div>
-            <div className="toggle-row">
-              <div className="row-text">
-                <span className="row-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M5 4 1.5 8 5 12" />
-                    <path d="M11 4l3.5 4L11 12" />
-                    <path d="M9.5 3.5l-3 9" opacity=".6" />
-                  </svg>
-                </span>
-                <div className="row-body"><div className="name">Code execution<span className="soon-tag">Soon</span></div></div>
-              </div>
-              <Switch checked={false} locked label="Code execution" />
-            </div>
-            <div className="row-separator" />
-            <div className="toggle-row wand-row">
-              <div className="row-text">
-                <span className="row-icon">
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M2.5 13.5 10 6" />
-                    <path d="m12 1.5.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" fill="currentColor" />
-                    <path d="m5 2.4.4 1.1 1.1.4-1.1.4L5 5.4l-.4-1.1-1.1-.4 1.1-.4Z" fill="currentColor" opacity=".7" />
-                  </svg>
-                </span>
-                <div className="row-body">
-                  <div className="name">Optimize prompt while using</div>
-                  <div className="desc">Quietly evolves parameters across your project</div>
-                </div>
-              </div>
-              {/* No switch and no SOON tag: this is what the engine DOES, not a feature to
-                  turn on, so a control here would offer a choice the product does not have. */}
-              {SPARKLES.map((style, i) => (
-                <span key={i} className="sparkle" style={style} />
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

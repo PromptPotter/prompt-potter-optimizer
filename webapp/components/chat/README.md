@@ -51,8 +51,11 @@ To strip this down to a generic chat + tool-activity app, remove:
 - **The run card** — `components/chat/RunCard.tsx` plus the three derivations it reads,
   `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`, and the `runCard` slot in
   `IngestConversation`. Keep the `run` item kind and re-point it at your own task summary.
-- The job-bar + pipeline hero + settings card inside `ChatPane.tsx` (the campaign
-  telemetry chrome) — leave the `.chat-panel` thread + `LiveSegment`.
+- The job-bar + pipeline hero inside `ChatPane.tsx` (the campaign telemetry chrome) —
+  leave the `.chat-panel` thread + `LiveSegment`.
+- **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it —
+  keep the Tools popover and its coming-soon rows, which are the generic composer, and
+  re-point that one row at your own long-running task's pause/start.
 
 What remains is the chat shell, the one-thread model, the SSE transport +
 translator seam, and the button-gated control surface — a generic copilot you

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useId, useState } from "react";
 import {
   postArchiveCampaign,
   postDeleteCampaign,
@@ -22,17 +22,13 @@ import { Button, Dialog, Popover } from "@/components/ui";
 
 interface Props {
   campaign: CampaignSummary;
-  // Items rendered ABOVE the lifecycle verbs, separated. The mobile app bar puts
-  // the two demoted views (Verify / Files) here, so the phone has ONE ⋯ rather
-  // than a second menu that drifts from this one.
-  leading?: (args: { close: () => void }) => ReactNode;
   // `row` — inside a clickable sidebar row: the ROW is the tab stop, so the ⋯
   // takes no focus of its own and swallows the click that would select the row.
   // `standalone` — a top-level control (the app bar), which wants both.
   variant?: "row" | "standalone";
 }
 
-export function CampaignMenu({ campaign, leading, variant = "row" }: Props) {
+export function CampaignMenu({ campaign, variant = "row" }: Props) {
   const inRow = variant === "row";
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -137,12 +133,6 @@ export function CampaignMenu({ campaign, leading, variant = "row" }: Props) {
       >
         {({ close }) => (
           <div role="menu">
-            {leading ? (
-              <>
-                {leading({ close })}
-                <span className="campaign-menu-sep" role="separator" />
-              </>
-            ) : null}
             <button
               type="button"
               role="menuitem"

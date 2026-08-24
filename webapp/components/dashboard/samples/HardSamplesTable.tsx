@@ -29,9 +29,6 @@ interface Props {
   // The served per-sample series — what the Fitness column reports on. Kept
   // apart from `perSample`, which folds in the in-flight tail for the strip.
   servedSeries?: Map<number, SampleSeries>;
-  // Compact = tiny default height (~3 rows visible). User can still drag
-  // the resize handle to grow it. Off = standard preset height.
-  compact?: boolean;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetMeasuredCount: number;
@@ -54,7 +51,6 @@ interface Props {
 export function HardSamplesTable({
   perSample,
   servedSeries,
-  compact,
   datasetName,
   datasetItems,
   datasetMeasuredCount,
@@ -122,9 +118,9 @@ export function HardSamplesTable({
   const totalHeight = virtualizer.getTotalSize();
 
   return (
-    <div className="hs-zone">
+    <>
       <div
-        className={`hs-block${compact ? " compact" : ""}`}
+        className="hs-block"
         // Width tracks the columns' total — folding/narrowing a column
         // shrinks the block. Set as a custom property, not `width`, so a
         // manual corner-resize (which writes inline `width`) still wins
@@ -369,6 +365,6 @@ export function HardSamplesTable({
       {popover && <HardSamplesPopover popover={popover} onClose={() => setPopover(null)} />}
 
       {hoverTip && <HardSamplesHeatTip tip={hoverTip} />}
-    </div>
+    </>
   );
 }

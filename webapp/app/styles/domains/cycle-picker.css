@@ -1,11 +1,15 @@
 /* Inline cycle picker — a native <select> whose trigger reads as text; click
    expands the native dropdown.
 
-   Run masthead — ONE header for the Chat + Dashboard tabs
-   (components/shell/RunMasthead): the picker restyled as the title line, the
-   leaf cycle id beneath in mono. Same width tier and the same main-column
-   centering as the dashboard spine and the chat column, so all three align. */
-.run-header{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto;padding:var(--space-14) var(--space-16) var(--space-10)}
+   Run masthead — ONE header over every view (components/shell/RunMasthead): the
+   picker restyled as the title line, the leaf cycle id beneath in mono, the view
+   strip under both. The BAND is full-bleed and carries the hairline that closes
+   the chrome; the inner box takes the same width tier and the same main-column
+   centering as the dashboard spine and the chat column, so all three align. Its
+   horizontal padding matches `.content`'s, which is what puts the title on the
+   spine's left edge rather than 18px inside it. */
+.run-header{border-bottom:0.5px solid var(--color-border);padding:var(--space-14) var(--space-18) var(--space-10)}
+.run-header-inner{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto}
 .run-title .cycle-picker select{
   font-size:var(--text-4xl);font-weight:700;letter-spacing:-0.015em;
   color:var(--color-text-primary);background-color:transparent;

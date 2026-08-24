@@ -29,6 +29,17 @@
   border-right: 0;
 }
 
+/* Page-level chrome scale. The icon rides inside the button, so the segment becomes
+   a flex row rather than growing a wrapper. */
+.lg .segment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--text-md);
+  letter-spacing: 0;
+  padding: var(--space-8) var(--space-14);
+}
+
 .segment:hover:not(:disabled) {
   background: var(--color-background-hover);
   color: var(--color-text-primary);

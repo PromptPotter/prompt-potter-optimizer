@@ -1,12 +1,16 @@
 // The per-campaign view axis and its HIERARCHY — one closed client union with its
-// labels beside it, the same shape as `lib/run-phase.ts`. Three surfaces read it:
-// the sidebar's view nav, the phone app bar's segments, and that bar's `⋯`, so
-// promoting a view out of MORE moves one line here and lands in all three.
+// labels beside it, the same shape as `lib/run-phase.ts`. ONE surface reads it: the
+// unit header's tab strip (`components/shell/ViewTabs`), at every width. Promoting a
+// view out of RECORDS moves one line here and lands there.
 //
 // Client-side on purpose: "a closed set belongs on the server" (webapp/CLAUDE.md)
 // governs shapes the API also names, and no route names this one.
 
-export type Tab = "chat" | "dashboard" | "compare" | "verify" | "files";
+export type PrimaryTab = "chat" | "dashboard";
+// The run's written record — the diagnostic runs, the on-disk artifacts, and the
+// cross-campaign read. Real but rare, so they ride one top-level segment together.
+export type RecordsTab = "compare" | "verify" | "files";
+export type Tab = PrimaryTab | RecordsTab;
 
 const TAB_LABEL: Record<Tab, string> = {
   chat: "Chat",
@@ -16,16 +20,28 @@ const TAB_LABEL: Record<Tab, string> = {
   files: "Files",
 };
 
-export const PRIMARY_TABS: readonly Tab[] = ["chat", "dashboard"];
-// Real but rare — behind the sidebar's `› more` disclosure and in the phone's `⋯`.
-export const MORE_TABS: readonly Tab[] = ["compare", "verify", "files"];
+export const PRIMARY_TABS: readonly PrimaryTab[] = ["chat", "dashboard"];
+export const RECORDS_TABS: readonly RecordsTab[] = ["compare", "verify", "files"];
+export const RECORDS_LABEL = "Records";
+// Which member a click on the Records segment opens, arriving from a primary view.
+// The first of the three, named rather than indexed — `RECORDS_TABS[0]` types as
+// possibly-undefined and there is no honest default to fall back to.
+export const RECORDS_ENTRY: RecordsTab = "compare";
 
 export function tabLabel(tab: Tab): string {
   return TAB_LABEL[tab];
 }
 
-export function isMoreTab(tab: Tab): boolean {
-  return MORE_TABS.includes(tab);
+export function isRecordsTab(tab: Tab): tab is RecordsTab {
+  return (RECORDS_TABS as readonly string[]).includes(tab);
+}
+
+// What the TOP row of the strip selects. One segment stands for the three Records
+// views, so the strip's value is the group rather than the tab itself.
+export type ViewGroup = PrimaryTab | "records";
+
+export function groupOf(tab: Tab): ViewGroup {
+  return isRecordsTab(tab) ? "records" : tab;
 }
 
 // The default view — what the address means when it names no tab, and where a fresh
@@ -34,7 +50,7 @@ export function isMoreTab(tab: Tab): boolean {
 export const DEFAULT_TAB: Tab = "chat";
 
 export function isTab(s: string): s is Tab {
-  return (PRIMARY_TABS as readonly string[]).includes(s) || (MORE_TABS as readonly string[]).includes(s);
+  return (PRIMARY_TABS as readonly string[]).includes(s) || (RECORDS_TABS as readonly string[]).includes(s);
 }
 
 // The account modal's own panes — the second view axis, and a closed client set for the

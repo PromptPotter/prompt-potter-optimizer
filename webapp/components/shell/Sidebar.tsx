@@ -7,13 +7,11 @@ import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
-import type { Tab } from "@/lib/view-tab";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
 import { AccountModal } from "@/components/account/AccountModal";
 import { buildForest, nodeKey } from "./sidebar/grouping";
 import type { TreeCtx } from "./sidebar/ForestRows";
 import { SidebarContent } from "./SidebarContent";
-import { ViewNav } from "./sidebar/ViewNav";
 
 interface Props {
   // Selection carries the whole CyclePath — a cycle_id is ambiguous across
@@ -23,12 +21,6 @@ interface Props {
   onNewCycle: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
-  // The per-campaign view axis. It lives here rather than in a bar of its own:
-  // this is the app's only primary nav surface on a desktop.
-  tab: Tab;
-  onSelectTab: (tab: Tab) => void;
-  moreOpen: boolean;
-  onToggleMore: () => void;
 }
 
 // The sidebar is a FOREST, and the shape repeats at every depth:
@@ -65,10 +57,6 @@ export function Sidebar({
   onNewCycle,
   collapsed,
   onToggleCollapse,
-  tab,
-  onSelectTab,
-  moreOpen,
-  onToggleMore,
 }: Props) {
   // Cycle list + campaign registry + active pointer + current selection all
   // come from the shared workspace context — one poll for the whole app.
@@ -214,13 +202,6 @@ export function Sidebar({
           + New campaign
         </button>
       </div>
-      <ViewNav
-        tab={tab}
-        onSelect={onSelectTab}
-        collapsed={collapsed}
-        moreOpen={moreOpen}
-        onToggleMore={onToggleMore}
-      />
       <SidebarContent
         status={status}
         loaded={loaded}

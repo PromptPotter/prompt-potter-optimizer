@@ -1,8 +1,11 @@
 "use client";
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
 import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import { sampleBucket, sampleSpread, sampleWalk, type SampleBucket } from "@/lib/derivations";
 import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
@@ -70,6 +73,11 @@ export function HardSamplesPreview({
 }: Props) {
   const { dash, isLive } = useDashboard();
   const [showAll, setShowAll] = useState(false);
+  // A phone opens the roster as a full-screen sheet instead of inline. The table
+  // is a ~1192px grid; in the thread's ~330px content box it is a window you pan
+  // a spreadsheet through, and the run card around it scrolls too. Same rows,
+  // same controls — the whole viewport instead of a slot in a bubble.
+  const asSheet = useIsPhone();
 
   // The RANKED roster, straight off the wire: `/preview` serves items in rank order
   // (`items[i].hard_sample_rank === i + 1`), so sorting it here would re-derive an
@@ -219,32 +227,66 @@ export function HardSamplesPreview({
       </div>
 
       {showAll ? (
-        <div className="hsp-full">
-          <HardSamplesTable
-            perSample={
-              new Map(
-                [...archivePerSample].map(([sid, s]) => [
-                  sid,
-                  s.measurements.map((m) => ({ fitness: m.fitness, ord: m.ord })),
-                ]),
-              )
-            }
-            servedSeries={archivePerSample}
-            datasetName={datasetName}
-            datasetItems={items}
-            datasetMeasuredCount={measuredCount}
-            datasetUnmeasuredCount={unmeasuredCount}
-            datasetSplitTest={splitTest}
-            rankedBy={rankedBy}
-            rankedByPick={rankedByPick}
-            onRankedByChange={onRankedByChange}
-            datasetStale={stale}
-            scope={scope}
-            onScopeChange={onScopeChange}
-          />
-        </div>
+        (() => {
+          const table = (
+            <HardSamplesTable
+              perSample={
+                new Map(
+                  [...archivePerSample].map(([sid, s]) => [
+                    sid,
+                    s.measurements.map((m) => ({ fitness: m.fitness, ord: m.ord })),
+                  ]),
+                )
+              }
+              servedSeries={archivePerSample}
+              datasetName={datasetName}
+              datasetItems={items}
+              datasetMeasuredCount={measuredCount}
+              datasetUnmeasuredCount={unmeasuredCount}
+              datasetSplitTest={splitTest}
+              rankedBy={rankedBy}
+              rankedByPick={rankedByPick}
+              onRankedByChange={onRankedByChange}
+              datasetStale={stale}
+              scope={scope}
+              onScopeChange={onScopeChange}
+            />
+          );
+          return asSheet ? (
+            <HardSamplesSheet onClose={() => setShowAll(false)}>{table}</HardSamplesSheet>
+          ) : (
+            <div className="hsp-full">{table}</div>
+          );
+        })()
       ) : null}
     </div>
+  );
+}
+
+// The phone form of the roster: the table over the whole viewport, portalled out
+// of the thread so the run card keeps its own height budget. ESC, focus-trap and
+// focus-restore ride `useDialogA11y` — the same contract `Dialog` uses under its
+// 480px card, which this deliberately is not.
+function HardSamplesSheet({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const cardRef = useDialogA11y(true, onClose);
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="hsp-sheet" ref={cardRef} role="dialog" aria-modal="true" aria-label="Hard samples" tabIndex={-1}>
+      <div className="hsp-sheet-head">
+        <span className="hsp-sheet-title">Hard samples</span>
+        <button type="button" className="hsp-sheet-close" onClick={onClose} aria-label="Close the sample table">
+          ✕
+        </button>
+      </div>
+      <div className="hsp-sheet-body">{children}</div>
+    </div>,
+    document.body,
   );
 }
 

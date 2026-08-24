@@ -10,6 +10,7 @@ import { SlugField } from "@/components/forms/SlugField";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
+import { ComposerTools } from "./ComposerTools";
 import { PipelineSetupSection } from "./PipelineSetupSection";
 import { OptimizerSetupSection } from "./OptimizerSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
@@ -222,25 +223,31 @@ export function IngestConversation({
             <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
           </svg>
         </button>
-        <textarea
-          className="chat-input"
-          placeholder={
-            flow.awaitingContext
-              ? "Describe the task in one message…"
-              : "Drop a CSV, TSV, JSON or Excel file…"
-          }
-          rows={1}
-          value={flow.inputText}
-          onChange={(e) => flow.setInputText(e.target.value)}
-          onKeyDown={(e) => {
-            if (flow.awaitingContext && e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              flow.submitContext();
+        {/* The field carries the frame; the textarea inside it is bare. Tools sits in
+            the field's own bottom-right corner rather than beside it — it names what this
+            chat can do, and a label does not deserve a slot in the control row. */}
+        <div className="chat-field">
+          <textarea
+            className="chat-input"
+            placeholder={
+              flow.awaitingContext
+                ? "Describe the task in one message…"
+                : "Drop a CSV, TSV, JSON or Excel file…"
             }
-          }}
-          disabled={!flow.awaitingContext}
-          aria-label="Chat input"
-        />
+            rows={1}
+            value={flow.inputText}
+            onChange={(e) => flow.setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (flow.awaitingContext && e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                flow.submitContext();
+              }
+            }}
+            disabled={!flow.awaitingContext}
+            aria-label="Chat input"
+          />
+          <ComposerTools />
+        </div>
         <button
           className="chat-send"
           type="button"

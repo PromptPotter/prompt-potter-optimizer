@@ -30,15 +30,20 @@ export function SegmentedControl<T extends string>({
   onChange,
   ariaLabel,
   className,
+  size = "sm",
 }: {
   options: readonly Segment<T>[];
   value: T;
   onChange: (value: T) => void;
   ariaLabel: string;
   className?: string;
+  // `sm` is the toolbar scale this was built at. `lg` is page-level chrome — the
+  // unit header's view strip — where a toolbar-sized control reads as a stray
+  // widget rather than the app's navigation.
+  size?: "sm" | "lg";
 }) {
   return (
-    <span className={cx(s.group, className)} role="group" aria-label={ariaLabel}>
+    <span className={cx(s.group, size === "lg" && s.lg, className)} role="group" aria-label={ariaLabel}>
       {options.map((o) => {
         const on = o.value === value;
         return (

@@ -25,11 +25,12 @@ import { LineageProvider } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/RemoteControl";
+import { RunMasthead } from "@/components/shell/RunMasthead";
 
 // The non-landing surfaces load on demand, not on first paint. The operator
 // lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
 // `marked` that rides inside Files) and the Ingest modal each ship as their own
-// chunk fetched only when the tab is opened — `ssr: false` since they're
+// chunk fetched only when the view is opened — `ssr: false` since they're
 // client-only and there's no SSR under `output: export` anyway.
 const ChatPane = dynamic(() => import("@/components/chat/ChatPane").then((m) => m.ChatPane), {
   ssr: false,
@@ -170,10 +171,10 @@ function AppShellInner() {
     viewedPath,
     datasetName,
   );
-  // The per-campaign view (Chat / Dashboard / Verify / Files) is ON THE ADDRESS
+  // The per-campaign view (Chat / Dashboard / Records) is ON THE ADDRESS
   // (`lib/address.ts`), so the workspace holds it — a reload or a copied link now
-  // restores the pane the operator was reading instead of dropping them on Chat. The
-  // sidebar's ViewNav renders it on a desktop, the mobile app bar on a phone.
+  // restores the pane the operator was reading instead of dropping them on Chat.
+  // The unit header's strip renders it, at every width.
   // Which of the two PHONE screens is showing. `false` = the campaign screen,
   // which is also the desktop-equivalent default and the public landing surface
   // (the Chat pane) — booting an anon phone visitor onto a list that reads "Sign
@@ -241,19 +242,6 @@ function AppShellInner() {
       },
     },
   );
-  // Whether the sidebar's `› more` group (Verify / Files) is expanded — the
-  // operator's own preference, so localStorage beside the other two sidebar keys.
-  // NOT view-memory: that record is per-campaign with TTL + LRU eviction, so a
-  // deliberate preference would flap on every campaign switch and expire on its
-  // own. ViewNav derives the RENDERED state from this plus the active view, so
-  // there is nothing here to keep in sync.
-  const [moreOpen, setMoreOpen] = useLocalStorage<boolean>(
-    "promptpotter.sidebar.more",
-    false,
-    { serialize: (v) => (v ? "1" : "0"), deserialize: (raw) => raw === "1" },
-  );
-  const toggleMore = useCallback(() => setMoreOpen((prev) => !prev), [setMoreOpen]);
-
   // The ONE call site that switches views. Choosing a view means "show me this
   // campaign", so leaving the phone's list screen rides along here rather than at every
   // caller — which is also why no render-phase reset is needed: the invariant is
@@ -386,10 +374,6 @@ function AppShellInner() {
         Skip to content
       </a>
       <Sidebar
-        tab={tab}
-        onSelectTab={openView}
-        moreOpen={moreOpen}
-        onToggleMore={toggleMore}
         onSelectPath={(path, candidate) => {
           selectCyclePath(...restoreNavigation(path, candidate));
           // Picking a campaign on a phone means "open it" — leave the list screen.
@@ -441,11 +425,10 @@ function AppShellInner() {
           not portaled. Desktop only — see JobsDock. */}
       <JobsDock onPicked={() => openView("dashboard")} />
       <main className="main" id="main-content" tabIndex={-1}>
-        {/* Phone chrome. Hidden above --bp-md, where the sidebar carries all of
-            this and there is no top bar at all. */}
+        {/* Phone chrome — the back arrow to the list screen and the campaign's
+            verbs. Hidden above --bp-md, where the sidebar carries both. The view
+            axis is NOT here: the unit header below owns it at every width. */}
         <MobileAppBar
-          tab={tab}
-          onSelectTab={openView}
           listScreen={listScreen}
           onBack={() => setListScreen(true)}
           onNewCycle={() => setNewCampaignOpen(true)}
@@ -466,6 +449,9 @@ function AppShellInner() {
               : undefined
           }
         />
+        {/* The unit header — what am I looking at, and which view of it. Chrome
+            rather than a pane's first child, so the strip cannot scroll away. */}
+        <RunMasthead tab={tab} onSelectTab={openView} />
         {showCheckin && campaignId ? (
           <CheckinReopenPane campaignId={campaignId} onStarted={selectAndOpen} />
         ) : tab === "chat" ? (

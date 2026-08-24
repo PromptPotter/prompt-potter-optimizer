@@ -29,3 +29,10 @@
   left: auto;
   right: 0;
 }
+
+.sideTop {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 2px;
+}

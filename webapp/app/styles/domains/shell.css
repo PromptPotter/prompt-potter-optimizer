@@ -1,13 +1,19 @@
 /* Shell + sidebar + main.
-   There is no top bar at any width: the sidebar is the desktop's only nav
-   surface, and the phone's app bar (components/shell/MobileAppBar) is the
-   campaign screen's chrome, revealed by the ≤bp-md block at the foot of this
-   file.
+   The sidebar is the campaign FOREST; the per-campaign view axis is the unit
+   header's strip (components/shell/ViewTabs) at every width. The phone's app bar
+   (components/shell/MobileAppBar) carries the back arrow and the campaign's verbs,
+   revealed by the ≤bp-md block at the foot of this file.
    --sidebar-width drives the sidebar's flex slot.
    Toggle the .sidebar-collapsed class on .shell to switch widths. */
 .shell{--sidebar-width:200px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
-/* The right-hand column: the app bar (phone only), the alert banner, the pane. */
+/* The right-hand column: the app bar (phone only), the alert banner, the unit
+   header, the pane. */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+/* The view strip inside the unit header (components/shell/ViewTabs). Two rows: the
+   top level, and the Records members while one of them is the view. It scrolls
+   rather than compressing — the segments carry glyphs, and a squeezed strip is
+   how a narrow column silently loses its last nav. */
+.view-tabs{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-6);width:100%;margin-top:var(--space-8);overflow-x:auto;scrollbar-width:thin}
 /* Skip-to-content — off-screen until it takes keyboard focus, then it
    parks at the top-left over the shell. First Tab from page load lands
    here so a keyboard user can bypass the sidebar. */
@@ -28,8 +34,8 @@
 .sidebar-toggle{position:absolute;top:8px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;color:var(--color-text-tertiary);font-size:var(--text-md);font-family:inherit;border-radius:4px}
 .sidebar-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .sidebar > .sidebar-toggle{position:relative;align-self:flex-end;margin-right:6px;margin-bottom:8px}
-/* What the 36px rail drops. `.sidebar-views` is deliberately absent — it survives
-   as an icon rail, for the reason stated at its own rules below. */
+/* What the 36px rail drops — everything but the collapse chevron. Switching views
+   is unaffected: that lives in the unit header, outside the sidebar entirely. */
 .shell.sidebar-collapsed .sidebar > .brand,
 .shell.sidebar-collapsed .sidebar > .sidebar-primary,
 .shell.sidebar-collapsed .sidebar > .unit-library,
@@ -39,25 +45,6 @@
 .brand-mark{width:22px;height:22px;background:var(--color-accent);border-radius:4px;display:flex;align-items:center;justify-content:center}
 .brand-name{font-size:var(--text-xl);font-weight:500}
 .brand-sub{font-size:var(--text-xs);letter-spacing:.1em;color:var(--color-text-tertiary)}
-/* The per-campaign view nav (components/shell/sidebar/ViewNav) — Chat and
-   Dashboard as rows, Verify and Files behind a `› more` disclosure. */
-.sidebar-views{display:flex;flex-direction:column;padding:var(--space-4) 0 var(--space-6);border-bottom:0.5px solid var(--color-border)}
-.sidebar-views-sub{padding-left:var(--space-14)}
-.nav-item{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-16);cursor:pointer;color:var(--color-text-secondary);font-size:var(--text-md);transition:background .1s;background:none;border:none;width:100%;text-align:left;font-family:inherit;border-radius:6px}
-.nav-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.nav-item.active{color:var(--color-accent);background:var(--color-background-tint-active);font-weight:500}
-.nav-item.disabled{opacity:.45;cursor:not-allowed}
-.nav-item.disabled:hover{background:transparent;color:var(--color-text-secondary)}
-/* The disclosure row is a control over the nav, not a destination in it — muted
-   and lower-case so it never reads as a fifth view. */
-.nav-item-more{font-size:var(--text-sm);color:var(--color-text-tertiary);padding-left:var(--space-16)}
-.nav-item-more:hover{color:var(--color-text-secondary)}
-.nav-item-twist{display:inline-flex;width:16px;justify-content:center}
-/* The 36px rail keeps ALL FOUR views as icons and drops the disclosure: the
-   hierarchy rations horizontal TEXT, and there is none here. Hiding two would
-   also leave a collapsed sidebar with no way to switch views at all. */
-.shell.sidebar-collapsed .sidebar-views{padding:var(--space-4) 0}
-.shell.sidebar-collapsed .sidebar-views .nav-item{justify-content:center;padding:var(--space-6) 0;gap:0}
 .sidebar-footer{margin-top:auto;padding:var(--space-12) var(--space-16);border-top:0.5px solid var(--color-border)}
 /* Workspace-level controls, one row: they are not per-campaign, so they sit
    under the library rather than above it. */
@@ -245,7 +232,6 @@
 .jobs-dock-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Separator inside the campaign ⋯ menu, between the mobile bar's leading view
    items and the lifecycle verbs. */
-.campaign-menu-sep{display:block;height:1px;margin:var(--space-4) 0;background:var(--color-border)}
 /* Run-phase chip — a status dot paired with the phase word (never colour
    alone), shared by the RemoteControl and the jobs dock's list so a run's
    phase reads identically wherever it surfaces. */
@@ -312,10 +298,8 @@
      here, so the app bar needs no exception of its own. */
   .shell.mobile-list > .main{flex:0 0 auto}
   .shell.mobile-list > .main > :not(.critical-alert){display:none}
-  /* The view nav belongs to the campaign screen — on the list screen the app
-     bar's segments own that axis, and the collapse chevron means nothing when
-     the sidebar is either the whole screen or absent. */
-  .sidebar > .sidebar-views,
+  /* The collapse chevron means nothing when the sidebar is either the whole
+     screen or absent. */
   .sidebar > .sidebar-toggle{display:none}
   /* A sidebar collapsed on a desktop must not become an empty list screen. */
   .shell.sidebar-collapsed .sidebar > .brand,
