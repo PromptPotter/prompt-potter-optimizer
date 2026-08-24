@@ -390,7 +390,10 @@ controls:
         it ISOLATES: the level is already on screen, so the click drops every level above
         it. The inward half of the zoom whose outward half is preview.zoom.
   - id: preview.node.llm
-    do: Expand to model & params; "declares no configurable params" when none.
+    do: Opens the ONE node detail (shell/node-surface/NodeDetail): config, the prompt the node
+        STARTS from, output contract — plus the viewed round's I/O where the audit twin speaks
+        for that level. Every rail owning a scope opens it, not only the campaign's own; a
+        node's detail is the node's, never the tab's. "declares no configurable params" when none.
   - id: composer.{attach,input,send}
     do: Gated on the INGEST FLOW phase, not on campaign+auth. input/send enabled only while
         flow.awaitingContext (send also needs non-empty text); attach disabled while flow.busy.
@@ -592,9 +595,10 @@ controls:
         round from round_NNNN.json (no stitch); scalar stats + per-sample rows below; Steer & fork
         opens the editable twin. Loading note until the spec's round data lands.
   - id: optimizer.round_axis
-    do: One circle per closed round + a LIVE pill, in the optimizer card's toolbar — the optimizer
-        can only depict ONE round, so this is its scope, not a free-floating axis. Writes
-        selection.round; the canvas, the node inspector and the samples view all follow it.
+    do: One circle per closed round + a LIVE pill, beside the picture it scopes — a pipeline
+        picture can depict ONE round, so this is that card's scope, not a free-floating axis.
+        ONE control per picture (this toolbar, and the chat hero's own), both writing the single
+        selection.round the canvas, the node detail and the samples view follow.
   - id: optimizer.node_strip
     do: checkin/l3_plan/l2_context/l1_generate/l1_score/l1_critique nodes for the VIEWED round
         (live -> dashboard.json; historical -> the audit twin, via the one useRoundNodes resolver).

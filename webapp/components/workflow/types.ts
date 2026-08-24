@@ -49,6 +49,13 @@ export interface PipelineDoc {
   // JSON dump. Read-only there (the optimizer's own pipeline is edited by hand).
   node_config_schema?: Record<string, NodeConfigParam[]>;
   node_output_schema?: Record<string, NodeOutputSchema | null>;
+  // The prompt each optimizer node STARTS from, keyed `"{node}/{version}"` — a node
+  // declaring several prompts carries one entry per version. Served by
+  // `/optimizer-pipeline` since the route was written; it had no reader, so the node
+  // detail rendered six empty boxes under a heading reading "Starting prompt"
+  // whenever the searchpoint carried no evolved delta for that node. Read it through
+  // `nodeOriginPrompt`, never by spelling the key.
+  resolved_prompts?: Record<string, Record<string, unknown>>;
 }
 
 // One node block as written by AuditTrailView._handle_llm_call

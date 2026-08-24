@@ -95,6 +95,8 @@ function AppShellInner() {
     viewedCandidateId,
     goneAddress,
     dismissGoneNotice,
+    tab,
+    setTab,
   } = useWorkspace();
 
   // ── Per-campaign view memory: remember where the operator was, put them back.
@@ -168,11 +170,10 @@ function AppShellInner() {
     viewedPath,
     datasetName,
   );
-  // The per-campaign view (Chat / Dashboard / Verify / Files), scoped to the
-  // currently-selected cycle. Default = chat: that's where new cycles get
-  // conceived and where the conversational interface lives. The sidebar's ViewNav
-  // renders it on a desktop, the mobile app bar on a phone.
-  const [tab, setTab] = useState<Tab>("chat");
+  // The per-campaign view (Chat / Dashboard / Verify / Files) is ON THE ADDRESS
+  // (`lib/address.ts`), so the workspace holds it — a reload or a copied link now
+  // restores the pane the operator was reading instead of dropping them on Chat. The
+  // sidebar's ViewNav renders it on a desktop, the mobile app bar on a phone.
   // Which of the two PHONE screens is showing. `false` = the campaign screen,
   // which is also the desktop-equivalent default and the public landing surface
   // (the Chat pane) — booting an anon phone visitor onto a list that reads "Sign
@@ -253,14 +254,18 @@ function AppShellInner() {
   );
   const toggleMore = useCallback(() => setMoreOpen((prev) => !prev), [setMoreOpen]);
 
-  // The ONE writer of `tab`. Choosing a view means "show me this campaign", so
-  // leaving the phone's list screen rides along here rather than at every call site
-  // that switches views — which is also why no render-phase reset is needed: the
-  // invariant is structural, leaving no derived state to correct.
-  const openView = useCallback((t: Tab) => {
-    setTab(t);
-    setListScreen(false);
-  }, []);
+  // The ONE call site that switches views. Choosing a view means "show me this
+  // campaign", so leaving the phone's list screen rides along here rather than at every
+  // caller — which is also why no render-phase reset is needed: the invariant is
+  // structural, leaving no derived state to correct. The view itself is the workspace's
+  // (it is on the address); `listScreen` is this component's, being phone chrome.
+  const openView = useCallback(
+    (t: Tab) => {
+      setTab(t);
+      setListScreen(false);
+    },
+    [setTab],
+  );
 
   // Every mint / re-open path lands the operator ON the thing it just created,
   // which on a phone means leaving the list screen. One helper so a fourth mint

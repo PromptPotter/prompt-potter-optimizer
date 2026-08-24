@@ -11,6 +11,7 @@ import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel"
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { PipelineSetupSection } from "./PipelineSetupSection";
+import { OptimizerSetupSection } from "./OptimizerSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
@@ -297,6 +298,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
+      {/* The campaign's NAME — an identity fact, so it sits with the other things that
+          say what this run is. It used to be folded in with the loop knobs below, which
+          is the one place a reader would never look for it. */}
+      <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
+
       {/* The active pipeline's required inputs beyond (pipeline + dataset +
           origin) — e.g. a candidate_source node's target library — surfaced so
           the operator drops the missing one in place. Soft: doesn't gate Start. */}
@@ -316,8 +322,16 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           NodeSurface every node-detail surface renders. */}
       <PipelineSetupSection draft={draft} onApply={flow.applyPatch} />
 
+      {/* The loop that will do the searching, drawn the way the chat hero draws it.
+          Always open: it is what the operator is about to spend money running, and it
+          used to reach this surface only as the round-ceiling number field below. */}
+      <OptimizerSetupSection />
+
       <details className="new-campaign-optional ingest-advanced">
-        <summary>Optimizer (optional)</summary>
+        {/* Bounds on the LOOP, not the optimizer's wiring — that is the section above.
+            Both knobs are campaign policy (`OptimizationConfig`), which is why they are
+            here and not on a node. */}
+        <summary>Loop bounds (optional)</summary>
         <div className="new-campaign-optional-body">
           <NumberField
             label="Max rounds"
@@ -341,7 +355,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
               flow.applyPatch({ optimization_overrides: { prompt_block_catalogue } })
             }
           />
-          <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
           {/* Pluggable orchestration mechanisms — sorting/selection + early-abort
               toggles, the same surface the dashboard renders read-only. Editable
               here at authoring time; each flip patches the draft's campaign.json. */}

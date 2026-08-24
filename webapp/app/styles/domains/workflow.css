@@ -38,9 +38,13 @@
 .round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 4px var(--color-success);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
 @keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
-/* One compact wide-short canvas at every width — aspect-ratio mirrors
-   CANVAS_W/CANVAS_H. Keeps the optimizer card short on desktop too. */
-.workflow-canvas{position:relative;width:360px;max-width:100%;aspect-ratio:360/160;overflow:hidden}
+/* One compact wide-short canvas at every width — width and aspect-ratio mirror
+   CANVAS_W/CANVAS_H (`components/workflow/layout.ts`). Keeps the optimizer card
+   short on desktop too. Both numbers move with that file or this box clips: the
+   component sets `aspect-ratio` inline from the constants and wins, so a stale
+   `width` here would crop the diagram against `overflow:hidden` with nothing on
+   screen to say so. */
+.workflow-canvas{position:relative;width:460px;max-width:100%;aspect-ratio:460/160;overflow:hidden}
 /* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
 .wf-node{cursor:pointer;user-select:none;outline:none}
 .wf-node[aria-disabled="true"]{cursor:default}
@@ -61,25 +65,15 @@
 .wf-stray .wf-dot-label{fill:var(--color-warn)}
 .wf-dot-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
 .wf-dot-sub{font-size:var(--text-xs);fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
-/* Optimizer node detail — slave content panel appended BELOW the Now-lane
-   row when a workflow node is picked. The 3-col row stays mounted so the
-   operator can keep clicking between optimizer nodes; this panel just
-   re-targets to whichever node is selected. Flat layout (no accordions
-   in the primary content) so it doesn't dominate the viewport. */
-.opt-detail{margin-top:14px;background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);overflow:hidden;display:flex;flex-direction:column}
-
-.opt-detail-head{padding:var(--space-10) var(--space-16);border-bottom:0.5px solid var(--color-border);display:flex;align-items:center;gap:var(--space-16);flex:none}
-.opt-detail-head-titles{display:flex;align-items:baseline;gap:var(--space-10);flex-wrap:wrap;min-width:0;flex:1}
-.opt-detail-name{margin:0;font-size:var(--text-lg);font-weight:600;color:var(--color-text-primary);letter-spacing:-.005em}
+/* The node detail's RUN half — what the picked node did in the viewed round.
+   Its frame, header and close now come from `.bnode` / `.setup-preview-*`
+   (backend-node.css): one panel serves both canvases on both tabs, so the
+   container, title row and close button it used to own here are gone rather
+   than duplicated. What stays is everything only a run trace needs. */
 .opt-detail-id{font-family:var(--font-mono);font-size:var(--text-xs);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:3px;padding:1px var(--space-4);color:var(--color-text-secondary)}
-.opt-detail-kind{font-family:var(--font-mono);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary)}
-.opt-detail-kind.kind-llm{color:var(--color-accent)}
-.opt-detail-status{font-size:var(--text-sm);color:var(--color-text-tertiary);margin-left:4px}
+.opt-detail-status{font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .opt-detail-status.live{color:var(--color-success);font-weight:500}
-.opt-detail-head-actions{display:flex;align-items:center;gap:var(--space-10);flex:none}
 .opt-detail-round-tag{font-size:var(--text-xs);color:var(--color-text-tertiary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);padding:1px var(--space-8);white-space:nowrap}
-.opt-detail-close{background:none;border:0;color:var(--color-text-tertiary);font-size:var(--text-2xl);line-height:1;cursor:pointer;padding:0 var(--space-6);font-family:inherit;border-radius:var(--border-radius-sm)}
-.opt-detail-close:hover{color:var(--color-accent);background:var(--color-background-secondary)}
 
 /* Metadata strip — one dense line of label/value chips. The "portfolio"
    line the operator asked for; collapses to multi-line on narrow screens. */
@@ -126,11 +120,31 @@
 .opt-detail-samples{padding:var(--space-8) var(--space-16);border-top:0.5px solid var(--color-border)}
 .opt-detail-samples .round-samples-view{margin-bottom:0}
 
-/* Node configuration — the optimizer node's own knobs (model / provider /
-   reasoning_effort / temperature / …) rendered read-only through the canonical
-   config element (NodeConfigEditor), replacing the old chip strip + JSON dump. */
-.opt-detail-config{border-top:0.5px solid var(--color-border)}
-.opt-detail-config .config-editor{padding:var(--space-8) var(--space-16)}
+/* What l1_generate PRODUCED — the round's population, one candidate at a time.
+   The node's response is the whole population in one blob, and printed as a single
+   <pre> it was the least readable thing on the dashboard while being the only place
+   the optimizer's reasoning lands. Named fields, one variant showing. */
+.l1-variants{padding:var(--space-10) var(--space-16);border-top:0.5px solid var(--color-border);display:flex;flex-direction:column;gap:var(--space-10)}
+.l1v-head{display:flex;align-items:center;gap:var(--space-10);flex-wrap:wrap}
+.l1v-title{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary);font-weight:600}
+.l1v-count{font-size:var(--text-xs);color:var(--color-text-tertiary);margin-left:auto}
+/* The optimizer's own account of what it changed and why — prose, so it reads in
+   the body face at full size rather than as payload. */
+.l1v-lede{margin:0;font-size:var(--text-sm);color:var(--color-text-primary);line-height:1.5}
+.l1v-block{display:flex;flex-direction:column;gap:var(--space-4)}
+.l1v-block-head{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary);font-weight:600}
+/* The quoted evidence, marked as a quotation: it is text copied out of the panel the
+   generator was handed, and reading it as the generator's own words is what makes a
+   fabricated citation invisible. */
+.l1v-cite{margin:0;padding:var(--space-4) var(--space-10);border-left:2px solid var(--color-border);font-size:var(--text-sm);color:var(--color-text-secondary);line-height:1.5}
+.l1v-targets{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
+.l1v-fields{margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.l1v-field{display:flex;flex-wrap:wrap;gap:var(--space-10);align-items:start;min-width:0}
+.l1v-field > :first-child{flex:0 0 130px}
+.l1v-field > :last-child{flex:1 1 200px;min-width:0}
+.l1v-field dt{font-size:var(--text-xs);color:var(--color-text-secondary);padding-top:5px;overflow-wrap:break-word;min-width:0}
+.l1v-field dd{margin:0;min-width:0}
+.l1v-field dd pre{margin:0;font-family:var(--font-mono);font-size:var(--text-xs);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);padding:var(--space-4) var(--space-8);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto;line-height:1.45;color:var(--color-text-primary)}
 
 /* Footer — secondary content as inline disclosures. The raw payloads are escape
    hatches, not primary; default-collapsed so the strip stays one line tall. */

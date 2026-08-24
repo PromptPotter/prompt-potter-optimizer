@@ -127,6 +127,9 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     composite_fitness: 0,
     total: 0,
     improved: false,
+    // No arms, so the round could not be read either way — never `false`, which asserts it
+    // measured cleanly and told nothing apart.
+    separable: null,
     electable_count: 0,
     p_value: null,
     verdict_reason: null,

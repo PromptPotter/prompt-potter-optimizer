@@ -6,7 +6,7 @@ import { SegmentedControl, Chip, ChipGroup } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
-import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
+import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { interiorNodes, searchPoint } from "@/lib/derivations";
 
@@ -158,8 +158,9 @@ function PipelineSetupInner({
             schema={cv.nodeConfigSchema}
             scope="target"
           />
-          {showDetail ? (
-            <BackendNodeDetail
+          {showDetail && selected ? (
+            <NodeDetail
+              node={selected}
               draft={draft}
               onClose={() => setSelectionForNode(null)}
               onPromptApply={onApply}

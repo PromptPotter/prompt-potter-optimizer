@@ -19,12 +19,18 @@ import {
   type LifecycleFilter,
 } from "./api";
 import {
-  decodeCyclePath,
   encodeCyclePath,
   pathLeaf,
   pathRoot,
   type CyclePath,
 } from "./ids";
+import { EMPTY_ADDRESS, formatAddress, parseAddress, type Address } from "./address";
+import {
+  DEFAULT_ACCOUNT_PANE,
+  DEFAULT_TAB,
+  type AccountPane,
+  type Tab,
+} from "./view-tab";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
@@ -72,6 +78,14 @@ interface WorkspaceState {
   viewedCandidateId: string | null;
   datasetName: string | null;
   following: boolean; // the viewed path tracks the active pointer
+  // The per-campaign view, and the account modal's pane (null = closed). Both are on the
+  // ADDRESS (`lib/address.ts`), which is why they live beside the path rather than in the
+  // components that render them — a view held locally cannot be linked to.
+  tab: Tab;
+  setTab: (t: Tab) => void;
+  accountPane: AccountPane | null;
+  openAccount: (pane?: AccountPane) => void;
+  closeAccount: () => void;
   cycles: CycleListEntry[];
   cyclesLoaded: boolean; // first /cycles poll has resolved (success or fail)
   // True once the campaign list on hand reflects the CURRENT lifecycleFilter.
@@ -140,22 +154,15 @@ export function useWorkspace(): WorkspaceState {
 // RECONNECT_INTERVAL_MS so both polls retry a downed server on the same 5 s beat.
 const RECONNECT_INTERVAL_MS = 5000;
 
-// The deep-link, read as ONE address. `webapp/CLAUDE.md` says the address is
-// `(path, candidateId)`, and the URL used to encode only the first half — so a reload
-// silently dropped the node the tree was parked on. Harmless-looking for an ordinary
-// course (its own path still names a node), but a FORK is not a node: its path names
-// something the server dissolved onto the parent's timeline, so a fork path with no
-// candidate names nothing at all and the bars came back empty.
-//
-// Two params rather than one encoded string: `encodeCyclePath` is also the wire format for
-// the server's `?descend=`, and a candidate has no business in that.
-function urlAddress(): { path: CyclePath; candidateId: string | null } | null {
+// The deep-link, read as ONE address — path, candidate AND view, in the location hash.
+// The syntax and the reasons for it are `lib/address.ts`; this file only reads and
+// writes it. `webapp/CLAUDE.md` says the address is `(path, candidateId)`: encoding only
+// the first half dropped the node the tree was parked on, which for a FORK names nothing
+// at all, because a fork's path points at something the server dissolved onto the
+// parent's timeline — so the bars came back empty.
+function urlAddress(): Address | null {
   if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  const path = params.get("path");
-  const decoded = path ? decodeCyclePath(path) : null;
-  if (!decoded) return null;
-  return { path: decoded, candidateId: params.get("cand") };
+  return parseAddress(window.location.hash);
 }
 
 export function WorkspaceProvider({
@@ -179,9 +186,18 @@ export function WorkspaceProvider({
   // outlive the course that owns it.
   const [viewedCandidateId, setViewedCandidateId] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
-  // The `?path=` deep-link is read in a mount effect rather than a useState
-  // initializer so the static-export HTML and the first client render agree (no
-  // hydration mismatch).
+  // The per-campaign view. It lives here rather than in `AppShell` because it is part of
+  // the ADDRESS now, and the address has exactly one writer — a second holder of it would
+  // be a second answer to "what am I looking at", which is the thing this file exists to
+  // prevent. `AppShell` still owns the ONE call site (`openView`), which also leaves the
+  // phone's list screen.
+  const [tab, setTab] = useState<Tab>(DEFAULT_TAB);
+  // The account modal's pane, or null for closed — the second view axis, on the same
+  // address. The pin is deliberately NOT cleared while it is up: closing returns to
+  // whatever was underneath, straight off the state that never moved.
+  const [accountPane, setAccountPane] = useState<AccountPane | null>(null);
+  // The deep-link is read in a mount effect rather than a useState initializer so the
+  // static-export HTML and the first client render agree (no hydration mismatch).
   const [initialized, setInitialized] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
@@ -215,7 +231,30 @@ export function WorkspaceProvider({
   // callback without re-render churn.
   const prevActivePointerRef = useRef<string | null>(null);
 
-  // Mount: honour a `?path=` deep-link as an explicit pin.
+  // Adopt an address off the hash. Shared by the mount read and the `hashchange`
+  // listener below, so a pasted link and a hand-edited one land the same way. A null
+  // parse is a malformed hash and changes nothing — the operator keeps the view they
+  // had rather than being thrown back to the active run by a typo.
+  const adoptAddress = useCallback((a: Address | null) => {
+    if (!a) return;
+    if (a.kind === "account") {
+      setAccountPane(a.pane);
+      return;
+    }
+    setAccountPane(null);
+    setTab(a.tab);
+    if (a.kind === "follow") {
+      setFollowing(true);
+      setPinnedPath(null);
+      setViewedCandidateId(null);
+      return;
+    }
+    setPinnedPath(a.path);
+    setViewedCandidateId(a.candidateId);
+    setFollowing(false);
+  }, []);
+
+  // Mount: honour the hash deep-link as an explicit pin.
   // The synchronous setState here is load-bearing, not an oversight — the
   // deep-link is read in a mount effect (not a useState initializer) so
   // the static-export HTML and the first client render agree, then
@@ -223,15 +262,22 @@ export function WorkspaceProvider({
   // is the one place set-state-in-effect is deliberately waived.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const deepLink = urlAddress();
-    if (deepLink) {
-      setPinnedPath(deepLink.path);
-      setViewedCandidateId(deepLink.candidateId);
-      setFollowing(false);
-    }
+    adoptAddress(urlAddress());
     setInitialized(true);
-  }, []);
+  }, [adoptAddress]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // The hash can also change from OUTSIDE this app — a pasted link in the same tab, a
+  // hand-edit in the address bar, a click on an anchor. Without this the URL would say
+  // one thing and the app show another, which is exactly the split the single-address
+  // rule exists to prevent. The writer below no-ops when the hash already matches, so
+  // this cannot loop against it.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHash = () => adoptAddress(parseAddress(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [adoptAddress]);
 
   // TWO poll cadences. The active pointer (`/sessions/active` — three opaque
   // ids) is staleness-critical: when the CLI mints a fresh cycle
@@ -391,22 +437,43 @@ export function WorkspaceProvider({
     [cycles],
   );
 
-  // URL contract: `?path=<encoded CyclePath>` (+ `?cand=<id>`) present ⇔ pinned to that
-  // address. Written only while pinned, stripped while following. BOTH halves, so a reload
-  // restores the same address rather than half of one.
+  // URL contract: the hash IS the address — `lib/address.ts` owns its syntax, this is the
+  // sole writer of it. A cycle segment appears exactly while pinned; the view and the
+  // parked candidate ride alongside, so a reload restores the whole address rather than
+  // half of one, and a copied link opens on the pane it was copied from.
+  //
+  // `replaceState`, not `push`: navigating the app has never added history entries and
+  // this change does not start. Back still leaves the app, which is what the operator's
+  // muscle memory expects from a dashboard.
   useEffect(() => {
     if (!initialized || typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const wantPath = following || !pinnedPath ? null : encodeCyclePath(pinnedPath);
-    const wantCand = wantPath ? viewedCandidateId : null;
-    if (params.get("path") === wantPath && params.get("cand") === wantCand) return;
-    if (wantPath) params.set("path", wantPath);
-    else params.delete("path");
-    if (wantCand) params.set("cand", wantCand);
-    else params.delete("cand");
-    const qs = params.toString();
-    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [initialized, following, pinnedPath, viewedCandidateId]);
+    const want = formatAddress(
+      accountPane != null
+        ? { kind: "account", pane: accountPane }
+        : following || !pinnedPath
+          ? { kind: "follow", tab }
+          : { kind: "cycle", path: pinnedPath, tab, candidateId: viewedCandidateId },
+    );
+    // "Following, default view" has nothing to say, so it says nothing: the hash comes
+    // OFF rather than sitting there as a bare `#/`. Same discipline the query string had
+    // — an address is what distinguishes this view from the default, and a decoration
+    // that appears on every page load is not one.
+    const bare = want === EMPTY_ADDRESS;
+    const now = window.location.hash;
+    // Also the guard that stops this racing the `hashchange` listener above.
+    if (bare ? now === "" || now === EMPTY_ADDRESS : now === want) return;
+    window.history.replaceState(
+      null,
+      "",
+      bare ? window.location.pathname + window.location.search : want,
+    );
+  }, [initialized, following, pinnedPath, viewedCandidateId, tab, accountPane]);
+
+  const openAccount = useCallback(
+    (pane: AccountPane = DEFAULT_ACCOUNT_PANE) => setAccountPane(pane),
+    [],
+  );
+  const closeAccount = useCallback(() => setAccountPane(null), []);
 
   const selectCyclePath = useCallback(
     (path: CyclePath, candidate: string | null = null) => {
@@ -492,6 +559,11 @@ export function WorkspaceProvider({
     viewedCandidateId,
     datasetName,
     following,
+    tab,
+    setTab,
+    accountPane,
+    openAccount,
+    closeAccount,
     cycles,
     cyclesLoaded,
     campaignsLoaded: campaignsFilter === lifecycleFilter,

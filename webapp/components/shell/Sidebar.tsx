@@ -83,6 +83,11 @@ export function Sidebar({
     activeCampaignId,
     lifecycleFilter,
     setLifecycleFilter,
+    // The account modal's open-ness is on the ADDRESS (`#/account/<pane>`), not local
+    // state — the modal is a view like any other, so it is linkable and survives a reload.
+    accountPane,
+    openAccount,
+    closeAccount,
   } = useWorkspace();
   // Expand/collapse, remembered PER CAMPAIGN (`lib/view-memory.tsx`) — the campaign a node
   // belongs to is read off its own address, so nothing here has to carry one.
@@ -96,7 +101,6 @@ export function Sidebar({
   // state (anon → sign-in prompt, not perpetual loading).
   const { status, openAuthPrompt } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
   const handleSignOut = useCallback(async () => {
     setSigningOut(true);
     try {
@@ -264,7 +268,7 @@ export function Sidebar({
               type="button"
               className="account-trigger"
               aria-label="Open account"
-              onClick={() => setAccountOpen(true)}
+              onClick={() => openAccount()}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
                 <circle cx="8" cy="5.5" r="2.5" />
@@ -310,7 +314,7 @@ export function Sidebar({
           </button>
         )}
       </div>
-      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
+      <AccountModal open={accountPane != null} onClose={closeAccount} />
     </nav>
   );
 }

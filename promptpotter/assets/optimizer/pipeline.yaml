@@ -8,9 +8,31 @@
 # Comments and formatting are not: the fingerprint hashes the parsed manifest, not bytes.
 name: PromptPotter Optimizer
 version: v1.0
+# The MENU a human picks an optimizer model from — what is offerable, never what is set
+# (each node's own `config.model` is that). Outside the L4 fingerprint by construction:
+# `connectors/promptpotter.py::_identity_config` hashes `config` only, because a permission
+# list does not change what the origin ran, so widening this must not void a banked panel.
+# Admin-owned: extend it here (or in the shadow at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml`,
+# which `optimizer_pipeline_path()` prefers) as this install gains access to more models.
+# Seeded with what this install actually runs and profiles — `_MODEL_PROFILES`
+# (`infrastructure/llm/registry.py`) is where a model's max_tokens floor is declared, and
+# preflight HARD-blocks a node set below its own.
+available_models:
+  - deepseek/deepseek-v4-flash:nitro
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-120b:nitro
 nodes:
   l1_generate:
     type: llm/optimizer
+    # The MENUS behind this node's scalar params, so the operator picks a value instead of
+    # typing one. `param_allowed_values` alone does NOT open a search axis — `node_config_schema`
+    # reads `optimizer_tunable` off `param_keys`, which stays empty here on purpose: the
+    # optimizer never searches its own configuration. Anchored and aliased onto every node
+    # below; a menu named for a key a node does not carry is simply never read.
+    optimizer: &node_menus
+      param_allowed_values:
+        reasoning_effort: [none, default, low, medium, high]
+        provider: [openrouter, groq, openai, anthropic]
     config:
       temperature: 0.4
       output_format: json
@@ -49,10 +71,12 @@ nodes:
       only measured difference so far: 16.1s vs 23.0s median.
   l1_score:
     type: measurement
+    optimizer: *node_menus
     config:
       reasoning_effort: high
   l1_critique:
     type: agent
+    optimizer: *node_menus
     config:
       temperature: 0.3
       output_format: json
@@ -75,6 +99,7 @@ nodes:
     description: *nitro_probe
   l2_context:
     type: llm/optimizer
+    optimizer: *node_menus
     config:
       temperature: 0.3
       output_format: json
@@ -87,6 +112,7 @@ nodes:
     description: *nitro_probe
   l3_plan:
     type: llm/optimizer
+    optimizer: *node_menus
     config:
       temperature: 0.5
       output_format: json
@@ -99,6 +125,7 @@ nodes:
     description: *nitro_probe
   checkin:
     type: llm/optimizer
+    optimizer: *node_menus
     config:
       temperature: 0.3
       output_format: json
@@ -330,7 +357,7 @@ resolved_prompts:
       Return JSON. Set only the LEVER you pull — but ALWAYS write both reason fields, on every
       fire, including one that pulls no lever.
       {
-        "l1_layout": {"<slot>": ["<placeholder>", ...]},   // a per-SLOT edit: a slot you name replaces that slot's whole list, a slot you omit keeps what it has
+        "l1_layout": {"<placeholder>": "<slot>", ...},   // a MOVE: each panel you name goes to that slot, one you omit stays put
         "l1_overrides": {...},
         "axis_targeted": "<short>",   // ALWAYS — the axis you routed the cluster to
         "rationale": "1-2 sentences"  // ALWAYS — the cluster you are attacking and the sample id / count / yield number behind it

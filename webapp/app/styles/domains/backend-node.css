@@ -14,6 +14,10 @@
   flex-direction: column;
   gap: var(--space-8);
 }
+/* The same panel carrying a RUN trace: rendered input beside response, two columns
+   of payload that a 560px form column crushes. The width is the content's, not the
+   tab's — an optimizer node reads the same on Chat as on Dashboard. */
+.bnode-wide { max-width: none; }
 
 /* The observe searchpoint selector (origin/live/historical) — sits ABOVE the
    node surface, mirroring `.bnode`'s width constraint so the two read as one

@@ -47,8 +47,8 @@ export function unitKey(campaignId: string, cycleId: string): string {
 // Named `PathHop`, not `CycleHop`: the generated wire type of that name
 // (`lib/api/types.generated.ts`, the element of `LineageNode.path` / `RayItem.path`)
 // is snake_case and belongs to the server. This one is the BROWSER's address —
-// it is encoded into `?path=` URLs and view-memory keys, so binding it to a wire
-// shape would let a server-side field rename invalidate persisted addresses.
+// it is encoded into view-memory keys and into the location hash, so binding it to a
+// wire shape would let a server-side field rename invalidate persisted addresses.
 interface PathHop {
   campaignId: string;
   cycleId: string;
@@ -66,7 +66,9 @@ const ALL_DOTS_RE = /^\.+$/;
 // Mirrors `store/io.py::validate_path_component`, whose dot-allowing regex is paired
 // with an all-dots rejection: `.` / `..` / `...` pass ID_RE but are traversal segments
 // the server refuses, so without this the browser hands back a path Python rejects.
-function validIdComponent(s: string): boolean {
+// Exported for `lib/address.ts`, which parses the SAME ids out of a different syntax —
+// re-testing them there against a second regex is how the two would come to disagree.
+export function validIdComponent(s: string): boolean {
   return ID_RE.test(s) && !ALL_DOTS_RE.test(s);
 }
 

@@ -1,7 +1,5 @@
 "use client";
-import { useFetch } from "@/lib/hooks/useFetch";
-import { fetchPipeline } from "@/lib/api";
-import type { PipelineDoc } from "@/components/workflow";
+import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
 import { DashSpine } from "./DashSpine";
@@ -25,10 +23,7 @@ import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 export function DashboardTab() {
   // One-shot pipeline (topology) lookup. Errors → pipeline stays null (the
   // canvas renders its own empty state); no retry needed for a static read.
-  const { data: pipeline } = useFetch<PipelineDoc>(
-    () => fetchPipeline().then((p) => p as PipelineDoc),
-    [],
-  );
+  const { doc: pipeline } = useOptimizerPipeline();
 
   // The outer L4 loop earns extra boxes: the per-round outer verdict + the
   // cross-cycle ranking / capability surfaces. `campaignId` is the ROOT hop, so

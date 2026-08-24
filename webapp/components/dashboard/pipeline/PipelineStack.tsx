@@ -1,11 +1,10 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { fetchPipeline } from "@/lib/api";
 import { interiorNodes } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useFetch } from "@/lib/hooks/useFetch";
 import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
+import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import type { NodeConfigParam } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineDoc, PipelineView } from "@/components/workflow";
@@ -80,11 +79,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
   // fires nothing.
   const nested = useNestedPipelines(cv.nests, cv.pipelineStatus === "ok");
   // The level above it: a static manifest, no identity dependency, read only on zoom-out.
-  const wantsOptimizer = outermost === 0;
-  const { data: optimizer } = useFetch<PipelineDoc>(
-    wantsOptimizer ? () => fetchPipeline().then((p) => p as PipelineDoc) : null,
-    [wantsOptimizer],
-  );
+  const { doc: optimizer } = useOptimizerPipeline(outermost === 0);
   const activeNode = dash?.current_round.active_node ?? null;
 
   const layers: Layer[] = [

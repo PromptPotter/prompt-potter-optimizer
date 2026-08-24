@@ -151,9 +151,14 @@
 .unit-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
 .unit-library-item{display:flex;align-items:flex-start;gap:var(--space-6);padding:var(--space-6) var(--space-8);background:transparent;border:0;border-radius:6px;cursor:pointer;width:100%;text-align:left;font-family:inherit;color:var(--color-text-secondary);font-size:var(--text-base)}
 .unit-library-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.unit-library-row{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
-.unit-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.unit-library-meta{font-size:var(--text-xs);color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Name and meta share ONE line and fold only when they cannot: the name carries a
+   60% basis and grows into the slack (so the meta sits right), the meta never wraps
+   its own text, and `flex-wrap` drops it to a second line at the width where the two
+   would collide. A percentage basis rather than a px floor — no literal, and it
+   contracts with the row instead of pinning a breakpoint. */
+.unit-library-row{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:var(--space-6);row-gap:1px;min-width:0;flex:1}
+.unit-library-name{flex:1 1 60%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-library-meta{flex:0 1 auto;font-size:var(--text-xs);color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-success);margin-left:4px;font-size:var(--text-xs);vertical-align:middle}
 .unit-library-live.active{color:var(--color-accent)}
 /* Terminal run-state on a non-running unit row — distinguishes a stopped/aborted

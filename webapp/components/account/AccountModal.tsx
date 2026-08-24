@@ -2,7 +2,6 @@
 // Clerk-style account modal — two-pane shell over `/auth/*`. Each section is its
 // own pane component: Profile / Security / Activity / Preferences / About.
 
-import { useState } from "react";
 import { AboutUnit } from "./AboutUnit";
 import { AccountProfileTab } from "./AccountProfileTab";
 import { AccountSecurityTab } from "./AccountSecurityTab";
@@ -12,15 +11,18 @@ import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { fetchMe } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
+import { DEFAULT_ACCOUNT_PANE, type AccountPane } from "@/lib/view-tab";
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-type AccountTab = "profile" | "security" | "activity" | "storage" | "preferences" | "about";
-
-const TAB_TITLES: Record<AccountTab, string> = {
+// The pane set is `lib/view-tab.ts::AccountPane` — it is on the address
+// (`#/account/activity`), so the closed set cannot live inside the component that
+// renders it. The titles stay here; they are presentation.
+const TAB_TITLES: Record<AccountPane, string> = {
   profile: "Profile details",
   security: "Security",
   activity: "Activity",
@@ -30,7 +32,11 @@ const TAB_TITLES: Record<AccountTab, string> = {
 };
 
 export function AccountModal({ open, onClose }: Props) {
-  const [tab, setTab] = useState<AccountTab>("profile");
+  // Which pane, from the address. Nav clicks write it back, so a pane is linkable and
+  // survives a reload — the same rule the main view axis follows.
+  const { accountPane, openAccount } = useWorkspace();
+  const tab: AccountPane = accountPane ?? DEFAULT_ACCOUNT_PANE;
+  const setTab = openAccount;
   // `open` in the deps key means useFetch re-runs (and blanks me/error) on every
   // open — stale data from a prior session never flashes in, so no separate reset.
   const { data: me, error } = useFetch(open ? () => fetchMe() : null, [open]);

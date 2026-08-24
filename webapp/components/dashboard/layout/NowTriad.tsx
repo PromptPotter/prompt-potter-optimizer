@@ -1,5 +1,6 @@
 "use client";
-import { OptimizerNodeDetail, WorkflowCanvas, type PipelineDoc } from "@/components/workflow";
+import { WorkflowCanvas, type PipelineDoc } from "@/components/workflow";
+import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { ForestCard } from "@/components/candidates/ForestCard";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
@@ -14,9 +15,10 @@ import { useSelection } from "@/lib/SelectionContext";
 // of squeezing the optimizer. No breakpoint decides that; the content does.
 //
 // The drill-downs then stack full-width below: the Scoring inspector when a
-// candidate is selected, the node panel when an optimizer node is. The per-round
-// samples view is not a standalone card either — it lives inside the l1_score
-// node panel, surfaced only when that node is clicked.
+// candidate is selected, the node panel when a node is — EITHER canvas's, since
+// `NodeDetail` is one panel for both scopes and the tab a node was clicked on no
+// longer decides whether it opens. The per-round samples view is not a standalone
+// card either — it lives inside the l1_score node panel.
 //
 // Every region reads its own state from context (`useDashboard`,
 // `useWorkspace`, `useSelection`); the only thing threaded is `pipeline` (a
@@ -53,10 +55,12 @@ export function NowTriad({ pipeline }: Props) {
           />
         </div>
       )}
-      {node?.scope === "optimizer" && (
-        <OptimizerNodeDetail
-          id={node.id}
-          pipeline={pipeline}
+      {/* Either scope: the panel is the node's, not the tab's. A target node picked
+          on the chat hero stays open when the operator crosses to Dashboard. */}
+      {node && (
+        <NodeDetail
+          node={node}
+          draft={null}
           onClose={() => setSelectionForNode(null)}
         />
       )}

@@ -11,8 +11,9 @@ import { hasLiveProducer } from "@/lib/run-phase";
 import { isSelfOptimization, runSummary } from "@/lib/derivations";
 import { Switch } from "@/components/ui";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
-import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
+import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
+import { RoundAxis } from "@/components/workflow";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
@@ -166,10 +167,6 @@ export function ChatPane({
   // inner campaigns — so the hard-samples panels point to the inner run instead.
   const selfOpt = isSelfOptimization(cv.backendType);
   const { node: selectedNode, setSelectionForNode } = useSelection();
-  // The scope the click was recorded with — NOT a name test. The ids are not a
-  // disjoint namespace: pp-self's target pipeline declares `l1_generate` &
-  // friends, the optimizer's own node names.
-  const showBackendDetail = selectedNode?.scope === "target";
   // While a campaign is being set up, the connector preview shows the DRAFT's
   // searchpoint (not the prior cycle / origin). Carries through awaiting-context
   // and ready — the two phases that hold a draft.
@@ -206,9 +203,17 @@ export function ChatPane({
             samplesOpen={samplesOpen}
             onToggleSamples={toggleSamples}
           />
+          {/* The round the hero's node detail reads. Its twin scopes the Dashboard's
+              canvas from that card's own toolbar — one control per picture, both
+              writing the single `selection.round` axis, so crossing tabs holds the
+              round. Without one here the chat could only ever inspect live. */}
+          <RoundAxis />
         </div>
-        {showBackendDetail && (
-          <BackendNodeDetail
+        {/* Either scope. The optimizer rail used to light a node and open nothing,
+            because `optimizer`-scoped detail was mounted on the Dashboard alone. */}
+        {selectedNode && (
+          <NodeDetail
+            node={selectedNode}
             draft={previewDraft}
             onClose={() => setSelectionForNode(null)}
           />

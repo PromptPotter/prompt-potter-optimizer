@@ -35,11 +35,7 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
   and every term the panel retired, is argued in
   [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § The measurand.
-  `verdict.py`: what a ROUND of
-  them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
-  is what stops it growing a file read or a session dep, which is exactly how it drifted before.
-  Import the submodule, never the package: `domain.results` imports `verdict` while `proxies`
-  imports `domain.results`, so a re-exporting `__init__` would make two acyclic modules circular.
+  `__init__.py` re-exports nothing — import `l4.proxies`, never the package.
 - `export.py` — the export artifact (`cycles/{id}/export.json`): the winning prompt by field name
   plus the provenance that makes its fitness readable — the formula the number was computed under,
   n, lift + CI, θ, the rows' own hash, the optimizer manifest — and an `artifact_version` a reader
