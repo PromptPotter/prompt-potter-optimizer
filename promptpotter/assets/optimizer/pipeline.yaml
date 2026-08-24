@@ -230,14 +230,16 @@ resolved_prompts:
       task type. A critique's priority_fix is your primary steer.
     problem_description: ''
     instruction: >-
-      THINK FIRST — diverge, then converge. Before writing any variant, name 2-3 genuinely distinct hypotheses
-      for WHY the parent fails (different failure clusters or root causes from the panels), then develop
-      only the ones you can actually ground in a panel. {{n_variants}} is a CEILING, not a quota: emit
-      fewer whenever you have fewer distinct hypotheses, and never pad to reach it. A slot filled to hit
-      the number costs a full measurement and arrives as an idea this cycle already lost, which is rejected
-      before it is ever scored. One variant per failure cluster — the spread is carried by targets_cluster
+      THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} genuinely
+      distinct hypotheses for WHY the parent fails (different failure clusters or root causes from the
+      panels), then develop each one you can ground in a panel. Reach the full count: a round's chance
+      of finding a lift climbs steeply with the number of DISTINCT hypotheses it tests, so stopping at
+      one or two forfeits most of the round. What is forbidden is padding, not breadth — a slot filled
+      by restating an idea already on the board arrives as one this cycle already lost and is rejected
+      before it is ever scored, so the way to fill the last slot is a NEW hypothesis, never a reworded
+      one. One variant per failure cluster — the spread is carried by targets_cluster
       (see answer_format), so spend your reasoning on each cluster's MECHANISM rather than on making the
-      set look varied. On round 1 (no critique), spread across the
+      set look varied. Spread across the
       two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its
       output-schema `description` strings, which steer harder per token than the instruction; see answer_format).
       An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort)
@@ -275,7 +277,7 @@ resolved_prompts:
         - "evidence_grounding": {field, citation}. field one of {{citable_fields}} — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
         - "targets_cluster": the verbatim label of the ONE critique failure cluster this variant attacks; "none" when there is no critique yet. Two variants may NOT name the same cluster — the batch is one variant per cluster, which is where the round's spread comes from.
         - Three override slots; AT LEAST ONE NON-EMPTY. A variant that overrides nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.
-          * "pipeline_params_override": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {"output_schema_descriptions": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one.
+          * "pipeline_params_override": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {"output_schema_descriptions": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one. A prompt-template field (persona, instruction, …) goes in prompt_fields_override and NEVER here, even where the catalogue lists it under a node: the same edit sent both ways is scored once and remembered twice, and the duplicate row makes an idea already tried read as untried.
           * "prompt_fields_override": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.
           * "task_context_override": flat {field: string}, field one of upstream_context, downstream_context.
         - "changes_description": 1-2 sentences, <=320c, REPORTING the override you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
@@ -290,9 +292,8 @@ resolved_prompts:
       change.
 
 
-      priority_fix: follow the answer_format template. <axis> MUST be EXACTLY one of
+      priority_fix: <axis> MUST be EXACTLY one of
       persona/task_intent/problem_description/instruction/thinking_style/answer_format.
-      A descriptive name you invent (e.g. 'premise_parsing', 'reasoning') is INVALID and wastes the fix.
       Do not reflexively route every failure to thinking_style: an execution slip (a skipped step, a mis-read
       input, a formatting miss) is usually fixed better by instruction or answer_format; reserve thinking_style
       for when the reasoning STRATEGY itself is wrong, and vary the axis when a prior fix on it did not
@@ -300,8 +301,11 @@ resolved_prompts:
       reasoning"); <quoted failure pattern> matches a cluster you name in failure_highlights.
 
 
-      failure_highlights: each entry quotes from SAMPLE TRANSCRIPTS the decisive evidence for one failure
-      — the claim at stake, the model's broken reasoning step (verbatim), and predicted vs ground truth.
+      failure_highlights: each entry quotes ONE CONTIGUOUS span of SAMPLE TRANSCRIPTS, copied exactly and
+      unabridged — the decisive step where the reasoning went wrong. Never stitch or ellipse fragments
+      into one quote: an abridged quote is a reconstruction, the next round cites it back verbatim as
+      evidence, and nothing downstream can tell it from text the model actually wrote. Give the claim at
+      stake and predicted vs ground truth in your OWN words around the quote.
       Diagnose the mechanism: WHY the model landed wrong, not just that it did. Before claiming a bias
       (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one error
       class for another is not a fix. ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first,

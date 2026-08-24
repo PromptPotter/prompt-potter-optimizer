@@ -164,6 +164,85 @@ def paired_reading(
     )
 
 
+def exact_p_floor(n: int) -> float:
+    """The smallest two-sided p an exact paired test on *n* pairs can reach — the two sign draws
+    where every difference agrees. A fact about the panel's WIDTH, never about the edit under test:
+    below it no verdict exists at ANY effect size."""
+    return 1.0 if n < 1 else min(1.0, 2.0 / 2.0**n)
+
+
+def cells_for_exact_verdict(n_tests: int, alpha: float = 0.05) -> int:
+    """Smallest paired *n* whose :func:`exact_p_floor` clears Holm's tightest step over *n_tests*
+    comparisons — what to BUY, in the unit a panel is bought in. Holm's first step is its
+    strictest, so a width clearing that one can in principle clear every later one."""
+    target = alpha / max(1, n_tests)
+    n = 1
+    while exact_p_floor(n) > target:
+        n += 1
+    return n
+
+
+def _signed_rank_counts(n: int) -> list[int]:
+    """``out[w]`` = how many of the ``2**n`` sign draws put ``W+`` at *w*. Built by DP, so the null
+    costs O(n**3) rather than the ``2**n`` an enumeration would spend."""
+    total = n * (n + 1) // 2
+    counts = [0] * (total + 1)
+    counts[0] = 1
+    for rank in range(1, n + 1):
+        for w in range(total, rank - 1, -1):
+            counts[w] += counts[w - rank]
+    return counts
+
+
+def exact_paired_reading(
+    candidate_scores: list[float],
+    prior_scores: list[float],
+    *,
+    alpha: float = 0.05,
+) -> tuple[float, float | None, float | None, float | None, int]:
+    """``(median_shift, ci_lo, ci_hi, p, n)`` — the Wilcoxon signed-rank twin of
+    :func:`paired_reading`, assuming no distribution, for a read over a handful of cells.
+
+    Estimate, bracket and test come off one set of Walsh averages, so they cannot disagree about
+    zero. ``p`` never falls below :func:`exact_p_floor` and both bracket ends are ``None`` where
+    *alpha* is unreachable at this *n* — a verdict the width cannot support is refused, never
+    borrowed from an unmeasured tail."""
+    diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
+    nonzero = [d for d in diffs if d != 0.0]
+    n = len(nonzero)
+    walsh = sorted((a + b) / 2.0 for i, a in enumerate(nonzero) for b in nonzero[i:])
+    mid = len(walsh) // 2
+    shift = (
+        0.0
+        if not walsh
+        else (walsh[mid] if len(walsh) % 2 else (walsh[mid - 1] + walsh[mid]) / 2.0)
+    )
+    if n < 2:
+        return (shift, None, None, None, n)
+
+    counts = _signed_rank_counts(n)
+    draws = float(2**n)
+    total = n * (n + 1) // 2
+    by_magnitude = sorted(range(n), key=lambda i: abs(nonzero[i]))
+    observed = sum(rank for rank, i in enumerate(by_magnitude, start=1) if nonzero[i] > 0.0)
+    # Doubled, so a half-integer centre never needs a tolerance to compare against.
+    deviation = abs(2 * observed - total)
+    p = min(1.0, sum(c for w, c in enumerate(counts) if abs(2 * w - total) >= deviation) / draws)
+
+    # The k-th Walsh average in from each end, k being the largest lower tail still inside alpha/2.
+    # k = 0 says this width cannot bracket at alpha at all.
+    cumulative = 0
+    k = 0
+    for w, c in enumerate(counts):
+        cumulative += c
+        if cumulative / draws > alpha / 2.0:
+            break
+        k = w + 1
+    if k < 1:
+        return (shift, None, None, p, n)
+    return (shift, walsh[k - 1], walsh[len(walsh) - k], p, n)
+
+
 def holm_adjusted(p_values: list[float]) -> list[float]:
     """Holm-Bonferroni step-down, returned IN INPUT ORDER with monotonicity enforced and clipped to 1.0.
 
@@ -243,6 +322,9 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
 
 
 __all__ = [
+    "cells_for_exact_verdict",
+    "exact_p_floor",
+    "exact_paired_reading",
     "holm_adjusted",
     "mean_ci",
     "mean_ci_t",

@@ -887,11 +887,12 @@ export interface Comparability {
   note: string;
 }
 
-/** One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns */
+/** One arm that ran more than once. ``level_spread`` is the cheapest noise reading on the */
 export interface ArmReplicate {
   arm_id: string;
   campaign_ids: string[];
   level_spread: number;
+  n_instruments: number;
 }
 
 /** The additive cell + arm decomposition over the cells every campaign measured. */
@@ -912,6 +913,8 @@ export interface EvidencePower {
   largest_arm_gap: number;
   cells_per_arm: number;
   cells_for_largest_gap: number | null;
+  exact_p_floor: number;
+  cells_for_corrected_verdict: number;
 }
 
 /** Run order against outcome. A campaign-at-a-time comparison confounds the arm with WHEN it */
@@ -942,6 +945,7 @@ export interface CampaignReading {
   dataset_name: string;
   created_at: string;
   arm_id: string | null;
+  instrument_id: string | null;
   ability: AbilityReading | null;
   spend_usd: number | null;
   rounds_scored: number;
@@ -957,7 +961,7 @@ export interface CampaignReading {
 export interface PairwiseComparison {
   campaign_a: string;
   campaign_b: string;
-  mean_d: number;
+  median_shift: number;
   ci_lo: number | null;
   ci_hi: number | null;
   p_value: number | null;

@@ -127,6 +127,7 @@
           },
           "priority_fix": {
             "default": "",
+            "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the vocabulary this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
             "maxLength": 320,
             "title": "Priority Fix",
             "type": "string"
@@ -338,6 +339,7 @@
         "additionalProperties": false,
         "properties": {
           "plan": {
+            "description": "The strategy every later prompt reads until the next replan. Say what L2 and L1 should DO with the levers they hold — L2 moves which panels L1 sees and how wide it explores; L1 rewrites the target prompt's fields. A plan written in the solver's vocabulary instructs neither, and rides every downstream call regardless.",
             "maxLength": 800,
             "title": "Plan",
             "type": "string"

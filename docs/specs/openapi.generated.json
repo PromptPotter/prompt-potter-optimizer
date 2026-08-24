@@ -259,7 +259,7 @@
       },
       "ArmReplicate": {
         "additionalProperties": false,
-        "description": "One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns\nalready paid for — the cheapest one on the board, and invisible to a roster that lists\ncampaigns rather than arms.",
+        "description": "One arm that ran more than once. ``level_spread`` is the cheapest noise reading on the\nboard — taken from campaigns already paid for, and invisible to a roster that lists campaigns\nrather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
         "properties": {
           "arm_id": {
             "title": "Arm Id",
@@ -275,12 +275,17 @@
           "level_spread": {
             "title": "Level Spread",
             "type": "number"
+          },
+          "n_instruments": {
+            "title": "N Instruments",
+            "type": "integer"
           }
         },
         "required": [
           "arm_id",
           "campaign_ids",
-          "level_spread"
+          "level_spread",
+          "n_instruments"
         ],
         "title": "ArmReplicate",
         "type": "object"
@@ -595,6 +600,17 @@
             "title": "Dataset Name",
             "type": "string"
           },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
           "n_cells": {
             "title": "N Cells",
             "type": "integer"
@@ -642,6 +658,7 @@
           "dataset_name",
           "created_at",
           "arm_id",
+          "instrument_id",
           "ability",
           "spend_usd",
           "rounds_scored",
@@ -1975,8 +1992,12 @@
       },
       "EvidencePower": {
         "additionalProperties": false,
-        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per arm it\nwould take to resolve the biggest gap the roster already shows.",
+        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per arm it\nwould take to resolve the biggest gap the roster already shows.\n\nThe last two are the harder limit and they answer a different question. Effect size decides the\nfirst three; ``exact_p_floor`` is what the WIDTH alone permits, so a panel below\n``cells_for_corrected_verdict`` cannot produce a Holm-corrected result however large the effect —\na clean sweep of every cell included. Buy width to that line before buying it for power.",
         "properties": {
+          "cells_for_corrected_verdict": {
+            "title": "Cells For Corrected Verdict",
+            "type": "integer"
+          },
           "cells_for_largest_gap": {
             "anyOf": [
               {
@@ -1991,6 +2012,10 @@
           "cells_per_arm": {
             "title": "Cells Per Arm",
             "type": "integer"
+          },
+          "exact_p_floor": {
+            "title": "Exact P Floor",
+            "type": "number"
           },
           "largest_arm_gap": {
             "title": "Largest Arm Gap",
@@ -2010,7 +2035,9 @@
           "min_detectable_effect",
           "largest_arm_gap",
           "cells_per_arm",
-          "cells_for_largest_gap"
+          "cells_for_largest_gap",
+          "exact_p_floor",
+          "cells_for_corrected_verdict"
         ],
         "title": "EvidencePower",
         "type": "object"
@@ -3405,7 +3432,7 @@
       },
       "PairwiseComparison": {
         "additionalProperties": false,
-        "description": "One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``mean_d = b - a`` has one reading\nacross the whole table. The interval and both p-values are ``None`` below two shared cells:\nnothing was tested there, which a ``1.0`` would misreport as a test that found nothing.",
+        "description": "One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
         "properties": {
           "campaign_a": {
             "title": "Campaign A",
@@ -3437,8 +3464,8 @@
             ],
             "title": "Ci Lo"
           },
-          "mean_d": {
-            "title": "Mean D",
+          "median_shift": {
+            "title": "Median Shift",
             "type": "number"
           },
           "n_cells": {
@@ -3471,7 +3498,7 @@
         "required": [
           "campaign_a",
           "campaign_b",
-          "mean_d",
+          "median_shift",
           "ci_lo",
           "ci_hi",
           "p_value",

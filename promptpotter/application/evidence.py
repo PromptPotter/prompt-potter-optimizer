@@ -49,11 +49,13 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import (
+    cells_for_exact_verdict,
+    exact_p_floor,
+    exact_paired_reading,
     holm_adjusted,
     mean_ci_t,
     min_detectable_effect,
     paired_diff_posterior,
-    paired_reading,
     rank_correlation,
     sample_sd,
     two_way_effect_sds,
@@ -152,6 +154,10 @@ class CampaignReading(StrictModel):
     # fact a roster listing campaigns cannot show. `None` where round 0 carries no hashes: the arm
     # is UNKNOWN, which groups with nothing — least of all with every other unstamped campaign.
     arm_id: str | None
+    # The connector's measurement-identity fingerprint — the RULER the arm was read against, moved
+    # by any inner prompt, panel prose, layout or estimator edit. Two campaigns sharing an arm but
+    # not this are NOT replicates: their spread is code drift wearing a noise label.
+    instrument_id: str | None
     # This origin's own reading, carried for the scale on it: campaigns whose rulers differ
     # measured on different scales, so their ABSOLUTE levels are not one quantity however well
     # paired the cells are. `None` where round 0 carries no reading at all.
@@ -171,14 +177,21 @@ class PairwiseComparison(StrictModel):
     difficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``
     pairs rather than differencing two means.
 
-    ``a`` precedes ``b`` in the roster's oldest-first order, so ``mean_d = b - a`` has one reading
-    across the whole table. The interval and both p-values are ``None`` below two shared cells:
-    nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.
+    ``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one
+    reading across the whole table. The interval and both p-values are ``None`` below two shared
+    cells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.
+
+    The test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t
+    p can sit below what any exact test on that many pairs is able to return, which is resolution
+    taken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says
+    which verdicts the width can reach at all, before a cell is spent.
     """
 
     campaign_a: str
     campaign_b: str
-    mean_d: float
+    # Hodges-Lehmann: the median of the pairwise Walsh averages, not the mean of the differences.
+    # One outlier cell moves the mean by 1/n of itself and moves this by nothing.
+    median_shift: float
     ci_lo: float | None
     ci_hi: float | None
     p_value: float | None
@@ -246,6 +259,11 @@ class EvidencePower(StrictModel):
 
     ``cells_for_largest_gap`` prices the question actually on the table — how many cells per arm it
     would take to resolve the biggest gap the roster already shows.
+
+    The last two are the harder limit and they answer a different question. Effect size decides the
+    first three; ``exact_p_floor`` is what the WIDTH alone permits, so a panel below
+    ``cells_for_corrected_verdict`` cannot produce a Holm-corrected result however large the effect —
+    a clean sweep of every cell included. Buy width to that line before buying it for power.
     """
 
     paired_se: float
@@ -253,16 +271,23 @@ class EvidencePower(StrictModel):
     largest_arm_gap: float
     cells_per_arm: int
     cells_for_largest_gap: int | None
+    exact_p_floor: float
+    cells_for_corrected_verdict: int
 
 
 class ArmReplicate(StrictModel):
-    """One arm that ran more than once. ``level_spread`` is a NOISE reading taken from campaigns
-    already paid for — the cheapest one on the board, and invisible to a roster that lists
-    campaigns rather than arms."""
+    """One arm that ran more than once. ``level_spread`` is the cheapest noise reading on the
+    board — taken from campaigns already paid for, and invisible to a roster that lists campaigns
+    rather than arms.
+
+    It is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while
+    the INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served
+    as that — a replicate that was never one is the more useful finding, but it is not noise."""
 
     arm_id: str
     campaign_ids: list[str]
     level_spread: float
+    n_instruments: int
 
 
 class OrderConfound(StrictModel):
@@ -435,15 +460,18 @@ def campaign_evidence(
         reverse=True,
     )
     scored = {r.campaign_id: r.values for r in rows if r.values}
+    # Read before the envelope: the width a corrected verdict needs depends on how many tests the
+    # correction spans, so `power` cannot be built without the count `metric` arrives at.
+    metric_reading = _metric_reading(spec, rows, available)
     return Evidence(
         generated_at=utcnow_iso(),
         campaigns=rows,
         comparability=_comparability(rows),
-        metric=_metric_reading(spec, rows, available),
+        metric=metric_reading,
         unread_campaigns=sorted(wanted - set(found)),
         replicates=_replicates(rows),
         variance=(variance := _variance(scored)),
-        power=_power(variance, rows),
+        power=_power(variance, rows, n_tests=metric_reading.n_tests),
         order_confound=_order_confound(rows),
         ranking_computed=include_ranking,
         edits=edits,
@@ -495,14 +523,14 @@ def _pairwise(rows: list[CampaignReading]) -> list[PairwiseComparison]:
             cells = sorted(set(a.values) & set(b.values))
             if not cells:
                 continue
-            mean_d, lo, hi, p_value, n = paired_reading(
+            shift, lo, hi, p_value, n = exact_paired_reading(
                 [b.values[c] for c in cells], [a.values[c] for c in cells]
             )
             out.append(
                 PairwiseComparison(
                     campaign_a=a.campaign_id,
                     campaign_b=b.campaign_id,
-                    mean_d=mean_d,
+                    median_shift=shift,
                     ci_lo=lo,
                     ci_hi=hi,
                     p_value=p_value,
@@ -532,6 +560,11 @@ def _reading_row(
     # The configuration the campaign ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
     hashes = doc.get("optimizer_prompt_hashes")
+    # `None` on any backend declaring no measurement identity — every campaign shares that absence,
+    # so the arm alone is the whole grouping there.
+    params = doc.get("pipeline_params")
+    generate = params.get("l1_generate") if isinstance(params, dict) else None
+    instrument = generate.get("inner_origin") if isinstance(generate, dict) else None
     raw = doc.get("ability")
     ordered = [values[c] for c in sorted(values)]
     bracketed = mean_ci_t(ordered)
@@ -543,6 +576,7 @@ def _reading_row(
         # nothing. Collapsing the two onto one hash makes `_replicates` report every unstamped
         # campaign as a replicate of the rest, spread and all, over a shared absence.
         arm_id=_state_hash({"": dict(hashes)}) if isinstance(hashes, dict) and hashes else None,
+        instrument_id=str(instrument) if isinstance(instrument, str) else None,
         ability=(AbilityReading.model_validate(raw) if isinstance(raw, dict) else None),
         spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
         rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
@@ -569,6 +603,7 @@ def _replicates(rows: list[CampaignReading]) -> list[ArmReplicate]:
                     arm_id=arm,
                     campaign_ids=[r.campaign_id for r in same],
                     level_spread=max(levels) - min(levels),
+                    n_instruments=len({r.instrument_id for r in same}),
                 )
             )
     return out
@@ -638,9 +673,14 @@ def _variance(by_arm: dict[str, dict[str, float]]) -> EvidenceVariance | None:
     )
 
 
-def _power(variance: EvidenceVariance | None, rows: list[CampaignReading]) -> EvidencePower | None:
+def _power(
+    variance: EvidenceVariance | None, rows: list[CampaignReading], *, n_tests: int
+) -> EvidencePower | None:
     """The paired SE of a two-arm contrast: pairing removes the cell effect — the term that is
-    largest here — and leaves the residual on both arms, hence ``residual * sqrt(2 / cells)``."""
+    largest here — and leaves the residual on both arms, hence ``residual * sqrt(2 / cells)``.
+
+    Beside it the width limit, which no SE can see: an exact test on this many cells has a smallest
+    reachable p, and *n_tests* is the correction it has to clear."""
     levels = [r.value for r in rows if r.value is not None]
     if variance is None or len(levels) < 2 or variance.n_cells < 1:
         return None
@@ -657,6 +697,8 @@ def _power(variance: EvidenceVariance | None, rows: list[CampaignReading]) -> Ev
         largest_arm_gap=gap,
         cells_per_arm=variance.n_cells,
         cells_for_largest_gap=needed,
+        exact_p_floor=exact_p_floor(variance.n_cells),
+        cells_for_corrected_verdict=cells_for_exact_verdict(n_tests),
     )
 
 
@@ -755,7 +797,9 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
         cell_cand.append(sum(cand_vals) / len(cand_vals))
         cell_orig.append(sum(orig_vals) / len(orig_vals))
 
-    anchor, ci_lo, ci_hi, _p, _n = paired_reading(cell_cand, cell_orig)
+    # The same exact test the pairwise table runs, so the two readings on one page cannot hold an
+    # edit to different standards — and a single wild cell cannot carry an edit up the ranking.
+    anchor, ci_lo, ci_hi, _p, _n = exact_paired_reading(cell_cand, cell_orig)
     return RankedEdit(
         state_hash=state_hash,
         label=acc.label,

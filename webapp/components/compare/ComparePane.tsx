@@ -10,7 +10,7 @@
 // pairwise test, which are arithmetic over values the roster read already had in hand. The edit
 // ranking is the one walk expensive enough to sit behind a press (see `useEvidence`).
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import type { CampaignReading, Evidence } from "@/lib/api";
 import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
 import { cx } from "@/lib/cx";
@@ -288,9 +288,19 @@ function Readings({ evidence }: { evidence: Evidence }) {
     <CardFrame title="What this selection can settle" headingTag="h2">
       {evidence.replicates.map((r) => (
         <p className="l4-note" key={r.arm_id}>
-          Arm <code>{r.arm_id.slice(0, 8)}</code> ran {r.campaign_ids.length} times — a{" "}
-          <strong>replicate</strong>, spread {fmtMetricValue(unit, r.level_spread)}. That spread is
-          noise, not an effect.
+          Arm <code>{r.arm_id.slice(0, 8)}</code> ran {r.campaign_ids.length} times, spread{" "}
+          {fmtMetricValue(unit, r.level_spread)}.{" "}
+          {r.n_instruments === 1 ? (
+            <>
+              A <strong>replicate</strong> — that spread is noise, not an effect.
+            </>
+          ) : (
+            <>
+              <strong>Not a replicate</strong>: those runs span {r.n_instruments} measurement
+              identities, so the arm was held while the instrument moved. Read that spread as
+              engine drift, and expect no cell of theirs to have replayed.
+            </>
+          )}
         </p>
       ))}
       {!v ? (

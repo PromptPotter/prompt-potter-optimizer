@@ -249,7 +249,14 @@ class L1CritiqueOutput(OptimizerResponseModel):
     # pattern>` cannot hold a real verbatim quote in 200c — observed truncating
     # mid-quote, and the clipped steer still drove candidates (b786e9).
     priority_fix: Annotated[str, BeforeValidator(_truncate_marked(320))] = Field(
-        default="", max_length=320
+        default="",
+        max_length=320,
+        description=(
+            "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before "
+            "the colon, named VERBATIM from the vocabulary this node's prompt states. One you "
+            "invent is dropped downstream and takes the steer's axis menu with it, so the next "
+            "round reads a fix naming no lever it can pull."
+        ),
     )
     suggested_axes: Annotated[list[str], BeforeValidator(_truncate(4))] = Field(
         default_factory=list,
@@ -368,7 +375,15 @@ class L3PlanOutput(OptimizerResponseModel):
     # tax — and it was the only unbounded output. Asking for the budget in `answer_format`
     # cannot work (a model cannot count the characters it emits), so it is judged here and
     # MARKED: a plan cut mid-bullet must not read downstream as a complete strategy.
-    plan: Annotated[str, BeforeValidator(_truncate_marked(800))] = Field(max_length=800)
+    plan: Annotated[str, BeforeValidator(_truncate_marked(800))] = Field(
+        max_length=800,
+        description=(
+            "The strategy every later prompt reads until the next replan. Say what L2 and L1 "
+            "should DO with the levers they hold — L2 moves which panels L1 sees and how wide it "
+            "explores; L1 rewrites the target prompt's fields. A plan written in the solver's "
+            "vocabulary instructs neither, and rides every downstream call regardless."
+        ),
+    )
     note: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(default="", max_length=150)
     rationale: Annotated[str, BeforeValidator(_truncate_marked(125))] = Field(
         default="", max_length=125

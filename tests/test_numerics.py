@@ -3344,6 +3344,48 @@ def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_test
     assert paired_reading([0.5], [0.1])[1:4] == (None, None, None)
 
 
+def test_an_exact_paired_reading_refuses_the_resolution_its_width_lacks() -> None:
+    """The silent harm this replaces: a t on six cells returns a p below what ANY exact test on six
+    pairs can reach, so the extra resolution came from the assumed tail rather than from the cells —
+    and a roster read it as a result. Nothing raises; the table just reads significant."""
+    from scipy.stats import ttest_rel
+
+    from promptpotter.shared.statistics import (
+        cells_for_exact_verdict,
+        exact_p_floor,
+        exact_paired_reading,
+    )
+
+    # The floor is the whole point: two of the 2**n sign draws put every difference on one side.
+    assert exact_p_floor(6) == pytest.approx(2 / 64)
+    assert exact_p_floor(0) == 1.0
+
+    # A CLEAN SWEEP is the most six pairs can say, and it says exactly the floor — never less.
+    won = [0.600, 0.610, 0.600, 0.605, 0.600, 0.602]
+    lost = [0.5] * 6
+    sweep = exact_paired_reading(won, lost)
+    assert sweep[3] == pytest.approx(exact_p_floor(6))
+    assert float(ttest_rel(won, lost).pvalue) < exact_p_floor(6)
+
+    # Hodges-Lehmann over the mean: one wild cell drags a mean across zero and moves a median of
+    # Walsh averages by nothing. Five cells up 0.1, one down 5.0 — the arm still reads +0.1.
+    outlier = exact_paired_reading([0.1] * 5 + [-5.0], [0.0] * 6)
+    assert outlier[0] == pytest.approx(0.1)
+    assert sum([0.1] * 5 + [-5.0]) / 6 < 0.0
+
+    # Below six pairs no 95% distribution-free bracket EXISTS, so none is served; at six the
+    # bracket is served and contains the estimate it was drawn with.
+    assert exact_paired_reading([0.6] * 5, [0.5] * 5)[1] is None
+    lo, hi = sweep[1], sweep[2]
+    assert lo is not None and hi is not None and lo <= sweep[0] <= hi
+
+    # What to BUY: Holm's tightest step over m tests, solved for width. These are the numbers a
+    # panel is sized against, and they do not move with effect size.
+    assert cells_for_exact_verdict(1) == 6
+    assert cells_for_exact_verdict(3) == 7
+    assert cells_for_exact_verdict(21) == 10
+
+
 def test_holm_adjusted_enforces_monotonicity_and_preserves_input_order() -> None:
     """A plain Bonferroni pass satisfies the first case and fails the second — which is the point
     of pinning the second. Holm is a STEP-DOWN: an adjusted p may never fall below the one before
@@ -3860,6 +3902,7 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
             dataset_name="d",
             created_at="",
             arm_id="a",
+            instrument_id=None,
             ability=AbilityReading(
                 theta=0.0, se=None, ruler_id=ruler, ruler_n=1, calibration_model=None
             ),

@@ -33,7 +33,7 @@ export function PairwisePanel({ reading, nRead }: { reading: MetricReading; nRea
               <thead>
                 <tr>
                   <th scope="col">pair</th>
-                  <th scope="col">difference · 95% CI</th>
+                  <th scope="col">shift · 95% CI</th>
                   <th scope="col">cells</th>
                   <th scope="col">p</th>
                   <th scope="col">p (Holm)</th>
@@ -51,13 +51,18 @@ export function PairwisePanel({ reading, nRead }: { reading: MetricReading; nRea
             </table>
           </div>
           <p className="l4-lede">
-            Each difference is <code>b − a</code> over the cells both campaigns scored — pairing
-            removes cell difficulty rather than carrying it as noise. Holm corrects across the{" "}
+            Each shift is <code>b − a</code> over the cells both campaigns scored — pairing removes
+            cell difficulty rather than carrying it as noise. Holm corrects across the{" "}
             {reading.n_tests} comparison{reading.n_tests === 1 ? "" : "s"} in this table.
           </p>
           <p className="l4-note">
             It does not correct across metrics. If you tried several and kept the tightest, the
             interval you are reading is optimistic by an amount nothing here can compute.
+          </p>
+          <p className="l4-note">
+            The test is exact, so <code>p</code> stops at what this many paired cells can carry
+            instead of borrowing a normal tail — and below a handful of cells no 95% interval exists
+            to draw, which reads here as absent rather than as a wide one.
           </p>
         </>
       )}
@@ -72,7 +77,7 @@ function Row({ row, unit }: { row: PairwiseComparison; unit: MetricSpec["unit"] 
         <code>{shortId(row.campaign_a)}</code> → <code>{shortId(row.campaign_b)}</code>
       </td>
       <td className={cx("l4-effect", effectTone(row.ci_lo, row.ci_hi))}>
-        <span className="l4-effect-mean">{fmtMetricValue(unit, row.mean_d)}</span>
+        <span className="l4-effect-mean">{fmtMetricValue(unit, row.median_shift)}</span>
         <span className="l4-effect-ci">{fmtMetricInterval(unit, row.ci_lo, row.ci_hi)}</span>
       </td>
       <td className="l4-num">{row.n_cells}</td>

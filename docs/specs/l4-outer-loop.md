@@ -141,7 +141,8 @@ quotes no figure; re-measure before quoting a price to anyone.
 4. **The arms differ less than their own intervals.** `se ∝ 1/√n`, so the cell count needed to separate two
    arms is far below what a linear intuition suggests. Closing it needs more cells, or **candidates that
    differ more than they currently do** — the cheaper lever, and the untried one.
-5. **Cross-sample terms, still unbuilt.** Area-under-lift-vs-budget (reconstruct cumulative spend from
+5. **Four optimizer-prompt edits the corpus REFUTED — do not re-propose them.** Slot-steering language, an anti-same-slot clause, and a reweight of the under-cited panels: same-slot pairs are two genuine ideas; slot choice carries no signal once variant width is controlled; and non-cited panels do not underperform enough to move at their n. Fourth, **a wire `maxLength` on `prompt_fields_override`** — the target prompt's `instruction` really does grow with the round (median 216c at round 0 to 410c by round 4, max 1220c over the banked rounds), but `OPTIMIZER_PROMPT_FIELD_MAX_CHARS` sets its ceiling far above that, so the declaration is prompt text that never binds. The ceiling already reaches the one place it DOES bind — an optimizer node's own `instruction`, on the param route, which is what L4 rewrites. Growth is therefore not what starves the evidence panels; the panels that grow with round count are, and that is where to look next. Each of the four looks obvious from the round traces, which is why the refutation is written down rather than left to be re-derived.
+6. **Cross-sample terms, still unbuilt.** Area-under-lift-vs-budget (reconstruct cumulative spend from
    `TokenUsageRecord.round`). Panel aggregation `mean lift − λ·std`, where `std` is cross-seed **outcome
    dispersion** and never the θ estimation SE — penalizing `theta_se` resurrects the wide-posterior-discards-
    good-candidates pathology — routed through the P3 post-aggregate formula, never the election rank key.

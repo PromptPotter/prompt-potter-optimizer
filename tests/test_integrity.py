@@ -2885,6 +2885,77 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     assert _billed_cost(None, None) is None
 
 
+def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) -> None:
+    """The silent harm: a replicate spread is the cheapest noise reading on the board, and it is
+    only noise if the INSTRUMENT held while the arm repeated. The engine's measurement identity
+    moves on any panel, layout, estimator or inner-prompt edit, so campaigns sharing an arm across
+    a week of commits were never replicates — and the read said "that spread is noise, not an
+    effect" over what is actually the engine's own drift. Nothing raises; the number just gets
+    believed, and every later power calculation is anchored to it."""
+    from promptpotter.application.evidence import campaign_evidence
+
+    arm = {"l1_generate": "same-arm-hash"}
+    cells = {"q1": 0.20, "q2": 0.80, "q3": 0.50}
+    for cid, instrument, shift in [
+        ("gsm8k__aaaaaa", "instrument-A", 0.0),
+        ("gsm8k__bbbbbb", "instrument-A", 0.05),
+        ("gsm8k__cccccc", "instrument-B", 0.11),
+    ]:
+        _write_campaign(
+            built_stores,
+            cid,
+            "gsm8k",
+            created_at=f"2026-01-0{cid[-1]}",
+            origin_cells={q: v + shift for q, v in cells.items()},
+            arm_hashes=arm,
+            instrument_id=instrument,
+        )
+
+    held = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
+    assert [r.n_instruments for r in held.replicates] == [1]
+
+    # Same arm, one campaign read on a second instrument — the group is still SERVED, because
+    # "your replicates were never replicates" is the finding, but it may not read as noise.
+    moved = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
+    assert [r.n_instruments for r in moved.replicates] == [2]
+    assert moved.replicates[0].level_spread > held.replicates[0].level_spread
+
+
+# --- L4 measurement identity: the freeze ratchet ------------------------------
+
+# What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
+# is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose.
+L4_INNER_ORIGIN = "1b9f8302b41f"
+
+
+def test_the_l4_measurement_identity_moves_only_when_someone_meant_it() -> None:
+    """The silent harm: this fingerprint keys every banked inner campaign, and it is computed from
+    the ENGINE — dispatch panel prose, ``NODE_LAYOUTS``, the estimator's own source, the inner
+    prompts, the seed roster, the inner benchmark's config. So an ordinary edit to any of those
+    voids the whole L4 archive with nothing raised anywhere: the next campaign simply re-measures
+    its origin, cannot be compared to the ones before it, and a replicate arm reads its own code
+    drift back as noise.
+
+    Nothing else can catch it. The cost lands weeks later as "why does nothing accumulate", which
+    is a question about a number that no longer exists to be asked about.
+
+    Re-pin DELIBERATELY, in the commit that moves it, with the reason in the commit body — the
+    ``<surface-ledger>`` discipline, applied to measurement identity instead of surface count."""
+    from promptpotter.connectors import CONNECTORS
+
+    identity = CONNECTORS["promptpotter"].identity_config(Path("datasets/promptpotter-self"))
+    assert identity == {"l1_generate": {"inner_origin": L4_INNER_ORIGIN}}, (
+        f"L4 measurement identity moved to {identity}. Every banked inner campaign under "
+        f"{L4_INNER_ORIGIN} just stopped replaying, so the next `new promptpotter-self` "
+        "re-measures its origin and compares to nothing. If that is what you meant — a batched "
+        "inner-side change — re-pin L4_INNER_ORIGIN here and say why in the commit body. If it "
+        "is not, the edit reached inside the fingerprint: dispatch/panel prose, NODE_LAYOUTS, "
+        "the estimator source (exploration/metrics/selection/proxies), the inner optimizer "
+        "prompts, inner_tasks.yaml, or the inner benchmark's pipeline/campaign config. The OUTER "
+        "optimizer prompts (assets/optimizer/sets/) are outside it and free to edit."
+    )
+
+
 # --- sample look-ahead: the depth must not reach the record -------------------
 
 
@@ -3131,6 +3202,8 @@ def _write_campaign(
     candidate_cells: dict[str, float] | None = None,
     origin_pipeline_data: dict[str, dict[str, Any]] | None = None,
     candidate_pipeline_data: dict[str, dict[str, Any]] | None = None,
+    arm_hashes: dict[str, str] | None = None,
+    instrument_id: str | None = None,
 ) -> None:
     """A minimal campaign tree: manifest + one cycle whose round 0 holds ORDINARY origin rows —
     a `query` and a `fitness`, no `pipeline_data`. That is what every non-L4 campaign on disk
@@ -3161,9 +3234,12 @@ def _write_campaign(
         ]
     }
     rounds = campaign_cycles_dir(root) / "cycle_0" / "rounds"
-    (rounds / "round_0000.json").write_text(
-        json.dumps({"round": 0, "accuracy": 0.5, "all_candidate_results": acr}), encoding="utf-8"
-    )
+    round_zero: dict[str, Any] = {"round": 0, "accuracy": 0.5, "all_candidate_results": acr}
+    if arm_hashes is not None:
+        round_zero["optimizer_prompt_hashes"] = arm_hashes
+    if instrument_id is not None:
+        round_zero["pipeline_params"] = {"l1_generate": {"inner_origin": instrument_id}}
+    (rounds / "round_0000.json").write_text(json.dumps(round_zero), encoding="utf-8")
     # Every real cycle has one, and `spend` is read off it for the roster's spend column — the
     # run-order confound correlates on that, so without it the fixture cannot exercise it.
     (root / "cycles" / "cycle_0" / "dashboard.json").write_text(
@@ -3395,19 +3471,23 @@ def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
     assert len(two.metric.pairwise) == 1
     assert two.metric.n_tests == 1
     only = two.metric.pairwise[0]
-    # `a` precedes `b` in the roster's oldest-first order, so `mean_d = b - a` reads one way.
+    # `a` precedes `b` in the roster's oldest-first order, so `median_shift = b - a` reads one way.
     assert (only.campaign_a, only.campaign_b) == ("gsm8k__aaaaaa", "gsm8k__bbbbbb")
-    assert only.mean_d == pytest.approx(0.05)
+    assert only.median_shift == pytest.approx(0.05)
     assert only.n_cells == 4
     assert only.p_adjusted == pytest.approx(only.p_value)  # m=1 is the identity
+    # Every cell moved the same way, which is the most an exact test can ever see — so p lands ON
+    # the width's floor. A t-test reports 0.0 here, which is resolution four pairs do not hold.
+    assert only.p_value == pytest.approx(2 / 2**4)
 
     three = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
     assert len(three.metric.pairwise) == 3
     for row in three.metric.pairwise:
         assert row.p_value is not None and row.p_adjusted is not None
         assert row.p_adjusted >= row.p_value
-        assert row.ci_lo is not None and row.ci_hi is not None
-        assert row.ci_lo < row.mean_d < row.ci_hi
+        # Four paired cells cannot bracket at 95% without assuming a shape, so no bracket is
+        # served. `fmt_ci` renders that as absent, which is the honest reading of this width.
+        assert row.ci_lo is None and row.ci_hi is None
 
 
 def test_one_shared_cell_reports_a_value_and_refuses_an_interval(built_stores: Any) -> None:
@@ -3428,7 +3508,7 @@ def test_one_shared_cell_reports_a_value_and_refuses_an_interval(built_stores: A
     assert first.value == pytest.approx(0.2)
     assert first.ci_lo is None and first.ci_hi is None
     pair = ev.metric.pairwise[0]
-    assert pair.mean_d == pytest.approx(0.4)
+    assert pair.median_shift == pytest.approx(0.4)
     assert pair.p_value is None and pair.p_adjusted is None  # nothing was tested, so no 1.0
     assert ev.metric.n_tests == 0
 

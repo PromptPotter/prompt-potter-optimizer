@@ -89,9 +89,18 @@ def _roster_lines(ev: Evidence) -> list[str]:
         )
     lines.append(f"\n{ev.comparability.note}")
     for rep in ev.replicates:
+        verdict = (
+            "That spread is noise, not an effect."
+            if rep.n_instruments == 1
+            else (
+                f"NOT a replicate: those runs span {rep.n_instruments} measurement identities, so "
+                "the arm was held while the instrument moved. Read that spread as engine drift, "
+                "and expect no cell of theirs to have replayed."
+            )
+        )
         lines.append(
-            f"\nArm {rep.arm_id[:8]} ran {len(rep.campaign_ids)} times — a REPLICATE, spread "
-            f"{rep.level_spread:+.3f}. That spread is noise, not an effect."
+            f"\nArm {rep.arm_id[:8]} ran {len(rep.campaign_ids)} times, spread "
+            f"{rep.level_spread:+.3f}. {verdict}"
         )
     return lines
 
@@ -106,13 +115,13 @@ def _pairwise_lines(ev: Evidence) -> list[str]:
     spec = _UNIT_SPEC[m.spec.unit]
     lines = [
         "",
-        f"{'pair (b - a)':<40}  {'difference':>11}  {'95% CI':>20}  {'n':>3}  "
+        f"{'pair (b - a)':<40}  {'shift':>11}  {'95% CI':>20}  {'n':>3}  "
         f"{'p':>16}  {'p (Holm)':>16}",
     ]
     for pair in m.pairwise:
         label = f"{pair.campaign_a[-8:]} -> {pair.campaign_b[-8:]}"
         lines.append(
-            f"{label:<40}  {spec.format(pair.mean_d):>11}  "
+            f"{label:<40}  {spec.format(pair.median_shift):>11}  "
             f"{fmt_ci(pair.ci_lo, pair.ci_hi, spec=spec):>20}  {pair.n_cells:>3}  "
             f"{fmt_pvalue(pair.p_value):>16}  {fmt_pvalue(pair.p_adjusted):>16}"
         )
@@ -122,6 +131,8 @@ def _pairwise_lines(ev: Evidence) -> list[str]:
         f"Holm corrects across the {m.n_tests} comparison(s) in this table. It does NOT correct "
         "across metrics: if you tried several and kept the tightest, the interval you are reading "
         "is optimistic by an amount nothing here can compute.",
+        "The shift is Hodges-Lehmann and the test is exact — no normal tail is assumed, so p stops "
+        "at what this many paired cells can carry rather than borrowing the rest.",
     ]
 
 
@@ -159,6 +170,9 @@ def _variance_lines(ev: Evidence) -> list[str]:
             f"{spec.format(p.min_detectable_effect)}.",
             f"  the widest gap on the roster is {spec.format(p.largest_arm_gap)}; resolving it "
             f"would take ~{needed} cells per arm.",
+            f"  WIDTH, before any of that: an exact test on {p.cells_per_arm} cells cannot return "
+            f"a p below {p.exact_p_floor:.3f}, so surviving Holm over {ev.metric.n_tests} "
+            f"comparison(s) needs {p.cells_for_corrected_verdict} cells — at any effect size.",
         ]
     oc = ev.order_confound
     if oc is not None and oc.level_vs_order is not None:
