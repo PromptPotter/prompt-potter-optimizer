@@ -105,12 +105,16 @@ __all__ = ["execute_stale_data_protocol", "measure_sample"]
 # Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
 # ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
 # critique tier reads it to diagnose WHERE a deduction broke.
+#
+# ``pipeline_params`` is deliberately NOT here: it is constant across a run, and the archive
+# already lifts it onto the index entry (`measurement_archive.py::_summary`), which is where
+# its one reader takes it from (`intelligence/indexes/axis.py`). Per-sample it was the same
+# ~3 KB blob re-stored on every row — 44% of a run file, addressable without it.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {
         "step_timings",
         "step_tokens",
         "total_time",
-        "pipeline_params",
         "diagnostics",
         "reasoning_trace",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides

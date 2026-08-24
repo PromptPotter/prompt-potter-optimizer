@@ -49,7 +49,13 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import graceful
 
-__all__ = ["check_round_documents", "compact_cycle_ledgers", "restamp_campaign_configs"]
+__all__ = [
+    "backfill_inner_facts",
+    "check_round_documents",
+    "compact_cycle_ledgers",
+    "restamp_campaign_configs",
+    "shrink_measurement_runs",
+]
 
 
 def _workspace_trees() -> list[pathlib.Path]:
@@ -591,6 +597,110 @@ def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
             filled += got
             orphaned += lost
     return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
+
+
+# --- (5) the run-level pipeline config re-stored on every measurement row --------------------
+
+# One live producer ANYWHERE blocks this pass: the measurement archive is shared across every
+# cycle (`build_stores`'s `shared_root`) and appended to per sample, so a rewrite of any run
+# file can lose a row another cycle is landing. CHECKIN is pre-loop and writes no measurement.
+_ARCHIVE_WRITER_PHASES: frozenset[RunPhase] = frozenset({RunPhase.RUNNING, RunPhase.GATE})
+
+
+def _archive_writers() -> int:
+    """Cycles that could append to the archive while this pass runs."""
+    n = 0
+    for ledger_path in _iter_cycle_ledgers():
+        cycle_dir = ledger_path.parent.parent
+        manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
+        finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
+        if derive_run_phase(cycle_dir, is_terminal=finished) in _ARCHIVE_WRITER_PHASES:
+            n += 1
+    return n
+
+
+def _iter_measurement_runs() -> list[pathlib.Path]:
+    """Every archived run's detail log. An inner sandbox isolates campaign state but NOT the
+    content-addressed caches, so in practice these all live under the real projects root — the
+    sandbox trees are walked anyway rather than asserting that from here."""
+    return [
+        p for tree in _workspace_trees() for p in sorted(tree.glob("*/measurements/runs/*.jsonl"))
+    ]
+
+
+def _shrink_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
+    """``(bytes_before, bytes_after, rows_rewritten)``. Every line is kept, in order: the file is a
+    fold log keyed on ``k`` (last-wins per sample, header included), so dropping or reordering one
+    changes what ``_fold_detail`` returns. tmp + ``os.replace``, never in place."""
+    before = after = rewritten = 0
+    lines: list[str] = []
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            before += len(line)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                lines.append(line)
+                after += len(line)
+                continue
+            pd = row.get("pipeline_data") if isinstance(row, dict) else None
+            if not isinstance(pd, dict) or "pipeline_params" not in pd:
+                lines.append(line)
+                after += len(line)
+                continue
+            del pd["pipeline_params"]
+            rewritten += 1
+            new_line = json.dumps(row, separators=(",", ":"), default=str) + "\n"
+            lines.append(new_line)
+            after += len(new_line)
+    if apply and rewritten:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text("".join(lines), encoding="utf-8")
+        os.replace(tmp, path)
+    return before, after, rewritten
+
+
+def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
+    """Drop ``pipeline_data.pipeline_params`` from archived measurement rows.
+
+    It is constant across a run, and the archive already keeps it twice at run level — on the
+    detail log's own header row and on the index entry (``measurement_archive.py::_summary``),
+    which is where its one reader takes it from (``intelligence/indexes/axis.py``). Per sample it
+    was the same ~3 KB blob on every row.
+
+    Safe against the cache key by construction: ``content_hash`` is sha256 over the rendered
+    prompt, the dataset pairs and the search point's ``pipeline_params`` (``shared/hashing.py``) —
+    never the stored row bytes — so no archived cell moves."""
+    writers = _archive_writers()
+    if writers:
+        print(f"\nMeasurement rows — SKIPPED, {writers} cycle(s) can still append to the archive")
+        return {"runs_shrunk": 0, "run_bytes_saved": 0, "archive_writers": writers}
+
+    total_before = total_after = touched = rows = 0
+    for path in _iter_measurement_runs():
+        with graceful(f"shrink {path}"):
+            before, after, rewritten = _shrink_one(path, apply=apply)
+            total_before += before
+            total_after += after
+            rows += rewritten
+            if rewritten:
+                touched += 1
+
+    mb = 1024 * 1024
+    verb = "shrank" if apply else "would shrink"
+    print(f"\nMeasurement rows — {verb} {rows} row(s) across {touched} run(s)")
+    print(f"  {'before':>12}: {total_before / mb:8.2f} MB")
+    print(f"  {'after':>12}: {total_after / mb:8.2f} MB")
+    if total_before:
+        pct = 100 * (total_before - total_after) / total_before
+        print(f"  {'saved':>12}: {(total_before - total_after) / mb:8.2f} MB  ({pct:.1f}%)")
+    if not apply and touched:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {
+        "runs_shrunk": touched,
+        "run_bytes_saved": total_before - total_after,
+        "archive_writers": 0,
+    }
 
 
 def _drift_cause(exc: ValidationError) -> str:
