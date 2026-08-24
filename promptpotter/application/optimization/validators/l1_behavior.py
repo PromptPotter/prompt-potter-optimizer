@@ -6,6 +6,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from pydantic import ValidationError
+
 from promptpotter.application.optimization.dispatch.injections.registry import (
     INJECTIONS,
     STALL_EXPLORATION,
@@ -18,7 +20,7 @@ from promptpotter.application.optimization.validators.behavior_base import (
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import variant_prose_written
-from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout
+from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 # Rounds before this one keep param-scope locked so prompt-field exploration
@@ -298,13 +300,15 @@ def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
     """The same derivation that built the round's citation menu, replayed off the round-start OSP.
     Falls open to every citable panel when the snapshot carries no layout."""
     memory = ctx.opt_sp.get("memory") or {}
-    # A COMPLETE stored layout, not an edit — the snapshot names every slot — so it lands on an
-    # empty base and inherits nothing. Passing the floor here would re-add panels the round did
-    # not render, and this derivation exists to say what the round actually showed.
-    layout = coerce_l1_layout(
-        memory.get("l1_layout") if isinstance(memory, dict) else None, base=L1Layout()
-    )
-    if layout is None:
+    raw = memory.get("l1_layout") if isinstance(memory, dict) else None
+    # A COMPLETE stored layout, NOT an edit — the snapshot names every slot — so it is parsed as
+    # one. Routing it through `coerce_l1_layout` reads it as a `{panel: slot}` edit, which a dump
+    # of per-slot lists is not, and every round then falls open to the whole citable registry.
+    if not isinstance(raw, dict) or not raw:
+        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
+    try:
+        layout = L1Layout.model_validate(raw)
+    except ValidationError:
         return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
     return citable_fields(layout, exploration_budget=ctx.exploration_budget)
 

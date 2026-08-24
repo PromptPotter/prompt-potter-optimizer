@@ -212,7 +212,7 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     from promptpotter.application.scoring.evaluators import (
         compute_accuracy,
         compute_error_rate,
-        compute_latency_norm,
+        compute_mean_latency_s,
         compute_output_compactness,
     )
     from promptpotter.application.scoring.formula import (
@@ -222,8 +222,20 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
 
     assert compute_accuracy(results=[]) is None
     assert compute_error_rate(results=[]) is None
-    assert compute_latency_norm(results=[]) is None
+    assert compute_mean_latency_s(results=[]) is None
     assert compute_output_compactness(results=[]) is None
+
+    # `mean_latency_s` has its own wrong-score: a CACHED replay stamps `total_time` 0.0 while the
+    # work it replays took minutes, so reading that field priced a whole round at "instant" and
+    # elected the arm that had doubled the clock. It reads `step_timings`, which survives the
+    # stamp. An EMPTY timing map is a row that recorded no time at all — absent, never a 0.0
+    # that would read as a free cell and divide into any budget the formula sets.
+    def _timed(total: float, steps: dict[str, float]) -> dict[str, object]:
+        pipeline_data = {"total_time": total, "step_timings": steps}
+        return _result_min("q", "a") | {"pipeline_data": pipeline_data}
+
+    assert compute_mean_latency_s(results=[_timed(0.0, {"inner": 600.0})]) == 600.0
+    assert compute_mean_latency_s(results=[_timed(0.0, {})]) is None
 
     # All samples measured, all fatally deprecated → a verdict of 0.0, not an absence.
     deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
@@ -241,9 +253,9 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
 
     # The default composite (`accuracy`) refuses a round it cannot score, rather than 0.0.
     with pytest.raises(ScoringTermMissingError, match="accuracy"):
-        compile_round_scorer(None)({"latency_norm": 0.9})
-    with pytest.raises(ScoringTermMissingError, match="latency_norm"):
-        compile_round_scorer("0.5 * accuracy + 0.5 * latency_norm")({"accuracy": 0.9})
+        compile_round_scorer(None)({"mean_latency_s": 600.0})
+    with pytest.raises(ScoringTermMissingError, match="mean_latency_s"):
+        compile_round_scorer("accuracy * 500.0 / mean_latency_s")({"accuracy": 0.9})
 
     # But the GATEWAY over an EMPTY round is defined, not a crash: an operator skip at query
     # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
@@ -339,7 +351,7 @@ def _recall_schema() -> PipelineSchema:
 def test_registry_scopes_are_valid():
     """Every registered evaluator declares a known scope."""
     names = {ev.name for ev in all_evaluators()}
-    assert {"accuracy", "error_rate", "latency_norm", "source_recall"}.issubset(names)
+    assert {"accuracy", "error_rate", "mean_latency_s", "source_recall"}.issubset(names)
     for ev in all_evaluators():
         assert ev.scope in ("per_sample", "per_round")
 
@@ -472,11 +484,11 @@ def test_value_with_mask_applied_reproduces_the_retired_client_whatif_math():
 
     Also the self-consistency leg: the realizing criterion reproduces the stored value,
     and a criterion naming an absent evaluator is unscorable (None, not fabricated)."""
-    evaluators = {"accuracy": 0.8, "latency_norm": 0.2}
-    # `formulaFromWeights({accuracy: high, latency_norm: low}, {0.7, 0.3})`:
-    #   0.7 * accuracy + 0.3 * (1 - latency_norm) = 0.56 + 0.24 = 0.80
+    evaluators = {"accuracy": 0.8, "error_rate": 0.2}
+    # `formulaFromWeights({accuracy: high, error_rate: low}, {0.7, 0.3})`:
+    #   0.7 * accuracy + 0.3 * (1 - error_rate) = 0.56 + 0.24 = 0.80
     assert value_with_mask_applied(
-        evaluators, "0.7 * accuracy + 0.3 * (1 - latency_norm)"
+        evaluators, "0.7 * accuracy + 0.3 * (1 - error_rate)"
     ) == pytest.approx(0.80)
     # Realizing criterion (plain accuracy) reproduces the stored accuracy exactly.
     assert value_with_mask_applied(evaluators, "accuracy") == pytest.approx(0.8)
@@ -1229,7 +1241,7 @@ def test_pp_self_scoring_is_monotone_and_never_clips_on_real_data() -> None:
     cfg = yaml.safe_load(
         Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
     )
-    score = compile_scorer(cfg["campaign_config"]["scoring"])
+    score = compile_scorer(cfg["campaign_config"]["scoring"]["per_sample"])
 
     def s(mean_round_delta: float) -> float:
         return score({"pipeline_data": {"mean_round_delta": mean_round_delta}})
@@ -2011,9 +2023,11 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     )
 
     dropped_failures = opt_sp_list[0].memory.wounds.validation_failures
-    assert [vf.reason for vf in dropped_failures] == ["dropped_mandatory_placeholder"]
-    assert dropped_failures[0].axis == "l1_generate.prompt"
-    assert "citable_fields" in dropped_failures[0].value
+    # A 21-char replacement for a 1.5k field is ALSO a gutting, so this candidate now carries two
+    # reasons. Selected rather than asserted whole: the subject here is the severed port.
+    (port,) = [vf for vf in dropped_failures if vf.reason == "dropped_mandatory_placeholder"]
+    assert port.axis == "l1_generate.prompt"
+    assert "citable_fields" in port.value
     assert opt_sp_list[1].memory.wounds.validation_failures == []
     assert [vf.reason for vf in inherited_list[0].memory.wounds.validation_failures] == [
         "dropped_mandatory_placeholder"
@@ -2200,43 +2214,44 @@ def test_run_l3_output_validators_aggregates():
             ),
             "l1_layout_unknown_placeholder",
         ),
-        # Duplicate placeholder within one slot.
-        (
-            L1Layout(
-                task_intent=["task_context", "task_context"],
-                problem_description=[
-                    "rendered_prompt",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "critique",
-                    "answer_distribution",
-                ],
-            ),
-            "l1_layout_dups_within_slot",
-        ),
-        # Same placeholder in TWO slots — every other check passes, and the panel is rendered
-        # twice verbatim. Silent by construction: `char_cap` is per render and never sees the
-        # second copy, so the prompt doubles with every gate green.
-        (
-            L1Layout(
-                task_intent=["task_context"],
-                problem_description=[
-                    "rendered_prompt",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "critique",
-                    "answer_distribution",
-                ],
-                thinking_style=["task_context"],
-            ),
-            "l1_layout_dups_across_slots",
-        ),
     ],
 )
 def test_layout_hard_failures(layout, expected_validator_id):
     result = validate_l1_layout(layout, spec=NODE_LAYOUTS["l1_generate"])
     assert result.is_valid is False
     assert expected_validator_id in {o.validator_id for o in result.outcomes}
+
+
+def test_a_move_cannot_place_one_panel_twice():
+    """The edit that used to fail: L2 names `thinking_style` and omits `problem_description`, which
+    keeps what it has. Addressed as `{panel: slot}` the panel LEAVES its old slot, so the duplicate
+    has no shape to arrive in and there is no validator left to reject it.
+    """
+    from promptpotter.domain.l1_layout import (
+        L1_LAYOUT_SLOTS,
+        coerce_l1_layout,
+        default_l1_layout,
+    )
+
+    base = default_l1_layout()
+    assert "critique" in base.problem_description, "vacuous — the panel is not where it moves from"
+
+    moved = coerce_l1_layout({"critique": "thinking_style"}, base=base)
+    assert moved is not None
+    assert moved.thinking_style == ["critique"]
+    assert "critique" not in moved.problem_description
+    assert validate_l1_layout(moved, spec=NODE_LAYOUTS["l1_generate"]).is_valid
+
+    # Every panel, moved to every slot, one at a time: none can reach two places.
+    for panel in sorted(NODE_LAYOUTS["l1_generate"].possible):
+        for slot in L1_LAYOUT_SLOTS:
+            out = coerce_l1_layout({panel: slot}, base=base)
+            assert out is not None
+            placed = out.all_placeholders()
+            assert len(placed) == len(set(placed)), f"{panel} -> {slot} placed a panel twice"
+
+    # An unmoved panel keeps its POSITION, not merely its slot — the floor's order is authored.
+    assert moved.problem_description == [n for n in base.problem_description if n != "critique"]
 
 
 def test_persisted_params_drop_the_render_and_lose_nothing():
@@ -2287,17 +2302,18 @@ def test_resolve_node_layout_l4_edit_and_guard_rail():
         set_optimizer_prompt_overrides(None)
         assert resolve_node_layout("l1_critique") == floor
 
-        # Valid edit (keeps mandatory `diagnostics`, all names in `possible`) → merges.
+        # Valid edit (`diagnostics` stays placed, every name in `possible`) → merges.
         set_optimizer_prompt_overrides(
-            {"l1_critique": {"layout": {"problem_description": ["diagnostics", "axis_memory"]}}}
+            {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
         )
         applied = resolve_node_layout("l1_critique")
-        assert applied.problem_description == ["diagnostics", "axis_memory"]
+        assert applied.thinking_style == ["axis_memory"]
+        assert "diagnostics" in applied.problem_description
         assert applied != floor
 
-        # Guard rail: dropping the mandatory `diagnostics` rolls back to the floor.
+        # Guard rail: a name outside `possible` rolls the whole edit back to the floor.
         set_optimizer_prompt_overrides(
-            {"l1_critique": {"layout": {"problem_description": ["axis_memory"]}}}
+            {"l1_critique": {"layout": {"made_up_signal": "thinking_style"}}}
         )
         assert resolve_node_layout("l1_critique") == floor
     finally:
@@ -3541,7 +3557,7 @@ def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
         )
 
     # Every arm straddles 0 — nothing here separates from the origin.
-    winner_mod._warn_if_not_separable(2, [arm("a", -0.05, 0.21), arm("b", -0.30, 0.10)])
+    assert winner_mod._separability(2, [arm("a", -0.05, 0.21), arm("b", -0.30, 0.10)]) is False
     assert len(fired) == 1
     assert fired[0]["kind"] == "round_not_separable"
     # The message must carry the BEST case, not the count alone: "two arms were inconclusive" and
@@ -3551,12 +3567,14 @@ def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
     # ONE arm clearing 0 is enough — the round resolved something, and warning anyway would train
     # the operator to ignore the kind.
     fired.clear()
-    winner_mod._warn_if_not_separable(2, [arm("a", -0.05, 0.21), arm("b", 0.04, 0.30)])
+    assert winner_mod._separability(2, [arm("a", -0.05, 0.21), arm("b", 0.04, 0.30)]) is True
     assert not fired
 
     # No arm carries an interval (below two shared cells — a one-cell panel, every round). There
     # is nothing to be inconclusive ABOUT, and firing here would be noise on every single round.
-    winner_mod._warn_if_not_separable(2, [scored_candidate("a", accuracy=0.5)])
+    # `None`, never `False`: the escalation gate treats "resolved nothing" as a stall, and an
+    # unreadable round is not evidence of one.
+    assert winner_mod._separability(2, [scored_candidate("a", accuracy=0.5)]) is None
     assert not fired
 
 

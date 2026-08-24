@@ -26,7 +26,9 @@ from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
+    "L1_INNER_STEER_IS_LEGAL",
     "L1_PROMPT_BLOCKS_IN_LIBRARY",
+    "L1_PROMPT_FIELD_NOT_GUTTED",
     "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
     "validate_overrides",
@@ -328,4 +330,191 @@ def _check_l1_prompt_placeholders_intact(
 L1_PROMPT_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
     id="l1_prompt_placeholders_intact",
     check=_check_l1_prompt_placeholders_intact,
+)
+
+
+# The steers an L4 override may not make, as (reason, phrases). PHRASE lists, and deliberately not
+# token lists: the thing being matched is free prose an LLM wrote, so there is no typed predicate to
+# ask instead, and single tokens misfire on legitimate steers — "stop proposing the same axis in
+# consecutive rounds" is exactly the edit this loop wants and carries both a stop word and a round
+# word. A table rather than a validator apiece because the finding is one finding: the override
+# reached outside the inner node's own level or its own job, and each new family is a row.
+_FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Ends the loop instead of searching it better. Every entry names the loop itself as the
+    # thing being ended, so a stop word aimed at anything smaller passes.
+    (
+        "steers_inner_stopping",
+        (
+            "early stop",
+            "stop early",
+            "stops early",
+            "stopping early",
+            "terminate early",
+            "stop the loop",
+            "stop the run",
+            "stop the search",
+            "stop the campaign",
+            "halt the loop",
+            "halt the run",
+            "exit the loop",
+            "end the run",
+            "end the search",
+            "abort the run",
+            "no further rounds",
+            "skip the remaining rounds",
+            "stop optimizing",
+            "stop iterating",
+        ),
+    ),
+    # Reasons one level up from where it runs. A seed IS one whole inner run, so an inner node can
+    # no more iterate seeds than it can iterate tokens: the quantifier names a collection that
+    # exists only in the OUTER loop's view, and the rule is inert wherever the edit is pasted.
+    # Quantified forms only — the bare word "seed" is legitimate prose one level up and in
+    # "seed prompt", and matching it would convict the sentence that explains the level.
+    (
+        "steers_across_seeds",
+        (
+            "each seed",
+            "every seed",
+            "per seed",
+            "per-seed",
+            "all seeds",
+            "across seeds",
+            "seed-level",
+            "each inner run",
+            "every inner run",
+        ),
+    ),
+)
+
+
+def _check_l1_inner_steer_is_legal(
+    source_output: Mapping[str, Any],
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """An edit may make the inner loop search BETTER or WORSE — measurable either way. It may not
+    change how many rounds that loop runs, nor address a level the node it lands in cannot see;
+    neither is a search move at all.
+
+    Stopping: ``mean_round_delta`` is the mean improvement ACROSS the inner rounds, so a prompt that
+    stops the loop as soon as gains thin scores higher by dropping the flat tail out of the average
+    — with no better search behind it. That is the measurand's denominator being edited rather than
+    the thing it measures, and it outscores real work every time. Round budget is the OUTER loop's
+    (``max_rounds`` / ``lives`` / the spend ceiling), the same way ``model`` is the operator's.
+
+    Level: an edit keyed to the seed panel renders nothing one level down, so it costs a candidate
+    and measures the incumbent. It is not wrong the way a bad hypothesis is wrong — it is unrunnable,
+    which the round has no way to report as anything but a flat result.
+
+    The sibling of ``_check_l1_prompt_placeholders_intact``: that one forbids DELETING a channel,
+    this one forbids writing prose no channel can carry. Reads the DELTA, never the merge — a child
+    inheriting a parent's prose has proposed nothing, and checking the merge would convict it for
+    its ancestor. Scoped to ``NODE_LAYOUTS``, so it reaches only overrides that ARE inner optimizer
+    prompts: on an ordinary campaign the same words in a target prompt steer a task rather than a
+    loop, and mean nothing here."""
+    if not source_output:
+        return None
+    failures: list[ValidationFailure] = []
+    for node_name, node_params in source_output.items():
+        if node_name not in NODE_LAYOUTS or not isinstance(node_params, dict):
+            continue
+        for field, value in node_params.items():
+            if field not in PromptTemplate.model_fields or not isinstance(value, str):
+                continue
+            prose = " ".join(value.lower().split())
+            for reason, phrases in _FORBIDDEN_INNER_STEERS:
+                hit = next((p for p in phrases if p in prose), None)
+                if hit is not None:
+                    failures.append(
+                        ValidationFailure(
+                            axis=f"{node_name}.{field}",
+                            value=hit,
+                            allowed=[],
+                            reason=reason,
+                        )
+                    )
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_INNER_STEER_IS_LEGAL.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_INNER_STEER_IS_LEGAL: LLMOutputValidator = LLMOutputValidator(
+    id="l1_inner_steer_is_legal",
+    check=_check_l1_inner_steer_is_legal,
+)
+
+
+# An override REPLACES its field whole, so a short replacement for a long incumbent is a deletion
+# of every contract the incumbent carried — and the generator is told to carry them forward, or to
+# say in `changes_description` what it dropped and why. Nothing can read that prose, so the
+# measurable half is the collapse itself. Both constants are first estimates off the only gutted
+# candidates on disk (two at ~14% of their incumbent); a genuine tightening lands far above them,
+# and the floor keeps short fields — a 132-char `thinking_style` — out of reach entirely.
+_GUTTABLE_MIN_CHARS = 1000
+_GUT_RATIO = 0.35
+
+
+def _incumbent_field_text(node: str, field: str, pipeline_params: Mapping[str, Any] | None) -> str:
+    """What this field says BEFORE the candidate's edit — the parent's own override where it made
+    one, else the manifest template. The same two-step the run resolves, so the length compared
+    against is the text the generator was shown as CURRENT INNER OPTIMIZER PROMPTS."""
+    parent = (pipeline_params or {}).get(node)
+    if isinstance(parent, Mapping):
+        inherited = parent.get(field)
+        if isinstance(inherited, str) and inherited:
+            return inherited
+    template = _opt_prompts.base_optimizer_template(node)
+    current = getattr(template, field, "")
+    return current if isinstance(current, str) else ""
+
+
+def _check_l1_prompt_field_not_gutted(
+    source_output: Mapping[str, Any],
+    *,
+    pipeline_params: Mapping[str, Any] | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Reject a replacement so much shorter than what it replaces that it cannot have carried the
+    incumbent's contracts forward. Distinct from ``_check_l1_prompt_placeholders_intact``, which
+    catches only the contracts spelled as ``{{slots}}``: everything else an inner optimizer prompt
+    declares — the output shape, the forbidden moves, the evidence it must ground on — is ordinary
+    prose, and deleting it raises nothing and reads as a bold edit.
+
+    Scoped to ``NODE_LAYOUTS`` and to the DELTA for the same reasons as the steer table above."""
+    if not source_output:
+        return None
+    failures: list[ValidationFailure] = []
+    for node_name, node_params in source_output.items():
+        if node_name not in NODE_LAYOUTS or not isinstance(node_params, dict):
+            continue
+        for field, value in node_params.items():
+            if field not in PromptTemplate.model_fields or not isinstance(value, str):
+                continue
+            incumbent = _incumbent_field_text(node_name, field, pipeline_params)
+            if len(incumbent) < _GUTTABLE_MIN_CHARS:
+                continue
+            if len(value) >= _GUT_RATIO * len(incumbent):
+                continue
+            failures.append(
+                ValidationFailure(
+                    axis=f"{node_name}.{field}",
+                    value=f"{len(value)}B replaces {len(incumbent)}B",
+                    allowed=[],
+                    reason="guts_inherited_contract",
+                )
+            )
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_PROMPT_FIELD_NOT_GUTTED.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_PROMPT_FIELD_NOT_GUTTED: LLMOutputValidator = LLMOutputValidator(
+    id="l1_prompt_field_not_gutted",
+    check=_check_l1_prompt_field_not_gutted,
 )

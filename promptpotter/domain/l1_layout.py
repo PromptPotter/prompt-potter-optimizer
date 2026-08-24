@@ -342,6 +342,11 @@ def default_l1_layout() -> L1Layout:
 for _node, _spec in NODE_LAYOUTS.items():
     _floor_ph = set(_spec.floor.all_placeholders())
     assert _spec.mandatory <= _spec.possible, f"{_node}: mandatory ⊄ possible"
+    # An EDIT cannot name a panel twice — a panel addresses one slot — so the floor is the only
+    # producer left that could, and `DispatchHub.fill` renders one copy per occurrence.
+    assert len(_floor_ph) == len(_spec.floor.all_placeholders()), (
+        f"{_node}: floor names a placeholder in two places"
+    )
     assert _floor_ph <= _spec.possible, (
         f"{_node}: floor references a placeholder absent from possible"
     )
@@ -351,61 +356,50 @@ for _node, _spec in NODE_LAYOUTS.items():
 del _node, _spec, _floor_ph
 
 
-def layout_json_schema(spec: NodeLayoutSpec) -> dict[str, Any]:
-    """The wire shape of a layout edit against ``spec``: the slots are the only legal keys and
-    ``possible`` the only legal values. ONE builder for BOTH seams that offer the edit — L4's per-node
-    ``layout`` param and L2's ``l1_layout`` — because only L4's was ever built this way. L2's rode a
-    bare ``dict[str, list[str]]``, which states neither half, and L2 answered the silence by inventing
-    a shape: one fire keyed the map by slot with a ``<slot>_block`` value apiece, the next keyed it by
-    SIGNAL with invented sub-selectors. ``validate_l1_layout`` rejected both, as it must — but it is
-    the backstop, and a vocabulary the emitter is never shown is not a vocabulary.
+def layout_json_schema(spec: NodeLayoutSpec, *, description: str) -> dict[str, Any]:
+    """The wire shape of a layout edit against ``spec``: a panel name addresses the ONE slot it fills.
+    ONE builder for BOTH seams that offer the edit — L4's per-node ``layout`` param and L2's
+    ``l1_layout`` — because only L4's was ever built this way, and a vocabulary the emitter is never
+    shown is not a vocabulary.
 
-    The edit granularity below is the WHOLE contract, so both seams must mean it identically — one
-    sentence describing two different rules is worse than the silence it replaced."""
+    ``propertyNames`` + ``additionalProperties`` state each enum once. Per-slot arrays restate the
+    signal enum for every slot of every node, and this schema is prompt text on each call.
+
+    ``description`` is passed rather than written here: ``injection_source_digest`` hashes ``bundle``
+    and not this module, so prose living here would change every prompt for free."""
     return {
         "type": "object",
-        "description": (
-            "Which evidence panels fill each prompt slot. The keys below are the only addressable "
-            "slots and the enum the only signals this node may be given. Editing is per SLOT: a slot "
-            "you name replaces that slot's whole list, so carry over what you still want there; a "
-            "slot you omit keeps what it has, and `[]` empties one. Each signal may appear at most "
-            "ONCE across the whole layout — a signal listed in two slots is rendered twice, verbatim, "
-            "and the edit is rejected."
-        ),
-        "properties": {
-            slot: {"type": "array", "items": {"type": "string", "enum": sorted(spec.possible)}}
-            for slot in L1_LAYOUT_SLOTS
-        },
-        "additionalProperties": False,
+        "description": description,
+        "propertyNames": {"enum": sorted(spec.possible)},
+        "additionalProperties": {"type": "string", "enum": list(L1_LAYOUT_SLOTS)},
     }
 
 
 def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
-    """Coerce an EDIT onto ``base``, or ``None`` for BOTH "no edit asked" (``{}``, the sanctioned
-    omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the two off the
-    raw input; this returns no outcome of its own, because a coercer that judged would be a second
-    validator. It once claimed the validator surfaced the malformed case — which returning ``None``
-    is precisely what prevents, since the caller then skips validation altogether.
+    """Apply a ``{panel: slot}`` EDIT onto ``base``, or ``None`` for BOTH "no edit asked" (``{}``, the
+    sanctioned omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the
+    two off the raw input; this returns no outcome of its own, because a coercer that judged would be
+    a second validator.
 
-    PARTIAL per-slot replacement — the semantics ``resolve_node_layout`` already gives L4's ``layout``
-    param, and now the only ones. The two seams ran OPPOSITE rules while sharing the one
-    ``layout_json_schema`` sentence, which stated L4's: an omitted slot was kept there and EMPTIED
-    here. So L2 wrote the slots it meant to change, omitted the rest expecting them kept, and lost
-    them. All 13 banked edits dropped 7-8 floor signals that way — ``mutation_memory`` on every one,
-    the panel whose absence is what lets round 4 re-propose round 1's measured failure."""
+    A panel is MOVED, so it reaches at most one slot and a duplicate has no shape to arrive in. One
+    the edit does not name keeps its slot AND its position — the floor's order is authored and
+    load-bearing, so only a moved panel is repositioned, to the end of the slot it moves to. An
+    unknown PANEL is placed rather than dropped, so ``l1_layout_unknown_placeholder`` rolls the edit
+    back instead of the floor surviving in silence."""
     if not isinstance(raw_layout, dict) or not raw_layout:
+        return None
+    moves = {
+        name: slot
+        for name, slot in raw_layout.items()
+        if isinstance(name, str) and isinstance(slot, str) and slot in L1_LAYOUT_SLOTS
+    }
+    if not moves:
         return None
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
-        vals = raw_layout.get(slot)
-        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-            update[slot] = list(vals)
-    if not update:
-        return None
-    try:
-        return base.model_copy(update=update, deep=True)
-    except Exception:
-        return None
+        kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]
+        update[slot] = kept + [n for n, s in moves.items() if s == slot and n not in kept]
+    return base.model_copy(update=update, deep=True)
 
 
 class LayoutValidationResult:
@@ -449,42 +443,6 @@ def validate_l1_layout(
             ValidatorOutcome(
                 validator_id="l1_layout_unknown_placeholder",
                 evidence={"unknown": sorted(unknown)},
-            )
-        )
-        is_valid = False
-
-    # HARD: no slot may list the same placeholder twice (renderer would emit it twice).
-    for slot_name in L1_LAYOUT_SLOTS:
-        slot_vals = getattr(layout, slot_name)
-        if len(slot_vals) != len(set(slot_vals)):
-            dups = sorted({n for n in slot_vals if slot_vals.count(n) > 1})
-            outcomes.append(
-                ValidatorOutcome(
-                    validator_id="l1_layout_dups_within_slot",
-                    evidence={"slot": slot_name, "duplicates": dups},
-                )
-            )
-            is_valid = False
-
-    # HARD: nor may two slots list the SAME placeholder — `all_placeholders` concatenates the
-    # slot lists and `DispatchHub.fill` appends one render per occurrence, so a signal named
-    # twice is emitted twice, verbatim, in one prompt. Nothing else could catch it: `char_cap`
-    # is applied per render and never sees the second copy, which is how prompts reached 80%
-    # over their ceiling with every individual panel inside its own cap. Measured on the banked
-    # corpus before this check existed: 28% of `l1_generate` prompts carried a duplicate, median
-    # 2,414 wasted chars and up to 12,242 — 6.3% of every byte ever sent to the node.
-    across = sorted(
-        {
-            name
-            for name in layout.all_placeholders()
-            if sum(1 for slot in L1_LAYOUT_SLOTS if name in getattr(layout, slot)) > 1
-        }
-    )
-    if across:
-        outcomes.append(
-            ValidatorOutcome(
-                validator_id="l1_layout_dups_across_slots",
-                evidence={"duplicates": across},
             )
         )
         is_valid = False

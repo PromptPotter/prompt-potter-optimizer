@@ -150,8 +150,12 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 l2_guard_breaches=[
                     ValidatorOutcome(validator_id="l2_verbatim_self_repeat", evidence={}),
                     ValidatorOutcome(
-                        validator_id="l1_layout_dups_across_slots",
-                        evidence={"duplicates": ["critique"], "unknown": [poisoned_value]},
+                        validator_id="l1_layout_missing_mandatory",
+                        evidence={"missing": ["critique"]},
+                    ),
+                    ValidatorOutcome(
+                        validator_id="l1_layout_unknown_placeholder",
+                        evidence={"unknown": [poisoned_value]},
                     ),
                 ],
                 l3_guard_breaches=[
@@ -191,7 +195,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert "UNTRUSTED" not in guards_text
     assert "l2_verbatim_self_repeat" in guards_text
     assert "l3_plan_verbatim_repeat" in guards_text
-    assert "duplicates: critique" in guards_text
+    assert "missing: critique" in guards_text
     assert poisoned_value not in guards_text
     assert poisoned_query not in guards_text
 

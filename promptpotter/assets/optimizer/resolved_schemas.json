@@ -205,137 +205,43 @@
             "type": "string"
           },
           "l1_layout": {
-            "additionalProperties": false,
-            "description": "Which evidence panels fill each prompt slot. The keys below are the only addressable slots and the enum the only signals this node may be given. Editing is per SLOT: a slot you name replaces that slot's whole list, so carry over what you still want there; a slot you omit keeps what it has, and `[]` empties one. Each signal may appear at most ONCE across the whole layout — a signal listed in two slots is rendered twice, verbatim, and the edit is rejected.",
-            "properties": {
-              "persona": {
-                "items": {
-                  "enum": [
-                    "answer_distribution",
-                    "archive_top_runs",
-                    "axis_memory",
-                    "budget_state",
-                    "confounds",
-                    "critique",
-                    "detectable_move",
-                    "diagnostics",
-                    "escalation_panel",
-                    "failing_samples",
-                    "inner_narratives",
-                    "l1_wounds",
-                    "measurand",
-                    "mutation_memory",
-                    "origin_strengths",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "precision",
-                    "prompt_block_catalogue",
-                    "rare_hit_samples",
-                    "rendered_prompt",
-                    "sample_provenance",
-                    "sample_transcripts",
-                    "task_context"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "task_intent": {
-                "items": {
-                  "enum": [
-                    "answer_distribution",
-                    "archive_top_runs",
-                    "axis_memory",
-                    "budget_state",
-                    "confounds",
-                    "critique",
-                    "detectable_move",
-                    "diagnostics",
-                    "escalation_panel",
-                    "failing_samples",
-                    "inner_narratives",
-                    "l1_wounds",
-                    "measurand",
-                    "mutation_memory",
-                    "origin_strengths",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "precision",
-                    "prompt_block_catalogue",
-                    "rare_hit_samples",
-                    "rendered_prompt",
-                    "sample_provenance",
-                    "sample_transcripts",
-                    "task_context"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "problem_description": {
-                "items": {
-                  "enum": [
-                    "answer_distribution",
-                    "archive_top_runs",
-                    "axis_memory",
-                    "budget_state",
-                    "confounds",
-                    "critique",
-                    "detectable_move",
-                    "diagnostics",
-                    "escalation_panel",
-                    "failing_samples",
-                    "inner_narratives",
-                    "l1_wounds",
-                    "measurand",
-                    "mutation_memory",
-                    "origin_strengths",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "precision",
-                    "prompt_block_catalogue",
-                    "rare_hit_samples",
-                    "rendered_prompt",
-                    "sample_provenance",
-                    "sample_transcripts",
-                    "task_context"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "thinking_style": {
-                "items": {
-                  "enum": [
-                    "answer_distribution",
-                    "archive_top_runs",
-                    "axis_memory",
-                    "budget_state",
-                    "confounds",
-                    "critique",
-                    "detectable_move",
-                    "diagnostics",
-                    "escalation_panel",
-                    "failing_samples",
-                    "inner_narratives",
-                    "l1_wounds",
-                    "measurand",
-                    "mutation_memory",
-                    "origin_strengths",
-                    "pipeline_param_catalogue",
-                    "plan",
-                    "precision",
-                    "prompt_block_catalogue",
-                    "rare_hit_samples",
-                    "rendered_prompt",
-                    "sample_provenance",
-                    "sample_transcripts",
-                    "task_context"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              }
+            "additionalProperties": {
+              "enum": [
+                "persona",
+                "task_intent",
+                "problem_description",
+                "thinking_style"
+              ],
+              "type": "string"
+            },
+            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
+            "propertyNames": {
+              "enum": [
+                "answer_distribution",
+                "archive_top_runs",
+                "axis_memory",
+                "budget_state",
+                "confounds",
+                "critique",
+                "detectable_move",
+                "diagnostics",
+                "escalation_panel",
+                "failing_samples",
+                "inner_narratives",
+                "l1_wounds",
+                "measurand",
+                "mutation_memory",
+                "origin_strengths",
+                "pipeline_param_catalogue",
+                "plan",
+                "precision",
+                "prompt_block_catalogue",
+                "rare_hit_samples",
+                "rendered_prompt",
+                "sample_provenance",
+                "sample_transcripts",
+                "task_context"
+              ]
             },
             "title": "L1 Layout",
             "type": "object"

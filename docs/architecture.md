@@ -607,14 +607,12 @@ the PR description.
   recent arc that earned its keep. Cross-round AxisIndex digest.
 - **`injection_source_digest` inside `_identity_config`**
   (`dispatch/injections/registry.py` → `connectors/promptpotter.py`) —
-  what a node is HANDED is L4 measurement identity, so the digest must
-  cover everything deciding it: the renderers (what a panel says), plus
-  `bundle` (how much of one a prompt receives) and `compose` (which
-  panels reach it at all). AST-normalized, so a comment or a reflow
-  costs nothing while a panel's prose, a cap, a ceiling or a selection
-  rule voids the banked origins. A module that shapes the prompt and is
-  missing from it pools corpora the digest exists to keep apart — which
-  is what the node ceilings did until they moved into `bundle`.
+  what a node is HANDED is L4 measurement identity, so everything
+  deciding it is hashed: the renderers, `bundle` (how much of a panel
+  arrives) and `compose` (which arrive at all). AST-normalized — a
+  comment or reflow costs nothing, a panel's prose, a cap, a ceiling or
+  a selection rule voids the banked origins. Shape a prompt from
+  outside the hash and nothing raises; the corpora just pool.
 - **`pipeline.yaml` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."

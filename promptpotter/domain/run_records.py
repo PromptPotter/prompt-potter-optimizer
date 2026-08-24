@@ -616,7 +616,7 @@ class ForkSpec(StrictModel):
     issued_by: str
     from_round: int | None = None
     from_candidate_id: str | None = None
-    l1_layout: dict[str, list[str]] | None = None
+    l1_layout: dict[str, str] | None = None
     seed: CycleSeed | None = None
     # The MEASURED direction, for a cut taken before its consequence was known — only a
     # correction needs it. `None` ⇒ the trigger implies the direction (`FORK_DIRECTION`),
@@ -645,13 +645,13 @@ class OperatorSweepFile(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     reason: str = ""
-    l1_layout: dict[str, list[str]] | None = None
+    l1_layout: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _arm_pulls_a_lever(self) -> OperatorSweepFile:
         """A lever-less arm forks a COPY of its parent and pays a full scored round to measure it, so
         it fails here rather than at the end of the batch. The set is derived, never listed twice, and
-        the test is EMPTINESS — an empty ``l1_layout`` edits no slot and coerces back to its base."""
+        the test is EMPTINESS — an empty ``l1_layout`` moves no panel and coerces back to its base."""
         levers = sorted(set(type(self).model_fields) - {"reason"})
         if not any(getattr(self, lever) for lever in levers):
             raise ValueError(

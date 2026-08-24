@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from promptpotter.application.optimization.dispatch.bundle import (
+    LAYOUT_SCHEMA_INSTRUCTION,
     OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
     SCHEMA_DESCRIPTION_MAX_CHARS,
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
@@ -91,7 +92,11 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
         }
     if param == "layout":
         spec = NODE_LAYOUTS.get(node.name)
-        return None if spec is None else layout_json_schema(spec)
+        return (
+            None
+            if spec is None
+            else layout_json_schema(spec, description=LAYOUT_SCHEMA_INSTRUCTION)
+        )
     if param == SCHEMA_RENAME_PARAM and NODE_LAYOUTS.get(node.name) is not None:
         return {
             "type": "object",

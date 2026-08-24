@@ -427,9 +427,9 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
         baseline = compute_optimizer_prompt_hashes()
         assert compute_optimizer_prompt_hashes() == baseline
 
-        # Valid layout edit (keeps the mandatory `diagnostics`) on one node.
+        # Valid layout edit (`diagnostics` stays placed) on one node.
         set_optimizer_prompt_overrides(
-            {"l1_critique": {"layout": {"problem_description": ["diagnostics", "axis_memory"]}}}
+            {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
         )
         edited = compute_optimizer_prompt_hashes()
         assert edited["l1_critique"] != baseline["l1_critique"], (
@@ -4003,3 +4003,110 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
         "the grandparent's records come first WHOLE, then the parent's own up to the cut — "
         "a bound read against the parent's chain would have stopped inside the grandparent"
     )
+
+
+def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
+    """Two edits an L4 candidate can make that score without measuring anything, both silent:
+    nothing raises, and each reads as a plausible optimizer improvement in every artifact.
+
+    STOPPING — `mean_round_delta` averages over the inner rounds, so an early-stop rule raises it
+    by dropping the flat tail, no better search behind it, and the round crowns it. Verbatim from
+    the round-2 candidate that provoked the gate (`C2.1`).
+
+    LEVEL — a seed is one whole inner run, so a rule keyed to the seed panel renders empty where
+    it lands: the candidate is unrunnable rather than wrong, and re-measures the incumbent.
+    Verbatim from `C2.2`, and round 1 crowned prose of the same shape before it.
+
+    The other half is the one that costs more to get wrong: a REJECTION is destructive and leaves
+    no trace, so legitimate steers carrying the same words must survive."""
+    from promptpotter.application.optimization.validators.l1_strict import (
+        L1_INNER_STEER_IS_LEGAL,
+    )
+
+    c21 = (
+        "Critique each inner run's trajectory by monitoring the change in score from round to "
+        "round. If the absolute difference between the current round's score and the previous "
+        "round's score is less than 0.05 for two consecutive rounds, trigger early stop."
+    )
+    outcome = L1_INNER_STEER_IS_LEGAL.run({"l1_critique": {"instruction": c21}})
+    assert outcome is not None
+    # BOTH families, and that is the candidate rather than the gate being loose: it ends the loop
+    # AND tells a node that critiques one run to iterate over runs. One reason per family, so L2
+    # is handed each defect rather than whichever matched first.
+    assert {f.reason for f in outcome.evidence["failures"]} == {
+        "steers_inner_stopping",
+        "steers_across_seeds",
+    }
+    assert {f.axis for f in outcome.evidence["failures"]} == {"l1_critique.instruction"}
+
+    c22 = (
+        "Generate candidate prompts that differ in their underlying reasoning approach, not just "
+        "in wording. For each seed, first examine the critique to identify the specific logical "
+        "step the current prompt fails on."
+    )
+    outcome = L1_INNER_STEER_IS_LEGAL.run({"l1_generate": {"instruction": c22}})
+    assert outcome is not None
+    (failure,) = outcome.evidence["failures"]
+    assert failure.reason == "steers_across_seeds"
+
+    # Carries a stop word AND a round word, and is exactly the edit this loop wants — a token
+    # match would convict it. Nothing here ends the loop.
+    keep = "Stop proposing the same axis in consecutive rounds; name a new mechanism each round."
+    assert L1_INNER_STEER_IS_LEGAL.run({"l1_critique": {"instruction": keep}}) is None
+
+    # The bare word is legitimate one level up and in "seed prompt" — only the QUANTIFIED forms
+    # name a collection the inner node cannot see.
+    seeded = "Ground each candidate in the seed prompt's own wording before proposing a rewrite."
+    assert L1_INNER_STEER_IS_LEGAL.run({"l1_generate": {"instruction": seeded}}) is None
+
+    # Scoped to the inner OPTIMIZER nodes. The same words in a target-pipeline prompt steer a
+    # task, not a loop, and there is no round budget for them to reach.
+    assert L1_INNER_STEER_IS_LEGAL.run({"llm_only": {"instruction": c21}}) is None
+
+
+def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
+    """An override REPLACES its field whole, so a short replacement for a long incumbent deletes
+    every contract the incumbent carried in plain prose — the output shape, the forbidden moves,
+    the evidence it must ground on. `L1_PROMPT_PLACEHOLDERS_INTACT` catches only the contracts
+    spelled as `{{slots}}`; the rest raise nothing and read as a bold edit, and the round then
+    measures a crippled inner optimizer against a whole one.
+
+    The incumbent is resolved the way the run resolves it, so the length compared against is the
+    text the generator was shown — parent override first, manifest template otherwise."""
+    from promptpotter.application.optimization.validators.l1_strict import (
+        _GUTTABLE_MIN_CHARS,
+        L1_PROMPT_FIELD_NOT_GUTTED,
+        _incumbent_field_text,
+    )
+
+    incumbent = {"l1_critique": {"instruction": "x" * 3000}}
+
+    outcome = L1_PROMPT_FIELD_NOT_GUTTED.run(
+        {"l1_critique": {"instruction": "y" * 400}}, pipeline_params=incumbent
+    )
+    assert outcome is not None
+    (failure,) = outcome.evidence["failures"]
+    assert failure.reason == "guts_inherited_contract"
+    assert failure.value == "400B replaces 3000B"
+
+    # A real tightening keeps the contracts and survives.
+    assert (
+        L1_PROMPT_FIELD_NOT_GUTTED.run(
+            {"l1_critique": {"instruction": "y" * 2000}}, pipeline_params=incumbent
+        )
+        is None
+    )
+
+    # A short field cannot be gutted — `thinking_style` is a couple of lines, and every rewrite
+    # of one would otherwise convict.
+    assert (
+        L1_PROMPT_FIELD_NOT_GUTTED.run(
+            {"l1_critique": {"thinking_style": "y" * 10}},
+            pipeline_params={"l1_critique": {"thinking_style": "x" * 200}},
+        )
+        is None
+    )
+
+    # The manifest fallback is live: with no parent override, the incumbent is the template's own
+    # text and it is long enough to be reachable. Pins the wiring, not a byte count.
+    assert len(_incumbent_field_text("l1_critique", "instruction", None)) > _GUTTABLE_MIN_CHARS

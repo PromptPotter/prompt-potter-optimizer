@@ -238,12 +238,11 @@ reason: >-
   Does the objective read better leading the prompt than buried mid-panel? Same evidence,
   measurand and confounds moved to the front slot.
 l1_layout:
-  persona: [measurand, confounds]
-  problem_description: [rendered_prompt, pipeline_param_catalogue, plan, answer_distribution,
-    critique, failing_samples]
+  measurand: persona
+  confounds: persona
 ```
 
-`l1_layout` stamps per-slot signal-name lists onto the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Edit only the slots you mean to move; an omitted slot keeps what it holds (`domain/l1_layout.py::coerce_l1_layout`). The slots are `L1_LAYOUT_SLOTS` and the placeholders that must each appear somewhere across them are `NODE_LAYOUTS["l1_generate"].mandatory` — read both there, never a copy: a layout failing them raises only once the fork is minted and its origin paid for.
+`l1_layout` moves panels on the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Name each panel and the slot it moves to; one you omit stays where it is, and a panel is only ever in one place (`domain/l1_layout.py::coerce_l1_layout`). The slots are `L1_LAYOUT_SLOTS` and the placeholders that must each appear somewhere across them are `NODE_LAYOUTS["l1_generate"].mandatory` — read both there, never a copy: a layout failing them raises only once the fork is minted and its origin paid for.
 
 ```bash
 python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
@@ -332,9 +331,8 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner
    optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its
    resolved response schema, which is prompt text riding every call as `response_format`, and
-   its config), plus the per-node information-flow layouts, **the source that decides what a node
-   is handed** (`injection_source_digest` — the renderers, plus the per-panel caps and the
-   composition that selects under a node ceiling), **the estimator's own source**
+   its config), plus the per-node information-flow layouts, **the source deciding what each node
+   is handed** (`injection_source_digest`), **the estimator's own source**
    (`_measurement_source_digest`), the dataset's whole `inner_tasks.yaml`, and the inner
    benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the
    scoring formula included, since either changes what every cell measures. Both source digests
@@ -367,7 +365,7 @@ Gated by `applies(schema)` — present only when the matching node is active.
 | `error_rate` | `[0, 1]` | Fraction of errored queries |
 | `degraded_rate` | `[0, 1]` | Fraction with degradation warnings |
 | `runtime_failure_rate` | `[0, 1]` | OptSP runtime-failure count, normalized |
-| `latency_norm` | `[0, 1]` | `1 - mean_ms / 10_000`; 1.0 = instant |
+| `mean_latency_s` | seconds | mean `step_timings` sum per cell; larger is worse |
 | `prompt_compactness` | `[0, 1]` | `1 - len(rendered_prompt) / 4_000`; 1.0 = short |
 | `pipeline_compactness` | `[0, 1]` | `1 - (active_steps - 1) / 11`; 1.0 = single-node |
 | `source_recall` / `candidate_recall` | `[0, 1]` | GT in candidate-source output / in ranker `final_ranking` (when active) |

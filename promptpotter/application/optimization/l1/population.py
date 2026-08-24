@@ -8,7 +8,9 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    L1_INNER_STEER_IS_LEGAL,
     L1_PROMPT_BLOCKS_IN_LIBRARY,
+    L1_PROMPT_FIELD_NOT_GUTTED,
     L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
 )
@@ -92,6 +94,19 @@ def parse_population(
                 )
                 if rf_outcome is not None:
                     failures.extend(rf_outcome.evidence["failures"])
+                # The DELTA, like the two above and unlike the placeholder check below: these
+                # convict a candidate for what it PROPOSED, and a child inheriting an ancestor's
+                # prose proposed nothing. The gutting check takes the parent's params because the
+                # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
+                for outcome in (
+                    L1_INNER_STEER_IS_LEGAL.run(pipeline_params_override),
+                    L1_PROMPT_FIELD_NOT_GUTTED.run(
+                        pipeline_params_override,
+                        pipeline_params=pipeline_params,
+                    ),
+                ):
+                    if outcome is not None:
+                        failures.extend(outcome.evidence["failures"])
             # Mandatory placeholders intact — the evolved TARGET prompt (runs even when the
             # mutation is prompt-fields-only, the exact case that drops {{combined_text}})
             # AND, on an L4 campaign, the MERGED inner optimizer prompts (a child of a broken

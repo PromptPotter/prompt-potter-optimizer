@@ -63,6 +63,13 @@ SCHEMA_RENAME_INSTRUCTION = (
     "honour makes the round unparseable and scores it maximally dirty."
 )
 
+LAYOUT_SCHEMA_INSTRUCTION = (
+    "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that "
+    "slot; a panel you omit stays where it is, and a panel is only ever in one "
+    "place. Slot order within the prompt is the floor's and does not move — what "
+    "you choose is which slot a panel speaks from."
+)
+
 
 # Per-injection caps — bound LLM-authored output to keep individual blocks tight.
 AXES_ENUM_PREVIEW = 4

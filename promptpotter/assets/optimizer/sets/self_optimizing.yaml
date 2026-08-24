@@ -48,7 +48,9 @@ l1_generate:
     the channel is severed, which rolls the candidate back. The replacement must instruct the inner node's OPTIMIZER job (how
     to generate, critique, or frame PROMPT CANDIDATES) — text that answers or formats the inner
     BENCHMARK TASK belongs in the prompts the inner loop evolves, never in an optimizer prompt field; such a
-    candidate is wasted (measured: -2.2%).
+    candidate is wasted (measured: -2.2%). Edit how the inner loop SEARCHES, never when it stops: an
+    early-stop or plateau rule scores by dropping the flat tail out of the mean it is judged on rather
+    than by searching better, so it is rejected outright and the candidate is spent.
 
 
     Write for ANY inner benchmark. You are shown one instrument's run, but the optimizer prompt you edit is
@@ -115,7 +117,7 @@ l2_context:
     is operator-authored and frozen. Your levers are l1_layout and l1_overrides.
   instruction: |-
     PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
-      l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. Edit the slots you mean to move; the ones you omit keep what they hold, so you never restate a layout to preserve it.
+      l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. Name the panels you mean to move and the slot each moves to; the ones you omit stay where they are.
       l1_overrides — rare; creativity / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
     AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.

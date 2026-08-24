@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from promptpotter.application.optimization.dispatch.bundle import LAYOUT_SCHEMA_INSTRUCTION
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
 
@@ -321,12 +322,15 @@ class L2ContextOutput(OptimizerResponseModel):
             "is judged against, not a label for the lever."
         ),
     )
-    # PARSED as a plain dict on purpose. Typing the slots would make one off-enum signal fail the
+    # PARSED as a plain dict on purpose. Typing the panels would make one off-enum name fail the
     # whole model, taking `axis_targeted`, `rationale` and both control proposals down with the
     # layout edit — and the breach must still reach L2's next fire as a `ValidatorOutcome`, which
     # is a thing only `validate_l1_layout` can emit. The schema teaches; the validator judges.
     l1_layout: Annotated[
-        dict[str, list[str]], WithJsonSchema(layout_json_schema(NODE_LAYOUTS["l1_generate"]))
+        dict[str, str],
+        WithJsonSchema(
+            layout_json_schema(NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION)
+        ),
     ] = Field(default_factory=dict)
     l1_overrides: Annotated[dict[str, Any], BeforeValidator(_keep_known_keys(L1_OVERRIDE_KEYS))] = (
         Field(

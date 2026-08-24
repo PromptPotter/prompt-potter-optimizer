@@ -190,10 +190,17 @@ export interface ValidationFailure {
    * prior ``RuntimeFailure.observed_config`` row),
    * ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` /
    * ``optimizer_prompt_unexpected_type`` (generator-side failure),
-   * ``no_op_variant`` / ``duplicate_variant`` (invariant-detect),
-   * ``hallucinated_node`` (named a node absent from the schema — NON-fatal:
-   * the phantom edit is stripped, the candidate still scores; routed as
-   * signal, not a synthetic-0). */
+   * ``steers_inner_stopping`` (an L4 override telling the inner loop when to
+   * STOP rather than how to search — it edits the frame `mean_round_delta`
+   * averages over instead of the search it measures), ``steers_across_seeds``
+   * (an L4 override making an inner node reason over the seed panel, which
+   * exists only one level up — the rule renders empty where it lands),
+   * ``guts_inherited_contract`` (an L4 override replacing a long prompt field
+   * with a fraction of its length, deleting contracts the incumbent carried
+   * in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-
+   * detect), ``hallucinated_node`` (named a node absent from the schema —
+   * NON-fatal: the phantom edit is stripped, the candidate still scores;
+   * routed as signal, not a synthetic-0). */
   reason: string;
 }
 
@@ -383,6 +390,7 @@ export interface RoundResult {
   matched_parent_lift: number | null;
   matched_parent_lift_ci_lo: number | null;
   matched_parent_lift_ci_hi: number | null;
+  separable: boolean | null;
   ability: AbilityReading | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
@@ -1662,7 +1670,7 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'runtime_failure_rate', scope: 'per_round', direction: 'low', node_type: null, description: 'Fraction of samples that triggered DegradationCheck; L1 retunes, or operator-flagged if locked.' },
   { name: 'l2_guard_breach_rate', scope: 'per_round', direction: 'low', node_type: null, description: 'Fraction of samples where L2 refinement breached guards; L3 healed.' },
   { name: 'l3_guard_breach_rate', scope: 'per_round', direction: 'low', node_type: null, description: 'Fraction of samples where L3 plan breached its own guards.' },
-  { name: 'latency_norm', scope: 'per_round', direction: 'high', node_type: null, description: 'Mean latency normalized against LATENCY_BUDGET_MS (1.0 = instant, 0.0 = ≥ budget).' },
+  { name: 'mean_latency_s', scope: 'per_round', direction: 'low', node_type: null, description: 'Mean seconds one scored cell cost, off step_timings — so a cached replay still prices the work it replays. Larger is worse; a formula supplies the budget.' },
   { name: 'source_recall', scope: 'per_round', direction: 'high', node_type: 'candidate_source', description: "Fraction of queries where GT appears in a candidate_source node's output." },
   { name: 'candidate_recall', scope: 'per_round', direction: 'high', node_type: 'ranker', description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
   { name: 'cache_hit_rate', scope: 'per_round', direction: 'high', node_type: 'cache', description: 'Fraction of queries resolved by a cache node (non-null timing).' },

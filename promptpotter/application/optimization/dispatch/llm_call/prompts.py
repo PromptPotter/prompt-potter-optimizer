@@ -12,9 +12,9 @@ from typing import Any
 from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import (
-    L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
     L1Layout,
+    coerce_l1_layout,
     validate_l1_layout,
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
@@ -298,8 +298,8 @@ def resolve_node_override(node: str) -> ResolvedNodeOverride:
 
 
 def resolve_node_layout(node: str) -> L1Layout:
-    """PARTIAL per-slot replacement: a named slot replaces the floor's list, an omitted one keeps it.
-    The GUARD RAIL rolls a bad edit back to the floor, so it scores no-improvement, not starvation."""
+    """Apply L4's ``{panel: slot}`` edit onto the node's floor. The GUARD RAIL rolls a bad edit back
+    to the floor, so it scores no-improvement, not starvation."""
     spec = NODE_LAYOUTS[node]
     # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
     # layout is L2's in-campaign surface (`opt_sp.memory.l1_layout`) and nothing here applies
@@ -311,17 +311,9 @@ def resolve_node_layout(node: str) -> L1Layout:
             "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
             "channel; l1_generate's rides opt_sp.memory.l1_layout instead."
         )
-    raw = _node_override(node).get("layout")
-    if not isinstance(raw, dict) or not raw:
+    merged = coerce_l1_layout(_node_override(node).get("layout"), base=spec.floor)
+    if merged is None:
         return spec.floor
-    update: dict[str, list[str]] = {}
-    for slot in L1_LAYOUT_SLOTS:
-        vals = raw.get(slot)
-        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-            update[slot] = list(vals)
-    if not update:
-        return spec.floor
-    merged = spec.floor.model_copy(update=update)
     result = validate_l1_layout(merged, spec=spec)
     if not result.is_valid:
         logger.warning(

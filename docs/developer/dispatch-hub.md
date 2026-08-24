@@ -169,7 +169,7 @@ This is where the reader's mental model of a round usually starts: candidates we
   - **STATUS prefix** ← `bundle.cycle_slice` — `round`🧩, `current`🧩 (parent fitness `f"{cs.current_accuracy:.1%}"`), `best`🧩 (acc + round), `L1 stall`🧩 (rounds), and — when fired — `L2 fired`🧩 (count + stall), `L3 fired`🧩 (count + stall). Plain text (cycle counters are trusted optimizer state, not untrusted dataset content). Always renders, including pre-round-1 when `digest.diagnostics is None`. Despite the `current`/`best` accuracy labels, the rendered values are mean composite *fitness* under the active scorer, not hit-rates.
   - **Body** [fenced] ← `bundle.digest.diagnostics`: `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE) — trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
 - ⁵ **`l1_wounds`** [fenced] ← `opt_sp.wounds.{validation_failures, runtime_failures}` · L1-owned wounds, one block
-  - **Validation** (parse-time): `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩 — from `L1_SCHEMA_COMPLIANCE`; synthetic-0 per-candidate, except `reason=hallucinated_node` which is non-fatal routed signal.
+  - **Validation** (parse-time): `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩 — from the reject gates in `validators/l1_strict.py`; synthetic-0 per-candidate, except `reason=hallucinated_node` which is non-fatal routed signal.
   - **Runtime** (mid-eval): per-candidate `DegradationCheck` evidence, owner-tagged (`owner=l1` retune · `owner=operator` flagged, not in-loop fixable); accumulates cross-round (NEW vs ACCUMULATED).
   - Fenced (echoes arbitrary LLM output + pipeline warnings). Renderer `_r_l1_wounds`.
 - ¹² **`guard_breaches`** ← `opt_sp.wounds.{l2_guard_breaches, l3_guard_breaches}` · post-parse breaches, both owner=L3 (replan)
@@ -211,7 +211,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · the one name that is BOTH a structural input and a signal
   - L2_CONTEXT-only writer; consumed by `DispatchHub.fill` as `l1_generate`'s per-slot injection-name list that drives the slot walk (every node's layout comes from `NODE_LAYOUTS[node]`; `l1_generate`'s is L2-overridden via this field)
   - Decides *which* injection renderings land in each L1 addressable slot (`persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩) — content is rendered separately by the listed injections' `_r_*` functions
-  - Registered too, on `l2_context`'s floor only — the writer's view of what it is about to overwrite, the twin `l1_overrides` always had. An edit is per slot and the floor packs 12 of 13 signals into one, so a blind writer drops whatever it fails to restate
+  - Registered too, on `l2_context`'s floor only — the writer's view of what it is about to move, the twin `l1_overrides` always had. An edit names a panel and the slot to move it to, so what a writer needs to read is where each one sits now
 
 ### L2_CONTEXT / L3_PLAN-internal
 
@@ -253,12 +253,12 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 
 **Validation — split HARD / SOFT.** `validate_l1_layout(layout, *, spec, prior_layout)` enforces against the node's `NodeLayoutSpec` (`spec.mandatory`/`spec.possible`):
 
-- HARD — missing mandatory placeholder, name outside the node's `possible`, duplicate within a slot, **duplicate across slots**. Caller rolls back to the prior layout / floor; outcomes append to the guard-breach wound stream for self-healing on the next L2 fire.
-
-**A signal may sit in at most ONE slot, and that is a HARD check rather than a render-time dedup.** `all_placeholders()` concatenates the per-slot lists and `fill` appends one render per occurrence, so a name in two slots is emitted twice verbatim — and no `char_cap` can see it, being applied per render. Measured over 135 banked `l1_generate` prompts before `l1_layout_dups_across_slots` existed: 28% carried a verbatim second copy, median 2,414 wasted chars and up to 12,242, which is 6.3% of every character ever sent to the node and the whole of its over-budget cohort. It is rejected at the producer because the fault is an illegal layout L2 authored, not a render that obeyed one; the rule is also stated in `layout_json_schema`'s description, since that string is the only vocabulary the emitter is shown.
+- HARD — missing mandatory placeholder, name outside the node's `possible`. Caller rolls back to the prior layout / floor; outcomes append to the guard-breach wound stream for self-healing on the next L2 fire.
 - SOFT — layout unchanged from prior. Applied with a warning; flagged `score=0.5` so L3 sees the churn signal next replan.
 
-L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layout`, validates, and only writes the new layout to OSP when HARD checks pass.
+**A signal sits in at most ONE slot, and the WIRE SHAPE is what makes that true.** `all_placeholders()` concatenates the per-slot lists and `fill` appends one render per occurrence, so a name in two slots is emitted twice verbatim — and no `char_cap` can see it, being applied per render. Measured over 135 banked `l1_generate` prompts while an edit could still express one: 28% carried a verbatim second copy, median 2,414 wasted chars and up to 12,242, which is 6.3% of every character ever sent to the node and the whole of its over-budget cohort. An edit addresses a panel and names the slot it moves to, so there is no second place for it to land and no validator arm to reject one. The floor is the only producer that could still name a panel twice, and `l1_layout.py`'s import-time block asserts it does not.
+
+L2's parser (`escalation._parse_l2`) coerces `{name: slot}` onto the current layout, validates, and only writes the new layout to OSP when HARD checks pass.
 
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
@@ -283,7 +283,7 @@ One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rul
 ```json
 {
   "axis_targeted": "...",
-  "l1_layout": {"persona": [...], "task_intent": [...], ...},
+  "l1_layout": {"<placeholder>": "<slot>", ...},
   "l1_overrides": {...},
   "rationale": "...",
   "fork_proposal": null,
