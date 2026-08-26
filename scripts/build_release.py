@@ -48,6 +48,7 @@ _ASSETS = _REPO / "promptpotter" / "assets"
 _WEBAPP_SRC = _REPO / "webapp" / "out"
 _WEBAPP_DST = _ASSETS / "webapp"
 _DATASETS_DST = _ASSETS / "benchmarks"
+_STAGED_BANNER = "<!-- generated from datasets/ by scripts/build_release.py — do not edit -->"
 
 
 def _clear(dst: Path) -> None:
@@ -108,6 +109,24 @@ def stage_datasets() -> int:
         dst = _DATASETS_DST / Path(rel).relative_to("datasets")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        # A staged copy is gitignored, so every git-based scan is blind to it while Glob/Grep/Read
+        # find it immediately — the same asymmetry the CLAUDE.md skip above exists for. Every
+        # staged `dataset.md` had drifted from its source by the time anyone checked, and the
+        # stale copy was the LARGER one, so a grep for any dataset concept returned two plausible
+        # hits and the wrong one read as fuller. `_read_title` scans for the first `# ` line, so a
+        # leading comment costs it nothing. NOT applied to `task_description.md`: that file is L1's
+        # framing and reaches the model, where a banner would be prompt text.
+        if dst.name == "dataset.md":
+            dst.write_text(
+                f"{_STAGED_BANNER}\n\n{src.read_text(encoding='utf-8')}", encoding="utf-8"
+            )
+    (_DATASETS_DST / "README.md").write_text(
+        f"{_STAGED_BANNER}\n\n# Staged benchmark definitions\n\n"
+        "Generated copies of the tracked files under `datasets/`, written by\n"
+        "`scripts/build_release.py::stage_datasets` so the wheel ships them. **Edit the source, "
+        "never this tree** — the next release build overwrites it whole.\n",
+        encoding="utf-8",
+    )
     return sum(1 for p in _DATASETS_DST.rglob("*") if p.is_file())
 
 

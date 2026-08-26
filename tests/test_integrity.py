@@ -1929,6 +1929,32 @@ _CLAUDE_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.M)
 _GITHUB_BLOB = re.compile(
     r"https://github\.com/[^/\s)]+/[^/\s)]+/(?:blob|tree)/main/([^)\s#]+)(?:#([^)\s]+))?"
 )
+# The spelling the repo actually uses OUTSIDE markdown: a bare backticked path, not `](link)`.
+# Leading dot allowed — `.claude/**` is cited from source. A citation that NARRATES the death
+# ("`x.md`, gone 2026-06-18") is exempt: naming what was removed is the point of the sentence.
+_CODE_DOC_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.md)`")
+_NARRATED_DEATH = re.compile(
+    r"`\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.md`[^`\n]{0,24}?\b(?:gone|deleted|removed|retired)\b"
+)
+# Basenames the SYSTEM writes per campaign — not documents in this repo. 27 of the raw hits, all
+# false. Path-qualified (`datasets/gsm8k/dataset.md`) still resolves normally.
+_RUNTIME_ARTIFACT_MD = frozenset(
+    {"log.md", "review.md", "summary.md", "dataset.md", "task_description.md", "README.md"}
+)
+_CODE_SUFFIXES = (".py", ".ts", ".tsx", ".yaml", ".yml", ".toml", ".css", ".js")
+# A backticked doc path followed by `§ Name`, unlinked. The gap is 3 chars, not the 40 the linked arm allows: at 40 this
+# binds `architecture.md`'s own "§0" to a neighbouring `CLAUDE.md` mention. `]` is in the stop
+# class because a markdown link straight after the § otherwise captures "Data model]".
+_CODE_SECTION = re.compile(
+    r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.md)`[ ,)]{0,3}§\s*[\"']?"
+    r"([A-Za-z][^.,;`|)\n\[\]\"]{2,60}?)"
+    r"(?=\s+[—+·→]|\s*$|\s*\(|,|\.\s|\s*\*\*|\"|$)",
+    re.M,
+)
+# The repo's most-cited anchors are paragraph leads, not headings — `**The framing is frozen…**`
+# is cited from `domain/search_point.py`. Headings alone would red-flag legitimate citations,
+# and a check that cries wolf gets xfailed, taking the whole surface with it.
+_CLAUDE_BOLD_LEAD = re.compile(r"^[>\-*|\s]{0,6}\*\*(.+?)\*\*", re.M)
 _CLAUDE_CARD = re.compile(r"^##\s+Load-bearing\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
 _CLAUDE_CARD_TARGET = re.compile(r"→\s*§\s*(.+?)\s*$", re.M)
 # Each entry is a shape that reads as a fact but silently decays into a false one.
@@ -1943,6 +1969,34 @@ def _claude_headings(path: Path) -> set[str]:
         return set()
     text = path.read_text(encoding="utf-8")
     return {re.sub(r"[`*]", "", h).strip() for h in _CLAUDE_HEADING.findall(text)}
+
+
+def _claude_anchors(path: Path) -> set[str]:
+    """Headings PLUS bold paragraph leads — both are cited with `§` in this repo."""
+    if not path.is_file():
+        return set()
+    text = path.read_text(encoding="utf-8")
+    return _claude_headings(path) | {
+        re.sub(r"[`*_]", "", b).strip() for b in _CLAUDE_BOLD_LEAD.findall(text)
+    }
+
+
+def _resolve_doc_ref(root: Path, tracked_md: list[str], citing: str, target: str) -> str | None:
+    """Relative to the citing file, then to the repo root, then unique-suffix.
+
+    The suffix step is what the repo actually writes — `optimization/CLAUDE.md`, `roadmap.md` —
+    and it must stay UNIQUE rather than basename-only, because twelve files are named
+    `CLAUDE.md` and a basename match would resolve any of them to whichever came first.
+    """
+    for cand in ((root / citing).parent / target, root / target):
+        try:
+            rel = cand.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        if rel in tracked_md:
+            return rel
+    hits = [m for m in tracked_md if m == target or m.endswith("/" + target)]
+    return hits[0] if len(hits) == 1 else None
 
 
 def test_claude_md_claims_resolve() -> None:
@@ -2070,6 +2124,42 @@ def test_claude_md_claims_resolve() -> None:
                 and slug(anchor) not in {slug(h) for h in _claude_headings(dest)}
             ):
                 broken.append(f"{rel}: blob anchor -> {target}#{anchor}")
+
+    tracked_md = [p for p in tracked if p.endswith(".md")]
+    scannable = [p for p in tracked if not p.startswith("webapp/node_modules")]
+
+    # (6) A doc path cited from CODE. This is the third instance of the scope lesson above, one
+    # level down: cycle-fixtures.md (deleted) left live pointers in `fixtures.ts` and
+    # `vitest.config.ts` with every gate green, because nothing outside markdown was ever read.
+    for rel in (p for p in scannable if p.endswith(_CODE_SUFFIXES)):
+        for line in (root / rel).read_text(encoding="utf-8").split("\n"):
+            if _NARRATED_DEATH.search(line):
+                continue
+            for target in set(_CODE_DOC_PATH.findall(line)):
+                if target in _RUNTIME_ARTIFACT_MD:
+                    continue
+                if _resolve_doc_ref(root, tracked_md, rel, target) is None:
+                    broken.append(f"{rel}: code -> {target}")
+
+    # (7) The UNLINKED backticked-path + section spelling, over every tracked text file. chat-foundation.md
+    # was cited as §7, §6 and §4a from three files while only ever having §0-§4 — all three in this
+    # spelling, which arm (1) cannot see because it requires a preceding `](link)`.
+    for rel in scannable:
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for target, name in _CODE_SECTION.findall(text):
+            dest = _resolve_doc_ref(root, tracked_md, rel, target)
+            if dest is None:
+                continue
+            name = name.strip().rstrip("*_ ")
+            anchors = _claude_anchors(root / dest)
+            if not any(
+                a.lower().startswith(name.lower()) or name.lower().startswith(a.lower())
+                for a in anchors
+            ):
+                broken.append(f"{rel}: `{target}` § {name!r} is not an anchor there")
 
     assert not broken, (
         "CLAUDE.md claim(s) that do not resolve:\n  " + "\n  ".join(sorted(broken)) + "\n"

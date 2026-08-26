@@ -46,6 +46,13 @@ run reveals; each test's docstring carries the detail.
   ref, an `R-NN` tag) run wider — every tracked `docs/**/*.md`** — because those govern all
   docs rather than the CLAUDE.md shape; scoping them narrow is what let one backlog collect
   nine refs that had all rotted, and twelve tags outlive the registry that defined them.
+  **Two arms read CODE as well**, for the third instance of that same scope lesson: a doc path
+  backticked in `.py`/`.ts`/`.yaml`/… (deleting cycle-fixtures.md stranded live pointers in
+  `fixtures.ts` and `vitest.config.ts`, every gate green), and the UNLINKED path-plus-section
+  spelling the linked arm's regex cannot see (chat-foundation.md was cited as §7, §6 and §4a
+  while only ever having §0–§4). Anchors resolve against headings **and bold paragraph leads**,
+  because the repo cites both — and a scan that red-flags a legitimate citation gets xfailed,
+  taking the whole surface with it.
 
 Neither can be an import-time assert: no production module owns the repo's file bytes.
 
