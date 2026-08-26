@@ -1,6 +1,6 @@
 # webapp — CLAUDE.md
 
-Next.js + React + TypeScript, static export at `out/` mounted at the domain root by FastAPI: **the app owns `/`, the API is the carved-out `/api/v1` namespace.** A read-only dashboard over served cycle state — it polls, it renders, it decides nothing. Installed versions are in `package.json`.
+Next.js + React + TypeScript, static export at `out/` mounted at the domain root by FastAPI: **the app owns `/`, the API is the carved-out `/api/v1` namespace.** A control-plane dashboard over served cycle state — it polls, it renders, it issues control verbs (pause/resume/fork/steer/set-budget/…) through `POST /commands/{kind}`; it never recomputes a score itself. Installed versions are in `package.json`.
 
 ## Load-bearing
 
@@ -146,12 +146,12 @@ Per-poll re-renders cascade through the chart tree by default. **Any chart consu
 
 ## Testing posture
 
-The gate is `python scripts/gate.py --web`, which is also what CI's `webapp` job runs. Two things about it are this layer's rather than the gate's: the standalone typecheck is what makes `strict` real, because `next build` alone does not hard-fail on every type error; and Vitest is scoped to reader-side derivations — pure data → data helpers — per `webapp/vitest.config.ts`, with display components left to smoke. Cycle fixtures live at `tests/fixtures/cycles/`; recipe in [`../docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
+The gate is `python scripts/gate.py --web`, which is also what CI's `webapp` job runs. Two things about it are this layer's rather than the gate's: the standalone typecheck is what makes `strict` real, because `next build` alone does not hard-fail on every type error; and Vitest is scoped to reader-side derivations — pure data → data helpers — per `webapp/vitest.config.ts`, with display components left to smoke. Cycle fixtures live at `tests/fixtures/cycles/` (recipe + full roster: [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures). The one vitest loads today is `l2_terminal/` — a completed cycle whose last round stopped before `l1_score` fired — via `loadCycleFixture()` (`lib/test-utils/fixtures.ts`); `round-candidates.test.ts` pins that an empty-candidates round stays excluded from `historicalRounds`/`closedRoundNumbers`/`groupByRound`.
 
 Smoke-test manually at `http://localhost:8001/` after a behavioural change. **Two states, two harnesses:**
 
 - **anon** — open `:8001` as-is (no flag); drives the public-preview surface.
-- **authed + live** — relaunch with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to the CLI's resolver, so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). The cheap way to exercise the surface contract's `live` / `warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`../dev/oidc-local/`](../dev/oidc-local/), [`../docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md) § Local OIDC harness) for the one thing it cannot reach: the real Google OIDC login round-trip.
+- **authed + live** — relaunch with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to the CLI's resolver, so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). The cheap way to exercise the surface contract's `live` / `warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`../dev/oidc-local/`](../dev/oidc-local/)) for the one thing it cannot reach: the real Google OIDC login round-trip.
 
 Reach for a component-render test only for a regression class that compile + smoke + the derivation tests cannot catch; today's bug classes are reader-side and ride the existing Vitest scope.
 

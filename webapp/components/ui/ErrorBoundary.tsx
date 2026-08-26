@@ -52,7 +52,7 @@ export class ErrorBoundary extends Component<Props, State> {
           The dashboard hit a render error
         </h1>
         <p style={{ fontSize: "var(--text-md)", lineHeight: 1.5, margin: "0 0 12px" }}>
-          This is a read-only view — your campaign on disk is untouched.
+          A render error never writes to disk — your campaign is untouched.
           Reloading usually clears it; if it repeats, the console has the
           component stack.
         </p>

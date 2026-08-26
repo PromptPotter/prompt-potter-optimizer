@@ -150,7 +150,6 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 | [DSPy optimizer](dspy-optimizer.md) **(draft)** | Driving the loop from inside someone else's DSPy program via the separate `promptpotteropt` package — what that trades away, the `compile()` swap, `Loop` / `Node`, and why it asks for a dataset name. Packaging boundary: [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md) |
 | [Run initialization](run-initialization.md) | The INIT phase: the four-step chain `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop`, the init/runner write boundary, and the four ways the chain breaks |
 | [Event stream](event-stream.md) | SSE Profile-A contract |
-| [Local repro harnesses](cycle-fixtures.md) | Freezing a buggy cycle as a test fixture, and the Dex harness for the auth-on dashboard |
 | [Conventions](conventions.md) | Style + code-shape rules + the six situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock) |
 
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/the-loop.md`](../concepts/the-loop.md).

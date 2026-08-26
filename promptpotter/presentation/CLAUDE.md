@@ -26,7 +26,7 @@ what may not happen here is § Out-of-bounds.
 - **No business logic here** — `cli/` and `api/` parse, route, and format; anything else is drift into the wrong layer.
 - **One orchestration layer under every adapter.** A behavior reachable from the CLI but not the notebook or webapp is a bug, not a feature.
 
-## Read-only API stance
+## No ad-hoc mutating routes
 
 **Add no mutating route touching campaign / cycle state** — that is
 Control-remote highway territory, and out of charter here. `api/` is

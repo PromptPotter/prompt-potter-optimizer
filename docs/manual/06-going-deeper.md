@@ -8,15 +8,4 @@ matches your question.
 - [Developer](../developer/README.md) — implementation: prompt structure, the dispatch hub, self-healing, wiring a node.
 - [Methods](../methods/README.md) — the statistics: PoBB elimination and the hard-sample leaderboard.
 - [Research](../research/README.md) — benchmarks, metrics, and where PromptPotter sits among peers.
-
----
-
-## Iterating on prompts manually
-
-Hand-tuning `l1_generate` (or another optimizer prompt) means editing
-`promptpotter/assets/optimizer/pipeline.yaml` directly — it is an operator-owned file that nothing
-writes. To measure whether an edit helped, run the optimizer **on itself**:
-`python -m promptpotter new promptpotter-self` (L4) scores optimizer prompt variants against a
-cached origin on shared cells and reports a paired verdict.
-
-Full design spec: [`../specs/roadmap.md`](../specs/roadmap.md).
+- L4 self-optimization — [`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md), then the `/potter-self` skill.

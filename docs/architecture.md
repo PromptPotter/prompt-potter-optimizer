@@ -500,7 +500,7 @@ Convention (not CI-enforced — the structural scan was cut; see
 (`notebooks/bbeh_potter.ipynb`) is **work-in-progress** — kept but not
 part of the documented entry-point surface. Mark it WIP in cell-1
 markdown so a reader knows status at a glance. The
-webapp (`webapp/`) ships — served read-only at the root, chat as the
+webapp (`webapp/`) ships — a control-plane app served at the root, chat as the
 first tab — rendering views over `dashboard.json` plus a file-tree
 view; a panel that reads a disk file we don't already commit to
 writing needs that write committed first. The `init`

@@ -107,29 +107,18 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 
 ## Live state ([forks and the family root](../concepts/campaign-tree.md))
 
-- `dashboard.json` — current phase, round, candidate, accuracies, in-flight query. Full path:
-  ```
-  .promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard.json
-  ```
-  The active campaign + cycle ids are in `.promptpotter/projects/{tenant_id}/.workspace/active_session.json`. Open the file directly for live state.
-- **Webapp preview** — same `dashboard.json`, rendered in the browser. In a separate terminal, run:
+- **Webapp preview** — in a separate terminal, run:
   ```bash
   python -m uvicorn promptpotter.main:app --port 8001
   ```
-  then open <http://127.0.0.1:8001/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
+  then open <http://127.0.0.1:8001/>. Keep `python -m promptpotter resume` running in another terminal for live refresh.
 - For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the gitignored `logs/latest.log` — the most-recent run's stdout, ANSI-stripped.
 
-`dashboard.json` lives in the cycle's **own** dir. When you fork, the fork's dir is flat alongside its root at `campaigns/{campaign_id}/cycles/{fork_cycle_id}/`, and its `dashboard.json` lives there too — each cycle owns its stream. Tail the cycle you're actually running.
-
-- `dashboard.json::cycle_id` stamps the cycle that owns the file.
-
-The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`, `.runtime/`). Open those when you want to inspect what specifically happened in one fork; tail the root for live progress.
+Full on-disk shape — the exact `dashboard.json` / `active_session.json` paths, fork-directory layout: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
 ## Where results land
 
-- `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated at every round-complete — so a run stopped mid-round shows the last
-  round that closed, not the partial one.
-- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `stop_reason`, `mode`. The cycle's best score lives top-level (`index.json::best_accuracy` / `best_round`), not inside `final`.
+Best config, provenance, and per-round digest all live under the campaign's directory. Full file-by-file reference: [`../operations/persistence-and-state.md § File reference`](../operations/persistence-and-state.md#file-reference).
 
 ## Stopping
 

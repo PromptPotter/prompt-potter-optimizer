@@ -262,7 +262,7 @@ app.include_router(verify_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 
-# Static webapp mount — read-only operator dashboard at the domain root
+# Static webapp mount — the operator dashboard, served at the domain root
 # (Next.js export from webapp/, built via `npm run build` in that directory).
 # The app owns `/`; the API is the carved-out `/api/v1` namespace. This mount
 # is a catch-all and MUST stay the last route registered — every API router

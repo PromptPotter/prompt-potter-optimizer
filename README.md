@@ -86,24 +86,21 @@ Each round is **generate → score → critique**: L1 proposes candidates, they'
 
 ### Compared to GEPA, and to AlphaEvolve
 
-**GEPA** ([arXiv:2507.19457](https://arxiv.org/abs/2507.19457), ICLR 2026 Oral) is the reference point for prompt optimization today, and ships inside DSPy as `dspy.GEPA`; **AlphaEvolve** is the closest published peer on the code-evolution side. Same family and the same reflective core — a critique of what failed drives the next proposal. GEPA evolves the instruction text of a DSPy program, AlphaEvolve evolves source code, PromptPotter evolves prompts **and** the pipeline parameters around them, jointly. That is scope — a different target, not a missing feature; the table below is capability.
+**GEPA** ([arXiv:2507.19457](https://arxiv.org/abs/2507.19457), ICLR 2026 Oral) is the reference point for prompt optimization today, and ships inside DSPy as `dspy.GEPA`; **AlphaEvolve** is the closest published peer on the code-evolution side. Same family and the same reflective core — a critique of what failed drives the next proposal, a population breeds and the weak die, and the scoring formula is declared once and wired into every eval path. GEPA evolves the instruction text of a DSPy program, AlphaEvolve evolves source code, PromptPotter evolves prompt and pipeline jointly. That is scope — a different target, not a missing feature; the table below is capability.
 
 | Capability | GEPA | AlphaEvolve | PromptPotter |
 |---|:--:|:--:|:--:|
-| **Evolutionary tree search** — a population breeds and the weak die; branches are kept and compared rather than replaced | 🟢 | 🟢 | 🟢 |
-| **Automatic scoring** — define the formula once; it wires itself into every eval path, no glue code | 🟢 | 🟢 | 🟢 |
-| **Statistical pruning** — drop losers after a handful of queries, not the full budget ([PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)) | 🟡 | 🟢 | 🟢 |
-| **Carries knowledge forward** — parameter impact, query difficulty and failure patterns across runs, plus a library of proven personas, thinking styles and answer formats to recombine | 🔴 | 🟢 | 🟢 |
-| **Multi-step pipelines** — tune a chain of calls, not a single one | 🟢 | 🟡 | 🟢 |
-| **Prompt + pipeline parameters** — model, temperature and node thresholds evolve alongside the prompt | 🔴 | 🟡 | 🟢 |
-| **Guards against self-validation** — subset-invariant ability scoring (Rasch θ) + degenerate-candidate detection, so the winner's number is not merely its own selection score | 🔴 | 🟡 | 🟢 |
-| **Self-healing** — an invalid proposal is caught and taught to a *different* layer, not just discarded ([internals](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)) | 🟡 | 🟡 | 🟢 |
-| **Pause, resume, rewind, fork** — a run is an object on disk you steer, not a `compile()` you must finish | 🟡 | — | 🟢 |
-| **A replay is not free** — a cache-served measurement stays on the cost ledger instead of reporting zero spend | 🔴 | — | 🟢 |
-| **Open & inspectable** — the code is on GitHub and the statistical model (PoBB) is documented and yours to tune | 🟢 | 🔴 | 🟢 |
 | **Runs in your editor** — drive a whole campaign from the terminal (`/potter-run`) | 🔴 | 🔴 | 🟢 |
+| **Tunes the whole pipeline** — a chain of calls, not a single one: model, temperature and node thresholds evolve alongside the prompt | 🟡 | 🟡 | 🟢 |
+| **Stops losers early** — the budget goes to the questions that separate candidates, and one is abandoned the moment the evidence says it loses ([PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)); scores share one scale, so nobody wins by drawing an easier set | 🟡 | 🟡 | 🟢 |
+| **Self-healing** — an invalid proposal is caught and taught to a *different* layer, not just discarded ([internals](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)) | 🟡 | 🟡 | 🟢 |
+| **Carries knowledge forward** — parameter impact, query difficulty and failure patterns across runs, plus a library of proven personas, thinking styles and answer formats to recombine | 🔴 | 🟢 | 🟢 |
+| **Every measurement is priced** — a cache-served result keeps its full cost on the ledger, so a replay reports what the work really cost | 🔴 | — | 🟢 |
+| **Open & inspectable** — the code is on GitHub and a browser control plane shows the run as it happens; it is an object on disk you pause, resume, rewind or fork, not a script that has to finish | 🟡 | 🔴 | 🟢 |
 
-🟡 is a partial version of the same capability — GEPA gates on a minibatch where PromptPotter runs a sequential test, and its checkpointing lives in the standalone `gepa` package rather than on the DSPy path; AlphaEvolve's are that capability expressed at the code level. A `—` is a closed hosted service whose behaviour is not publicly documented. **Where each is ahead of us:** GEPA on **reach** — it sits inside DSPy, with that ecosystem's adapters, tracing and audience, which is why PromptPotter ships as a DSPy optimizer rather than asking anyone to leave it; AlphaEvolve on **code optimization**, its search reaching into source, which is not what PromptPotter is pointed at. Full grading: [`related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#feature-highlights) — and DSPy's own engine, read from its source, in [§ What a DSPy source study settles](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#what-a-dspy-source-study-settles).
+🟡 is a partial version of the same capability — GEPA gates on a minibatch (one fixed slice, checked once) where PromptPotter runs a sequential test, evolves a chain's instruction text but not the parameters around it, discards a bad proposal instead of teaching another layer, and keeps its checkpointing in the standalone `gepa` package. AlphaEvolve's are that capability at the code level. A `—` is a closed service whose behaviour is not documented.
+
+**Where each is ahead of us:** GEPA on **reach** — it sits inside DSPy, with that ecosystem's adapters, tracing and audience, which is why PromptPotter ships as a DSPy optimizer rather than asking anyone to leave it; AlphaEvolve on **code optimization**, its search reaching into source, which is not what PromptPotter is pointed at. Full grading: [`related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#feature-highlights) — and DSPy's own engine, read from its source, in [§ What a DSPy source study settles](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#what-a-dspy-source-study-settles).
 
 ### Use it as a DSPy optimizer
 
@@ -153,7 +150,7 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 ## Watching a run
 
-While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{campaign_id}/cycles/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `rounds/`, `log.md`, `index.json`. Internal resume + audit state lives under `.runtime/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md).
+While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{campaign_id}/cycles/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `rounds/`, `log.md`, `index.json`. Internal resume + audit state lives under `.runtime/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the webapp control plane at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md).
 
 > [!TIP]
 > <details>

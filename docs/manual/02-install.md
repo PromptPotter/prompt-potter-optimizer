@@ -25,11 +25,11 @@ Create a file called `.env` in the repo root, containing exactly:
 OPENROUTER_API_KEY=your_key_here
 ```
 
-Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` (or the OS application-data dir when that variable is unset) — the same place your campaigns and measurements live. One location per install, resolved by the package: it is deliberately **not** the working directory, which would give you one `.env` per folder you happen to run from. `promptpotter new` offers to write it for you on first run if no key is set.
+Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` instead. `promptpotter new` offers to write it for you on first run if no key is set.
 
 The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It's install-global, configured once in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
 
-Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. It is the only shipped asset you may shadow — its two neighbours are generated (`resolved_schemas.json`) or are the L4 instrument (`sets/*.yaml`).
+Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
 
 Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
 
@@ -74,7 +74,7 @@ dashboard is `[api]`, because PromptPotter is also a library another program imp
 that drags a web server along is one nobody adds.
 
 ```bash
-pip install -e ".[api]"            # the read-only API + the dashboard mount + OIDC identity
+pip install -e ".[api]"            # the API + the dashboard mount + OIDC identity
 pip install -e ".[excel]"          # ingest .xlsx as well as CSV/TSV/JSON/JSONL
 pip install -e ".[stats]"          # Wilson CI, significance tests (scipy)
 pip install -e ".[jupyter]"        # JupyterLab + IPython display

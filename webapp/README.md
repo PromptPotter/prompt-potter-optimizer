@@ -1,4 +1,4 @@
-The PromptPotter dashboard — a read-only Next.js app served at the domain root by
+The PromptPotter dashboard — a Next.js control-plane app served at the domain root by
 FastAPI, with the API as the carved-out `/api/v1` namespace.
 
 **How to run, build and test it lives in [`CLAUDE.md`](CLAUDE.md) § Build + run and

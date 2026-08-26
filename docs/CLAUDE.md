@@ -35,7 +35,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
 | What's the full access/security model — tiers, boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
-| How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
+| How do I freeze a buggy cycle as a test fixture? | [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures (pytest side); [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture (vitest side) |
 | I changed the formula / a PoBB setting / the engine — do my measurements still carry over, or must I fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
 
 ## L4 — the recursion case (project's closing focus)

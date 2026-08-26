@@ -93,3 +93,22 @@ builders that return REAL domain models — `round_result`, `cycle_result`,
 `scored_candidate`, `degradation_health`, `lost_round` — each taking only the fields a
 test bends. Add a parameter when a test needs to bend one, never a whole new builder for
 a shape an existing one can express.
+
+## Frozen cycle fixtures (`tests/fixtures/cycles/`)
+
+`frozen_campaign/campaign.json` and `frozen_dataset_template/campaign.yaml` pin real
+`Campaign`/`CampaignConfig` payloads (`extra="forbid"`) from before a since-landed field
+rename. `test_resume.py` writes each raw dict into a `built_stores` tmp workspace and reads
+it back through the real loader (`store.load_campaign`, `load_dataset_campaign_config`) — a
+freshly-built dict can't catch this, since by construction it never carries a stale key.
+The class has fired three times in ten weeks (`application/CLAUDE.md::campaign_config.py`),
+once bricking a live tenant's dataset (`swiss-invoices-eval`) — a rename that silently
+orphans on-disk data is exactly this file's "breaks silent" bar, not a hypothetical one.
+
+Vitest reaches into the same tree for a different bug class (`l2_terminal/` — owned by
+[`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture), which is why the tree sits
+here rather than under `webapp/`. Freeze a new one only for a landed bug: hand-write the
+minimal shape against the real model first; strip a real cycle only when the repro needs a
+wider slice — drop LLM traces and `spend.history`, replace every id, anonymize
+operator-private fields — and leave a one-paragraph `README.md` beside it naming the bug
+class.

@@ -6,8 +6,8 @@ import { defineConfig } from "vitest/config";
 //   .test.tsx — UI-primitive render/interaction tests. Each opts into jsdom
 //               with a `// @vitest-environment jsdom` docblock at its top, so
 //               the fast node default stays for the derivation suite.
-// See docs/developer/cycle-fixtures.md for the testing posture and how to
-// freeze a new cycle fixture under ../tests/fixtures/cycles/.
+// See webapp/CLAUDE.md § Testing posture for how to freeze a new cycle
+// fixture under ../tests/fixtures/cycles/.
 export default defineConfig({
   resolve: {
     alias: {

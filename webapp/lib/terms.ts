@@ -42,7 +42,7 @@ export const TERMS: Record<string, string> = {
   stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",
   stub_score_freq:    "Inferred bucket counts. Real per-sample scores live in measurements/.",
   badge_top:          "Page-anchor card — primary signal for round health.",
-  brand_live_preview: "This page polls dashboard.json every 2s. Read-only.",
+  brand_live_preview: "This page polls dashboard.json every 2s.",
 
   // New Job status / spend bar — collapsed chips + expand-down panel
   newjob_bar_best:   "Lift over origin — the running winner's gain (best − origin). '+12% · best 62%' reads as '+12 points over origin, now at 62%' — the gain is the spend's return.",

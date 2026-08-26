@@ -1,5 +1,5 @@
 // Test-only — loads checked-in cycle fixtures from tests/fixtures/cycles/
-// for vitest to assert against. See docs/developer/cycle-fixtures.md for
+// for vitest to assert against. See webapp/CLAUDE.md § Testing posture for
 // the freezing recipe.
 //
 // The fixture tree lives outside the webapp/ subtree intentionally:
