@@ -389,9 +389,9 @@ async def _run_sweep_batch(
     train_data: list[Sample],
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
-    """Thin shim → ``application.sweep.run_sweep_batch``, binding the observer factory and the
+    """Thin shim → ``application.sweep_batch.run_sweep_batch``, binding the observer factory and the
     active-pointer reload to CLI args so the application layer imports no ``argparse``."""
-    from promptpotter.application.sweep import run_sweep_batch
+    from promptpotter.application.sweep_batch import run_sweep_batch
     from promptpotter.presentation.cli.session import load_session
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
@@ -426,7 +426,7 @@ async def _maybe_dispatch_sweep_batch(
     setup error: running one unpaired cycle instead answers a different question than the one posed."""
     if not getattr(args, "sweep", False):
         return None
-    from promptpotter.application.sweep import load_sweep_payloads, resolve_sweep_dir
+    from promptpotter.application.sweep_batch import load_sweep_payloads, resolve_sweep_dir
 
     sweep_dir = resolve_sweep_dir(dataset_config_dir)
     if sweep_dir is None:

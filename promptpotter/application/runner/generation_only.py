@@ -1,5 +1,6 @@
 """Generation-only round — L1 variants without scoring. Shared by ``new --sweep-batch`` and ``--diag``; the round
-document carries ``status='generation_only'``, no scoreboard and no accuracy."""
+document carries ``status='generation_only'``, the word every reader of it already uses (``output.py::gen_only_rounds``,
+``review_md.py::_is_generation_only``), no scoreboard and no accuracy."""
 
 from __future__ import annotations
 
@@ -17,13 +18,13 @@ from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.shared.errors import graceful
 
 
-async def run_sweep_generation_only(
+async def run_generation_only_round(
     cycle: Cycle,
     session: Session,
     cb: RunCallbacks,
     round_num: int,
     *,
-    label: str = "sweep_gen_only",
+    label: str,
 ) -> None:
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
@@ -37,7 +38,7 @@ async def run_sweep_generation_only(
     )
 
     if session.state.cycle_id:
-        with graceful("Sweep generation-only round_data write failed"):
+        with graceful("Generation-only round_data write failed"):
             # A generation-only round IS a round — same document, `status` telling every
             # reader it was never scored. The scoring scalars below are structural zeros
             # (no measurement happened), not measurements of zero; `health` and the
@@ -75,4 +76,4 @@ async def run_sweep_generation_only(
         )
 
 
-__all__ = ["run_sweep_generation_only"]
+__all__ = ["run_generation_only_round"]

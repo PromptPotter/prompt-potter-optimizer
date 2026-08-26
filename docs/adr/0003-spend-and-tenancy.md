@@ -150,7 +150,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 |---|---|---|
 | CLI (`new` / `resume` / `verify` / `reset`) | `presentation/cli/commands/_shared.py::identity_from_args(args)` derives the `IdentityContext` from `args.tenant`; `init_services_cli(identity=…)` threads it into `init_services` and then `build_stores`. | `default_identity()` → `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. |
 | FastAPI (`presentation/api/`) | `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it for routers. Stage-1 OIDC middleware replaces only `resolve_identity`. | Same `default_identity()` value; auth-off mode is one branch, not a feature flag. |
-| Background jobs (fork, sweep, sweep_restore) | Inherit from parent `Session.identity` — already populated; never re-resolved from disk. `application/sweep.py`, `application/optimization/resume_and_fork/fork_siblings.py`. | Same `IdentityContext` flows through; no extra ceremony. |
+| Background jobs (fork, sweep, sweep_restore) | Inherit from parent `Session.identity` — already populated; never re-resolved from disk. `application/sweep_batch.py`, `application/optimization/resume_and_fork/fork_siblings.py`. | Same `IdentityContext` flows through; no extra ceremony. |
 
 **Auth-off definition (Stage 0).** A single boolean at startup (`settings.AUTH_OFF`, default `True`). When set: the FastAPI dependency returns the Stage-0 `IdentityContext` default unconditionally and OIDC middleware is not mounted. The CLI is auth-off by definition (no request context). **If a reader of this ADR can't convince themselves that today's `python -m promptpotter new aime` runs unchanged, the ADR is wrong** — the only delta is internal types. Stage 1 (OIDC client) flips the default but does not rewrite this seam — same `IdentityContext`, different source.
 
@@ -371,7 +371,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | Path-component validator | `promptpotter/infrastructure/store/io.py` |
 | CLI seam (shipped) | `promptpotter/presentation/cli/commands/_shared.py` |
 | API seam (shipped) | `promptpotter/presentation/api/deps.py` |
-| Background job inheritance | `promptpotter/application/sweep.py` |
+| Background job inheritance | `promptpotter/application/sweep_batch.py` |
 | Spend resolution | `promptpotter/shared/pricing.py` |
 | Token emit (optimizer) | `promptpotter/application/optimization/dispatch/llm_call/call.py` |
 | Token emit (backend) | `promptpotter/application/scoring/sample_measurement.py` |

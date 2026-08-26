@@ -234,7 +234,7 @@ Breadth-first comparison of N L1-prompt hypotheses: instead of one trial cycle o
 
 **Per-fork protocol:** origin (cache-hit after the first) + 1 scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`.
 
-**Authoring.** One `*.yaml` file per arm under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). `reason` is a label and changes nothing the fork runs, so **an arm setting no contrast lever is refused at load** (`application/sweep.py::load_sweep_payloads`, which names every offending arm at once): it would fork a copy of its parent and pay a full scored round to measure it.
+**Authoring.** One `*.yaml` file per arm under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). `reason` is a label and changes nothing the fork runs, so **an arm setting no contrast lever is refused at load** (`application/sweep_batch.py::load_sweep_payloads`, which names every offending arm at once): it would fork a copy of its parent and pay a full scored round to measure it.
 
 ```yaml
 reason: >-

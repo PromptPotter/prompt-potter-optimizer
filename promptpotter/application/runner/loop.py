@@ -16,6 +16,7 @@ from promptpotter.application.optimization.dispatch.facade import (
 from promptpotter.application.optimization.l1.execute import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.runner.generation_only import run_generation_only_round
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     close_round,
@@ -24,7 +25,6 @@ from promptpotter.application.runner.round import (
     persist_round,
     post_round,
 )
-from promptpotter.application.runner.sweep import run_sweep_generation_only
 from promptpotter.application.runner.termination import (
     BudgetGate,
     backend_unreachable_tripped,
@@ -218,13 +218,15 @@ async def run_round_loop(
                 return budget_stop, None
 
             if sweep and clean_rounds >= 1:
-                await run_sweep_generation_only(cycle, session, cb, round_num)
+                await run_generation_only_round(
+                    cycle, session, cb, round_num, label="sweep_gen_only"
+                )
                 return StopReason.SWEEP_COMPLETE, None
 
             if diag and clean_rounds >= 1:
                 # Force L2 (bypass stall counter) on R1 evidence; peek R2 with L2 overrides.
                 await escalate_or_stop(cycle, config, session, round_num - 1, cb)
-                await run_sweep_generation_only(
+                await run_generation_only_round(
                     cycle, session, cb, round_num, label="diag_gen_only"
                 )
                 return StopReason.DIAG_COMPLETE, None
