@@ -127,7 +127,8 @@ def build_l1_response_schema(
     if n_variants is not None:
         inlined["properties"]["variants"]["maxItems"] = n_variants
 
-    variant_props = inlined["properties"]["variants"]["items"]["properties"]
+    variant_items = inlined["properties"]["variants"]["items"]
+    variant_props = variant_items["properties"]
 
     # 1. pipeline_params_override — per-node tunables.
     pp_override = variant_props["pipeline_params_override"]
@@ -145,8 +146,7 @@ def build_l1_response_schema(
     # here anyway, which is worse than useless: it read as though the campaign's model
     # catalogue were an emittable axis, contradicting the lock the line above states.
     # The lock is structural — the LLM cannot emit a key the schema never declares.
-    npk = pipeline_schema.node_param_keys()
-    for node_name, keys in npk.items():
+    for node_name, keys in pipeline_schema.node_param_keys().items():
         node = pipeline_schema.get_node(node_name)
         if node is None:
             continue
@@ -212,7 +212,6 @@ def build_l1_response_schema(
     # as a legal answer to a question the loop treats as mandatory, and 2 of 19 live rounds took
     # it — for every variant in the call, since one response is one decision. `citable_fields` is
     # never empty, so the object arm alone is always satisfiable.
-    variant_items = inlined["properties"]["variants"]["items"]
     eg = variant_props["evidence_grounding"]
     object_arm = next(a for a in eg["anyOf"] if a.get("type") == "object")
     object_arm["properties"]["field"]["enum"] = list(citable_fields)
@@ -232,6 +231,6 @@ def build_l1_response_schema(
     # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)
     field_names = effective_l1_field_names()
     if field_names:
-        _rename_variant_schema(inlined["properties"]["variants"]["items"], field_names)
+        _rename_variant_schema(variant_items, field_names)
 
     return cast("dict[str, Any]", inlined)

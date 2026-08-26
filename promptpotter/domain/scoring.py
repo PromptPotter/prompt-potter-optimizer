@@ -152,6 +152,14 @@ DEFAULT_SCORER_ID = "default_hit"
 HIT_THRESHOLD = 1.0
 
 
+def extract_item_label(c: Any) -> str:
+    """Canonical label of a ranked item (dict ``{candidate: ...}``, list/tuple, or string) — what a
+    rank walk compares against ground truth and what a display line prints."""
+    if isinstance(c, dict):
+        return str(c.get("candidate", c))
+    return c[0] if isinstance(c, (list, tuple)) else str(c)
+
+
 def is_hit(fitness: float | None) -> bool:
     """Per-sample display and stratification ONLY — never a rate, an interval or a comparison:
     graded formulas never reach the ceiling, and on a binary one the mean is ``accuracy``."""

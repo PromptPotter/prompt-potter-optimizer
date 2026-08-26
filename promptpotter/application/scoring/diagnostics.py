@@ -11,9 +11,9 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.scoring.formula import extract_item_label
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.domain.scoring import extract_item_label
+from promptpotter.shared.errors import has_pipeline_warnings
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
@@ -49,14 +49,11 @@ def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
+    """The NODE-derived keys only: `terminal_node`, the error flag and the degradation flag are
+    read off the row itself by every consumer, so this does not re-pack them."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
-    diag: dict[str, float | bool | int | str | None] = {
-        "terminal_node": pd.get("terminal_node"),
-        "total_time_ms": pd.get("total_time"),
-        "degraded": bool((pd.get("diagnostics") or {}).get("warnings")),
-        "error": is_error_result(result),
-    }
+    diag: dict[str, float | bool | int | str | None] = {}
     if not pd:
         return diag
 
@@ -117,9 +114,8 @@ def _diag_ranker(
         ]
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
-    # A width-1 ranking has no ranking to report, and the panel prints these on MISS lines
-    # only — so `gt_in_ranked` was False on every line it could ever appear on. `None` where
-    # the fact is absent, which the panel's `is not None` guard already reads.
+    # A width-1 ranking has no ranking to report, so the fact is absent rather than False —
+    # which is what the panel's `is not None` guard reads.
     ranked = len(candidates) >= 2
     return {
         "gt_in_ranked": (pos is not None) if ranked else None,

@@ -17,7 +17,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
     _mint_fork,
     cleanup_stub_fork_if_empty,
 )
-from promptpotter.application.views.render import render_sweep_summary
+from promptpotter.application.views.render.markdown import render_sweep_summary
 from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome

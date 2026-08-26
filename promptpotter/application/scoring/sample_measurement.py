@@ -403,7 +403,7 @@ async def measure_sample(
         from promptpotter.application.optimization.pobb.classification import (
             terminal_ranking,
         )
-        from promptpotter.application.scoring.formula import extract_item_label
+        from promptpotter.domain.scoring import extract_item_label
 
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
         predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT

@@ -211,7 +211,9 @@ class EscalationFSM:
     ) -> EscalationEvent:
         """L1 round outcome; routing delegates to `decide_escalation`. An emptied life bank overrides a
         CONTINUE or an escalation, but never a more-specific stop (a natural PERFECT / L3 convergence)."""
-        from promptpotter.application.optimization.escalation.decide import (
+        # Deferred: `rules` imports this module's `NextAction` / `EscalationEvent` at module level,
+        # so the policy layer sits above the state it reports on and this is the one edge back down.
+        from promptpotter.application.optimization.escalation.rules import (
             EscalationInputs,
             decide_escalation,
         )

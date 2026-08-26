@@ -14,7 +14,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
 from promptpotter.application.review_md import render_review_md
-from promptpotter.application.views.render import to_markdown
+from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.view_models import (
     DigestStatusView,
     FinalWinnerView,

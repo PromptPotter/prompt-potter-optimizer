@@ -51,7 +51,7 @@ persona → task_intent → problem_description → instruction
 
 ## 2. Dispatch (which layer fires when)
 
-The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/decide.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
+The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimization/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
 
 ```
 round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)

@@ -14,7 +14,10 @@ from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
 )
-from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_layout
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    load_optimizer_prompt,
+    resolve_node_layout,
+)
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.results import CritiqueReadout
 
@@ -40,10 +43,6 @@ async def run_l1_critique(
     """Build the critique from pipeline stats + LLM analysis. The output is materialized to a dict so persistence does not
     drag Pydantic into the domain serialization path."""
     bundle = build_bundle(cycle, latest_round=round_result)
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        load_optimizer_prompt,
-    )
-
     template, prompt_vars, rendered, coverage = DispatchHub.fill(
         load_optimizer_prompt("l1_critique"),
         resolve_node_layout("l1_critique"),

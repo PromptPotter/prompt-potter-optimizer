@@ -84,6 +84,7 @@ async def generate_or_load_candidates(
             yield_stats = detect_invariants(
                 persisted, cycle.opt_sp, parent_pipeline_params, cycle.rounds
             )
+            summaries = candidate_summaries(persisted, round_num)
             # llm_call never fires on this branch — synthesize an
             # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
             # trail + dashboard see the node, without lying about a real
@@ -97,7 +98,7 @@ async def generate_or_load_candidates(
                         payload={
                             "type": "l1_generate",
                             "input": {"source": "loaded_from_disk", "round": round_num},
-                            "response": {"candidates": candidate_summaries(persisted, round_num)},
+                            "response": {"candidates": summaries},
                         },
                     )
                 )
@@ -109,7 +110,7 @@ async def generate_or_load_candidates(
                 n_candidates=len(persisted),
                 n_scoring_samples=n_scoring_samples,
                 loaded_from_disk=True,
-                candidates=candidate_summaries(persisted, round_num),
+                candidates=summaries,
                 l1_yield=yield_stats.l1_yield,
                 l1_n_no_op=yield_stats.l1_n_no_op,
                 l1_n_duplicate=yield_stats.l1_n_duplicate,

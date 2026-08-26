@@ -8,9 +8,9 @@ only where the surface stands now — never a target to reach.
 from promptpotter.diagnostics import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 327,
+    "modules": 326,
     "init_files": 48,
-    "reexport_shims": 6,
+    "reexport_shims": 5,
     "config_leaf_fields": 39,
     "settings_env": 31,
     "settings_const": 14,

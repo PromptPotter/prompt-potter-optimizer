@@ -198,13 +198,12 @@ def _resolve_prior_cache(
 def _resolve_partial_escalation(
     batch: QueryLoopResult,
     *,
-    results: list[QueryMeasurement],
-    escalation_signal: EscalationSignal | None,
     candidate_idx: int,
     n_total_candidates: int,
 ) -> EscalationSignal | None:
     """Resolve the escalation signal for a non-completed, non-escalated batch. Raises
     ``KeyboardInterrupt`` to unwind a stop — it must propagate uncaught. Branch order is load-bearing."""
+    escalation_signal = batch.escalation_signal
     if not batch.completed and not escalation_signal:
         if batch.stop_reason == "skip":
             # Operator early-abort of THIS searchpoint. The partial is already on
@@ -223,7 +222,7 @@ def _resolve_partial_escalation(
             # caller can attach a RuntimeFailure and continue with the next
             # candidate — never kill the round.
             return _build_scoring_error_signal(
-                results=results,
+                results=batch.results,
                 stop_reason=batch.stop_reason or "",
                 candidate_idx=candidate_idx,
                 n_total_candidates=n_total_candidates,
@@ -328,6 +327,8 @@ async def score_search_point(
     priors_appended = not prior_tail
 
     def _composite(rows: list[QueryMeasurement]) -> dict[str, Any]:
+        """This candidate's fitness over *rows*. Also the loop's `running_scores`, so the number a
+        live surface shows converging is the one the round banks — never a second fold."""
         return compute_composite_fitness(
             rows,
             pipeline_schema,
@@ -379,11 +380,6 @@ async def score_search_point(
         _save_run(results, running if merged is results else _composite(merged))
         return running
 
-    def _running_scores(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """The in-flight candidate's fitness over results-so-far, same shape and inputs as the final
-        fold. It rides the sample snapshot, so a file-tree reader watches the composite converge."""
-        return _composite(results)
-
     # Bound over the walk alone: it is the only part reaching the backend seam, the seam is the
     # only reader, and the scope bounds `on_sample_pre_check`'s re-entry into this same function.
     with measured_candidate_scope(measured):
@@ -400,25 +396,17 @@ async def score_search_point(
             n_total_candidates=n_total_candidates,
             axes=axes,
             persist_fresh=_persist_fresh,
-            running_scores=_running_scores,
+            running_scores=_composite,
             on_sample_pre_check=on_sample_pre_check,
         )
     results = batch.results
     escalation_signal = _resolve_partial_escalation(
         batch,
-        results=results,
-        escalation_signal=batch.escalation_signal,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
     )
 
-    scores = compute_composite_fitness(
-        results,
-        pipeline_schema,
-        opt_sp=opt_sp,
-        round_scorer=session.scoring.round_scorer,
-        l1_diversity=l1_diversity,
-    )
+    scores = _composite(results)
     if batch.stop_reason == "skip":
         # Mark the partial as an operator early-abort so the candidate report and
         # measurement record carry the provenance (the cycle is babysat).

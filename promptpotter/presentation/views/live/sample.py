@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.rendering import classify_result, extract_display_answer
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import is_hit, recorded_elapsed_s
 from promptpotter.presentation.views.display import (
     DIM,
     DISPLAY_TAGS,
@@ -13,6 +13,9 @@ from promptpotter.presentation.views.display import (
     _step_tag,
 )
 from promptpotter.shared.errors import is_error_result
+
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import QueryMeasurement
 
 
 def _ellide(s: str, n: int) -> str:
@@ -45,7 +48,7 @@ def fmt_query_result(
         step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)
     step = _step_tag(step_name)
 
-    tt = pd.get("total_time")
+    tt = recorded_elapsed_s(cast("QueryMeasurement", r))
 
     if err:
         # Asked FIRST: an errored row carries no ``fitness``, and the MISS ladder below would read

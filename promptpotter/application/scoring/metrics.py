@@ -11,8 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
-from promptpotter.application.scoring.evaluators import compute_accuracy as compute_accuracy
 from promptpotter.application.scoring.evaluators import (
+    compute_accuracy,
     default_per_round_formula,
     materialize_round_values,
 )

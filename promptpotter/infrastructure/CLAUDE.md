@@ -341,10 +341,24 @@ or cache key. Do not delete it as write-only surface; read its field note first.
 `backend.py`: `BackendClient` is connector-agnostic; per-connector wire
 adapters live in `promptpotter/connectors/`.
 
-## Tracing — fan-out only
+## Tracing — fan-out only, and DORMANT ON PURPOSE
 
 `tracing/` exposes no read API. State reaches the optimizer via the
 ledger; tracing is fan-out only.
+
+**It has no in-repo reader by design, and that is not evidence it is dead — do not propose deleting
+it.** The Langfuse and MLflow sinks are held for a live integration the operator is bringing up;
+`LANGFUSE_*` defaulting to `""` and `MLFLOW_ENABLED=False` are an integration not yet switched on,
+not a feature nobody wanted. `file_sink.py` says `events.jsonl` is never read back for state
+reconstruction, which is true and is what a trace sink IS — resume and fork are driven by the round
+files, and that separation is the design.
+
+This note exists because the subtree reads as ~2,300 lines of dead code to every sweep that measures
+deadness by counting readers, and has been proposed for deletion repeatedly. The intent was already
+written down in `mlflow_sink.py`'s module docstring ("Kept on purpose even when off") — inside a
+63-line file no sweep opens. Progressive disclosure only works where the reader actually lands.
+`docs/specs/code-debt-cleanup.md` carries the matching scar ("a 'dead' field that mlflow reads").
+If it is *badly written*, refactor it; absence of a reader is not the reason.
 
 ## Identity — the OIDC foundation
 
