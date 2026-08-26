@@ -135,21 +135,4 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
----
-
-## Pages
-
-| Page | Covers |
-|------|--------|
-| [Adding a surface](adding-a-surface.md) | Golden-path recipes per expansion point (record/injection/view-field/decision-kind/connector/node) + the guard that catches each half-wiring |
-| [Dispatch hub + L1 layout](dispatch-hub.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub`, mermaid flow + per-placeholder source map |
-| [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
-| [Node standard + `pipeline.yaml` contract](node-standard.md) | The node model, the JSON declaration format, and the strict field-level wire shape |
-| [Stable API v1](stable-api.md) | Fork-readiness surface |
-| [Whitelabel](whitelabel.md) **(draft)** | Running the unit under another name — the four rename tiers, what each breaks, what must never be renamed. Parked: wired and gate-green, never walked end to end |
-| [DSPy optimizer](dspy-optimizer.md) **(draft)** | Driving the loop from inside someone else's DSPy program via the separate `promptpotteropt` package — what that trades away, the `compile()` swap, `Loop` / `Node`, and why it asks for a dataset name. Packaging boundary: [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md) |
-| [Run initialization](run-initialization.md) | The INIT phase: the four-step chain `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop`, the init/runner write boundary, and the four ways the chain breaks |
-| [Event stream](event-stream.md) | SSE Profile-A contract |
-| [Conventions](conventions.md) | Style + code-shape rules + the six situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock) |
-
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/the-loop.md`](../concepts/the-loop.md).

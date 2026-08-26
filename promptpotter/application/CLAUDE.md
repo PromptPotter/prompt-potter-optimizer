@@ -17,11 +17,25 @@ intelligence; intelligence depends on neither. It carries no test because a
 error tempts you into: moving an import inside a function to make the error go away
 does not fix the cycle, it hides this rule.
 
+## Init writes `Session`; the runner reads it
+
+`initialization/` writes to `Session`. The runner reads `Session` and the `CycleEventLog`, and never
+writes back outside the per-round bundle (`session.state`). State that must survive a `new` / `resume`
+goes through the ledger or its projections, **never `Session`**; per-process per-cycle state lives on
+`Session.state` or `Cycle`. No test guards it — state that skips the ledger does not survive a restart,
+which is visible immediately ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+
+`init_services` raises `pipeline_config_invalid` — **422, typed rather than bare** — when the dataset's
+`pipeline.yaml` names no `backend_type` or yields no parseable schema. Every measurement is keyed on that
+schema, so there is no degraded run to fall through to, and a 500 here reads as `transient` to the webapp,
+which would retry a config only the operator can fix. The one SILENT arm is `init_cycle` returning
+`(None, 1)` on an empty `session.backend_id`: the run continues with no per-cycle persistence.
+
 ## Subpackages
 
 | Subpackage | Owns |
 |---|---|
-| `initialization/` | **Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (stores, LLM clients, connectors → `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). Pipeline-discovery view fetched at init time lives here. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 without the rest of it, for the verbs that score outside the loop (`verify` / `ab` / `noise-floor` / `seed-screen`) — they have no `ObservabilityBridge` to give, and that `obs=None` is what makes them one path rather than four copies. Sequence + pre/postconditions: [`../../docs/developer/run-initialization.md`](../../docs/developer/run-initialization.md). |
+| `initialization/` | **Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (stores, LLM clients, connectors → `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). Pipeline-discovery view fetched at init time lives here. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 without the rest of it, for the verbs that score outside the loop (`verify` / `ab` / `noise-floor` / `seed-screen`) — they have no `ObservabilityBridge` to give, and that `obs=None` is what makes them one path rather than four copies. **Each step's preconditions are the prior step's postconditions** — called out of order, the session is left under-wired. |
 | `optimization/` | The L1/L2/L3 loop primitives: `Cycle` state, candidate generation, critique, validation, transitions, PoBB elimination, `dispatch/` injection routing. Curated subpackages `escalation/` (state + decide + rules + firing) and `resume_and_fork/` (decisions + replayers + fork siblings + resume entry). |
 | `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. `indexes/` is **a cursor pattern, not a base class, deliberately** — both carry a `_seen_runs` set, but one consumes run *details* and the other *index entries* under its own cursor, so a shared base would have to abstract the archive call, the payload schema, cursor ownership and cache invalidation at once. |
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, and three modules that were one bag named `metrics.py`: `metrics.py` (the composite-fitness COMPUTER — the gateway is not it), `selection.py` (which candidate wins / is cut: `elect_round_winner`, `elimination_p_best`, `paired_fitness`, `mean_fitness_ci`), `diagnostics.py` (what one measured row REPORTS: `find_rank`, `extract_sample_diagnostics`). Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |

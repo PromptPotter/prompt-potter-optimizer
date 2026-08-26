@@ -50,52 +50,38 @@ Both backends and the optimizer loop declare pipelines as JSON. The optimizer's 
 
 The `pipelines` dict composes named sequences from the node pool; the same node can appear in several. Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — the same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. The optimizer manifest carries the registries inline; a backend serves them via `GET /pipeline`.
 
-## Top-level shape
+## The shape, and what PromptPotter reads of it
 
-| Field | Required | Type | Notes |
-|---|---|---|---|
-| `name` | required | `str` | Connector / pipeline display name. Lowercased into `PipelineSchema.name`. |
-| `nodes` | required | `dict[str, NodeDecl]` | Map of node-name → node declaration. See **Node declaration**. |
-| `pipelines` | required | `dict[str, list[str]]` | Named sequences over `nodes` keys. Must contain `default` — the active step order unless a campaign overrides it. |
-| `version` | optional | `str` | Connector schema version; rendered into `PipelineSchema.version`. |
-| `description` | optional | `str` | One-line human description. |
-| `available_models` | optional | `list[str]` | Models the connector exposes — surfaced into `PipelineSchema.available_models`. |
-| `backend_name` | optional | `str` | Human label for the backend. |
-| `backend_type` | **required** | `str` | The connector KIND (`termnorm` / `promptpotter` / …). Picks the connector at init (`wiring._read_backend_type` raises when absent), and is served on `CampaignSummary.backend_type` — the ONE test for a self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`). Never a `PipelineSchema` field: the parser drops it, so readers take it off the raw overlay. |
-| `resolved_prompts` | optional | `dict[str, ResolvedPrompt]` | Prompt registry keyed by `"{family}/{version}"`. Each node references its prompt via `config.prompt_family` + `config.prompt_version`. |
-| `resolved_schemas` | optional | `dict[str, ResolvedSchema]` | Output-schema registry keyed by `"{family}/{version}"`. Each node references its schema via `config.schema_family` + `config.schema_version`. |
-| `view` | optional | `dict` | Diagram metadata for the webapp; ignored by the parser. |
+The parser is `domain/pipeline_parsing.py::parse_pipeline_response`, building `PipelineSchema` /
+`PipelineNode` / `ObservationMapping` (`domain/pipeline_schema.py`). **Read the required set, the
+types and the defaults off those models** — a table here is a second declaration that drifts.
 
-## Node declaration (`nodes[name]`)
+**PromptPotter parses a SUBSET of this file, and that is by design, not rot — do not re-file the
+remainder as dead keys.** `PipelineNode` is built from `type`, `node_role`, `config` and the
+`optimizer` sub-object, nothing else; `description`, `runtime`, `short_circuit` and `input_schema`
+are the **backend's self-description**, stating its own topology for a human reader. The mirror
+rule: a key PP does not *use* gets no model field, but the key still belongs in the file — and
+"required" on a connector's side means *a connector must publish it*, not *PP reads it*.
 
-**PromptPotter parses a SUBSET of this file.** The parser builds `PipelineNode` from `type`, `node_role`, `config` and the `optimizer` sub-object — nothing else. The rest (`description`, `runtime`, `short_circuit`, `input_schema`) is the **backend's self-description**: it states the node's own topology for a human or a future reader, and no `PipelineNode` field carries it. That is by design, not rot — do not re-file these as dead keys. The mirror rule: a key PP does not *use* gets no model field, but the key still belongs in the file and in this table. "Required" below means *a connector must publish it*, not *PP reads it*.
+Five decisions the models cannot state:
 
-| Field | Required | Type | Notes |
-|---|---|---|---|
-| `type` | required | `str` | Wire type — `generation`, `cache`, `retriever`, `tool`, `optimizer_prompt` for connector-served nodes; `llm/optimizer`, `measurement`, `agent` for the optimizer's own internal nodes (`assets/optimizer/pipeline.yaml`). Mapped to `PipelineNode.wire_type`. |
-| `node_role` | optional | `str` | One of `""`, `candidate_source`, `ranker`, `enricher`, `cache`. Mapped to `PipelineNode.node_type` (the typed `NodeType` enum). Absent on every `_optimizer` node; parsed as `""`. |
-| `description` | required | `str` | One-line node description. Self-description — not parsed. |
-| `runtime` | connector-served | `str` | Where the node runs **inside the backend's own topology**: `backend`, `frontend` (e.g. TermNorm's Excel add-in runs `cache_lookup` / `fuzzy_matching` client-side), `in_process`. Orthogonal to `Connector.execution`, which says how *PromptPotter* reaches the backend — one `remote_http` connector legitimately mixes all three (`lca-termnorm` does). Self-description — not parsed. Absent on `_optimizer` nodes. |
-| `short_circuit` | connector-served | `bool` | Whether a successful match here bypasses downstream nodes (`lca-termnorm`'s two `frontend` nodes set it — a cache hit answers without reaching the backend). Self-description — not parsed. |
-| `config` | optional | `dict` | Node-local defaults. For LLM nodes typically `{model, temperature, max_tokens, ...}`. For optimizer nodes also `{prompt_family, prompt_version, schema_family, schema_version}` keys that index into the registries. |
-| `prompt_info` | optional | `dict` | Inline `{family, template_variables, description}` — marks the node as prompt-bearing (the candidate-prompt injection point). Used when no `resolved_prompts` registry is present. |
-| `output_schema` | — | — | **Not a node-level key.** An inline output schema is declared at `config.output_schema` — the same place the connector forwards it to the backend from, so there is one schema, not a display copy beside a wire copy. Parsed by `parse_resolved_schema` into the node's read-model exactly like a `resolved_schemas` entry, and locked against the optimizer (`SCHEMA_OWNED_FIELDS`). |
-| `input_schema` | optional | `dict` | Reserved for future input-validation work. |
-| `optimizer` | optional | `dict` | See **`optimizer` sub-object**. Required for any node PromptPotter is allowed to mutate or trace. |
-
-## `optimizer` sub-object
-
-Pinned per-node so PromptPotter knows what is mutable and how trace data maps back into pipeline state.
-
-| Field | Required | Type | Notes |
-|---|---|---|---|
-| `param_keys` | required | `list[str]` | Wire-name params PromptPotter is allowed to mutate. Drives L1's mutation surface and the JSON-schema enum constraints fed to the LLM. |
-| `observation_mappings` | required | `list[ObservationMapping]` | One entry per pipeline-data field this node writes. Each is `{pipeline_key: str, output_field: str \| null, is_llm: bool}`. |
-| `langfuse_type` | required | `str` | Trace-span kind — one of `generation`, `tool`, `retriever`, `span`. |
-| `observation_name` | optional | `str` | Trace-name override. Defaults to the node name. |
-| `display_tag` | optional | `str` | Short name for dashboard / webapp display. |
-| `param_descriptions` | optional | `dict[str, str]` | One-line description per param key. Surfaced into L1's prompt as the param catalogue. |
-| `param_allowed_values` | optional | `dict[str, list[str]]` | Enum constraint per param. Drives both L1 prompt guidance and the JSON-schema enum constraint on structured-output generation, plus post-hoc `ValidationFailure` attachment in `validate_overrides`. |
+- **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
+  readers take it off the raw overlay. It picks the connector at init (`wiring._read_backend_type`
+  raises when absent) and is served on `CampaignSummary.backend_type` — the ONE test for a
+  self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`).
+- **`pipelines` must contain `default`** — the active step order unless a campaign overrides it.
+  The same node may appear in several sequences.
+- **`runtime` is orthogonal to `Connector.execution`.** It says where a node runs inside the
+  *backend's* topology (`backend` / `frontend` / `in_process`); `Connector.execution` says how
+  PromptPotter reaches the backend. One `remote_http` connector legitimately mixes all three —
+  `lca-termnorm` runs `cache_lookup` / `fuzzy_matching` client-side, and `short_circuit` on those
+  two means a hit answers without reaching the backend at all.
+- **`output_schema` is not a node-level key.** An inline one is declared at `config.output_schema`,
+  the same place the connector forwards it from, so there is one schema rather than a display copy
+  beside a wire copy. It is locked against the optimizer (`SCHEMA_OWNED_FIELDS`).
+- **`param_allowed_values` drives three things at once** — L1's prompt guidance, the JSON-schema
+  enum constraint on structured-output generation, and post-hoc `ValidationFailure` attachment in
+  `validate_overrides`.
 
 ## Node capabilities
 
@@ -135,39 +121,11 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 1. **No silent-default forgiveness.** Either a field is required and the connector supplies it, or it is optional and PromptPotter ignores it absent. The "TermNorm doesn't supply X so PromptPotter assumes Y" pattern is what makes a second connector painful.
 2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and PromptPotter's own `promptpotter/assets/optimizer/pipeline.yaml` MUST round-trip through `parse_pipeline_response()` identically. The parity test pins this — add a special-case field to one and the test fails until both agree.
 
-## Example — TermNorm, sanitized
+## Worked examples
 
-A full real-shape example lives at [`datasets/lca-termnorm/pipeline.yaml`](../../datasets/lca-termnorm/pipeline.yaml). A minimal one — the GSM8K single-LLM-node pipeline — at [`datasets/gsm8k/pipeline.yaml`](../../datasets/gsm8k/pipeline.yaml):
-
-```json
-{
-  "name": "GSM8K",
-  "version": "v0.1",
-  "description": "...",
-  "backend_name": "TermNorm",
-  "backend_type": "termnorm",
-  "available_models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-  "nodes": {
-    "llm_only": {
-      "type": "generation",
-      "runtime": "backend",
-      "node_role": "ranker",
-      "description": "Direct LLM generation on the TermNorm backend.",
-      "short_circuit": false,
-      "config": {"model": "...", "temperature": 0.0, "reasoning_effort": "medium"},
-      "prompt_info": {"family": "llm_only", "template_variables": ["query"], "description": "..."},
-      "optimizer": {
-        "param_keys": ["temperature", "max_tokens", "model", "..."],
-        "param_allowed_values": {"reasoning_effort": ["none", "default", "low", "medium", "high"]},
-        "observation_name": "llm_only",
-        "observation_mappings": [{"pipeline_key": "final_ranking", "output_field": "generated_text", "is_llm": true}],
-        "langfuse_type": "generation"
-      }
-    }
-  },
-  "pipelines": {"default": ["llm_only"]}
-}
-```
+Read the real files rather than a copy: [`datasets/gsm8k/pipeline.yaml`](../../datasets/gsm8k/pipeline.yaml)
+is the minimal single-LLM-node case, [`datasets/lca-termnorm/pipeline.yaml`](../../datasets/lca-termnorm/pipeline.yaml)
+the full multi-node shape.
 
 ## Optimizer-manifest parity
 
@@ -176,14 +134,3 @@ PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backen
 So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)).
 
 The parity fails loud: if the optimizer manifest ever drifts from a backend pipeline's shape (parallel registries, ad-hoc keys, special-case fields), the shared parser rejects it at load. No standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
-
-## Reference
-
-| Resource | Covers |
-|----------|--------|
-| [![self-healing-internals](https://img.shields.io/badge/self--healing--internals-red?style=for-the-badge)](self-healing-internals.md) | LLM-to-LLM wounds — detection point × nurse owner |
-| [![candidate-elimination](https://img.shields.io/badge/candidate--elimination-black?style=for-the-badge)](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through PoBB cutoff |
-| [![developer/README](https://img.shields.io/badge/developer%2FREADME-red?style=for-the-badge)](README.md) | Architecture brief — prompt structure, dispatch, scoring node, cross-run memory |
-| [![observability](https://img.shields.io/badge/observability-black?style=for-the-badge)](../operations/observability.md) | Node tracing and Langfuse integration |
-| `promptpotter/assets/optimizer/pipeline.yaml` | Live optimizer node declarations |
-| `GET /pipeline` | Backend self-description — source of pipeline schema at runtime |

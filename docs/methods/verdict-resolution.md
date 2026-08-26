@@ -16,6 +16,12 @@ Which *candidate* wins is the sibling question, owned by
 [`candidate-elimination.md`](candidate-elimination.md). Both read θ, which is why they never
 disagree about what "better" means.
 
+**What this model does not cover.** Within LLM-driven program evolution, PromptPotter targets the
+bounded case: fixed pipeline, labelled dataset, scalar fitness. Open-ended synthesis,
+multi-objective fitness and unlabelled tasks remain open problems for the paradigm and are not
+supported here — θ is a single latent ability per candidate, so a second objective has nowhere to
+land.
+
 ---
 
 ## The model — Rasch θ/δ

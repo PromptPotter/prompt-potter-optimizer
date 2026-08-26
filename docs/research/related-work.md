@@ -64,29 +64,7 @@ The capabilities that differentiate PromptPotter most sharply, with one column e
 
 PromptPotter and AlphaEvolve share the same statistical primitives, the same evaluator-driven loop, and the same population dynamics. They part on two axes, in opposite directions: **code optimization** is where AlphaEvolve is unambiguously stronger (its configuration space reaches into source; PromptPotter's stops at the prompts and parameters wrapping pre-built nodes), and **self-healing** is where PromptPotter is (a rejected proposal is routed to a *different* layer, which rewrites the proposer's prompt — AlphaEvolve discards and re-samples). The two are a matched pair: each follows from what the system is pointed at.
 
----
-
-## Feature matrix
-
-
-| Dimension | PromptPotter | promptolution (CAPO) | promptfoo | AlphaEvolve / OpenEvolve |
-|-----------|-------------|---------------|-----------|--------------------------|
-| **Language** | Python 3.13+ | Python 3.10–3.12 | TypeScript | Python (OpenEvolve); AlphaEvolve internal to Google |
-| **Adoption** | Research/production tool | 126 stars (academic, AutoML group) | 19.9k stars, 300K+ users, acquired by OpenAI | OpenEvolve community-maintained, multiple forks; AlphaEvolve not released |
-| **Core approach** | Critique-guided L1→L2→L3 loop | Evolutionary (GA, DE) + LLM-as-optimizer (OPRO) + hybrid (CAPO) | Manual A/B testing (human writes all variants) | LLM-mutated evolutionary pool over source code, grounded by automatic evaluators |
-| **Optimization target** | prompts, node-parameters, hyperparameters | Prompts (single instruction string) + few-shot demos | Prompts (manual variants) | Source-code algorithms; OpenEvolve also: prompts, hyperparameters |
-| **Multi-step pipeline** | Per-node params, PipelineSchema from backend | No — single LLM call only | Single LLM call (custom script for multi-step) | Not applicable — target is the program, not a pipeline of LLM calls |
-| **Budget control** | `sp_budget_ttest` (adaptive), early-stopping | Token budget callback | `maxConcurrency`, `repeat`, `timeoutMs` | Compute-based; population-size + iteration count |
-| **Scoring** | Composite formula, custom per-dataset | `accuracy_score`, reward function, LLM-as-judge | 40+ assertion types (deterministic + model-graded) | Code-execution evaluator(s) — domain-specific, deterministic |
-| **Candidate selection** | Sequential elimination via Bayesian Posterior-of-Being-Best (Russo 2016): population-aware joint posterior, ε-threshold stop | CAPO: paired t-test racing (α=0.2). Others: full eval or subsampling | Pass/fail assertions, weighted aggregation | Tournament / Pareto over evaluator scores |
-| **Cross-run learning** | SearchMemory (parameter impact, axis exhaustion, failure groups) | None (in-memory only, lost on exit) | None (each eval independent) | Population persistence across iterations; no cross-run memory in published descriptions |
-| **Few-shot optimization** | Pipeline-level (backend handles examples) | CAPO: joint instruction + few-shot optimization | Not applicable (manual) | Not applicable — programs aren't few-shot prompted |
-| **Prompt representation** | 8-field decomposition | Opaque string (monolithic instruction) | Opaque string templates (Nunjucks) | Source code (AlphaEvolve); strings/code/configs (OpenEvolve) |
-| **Red teaming** | — | — | 50+ vulnerability types, dedicated pipeline | — |
-| **RAG / agent metrics** | — | — | context-faithfulness/-recall/-relevance, trajectory assertions | — |
-| **Persistence** | Two-tier (session + campaign store), content-addressed archival | None (in-memory; FileOutputCallback writes parquet/csv post-hoc) | Disk cache for LLM responses only | Population checkpoints between iterations |
-| **Provider ecosystem** | Backend-agnostic (single BackendClient endpoint) | OpenAI-compatible API, HuggingFace local, vLLM | 50+ built-in (OpenAI, Anthropic, Groq, Bedrock, etc.) | Gemini ensemble (AlphaEvolve); LiteLLM-routed (OpenEvolve) |
-| **CI/CD** | — | — | GitHub Actions, GitLab, Jenkins, Azure Pipelines, etc. | — |
+Two neighbours are worth naming precisely because they are routinely confused with this one and are not in the same class. **promptolution** (CAPO) optimizes a single monolithic instruction string plus few-shot demos for one LLM call — no pipeline, no cross-run memory, in-memory only. **promptfoo** is an assertion-and-red-teaming harness in which a human writes every variant: 50+ assertion types and a CI story we have nothing like, but no search loop at all. Neither optimizes per-node pipeline parameters, and only CAPO does statistical elimination (paired t-test racing, α=0.2).
 
 ---
 
@@ -190,77 +168,20 @@ This is worth noting. The absence is not just a citation oversight — it means 
 
 ## Head-to-head matchups from the literature
 
-> **Reading these tables:** Each matchup is from a single paper using identical eval conditions (same model, same splits, same scoring). Numbers across matchups are **NOT comparable** — different backbone models, token budgets, and eval protocols. For the full taxonomy, see the [Compound AI Systems Optimization survey](https://arxiv.org/abs/2506.08234) (EMNLP 2025).
+**Numbers across matchups are NOT comparable** — different backbone models, token budgets and
+eval protocols. Each is one paper's own table under its own conditions; read them there rather
+than from a transcription here, which cannot be re-verified and goes stale against a v2.
 
-### Matchup 1 — GEPA vs MIPROv2 (GEPA paper, ICLR 2026 Oral)
+| Matchup | Source | What it reports |
+|---|---|---|
+| GEPA vs MIPROv2 | [arXiv:2507.19457](https://arxiv.org/abs/2507.19457) (Qwen3-8B) | GEPA ahead on HotPotQA / HoVer / PUPA, and on AIME-2025 with GPT-4.1 Mini |
+| CAPO vs field | [arXiv:2512.02840](https://arxiv.org/abs/2512.02840) (Gemma-3-27B, 1M-token budget) | CAPO ahead of OPRO / EvoPromptGA / AdalFlow / DSPy-GEPA on GSM8K + SST-5 |
+| AdalFlow vs TextGrad vs DSPy | [arXiv:2501.16673](https://arxiv.org/abs/2501.16673) (GPT-3.5-turbo) | AdalFlow ahead on ObjectCount / TREC-10 / three HotPotQA settings |
+| Trace vs DSPy | [arXiv:2406.16218](https://arxiv.org/abs/2406.16218) (GPT-3.5-turbo) | Trace+CoT ahead on BBH, at 3× TextGrad's wall-clock |
+| AFlow vs ADAS | [arXiv:2410.10762](https://arxiv.org/abs/2410.10762) | AFlow ahead on average over six benchmarks; GPT-4o-mini + optimized workflow beats GPT-4o + manual at a fraction of inference cost |
+| AlphaEvolve on classical targets | [arXiv:2506.13131](https://arxiv.org/abs/2506.13131) | 4×4 complex matrix multiplication 49 → 48 scalar mults, the first improvement over Strassen in 56 years; data-center scheduling deployed |
 
-**Source:** [arXiv:2507.19457](https://arxiv.org/abs/2507.19457) | **Inference:** Qwen3-8B | **Optimizer:** undisclosed (frontier)
-
-| Method | HotPotQA | HoVer | PUPA |
-|--------|----------|-------|------|
-| Origin | 42.33 | — | — |
-| GRPO | 43.33 | — | 86.66 |
-| MIPROv2 | 55.33 | 47.33 | 81.55 |
-| **GEPA** | **62.33** | **52.33** | **91.85** |
-
-GEPA also reports GPT-4.1 Mini results on same tasks (same relative ranking). On AIME-2025 (GPT-4.1 Mini): GEPA 56.6% vs MIPROv2 46.6%.
-
-### Matchup 2 — CAPO vs field (promptolution paper)
-
-**Source:** [arXiv:2512.02840](https://arxiv.org/abs/2512.02840) (Dec 2025) | **Inference:** Gemma-3-27B | **Optimizer:** Llama-3.3-70B | **Budget:** 1M tokens, 500 dev / 300 test
-
-| Method | GSM8K (test) | SST-5 (test) |
-|--------|-------------|-------------|
-| Unoptimized | 78.1% | 44.6% |
-| OPRO | 69.7% | 56.0% |
-| EvoPromptGA | 91.0% | 53.3% |
-| **CAPO** | **93.7%** | **56.3%** |
-| AdalFlow | 88.7% | 55.7% |
-| DSPy (GEPA) | 84.7% | 42.0% |
-
-### Matchup 3 — AdalFlow vs TextGrad vs DSPy (AdalFlow paper)
-
-**Source:** [arXiv:2501.16673](https://arxiv.org/abs/2501.16673) (Jan 2025) | **Inference:** GPT-3.5-turbo-0125 | **Optimizer:** GPT-4o
-
-| Method | ObjectCount | TREC-10 | HotPotQA (Vanilla RAG) | HotPotQA (Multi-hop) | HotPotQA (Agentic) |
-|--------|------------|---------|------------------------|---------------------|-------------------|
-| DSPy | 82.5% | 81.7% | 42.375% | 47.75% | 31% |
-| TextGrad | 84.5% | 84.88% | — | — | — |
-| **AdalFlow** | **93.75%** | **87.5%** | **43.25%** | **49.625%** | **32.25%** |
-
-### Matchup 4 — Trace vs DSPy (Trace paper, NeurIPS 2024)
-
-**Source:** [arXiv:2406.16218](https://arxiv.org/abs/2406.16218) (Jun 2024) | **Inference:** GPT-3.5-turbo-1106 | **Optimizer:** GPT-4
-
-| Method | BBH All (23 tasks) | BBH Algorithmic (11 tasks) |
-|--------|-------------------|---------------------------|
-| DSPy+CoT | 70.4% | — |
-| DSPy-PO+CoT | 71.6% | 70.0% |
-| **Trace+CoT** | **78.6%** | **80.6%** |
-
-3x faster wall-clock time than TextGrad with comparable or better accuracy.
-
-### Matchup 5 — AFlow vs ADAS (AFlow paper, ICLR 2025 Oral)
-
-**Source:** [arXiv:2410.10762](https://arxiv.org/abs/2410.10762) (Oct 2024) | **Optimizer:** Claude-3.5-Sonnet | **Inference:** GPT-4o-mini, DeepSeek-V2.5, Claude-3.5-Sonnet, GPT-4o (all tested)
-
-| Method | GSM8K | HotPotQA | MATH | Avg (6 benchmarks) |
-|--------|-------|----------|------|---------------------|
-| ADAS | 81.3% | 78.5% | 68.7% | — |
-| **AFlow** | **83.5%** | **77.9%** | **82.9%** | **80.3%** |
-
-AFlow enables GPT-4o-mini + optimized workflow to outperform GPT-4o + manual workflow at 4.55% of inference cost.
-
-### Matchup 6 — AlphaEvolve on classical algorithm targets (AlphaEvolve paper)
-
-**Source:** [arXiv:2506.13131](https://arxiv.org/abs/2506.13131) (May 2025) | **Inference:** Gemini 2.0 Flash + Gemini 2.0 Pro ensemble | **Targets:** matrix multiplication, kissing-number bounds, data-center scheduling
-
-| Target | Prior best | AlphaEvolve | Note |
-|--------|-----------|-------------|------|
-| 4×4 complex matrix multiplication | 49 scalar mults (Strassen, 1969) | **48 scalar mults** | First improvement in 56 years |
-| Google data-center scheduling heuristic | (proprietary origin) | **+0.7% compute recovered** | Continuously deployed |
-| Various open math problems | various | improved or matched on a spectrum | Detailed in paper |
-
+Full taxonomy: the [Compound AI Systems Optimization survey](https://arxiv.org/abs/2506.08234) (EMNLP 2025).
 
 ---
 

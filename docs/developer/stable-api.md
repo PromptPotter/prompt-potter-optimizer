@@ -34,11 +34,7 @@ anything = "my_package.connector:CONNECTOR"
 
 The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
-Three rules a plugin is held to, all enforced at import in `connectors/__init__.py`:
-
-- **Same validation as a built-in.** One `_validate` runs over ours and yours alike — key/`name` agreement, the three hooks callable, `execution` a declared mode, `in_process` paired with `in_process_run` and carrying no `auth_token`.
-- **No shadowing.** A plugin may not register `termnorm` or `promptpotter`; those keys are read by name inside the loop.
-- **A plugin that cannot load is fatal, not skipped** — the error names the distribution. A skipped one would return later as an unexplained `connector 'x' not registered`.
+**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced at import in `connectors/__init__.py`, whose raise names them. What this page promises is only that they will not tighten within v1.
 
 `CONNECTOR_ORIGINS` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
 
@@ -46,7 +42,7 @@ Three rules a plugin is held to, all enforced at import in `connectors/__init__.
 python -c "from promptpotter.connectors import CONNECTOR_ORIGINS as o; print(*o.items(), sep='\n')"
 ```
 
-⚠️ **A connector is trusted code, not sandboxed.** Loading one imports its module into the PromptPotter process, where it sees the provider API keys, the tenant tree and the identity store — the same access any module we ship has. The capability scoping in [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) governs **API principals, not in-process code**, and nothing here changes that. Entry points do not lower the bar (anything able to install a distribution into your environment can already execute code in it), but they make the decision explicit: **installing a connector package is trusting its publisher completely.**
+⚠️ **A connector is trusted code, not sandboxed** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md). What v1 promises here is narrower and worth saying out loud: entry points do **not** lower that bar, and no future version will make them a sandbox. The capability scoping in [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) governs API principals, not in-process code.
 
 Adding one *to this repo* is still one new file under `promptpotter/connectors/` plus a `_BUILTIN` entry. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
 
@@ -90,7 +86,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `name`, `version` — pipeline identity.
 - `backend_type` — connector name; must match a registered connector.
 - `backend_name` — display name for operator surfaces.
-- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_type` (`candidate_source`/`ranker`/`enricher`/`cache`/`""`) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
+- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — model menu shown to L1.
 - `resolved_prompts` — prompt-template map keyed by version. (`resolved_schemas` is a
@@ -177,7 +173,7 @@ and where the HuggingFace `datasets` library lives.
 | `new` | `<name>` (positional) | Mint a fresh session+cycle from `datasets/<name>/`. |
 | `new` | `--config <path>` | Override the dataset's default `campaign.yaml`. |
 | `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
-| `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints siblings under `sweeps/`. |
+| `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints sibling cycles flat under `cycles/`; `sweeps/{batch_id}` holds the batch index + summary. |
 | `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
 | `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
 | `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X. |

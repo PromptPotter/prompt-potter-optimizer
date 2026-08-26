@@ -6,15 +6,10 @@ PromptPotter reports four metrics instead of just one. Absolute accuracy (the st
 
 ## The problem with a single number
 
-When a paper reports a number on GSM8K, that number is almost always **absolute accuracy** — the percentage of test problems the optimized prompt gets correct on a specific base model. That's the standard reporting convention in this space. GSM8K, BBH, and MMLU form the canonical benchmark trio for prompt optimization:
-
-| Dataset | Citation | Role |
-|---------|----------|------|
-| BIG-Bench Hard | Suzgun et al., 2022 | Reasoning, diverse tasks |
-| GSM8K | Cobbe et al., 2021 | Math reasoning |
-| MMLU | Hendrycks et al., 2020 | Knowledge breadth |
-
-Absolute accuracy is meaningful only when you know the base model and the origin prompt. Without those, lifting 60 → 75 and 90 → 93 look comparable — but the first captured 75% of the available headroom and the second captured only 33%.
+**Absolute accuracy is meaningful only when you know the base model and the origin prompt.**
+Without those, lifting 60 → 75 and 90 → 93 look comparable — but the first captured 75% of the
+available headroom and the second only 33%. Which datasets we actually measure on, and the bar
+one has to clear, is owned by [`benchmarks.md`](benchmarks.md) § Every dataset we measured.
 
 ---
 

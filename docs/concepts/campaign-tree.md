@@ -8,24 +8,9 @@ A **Campaign** owns `campaigns/{campaign_id}/`: a `campaign.json` manifest, a ca
 
 A cycle is a directory under a campaign's `cycles/`. A fork is a new cycle whose `index.json` carries `parent_cycle_id`; its KIND is stored nowhere, because the id already answers it. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round; the new cycle's ledger inherits from the parent's history up to the cut.
 
-```
-campaigns/justlogic__a1b2c3/        # one Campaign
-  campaign.json                     # manifest
-  log.md                            # campaign digest
-  cycles/
-    cycle_abc123/                   # root (no parent_cycle_id)
-      dashboard.json                # this cycle's own live telemetry
-      index.json                    # no parent_cycle_id — the id has no separator, so: root
-      .runtime/ledger.jsonl         # …, FORK_CUT → fork_x, …
-    cycle_abc123_fork_x/            # branch — flat alongside the root
-      dashboard.json                # the fork's OWN telemetry (seeded from parent at the cut)
-      index.json                    # parent_cycle_id + forked_at_offset: WHERE on the parent
-      .runtime/ledger.jsonl         # own appends only; the parent's prefix is walked, not copied
-```
+Forks land **flat** under `cycles/` — the tree is reconstructed from `parent_cycle_id`, never from directory nesting. Three things a fork owns rather than shares: its own `dashboard.json` (seeded from the parent at the cut), `index.json::forked_at_offset` naming *where* on the parent it cut, and a ledger carrying **own appends only** — the parent's prefix is walked, not copied. The on-disk shape is owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Layout.
 
-Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
-
-**`mint_kind`** is the webapp sidebar label for what minted a cycle, derived from the id's own kind plus `index.json::fork.trigger` by `domain/run_records.py::MINT_KIND_FOR_TRIGGER`, which enumerates the values and refuses an unbadged trigger at import; `campaign_store/store.py::_mint_kind` projects it and `routers/active.py::CycleListEntry` serves that same type. The raw kind is **not** served beside it — the browser parses the id (`webapp/lib/ids.ts`), because it needs the family tail as well.
+**`mint_kind`** is the webapp sidebar label for what minted a cycle — `domain/run_records.py::MINT_KIND_FOR_TRIGGER` enumerates the values and refuses an unbadged trigger at import. The raw kind is **not** served beside it: the browser parses the id (`webapp/lib/ids.ts`), because it needs the family tail as well.
 
 ## Three callers, one primitive
 
@@ -49,8 +34,4 @@ When a new driver lands, run it through three checks. If any fail, the primitive
 2. **Override is OSP-carriable.** Branch-differing fields are (or trivially extend to) `OptSearchPoint` fields. Different pipeline shape or scoring formula is a layer above.
 3. **No data fracture.** No parallel persistence directory; no duplicate of something already in `measurements/`, `rounds/`, or the ledger.
 
-## See also
-
-- Operator how-to (rewind / fork / sweep): [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)
-- Facts-vs-policy split underlying fork: [`scoring-and-memory.md`](scoring-and-memory.md)
-- L1/L2/L3 + the open seat L4 will fill: [`the-loop.md`](the-loop.md)
+Operator how-to (rewind / fork / sweep) is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Recovery; the facts-vs-policy split underneath a fork is [`scoring-and-memory.md`](scoring-and-memory.md).

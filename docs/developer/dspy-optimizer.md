@@ -102,6 +102,9 @@ loop = Loop(
 )
 ```
 
+The values above are an illustration, not the defaults — those live on the `Loop` dataclass
+itself and move without this page hearing about it. Read them off the fields.
+
 ## The node is your program
 
 `tune` is the axis list — prompt fields *and* model params evolve together, which is the half

@@ -28,7 +28,7 @@ Backend emits neutral advisories (e.g. `llm_only:content_empty`) + raw response 
 
 ## Decision replay + fork
 
-Optimizer choices derive from scored numbers, so they're replayable. On resume the optimizer rescores under the current scorer and re-runs each recorded decision against the rescored view. Match → round stands. Mismatch → halt at divergence point. `resume --fork-on-divergence` mints a sibling cycle rooted at the divergence point with `parent_cycle_id`; pre-divergence trials are copied, shared trace data stays in place. From the fork point forward, the new cycle decides under the current scorer; the old cycle remains the record under the original.
+Optimizer choices derive from scored numbers, so they're replayable. On resume the optimizer rescores under the current scorer and re-runs each recorded decision against the rescored view. Match → round stands. Mismatch → halt at divergence point. `resume --fork-on-divergence` mints a sibling cycle rooted at the divergence point with `parent_cycle_id`; pre-divergence rounds are copied, shared trace data stays in place. From the fork point forward, the new cycle decides under the current scorer; the old cycle remains the record under the original.
 
 Two-tier decision records: **replayable** (which candidate won, parameters that gated the choice) vs **archival** (full LLM outputs, diagnostic context — never read by replay).
 

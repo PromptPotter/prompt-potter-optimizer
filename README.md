@@ -146,7 +146,7 @@ A head-to-head against DSPy's optimizers (**GEPA**, MIPROv2, BootstrapFewShot) a
 | [Campaign tree](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/campaign-tree.md) | [Whitelabel — run it under your own name](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/whitelabel.md) *(draft)* | |
 | [Nodes and pipelines](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/node-standard.md) | [Use it as a DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) *(draft)* | |
 
-Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md). Statistical foundations under [`docs/methods/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/README.md).
+Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md). Statistical foundations under [`docs/methods/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/verdict-resolution.md).
 
 ## Watching a run
 

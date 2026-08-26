@@ -45,7 +45,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
       hard_samples.json                # campaign-scope hard-sample artifact
       cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
-        index.json                     # phase, trials, final block, parent_cycle_id (forks)
+        index.json                     # phase, rounds, final block, parent_cycle_id (forks)
         export.json                    # the winner + its provenance, for a program that is not us
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
         rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
@@ -75,7 +75,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 | `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
-| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
+| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sweep_batch_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
 | `export.json` | per cycle | The export artifact — the winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
@@ -160,7 +160,7 @@ Three workflows over one fork primitive (conceptual picture: [`../concepts/campa
 | Workflow | Command | Effect |
 |----------|---------|--------|
 | **Resume** | `resume` | Pick up from the latest completed round of the active cycle. |
-| **Rewind** | `resume --from N` | Same `cycle_id`; archive trials after round N; resume at N+1. |
+| **Rewind** | `resume --from N` | Same `cycle_id`; archive rounds after N; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | On divergence — a round produced by a different optimizer, a package that no longer reproduces, or a decision that re-derives differently — mint a sibling cycle rooted at that round and continue. |
 | **Sweep batch** | `new --sweep-batch` | Mint N siblings under one root from operator-authored overrides; 2-round sweep each. |
 
@@ -172,7 +172,7 @@ Use when the active cycle went somewhere you don't want (a bad L3 replan, or you
 
 ### Fork — `resume --fork-on-divergence`
 
-Use when a **data-affecting** edit (scoring formula, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence trials, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger.
+Use when a **data-affecting** edit (scoring formula, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence rounds, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger.
 
 **A cut has a DIRECTION** — which side the run continues on, written at the cut and served as `fork_direction`. Usually the trigger implies it (`FORK_DIRECTION`, derived, so every fork already on disk answers it): a sweep / diag / steered fork is an `offshoot`, the child hanging off a line that keeps running; a `scoring_divergence`, `operator_rewind` or L2/L3 rebase **supersedes**, the child being the continuation the pointer moves to and the *parent* what was left behind. Same shape on disk, opposite reading — which is why nothing is deleted on a supersede: whatever the old version produced above the cut stays with the branch that produced it. A correction is the one cut taken before its consequence is known, so it records the answer it later measured on `ForkSpec.direction`, which outranks the derived default; that is the only way `equivalent` arises. **How a cut READS once served** — the timeline renumber, which side wears `superseded_by`, which cycle speaks for the campaign — is owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § The lineage tree, which `store/lineage_views.py` serves without deciding anything. What THIS layer must get right is that the direction, and how far it reaches, are on disk before any reader asks.
 
@@ -265,10 +265,10 @@ python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the f
 | `--backend-url` | Backend service URL |
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
 | `--task-file` / `--task-text` | *(name form)* Override `<dataset>/task_description.md` from a file or inline |
-| `--halt-at` / `--spend-budget` | Run-halt gates (both forms) |
+| `--halt-at` / `--spend-budget` / `--token-budget` | Run-halt gates (both forms); whichever trips first halts |
 | `--diag` | Diagnostic mode — marks `index.json::final.mode` as `'diag'`; branches off a counted sibling on re-run |
 | `--excel-path` | Path to an Excel workbook to load alongside the dataset (name form) |
-| `--sweep-batch` | Sweep-batch config path (name form — see [Sweep batch](#sweep-batch--new---sweep-batch)) |
+| `--sweep-batch` | Flag, not a path — reads every `datasets/<name>/sweep/*.yaml` (name form; see [Sweep batch](#sweep-batch--new---sweep-batch)) |
 
 The workflow flags `--from`, `--fork-on-divergence`, `--rewind`, `--rewind-reason` are covered under [Recovery](#recovery-resume-rewind-fork-sweep) above. The remaining `resume` flags:
 

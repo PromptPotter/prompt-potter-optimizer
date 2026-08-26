@@ -45,20 +45,11 @@ Do **not** fold one into the other: routing the runner's `RunCallbacks` through
 (implicit mutable global), and routing `emit_*` through `RunCallbacks` is
 impossible (the deep sites have nothing to call it on).
 
-**Recipe (either shape):**
-
-1. Define `XxxRecord` in `domain/run_records.py` and add it to the `CycleRecord`
-   discriminated union.
-2. Add the record to `_ROUTES` (`infrastructure/projections/base.py`) — either naming a
-   `_handle_xxx` hook (default no-op on `DerivedView`) or `None` with the reason no
-   projection folds it. There is no third option: the table is checked against the
-   `CycleRecord` union at import.
-3. **Writer:** either add a typed method on `RunCallbacks`, **or** a kwargs-only
-   `emit_xxx` helper in `infrastructure/llm/telemetry.py` that calls `_append_record`.
-4. Override `_handle_xxx` on each projection that surfaces the fact
-   (`LiveDashboardView` for `dashboard.json`, `AuditTrailView` for `round_NNNN.json`,
-   `LiveDisplay` for the CLI). Unhandled = silently dropped — which is exactly
-   what the guard prevents.
+The step-by-step is [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
+§ Conventions' canonical template. The one step it does not spell out: **override `_handle_xxx`
+on each projection that surfaces the fact** (`LiveDashboardView` for `dashboard.json`,
+`AuditTrailView` for `round_NNNN.json`, `LiveDisplay` for the CLI). Unhandled = silently dropped,
+which is exactly what the guard prevents.
 
 **Guard (an import-time raise, not a standing test — see
 [`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants):** `_ROUTES` must answer
@@ -195,52 +186,32 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ## 5. A connector (backend)
 
-A new backend kind. Intentionally local — **no edits to `application/campaign_config.py`
-or `infrastructure/backend.py`.**
-
-**Recipe:**
-
-1. Write `connectors/<name>.py` exporting a `CONNECTOR = Connector(...)` binding
-   (`connectors/protocol.py`): wire adapter `(query, pipeline_params) -> dict`,
-   `extract_experiment -> (queries, index_terms)`, session hooks (noop for
-   in-process backends).
-2. Declare `execution` — `remote_http` (default, posts to `/matches`) or
-   `in_process` (runs an inner cycle, L4). `BackendClient.run_query` dispatches
-   on this **declared mode, never the connector name**, so transport stays a
-   capability rather than a core-loop branch.
-3. Add the import + a row to the `CONNECTORS` dict in `connectors/__init__.py`.
-   No `register()` call, no import side effects.
-4. Optional: set `expected_revision` + a `version_check` hook for cross-repo
-   drift warnings at init.
-5. If the backend needs a credential, declare an `auth_token: () -> str | None` hook.
-   **A credential is a per-backend fact and belongs on the connector**, never read at
-   the construction site — `build_backend_client` (`infrastructure/backend.py`) is the
-   one place a `BackendClient` is built, and it takes the token off the connector it
-   was handed. Read a token at the construction site instead and registering a second
-   `remote_http` backend POSTs the first one's bearer token to a third-party host.
+A new backend kind — one file under `connectors/` plus a row in its `CONNECTORS` dict, owned
+step by step by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
 **Guard (import-time, no standing test):** the registry guard at the bottom of
-`connectors/__init__.py` raises at import if any row is half-wired — registry key ≠
-`name`, a non-callable hook, an `execution` outside `ConnectorExecution`, an
-`in_process` connector without `in_process_run` (or a `remote_http` one with it), an
-`in_process` connector carrying an `auth_token` (no wire to send it over), or a
-`DEFAULT_CONNECTOR` naming an unregistered backend. An unknown connector raises
-`KeyError` at `get()`.
+`connectors/__init__.py` raises at import if any row is half-wired, and its own raise
+enumerates every half-wiring it rejects — read the list there rather than a copy here.
 
-**The `in_process` arm is SHIPPED**, and one connector rides it: `promptpotter` (an
-inner cycle — L4, via `runner/inner/spawn.py`). It does not raise
-`NotImplementedError`.
+Two things the recipe cannot show you:
 
-Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
+- **`BackendClient.run_query` dispatches on the declared `execution` mode, never the
+  connector name**, so transport stays a capability rather than a core-loop branch. The
+  `in_process` arm is SHIPPED and one connector rides it — `promptpotter`, an inner cycle
+  (L4, via `runner/inner/spawn.py`). It does not raise `NotImplementedError`.
+- **A credential is a per-backend fact and belongs on the connector's `auth_token` hook**,
+  never read at the construction site. `build_backend_client` (`infrastructure/backend.py`)
+  is the one place a `BackendClient` is built and it takes the token off the connector it was
+  handed. Read a token at the construction site instead, and registering a second
+  `remote_http` backend POSTs the first one's bearer token to a third-party host.
 
 ---
 
 ## 6. An optimizer node
 
-One of the five LLM nodes (`l1_generate`, `l1_critique`, `l2_context`,
-`l3_plan`, `checkin`). The JSON declaration format and registry live in
-[`developer/node-standard.md`](node-standard.md); response models in
-`dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS`. A node renders a
+One of the optimizer's own LLM nodes — `dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS`
+enumerates them, and is the only place that count is correct. The JSON declaration format
+and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
@@ -256,43 +227,31 @@ unwrapped LLM call is an automatic block at review (pre-flight gate), not a test
 A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call into
 `application/`, format. Business logic that lands here is drift.
 
-**Recipe:**
+One module under `presentation/cli/commands/`, one argparse subparser, one `COMMANDS` row —
+the wiring is owned by [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md)
+§ Layout, and an import-time assert pins the parser and the table together. Prefer a module over a
+subpackage: `lifecycle.py` holds every thin `CommandDispatcher` shell in one file, because a
+directory per verb bought a reader a hop to learn there was nothing to choose.
 
-1. Write `presentation/cli/commands/<verb>.py` exporting one `cmd_<verb>(args)`
-   entry function. Prefer a module; reach for a subpackage only when the verb has
-   genuinely separable parts (`lifecycle.py` holds every thin `CommandDispatcher`
-   shell in one module — a directory per verb bought a reader a hop to learn there
-   was nothing to choose).
-2. Add its argparse subparser in `presentation/cli/parsers.py`.
-3. Add the `"<verb>": cmd_<verb>` row to `COMMANDS` in
-   `presentation/cli/campaign_runner.py`, importing the function at the top.
-4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
-   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`),
-   **manifest-edit** (`rename` — rewrites `campaign.json` in place, leaving the tree
-   and every measurement where they are), or **diagnostic** (`ab` / `verify` /
-   `noise-floor` / `reindex` — these must not perturb an existing cycle's
-   measurements).
-5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
-   tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.
+**Two decisions the wiring does not make for you.** Honor the verb's class — **write**
+(`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
+`unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
+and leaves the tree and every measurement where they are), or **diagnostic** (`ab` / `verify` /
+`noise-floor` / `reindex`, which must not perturb an existing cycle's measurements). And do
+**not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
+`new <file.csv>`, not an `ingest` verb.
 
-**Guard:** none needed — an unknown verb exits non-zero and a missing `COMMANDS` row
-breaks loud on first invocation. Both are the "breaks loud → no test" class.
-
-Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md);
-verb reference: [`operations/`](../operations/).
+**Guard:** none needed — an unknown verb exits non-zero and a missing `COMMANDS` row breaks
+loud on first invocation. Both are the "breaks loud → no test" class.
 
 ---
 
 ## The shared discipline
 
-Three invariants hold across all of the above. None is a standing test — each
-breaks loud, which is exactly why [`tests/CLAUDE.md`](../../tests/CLAUDE.md) says
-not to test it:
-
-- **One ingress.** Observers are built only via `build_run_observers`; campaign
-  artifacts are written only through the canonical I/O seams (`CycleEventLog.append`
-  or a declared projection).
-- **Layers don't reach backward.** `domain↛anything`, `intelligence↛optimization`,
-  `infrastructure↛{application,intelligence,optimization}`. Violations fail at import.
-- **Registries are code-derived.** If a capability isn't in its registry, it doesn't
-  exist — and the registry's own import-time assert proves it is whole.
+Three invariants hold across every recipe above, each owned elsewhere and each breaking loud,
+which is why [`tests/CLAUDE.md`](../../tests/CLAUDE.md) says not to test them: **one ingress**
+— owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)
+§ Persistence — one ingress, two projections · **layers don't reach backward** — owned by
+[`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) § Layer rule · **registries
+are code-derived** — owned by [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md)
+§ Ask the typed predicate, never a set of names.
