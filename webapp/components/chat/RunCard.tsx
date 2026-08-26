@@ -321,8 +321,6 @@ function ConfigBox({
             schema={schema}
             outputSchema={outputSchema}
             mode="values"
-            readOnly
-            flat
             compact
           />
         </details>

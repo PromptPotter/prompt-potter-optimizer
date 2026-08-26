@@ -112,10 +112,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
           configSeed={cfg.config}
           schema={cv.nodeConfigSchema}
           outputSchema={cv.nodeOutputSchema}
-          title="Searchpoint"
           label={cfg.label}
           mode="values"
-          readOnly
         />
       ) : (
         <p className="inspector-note">

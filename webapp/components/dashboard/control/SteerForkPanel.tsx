@@ -216,7 +216,6 @@ export function SteerForkPanel({
         outputSchema={cv.nodeOutputSchema}
         mode="values"
         babysitEditable={canBabysit}
-        flat
         onApply={(p) => {
           editedPrompt.current = p.origin_prompt_fields ?? {};
         }}

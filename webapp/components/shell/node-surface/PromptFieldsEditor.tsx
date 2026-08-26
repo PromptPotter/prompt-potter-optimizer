@@ -43,15 +43,11 @@ function asStrings(value: Record<string, unknown>): Record<string, string> {
 export function PromptFieldsEditor({
   value,
   onApply,
-  flat = false,
   readOnly = false,
   compact = false,
 }: {
   value: Record<string, unknown>;
   onApply?: (patch: DraftPatch) => void;
-  // When true, render without the own card chrome (it nests inside another
-  // card — the unified setup-preview panel).
-  flat?: boolean;
   // When true, disable every field — the minted-campaign node panel shows the
   // origin prompt read-only (no draft to persist to).
   readOnly?: boolean;
@@ -89,16 +85,10 @@ export function PromptFieldsEditor({
 
   const shown = compact && readOnly ? FIELDS.filter((f) => (fields[f.key] ?? "").trim()) : FIELDS;
 
+  // Draws no frame: `NodeSurface` is its only caller and already provides one.
   return (
-    <section className={cx("prompt-editor", flat && "is-flat", compact && "is-compact")}>
-      {flat ? (
-        <span className="prompt-editor-title">Starting prompt</span>
-      ) : (
-        <header className="prompt-editor-head">
-          <span className="prompt-editor-title">Starting prompt</span>
-          <span className="prompt-editor-sub">the prompt the optimizer evolves — edit any field</span>
-        </header>
-      )}
+    <section className={cx("prompt-editor", compact && "is-compact")}>
+      <span className="prompt-editor-title">Starting prompt</span>
       <div className="prompt-editor-grid">
         {shown.map((f) => (
           <label key={f.key} className="prompt-field">
