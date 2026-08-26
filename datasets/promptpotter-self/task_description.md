@@ -73,5 +73,5 @@ for the inner search climbing sooner.
 The committed inner config (``inner_tasks.yaml`` — the source of truth for the
 inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
-publication runs. Cost shape + the finish-line plan:
-``docs/specs/l4-outer-loop.md`` § Finish line.
+publication runs. Cost shape + what remains:
+``docs/specs/l4-outer-loop.md`` § Cost + § Open.

@@ -37,7 +37,7 @@ class ValidatorContext:
     # ``evidence_grounding_present`` to reject variants that cite
     # ``axis_memory`` to justify mutating a peaked axis without naming a
     # rebut (the critique naming that axis, or exploration_budget=wide).
-    # Populated by ``output.py::_compute_behavior_per_round`` from each round's
+    # Populated by ``review_md.py::_compute_behavior_per_round`` from each round's
     # ``axis_memory_peaked`` field, stashed by ``persist_round``.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 

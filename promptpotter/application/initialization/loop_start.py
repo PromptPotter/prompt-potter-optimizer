@@ -329,7 +329,7 @@ def _finalize_loop_state(
 
     if resolved_cycle_id:
         session.state.cycle_id = resolved_cycle_id
-        # Idempotent — runner.py may have pre-opened the ledger.
+        # Idempotent — runner/entry.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
         # First moment the lock from `Cycle.start` has an id to be written under, and round 0 is

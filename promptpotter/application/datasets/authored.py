@@ -37,9 +37,9 @@ class AuthoredDataset:
 
     pipeline_nodes: dict[str, Any]
     """The WHOLE ``pipeline.yaml::nodes.{name}`` dicts (config + optimizer + …),
-    not just ``nodes.*.config``. ``_merged_backend_nodes`` shallow-merges each
-    sub-block, so dropping to ``nodes.*.config`` (as ``load_dataset_node_overlay``
-    does) would silently lose ``optimizer.param_allowed_values`` locks."""
+    not just ``nodes.*.config``. Every sub-block is carried, so dropping to
+    ``nodes.*.config`` (as ``load_dataset_node_overlay`` does) would silently lose
+    ``optimizer.param_allowed_values`` locks."""
 
     active_steps: list[str]
     """``pipeline.yaml::pipelines.default`` — the dataset's chosen pipeline (e.g.

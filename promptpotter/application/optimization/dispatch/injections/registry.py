@@ -42,7 +42,7 @@ _RENDERER_MODULES = (catalogues, layer_state, panels, wounds)
 @functools.cache
 def injection_source_digest() -> str:
     """The panels' text is code, so it sits outside ``_identity_config``'s prompt templates and
-    layouts. Its estimator-side twin is ``measurement_source_digest``.
+    layouts. Its estimator-side twin is ``connectors/promptpotter.py::_measurement_source_digest``.
 
     ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
     prompt receives live there rather than in the renderer that spends them, and ``compose`` because

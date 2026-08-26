@@ -106,7 +106,7 @@ def round_result(
     the mode-collapse denominator (collapsed + scored) comes out right.
 
     ``collapsed`` makes that many measured candidates answer ONE label to every sample —
-    the constant answerer ``_answer_collapse_rate`` charges. ``cut`` makes them *also* stop
+    the constant answerer built below. ``cut`` makes them *also* stop
     after 2 rows, an arm PoBB eliminated before it earned a verdict; below
     ``elimination_n_min`` a collapse is indistinguishable from small-n noise, which is why
     a cut arm must not be charged as dirt.

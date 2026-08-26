@@ -228,7 +228,7 @@ def _tighten_budgets(
     because a `CycleSeed` arrives over `fork-cycle` as request input. Re-read against the CURRENT
     account at every launch, which is what keeps the ADR-0003 guard at the layer that owns it.
 
-    The operator's own ceiling does NOT come through here — see :func:`_impose_operator_ceiling`.
+    The operator's own ceiling does NOT come through here — see :func:`_compose_run_ceilings`.
     Bounding it downward too was one guard doing two jobs, and it silently destroyed every
     legitimate raise: a cap lifted to 500k was min'd back to the config's default on the very next
     launch, so a budget-halted cycle re-tripped inside its first sample."""

@@ -160,8 +160,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     OverlapReading,
     RoundSummary,
     DiagnosticRunRecord,
-    # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`;
-    # also the `GET /rounds/{n}` response model). Nested graph, dependencies first. ---
+    # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`,
+    # served through the per-cycle `file?path=` route). Nested graph, dependencies first. ---
     ValidationFailure,
     RuntimeFailure,
     ScoredCandidate,

@@ -89,7 +89,7 @@ class RoundBuffer:
                 # tense, matching round_NNNN.json::results[]). Reading
                 # ``prediction`` here returned None on every sample → the live
                 # tape rendered every row as an empty prediction. The compact
-                # ``_fmt_sample_line`` reader stays on ``prediction`` because
+                # ``render.py::fmt_sample_line`` reader stays on ``prediction`` because
                 # that is the live-sample dict's outbound key — the mismatch was
                 # only on the inbound source name.
                 "prediction": result.get("predicted") or "",

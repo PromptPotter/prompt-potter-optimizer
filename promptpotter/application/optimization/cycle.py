@@ -281,7 +281,8 @@ def _cumulative_theta(
 
 def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) -> None:
     """Pull RuntimeFailures from sibling forks of this cycle's root so L1 sees configs
-    prior siblings already proved to fail (``_r_runtime_failures`` filters by pipeline match)."""
+    prior siblings already proved to fail (``wounds.py::_runtime_block`` filters by pipeline
+    match, under the ``l1_wounds`` signal)."""
     from promptpotter.application.intelligence.sibling_wounds import (
         gather_sibling_runtime_failures,
     )

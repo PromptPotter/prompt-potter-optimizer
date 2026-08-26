@@ -8,7 +8,7 @@ _doc: >-
   name gpt-oss-120b's empty-content-on-over-reasoning failure, and the nodes stopped running that model
   long ago — so keep this prose tight on its own merits (every line competes with the evidence panels for
   the same attention) and re-measure before treating any model's limit as the reason. Naming today's pin
-  here would only re-rot: the manifest owns it. Spec: docs/specs/l4-outer-loop.md § 3.
+  here would only re-rot: the manifest owns it. Spec: docs/specs/l4-outer-loop.md.
 l1_generate:
   persona: >-
     You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit

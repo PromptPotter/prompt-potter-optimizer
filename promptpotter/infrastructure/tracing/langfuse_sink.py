@@ -135,7 +135,7 @@ class LangfuseSink:
         # blocking sleep, fired from run start — so the operator waited on a price of pure
         # observability before the campaign made its first call. Nothing the loop does depends
         # on the result (tracing is fan-out only), and a query whose item has not landed yet
-        # simply skips its link-back in `on_query_scored`. The mint lands in one `update`
+        # simply skips its link-back in `on_query_score_end`. The mint lands in one `update`
         # rather than key-by-key so a concurrent `_persist` cannot observe the dict mid-growth.
         def _register() -> None:
             self._lf.create_dataset(

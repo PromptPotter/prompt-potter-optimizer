@@ -219,7 +219,7 @@ class OptimizationConfig(StrictModel):
             "instead of tuning its own template. Applied per-cycle at the runner seam "
             "through the same per-node override channel the inner runner uses, so an "
             "outer cycle and the inner (default) cycles it spawns stay isolated "
-            "by task. See docs/specs/l4-outer-loop.md § 3."
+            "by task. See docs/specs/l4-outer-loop.md."
         ),
     )
 

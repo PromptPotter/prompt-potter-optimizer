@@ -2,7 +2,7 @@ name: PromptPotter-self
 version: v0.1
 description: >-
   Optimizer-of-the-optimizer — outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3
-  optimizer prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json).
+  optimizer prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.yaml).
   See docs/specs/l4-outer-loop.md.
 backend_name: PromptPotter
 backend_type: promptpotter
