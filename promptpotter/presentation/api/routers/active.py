@@ -202,7 +202,7 @@ class MachineStatusResponse(StrictModel):
 
 
 @active_router.get("/machine-status", response_model=MachineStatusResponse, tags=["Sessions"])
-async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
+def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
     """Whether another user is currently running a campaign on this machine.
 
     The server is single-process and runs campaigns in sequence, so a launch
@@ -213,6 +213,9 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
     and gate never disagree. Cross-user holder info is intentionally exposed
     (the seed of an admin presence view).
     """
+    # Sync on purpose, like every other read here: `machine_holder` reads every job file and, on a
+    # zombie, writes one and globs the projects tree. On a 5 s always-on poll that belongs in the
+    # threadpool, never on the one event loop every other route shares.
     holder = jobs.machine_holder(exclude_user_id=str(identity.user_id))
     if holder is None:
         return MachineStatusResponse(busy=False)

@@ -30,6 +30,11 @@ _JOB_STATUSES: frozenset[str] = frozenset(get_args(JobStatus))
 # the task itself. One name, because three sites spelled the pair: a fourth reader that forgot
 # ``pending`` would hand the slot out twice across that window and see nothing wrong.
 LIVE_JOB_STATUSES: frozenset[JobStatus] = frozenset({"pending", "running"})
+# A typo here matches nothing and reads as "not live", so the slot is handed out twice or never
+# released — no error either way. The Literal is the source; fail at import instead.
+assert LIVE_JOB_STATUSES <= _JOB_STATUSES, (
+    f"LIVE_JOB_STATUSES names unknown JobStatuses: {sorted(LIVE_JOB_STATUSES - _JOB_STATUSES)}"
+)
 
 
 @dataclass(frozen=False)
@@ -235,6 +240,11 @@ class JobRegistry:
         return self.get(job.job_id) or job
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
+        """The live jobs — a reconciling READ, deliberately: a ``running`` job whose task is gone
+        is stamped ``stopped`` here and its cycle reaped, so no caller is answered a zombie. The
+        write is bounded to once per zombie (the next call filters it out above the check), and
+        this is the only judgment that sees a torn task at all — ``reaper.periodic_sweep`` needs
+        900 s of on-disk staleness, which is how long the zombie would hold the machine slot."""
         out: list[Job] = []
         for j in self.list_all(user_id=user_id):
             if j.status not in LIVE_JOB_STATUSES:

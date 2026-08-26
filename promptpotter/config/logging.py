@@ -25,9 +25,13 @@ class _CliFormatter(logging.Formatter):
 
 class _QuietPolls(logging.Filter):
     """Drop successful high-frequency webapp polls from the access log — ~100+ identical 200/304s a minute crowd out real
-    signal. Only successful GETs on those routes are silenced; 4xx/5xx, POSTs and one-shot reads still log."""
+    signal. Only successful GETs on those routes are silenced; 4xx/5xx, POSTs and one-shot reads still log.
 
-    _LIST = re.compile(r"^/api/v1/(active|cycles|campaigns)(\?|$)")
+    Every entry must name a route the app actually serves — check against ``app.openapi()["paths"]`` when
+    editing. ``active`` once stood here for a path served as ``/api/v1/sessions/active``, so the filter
+    silenced nothing while that 2 s poll and ``machine-status`` logged a line each per tick, forever."""
+
+    _POLLED = re.compile(r"^/api/v1/(cycles|campaigns|machine-status|sessions/active)(\?|$)")
     _SUFFIX = ("/dashboard", "/health")
     _QUIET_STATUS = frozenset({200, 304})
 
@@ -40,7 +44,7 @@ class _QuietPolls(logging.Filter):
             return True
         path_str = str(path)
         base = path_str.split("?", 1)[0]
-        return not (self._LIST.match(path_str) or base.endswith(self._SUFFIX))
+        return not (self._POLLED.match(path_str) or base.endswith(self._SUFFIX))
 
 
 def setup_logging(

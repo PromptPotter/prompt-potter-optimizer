@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-_SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 
 @dataclass(frozen=True)
@@ -36,12 +34,14 @@ class ProviderConfigBundle:
 
     @property
     def configured(self) -> tuple[str, ...]:
-        out: list[str] = []
-        if self.google is not None:
-            out.append("google")
-        if self.github is not None:
-            out.append("github")
-        return tuple(out)
+        return tuple(name for name in SUPPORTED_PROVIDERS if getattr(self, name) is not None)
+
+
+# Every field of the bundle IS a provider, so the bundle is the single declaration and the
+# login route, `oidc.json`'s unknown-key warning and `configured` all read it. Hand-authored,
+# the same two names stood in four places across two layers, and a third provider would have
+# reached none of them.
+SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(f.name for f in fields(ProviderConfigBundle))
 
 
 class OIDCConfigError(ValueError):
@@ -63,7 +63,7 @@ def load_provider_config(path: Path) -> ProviderConfigBundle:
         raise OIDCConfigError("oidc.json top-level must be a JSON object.")
     google = _parse_provider("google", data.get("google"))
     github = _parse_provider("github", data.get("github"))
-    unknown = set(data.keys()) - _SUPPORTED_PROVIDERS
+    unknown = set(data.keys()) - set(SUPPORTED_PROVIDERS)
     if unknown:
         logger.warning("oidc.json contains unsupported providers (ignored): %s", sorted(unknown))
     return ProviderConfigBundle(google=google, github=github)
@@ -89,4 +89,9 @@ def _parse_provider(name: str, raw: object) -> OIDCProviderConfig | None:
     )
 
 
-__all__ = ["OIDCProviderConfig", "ProviderConfigBundle", "load_provider_config"]
+__all__ = [
+    "SUPPORTED_PROVIDERS",
+    "OIDCProviderConfig",
+    "ProviderConfigBundle",
+    "load_provider_config",
+]

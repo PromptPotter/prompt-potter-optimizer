@@ -10,7 +10,7 @@ import queue
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
@@ -36,10 +36,13 @@ __all__ = ["run_origin_gate"]
 # within ~1 s.
 _GATE_POLL_S = 1.0
 
-_DECISIONS = ("rescore", "proceed", "abort")
-
 GateDecision = Literal["rescore", "proceed", "abort"]
 _GateOutcome = Literal["rescore", "proceed", "abort", "pause"]
+
+# The runtime spelling of ``GateDecision`` — the decision file and the TTY both arrive as
+# untyped text, so this is what turns one into a decision. Derived, because the hand-authored
+# pair sat two lines under the type it was meant to mirror.
+_DECISIONS: tuple[str, ...] = get_args(GateDecision)
 
 
 async def run_origin_gate(
@@ -67,9 +70,9 @@ async def run_origin_gate(
             # this prints to the launching console, whose encoding may be cp1252
             # (Windows) — a non-ASCII glyph (e.g. an emoji) raises
             # UnicodeEncodeError there and crashes the whole run.
+            keys = " / ".join(f"{d[0]}={d}" for d in _DECISIONS)
             print(
-                f"\n  [ORIGIN GATE: {grade}] type r=rescore / p=proceed / a=abort "
-                "then Enter (or use the webapp):",
+                f"\n  [ORIGIN GATE: {grade}] type {keys} then Enter (or use the webapp):",
                 flush=True,
             )
         declare_run_phase(session, RunPhase.GATE)
@@ -188,14 +191,9 @@ def _spawn_stdin_reader() -> queue.Queue[GateDecision] | None:
     q: queue.Queue[GateDecision] = queue.Queue()
 
     def _read() -> None:
-        mapping = {
-            "r": "rescore",
-            "rescore": "rescore",
-            "p": "proceed",
-            "proceed": "proceed",
-            "a": "abort",
-            "abort": "abort",
-        }
+        # Full word or its initial, derived from the same tuple — a hand-written table here
+        # would let the TTY accept a spelling the type no longer has, or miss a new one.
+        mapping = {key: d for d in _DECISIONS for key in (d, d[0])}
         try:
             for line in sys.stdin:
                 choice = mapping.get(line.strip().lower())

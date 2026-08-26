@@ -3,7 +3,6 @@ short-lived OAuth-state map. Stashed on ``app.state``; the middleware and auth r
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,8 +16,6 @@ from promptpotter.infrastructure.identity.provider_config import (
     load_provider_config,
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore
-
-logger = logging.getLogger(__name__)
 
 OAUTH_STATE_TTL_S = 600  # 10 min — covers slow consent screens but bounds replay
 _MAX_PENDING_STATES = 1024
@@ -77,7 +74,6 @@ def build_identity_bundle(paths: IdentityPaths) -> IdentityBundle:
     jwks_cache = JWKSCache()
     google = GoogleProviderClient(config.google, jwks_cache) if config.google is not None else None
     github = GitHubProviderClient(config.github) if config.github is not None else None
-    logger.info("identity bundle ready; providers configured: %s", config.configured or "(none)")
     return IdentityBundle(
         paths=paths,
         config=config,

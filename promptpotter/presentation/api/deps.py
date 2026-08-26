@@ -11,6 +11,7 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -25,23 +26,26 @@ from promptpotter.shared.identity import IdentityContext
 PROMPTPOTTER_AUTH_OFF_ENV = "PROMPTPOTTER_AUTH"
 
 
-def _auth_off() -> bool:
-    return os.environ.get(PROMPTPOTTER_AUTH_OFF_ENV, "").strip().lower() == "off"
+def auth_is_open(bundle: IdentityBundle | None) -> bool:
+    """Whether every request resolves to the local operator: the env kill-switch, or development with
+    ZERO auth providers, which can't complete a login. The development arm is gated on
+    ``ENVIRONMENT == "development"`` EXPLICITLY — a misconfigured production stays 401, never opens.
 
-
-def _dev_without_providers(request: Request) -> bool:
-    """Development with ZERO auth providers can't complete a login, so treat it as auth-off. Gated on
-    ``ENVIRONMENT == "development"`` EXPLICITLY — a misconfigured production stays 401, never opens."""
-    if settings.ENVIRONMENT != "development":
-        return False
-    bundle = getattr(request.app.state, "identity_bundle", None)
-    return bundle is not None and not bundle.config.configured
+    Takes the bundle rather than the ``Request`` so the startup banner reports the same posture the
+    resolver enforces, off one spelling of it."""
+    if os.environ.get(PROMPTPOTTER_AUTH_OFF_ENV, "").strip().lower() == "off":
+        return True
+    return (
+        settings.ENVIRONMENT == "development"
+        and bundle is not None
+        and not bundle.config.configured
+    )
 
 
 def resolve_identity(request: Request) -> IdentityContext:
     """Stage-1 identity resolver. Auth-off resolves the SAME single operator the CLI does, so a registered
     developer's terminal runs and their web session share one workspace; otherwise 401 without a session."""
-    if _auth_off() or _dev_without_providers(request):
+    if auth_is_open(getattr(request.app.state, "identity_bundle", None)):
         return registered_or_default_identity()
     identity_ctx: IdentityContext | None = getattr(request.state, "identity_ctx", None)
     if identity_ctx is None:
@@ -105,6 +109,7 @@ __all__ = [
     "IdentityDep",
     "JobRegistryDep",
     "StoresDep",
+    "auth_is_open",
     "build_stores_from_identity",
     "decode_descend",
     "get_backend_or_404",

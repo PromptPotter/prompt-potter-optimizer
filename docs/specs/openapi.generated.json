@@ -4279,7 +4279,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Identity envelope + the data the account modal + consent gate need.\n\n`connected_accounts` is a single-entry list at Stage 1 (one provider\nper session). `available_providers` is configured-minus-connected so\nthe \"+ Connect account\" affordance only surfaces real targets.\n`terms_*` drive the post-auth consent gate (read from `user.json`);\n`access_state` drives the entitlement gate in front of it.\n\nThis is also where a new account first becomes real on disk, so it is where both\nnew-account notices fire — the operator's and the CRM's. See the comment on\n`is_new_account`.",
+        "description": "Identity envelope + the data the account modal + consent gate need.\n\n`connected_accounts` is a single-entry list at Stage 1 (one provider\nper session). `available_providers` is configured-minus-connected so\nthe \"+ Connect account\" affordance only surfaces real targets.\n`terms_*` drive the post-auth consent gate (read from `user.json`);\n`access_state` drives the entitlement gate in front of it.\n\nThis is also where a new account first becomes real on disk, so it is what schedules the\nnew-account announcement — after the response, never on it. See the comment on\n`is_new_account`.",
         "operationId": "me_api_v1_auth_me_get",
         "responses": {
           "200": {

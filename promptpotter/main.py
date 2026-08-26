@@ -17,11 +17,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, webapp_static_root
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, user_data_root, webapp_static_root
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import notify_operator
+from promptpotter.presentation.api.deps import auth_is_open
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
 from promptpotter.presentation.api.routers.auth import auth_router
@@ -31,6 +32,7 @@ from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
 from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.verify import verify_router
+from promptpotter.presentation.views.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError
 
@@ -57,12 +59,22 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    logger.info("Starting %s v%s", app.title, app.version)
-    logger.info("Environment: %s", settings.ENVIRONMENT)
     # Quiet the benign Windows ProactorEventLoop disconnect noise (bpo-39010)
     # that fires when a browser tab drops a kept-alive socket.
     silence_proactor_disconnect_noise()
-    app.state.identity_bundle = build_identity_bundle(default_identity_paths())
+    bundle = build_identity_bundle(default_identity_paths())
+    app.state.identity_bundle = bundle
+    print(
+        render_server_banner(
+            brand_name=settings.BRAND_SERVICE_NAME,
+            version=app.version,
+            environment=settings.ENVIRONMENT,
+            data_root=user_data_root(),
+            auth_open=auth_is_open(bundle),
+            providers=bundle.config.configured,
+        ),
+        flush=True,
+    )
 
     # Liveness reconciler. The registry stamps a cycle terminal the moment its
     # API job is proven dead (torn task, or stale-on-restart) via on_reap; the
@@ -78,8 +90,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
-    logger.info("Webapp available at: /")
-    logger.info("API docs available at: /docs")
     yield
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -198,7 +208,11 @@ install_oidc_middleware(app)
 
 class SecurityHeadersMiddleware:
     """The single response-header seam — never add a second middleware beside it. Pure ASGI, not
-    ``BaseHTTPMiddleware``, which buffers the body and breaks the SSE feed's disconnect/shutdown teardown."""
+    ``BaseHTTPMiddleware``, which buffers the body and breaks the SSE feed's disconnect/shutdown teardown.
+
+    Here rather than beside ``install_oidc_middleware`` in ``api/middleware/``: that one belongs to the
+    ``/api/v1`` layer, this one headers the static webapp mount as well (its CSP branches on which), so
+    it sits at the composition root that owns both."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

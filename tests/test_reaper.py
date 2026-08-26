@@ -393,6 +393,31 @@ async def test_periodic_sweep_skips_its_tick_when_the_machine_slept(
     assert swept == [900.0]
 
 
+async def test_periodic_sweep_survives_a_tick_that_raises(
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
+    """Both halves of a tick WRITE, so a single unwritable path would end the task — and nothing
+    would say so. The sweep just stops for the rest of the server's uptime, leaving every
+    CLI-launched death reading as live on every surface, and the stored exception resurfaces
+    hours later as a shutdown crash when the lifespan awaits this task, blamed on the wrong tick."""
+    calls: list[float] = []
+
+    def _sweep(root: Path, dead_after_s: float) -> None:
+        calls.append(dead_after_s)
+        if len(calls) == 1:
+            raise OSError("data root is read-only")
+
+    monkeypatch.setattr(reaper, "sleep_measuring_suspend", _scripted_overshoots([0.0, 0.0]))
+    monkeypatch.setattr(reaper, "sweep_dead_cycles", _sweep)
+    monkeypatch.setattr(reaper, "reclaim_orphan_sandboxes", lambda root: None)
+
+    with pytest.raises(_TicksExhaustedError):
+        await reaper.periodic_sweep(built_stores.projects_root, interval_s=900.0)
+
+    # Tick 1 raised; tick 2 still ran. Unguarded, the OSError leaves here instead.
+    assert calls == [900.0, 900.0]
+
+
 async def test_heartbeat_reports_a_suspend_to_its_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     """``on_suspend`` is the wire from the one ticking loop to the L4 wall-clock deadline.
     A heartbeat that ticked but never called it would leave the deadline charging suspend

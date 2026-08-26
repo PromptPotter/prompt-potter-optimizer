@@ -170,12 +170,19 @@ async def periodic_sweep(
             )
             sleep_for = initial_delay_s
             continue
-        await asyncio.to_thread(sweep_dead_cycles, projects_root, dead_after_s=interval_s)
-        # Reclamation rides the same tick but stays a separate call: one judges LIVENESS
-        # (is this cycle's producer gone?), the other judges REACHABILITY (does this
-        # sandbox's owner still exist?). Same schedule, different question — folding them
-        # would make either count unreadable.
-        await asyncio.to_thread(reclaim_orphan_sandboxes, projects_root)
+        try:
+            await asyncio.to_thread(sweep_dead_cycles, projects_root, dead_after_s=interval_s)
+            # Reclamation rides the same tick but stays a separate call: one judges LIVENESS
+            # (is this cycle's producer gone?), the other judges REACHABILITY (does this
+            # sandbox's owner still exist?). Same schedule, different question — folding them
+            # would make either count unreadable.
+            await asyncio.to_thread(reclaim_orphan_sandboxes, projects_root)
+        except Exception:
+            # A raising tick must not END the loop: both halves write, so one unwritable path would
+            # silently stop all reaping for the rest of the server's uptime, then resurface hours
+            # later as a shutdown crash when the lifespan awaits this task. Cancellation is a
+            # BaseException, so shutdown still lands.
+            logger.exception("periodic sweep tick failed; the loop continues")
         sleep_for = interval_s
 
 

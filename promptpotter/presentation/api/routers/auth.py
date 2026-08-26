@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
@@ -27,6 +27,7 @@ from promptpotter.infrastructure.identity.google import (
     ProviderIdentity,
 )
 from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
+from promptpotter.infrastructure.identity.provider_config import SUPPORTED_PROVIDERS
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.account_spend import (
@@ -53,8 +54,6 @@ from promptpotter.shared.identity import ACCESS_BLOCKED, claim_access_state, cla
 logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
-
-_SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 
 class ConnectedAccount(StrictModel):
@@ -243,7 +242,7 @@ async def login(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    if provider not in _SUPPORTED_PROVIDERS:
+    if provider not in SUPPORTED_PROVIDERS:
         raise NotFoundError(
             f"unknown provider {provider!r}",
             code="provider_unknown",
@@ -271,7 +270,7 @@ async def callback(
     # the provider's consent screen, so a JSON 4xx renders as raw text in the
     # tab. The sibling routes (/login, /providers, /me, /logout) keep raising
     # since they're called by fetch() and want JSON.
-    if provider not in _SUPPORTED_PROVIDERS:
+    if provider not in SUPPORTED_PROVIDERS:
         return _redirect_with_error("signin_unavailable")
     bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
     if bundle is None:
@@ -365,8 +364,35 @@ async def logout(request: Request) -> JSONResponse:
     return response
 
 
+def _announce_new_account(
+    *, email: str | None, name: str | None, user_id: str, access_state: AccessState
+) -> None:
+    """Both one-shot notices an account's first request fires — the operator's and the CRM's.
+
+    Off the request path (``BackgroundTasks``), so the two ``timeout=10`` posts land after the
+    response rather than holding a new operator's first page. ``admin_bot.py`` makes both
+    best-effort by contract, so nothing here can raise and there is no result to wait for.
+
+    The count is read HERE, after ``get_or_create`` returned, so the arriving account is inside
+    the total both notices lead with: with signup as the grant, "how many are on the free tier"
+    is the number that decides whether anything needs doing, and no other surface holds it.
+    """
+    who = email or f"(no email) {user_id}"
+    total = count_accounts(DEFAULT_PROJECTS_ROOT)
+    notify_operator(
+        f"New PromptPotter account: {who}\n"
+        f"Accounts now: {total}\n"
+        f"Access: {access_state}" + (f"\nRevoke it with:  /block {email}" if email else "")
+    )
+    # Entitlement and contact record are separate questions: a blocked account is still a real
+    # person worth keeping, so both notices fire regardless of `access_state`.
+    forward_new_account_to_crm(email=email, name=name, user_id=user_id, account_count=total)
+
+
 @auth_router.get("/me", response_model=MeResponse)
-async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeResponse:
+def me(
+    request: Request, background: BackgroundTasks, identity: IdentityDep, stores: StoresDep
+) -> MeResponse:
     """Identity envelope + the data the account modal + consent gate need.
 
     `connected_accounts` is a single-entry list at Stage 1 (one provider
@@ -375,8 +401,8 @@ async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeRe
     `terms_*` drive the post-auth consent gate (read from `user.json`);
     `access_state` drives the entitlement gate in front of it.
 
-    This is also where a new account first becomes real on disk, so it is where both
-    new-account notices fire — the operator's and the CRM's. See the comment on
+    This is also where a new account first becomes real on disk, so it is what schedules the
+    new-account announcement — after the response, never on it. See the comment on
     `is_new_account`.
     """
     bundle = _require_bundle(request)
@@ -399,21 +425,12 @@ async def me(request: Request, identity: IdentityDep, stores: StoresDep) -> MeRe
         email=email,
     )
     if is_new_account:
-        who = email or f"(no email) {identity.user_id}"
-        # Counted AFTER `get_or_create`, so the arriving account is inside the total the operator reads.
-        # The count is the headline of both notices: with signup as the grant, "how many are on the free
-        # tier" is the number that decides whether anything needs doing, and no surface held it before.
-        total = count_accounts(DEFAULT_PROJECTS_ROOT)
-        notify_operator(
-            f"New PromptPotter account: {who}\n"
-            f"Accounts now: {total}\n"
-            f"Access: {access_state}" + (f"\nRevoke it with:  /block {email}" if email else "")
-        )
-        # Entitlement and contact record are separate questions: a blocked account is still a real
-        # person worth keeping. Both notices fire regardless of `access_state`, and both are
-        # best-effort — neither may fail the request that just created the account.
-        forward_new_account_to_crm(
-            email=email, name=name, user_id=str(identity.user_id), account_count=total
+        background.add_task(
+            _announce_new_account,
+            email=email,
+            name=name,
+            user_id=str(identity.user_id),
+            access_state=access_state,
         )
     return MeResponse(
         user_id=str(identity.user_id),
