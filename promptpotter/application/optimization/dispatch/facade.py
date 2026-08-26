@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimization.dispatch.bundle import (
-    OPTIMIZER_PROMPT_BUDGET_CHARS,
+    OPTIMIZER_DISCRETIONARY_CHARS,
     ArmReading,
     CycleSlice,
     InjectionBundle,
@@ -121,6 +121,21 @@ class InjectionRenderError(Exception):
         super().__init__(f"injection {name!r} renderer raised {type(cause).__name__}: {cause}")
 
 
+class MandatoryPanelStarvedError(Exception):
+    """A panel the node cannot operate without rendered evidence the composition did not place.
+
+    Halts rather than shipping the prompt: a node handed no subject still answers, confidently, and
+    nothing downstream can tell that apart from a node that was."""
+
+    def __init__(self, node: str, panels: list[str]) -> None:
+        self.node = node
+        self.panels = panels
+        super().__init__(
+            f"{node}: mandatory panel(s) {panels} rendered but were not placed. A mandatory panel "
+            f"is admitted whatever it costs, so reaching here means the allocator was bypassed."
+        )
+
+
 # Caller-supplied `compile_prompt` extras (not signals). Anything outside `INJECTIONS ∪ extras`
 # in a template body is a typo — `validate_template` raises rather than silently dropping it.
 _TEMPLATE_EXTRAS: dict[str, set[str]] = {
@@ -183,24 +198,25 @@ class DispatchHub:
         """Fill a node's layout, then resolve any injection token left in non-layout prose — two
         channels, one call. ``rendered`` is what the node was actually SHOWN, which is the smaller set.
 
-        *node* names the ceiling this composition must fit; without one the preview budget applies
-        and every item is placed. Selection runs either way, so a panel's fencing, its boundaries
-        and its "showed N of M" line have one implementation however the prompt was reached."""
+        *node* names the discretionary allowance this composition must fit; without one the preview
+        budget applies and every item is placed. Selection runs either way, so a panel's fencing, its
+        boundaries and its "showed N of M" line have one implementation however the prompt was
+        reached."""
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, bundle) for name in order}
-        # The ceiling is on the COMPOSED prompt, so the static template is already spent before a
-        # single item is placed.
-        ceiling = OPTIMIZER_PROMPT_BUDGET_CHARS.get(node or "")
-        budget = _NO_CEILING if ceiling is None else max(0, ceiling - len(template.render()))
+        budget = OPTIMIZER_DISCRETIONARY_CHARS.get(node or "", _NO_CEILING)
         # Which panels may be thinned is a property of what they CARRY, so it is asked of the kind
         # each signal already declares rather than kept as a second list here.
         whole = frozenset(n for n in order if (sig := INJECTIONS.get(n)) and not sig.kind.divisible)
-        # A mandatory name is a promise about the prompt the node RECEIVES, so it takes the
-        # ceiling's first claim; the slot loop below reads `layout.slot`, so nothing moves.
         spec = NODE_LAYOUTS.get(node or "")
-        rendered, coverage = compose_select(
-            items, order, budget, exempt=whole, first=spec.mandatory if spec else frozenset()
-        )
+        mandatory = spec.mandatory if spec else frozenset()
+        rendered, coverage = compose_select(items, order, budget, exempt=whole, mandatory=mandatory)
+        # `l1_layout_missing_mandatory` (`domain/l1_layout.py`) guards these against L2 EXCISING
+        # them; this is the same promise's other half, against the composition refusing them.
+        if starved := sorted(
+            n for n in mandatory if coverage[n].produced and not coverage[n].placed
+        ):
+            raise MandatoryPanelStarvedError(node or "llm_call", starved)
 
         update: dict[str, str] = {}
         for slot in L1_LAYOUT_SLOTS:
@@ -406,6 +422,7 @@ def build_bundle(
 __all__ = [
     "DispatchHub",
     "InjectionRenderError",
+    "MandatoryPanelStarvedError",
     "build_bundle",
     "injection_char_counts",
     "node_packages",

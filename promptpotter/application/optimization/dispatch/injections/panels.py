@@ -448,15 +448,17 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
     first."""
     # The rank decides which cells spend their FULL narrative, so a rank read off the point
     # estimate alone spends the budget on whichever cell noise put first — the measured gaps are
-    # routinely narrower than either bar. Ranking on the upper bound keeps a wide cell out of
-    # the lead, and when nothing clears its own bar NO cell earns the wide trace cap: there is
-    # no evidence to amplify, and the header says so instead of pretending.
+    # routinely narrower than either bar. Ranking on the upper bound keeps a wide cell out of the
+    # lead. Where nothing clears its own bar the header says the order carries no information, and
+    # the leading cells still narrate: the panel's job is to hand over what the inner loop DID,
+    # which does not stop being evidence because the cells cannot be ranked against each other.
     origin = {sid: r for r in b.origin_per_sample if (sid := r.get("sample_id")) is not None}
     scored = _inner_narrated(b)
     if not scored:
         return []
     # `upper` — how bad the cell is AFTER its own uncertainty — is computed once and carried, so
-    # the rank key and the separation test cannot come apart.
+    # the rank key and the separation test cannot come apart. It decides the ORDER and nothing
+    # else — which cells are worth reading is a separate question from which cell is worst.
     cells = []
     for lift, r in scored:
         # At the ORIGIN both arms are the same rows, so the paired difference is a cell against
@@ -505,7 +507,13 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
             f"ORDER here carries no information — do not ground an edit in a {unit}'s rank. Read "
             "the narratives for what the inner loop actually did:"
         )
-        full_cells = min(n_worse, INNER_NARRATIVE_FULL_CELLS)
+        # Separated cells earn the depth — they are the ones with something to learn from. Where
+        # NONE separates, no cell being privileged is a reason to spend the depth evenly rather
+        # than withhold it: both consumers are instructed to ground an edit in a narrative
+        # observation, so a panel of bare stat lines leaves them citing the critique instead.
+        full_cells = (
+            min(n_worse, INNER_NARRATIVE_FULL_CELLS) if n_worse else INNER_NARRATIVE_FULL_CELLS
+        )
     sections = [Item(header)]
     for i, (_upper, d, bar, r) in enumerate(shown):
         label = str(r.get("query") or r.get("sample_id") or "inner")[:80]

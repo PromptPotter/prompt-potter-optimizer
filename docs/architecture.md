@@ -133,10 +133,12 @@ an LLM-written field at its parse boundary (`dispatch/schemas.py`:
 at its mint-time `check_budget`, a derived view at its render cap.
 A composition-site bound may never **cut**: slicing a rendered panel
 only chooses which half the model sees. It may **select** — whole
-items dropped under the node's ceiling
-(`OPTIMIZER_PROMPT_BUDGET_CHARS`; `prompt_chars` on the ledger is the
+items dropped under the node's discretionary allowance
+(`OPTIMIZER_DISCRETIONARY_CHARS`; `prompt_chars` on the ledger is the
 measurement), in the layout's own priority order, leaving a smaller
-COMPLETE package rather than half of one. Per-panel caps stay
+COMPLETE package rather than half of one. It may never select away a
+`L1_MANDATORY` panel: the node's own subject is admitted whatever it
+costs, and a composition that cannot place one raises. Per-panel caps stay
 production bounds, and each is chosen alone: their SUM is nobody's
 until the composition owns it, which is the whole job of selecting.
 Two corollaries are easy to miss: input length is a

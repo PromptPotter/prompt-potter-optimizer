@@ -9,9 +9,8 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.scoring.formula import extract_item_label
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import recorded_cost_s
+from promptpotter.domain.scoring import extract_item_label, recorded_cost_s
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
@@ -393,7 +392,7 @@ _REGISTRY: list[Evaluator] = [
         ),
         scope="per_round",
         compute=compute_pipeline_compactness,
-        direction="low",
+        direction="high",
     ),
     Evaluator(
         name="output_compactness",

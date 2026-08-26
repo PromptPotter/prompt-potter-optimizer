@@ -42,7 +42,6 @@ from promptpotter.application.scoring.evaluators import all_evaluators, material
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
-    extract_item_label,
 )
 from promptpotter.application.scoring.formula.matchers import (
     _aime_match,
@@ -71,6 +70,7 @@ from promptpotter.domain.ruler import (
     ruler_id,
 )
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import extract_item_label
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import RulerCoverageError
@@ -3702,14 +3702,22 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
     assert "-0.300 ±0.054" in out and "+0.100 ±0.054" in out
 
     # Nothing separates ⇒ the order carries no information, and the panel says so instead of
-    # ranking anyway. No cell earns the full trace cap: there is no evidence to amplify.
+    # ranking anyway.
     flat = render([cell(1, 0.00, 0.34), cell(2, 0.26, 0.39), cell(3, 0.10, 0.35)], origin)
     assert "NOT ONE cell separates" in flat
     assert "worse than the origin" not in flat
-    # And NO cell buys the 4x trace cap — spending it here amplifies whichever cell noise ranked
-    # first, which is the whole defect. This is the token half of the fix; without it the panel
-    # still hands the model a coin-flip exemplar, just with an honest header above it.
-    assert flat.count("[…truncated]") == 3
+    # The cells still NARRATE. This assertion used to run the other way — no cell bought the full
+    # cap, on the argument that spending it here amplifies whichever cell noise ranked first. That
+    # argument was against amplifying ONE exemplar, and withholding every trace was the wrong
+    # answer to it: on `promptpotter-self__b40e8b` the zero branch collapsed all six cells to their
+    # stat lines from round 2 on, and the generator — whose instruction orders it to ground each
+    # candidate in a specific narrative observation — had nothing left but the critique. It cited
+    # the critique while declaring the field `inner_narratives` on 4 of 9 candidates, and neither
+    # round resolved anything, which suppressed the next round's traces in turn. Equal depth across
+    # the leading cells answers the original concern without starving the node: no single cell is
+    # held up, and the header above already says the rank means nothing.
+    assert flat.count("[…truncated]") == 0
+    assert flat.count("round 11: the inner loop tried a thing") == 3, "every cell kept its story"
 
     # A FLOORED cell adopts no levels, so it carries no SE — and it is the one cell whose badness
     # is not in question. It ranks on its value alone and leads, rather than being dropped for

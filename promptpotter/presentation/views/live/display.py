@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.bundle import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -196,21 +195,18 @@ class LiveDisplay(DerivedView):
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        # The node's own budget, not one line across all of them: a shared 8000 sat below
-        # every node's minimum, so the marker was yellow on every call and meant nothing.
-        budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(record.node)
-        oversize = budget is not None and record.prompt_chars > budget
-        marker = "⚠ " if oversize else "↻ "
+        # A REFUSED panel, not a big prompt — same alarm the run log raises, for the reason stated
+        # at `dispatch/llm_call/call.py`: a mandatory floor is admitted whatever it costs.
+        refused = record.refused_panels
+        marker = "⚠ " if refused else "↻ "
         bits = [f"{marker}optimizer call: {node_label} · {model}"]
         if record.prompt_chars > 0:
             bits.append(f"{record.prompt_chars:,}c prompt")
-        # ADDRESSED, not reprinted: on the warning path only, name the one panel to go and look
-        # at. The full breakdown is `injection_chars` on this record — the alarm's job here is to
-        # point, and without a pointer it fired on 23% of l1_generate calls and taught nothing.
-        if oversize and record.injection_chars:
-            worst, chars = max(record.injection_chars.items(), key=lambda kv: kv[1])
-            bits.append(f"heaviest {worst} {chars:,}c")
-        color = YELLOW if oversize else DIM
+        # ADDRESSED, not reprinted: on the warning path only, name the panel to go and look at.
+        # The full breakdown is `injection_chars` on this record — the alarm's job here is to point.
+        if refused:
+            bits.append(f"NO ROOM: {', '.join(refused[:3])}")
+        color = YELLOW if refused else DIM
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
@@ -247,11 +243,10 @@ class LiveDisplay(DerivedView):
             bits.append(f"{duration_s:.1f}s")
         if isinstance(total_tokens, int) and total_tokens > 0:
             bits.append(f"{total_tokens} tok")
-        # What the seconds beside it actually bought. A reasoning model can spend nearly its
-        # whole output budget thinking — measured at ~94% on the shipped optimizer route, where
-        # the answer is schema-capped at ~1300 characters — and the duration alone reads as a
-        # slow provider rather than as a node that was asked to think about something small.
-        # Silent at 0 so a non-reasoning model's line stays clean.
+        # What the seconds beside it actually bought. A reasoning model can spend nearly its whole
+        # output budget thinking against a schema-capped answer, and the duration alone then reads
+        # as a slow provider rather than a node asked to think about something small. Silent at 0
+        # so a non-reasoning model's line stays clean.
         completion = usage.get("completion_tokens")
         reasoning = usage.get("reasoning_tokens")
         if (
@@ -335,9 +330,8 @@ class LiveDisplay(DerivedView):
     # --- Public callback API (pre-ledger paths call these directly) ---
 
     def on_phase(self, event: PhaseEvent, view: AnyView | None = None) -> None:
-        # Round 0 gets the same rule every later round gets. The banner used to fire only on
-        # L1_GENERATE:enter, so the origin's samples and its C0 box sat above `✓ Initialized`
-        # under no round marker at all — the one stretch of the readout with nothing to seek to.
+        # Round 0 gets the same rule every later round gets, so no stretch of the readout sits
+        # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":

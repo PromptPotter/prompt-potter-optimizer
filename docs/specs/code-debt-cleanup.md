@@ -99,16 +99,6 @@ decisions → [`../architecture.md`](../architecture.md).
 
 ## Blocked — named blocker
 
-**`OPTIMIZER_PROMPT_BUDGET_CHARS["l1_generate"]` cannot carry that node's floor layout.** Past the
-static template the ceiling leaves ~6.1k for panels and the four whole-or-nothing ones take ~4k, so
-the back of the layout order is refused WHOLE rather than thinned: `failing_samples` reached 6 of 71
-calls, `mutation_memory` 2, both value-space catalogues under half, while every frame panel places —
-the generator keeps its instruments and loses its evidence. `l1_critique` fits. Three exits: raise
-the ceiling, shrink the template (46% of it), or give the catalogues row granularity — the rule they
-break is already in [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md), against which a
-thinned "use only these" menu lies. **Blocker: each voids banked origins, so which to spend is the
-operator's call.**
-
 **Entry-point parity — five wired verbs the browser can fire and the terminal cannot:**
 - Each is already whole on the server: a payload model in `PAYLOAD_MODEL_FOR_KIND`, a capability in `CAP_FOR_KIND`, a declared operation in `m12-api-openapi.yaml`. Missing is only the CLI half — one `sub.add_parser` row in `cli/parsers.py`, one `COMMANDS` row in `cli/campaign_runner.py` (an import-time assert pins the two together, so they land in one commit), and one handler beside the existing shells in `cli/commands/lifecycle.py`, which already owns `_refused`, `_resolve_target` and `resolve_campaign_hint`. No new orchestration: every one is a `CommandDispatcher` call.
 - `skip-searchpoint` — `SkipSearchpointPayload(campaign_id, cycle_id)` → `dispatch_cycle_command`. The sharpest of the five: an operator watching a candidate burn samples has no sanctioned way to cut it, and the in-run stdin reader (`runner/origin_gate.py`) is origin-gate-only.

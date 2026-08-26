@@ -154,9 +154,18 @@ def build_score_report(
     """Typed candidate score report. The CI is stamped HERE, off this candidate's own rows, so a finished candidate carries
     its whisker before its round ends — one writer, one band, no later override."""
     # Lazy: scoring → optimization circular.
+    from promptpotter.application.scoring.evaluators import materialize_row_derivable
     from promptpotter.application.scoring.selection import mean_fitness_ci
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
+    # Refresh the row-derivable subset from the rows, as the read-side mask does (`mask/load.py`):
+    # on a RECONSTRUCT-from-disk path — resume repair, an origin replayed off its round file — the
+    # snapshot carries whatever evaluator vocabulary was current when it was written, so a formula
+    # naming a term added since halts on a name its own rows can answer. No row-derivable evaluator
+    # namespaces by node, so a bare name cannot shadow a `{node}_{name}` one. An EMPTY snapshot is
+    # an invalid / force-zeroed candidate and stays empty rather than acquiring a real accuracy.
+    if evaluators.get("accuracy") is not None and query_results:
+        evaluators.update(materialize_row_derivable(query_results))
     ci_lo, ci_hi = mean_fitness_ci(query_results)
     return ScoredCandidate(
         mean_fitness_ci_lo=ci_lo,

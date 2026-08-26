@@ -38,9 +38,9 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | Step | File | What you extract |
 |---|---|---|
 | 1 | `promptpotter/assets/optimizer/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer set: `assets/optimizer/sets/self_optimizing.yaml`) | The current L1 optimizer prompt template — the thing you will edit |
-| 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: rendered L1 optimizer prompt, raw LLM output, parsed candidates, per-candidate scores, critique text |
+| 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap`, `separable`, critique text. **No rendered prompt** — see row 4 |
 | 3 | `{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
-| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. |
+| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record carries `template_fields` + `variables` (render one against the other), and the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` and `injection_silent` — the panel-by-panel breakdown of what the node was actually handed. |
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
 
@@ -58,9 +58,9 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 
 ### The per-checkup reading list — every tick reads ALL of these, not just the log tail
 
-**A checkup that only greps the run-readout tail is NOT a checkup** (operator-mandated 2026-07-02). Each tick, open the newest outer `{cycle}/.runtime/cache/rounds/round_NNNN.json` and read every LLM tier's actual I/O:
+**A checkup that only greps the run-readout tail is NOT a checkup** (operator-mandated 2026-07-02). Each tick, open the newest outer `{cycle}/.runtime/cache/rounds/round_NNNN.json` for each tier's output — and take the rendered INPUT from `.runtime/ledger.jsonl` (row 4 above), because the cache's `l1_generate` entry is a synthesized stub on any replayed round:
 
-1. **`l1_generate`** — rendered input (are the panels populated or empty? for the OUTER generator, is `inner_narratives` present with one story per seed — the primary evidence an optimizer-prompt edit must ground on, not the scalar per-seed delta?), raw output, parsed variants: `evidence_grounding.field` in the real enum? citations quoting text that EXISTS in the rendered input? hypotheses distinct, not one idea relocated? `changes_description` actually REPORTING the override emitted beside it? any hallucinated node/param?
+1. **`l1_generate`** — rendered input: are the panels populated or empty? `injection_dropped` on the `llm_call_start` record answers that directly, and **a name in it that is also `L1_MANDATORY` is a stop-and-diagnose** — `rendered_prompt` refused whole is how the generator ends up rewriting prompts it was never shown. For the OUTER generator, is `inner_narratives` present with a story per seed rather than bare stat lines — the primary evidence an optimizer-prompt edit must ground on, not the scalar per-seed delta? Then raw output, parsed variants: `evidence_grounding.field` in the real enum? citations quoting text that EXISTS in the rendered input — and quoting the panel they NAME, not another one? hypotheses distinct, not one idea relocated? `changes_description` actually REPORTING the override emitted beside it? any hallucinated node/param?
 2. **`l1_critique`** — the input carries the evidence, and WHICH panel is the evidence depends on the level: inner reads SAMPLE TRANSCRIPTS + MODEL REASONING, outer reads INNER RUN NARRATIVES. The two are a matched pair, each silent where the other fires (`panels.py::_inner_narrated`), because transcripts are selected by a MISS and one level up a miss is a placeholder artifact. Output `priority_fix` / `failure_highlights` must quote CONCRETE evidence — a reasoning step, a premise — not recycled labels, and `priority_fix` must name a steer the generator is ALLOWED to make: an edit to the inner optimizer's own job, never one naming the benchmark's vocabulary or answer labels.
 3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `mean_fitness_ci_lo`), the **matched-parent** comparison (never the cross-subset round-0 origin — subset drift reads as lift), the PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, on the right arm?).
 4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`, `dangling_trigger`), whether the `task_context` delta is evidence-anchored, plan text sane and within its render cap.
@@ -144,7 +144,7 @@ Open `promptpotter/assets/optimizer/pipeline.yaml` and locate the `l1_generate/1
 
 ### 2. Read the round's audit trail
 
-In `round_NNNN.json`, find the `l1_generate` node entry. Capture the **rendered prompt** (what the LLM actually saw, not the template), the **raw output**, the **parsed candidates**, the **per-candidate composite scores**, and the **`l1_critique` block**.
+Capture the **rendered prompt** (what the LLM actually saw, not the template) from `.runtime/ledger.jsonl` — the `llm_call` record for the node, rendering `payload.template_fields` against `payload.variables`. It is **not** in `round_NNNN.json` and **not** in the round cache; on a replayed round the cache's `l1_generate` entry is a `payload_kind: "synthesized"` stub whose `input` is `{source, round}`, which is honest about no call having fired and useless as evidence. Take the **parsed candidates**, **per-candidate composite scores** and the **`l1_critique` block** from `round_NNNN.json`.
 
 ### 3. Read PoBB stream + ledger
 

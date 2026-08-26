@@ -95,7 +95,7 @@ def select(
     budget: int,
     *,
     exempt: frozenset[str] = frozenset(),
-    first: frozenset[str] = frozenset(),
+    mandatory: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, str], dict[str, PanelCoverage]]:
     """Round-robin over *order*, taking one item per panel per pass until *budget* is spent.
 
@@ -104,10 +104,10 @@ def select(
     panel whose next item will not fit is SKIPPED, not stopped, so a smaller one behind it still
     gets its turn.
 
-    *first* is a FLOOR beneath that, not a rival ordering: those panels clear both passes before
-    anything else spends. Ordering alone cannot serve them, because an indivisible panel is placed
-    in an earlier pass than a divisible one whatever the layout says — so a mandatory panel that
-    happens to be divisible loses to every discretionary panel that happens not to be.
+    *budget* bounds the DISCRETIONARY panels alone. *mandatory* names the ones the node cannot
+    operate without: they are admitted whatever they cost — a first claim on a budget is not the
+    same promise as being present — and their only bound is ``char_cap`` at render. They spend
+    first, so a node whose floor exceeds its allowance shows the floor and no evidence.
 
     *exempt* names the panels placed whole or not at all; the caller derives it from
     ``InjectionKind.divisible`` rather than this looking it up, so this stays a pure allocator.
@@ -129,12 +129,12 @@ def select(
             extra += COUNT_LINE_ALLOWANCE
         return extra
 
-    def serve(names: list[str]) -> None:
+    def serve(names: list[str], *, bounded: bool) -> None:
         nonlocal spent
         for name in names:
             if name in pools and name in exempt:
                 whole = pools[name]
-                if spent + cost(name, whole) <= budget:
+                if not bounded or spent + cost(name, whole) <= budget:
                     spent += cost(name, whole)
                     taken[name] = list(whole)
                 cursor[name] = len(whole)  # whole or nothing; never half a panel carrying state
@@ -153,7 +153,7 @@ def select(
                 # promises rows that the budget then refused. So a panel's FIRST turn buys its
                 # header and its first row together, or buys neither.
                 chunk = items[at : at + 2] if at == 0 and len(items) > 1 else items[at : at + 1]
-                if spent + cost(name, chunk) > budget:
+                if bounded and spent + cost(name, chunk) > budget:
                     continue
                 spent += cost(name, chunk)
                 reserved.add(name)
@@ -161,8 +161,8 @@ def select(
                 cursor[name] = at + len(chunk)
                 placed_any = True
 
-    serve([n for n in order if n in first])
-    serve([n for n in order if n not in first])
+    serve([n for n in order if n in mandatory], bounded=False)
+    serve([n for n in order if n not in mandatory], bounded=True)
 
     # EVERY name in the layout gets an entry, silent ones as "". The caller indexes this by
     # placeholder, and a panel missing from it is a KeyError rather than an empty slot.

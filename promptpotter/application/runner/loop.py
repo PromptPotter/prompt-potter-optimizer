@@ -9,7 +9,10 @@ import traceback
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.facade import InjectionRenderError
+from promptpotter.application.optimization.dispatch.facade import (
+    InjectionRenderError,
+    MandatoryPanelStarvedError,
+)
 from promptpotter.application.optimization.l1.execute import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
@@ -238,15 +241,18 @@ async def run_round_loop(
             "Optimization paused at round %d (%s).", round_num, str(exc) or "user-initiated"
         )
         return StopReason.PAUSED, None
-    except InjectionRenderError as exc:
-        # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
+    except (InjectionRenderError, MandatoryPanelStarvedError) as exc:
+        # The prompt could not be composed correctly — a renderer raised, or a panel the node
+        # cannot operate without was not placed. Distinct from CRASHED so the operator can pinpoint
+        # the composition rather than the search, and a HALT rather than a degraded prompt: a node
+        # handed no subject still answers, confidently, and every instrument downstream reads green.
         tb = traceback.format_exc()
         session.state.crash_traceback = tb
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
         logger.exception(
-            "Optimization halted at round %d — an injection renderer failed. "
-            "Fix the renderer and resume.",
+            "Optimization halted at round %d — the optimizer prompt could not be composed. "
+            "Fix the composition and resume.",
             round_num,
         )
         return StopReason.RENDER_ERROR, emit_error_record(

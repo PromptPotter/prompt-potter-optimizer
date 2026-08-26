@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.dispatch.bundle import OPTIMIZER_PROMPT_BUDGET_CHARS
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
@@ -152,6 +151,7 @@ async def llm_call(
     ``provider``/``model`` resolve from the node's config, so the client is built here, not passed."""
     if context is None:
         context = LLMCallContext()
+    label = node or "llm_call"
     if config is None:
         if node:
             schema_node = get_optimizer_schema().get_node(node)
@@ -205,33 +205,29 @@ async def llm_call(
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
-        logger.debug("OptimizerReuseCache hit for %s (%s)", node or "llm_call", cache_key)
+        logger.debug("OptimizerReuseCache hit for %s (%s)", label, cache_key)
     else:
         prompt_chars = sum(len(m.get("content") or "") for m in messages)
+        start_record = LLMCallStartRecord(
+            call_id=call_id,
+            node=label,
+            round=context.round_num,
+            candidate_idx=context.candidate_idx,
+            model=merged.get("model"),
+            started_at_ms=int(time.time() * 1000),
+            prompt_chars=prompt_chars,
+            injection_chars=dict(context.injection_chars),
+            injection_dropped=dict(context.injection_dropped),
+            injection_silent=list(context.injection_silent),
+        )
         if context.ledger is not None:
-            context.ledger.append(
-                LLMCallStartRecord(
-                    call_id=call_id,
-                    node=node or "llm_call",
-                    round=context.round_num,
-                    candidate_idx=context.candidate_idx,
-                    model=merged.get("model"),
-                    started_at_ms=int(time.time() * 1000),
-                    prompt_chars=prompt_chars,
-                    injection_chars=dict(context.injection_chars),
-                    injection_dropped=dict(context.injection_dropped),
-                    injection_silent=list(context.injection_silent),
-                )
-            )
-        # Lets the operator tell an in-flight call from a frozen process without opening
-        # dashboard.json. The node's OWN ceiling, not one line across all of them: crossing it
-        # means a bound at some item's PRODUCTION site failed, and the fix is there.
-        budget = OPTIMIZER_PROMPT_BUDGET_CHARS.get(node or "")
-        oversize = budget is not None and prompt_chars > budget
-        log = logger.warning if oversize else logger.info
-        # An over-budget line that does not name the panel sends the reader to go and find it,
-        # which is how this warning came to fire on 23% of `l1_generate` calls unacted-on. The
-        # heaviest three are printed only on the warning path, so a healthy call stays one line.
+            context.ledger.append(start_record)
+        # The alarm is a REFUSED panel, never the prompt's size: a node's mandatory floor is
+        # admitted whatever it costs (`dispatch/compose.py::select`), so size is a fact about the
+        # task while a refusal is a node reasoning as though it had nothing to report.
+        no_room = start_record.refused_panels
+        log = logger.warning if no_room else logger.info
+        # The heaviest three are printed only on the warning path, so a healthy call stays one line.
         heaviest = (
             " · heaviest: "
             + ", ".join(
@@ -240,26 +236,21 @@ async def llm_call(
                     :3
                 ]
             )
-            if oversize and context.injection_chars
+            if no_room and context.injection_chars
             else ""
         )
-        # What the ceiling COST, on the normal path rather than the alarm one: selection keeps the
-        # prompt under budget, so the fact worth reading is which panel gave way to keep it there.
-        # Never one line for both: a panel the ceiling refused WHOLE is absent, and the node
-        # reasons as though it had nothing to report; a thinned one showed less and says so.
-        refused = {n for n in context.injection_dropped if n not in context.injection_chars}
+        # Never one line for both: a panel refused WHOLE is absent; a thinned one showed less and
+        # says so, which is the normal, healthy way a budget reports what it cost.
         by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
-        no_room = [n for n, _ in by_size if n in refused][:4]
-        thinned = [f"{n} -{c}" for n, c in by_size if n not in refused][:3]
-        dropped = (" · NO ROOM: " + ", ".join(no_room) if no_room else "") + (
+        thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
+        dropped = (" · NO ROOM: " + ", ".join(no_room[:4]) if no_room else "") + (
             " · thinned: " + ", ".join(thinned) if thinned else ""
         )
         log(
-            "→ optimizer call: %s · %s · %d-char prompt%s%s%s",
-            node or "llm_call",
+            "→ optimizer call: %s · %s · %d-char prompt%s%s",
+            label,
             merged["model"],
             prompt_chars,
-            f" (over its {budget}-char budget — mandatory floor)" if oversize else "",
             heaviest,
             dropped,
         )
@@ -271,7 +262,7 @@ async def llm_call(
                 heartbeat(
                     context.ledger,
                     call_id=call_id,
-                    node=node or "llm_call",
+                    node=label,
                     round_num=context.round_num,
                     start_monotonic=_t0,
                     # WHO the wait belongs to. A bare tick proves the process is alive and
@@ -292,7 +283,7 @@ async def llm_call(
                 try:
                     response = await _chat_under_deadline(
                         llm_client,
-                        node_label=node or "llm_call",
+                        node_label=label,
                         messages=messages,
                         model=merged.get("model"),
                         temperature=merged["temperature"],
@@ -314,7 +305,6 @@ async def llm_call(
                     decision = decide_429_wait(headers, body, attempt)
                     if decision is None:
                         raise
-                    label = node or "llm_call"
                     logger.warning(
                         "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
                         label,
@@ -331,11 +321,11 @@ async def llm_call(
             # to the ledger, the dashboard and the spend gate alike.
             logger.error(
                 "%s: optimizer call failed to parse — %s",
-                node or "llm_call",
+                label,
                 parse_err.diagnosis(),
             )
             emit_token_usage(
-                node=node or "llm_call",
+                node=label,
                 kind="optimizer",
                 input_tokens=parse_err.prompt_tokens,
                 output_tokens=parse_err.completion_tokens,
@@ -359,7 +349,7 @@ async def llm_call(
                     # append) that would otherwise vanish on this teardown path.
                     logger.warning(
                         "heartbeat task for %s raised on teardown",
-                        node or "llm_call",
+                        label,
                         exc_info=True,
                     )
 
@@ -371,7 +361,7 @@ async def llm_call(
     # search still MADE the call, so incurred cost stays invariant to our cache history and the
     # always-warmest L4 origin arm does not read as free.
     emit_token_usage(
-        node=node or "llm_call",
+        node=label,
         kind="optimizer",
         input_tokens=response.usage.get("prompt_tokens", 0),
         output_tokens=response.usage.get("completion_tokens", 0),
@@ -399,7 +389,7 @@ async def llm_call(
 
     if context.ledger is not None:
         payload: dict[str, Any] = {
-            "type": node or "llm_call",
+            "type": label,
             "config": {
                 "model": merged.get("model"),
                 "temperature": merged["temperature"],
@@ -425,7 +415,7 @@ async def llm_call(
             payload["messages"] = messages
         context.ledger.append(
             LLMCallRecord(
-                node=node or "llm_call",
+                node=label,
                 round=context.round_num,
                 candidate_idx=context.candidate_idx,
                 call_id=call_id,

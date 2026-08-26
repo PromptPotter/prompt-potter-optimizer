@@ -2924,8 +2924,9 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
 # --- L4 measurement identity: the freeze ratchet ------------------------------
 
 # What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
-# is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose.
-L4_INNER_ORIGIN = "1b9f8302b41f"
+# is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose — the
+# reason for a move belongs in the commit body, which is what this test's own message asks for.
+L4_INNER_ORIGIN = "f0e947588f6a"
 
 
 def test_the_l4_measurement_identity_moves_only_when_someone_meant_it() -> None:
@@ -3841,11 +3842,126 @@ def test_a_mandatory_panel_outranks_a_discretionary_indivisible_one() -> None:
     assert not starved["answer_distribution"], "vacuous — the panel fits without a first claim"
 
     served, coverage = select(
-        rendered, order, 800, exempt=exempt, first=frozenset({"answer_distribution"})
+        rendered, order, 800, exempt=exempt, mandatory=frozenset({"answer_distribution"})
     )
     assert served["answer_distribution"], "a mandatory panel was refused whole"
     assert coverage["answer_distribution"].placed >= 2, "a header alone promises rows it never buys"
-    assert sum(len(t) for t in served.values()) <= 800
+
+
+def test_a_mandatory_panel_larger_than_the_budget_is_still_served() -> None:
+    """First claim on a budget is not the same promise as being present, and reading it as one is
+    what shipped: at L4 ``rendered_prompt`` renders the inner optimizer prompts at ~9.1k against a
+    ~7.1k injection budget, so it was refused WHOLE on every round and the outer generator spent a
+    whole campaign rewriting prompts it had never been shown. The floor is the node's SUBJECT — it
+    is admitted whatever it costs, and the discretionary set is what gives way.
+    """
+    from promptpotter.application.optimization.dispatch.bundle import Item
+    from promptpotter.application.optimization.dispatch.compose import select
+
+    order = ["rendered_prompt", "mutation_memory"]
+    rendered = {
+        "rendered_prompt": [Item("s" * 3000)],
+        "mutation_memory": [Item("m" * 200)],
+    }
+    exempt = frozenset({"rendered_prompt"})
+
+    # The trap must be live: under a bounded pass this panel cannot fit at any priority.
+    starved, _ = select(rendered, order, 800, exempt=exempt)
+    assert not starved["rendered_prompt"], "vacuous — the subject fits inside the budget"
+
+    served, coverage = select(
+        rendered, order, 800, exempt=exempt, mandatory=frozenset({"rendered_prompt"})
+    )
+    assert len(served["rendered_prompt"]) >= 3000, "the node was handed no subject"
+    assert coverage["rendered_prompt"].dropped == 0
+    # The overspend lands on the DISCRETIONARY set, which is the whole point of the split.
+    assert not served["mutation_memory"]
+
+
+def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
+    """The regression for `promptpotter-self__b40e8b`: three rounds and $2.61 spent with
+    ``injection_dropped == {'rendered_prompt': 1}`` on every one. The generator's instruction says
+    "CURRENT INNER OPTIMIZER PROMPTS below is the text you are rewriting… carry every contract
+    forward", and the block was never in the prompt — one candidate was then rejected
+    ``guts_inherited_contract`` for shortening a field it had not been shown.
+
+    Composes the real floor layout against an L4-shaped schema, so it fails if the mandatory floor
+    ever stops being admitted whatever it costs.
+    """
+    from promptpotter.application.optimization.dispatch.bundle import (
+        OPTIMIZER_DISCRETIONARY_CHARS,
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.facade import (
+        DispatchHub,
+        injection_coverage_counts,
+    )
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        load_optimizer_prompt,
+    )
+    from promptpotter.domain.l1_layout import NODE_LAYOUTS, default_l1_layout
+    from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+
+    fields = list(PROMPT_STRING_FIELDS)
+    schema = PipelineSchema(
+        name="promptpotter-self",
+        version="1",
+        nodes=[
+            PipelineNode(
+                name=name,
+                wire_type="llm",
+                node_type="",
+                param_keys=fields,
+                param_types=dict.fromkeys(fields, "string"),
+            )
+            for name in NODE_LAYOUTS
+        ],
+    )
+    bundle = InjectionBundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=schema,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            current_accuracy=0.5,
+            best_accuracy=0.5,
+            best_round=0,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
+        axes=None,
+    )
+
+    subject = DispatchHub.render_items("rendered_prompt", bundle)
+    subject_chars = sum(len(i.text) for i in subject)
+    allowance = OPTIMIZER_DISCRETIONARY_CHARS["l1_generate"]
+    # Non-vacuous: the whole defect is that the node's own subject outweighs the budget the
+    # discretionary panels share. If it ever fits, this test proves nothing.
+    assert subject_chars > allowance, (
+        f"vacuous — the inner optimizer prompts ({subject_chars}c) now fit inside the "
+        f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
+    )
+
+    filled, _, rendered, coverage = DispatchHub.fill(
+        load_optimizer_prompt("l1_generate"),
+        default_l1_layout(),
+        bundle,
+        node="l1_generate",
+    )
+    assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.render(), (
+        "the generator was handed no subject — it is rewriting text it cannot see"
+    )
+    assert len(rendered["rendered_prompt"]) >= subject_chars
+    starved = set(injection_coverage_counts(coverage)) & NODE_LAYOUTS["l1_generate"].mandatory
+    assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
 
 
 def test_a_rewritable_prompt_field_declares_its_ceiling_only_where_it_runs_long() -> None:

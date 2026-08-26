@@ -25,15 +25,18 @@ if TYPE_CHECKING:
 
 # Every constant below decides what a prompt RECEIVES, and `injection_source_digest` hashes this
 # module: one shaping a prompt from outside that hash pools corpora the fingerprint keeps apart.
-OPTIMIZER_PROMPT_BUDGET_CHARS: dict[str, int] = {
-    # Its mandatory floor is not ours to bound — `rendered_prompt` and `task_context` are the
-    # dataset's — so this is set above the widest floor seen, not derived from one.
-    "l1_generate": 13_000,
-    # A whole sample transcript is indivisible, so this ceiling alone decides how many the
+#
+# What the DISCRETIONARY panels may spend. The mandatory floor and the static template are spent
+# before one is placed and neither is bounded here: the floor is the dataset's — on the recursion it
+# is the inner optimizer prompts — so a whole-prompt ceiling can only guess at it, and guessing low
+# refuses the node its own subject. A runaway is `char_cap`'s job, at render.
+OPTIMIZER_DISCRETIONARY_CHARS: dict[str, int] = {
+    "l1_generate": 7_000,
+    # A whole sample transcript is indivisible, so this allowance alone decides how many the
     # distiller sees; set where two still fit beside the frame.
-    "l1_critique": 10_150,
-    "l2_context": 7_500,
-    "l3_plan": 7_500,
+    "l1_critique": 7_500,
+    "l2_context": 5_500,
+    "l3_plan": 6_400,
 }
 
 

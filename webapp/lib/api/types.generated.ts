@@ -1680,7 +1680,7 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'cache_hit_rate', scope: 'per_round', direction: 'high', node_type: 'cache', description: 'Fraction of queries resolved by a cache node (non-null timing).' },
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, description: "Mean of retrieval_shortfall across the round's results." },
-  { name: 'pipeline_compactness', scope: 'per_round', direction: 'low', node_type: null, description: '1 - (active_steps - 1) / 11 — shorter pipelines score higher (single-node = 1.0).' },
+  { name: 'pipeline_compactness', scope: 'per_round', direction: 'high', node_type: null, description: '1 - (active_steps - 1) / 11 — shorter pipelines score higher (single-node = 1.0).' },
   { name: 'output_compactness', scope: 'per_round', direction: 'high', node_type: null, description: '1 - mean(output_tokens) / OUTPUT_TOKEN_BUDGET — terser (cheaper) generations score higher. The accuracy-vs-cost axis; available to formulas, not in the default composite.' },
   { name: 'prompt_compactness', scope: 'per_round', direction: 'high', node_type: null, description: '1 - len(rendered_prompt) / PROMPT_BUDGET_CHARS — shorter prompts score higher (≤ budget → 1.0, ≥ budget → 0.0). Penalizes overly verbose prompt templates in the composite_fitness score.' },
 ];

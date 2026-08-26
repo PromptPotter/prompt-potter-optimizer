@@ -203,6 +203,13 @@ class LLMCallStartRecord(StrictModel):
     injection_silent: list[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
+    @property
+    def refused_panels(self) -> list[str]:
+        """Panels the composition refused WHOLE — dropped, with nothing surviving in
+        ``injection_chars``. A THINNED panel showed less and said so; a refused one is absent, and
+        the node reasons as though it had nothing to report."""
+        return sorted(n for n in self.injection_dropped if n not in self.injection_chars)
+
 
 class LLMCallProgressRecord(StrictModel):
     """Heartbeat while the SDK call is blocked; cache replays skip it."""
@@ -297,8 +304,7 @@ RoundWarningKind = Literal[
     "layer_parse_failure",
     "optimizer_deadline_retry",
     # The cycle STOPPED and a human has to act. Its reason is the layer's own sentence, and it
-    # rides a warning because the log line it used to ride is not a channel an operator reads:
-    # the halt showed up as a bare `escalation_abort` with the why nowhere on disk.
+    # rides a warning rather than a log line so the why reaches disk with the halt.
     "layer_terminated_cycle",
     # A layer emitted `terminate_proposal` carrying no reason. Ignored — a contentless stop is a
     # volunteered field, not a decision — but never silently: it means the layer's schema let it

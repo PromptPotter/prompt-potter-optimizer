@@ -139,7 +139,7 @@ Beyond steering L1's attention / rewriting `plan`, L2 and L3 have **exactly two*
 
 ## Editing a renderer's PROSE is a measurement change
 
-`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` hashes it AST-normalized: a comment, docstring or reflow costs nothing; a panel's prose, its `char_cap`, a node ceiling or a selection rule voids the banked origins. Expect the re-measure; the bug is the reverse. **Every prompt-shaping constant lives in `bundle.py`** — the node ceilings and the wire schema's `maxLength`/descriptions included, an emitted JSON Schema being prompt text the ceiling does not even count. Anywhere else is outside the hash and changes every prompt for free; `bundle` is also the only import `l1_wire_schema` reaches without a cycle.
+`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` hashes it AST-normalized: a comment, docstring or reflow costs nothing; a panel's prose, its `char_cap`, a node's discretionary allowance or a selection rule voids the banked origins. Expect the re-measure; the bug is the reverse. **Every prompt-shaping constant lives in `bundle.py`** — `OPTIMIZER_DISCRETIONARY_CHARS` and the wire schema's `maxLength`/descriptions included, an emitted JSON Schema being prompt text the allowance does not even count. Anywhere else is outside the hash and changes every prompt for free; `bundle` is also the only import `l1_wire_schema` reaches without a cycle.
 
 ## A validator either REJECTS or SCORES — never both
 
