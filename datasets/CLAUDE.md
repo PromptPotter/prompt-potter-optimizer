@@ -44,7 +44,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 ## L4 — `promptpotter-self`
 
-`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
+`datasets/promptpotter-self/` is the **recursive case**: the outer cycle mutates the inner cycle's optimizer prompt template fields, exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys` — every node the file DECLARES (`PipelineSchema.config_nodes`), never only the ones a round runs, or an escalation node reached on a stall could never be told to improve. Its `pipelines` block mirrors the optimizer manifest's, so both describe ONE graph and an edit evolved on either layer lifts onto the other.
 
 L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
 

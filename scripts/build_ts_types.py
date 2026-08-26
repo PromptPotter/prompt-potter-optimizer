@@ -54,6 +54,9 @@ from promptpotter.domain.pipeline_schema import (
     NodeConfigParam,
     NodeOutputSchema,
     NodeSearchNarrowing,
+    PipelineView,
+    PipelineViewEdge,
+    PipelineViewNode,
 )
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
@@ -195,6 +198,9 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MeasurementSeriesResponse,
     NodeConfigParam,
     NodeOutputSchema,
+    PipelineViewNode,  # nested in PipelineView — the emitter does not recurse
+    PipelineViewEdge,
+    PipelineView,
     NestedPipelineRef,  # nested in DatasetPipelineResponse — the emitter does not recurse
     DatasetPipelineResponse,
     # --- active router ---
@@ -349,7 +355,10 @@ def _emit_field(name: str, info: FieldInfo, annotation: typing.Any) -> str:
     if description:
         wrapped = textwrap.fill(description, width=78, subsequent_indent="   * ")
         comment_block = f"  /** {wrapped} */\n"
-    return f"{comment_block}  {name}: {ts_type};"
+    # The ALIAS is the wire name where one is declared — a producer dumping `by_alias`
+    # sends it, so emitting the Python attribute would type a key the browser never sees
+    # (`from_` for `from`, which is a reserved word and the reason the alias exists).
+    return f"{comment_block}  {info.alias or name}: {ts_type};"
 
 
 def _resolved_hints(model: type[BaseModel]) -> dict[str, typing.Any]:

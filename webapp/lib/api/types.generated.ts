@@ -689,6 +689,27 @@ export interface NodeOutputSchema {
   json_schema: Record<string, unknown>;
 }
 
+/** One node's place in the flow, as a tier and a rank rather than as pixels. */
+export interface PipelineViewNode {
+  id: string;
+  label: string;
+  kind: string;
+  tier: number;
+  rank: number;
+}
+
+export interface PipelineViewEdge {
+  from: string;
+  to: string;
+  kind: string;
+}
+
+/** The webapp-facing graph projection, derived from a manifest's nodes and pipelines. */
+export interface PipelineView {
+  nodes: PipelineViewNode[];
+  edges: PipelineViewEdge[];
+}
+
 /** Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are */
 export interface NestedPipelineRef {
   /** Node id in this pipeline whose measurement runs `dataset`. */
@@ -703,7 +724,7 @@ export interface DatasetPipelineResponse {
   connector: string;
   backend_type: string | null;
   pipeline: Record<string, unknown>;
-  view: Record<string, unknown> | null;
+  view: PipelineView | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   nests: NestedPipelineRef | null;

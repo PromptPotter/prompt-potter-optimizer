@@ -137,6 +137,12 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
     description: *nitro_probe
 pipelines:
+  # Its own occasion, not a round: check-in resolves the origin and scores the starting
+  # prompt once, before round 1. Naming it here is what says it RUNS — a node named by no
+  # pipeline is declared-but-unwired, and only this block tells the two apart. `default`
+  # stays what a ROUND runs; nothing reads this entry but the derived view.
+  checkin:
+    - checkin
   default:
     - l1_generate
     - l1_score
@@ -159,65 +165,6 @@ pipelines:
     - l1_generate
     - l1_score
     - l1_critique
-view:
-  nodes:
-    - id: input
-      label: Dataset
-      kind: io
-    - id: checkin
-      label: checkin
-      kind: llm
-    - id: l3_plan
-      label: l3_plan
-      kind: llm
-    - id: l2_context
-      label: l2_context
-      kind: llm
-    - id: l1_generate
-      label: l1_generate
-      kind: llm
-    - id: l1_score
-      label: l1_score
-      kind: measurement
-    - id: l1_critique
-      label: l1_critique
-      kind: llm
-    - id: output
-      label: Best SP
-      kind: io
-  edges:
-    - from: input
-      to: checkin
-      kind: forward
-    - from: checkin
-      to: l1_generate
-      kind: forward
-    - from: l1_generate
-      to: l1_score
-      kind: forward
-    - from: l1_score
-      to: l1_critique
-      kind: forward
-    - from: l1_critique
-      to: output
-      kind: forward
-    - from: l1_critique
-      to: l1_generate
-      kind: loop
-    - from: l1_critique
-      to: l2_context
-      kind: escalate
-    - from: l2_context
-      to: l1_generate
-      kind: directive
-      label: brief
-    - from: l1_critique
-      to: l3_plan
-      kind: escalate
-    - from: l3_plan
-      to: l1_generate
-      kind: directive
-      label: plan
 resolved_prompts:
   l1_generate/1:
     persona: >-

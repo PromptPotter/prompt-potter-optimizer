@@ -114,10 +114,58 @@ nodes:
       observation_name: l3_plan
       observation_mappings: []
       langfuse_type: generation
+  checkin:
+    type: optimizer_prompt
+    runtime: in_process
+    node_role: enricher
+    description: >-
+      Inner cycle's check-in prompt — resolves the origin the run's lift is then read against.
+      NOT yet exercised by a seed: `runner/inner/spawn.py` hands the inner run its origin
+      rather than resolving one, so an edit to these fields measures as a no-change until that
+      path closes. Declared regardless, so this dataset carries the optimizer's whole node set.
+    config: {}
+    optimizer:
+      param_keys:
+        - persona
+        - task_intent
+        - instruction
+        - thinking_style
+        - answer_format
+      param_types: {}
+      param_allowed_values: {}
+      observation_name: checkin
+      observation_mappings: []
+      langfuse_type: generation
+# Mirrors `promptpotter/assets/optimizer/pipeline.yaml::pipelines` node for node, because this
+# dataset IS that optimizer seen as a target: an edit evolved on one layer lifts onto the other
+# only while both declare the same graph. Pinned by
+# `test_integrity.py::test_the_two_optimizer_manifests_describe_one_graph` — edit one, mirror it.
+#
+# `default` is the ROUND, not the tunable set. What the outer loop may EDIT is every node under
+# `nodes:` (`PipelineSchema.config_nodes`), so `l2_context` and `l3_plan` stay tunable while
+# sitting off the chain a round runs.
 pipelines:
+  checkin:
+    - checkin
   default:
     - l1_generate
     - l1_score
     - l1_critique
+  l1_round:
+    - l1_generate
+    - l1_score
+  l1_round_with_l1_critique:
+    - l1_generate
+    - l1_score
+    - l1_critique
+  l2_escalation:
     - l2_context
+    - l1_generate
+    - l1_score
+    - l1_critique
+  l3_escalation:
     - l3_plan
+    - l2_context
+    - l1_generate
+    - l1_score
+    - l1_critique

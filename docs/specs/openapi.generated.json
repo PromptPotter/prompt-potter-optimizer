@@ -1534,14 +1534,12 @@
           "view": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineView"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "View"
+            ]
           }
         },
         "required": [
@@ -3506,6 +3504,87 @@
           "n_cells"
         ],
         "title": "PairwiseComparison",
+        "type": "object"
+      },
+      "PipelineView": {
+        "additionalProperties": false,
+        "description": "The webapp-facing graph projection, derived from a manifest's nodes and pipelines.\n\nNo manifest declares one (:func:`pipeline_parsing.derive_pipeline_view` is the sole\nproducer): a hand-written block is a second roster beside the one the engine runs.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineViewEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineViewNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "title": "PipelineView",
+        "type": "object"
+      },
+      "PipelineViewEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "kind": {
+            "default": "forward",
+            "title": "Kind",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "PipelineViewEdge",
+        "type": "object"
+      },
+      "PipelineViewNode": {
+        "additionalProperties": false,
+        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only by escalating n\nlevels; rank is the tier-0 position it acts on. A renderer maps them to rows and\ncolumns.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "rank": {
+            "default": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "tier": {
+            "default": 0,
+            "title": "Tier",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "PipelineViewNode",
         "type": "object"
       },
       "QuotaStatus": {

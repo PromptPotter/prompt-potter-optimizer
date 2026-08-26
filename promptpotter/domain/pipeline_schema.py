@@ -162,11 +162,22 @@ class NodePromptInfo(StrictModel):
 
 
 class PipelineViewNode(StrictModel):
+    """One node's place in the flow, as a tier and a rank rather than as pixels.
+
+    Tier 0 is the chain a sample runs and tier n>0 is a node reached only by escalating n
+    levels; rank is the tier-0 position it acts on. A renderer maps them to rows and
+    columns.
+    """
+
     model_config = ConfigDict(frozen=True)
 
     id: str
     label: str
-    kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement" | "phase"
+    # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit — a member here the
+    # producer cannot produce is one the client styles and captions for nothing.
+    kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement"
+    tier: int = 0
+    rank: int = 0
 
 
 class PipelineViewEdge(StrictModel):
@@ -175,11 +186,14 @@ class PipelineViewEdge(StrictModel):
     from_: str = Field(alias="from")
     to: str
     kind: str = "forward"  # "forward" | "loop" | "directive" | "escalate"
-    label: str = ""
 
 
 class PipelineView(StrictModel):
-    """Webapp-facing graph projection — ``promptpotter/assets/optimizer/pipeline.yaml::view`` or derived."""
+    """The webapp-facing graph projection, derived from a manifest's nodes and pipelines.
+
+    No manifest declares one (:func:`pipeline_parsing.derive_pipeline_view` is the sole
+    producer): a hand-written block is a second roster beside the one the engine runs.
+    """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
@@ -282,14 +296,22 @@ class PipelineSchema(StrictModel):
     version: str = ""
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
+    # Every node the manifest DECLARES — a superset of `nodes`, which holds only the ones a
+    # round runs. Identity stays on `nodes`: folding these into `sp_hash` re-keys every
+    # banked measurement. Empty means "same as `nodes`"; read it through `config_nodes`.
+    declared_nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
 
-    _node_map: dict[str, int] = PrivateAttr(default_factory=dict)
+    _node_map: dict[str, "PipelineNode"] = PrivateAttr(default_factory=dict)
     _observation_keys: frozenset[str] = PrivateAttr(default_factory=frozenset)
 
     def model_post_init(self, __context: Any) -> None:
-        self._node_map = {n.name: i for i, n in enumerate(self.nodes)}
+        # Indexed over DECLARED nodes: "is there a node called X" and "what type is its
+        # param" are questions about the manifest, not about this round's chain — an
+        # escalation node resolving to None merges its nested params shallow and loses
+        # every sibling key.
+        self._node_map = {n.name: n for n in (self.declared_nodes or self.nodes)}
         self._observation_keys = frozenset(
             m.pipeline_key
             for n in self.nodes
@@ -322,15 +344,24 @@ class PipelineSchema(StrictModel):
         hashes the overlay-merged params, so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}
 
+    @property
+    def config_nodes(self) -> list[PipelineNode]:
+        """The nodes a CONFIG surface covers — every declared one, not just the running chain.
+        Read it wherever the answer is "what can the operator see and unlock": a node absent
+        from the surface is not a locked node, it is nothing at all."""
+        return self.declared_nodes or self.nodes
+
     def node_config_schema(self) -> dict[str, list[NodeConfigParam]]:
         """COMPLETE by contract, so a reader answers "may the optimizer move anything here?" by summing
         ``optimizer_tunable``. A param dropped here is invisible to every caller — filter downstream."""
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
-        model_declared = any("model" in (n.param_keys | set(n.current_config)) for n in self.nodes)
+        model_declared = any(
+            "model" in (n.param_keys | set(n.current_config)) for n in self.config_nodes
+        )
         model_carrier = None if model_declared else self._model_carrier()
         out: dict[str, list[NodeConfigParam]] = {}
-        for n in self.nodes:
+        for n in self.config_nodes:
             params: list[NodeConfigParam] = []
             for key in sorted((n.param_keys | set(n.current_config)) - SCHEMA_OWNED_FIELDS):
                 options: list[str] = []
@@ -395,16 +426,19 @@ class PipelineSchema(StrictModel):
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
         """The read-only companion to :meth:`node_config_schema`, so the steer panel can show the WHOLE
         node: model + params + prompt + the structured output it produces."""
-        return {n.name: n.output_schema for n in self.nodes}
+        return {n.name: n.output_schema for n in self.config_nodes}
 
     def get_node(self, name: str) -> PipelineNode | None:
-        idx = self._node_map.get(name)
-        return self.nodes[idx] if idx is not None else None
+        return self._node_map.get(name)
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
+        # Both lists, so a filtered schema cannot still resolve a node it just excluded.
         active = set(steps)
         return self.model_copy(
-            update={"nodes": [n for n in self.nodes if n.name in active]},
+            update={
+                "nodes": [n for n in self.nodes if n.name in active],
+                "declared_nodes": [n for n in self.declared_nodes if n.name in active],
+            },
         )
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
@@ -412,27 +446,40 @@ class PipelineSchema(StrictModel):
         narrowing is a no-op and a node absent from the mapping is unchanged."""
         if not narrowing:
             return self
-        new_nodes: list[PipelineNode] = []
-        for n in self.nodes:
-            nv = narrowing.get(n.name)
-            if nv is None:
-                new_nodes.append(n)
-                continue
-            if nv.param_keys is None:
-                keys = n.param_keys
-            else:
-                kept = set(nv.param_keys)
-                keys = (n.param_keys & kept) | (n.param_keys & _PROMPT_OWNED_FIELDS)
-            allowed = dict(n.param_allowed_values)
-            for param, vals in nv.param_allowed_values.items():
-                subset = set(vals)
-                allowed[param] = (
-                    [v for v in allowed[param] if v in subset] if param in allowed else list(vals)
+
+        def _narrowed(source: list[PipelineNode]) -> list[PipelineNode]:
+            out: list[PipelineNode] = []
+            for n in source:
+                nv = narrowing.get(n.name)
+                if nv is None:
+                    out.append(n)
+                    continue
+                if nv.param_keys is None:
+                    keys = n.param_keys
+                else:
+                    kept = set(nv.param_keys)
+                    keys = (n.param_keys & kept) | (n.param_keys & _PROMPT_OWNED_FIELDS)
+                allowed = dict(n.param_allowed_values)
+                for param, vals in nv.param_allowed_values.items():
+                    subset = set(vals)
+                    allowed[param] = (
+                        [v for v in allowed[param] if v in subset]
+                        if param in allowed
+                        else list(vals)
+                    )
+                out.append(
+                    n.model_copy(update={"param_keys": keys, "param_allowed_values": allowed})
                 )
-            new_nodes.append(
-                n.model_copy(update={"param_keys": keys, "param_allowed_values": allowed})
-            )
-        return self.model_copy(update={"nodes": new_nodes})
+            return out
+
+        # Both lists, or a narrowed campaign still renders the un-narrowed knobs on every
+        # node that runs outside the default chain.
+        return self.model_copy(
+            update={
+                "nodes": _narrowed(self.nodes),
+                "declared_nodes": _narrowed(self.declared_nodes),
+            }
+        )
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing."""
@@ -450,9 +497,14 @@ class PipelineSchema(StrictModel):
 
     def node_param_keys(self) -> dict[str, set[str]]:
         """The SINGLE surface the param catalogue, the L1 output schema and ``validate_overrides`` all
-        derive from — so a key stripped here is one the LLM's schema never declares."""
+        derive from — so a key stripped here is one the LLM's schema never declares.
+
+        DECLARED nodes, matching :attr:`config_nodes`: what the optimizer may EDIT is not what
+        this round happens to run, or an escalation node reached only on a stall could never
+        be told to improve.
+        """
         out: dict[str, set[str]] = {}
-        for step in self.nodes:
+        for step in self.config_nodes:
             keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
             if keys:
                 out[step.name] = keys

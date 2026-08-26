@@ -69,8 +69,19 @@ Five decisions the models cannot state:
   readers take it off the raw overlay. It picks the connector at init (`wiring._read_backend_type`
   raises when absent) and is served on `CampaignSummary.backend_type` — the ONE test for a
   self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`).
-- **`pipelines` must contain `default`** — the active step order unless a campaign overrides it.
-  The same node may appear in several sequences.
+- **`pipelines` must contain `default`** — the active step order unless a campaign overrides it,
+  and the same node may appear in several sequences. **The other names are read too, and this is
+  what decides whether a node is drawn at all:** a sequence sharing steps with `default` is an
+  ESCALATION, and the nodes it introduces tier above the chain in the served `view`; one sharing
+  none is a separate PHASE, running on its own occasion; and **a node named by no pipeline is not
+  in the flow, so nothing draws it** — being declared is not the same as running, which is why the
+  optimizer publishes its check-in node as a one-step pipeline of its own. `derive_pipeline_view`
+  reads exactly this, and no manifest declares a `view` of its own.
+- **Declaring a node and running it are separate, and the CONFIG surface follows the declaration.**
+  `PipelineSchema.config_nodes` covers every node under `nodes:`, whether or not a pipeline names
+  it — a node absent from the surface is not a locked node the operator can open, it is nothing at
+  all, with no row and no lock. `nodes` (the running chain) stays the identity: `node_configs` →
+  `sp_hash` reads it alone, so declaring a step no round takes re-keys no banked measurement.
 - **`runtime` is orthogonal to `Connector.execution`.** It says where a node runs inside the
   *backend's* topology (`backend` / `frontend` / `in_process`); `Connector.execution` says how
   PromptPotter reaches the backend. One `remote_http` connector legitimately mixes all three —
@@ -129,7 +140,9 @@ the full multi-node shape.
 
 ## Optimizer-manifest parity
 
-PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `l1_score`, `checkin`), the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over node names (it publishes `l1_round`, `l1_round_with_l1_critique`, `l2_escalation`, `l3_escalation`), and the same `resolved_prompts` + `resolved_schemas` registries, carried inline where a backend serves them via `GET /pipeline`.
+PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries, carried inline where a backend serves them via `GET /pipeline`. It publishes escalation sequences beside `default`, which no backend needs; the shape is identical either way.
+
+It once declared a `view` block beside those two — a second node roster, hand-kept in sync with the one the engine runs. The graph is derived from `nodes` + `pipelines` now (§ The shape), so the parity is whole rather than one key short of it.
 
 So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)).
 

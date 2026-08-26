@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
@@ -62,19 +63,20 @@ def strip_lone_surrogates(obj: Any) -> Any:
 
 
 def _derive_node_kind(node: PipelineNode | None) -> str:
-    """Cache role wins — a hit short-circuits the pipeline — then :attr:`PipelineNode.runs_llm`,
-    which the model-axis carrier also reads, so kind and carrier cannot disagree."""
+    """Cache role wins — a hit short-circuits the pipeline — then the LLM-bearing signals,
+    broadest first, so a node carrying the model axis can never read as anything else."""
     if node is None:
         return "tool"
     if str(node.node_type) == "cache":
         return "cache"
     if node.runs_llm:
         return "llm"
-    # `measurement` is a member of the served kind vocabulary — the optimizer's own
-    # view uses it for `l1_score` and the client labels it "system step" — but this
-    # deriver could not emit it, so a dataset declaring `type: measurement` was
-    # silently downgraded to "tool". A vocabulary the producer cannot produce is a
-    # vocabulary that lies.
+    # `llm/optimizer` and `agent` bear an LLM without carrying the MODEL AXIS, which is all
+    # `runs_llm` asks about — an in-process optimizer node resolves no carrier.
+    if node.wire_type.startswith("llm") or node.wire_type == "agent":
+        return "llm"
+    # A kind this cannot emit is a kind the client styles and captions for nothing, so every
+    # member of the served vocabulary has a branch here (`pipeline_schema.PipelineViewNode`).
     if node.wire_type == "measurement":
         return "measurement"
     if node.wire_type == "retriever":
@@ -84,22 +86,91 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
     return "tool"
 
 
-def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
-    interior_ids = list(schema.active_steps)
-    nodes: list[PipelineViewNode] = [
-        PipelineViewNode(id="input", label="Input", kind="io"),
-    ]
-    for name in interior_ids:
-        node = schema.get_node(name)
-        nodes.append(PipelineViewNode(id=name, label=name, kind=_derive_node_kind(node)))
-    nodes.append(PipelineViewNode(id="output", label="Output", kind="io"))
+def derive_pipeline_view(
+    nodes: Mapping[str, PipelineNode],
+    pipelines: Mapping[str, Sequence[str]],
+) -> PipelineView:
+    """The graph the engine actually runs, read off the two blocks that declare it.
 
-    sequence = ["input", *interior_ids, "output"]
-    edges = [
-        PipelineViewEdge.model_validate({"from": sequence[i], "to": sequence[i + 1]})
-        for i in range(len(sequence) - 1)
-    ]
-    return PipelineView(nodes=nodes, edges=edges)
+    ``default`` is the chain a sample runs. A node declared but named by no pipeline runs
+    once ahead of it, so it joins the chain without being a member of anything that
+    repeats. Every other pipeline is an ESCALATION: the nodes it introduces are placed at
+    its depth, and the depths order by containment, since a deeper escalation re-runs the
+    shallower one's steps. A pipeline with no escalations is one straight tier.
+    """
+    declared = list(nodes)
+    chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
+    in_chain = set(chain)
+    others = sorted(
+        (name, [s for s in seq if s in nodes])
+        for name, seq in pipelines.items()
+        if name != "default"
+    )
+    # Sharing no step with the chain makes a pipeline a separate PHASE — its own occasion,
+    # ahead of the chain and outside anything that repeats. Sharing steps makes it an
+    # ESCALATION, which re-runs the chain rather than standing beside it. A node named by
+    # NO pipeline is not in the flow at all and is drawn nowhere.
+    spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
+    rank_of = {name: i for i, name in enumerate(spine)}
+    placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
+
+    # Shortest first: an escalation that re-runs another's steps is the deeper of the two,
+    # so length IS the containment order for a chain of them.
+    ordered = sorted(
+        ((name, seq) for name, seq in others if set(seq) & in_chain),
+        key=lambda kv: (len(kv[1]), kv[0]),
+    )
+    depth = 0
+    introduced: list[tuple[list[str], list[str]]] = []
+    for _name, seq in ordered:
+        fresh = [s for s in seq if s not in placed]
+        if not fresh:
+            continue
+        depth += 1
+        for step in fresh:
+            # Ranked on the tier-0 step it acts on: the first spine node that follows it.
+            following = seq[seq.index(step) + 1 :]
+            placed[step] = (
+                depth,
+                next((rank_of[t] for t in following if t in rank_of), max(len(spine) - 1, 0)),
+            )
+        introduced.append((fresh, seq))
+
+    view_nodes = [PipelineViewNode(id="input", label="Input", kind="io", rank=-1)]
+    for name, (tier, rank) in placed.items():
+        view_nodes.append(
+            PipelineViewNode(
+                id=name,
+                label=name,
+                kind=_derive_node_kind(nodes.get(name)),
+                tier=tier,
+                rank=rank,
+            )
+        )
+    view_nodes.append(PipelineViewNode(id="output", label="Output", kind="io", rank=len(spine)))
+
+    edges: list[PipelineViewEdge] = []
+
+    def _edge(source: str, target: str, kind: str) -> None:
+        edges.append(PipelineViewEdge.model_validate({"from": source, "to": target, "kind": kind}))
+
+    sequence = ["input", *spine, "output"]
+    for i in range(len(sequence) - 1):
+        _edge(sequence[i], sequence[i + 1], "forward")
+    # An escalation re-runs the chain, which is what makes the chain repeat — so a view
+    # carrying any tier above 0 always carries this edge too, and a renderer may lay a
+    # loopless view out as a straight rail knowing every node on it is tier 0.
+    if introduced and chain:
+        _edge(chain[-1], chain[0], "loop")
+    for fresh, seq in introduced:
+        for step in fresh:
+            if chain:
+                _edge(chain[-1], step, "escalate")
+            after = seq[seq.index(step) + 1 :]
+            if after:
+                _edge(step, after[0], "directive")
+
+    return PipelineView(nodes=view_nodes, edges=edges)
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
@@ -210,8 +281,11 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     # Step order from pipelines.default, fallback to nodes dict order
     step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))
 
-    steps: list[PipelineNode] = []
-    for name in step_order:
+    # EVERY declared node, because the escalation pipelines name nodes beside the chain and
+    # both the view and the config surface reach them. `steps` below stays the chain alone,
+    # which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
+    parsed: dict[str, PipelineNode] = {}
+    for name in nodes:
         node = nodes.get(name, {})
         if not node:
             continue
@@ -287,7 +361,9 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 SCHEMA_DESCRIPTIONS_PARAM: "object",
             }
 
-        steps.append(PipelineNode(**step_kwargs))
+        parsed[name] = PipelineNode(**step_kwargs)
+
+    steps: list[PipelineNode] = [parsed[name] for name in step_order if name in parsed]
 
     logger.info(
         "Parsed pipeline '%s' with %d steps",
@@ -300,19 +376,13 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         version=config.get("version", ""),
         description=config.get("description", ""),
         nodes=steps,
+        declared_nodes=list(parsed.values()),
         available_models=config.get("available_models", []),
     )
 
-    # View pass-through (explicit ``view`` block in the source JSON) or
-    # synthesized from ``pipelines.default`` so every dataset overlay
-    # renders without authoring graph bookkeeping by hand. The optimizer
-    # pipeline ships an explicit view; dataset overlays don't.
-    raw_view = config.get("view")
-    if isinstance(raw_view, dict):
-        view: PipelineView | None = PipelineView.model_validate(raw_view)
-    elif schema.active_steps:
-        view = derive_pipeline_view(schema)
-    else:
-        view = None
+    # Always derived, never read off the manifest: a declared ``view`` is a second roster
+    # beside `nodes`, with nothing able to catch the two drifting apart.
+    pipelines = config.get("pipelines") or {"default": step_order}
+    view = derive_pipeline_view(parsed, pipelines) if parsed else None
 
     return schema.model_copy(update={"view": view})

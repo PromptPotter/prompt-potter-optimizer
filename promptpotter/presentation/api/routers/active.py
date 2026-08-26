@@ -245,17 +245,11 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     # was a second opinion on the same bytes. Copied because the response is mutated below.
     pipeline: dict[str, Any] = dict(optimizer_manifest())
     pipeline["resolved_schemas"] = optimizer_resolved_schemas()
-    # Every DECLARED node, not just the default pipeline's three. `parse_pipeline_response`
-    # takes its node set from ``pipelines.default``, which is right for a dataset (the steps
-    # that run) and wrong here: the optimizer picks its path per escalation, so `l2_context`
-    # and `l3_plan` sit in the escalation pipelines and `checkin` in none at all — yet the
-    # `view` this same response serves draws all six. The engine's own reader
-    # (``get_optimizer_schema``) already walks ``nodes`` whole; this route was the odd one out,
-    # and the three it dropped rendered as "declares no configurable params" while each
-    # declares model, provider, reasoning_effort, temperature and max_tokens.
-    schema = parse_pipeline_response(
-        {**pipeline, "pipelines": {"default": list(pipeline.get("nodes", {}))}}
-    )
+    # The manifest's own `pipelines` block, unflattened: `PipelineSchema.config_nodes` is
+    # what reaches the nodes no round runs, for this door and the other two alike, so the
+    # block stays free to shape the graph.
+    schema = parse_pipeline_response(pipeline)
+    pipeline["view"] = schema.view.model_dump(by_alias=True) if schema.view else None
     pipeline["node_config_schema"] = {
         node: [p.model_dump() for p in params]
         for node, params in schema.node_config_schema().items()

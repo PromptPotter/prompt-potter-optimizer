@@ -38,7 +38,7 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import PipelineSchema, PipelineView
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.search_point import JobSearchPoint
@@ -3016,7 +3016,36 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
 # What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
 # is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose — the
 # reason for a move belongs in the commit body, which is what this test's own message asks for.
-L4_INNER_ORIGIN = "f0e947588f6a"
+L4_INNER_ORIGIN = "40f684de7293"
+
+
+def test_the_two_optimizer_manifests_describe_one_graph() -> None:
+    """`promptpotter-self` IS the optimizer seen as a target, so an edit evolved on either layer
+    lifts onto the other only while both declare the same nodes wired the same way. Let the two
+    drift and nothing raises: each renders its own correct-looking picture, each keeps scoring,
+    and the transfer silently stops being a transfer — a `l2_context` edit measured on the outer
+    layer lands on an inner node reached by a different path, or by none.
+
+    The `nodes` + `pipelines` blocks are the whole declaration (`derive_pipeline_view`), so
+    comparing the derived graphs compares everything that decides it."""
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_manifest
+
+    outer = parse_pipeline_response(dict(optimizer_manifest())).view
+    inner = _pipeline_schema("promptpotter-self").view
+    assert outer is not None and inner is not None
+
+    def graph(view: PipelineView) -> tuple[set[str], set[tuple[str, str, str]]]:
+        return (
+            {n.id for n in view.nodes},
+            {(e.from_, e.to, e.kind) for e in view.edges},
+        )
+
+    assert graph(outer) == graph(inner), (
+        "the optimizer manifest and datasets/promptpotter-self/pipeline.yaml no longer describe "
+        "the same graph. Whichever one you edited, mirror the `nodes` / `pipelines` change onto "
+        "the other — until then an optimizer prompt evolved on one layer cannot be lifted onto "
+        "the other, and nothing else in the system will say so."
+    )
 
 
 def test_the_l4_measurement_identity_moves_only_when_someone_meant_it() -> None:

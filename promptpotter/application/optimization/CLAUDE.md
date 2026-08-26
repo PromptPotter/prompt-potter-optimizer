@@ -145,7 +145,7 @@ Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives fro
 
 ## Add no 4th LayerStrategy — L4 is a recursion
 
-**There is no `l4_*.py` in this package and there will not be one.** The ban is derived, not arbitrary, which is why naming a file `l4_recursion.py` breaks it just as surely: L4 is the same PromptPotter applied to itself via the `promptpotter` connector — an outer cycle whose *backend* is an inner cycle, mutating the inner's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`. A driver here would mean the ladder grew a rung; it did not. The ladder is closed at L1 / L2 / L3.
+**There is no `l4_*.py` in this package and there will not be one.** The ban is derived, not arbitrary, which is why naming a file `l4_recursion.py` breaks it just as surely: L4 is the same PromptPotter applied to itself via the `promptpotter` connector — an outer cycle whose *backend* is an inner cycle, mutating the inner's optimizer prompt template fields as `pipeline_params`. A driver here would mean the ladder grew a rung; it did not. The ladder is closed at L1 / L2 / L3.
 
 Conceptually L2 / L3 / L4 are one family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../CLAUDE.md`](../../CLAUDE.md) § Where L4 lives. Spec: [`../../../docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md).
 

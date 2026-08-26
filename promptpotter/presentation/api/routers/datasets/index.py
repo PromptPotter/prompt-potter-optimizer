@@ -104,7 +104,7 @@ class DatasetPipelineResponse(StrictModel):
     # The webapp branches self-optimization (pp-self) rendering on it.
     backend_type: str | None
     pipeline: dict[str, Any]
-    view: dict[str, Any] | None
+    view: PipelineView | None
     # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
     # included, carrying no value), because `optimizer_tunable` is summed per node to
     # answer "is this node optimizer-locked". The config editor filters to the widget
@@ -164,7 +164,7 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
         connector=connector,
         backend_type=backend_type,
         pipeline=schema.model_dump(by_alias=True),
-        view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
+        view=schema.view,
         node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
         nests=_nested_pipeline(dataset_dir, schema.view),

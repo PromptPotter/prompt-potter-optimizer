@@ -48,10 +48,12 @@ def merge_pipeline_params(
         return base
     merged = apply_node_overlay(copy.deepcopy(base or {}), overrides, schema)
     if schema:
-        _active = set(schema.active_steps)
+        # DECLARED, not the running chain: this guard strips an edit to a node that does not
+        # EXIST — a hallucinated name — and a node reached only by escalating exists.
+        _declared = {n.name for n in schema.config_nodes}
         for k, _cfg in list(node_config_items(merged)):
-            if k not in _active:
-                logger.warning("Dropping LLM override for excluded node %r", k)
+            if k not in _declared:
+                logger.warning("Dropping LLM override for undeclared node %r", k)
                 del merged[k]
     return merged
 
