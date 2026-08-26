@@ -112,7 +112,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       key: l.dataset,
       label: l.dataset,
       view: l.view,
-      status: "ok" as PipelineStatus,
+      status: l.status,
       connector: l.connector,
       schema: l.schema,
       // Read-only: no detail panel is scoped to another dataset's namespace, and an id
@@ -187,7 +187,6 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
   return (
     <div className="pipeline-stack" id="pipeline-stack">
       {draw(start)}
-      {nested.loading && <p className="pipeline-stack-note">Loading nested pipeline…</p>}
       {/* A truncated recursion that looks finished is worse than a short one. */}
       {nested.truncated && (
         <p className="pipeline-stack-note">Stack incomplete — {nested.truncated}.</p>

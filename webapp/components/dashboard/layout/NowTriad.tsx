@@ -1,5 +1,5 @@
 "use client";
-import { WorkflowCanvas, type PipelineDoc } from "@/components/workflow";
+import { OptimizerCard, type PipelineDoc } from "@/components/workflow";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { ForestCard } from "@/components/candidates/ForestCard";
@@ -39,7 +39,7 @@ export function NowTriad({ pipeline }: Props) {
   return (
     <>
       <div className="dash-now-row">
-        <WorkflowCanvas pipeline={pipeline} />
+        <OptimizerCard pipeline={pipeline} />
         <CandidatesCard />
       </div>
       {/* The lineage forest is its OWN card, opened by the toggle beside the

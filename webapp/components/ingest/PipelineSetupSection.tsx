@@ -5,7 +5,7 @@ import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector"
 import { SegmentedControl, Chip, ChipGroup } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
-import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
+import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { interiorNodes, searchPoint } from "@/lib/derivations";
@@ -144,7 +144,6 @@ function PipelineSetupInner({
               schema={cv.nodeConfigSchema}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"
-              flat
               onApply={onApply}
             />
           ) : (
@@ -153,10 +152,16 @@ function PipelineSetupInner({
         </>
       ) : (
         <>
-          <PipelineNodeList
-            nodes={interiorNodes(cv.view)}
+          <PipelineFlow
+            view={cv.view}
+            status={cv.pipelineStatus}
+            connector={cv.connector}
             schema={cv.nodeConfigSchema}
             scope="target"
+            nestsNode={null}
+            activeNode={null}
+            isLive={false}
+            tone="neutral"
           />
           {showDetail && selected ? (
             <NodeDetail

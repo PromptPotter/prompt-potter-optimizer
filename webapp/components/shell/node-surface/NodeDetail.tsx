@@ -15,7 +15,7 @@ import {
   type ObserveState,
 } from "@/lib/derivations";
 import { fmtSecs, fmtValue } from "@/lib/format";
-import { nodeKindLabel } from "@/components/workflow";
+import { nodeKind } from "@/components/workflow";
 import { CopyButton, SegmentedControl } from "@/components/ui";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { NodeSurface } from "./NodeSurface";
@@ -43,17 +43,8 @@ import { L1Variants, variantsOf } from "./L1Variants";
 //             end.
 //
 // The round is READ here, never set: its control belongs beside the picture it scopes
-// (the canvas toolbar on Dashboard, the hero frame on Chat), so this panel showing a
-// second one would be two controls for one axis.
-
-const KIND_ROLE: Record<string, string> = {
-  llm: "LLM call — runs the prompt below against each query.",
-  measurement: "System step — runs a whole pipeline rather than a prompt.",
-  phase: "Phase marker — no LLM call.",
-  retriever: "Retriever — ranks candidates from the index by similarity. No prompt.",
-  tool: "Tool — fetches external context (e.g. web search) for downstream nodes. No prompt.",
-  cache: "Cache — short-circuits the pipeline on a known hit. No prompt.",
-};
+// (the Optimizer card's toolbar on Dashboard, the hero frame on Chat), so this panel
+// showing a second one would be two controls for one axis.
 
 interface Props {
   node: SelectedNode;
@@ -78,7 +69,10 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
-  const kind = node?.kind ?? "llm";
+  // `tool` where the view has no such node, matching the producer's own fallback
+  // (`nodeKind`), so no two surfaces name one absent kind differently.
+  const kind = node?.kind ?? "tool";
+  const kindInfo = nodeKind(kind);
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)
@@ -104,7 +98,7 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
       <section className="setup-preview">
         <header className="setup-preview-head">
           <span className="setup-preview-title">
-            <span className={`bnode-kind kind-${kind}`}>{nodeKindLabel(kind) || kind}</span>
+            <span className={cx("bnode-kind", kindInfo.cls)}>{kindInfo.label}</span>
             {node?.label ?? id}
             <code className="opt-detail-id">{id}</code>
           </span>
@@ -137,7 +131,7 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
           </span>
         </header>
 
-        <p className="bnode-role">{KIND_ROLE[kind] ?? "Pipeline node."}</p>
+        <p className="bnode-role">{kindInfo.role}</p>
 
         {isOptimizer ? (
           <OptimizerProgram
@@ -207,8 +201,6 @@ function OptimizerProgram({
         schema={schema}
         outputSchema={outputSchema}
         mode="values"
-        readOnly
-        flat
       />
       {origin && origin.count > 1 && (
         <p className="inspector-note">
@@ -240,40 +232,27 @@ function TargetProgram({
   isLive: boolean;
   onPromptApply?: (patch: DraftPatch) => void;
 }) {
-  // AUTHOR: a concrete node with an active draft — the search-space lock/allow editor.
-  if (draft && node) {
-    return (
-      <NodeSurface
-        node={node}
-        point={{ origin_prompt_fields: draft.origin_prompt_fields, pipeline_overlay: {} }}
-        configSeed={draft.pipeline_overlay}
-        schema={schema}
-        outputSchema={outputSchema}
-        mode="search-space"
-        flat
-        onApply={onPromptApply}
-      />
-    );
-  }
-  // OBSERVE, draft: the draft IS the origin being authored; no server-resolved config
-  // exists pre-mint, so show the draft prompt + schema-declared config, read-only.
+  // Two draft lifecycles, one call: AUTHORING a concrete node opens the search-space
+  // lock/allow editor over the draft overlay; the draft WHOLE is the origin being authored,
+  // and no server-resolved config exists pre-mint, so it gets no callback — which IS
+  // read-only.
   if (draft) {
+    const authoring = node != null;
     return (
       <NodeSurface
-        node={null}
+        node={authoring ? node : null}
         point={{ origin_prompt_fields: draft.origin_prompt_fields, pipeline_overlay: {} }}
-        configSeed={{}}
+        configSeed={authoring ? draft.pipeline_overlay : {}}
         schema={schema}
         outputSchema={outputSchema}
-        mode="values"
-        readOnly
-        flat
+        mode={authoring ? "search-space" : "values"}
+        onApply={authoring ? onPromptApply : undefined}
       />
     );
   }
 
-  // A one-option group is not a choice — with a single state available the surface's
-  // own label already names what is on screen.
+  // A one-option group is not a choice: `NodeSurface` renders the `label` naming which
+  // searchpoint is on screen, so the group adds nothing until there are two to pick from.
   const options = observeOptions(observe.avail);
 
   return (
@@ -299,8 +278,6 @@ function TargetProgram({
             outputSchema={outputSchema}
             label={observe.cfg.label}
             mode="values"
-            readOnly
-            flat
           />
           {/* A per-node optimizer prompt is carried as the optimizer's evolved DELTA,
               so a node it has not touched yet has nothing here. Six empty boxes under
@@ -374,11 +351,9 @@ function RunSection({
         <div className="opt-detail-empty">
           {kind === "measurement"
             ? "System step — no LLM call. See the configuration above for the wired params."
-            : kind === "phase"
-              ? "Phase marker — no LLM call."
-              : loading
-                ? "Loading this round's audit trail…"
-                : "This node has not fired in any cached round yet."}
+            : loading
+              ? "Loading this round's audit trail…"
+              : "This node has not fired in any cached round yet."}
         </div>
       ) : (
         <>

@@ -23,6 +23,7 @@ import type {
   CampaignListResponse,
   CampaignStorageResponse,
   ConfigMapResponse,
+  DatasetPipelineResponse,
   CyclesResponse,
   DatasetIndexEntry,
   DatasetIndexResponse,
@@ -111,10 +112,15 @@ export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
 // Target connector pipeline for a dataset. One-shot — topology is bound at
 // cycle-identity hash time and doesn't mutate during the loop. The server
 // reads `datasets/{name}/pipeline.yaml` (dataset overlay = source of truth)
-// and synthesises a `view` block from `pipelines.default` when one isn't
-// explicit. Consumed by the ChatPane hero.
-export function fetchDatasetPipeline(name: string, signal?: AbortSignal): Promise<unknown> {
-  return jget(`${API}/datasets/${encodeURIComponent(name)}/pipeline`, signal);
+// and derives the `view` from its `nodes` + `pipelines`. Consumed by the ChatPane hero.
+export function fetchDatasetPipeline(
+  name: string,
+  signal?: AbortSignal,
+): Promise<DatasetPipelineResponse> {
+  return jget<DatasetPipelineResponse>(
+    `${API}/datasets/${encodeURIComponent(name)}/pipeline`,
+    signal,
+  );
 }
 
 export function fetchBackends(signal?: AbortSignal): Promise<BackendResponse[]> {

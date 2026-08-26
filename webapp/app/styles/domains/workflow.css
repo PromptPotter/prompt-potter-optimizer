@@ -5,18 +5,16 @@
 .raw-card details[open] summary::before{content:'▾ '}
 .raw-card pre{font-family:var(--font-mono);font-size:var(--text-base);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:var(--space-10) var(--space-14);margin-top:10px;max-height:480px;overflow:auto;line-height:1.5}
 
-/* Workflow canvas — sized small. Pipeline topology is reference info,
-   not a primary view; cap the canvas so it doesn't take a third of the
-   page. The SVG aspect-locks; cap width → height drops in lockstep. */
-/* Sizes to its canvas, as it always did. The round axis now lives in the toolbar,
-   but its scroller is capped (below) rather than allowed to stretch the card —
-   otherwise a 100-round campaign would drag the whole card to full width. */
+/* The Optimizer card. It sizes to the graph inside it — pipeline topology is reference
+   info, not a primary view, so it must not take a third of the page. The round axis rides
+   the toolbar with its scroller capped (below) rather than stretching the card, or a
+   100-round campaign would drag the whole thing to full width. */
 .workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px;width:fit-content;max-width:100%}
 /* Running cycle (live + fresh connection): wash the whole card green and
    weakly pulse so the optimizer reads as "active" at a glance. Neutralised
    under reduced-motion; the tint + border + "● live" label still carry it. */
 .workflow-card.running{border-color:var(--color-success-border);background:var(--color-success-bg);animation:wf-running-pulse 2s ease-in-out infinite}
-.workflow-card.running .workflow-canvas-bg{background-color:var(--color-success-bg)}
+.workflow-card.running .workflow-graph{background-color:var(--color-success-bg)}
 @keyframes wf-running-pulse{0%,100%{box-shadow:0 0 0 0 rgba(var(--color-success-rgb),0)}50%{box-shadow:0 0 14px 1px rgba(var(--color-success-rgb),0.35)}}
 .workflow-toolbar{padding:var(--space-6) var(--space-12);border-bottom:0.5px solid var(--color-border);display:flex;align-items:center;gap:var(--space-10);font-size:var(--text-sm);color:var(--color-text-secondary)}
 .workflow-title{flex:0 0 auto;font-weight:600}
@@ -28,7 +26,7 @@
    takes the slack (100 rounds = 100 circles) and keeps the toolbar one line. */
 .round-axis{display:flex;align-items:center;gap:var(--space-8);flex:0 1 auto;min-width:0}
 .round-axis-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600;flex:0 0 auto}
-/* Capped, not stretchy: the card sizes to its canvas, so a long campaign scrolls
+/* Capped, not stretchy: the card sizes to its graph, so a long campaign scrolls
    its rounds inside this box instead of widening everything. */
 .round-axis-scroll{display:flex;align-items:center;gap:var(--space-4);min-width:0;max-width:260px;overflow-x:auto;scrollbar-width:thin;padding:2px 0}
 .round-tab{flex:0 0 auto;min-width:26px;height:26px;padding:0 var(--space-6);border-radius:13px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:var(--text-sm);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:background-color 100ms,color 100ms,border-color 100ms}
@@ -37,39 +35,13 @@
 .round-tab-live{padding:0 var(--space-10);font-weight:600;gap:var(--space-6)}
 .round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 4px var(--color-success);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
 @keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
-.workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
-/* One compact wide-short canvas at every width — width and aspect-ratio mirror
-   CANVAS_W/CANVAS_H (`components/workflow/layout.ts`). Keeps the optimizer card
-   short on desktop too. Both numbers move with that file or this box clips: the
-   component sets `aspect-ratio` inline from the constants and wins, so a stale
-   `width` here would crop the diagram against `overflow:hidden` with nothing on
-   screen to say so. */
-.workflow-canvas{position:relative;width:460px;max-width:100%;aspect-ratio:460/160;overflow:hidden}
-/* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
-.wf-node{cursor:pointer;user-select:none;outline:none}
-.wf-node[aria-disabled="true"]{cursor:default}
-.wf-node:focus-visible .wf-dot{filter:drop-shadow(0 0 6px var(--color-accent-glow))}
-.wf-dot{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 5px var(--color-accent-glow));transition:transform .15s,filter .15s,fill .15s}
-.wf-node:hover .wf-dot{transform-box:fill-box;transform-origin:center;transform:scale(1.12)}
-.wf-dot.selected{filter:drop-shadow(0 0 9px var(--color-accent-glow)) drop-shadow(0 0 14px var(--color-accent-glow))}
-.wf-dot.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 8px rgba(var(--color-success-rgb),0.70));animation:pulse-active 1.6s ease-in-out infinite}
+.workflow-graph{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
+/* Lit while a node is mid-call. Declared here beside the card it was written for, and
+   read by the pipeline renderer's dots, locks and frames in `chat.css`. */
 @keyframes pulse-active{0%,100%{filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.52))}50%{filter:drop-shadow(0 0 14px rgba(var(--color-success-rgb),0.85))}}
-.wf-dot.dim{opacity:.45}
-.wf-dot.kind-io{fill:var(--color-background-secondary);stroke:var(--color-border);stroke-width:1.5;filter:none}
-.wf-dot.kind-measurement{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
-.wf-dot.kind-phase{fill:var(--color-accent);stroke:var(--color-accent);opacity:.85}
-/* A served node the hand-drawn LAYOUT has no position for. Warn-toned because it
-   is a drift report, not a feature: the optimizer manifest and this geometry have
-   diverged and someone needs to place it. */
-.wf-dot.kind-unplaced{fill:var(--color-warn);stroke:var(--color-warn);filter:none}
-.wf-stray .wf-dot-label{fill:var(--color-warn)}
-.wf-dot-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
-.wf-dot-sub{font-size:var(--text-xs);fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
-/* The node detail's RUN half — what the picked node did in the viewed round.
-   Its frame, header and close now come from `.bnode` / `.setup-preview-*`
-   (backend-node.css): one panel serves both canvases on both tabs, so the
-   container, title row and close button it used to own here are gone rather
-   than duplicated. What stays is everything only a run trace needs. */
+/* The node detail's RUN half — what the picked node did in the viewed round. Its frame,
+   header and close come from `.bnode` / `.setup-preview-*` (backend-node.css), one panel
+   for either scope on either tab. What stays here is only what a run trace needs. */
 .opt-detail-id{font-family:var(--font-mono);font-size:var(--text-xs);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:3px;padding:1px var(--space-4);color:var(--color-text-secondary)}
 .opt-detail-status{font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .opt-detail-status.live{color:var(--color-success);font-weight:500}

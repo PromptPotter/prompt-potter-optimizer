@@ -56,46 +56,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* Vanilla inline node list — the plain "business mechanics" pipeline view. Bare
-   layout only: nodes in a row, separators, a button reset. No theming. */
-.pipeline-node-list {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-6);
-  list-style: none;
-  margin: var(--space-8) auto 0;
-  padding: 0;
-  max-width: 560px;
-  font-size:var(--text-sm);
-}
-.pipeline-node-list li {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-}
-.pipeline-node-list button {
-  font: inherit;
-  cursor: pointer;
-  background: none;
-  border: 0.5px solid var(--color-border);
-  border-radius: var(--border-radius-sm);
-  padding: 2px var(--space-8);
-  color: inherit;
-}
-.pipeline-node-list button[aria-pressed="true"] {
-  border-color: var(--color-accent);
-}
-.pipeline-node-list small {
-  color: var(--color-text-tertiary);
-}
-/* Lock glyph on a collapsed node toggle — mirrors the search-space config editor
-   lock state shown when the node is expanded. Small, leading the label. */
-.pipeline-node-list .pnl-lock {
-  font-size:var(--text-xs);
-  line-height: 1;
-  margin-right: 2px;
-}
 /* Status notes under the stack (loading / truncated). Never the stack itself — a
    level that failed says so where it sits, not in a footer. */
 .pipeline-stack-note {

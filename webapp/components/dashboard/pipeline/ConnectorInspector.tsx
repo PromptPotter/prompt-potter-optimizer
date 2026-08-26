@@ -106,25 +106,17 @@ export function ConnectorInspector({ view }: Props) {
             docs ↗
           </a>
         </div>
-        <ul className="connector-pop-nodes">
-          {interior.length === 0 && (
-            <li className="empty">
-              {selfOpt
-                ? "optimizer prompt nodes — inspect them in the inner run"
-                : "no nodes loaded"}
-            </li>
-          )}
-          {interior.map((n) => {
-            const model = n.kind === "llm" ? currentNodes[n.id]?.model : null;
-            return (
-              <li key={n.id}>
-                <span className={`kind kind-${n.kind ?? "tool"}`}>{n.kind ?? "tool"}</span>
-                <span className="lbl">{n.label}</span>
-                {model && <span className="model">{model}</span>}
-              </li>
-            );
-          })}
-        </ul>
+        {/* No node roster here: this popover answers CONNECTION state — name, type, url,
+            TLS, auth — and the graph is drawn in the same row, from the same `view`.
+            Listing the nodes again needs its own kind fallback and model lookup, which is
+            two more places for one node to be described differently. */}
+        {interior.length === 0 && (
+          <p className="connector-pop-empty">
+            {selfOpt
+              ? "optimizer prompt nodes — inspect them in the inner run"
+              : "no nodes loaded"}
+          </p>
+        )}
         {others.length > 0 && (
           <div className="connector-pop-switch">
             <div className="head">Other backends</div>
