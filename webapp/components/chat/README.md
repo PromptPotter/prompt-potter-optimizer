@@ -1,15 +1,16 @@
 # chat/ — the reusable chat core + the delete-list
 
 PromptPotter's chat front door, built **chat-experience-first so another team can
-keep the core and delete the optimizer-specific panes** (`docs/specs/chat-foundation.md`
-§6). The seam is kept simple on purpose — clean internal structure + this
+keep the core and delete the optimizer-specific panes**. This file owns that
+delete-list. The seam is kept simple on purpose — clean internal structure + this
 delete-list, not a prematurely-extracted package. It can be lifted into its own
 module later; reversible by design.
 
 This is **Arc 1: curated activity + loop control** — the chat renders a curated
 layer over the live cycle event stream and surfaces in-thread decision buttons
 that fire the existing `/commands/{kind}` verbs. The free-form "talk to an
-assistant" endpoint is a deferred Arc 2 (see chat-foundation.md §4a).
+assistant" endpoint is a deferred Arc 2 —
+`docs/specs/chat-foundation.md` § Arc 2 — the conversational endpoint, open.
 
 ## Keep — the reusable core
 

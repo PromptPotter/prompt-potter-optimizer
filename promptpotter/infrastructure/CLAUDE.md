@@ -213,19 +213,11 @@ cache keyed by content hash. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
-no-drift gate #4 — never an independent field). Composite over ten focused
-leaf stores — **the attribute, then the class, then the file**, because the
-attribute is what a call site shows you and the file is what you have to open:
-`backends` → `BackendStore` (`store/backend_store.py`), `tenant_datasets` →
-`TenantDatasetStore` (`store/tenant_dataset_store.py`), `sessions` →
-`SessionStore` (`store/session_store.py`), `campaigns` → `CampaignStore`
-(`store/campaign_store/store.py`), `checkin` → `CheckinDraftStore`
-(`store/checkin_draft_store.py`), `sweeps` → `SweepStore`
-(`store/sweep_store.py`), `archive` → `MeasurementArchive`
-(`store/measurement_archive.py`), `optimizer_reuse` → `OptimizerReuseCache`
-(`store/stores.py`, defined inline), `diagnostic_runs` → `DiagnosticRunStore`
-(`store/diagnostic_run_store.py`), `users` → `UserStore`
-(`store/user_store.py`). Shared I/O in
+no-drift gate #4 — never an independent field). Composite over the leaf stores
+`Stores` declares as its own fields — one attribute each, one class per
+`store/*.py`, except `optimizer_reuse`, which `stores.py` defines inline.
+**Cite one as attribute → class → file**: the attribute is what a call site
+shows you, the file is what you have to open. Shared I/O in
 `store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
 code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
 measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
@@ -268,13 +260,13 @@ and denies on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
 on purpose is not.
 
-## Stores — the rest of the layout
+## Stores — path helpers, spend banking, the cycle seed
 
 Path helpers in
 `store/layout.py`; the per-tenant
 active-session pointer in `store/session_pointer.py`; derived reads are free
-functions in view modules (`store/archive_views.py` is the template — it is
-also the archive's single-writer facade). `store/account_spend.py` is the
+functions in view modules (`store/archive_views.py` is the template).
+`store/account_spend.py` is the
 same shape over the ledgers: it sums an account's lifetime spend, and it
 BANKS that spend as a `SpendTombstoneRecord` before a delete takes the rows
 carrying it. It sits here rather than in `application/` for exactly that

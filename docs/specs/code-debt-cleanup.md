@@ -180,6 +180,7 @@ decisions → [`../architecture.md`](../architecture.md).
 
 ## Considered, not debt — don't re-open
 
+- **The probe-rounds section of [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) stays at full length — it is not stale description of an unwired lever.** It reads that way because `L2ContextOutput` carries no `action` field, so a doc-shrink pass scores it as prose about nothing. Operator-decided 2026-08-26: it is the written spec for a planned L2 capability — a probe round spends a whole round interrogating one axis, which is how L2 breaks out of the loop while still using the loop. Don't compress it, don't fold it into a code pointer, don't file the missing field as drift.
 - **`best_round` two bases (composite-argmax winner export vs cumulative-accuracy index/dashboard headline)** — operator-decided correct-by-design: composite is the optimizer's objective (winner export + L2/L3 stall comparator, which also compares θ), accuracy is the formula-independent headline. Documented in `_apply_best`'s docstring + `architecture.md` §0.5. Don't flip either basis to match the other.
 - **`l2_duplicate_insert` / `l2_task_context_stale_repeat` are GONE — don't re-file either** — both were `task_context` checks, and that framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so neither breach is representable. Owner: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Wound 4.
 - **Benchmarks are NOT gated from the distributed app** — settled the other way by `20d17ea8`: repo `datasets/` is *install content* (tracked in git, readable by anyone who has the install), so the `datasets.benchmarks.read` capability + `PROMPTPOTTER_ADMIN=1` gate were deleted and the tier is now `yours`/`install`. The gate existed to hide one gitignored scratch cut, and its cost was a blank pipeline hero + hard-sample leaderboard on every benchmark campaign. A private cut belongs in the tenant, where path isolation already protects it. Don't re-file the old "hide benchmarks from the default identity" entry.
@@ -251,7 +252,7 @@ non-functional controls" sweep.
 |---|---|---|
 | Sidebar-footer search icon (disabled) | `webapp/components/shell/Sidebar.tsx` | analytics search (C4-adjacent) |
 | ChatPane attach + textarea + send (disabled) | `webapp/components/chat/ChatPane.tsx` | **C1** chat-first front door ([`chat-foundation.md`](chat-foundation.md)) |
-| ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | assistant tool-use — deferred past **C1** (asyncapi-first; [`chat-foundation.md`](chat-foundation.md) §7) |
+| ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | assistant tool-use — deferred past **C1** (asyncapi-first; [`chat-foundation.md`](chat-foundation.md) § Deferred — assistant tool-use) |
 | AccountModal "Update profile" (disabled) | `webapp/components/account/AccountModal.tsx` | profile editing |
 | AccountModal "Remove account" (disabled) | `webapp/components/account/AccountModal.tsx` | multi-provider account mgmt |
 | AccountModal "+ Connect account" (alerts, no-ops) | `webapp/components/account/AccountModal.tsx` | multi-provider account linking |

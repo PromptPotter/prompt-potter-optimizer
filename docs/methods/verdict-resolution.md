@@ -16,6 +16,11 @@ Which *candidate* wins is the sibling question, owned by
 [`candidate-elimination.md`](candidate-elimination.md). Both read θ, which is why they never
 disagree about what "better" means.
 
+**Holm corrects across PAIRS and cannot correct across METRICS.** Any surface reporting a
+pairwise comparison must say so: trying several metrics and keeping the tightest is a
+comparison no column prices, and the correction does not reach it. `p` is null where nothing
+was tested (below two shared cells) — a different fact from a test that returned 1.00.
+
 **What this model does not cover.** Within LLM-driven program evolution, PromptPotter targets the
 bounded case: fixed pipeline, labelled dataset, scalar fitness. Open-ended synthesis,
 multi-objective fitness and unlabelled tasks remain open problems for the paradigm and are not

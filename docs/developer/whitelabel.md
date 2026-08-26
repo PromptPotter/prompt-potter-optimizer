@@ -117,9 +117,8 @@ Do **not** wrap a replacement mark in a circle to make it survive both themes �
 that is what the tab pair already solves, and only for the tab.
 → [`BRAND.md`](../../BRAND.md)
 
-The engine's copies live on `Settings` (`config/settings.py`:
-`BRAND_SHORT_NAME`, `BRAND_SERVICE_NAME`, `BRAND_DOCS_URL`); the webapp's are
-enumerated by `webapp/lib/brand.ts`. Next inlines its half at build time, so
+The engine's copies live on `Settings` (`config/settings.py`, the `BRAND_*` fields);
+the webapp's are enumerated by `webapp/lib/brand.ts`. Next inlines its half at build time, so
 **the rebuild IS the rename** — there is no runtime brand config to drift.
 
 ## Tier 2 — deployment identity

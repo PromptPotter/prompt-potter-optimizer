@@ -126,18 +126,9 @@ per-outcome choice to store.
 
 ## Optimizer-memory state
 
-Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_search_point.py`) travel with each candidate cross-round:
+The fields that travel with each candidate cross-round are `domain/opt_search_point.py::L2L3Memory` — read the roster and each field's lifecycle off the model, which is frozen and cannot drift from itself.
 
-| Field | Lifecycle | Wound |
-|---|---|---|
-| `task_context` | persistent, accumulative; merged on each L2 fire; inherits through `mutate()` | Wound 1, Wound 2 — L2 writeback |
-| `wounds.validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L1 reads (via `l1_wounds`) |
-| `wounds.runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
-| `wounds.l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
-| `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
-| `wounds.l3_note` | sticky free-text; set by L3, survives every incumbent swap (L1 win + L2/L3 transition) via the `Cycle.adopt` seam's `copy_memory_to` | L3→L2 steer (not a failure record) |
-
-The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory lives on `Cycle` (`Cycle.rounds`), not OSP.
+Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every incumbent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, which is the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads from `cycle.latest_round.critique`, the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
 
 ## Mid-eval termination — what is and isn't healing
 

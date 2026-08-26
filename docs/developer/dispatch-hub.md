@@ -2,7 +2,7 @@
 
 Visual + reference for `promptpotter/application/optimization/dispatch/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. **L2_CONTEXT firing lives here too**, from § Trigger down: L2 is one entry in this hub — same `LayerStrategy` shape as L3, same `fill` path (from its `NODE_LAYOUTS["l2_context"].floor`), same `Bundle` per-call state, and the hub is what stops it accumulating its own renderers, surface object and escape hatches. Concept role: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
-The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → list[Item]`, a `char_cap`, a `citable` flag, and a `description` string, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
+The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → list[Item]`, a `char_cap` and a `citable` flag, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
 `citable` answers one question: may an `l1_generate` variant name this panel in `evidence_grounding`? True for panels that REPORT (what was measured, what failed, what the layers steered); False for the value-space menus and the prompt under edit — citing those grounds a mutation in its own subject. `citable_fields(layout, exploration_budget)` intersects the flag with the node's **live layout**, so what L1 may cite is exactly what L1 was shown; the same call fills the prompt's `{{citable_fields}}` menu, the wire schema's enum, and the `evidence_grounding_present` check. Adding a panel to a floor makes it citable automatically.
 
@@ -74,6 +74,7 @@ flowchart LR
   PLAN --> L1G
   TC --> L1G
   TUN --> L1G
+  BLK --> L1G
   DIAG --> L1G
   L1W --> L1G
   CRIT --> L1G
@@ -251,7 +252,9 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 
 `L1Layout` (`promptpotter/domain/l1_layout.py`) is a Pydantic model with one list per addressable slot: `persona`, `task_intent`, `problem_description`, `thinking_style` (all L2-mutable). `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's injection renderings are appended. Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3; if an injection needs to differ per layer, that's two injections.
 
-**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, then the decision frame (`measurand`, `precision`, `detectable_move`, `confounds`, `sample_provenance`), then `pipeline_param_catalogue`, `prompt_block_catalogue`, `plan`, `answer_distribution`, `critique`, `failing_samples`, `inner_narratives`, `mutation_memory`, `l1_wounds`, `escalation_panel`, `origin_strengths`, `budget_state` in `problem_description`. **Order is now priority in a second sense**: the composition selects section by section in layout order under the node's discretionary allowance (`dispatch/compose.py`), so the frame is placed before a large panel can crowd it — and the `L1_MANDATORY` names above are placed before either, whatever they cost. `answer_distribution` leads the evidence because it frames everything after it: a pipeline collapsed onto one label needs that break, not a better-argued instruction, and no other panel can say so. `sample_transcripts` stays OFF the floor — it is the same misses at ~5x the bytes, and the generator reading it beside the critique duplicated a ~10k payload every round; `failing_samples` is its dense peer. Raw `diagnostics` and the cross-run panels stay off the floor too (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring — every L2 fire in the first banked run touched the layout, so treat the floor as what a *first* L1 round reads, not as what most rounds read.
+**Default floor** — `default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`. **Read the membership there, never from a copy here**; this page bans exactly that below, for L2, and had carried one for L1 anyway. `l1_layout.py` states the ordering rationale beside the list it orders.
+
+What the layout file cannot say, because it is about the composition rather than the order: **order is priority in a second sense** — `dispatch/compose.py` selects section by section in layout order under the node's discretionary allowance, so the decision frame is placed before a large panel can crowd it, and the `L1_MANDATORY` names are placed before either, whatever they cost. And the floor is what a *first* L1 round reads, not what most rounds read: every L2 fire in the first banked run touched the layout, and L4 optimises that authoring.
 
 **Validation — split HARD / SOFT.** `validate_l1_layout(layout, *, spec, prior_layout)` enforces against the node's `NodeLayoutSpec` (`spec.mandatory`/`spec.possible`):
 

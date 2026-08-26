@@ -93,14 +93,10 @@ first cancels the in-flight call and pauses (resumable, exit 130), second force-
 `measurements/runs/{run_id}.jsonl` immediately, so a hard kill loses zero work and `resume`
 cache-hits prior results.
 
-**`promptpotter-self` runs ONCE, in the foreground, to completion.** A kill orphans the open
-inner run → the reaper stamps it `producer_vanished` (excluded from scoring, and NOT cached). The
-next launch no longer re-burns that seed from round 0 — an inner campaign is addressed by the
-cell it runs, so it re-enters the same campaign and continues from the rounds already banked —
-but the rounds the kill cut short are still lost, so a kill still costs. And the outer `cycle_id` is deterministic (hash of
-optimizer prompts + benchmark), so re-`new` with unchanged optimizer prompts collides on one `cycle_id` and
-renders the same measurement under N campaign headers. Iterate with `resume`; `new` again only
-after an optimizer prompt or config change.
+**Launch discipline for `promptpotter-self`** — owned by the `potter-self` skill
+(§ Live-run supervision), which states it in more depth: once, foreground, to completion; `resume` to
+iterate; `new` again only after a prompt or config change. Read it there; it is not
+restated here.
 
 ## Supervise
 

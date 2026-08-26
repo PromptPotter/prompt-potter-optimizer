@@ -143,7 +143,7 @@ Polled per checkpoint and consumed at the next **sample** boundary — transient
 |---|---|
 | `pause.flag` | The single operator-interrupt flag. **There is no `stop.flag`.** The loop exits at the next checkpoint; the cycle stays resumable. |
 | `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
-| `sample_lookahead.flag` | The operator's *request* that the walk hold a second sample in flight. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
+| `sample_lookahead.json` | The operator's *request* that the walk hold a second sample in flight. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
 | `skip.flag` | Skip the current unit at the next checkpoint. |
 | `spend_cap` | Live `(usd, tokens)` ceilings. |
 
@@ -214,14 +214,17 @@ Every ledger record is already typed; combined with `inherit_from`, "human in th
 
 **Make a slow round finish sooner — the look-ahead control.** When the operator is watching a run crawl through its samples, the remote's **⇉** control runs the walk with several of a candidate's samples in flight instead of one, cutting that walk's wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever that needs no config change and no restart.
 
-**What one press buys is the backend's to declare** (`Connector.concurrency_arming`), and the two forms behave differently enough that saying the wrong one misleads:
+**What one press buys is the backend's to declare** (`Connector.concurrency_arming`) — a
+button spent by the round that scored under it, or a number field spent by the group it
+releases — and **either layer is armed by naming the one you mean**, so an outer press
+releases several inner campaigns and an inner one holds several of its own rows. Both forms,
+the ceilings, and why an arming is never inherited downward: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
 
-- `round` — the control is a button. It arms the next round's scoring and **expires by itself** when that round finishes scoring, so the button unlights on its own.
-- `batch` — the control is a number field, because a round on a backend whose sample is a whole nested campaign runs hours and cannot bound a press. The operator names how many launch **together**; the walk waits for all of them before releasing the next group, and the arming is spent by exactly that group. `promptpotter-self` is this form — so the press does reach it, contrary to what this page claimed while the button was round-only.
-
-Two things hold under either form. It **does not make the cycle babysat**: samples are absorbed in walk order and an in-flight one is discarded rather than recorded, so the run's rows are identical at any depth (unlike Skip, which does taint the cycle). And it **costs at most one discarded backend call per eliminated candidate**, shown as `sample_lookahead_discards` on the dashboard.
-
-**Both layers are armed by naming the one you mean.** The arming is deliberately not inherited into a nested run — one press would otherwise multiply concurrency at every level at once — so arming an L4 outer campaign releases several inner campaigns together, and arming one of those inner runs (drill into it first; the command carries the path) holds several of its own rows in flight. Its ceiling is its own connector's.
+Two things hold under either form, and neither is on the wire. It **does not make the cycle
+babysat**: samples are absorbed in walk order and an in-flight one is discarded rather than
+recorded, so the run's rows are identical at any depth — unlike Skip, which does taint the
+cycle. And it **costs at most one discarded backend call per eliminated candidate**, shown as
+`sample_lookahead_discards` on the dashboard.
 
 It is browser-only and host-admin-gated (`scoring.sample_lookahead`) — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the control but cannot press it. Contract: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
 
@@ -249,33 +252,16 @@ python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
 python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the freshly-minted cycle
 ```
 
-**Reading results.** The sweep branches are ordinary forks on the campaign tree — read them side-by-side in the webapp, or open each branch's `round_NNNN.json`. A batch groups by parent root and sorts by `round_1_top_lift`; `proxy_lift_corr` is meaningful once ≥4 paired sweep/full branches share an `l1_generate_hash`. **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
+**Reading results.** The sweep branches are ordinary forks on the campaign tree — read them side-by-side in the webapp, or open each branch's `round_NNNN.json`. Ranking a batch by round-1 lift, and validating a cheap proxy against a full run, are an open gate rather than served behavior — [`../specs/roadmap.md`](../specs/roadmap.md) owns its status. **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
 ## CLI flags — `new` and `resume`
 
 `new <name>` mints a fresh session+cycle from an authored `datasets/<name>/` and runs from round 0. `new <file>` (a CSV — `Path.is_file()`) parses the file into a durable check-in campaign, runs the AI origin check-in (the same `checkin` node the web ingest uses), auto-confirms high-confidence findings, and — once the readiness gate passes — flips the check-in to `active` and runs the loop inline. It reuses the exact orchestration behind web onboarding (`ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run`); the only CLI↔web difference is the CLI runs inline while the web start-checkin detaches. If a gap survives the resolver, `new` prints the open fields + questions and exits non-zero — nothing is minted on a guessed default; confirm with `--set` and re-run. After a successful file run the committed slug is first-class to `new <slug>` / `resume`.
 
-| `new` flag | Purpose |
-|---|---|
-| `<name\|file>` (positional) | Dataset name under `./datasets/` (auto-loads its `campaign.json`) **or** a path to a raw CSV to ingest |
-| `--config` | Campaign config JSON — overrides the dataset's default `campaign.yaml` (name form) |
-| `--dataset-name` | Alternative to the positional name |
-| `--slug` | *(file form)* Dataset slug under `projects/{tenant}/datasets/` (default: derived from the filename) |
-| `--set FIELD=VALUE` | *(file form)* Confirm an origin field directly (operator-stated), repeatable. Fields: `task_description`, `column.query`, `column.ground_truth`, `connector`, `scoring_composite`, `max_rounds`. Applied before the resolver, so it seeds the rest |
-| `--backend-url` | Backend service URL |
-| `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
-| `--task-file` / `--task-text` | *(name form)* Override `<dataset>/task_description.md` from a file or inline |
-| `--halt-at` / `--spend-budget` / `--token-budget` | Run-halt gates (both forms); whichever trips first halts |
-| `--diag` | Diagnostic mode — marks `index.json::final.mode` as `'diag'`; branches off a counted sibling on re-run |
-| `--excel-path` | Path to an Excel workbook to load alongside the dataset (name form) |
-| `--sweep-batch` | Flag, not a path — reads every `datasets/<name>/sweep/*.yaml` (name form; see [Sweep batch](#sweep-batch--new---sweep-batch)) |
-
-The workflow flags `--from`, `--fork-on-divergence`, `--rewind`, `--rewind-reason` are covered under [Recovery](#recovery-resume-rewind-fork-sweep) above. The remaining `resume` flags:
-
-| `resume` flag | Purpose |
-|---|---|
-| `--no-check` | Rescore but skip the decision-replay halt |
-| `--diag` | Diagnostic mode (see `new --diag`); on a previously-completed diag cycle, branches off a counted sibling |
+**The flag set is `presentation/cli/parsers.py`** — every row here was its `help=` string one
+`--help` away, and the two drifted (`--sweep-batch` was documented as taking a path when it is
+`store_true`, and `--token-budget` was missing entirely). Read the flags there; this page owns
+what they do to the tree, above.
 
 ### Interrupt handling
 
@@ -353,26 +339,20 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
 
 **There is no live swap, and the reason is a gate rather than plumbing.** `round_scorer` compiles once during run init (`initialization/loop_start.py::populate_session_scoring`) from `campaign.json::scoring` and is never re-read. To change it: author a `per_round` formula over the names below, edit `campaign.json::scoring`, and `resume --fork-on-divergence` — the sibling starts at the divergence point and every round it banks is scored under one formula.
 
-Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._advanced` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/m12-api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
+Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._improved` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/m12-api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
 
 ### Available names
 
-Gated by `applies(schema)` — present only when the matching node is active.
+**The roster is `application/scoring/evaluators.py::_REGISTRY`** — the twelve literal
+`Evaluator`s plus one per `::SELF_HEALERS` spec, each carrying its own range and one-line
+meaning. Read it there: a table here goes stale in the one direction that costs the
+operator a name they never learn exists, and this page listed eleven of sixteen for
+long enough to hide five. Each is gated by `applies(schema)`, so it is present only when
+the matching node is active.
 
-| Name | Range | Meaning |
-| --- | --- | --- |
-| `accuracy` | `[0, 1]` | Mean per-sample score |
-| `error_rate` | `[0, 1]` | Fraction of errored queries |
-| `degraded_rate` | `[0, 1]` | Fraction with degradation warnings |
-| `runtime_failure_rate` | `[0, 1]` | OptSP runtime-failure count, normalized |
-| `mean_latency_s` | seconds | mean `step_timings` sum per cell; larger is worse |
-| `prompt_compactness` | `[0, 1]` | `1 - len(rendered_prompt) / 4_000`; 1.0 = short |
-| `pipeline_compactness` | `[0, 1]` | `1 - (active_steps - 1) / 11`; 1.0 = single-node |
-| `source_recall` / `candidate_recall` | `[0, 1]` | GT in candidate-source output / in ranker `final_ranking` (when active) |
-| `cache_hit_rate` | `[0, 1]` | Cache-node short-circuit fraction |
-| `mean_retrieval_shortfall` | `[0, 1]` | Mean `min(observed/target, 1.0)` across `max_*`/`num_*` nodes |
-
-Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `exp`, `pow`. Output clamped to `[0, 1]`; undefined names raise `NameError` — fail loud is the contract.
+Helpers are `scoring/formula/compiler.py::SAFE_BUILTINS`. Output clamped to `[0, 1]`;
+undefined names raise `NameError` — fail loud is the contract, which is exactly why the
+name list must come from the registry rather than from prose.
 
 The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs parent 0.5012)` per candidate — anchored on the row's matched parent, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md` (source of truth when reviewing finished cycles).
 

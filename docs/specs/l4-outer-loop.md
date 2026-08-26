@@ -137,7 +137,9 @@ quotes no figure; re-measure before quoting a price to anyone.
    gated on the panel being able to resolve one arm from another.
 3. **The OUTER election is unmeasured.** Round 0 holds one arm, so `p_best` cannot leave its tie and no arm
    can go negative; a round-1 election costs ~14 further cells. Until one runs, every claim about outer
-   *behaviour* is untested — the inner half is what has been measured.
+   *behaviour* is untested — the inner half is what has been measured, and the 2026-08-07 fixes are verified
+   on the C0 panel only. Deferred on purpose while concurrency is built; re-check on the next
+   `new promptpotter-self`, not before.
 4. **The arms differ less than their own intervals.** `se ∝ 1/√n`, so the cell count needed to separate two
    arms is far below what a linear intuition suggests. Closing it needs more cells, or **candidates that
    differ more than they currently do** — the cheaper lever, and the untried one.

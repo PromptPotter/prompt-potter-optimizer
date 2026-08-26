@@ -122,7 +122,7 @@ Every optimizer LLM call composes its prompt by the
 same path: `build_bundle(cycle) → DispatchHub.fill(template, layout, bundle)
 → compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
-state into a prompt's body. One registry (`dispatch_hub.INJECTIONS`).
+state into a prompt's body. One registry (`dispatch/injections/registry.py::INJECTIONS`).
 One `validate_template()` at module load that catches typos.
 **Adding a new piece of info to a prompt is one new injection
 renderer, period.** No sidecar paths, no out-of-band state mounting.
@@ -224,8 +224,9 @@ An operator-facing label for WHAT MINTED a cycle, computed
 server-side from the id's own kind plus the fork trigger, used by the webapp
 sidebar: `session` (a session root run — `resume` extends it),
 `divergent_resume` (a `resume --fork-on-divergence` branch),
-`user_fork` (any operator-initiated branch — HITL fork, diagnostic,
-sweep — these three fold into one kind), `auto_rebase` (an automatic
+`user_fork` (every operator-initiated branch folds into this one kind —
+`domain/run_records.py::MINT_KIND_FOR_TRIGGER` is the table, and it raises at
+import on an unbadged trigger), `auto_rebase` (an automatic
 L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 
 ### Three data scopes — campaign / dataset / workspace
@@ -235,10 +236,10 @@ Workspace datastore is queryable at three named, consistently-used
 scopes: **campaign** (one campaign's own cycles — the campaign dir),
 **dataset** (every campaign for one dataset — `measurements/` filtered by
 `dataset_name`), **workspace** (everything, all datasets — the whole
-measurement store). The same three names are used by the archive query API,
-the heatmap artifacts, the `scope` API param, and the webapp toggle,
-so the operator always distinguishes "this campaign" vs "this
-dataset" vs "everything" identically.
+measurement store). The archive query API and the heatmap artifacts use these names; the served
+`scope` param stops at dataset and adds `cycle` instead
+(`routers/datasets/leaderboard.py::HeatmapScope`), because a workspace-wide
+heatmap would compare samples that differ per dataset.
 
 ### The loop is embeddable, and that bounds what may sit in core
 
@@ -246,173 +247,105 @@ Two ways in, pulling
 opposite ways: an operator installs the whole product, while a *host program* — a DSPy
 module, an agent, a harness — runs the loop inside a dependency tree it did not choose to
 merge with ours. So the **core install is the engine and nothing else**; every surface above
-it is an extra (`api`, `excel`, `jupyter`, `stats`, `observability`, `anthropic`, `dspy`),
-and `all` folds the operator set back. What belongs in core is decided by *measured*
+it is an extra (`pyproject.toml::[project.optional-dependencies]` is the roster),
+and `all` folds the operator set back — `benchmarks` deliberately excepted. What belongs in core is decided by *measured*
 reachability from the two embedding entry points (`cli/campaign_runner.py`,
 `application/embedded_run.py`), never by argument; an extra's import is guarded where a
 non-installer would hit it, naming the extra. A capability that seems to need a new core
 package is a design question first — the answer is usually that the capability is an extra.
 Contract: [`adr/0006-embeddable-core-and-extras.md`](adr/0006-embeddable-core-and-extras.md).
 
-### State + persistence
+### State + persistence — the five I/O kinds
 
-The entry points (CLI, webapp, REST API, and the embedded library
-entry a host program drives) share **one** orchestration layer and **one** set of data types
-— no per-entry-point copies. **Five I/O kinds** the orchestrator reads or
-writes through, each with its own ingress: (1) **Persistence** — the
-sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
-HITL collapses into this ingress: `inherit_from(parent, offset)` mints
-a fork at any chosen ledger offset (the operator picks the offset
-through the webapp's lineage inspector and may edit the forked
-searchpoint's prompt + node config + limits — the operator-steered
-fork). Workspace-scoped commands without any cycle target
-(`register-backend`, `sync-backend-experiments`) write to a sibling
-**workspace `CycleEventLog`** at `projects/{tenant}/.workspace/events.jsonl`
-— same shape, same single-writer discipline, identity-bound by the
-tenant prefix. Per-cycle ledgers stay canonical for any command that
-targets a campaign or cycle; campaign lifecycle commands ride the
-campaign's root-cycle ledger. (2) **Display** — ledger subscribers (`LiveDisplay`,
-`LiveDashboardView`, `AuditTrailView`); read-only, never write
-campaign artifacts. **Run-state is owned state, not a freshness
-guess.** The runner *declares* its control phase — `running` /
-`paused`, plus `terminal` at finalize — onto the ledger
-as a `control` `PhaseRecord`, and `LiveDashboardView` projects it to
-`dashboard.json::declared_phase` (the `RunPhase` vocabulary,
-`domain/phases.py`). **That declaration is an INPUT, never the answer** —
-its only writer is the runner's own process, so a surface serving it raw
-still reads `running` after a kill, which is why the on-disk key is named
-for what it is and `run_phase` is wire-only. Every surface is served the ONE
-derivation `derive_run_phase` (`infrastructure/runtime_flags.py`), which
-composes lifecycle (terminal, from
-`index.json::finished_at`) with the control flags, the runner's own
-declaration (`paused` / `gate` — a Ctrl+C declares `paused` without ever
-writing a flag), and `dashboard.json` freshness (falling back to
-`index.json`'s mtime only while no dashboard has been written yet, e.g. a
-just-minted cycle)
-*only* to split `running` from `detached`. Two liveness invariants back that
-split: **every producer await that can exceed `RUN_FRESH_S` rides
-the in-flight heartbeat** (`dispatch/llm_call/heartbeat.py` —
-optimizer LLM calls, L4 inner-cycle awaits, and the backend scoring
-query), so a stale dashboard means a *dead* producer, never a quiet
-one — and a cycle that stops ON PURPOSE says so at the moment it does
-(a `supersede` cut stamps its parent right at the cut,
-`CampaignStore.mark_superseded`), so the reaper never has to interpret
-a deliberate silence; and the **liveness reaper** (`application/jobs/reaper.py`) is
-the single write-side reconciler stamping proven-dead cycles
-`TERMINAL` (`producer_vanished`) — the registry `on_reap` for API
-jobs plus a periodic sweep (roots include the flat `.inner/`
-sandboxes; never boot-one-shot, and it skips a tick after a
-detected machine-sleep so a woken producer's first heartbeat always
-lands before judgment). Sleep is detected in ONE place
-(`shared/clock.py::sleep_measuring_suspend` — wall overshoot, never
-the monotonic clock, whose behaviour across a suspend is
-platform-dependent); the sweep and the L4 inner-sample wall-clock
-deadline are its two consumers, so a slept machine can neither reap a
-live producer nor fabricate a deadline blowout. Every reap path funnels through the one
-guard seam `CampaignStore.mark_producer_vanished`, which never
-stamps a paused, check-in, or already-terminal cycle and delegates
-the write to `mark_finished`. `detached` is therefore always a dead
-producer: webapp in-flight membership is exactly {`running`,
-`gate`, `paused`}, and client-side connection loss is a
-presentation state, never a run phase. The terminal reason maps onto its
-display label + outcome class exactly once, through the single
-`STOP_REASON_INFO` table (which in turn drives `index.json::status`,
-`JobStatus`, and the webapp label). **Pause is the single
-operator-interrupt — there is no separate "stop".** A pause exits the
-worker cleanly at the next checkpoint but leaves the cycle
-**non-terminal and resumable** (no `finished_at`); "resume" is the
-`start-run`/`resume` launcher relaunching from the last completed round,
-not an in-place unpause. So "the loop stopped" never means "the work is
-done": only a user-specified target threshold (e.g. 90%) is an autonomous
-*completion*; `max_rounds` / budget caps are configured-limit halts the
-operator reviews and may bump+resume. A truly authoritative "done" is a
-human mark — a verb deliberately not built yet; "discard" is
-archive/delete, a separate axis. (3) **Control-local** — `pause_check` on
-`Session`; signals the loop to exit, writes nothing. The webapp's
-"Pause run" button rides this kind by writing a `.runtime/pause.flag`
-file the running loop polls via `pause_check`; the API route writing
-the flag is an explicitly-sanctioned mutation listed in
-`promptpotter/presentation/CLAUDE.md`. Its siblings are `skip.flag` and
-`sample_lookahead.json` — the same shape (write, poll, consume) for cutting a
-searchpoint and for arming how many samples the scoring walk holds in flight; that
-one carries a COUNT, so presence alone does not answer what the walk should do. (4) **Control-remote** —
-HTTP-ingressed mutations authored by signed-in operators or
-signed-in clients. Every command is appended to the canonical
-per-cycle `.runtime/ledger.jsonl` as a `CommandRecord` by a sole
-`CommandDispatcher` at the FastAPI seam (kwargs-only `emit_command`,
-ContextVar-scoped identity + cycle); it applies the mutation inline and
-acknowledges via a sibling `CommandAckRecord` on the same ledger
-(kwargs-only `emit_command_ack`). **One writer for both halves** — never
-split the ack onto a second subscriber; the dispatcher doing both is
-simpler than the split.
+The entry points (**how many there are, and the parity rule over them, is owned by root
+[`../CLAUDE.md`](../CLAUDE.md) § Working principles**) share **one** orchestration layer and
+**one** set of data types — no per-entry-point copies. Below them are **five I/O kinds**, each
+with its own ingress. **The five are fixed: adding one requires amending §0 first**, and the
+pre-flight gate blocks code that introduces one without §0 backing.
 
-Runtime FLAGS are the separate mechanism, and the one the runner really
-does read: `pause` / `skip` / `spend_cap` are polled at the next sample
-boundary (`infrastructure/runtime_flags.py`), not subscribed.
-Outbound, no projection writes SSE frames at all — `CycleLedgerTail`
-tails the on-disk ledger directly (cross-process) and fans out
-`ProjectionEnvelope` frames over SSE. Identity scope rides the
-existing cycle-dir tenant prefix; commands and acks carry no
-per-record `tenant_id`. The closed inbound command set is declared
-in `docs/specs/m12-api-openapi.yaml` (OpenAPI 3.1); the closed
-outbound event set is declared in
-`docs/specs/m12-events-asyncapi.yaml` (AsyncAPI 3.0); adding a
-command or event kind requires updating the YAML first, in its own
-PR. The permanent system-networking contract is
-`docs/adr/0001-m12-control-plane.md`. (5) **Identity** — OIDC
-verification at the API trust boundary. `presentation/api/middleware/oidc.py`
-(Stage 1) verifies an inbound ID Token against the issuer's JWKS and
-populates `IdentityContext` for the downstream resolver. Mutates no
-campaign state, is not a ledger subscriber, does not signal the loop
-— it is the gate establishing who the subsequent Control-remote call
-is *from*. Tokens are verified at this boundary and never appear past
-it (ADR-0002 gate #2 — review-enforced; no standing test). Stage 0 (auth-off, single
-operator) is the degenerate case: `default_identity()` substitutes
-for the middleware. Permanent contract:
-`docs/adr/0002-identity-foundation.md`. This kind also
-**administers the gate**: editing who may no longer act (`blocklist.json`)
-or the provider config is an identity-config *write*, distinct from
-campaign state and never on the campaign ledger. Privileged identity
-or deployment mutations ride an **in-zone operator-admin channel** — a
-deployment-side companion (e.g. an on-box bot) that reaches an
-untrusted message channel *outbound*, exposing no inbound surface to a
-low-trust zone; audited in the identity zone (`blocklist_audit.jsonl`).
-They never become Control-remote commands and never an inbound public
-route — the Purdue/zero-trust rule that a control-plane mutation is not
-reachable from the lowest-trust zone. Permanent contract:
-`docs/adr/0004-operator-admin-channels.md`. Adding a new I/O kind requires
-amending §0 first; the pre-flight gate (root `CLAUDE.md` § Pre-flight gate,
-"New I/O kind → amend §0 first") blocks code that introduces one without
-§0 backing. Hexagonal layer
-separation is a structural invariant (fails loud at import; see
-`tests/CLAUDE.md`) so data types stay free of I/O and the orchestrator can be
-reused without dragging a backend client along. A **concept-first re-hierarchy** (slicing this
-layer cut into per-concept vertical packages) was investigated and
-**rejected**: the recurring multi-directory fix signature is the inherent
-footprint of changing the central state spine — a flow that is correctly
-layered, not a defect to carve away. The cut stays; don't re-propose
-(analysis in `git log`). SearchPoint types are
-**immutable**: once created, their fields can't change. That makes
-their content hash a trustworthy identity, which is what lets
-`--from N` resume a campaign with different hyperparameters and
-`--fork-on-divergence` cleanly mint a sibling at the first hash
-mismatch. One per-cycle `CycleEventLog.append` is the sole persistence
-ingress; resume + fork ride dedicated checkpoint records on the
-ledger. Display and observability subscribe to the ledger as
-read-only views — never write campaign artifacts of their own.
-**Single-writer invariant on the ledger** (fails loud — an out-of-allowlist
-write shows up in the file tree; see `tests/CLAUDE.md`): any module
-besides the ledger writing to the per-cycle `.runtime/ledger.jsonl`, or any
-projection writing outside its declared allowlist, is drift. The
-MeasurementArchive (the other persistence layer, see "Measurement archive"
-below) is under the same discipline via the **`store/archive_views.py`
-facade** — the free-function read/write surface (`measurements_for_sample`,
-`reusable_results`, `record_measurement_run`, `reindex_measurements`, …)
-every consumer goes through. One raw call site remains, a narrow
-dataset-lifecycle operation that predates the facade
-(`datasets/dataset_replace.py::restamp_dataset`); a second consumer is drift.
-Together the two pins capture event-sourcing's reasoning-clarity gain
-without paying replay-on-every-read.
+#### 1 — Persistence
+
+Sole writer: per-cycle `CycleEventLog.append`. HITL collapses into it — `inherit_from(parent,
+offset)` mints a fork at any chosen ledger offset, which is the operator-steered fork. Commands
+with no cycle target (`command_dispatcher.py::WorkspaceScopedKind`) write a sibling **workspace
+ledger** at `projects/{tenant}/.workspace/events.jsonl`, same shape and same single-writer
+discipline; per-cycle ledgers stay canonical for anything targeting a campaign or cycle.
+
+**Single-writer invariant** (fails loud — an out-of-allowlist write shows up in the file tree;
+owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+§ Persistence — one ingress, two projections). The MeasurementArchive is under the same
+discipline through the **`store/archive_views.py` facade** — a second raw consumer is drift.
+Together the two pins capture event-sourcing's reasoning-clarity gain without paying
+replay-on-every-read.
+
+SearchPoint types are **immutable**: their content hash is therefore a trustworthy identity,
+which is what lets `--from N` resume under different hyperparameters and `--fork-on-divergence`
+mint a sibling at the first hash mismatch.
+
+#### 2 — Display
+
+Ledger subscribers, read-only, never writing campaign artifacts.
+
+**Run-state is owned state, not a freshness guess** — and the declaration is an INPUT, never the
+answer: its only writer is the process that dies, so served raw it reads `running` after a kill.
+Every surface is served the one derivation `derive_run_phase`. The mechanism behind it — the
+heartbeat invariant, the reaper, sleep detection, and why each exists — is
+[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+§ Persistence — one ingress, two projections, beside the code that would change it.
+
+**Pause is the single operator-interrupt — there is no separate "stop".** A pause exits cleanly
+at the next checkpoint and leaves the cycle **non-terminal and resumable**. So "the loop stopped"
+never means "the work is done": only a user-specified target threshold is an autonomous
+*completion*; `max_rounds` and budget caps are configured-limit halts the operator may bump and
+resume. An authoritative "done" is a human mark — deliberately not built.
+
+#### 3 — Control-local
+
+`pause_check` on `Session` — signals the loop to exit, writes nothing. The webapp's Pause button
+rides this kind by writing a flag the loop polls; the route writing it is an explicitly-sanctioned
+mutation listed in [`../promptpotter/presentation/CLAUDE.md`](../promptpotter/presentation/CLAUDE.md).
+Its siblings are the other polled flags `store/layout.py::CycleLayout` names — same shape (write,
+poll, consume), except that one carries a COUNT, so presence alone does not answer what the walk
+should do.
+
+#### 4 — Control-remote
+
+HTTP-ingressed mutations by signed-in principals. Every command is appended to the canonical
+per-cycle ledger as a `CommandRecord` by a sole `CommandDispatcher` at the FastAPI seam, applied
+inline, and acknowledged by a sibling `CommandAckRecord`. **One writer for both halves** — never
+split the ack onto a second subscriber.
+
+Outbound, no projection writes SSE frames at all: `CycleLedgerTail` tails the on-disk ledger
+directly, cross-process. The closed inbound set is declared in
+[`specs/m12-api-openapi.yaml`](specs/m12-api-openapi.yaml), the closed outbound set in
+[`specs/m12-events-asyncapi.yaml`](specs/m12-events-asyncapi.yaml); **adding a kind updates the
+YAML first, in its own PR**. Permanent contract: [`adr/0001-m12-control-plane.md`](adr/0001-m12-control-plane.md).
+
+#### 5 — Identity
+
+OIDC verification at the API trust boundary — the gate establishing who a Control-remote call is
+*from*. It mutates no campaign state, subscribes to nothing, and signals no loop. Tokens are
+verified there and never appear past it. Permanent contract:
+[`adr/0002-identity-foundation.md`](adr/0002-identity-foundation.md).
+
+This kind also **administers the gate**: editing who may no longer act, or the provider config, is
+an identity-config write, distinct from campaign state and never on the campaign ledger.
+Privileged identity or deployment mutations ride an **in-zone operator-admin channel** reaching an
+untrusted channel *outbound*, exposing no inbound surface to a low-trust zone. They never become
+Control-remote commands — the zero-trust rule that a control-plane mutation is not reachable from
+the lowest-trust zone. Permanent contract:
+[`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md).
+
+#### Layering, and one rejected re-cut
+
+Hexagonal layer separation is a structural invariant (fails loud at import — owned by
+[`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) § Layer rule), so
+data types stay free of I/O and the orchestrator is reusable without a backend client.
+
+A **concept-first re-hierarchy** — slicing this layer cut into per-concept vertical packages — was
+investigated and **rejected**: the recurring multi-directory fix signature is the inherent
+footprint of changing the central state spine, not a defect to carve away. The cut stays; don't
+re-propose it (analysis in `git log`).
 
 ### Everything material lives on disk, in human-readable form
 
@@ -481,7 +414,7 @@ directories do not. `dashboard.json` is **per-cycle**: every cycle (root,
 fork, diag, sweep) owns its live file in its own dir
 (`cycles/{cycle_id}/dashboard.json`), stamped with its own `cycle_id`. A
 fork's view never surfaces the parent's id; a fork seeds its prior
-trajectory from the parent's on-disk file (state-sync Phase 2). Each
+trajectory from the parent's on-disk file ([`specs/roadmap.md`](specs/roadmap.md) § State-sync). Each
 `dashboard.json` self-stamps its own `(campaign_id, cycle_id, session_id)`;
 the webapp drops a polled payload whose stamp doesn't match the unit it asked
 for, so a freshly minted cycle never renders another's data. Each campaign is a
@@ -505,8 +438,7 @@ markdown so a reader knows status at a glance. The
 webapp (`webapp/`) ships — a control-plane app served at the root, chat as the
 first tab — rendering views over `dashboard.json` plus a file-tree
 view; a panel that reads a disk file we don't already commit to
-writing needs that write committed first. The `init`
-command + `/potter-run` slash command sit in `presentation/` and
+writing needs that write committed first. The `new` verb + the `/potter-run` skill sit in `presentation/` and
 orchestrate one-time onboarding (TermNorm download, dataset
 conversion, API key prompts) — load-bearing for the operator's first
 run; audit for accumulated cruft but don't delete the underlying
@@ -515,38 +447,23 @@ silent additions.
 
 ### Tracing, Langfuse-shaped, lightweight by default
 
-Optimizer LLM
-calls and backend matches emit structured events in
-**Langfuse-compatible shape** (spans / traces / metadata) — wrapped
-via the `observed_node()` context manager. Every optimizer LLM call
-site is wrapped — all **five** registered nodes (`l1_generate`,
-`l1_critique`, `l2_context`, `l3_plan`, `checkin`), not just the four
-loop layers: `checkin` runs *around* the loop in both its modes
-(`task_context.py::decompose_prompt_fields` for CLI `new`,
-`origin_resolve.py::resolve_origin_turn` for web ingest), and each
-binds a cycle ledger so the call is billed to the campaign it seeds.
-An enumeration that stops at the loop layers is how an unwrapped,
-unbilled call gets written. Events serialize to local JSONL under
-`langfuse/events.jsonl` (`infrastructure/tracing/file_sink.py::_log_event`)
-— no Langfuse instance, no MLflow server, no external dependency required.
+Optimizer LLM calls and backend matches emit structured events in **Langfuse-compatible shape**,
+wrapped via `observed_node()`. **Every** optimizer node is wrapped, including `checkin`, which
+runs *around* the loop and binds a cycle ledger so its call is billed to the campaign it seeds —
+`dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS` is the roster, and an enumeration that stops at
+the loop layers is how an unwrapped, unbilled call gets written.
 
-**A nexus to the operator's existing observability stack — a core
-capability, not a stub.** Many teams already run an observability
-instance; PromptPotter drops straight into it. When **Langfuse cloud**
-credentials are present in `.env`, the same events also stream there —
-point PromptPotter at an existing cloud project and it becomes the
-optimizer's trace store, zero schema work. **MLflow** is the on-machine
-peer: an operator already running a local MLflow server flips
-`settings.MLFLOW_ENABLED` and per-round runs land there (wired via
-`infrastructure/tracing/mlflow_sink.py`). Both are **directly
-supported, off by default** — if a team already has the infra, hooking
-it up is a *drop-in upgrade* (flip a flag / add `.env` creds), never a
-code change, which is exactly why both sink paths stay import-alive even
-while dormant. The Langfuse schema is the **orientation point**: even
-with no external sink wired, events conform to it, so importing later
-(or swapping in a different backend) is configuration, not refactoring.
-Tracing is fan-out only — the optimizer never reads it, so it can never
-become load-bearing for the loop.
+**A nexus to the operator's existing observability stack — a core capability, not a stub.** Both
+the Langfuse and MLflow sinks are directly supported and **off by default**: a team already
+running either flips a flag or adds `.env` creds, never changes code, which is why both paths stay
+import-alive while dormant. Why they read as dead to every sweep that counts readers, and why they
+must not be deleted, is
+[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+§ Tracing — fan-out only, and DORMANT ON PURPOSE.
+
+The Langfuse schema is the **orientation point**: even with no sink wired, events conform to it, so
+importing later is configuration rather than refactoring. **Tracing is fan-out only — the optimizer
+never reads it, so it can never become load-bearing for the loop.**
 
 ### Measurement archive (the actual database)
 
@@ -574,9 +491,9 @@ the per-cycle ledger is the event log layered on top of it. A
 cleanup PR that simplifies persistence must respect both: ledger ≠
 archive, neither replaces the other.
 
-That's it. **Eight buckets** (central loop / escalation / errors-heal
-/ dispatch hub / state + persistence / on-disk / tracing / archive)
-plus two architectural commitments shaping them
+That's it. **The `###` headings above are the buckets** — a PR maps onto one of
+them by name, so the list cannot drift from the page — plus two architectural
+commitments shaping them
 (pipeline-agnostic / two-layer searchpoints + self-optimization).
 Anything in the codebase that doesn't fit a bucket is either drift
 (delete) or a missing bucket on this page (update §0 deliberately,
@@ -594,19 +511,25 @@ PR.
 A cleanup PR that touches anything below needs an explicit case in
 the PR description.
 
+
 - **PoBB elimination** (`application/optimization/pobb/checks.py`) —
   the actual abort-and-continue mechanism. §0 errors-heal-tolerantly
   depends on this.
+
 - **DegradationCheck** mid-eval halt — the per-candidate
   technical-failure threshold. Tunable values yes; mechanism no.
+
 - **Connector pattern** (`promptpotter/connectors/`) — the only
   sanctioned place backend identity is named. Pipeline-agnosticity
   depends on it.
+
 - **Langfuse JSONL events + Langfuse-shape compatibility** — the
   Tracing bucket's foundation. Don't simplify the schema "because
   we don't use Langfuse cloud yet."
+
 - **`axis_memory` injection** — the one new injection from the
   recent arc that earned its keep. Cross-round AxisIndex digest.
+
 - **`injection_source_digest` inside `_identity_config`**
   (`dispatch/injections/registry.py` → `connectors/promptpotter.py`) —
   what a node is HANDED is L4 measurement identity, so everything
@@ -615,39 +538,34 @@ the PR description.
   comment or reflow costs nothing, a panel's prose, a cap, a ceiling or
   a selection rule voids the banked origins. Shape a prompt from
   outside the hash and nothing raises; the corpora just pool.
+
 - **`pipeline.yaml` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
-- **Hexagonal layer separation** (fails loud at import; see `tests/CLAUDE.md`)
+
+- **Hexagonal layer separation** (owned by [`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) § Layer rule)
   — without the discipline, the entry points drift apart.
+
 - **The core/extra split in `pyproject.toml`** — moving a package back into core is not
   tidying; it is a cost charged to every program that embeds the loop, and nothing fails
   when it happens. The `[api]` set in particular looks like it belongs in core, because
   `main.py` is the obvious entry point and is not one of the embedding two. Re-measure
   reachability rather than reasoning about it
   ([`adr/0006`](adr/0006-embeddable-core-and-extras.md)).
+
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. The symbols are
   `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`).
-- **Campaign as a first-class entity** —
-  `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
-  with `log.md` + `hard_samples.json` at its root and
-  `cycles/{cycle_id}/` flat below (the session root plus every fork /
-  diag / sweep). `campaign_id = {dataset}__{rand6_hex}` is minted fresh
-  per `new` invocation by `mint_campaign_id`; the declaration rides
-  `campaign.json` as `root_content_hash` (resume's config-drift check)
-  + `optimizer_prompt_hash` (audit join key), never deriving the id. `dashboard.json` is per-cycle, at
-  `cycles/{cycle_id}/dashboard.json`. Cross-campaign evidence
-  pooling on the same declaration rides the dataset-scoped
-  `measurements/` layer, so two `new` calls on an unchanged
-  declaration get distinct `campaign_id`s, share their root cycle id
-  (content-addressed) and origin score (cache-served), and diverge
-  from round 1 onward. The four-entity hierarchy (Workspace / Dataset
-  / Campaign / Cycle, with Session a unit of a Campaign) and the three
-  data scopes (campaign / dataset / workspace) are §0 invariants — a
-  cleanup PR cannot collapse Campaign back into the root cycle.
+
+- **Campaign as a first-class entity** — §0 § Four entities owns the hierarchy and the
+  id-minting rule. What §0.5 adds: a cleanup PR **cannot collapse Campaign back into the root
+  cycle**, and two `new` calls on an unchanged declaration are meant to get distinct
+  `campaign_id`s while sharing a content-addressed root cycle and its cache-served origin.
+
+
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
+
 - **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
   / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl` via
   sole `CommandDispatcher` (inbound AND ack), `CycleLedgerTail` reading
@@ -658,9 +576,11 @@ the PR description.
   commands into a parallel queue, drop the YAML-first rule, or remove
   the sole-writer invariants — every M12-onward interactive surface
   rides this highway.
+
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.
+
 - **`RoundResult.results` duplicating `all_candidate_results[winner_id]`**
   (`domain/results.py`) — deriving either from the other silently corrupts
   the difficulty ruler. `exploration.build_observations` flattens
@@ -668,6 +588,7 @@ the PR description.
   dedup, so a retained incumbent — one lineage id held across k no-winner
   rounds — would contribute each observation k+1 times to a subset-invariant
   fit. `all_candidate_results` means "measured in THIS round".
+
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
   injections**
   (`application/optimization/dispatch/injections/catalogues.py`) — the
@@ -678,13 +599,17 @@ the PR description.
   statistics about material), the surface the pre-flight gate's
   reuse-before-adding rule leans on. Don't drop "because nobody calls it
   from production code today."
+
 - **The `new` verb + `/potter-run` onboarding flow** — operator's
   first-run path; cruft-audit yes, mechanism delete no.
+
 - **`new`-verb decomposition into `task_context`** — the one-time
   `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
+
 - **Origin, parent, and check-in — the start definitions the whole loop
   depends on.** Say "origin", never "baseline":
+
   - **Origin = the starting configuration = C0.** One word, one thing. In
     program evolution an individual **is** a configuration: the origin
     resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`,
@@ -697,6 +622,7 @@ the PR description.
     word. The name `origin_accuracy` survives only where the fact IS C0 —
     `CycleResult`, the export, the campaign index. A round's own floor is
     `RoundResult.parent_accuracy`.
+
   - **The origin arrives incomplete; check-in completes it and gates it.**
     The operator supplies what they have (a pipeline, some prompt fields);
     it is not a whole origin until the **required inputs** that pipeline
@@ -706,6 +632,7 @@ the PR description.
     different backends require different inputs. Once it clears both gates
     below, it is the **parent of round 1's candidates** — round 0 is not
     something C0 parents; round 0 *is* C0, measured.
+
   - **Origin is the parent at offset 0.** The general relation is *parent* —
     the individual a candidate was mutated from, scored over the samples that
     candidate touched so the diff is matched (`RoundParent`,
@@ -714,6 +641,7 @@ the PR description.
     At round 0 the parent is the origin; after that it is the prior winner.
     **Reserve "origin" for offset 0 and the fork point; everywhere else say
     parent.** Two names for one relation is how this word drifted before.
+
   - **Check-in** = the **process that produces a complete origin** from a raw
     upload. One LLM resolver node (`application/datasets/origin_resolve.py`)
     *proposes* the column map, the decomposed Layer-1 prompt fields (incl. an
@@ -729,6 +657,7 @@ the PR description.
     `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate
     library) are dropped in place here and committed alongside the origin,
     not chased at init.
+
   - **Two gates, because completeness ≠ scoreability.** The readiness gate is
     *static* — it proves the required fields are present, not that the prompt
     actually scores. **No individual prompt field is gated:** any of the six may
@@ -745,16 +674,19 @@ the PR description.
     both gates** — iterating the pipeline choice, the `answer_format`, and the
     required starting values — until the origin both passes readiness *and*
     runs scoreable. Only then does the loop proceed.
+
   - The line: **origin IS C0 — the first candidate, or the point a fork
     branches from; check-in is the resolver+gate that produces it; every
     later round compares against its *parent*, which is the origin only at
     offset 0.** Forward plan: [`specs/roadmap.md`](specs/roadmap.md)
     § Origin-resolution check-in.
+
 - **`MeasurementArchive` (`measurements/runs/{run_id}.jsonl` +
   `measurements/index.jsonl` index + retrieval views
   `measurements_for_sample()` / `measurements_for_config()`)** — the
   actual cross-cycle database. Per §0 it's a separate persistence
   layer from the ledger; never collapse the two.
+
 - **Per-dataset configs in `datasets/{name}/`** (`pipeline.yaml`,
   `campaign.yaml`, `prompts/{node}.yaml`,
   `task_context.yaml`, `dataset.md`, `task_description.md`) — the operator's primary
@@ -762,19 +694,23 @@ the PR description.
   no parallel default ladders elsewhere.
   A cleanup PR cannot move a default into PromptPotter code; if a
   setting needs a default, it goes in the dataset's config file.
+
 - **`Evaluator` class + `evaluators` field + `all_evaluators()`
   registry + `materialize_*_values`** — the **only** sanctioned use
   of "eval" vocabulary in the codebase. A future "rename eval to
   score" cleanup PR must not touch these — they're domain language,
   not a coincidence.
+
 - **`scripts/render_review.py` + `scripts/smoke_campaign.py`** —
   operator-facing CLI helpers (per-cycle review renderer; smoke
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
+
 - **`score_search_point()` gateway**
   (`application/scoring/search_point_scorer.py::score_search_point`) — sole scoring
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
+
 - **Composite-fitness resolution chain** — **fitness is never one fixed
   number; always ask "under which formula?"** It is formula-relative — the
   **active** formula the run actually used; a **what-if** preview when the
@@ -817,6 +753,7 @@ the PR description.
   formula-independent number (`campaign_store/store.py::_apply_best`).
   Forcing them to agree would make the deployed winner stop optimizing the
   configured composite; don't "fix" one basis to the other.
+
 - **Spend-ceiling resolution chain** — **a ceiling is never one number;
   always ask "at which tier?"** Four carry one, and they answer different
   questions: the **campaign knob** (`optimization.spend_budget_usd` /
@@ -828,10 +765,13 @@ the PR description.
   `.runtime/spend_cap.json` is a **mid-flight** move (`change-spend-budget`,
   which clamps rather than refuses and dies with the run). Resolution:
   seed > run-scoped > campaign default for every other config value, but the
-  admitted pair **bounds** rather than defaults
-  (`runner/entry.py::_bound_by_admitted_caps`) — a request may lower a
-  ceiling and never raise one, because a `CycleSeed` is request input from
-  anyone holding `campaign.run`. Only the cycle tier halts a run
+  three tiers compose in ONE call, and **the order is a security property**
+  (`runner/entry.py::_compose_run_ceilings`): config → operator override → wallet
+  bound. The *seed* may only lower, because a `CycleSeed` is request input from
+  anyone holding `campaign.run`; the **operator** ceiling SETS and **may raise as
+  well as lower**, which is the only way a budget-halted cycle is ever continued.
+  Bounding that one downward too was one guard doing two jobs and silently
+  destroyed every legitimate raise. Only the cycle tier halts a run
   (`termination.py::BudgetGate`, both units, whichever trips first); the
   account tier admits or refuses and never interrupts a campaign in flight.
   **An L4 inner cycle needs no fourth source:** it forwards its spend onto the
@@ -851,9 +791,11 @@ the PR description.
   (`shared/pricing.py::compute_usd`, which returns `None` for a call it
   cannot price rather than `0.0`). Owned by
   [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
+
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).
+
 - **`promptpotter/assets/optimizer/pipeline.yaml`** — the self-optimization claim in §0
   depends on this file having the same shape as a backend
   `pipeline.yaml`. Drift (special-case fields, parallel registries)

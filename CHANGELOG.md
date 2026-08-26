@@ -133,7 +133,7 @@ This release is a five-week arc, and the order the work landed *is* the story �
 
 **Parameter locks, live focus, MECE storage** *(Jun 22–23)*
 - **Per-node param locks persist across resume/fork**; a live **Focus chain** with comparable samples and mint timing; a slimmed per-cycle ledger writer.
-- **MECE storage taxonomy.** Measurements relocate under a mutually-exclusive, collectively-exhaustive on-disk layout with a recycle-bin delete; the webapp renders storage as that one hierarchy with a Files-tab placement.
+- **MECE storage taxonomy.** Measurements relocate under a mutually-exclusive, collectively-exhaustive on-disk layout with a recycle-bin delete; the webapp renders storage as that one hierarchy with a Files-tab placement. *(The recycle bin was later dropped — an archived campaign stays in `campaigns/` behind `lifecycle_status`, so a campaign has one home; see `docs/operations/persistence-and-state.md` § Why this shape.)*
 
 **The θ ruler — one comparable scoring axis** *(Jun 23–24)*
 - **Every decision now reads Rasch ability θ, not subset accuracy.** This is the release's measurement backbone. A per-subset accuracy never compared across rounds — an easy sample set flattered a weak candidate. Round-winner election, promotion/elimination gates, and cross-cycle elevation all now compare on a **fixed-delta θ primitive**: the cross-round comparability ruler. Along the way: a **measurement-provenance grade** de-biases the archive (a cached score and a fresh one aren't weighed the same), θ is threaded onto the candidate read-models and shown **wherever a candidate is inspected**, a **θ-exact stall replay** unblocks `per_round_resubset`, and a fork seed can A/B a selection-policy knob, not just run limits. **Coherent θ measurement** ties it together — one δ ruler, resubset ON, an A/B engine — and the ruler **graduates 1PL→2PL where it wins on held-out data**. A config coupling/provenance map documents what each knob moves and what it clashes with.
@@ -180,7 +180,7 @@ This release is a five-week arc, and the order the work landed *is* the story �
 - **Start clean — pre-0.8.8 measurements are not comparable.** Scoring decisions now read Rasch ability θ (not subset accuracy) and the on-disk cycle layout changed (session tier removed, `CycleLayout` owns layout, measurements relocated under the MECE taxonomy). By policy there are no compatibility shims: re-measure origins on a fresh workspace.
 - **`CampaignConfig` field renames remain data migrations.** Both on-disk surfaces now persist the **delta from defaults** (a knob nobody set is absent, so renaming it is free); a knob the operator *did* set is still written down. `deploy-linux/update.sh` runs `promptpotter restamp --apply` on every deploy.
 - **`CycleResult.n_rounds → n_l1_rounds`** (origin-exclusive count).
-- **Elimination config** — PoBB `pobb_epsilon` + dominance/equivalence are replaced by one `margin_elimination` paired-gate knob.
+- **Elimination config** — PoBB `pobb_epsilon` + dominance/equivalence are replaced by one `margin_elimination` paired-gate knob. *(Never shipped under that name; `pobb_epsilon` is still the live knob, now beside `pobb_epsilon_floor`.)*
 - **Paired backend.** 0.8.8 pairs with the TermNorm backend on the web-search `strategy` axis + the structured-output seam (`llm_only` returns `content=""` with a `content_empty:` advisory rather than substituting the reasoning trace). Paired with **TermNorm v1.2.0**.
 
 ### Technical Details
@@ -263,11 +263,11 @@ This release is a five-week arc, and the order the work landed *is* the story �
 > Note: existing entries below predate M9. Headline M10 beta-hosting (OIDC + lifecycle + quotas + browser start surface), Stage-1 identity foundation, M12 control-plane (ADR-0001/0002/0003), webapp Next.js port, and the mypy-strict-default migration are not enumerated here — see the v0.7.0 GitHub release notes for the headline summary.
 
 ### Added — Routed Dispatch arc
-- Typed `dispatch_hub.SIGNALS` (`dict[str, _Signal]` with `name`/`kind`/`render`/`doc`); load-time `validate_template` raises on unknown `{{slot}}` names.
+- Typed `dispatch_hub.SIGNALS` (`dict[str, _Signal]` with `name`/`kind`/`render`/`doc`); load-time `validate_template` raises on unknown `{{slot}}` names. *(Now `INJECTIONS: dict[str, _Injection]`; the `doc` field is gone — five fields, per `dispatch/bundle.py`.)*
 - New `axis_memory` signal — `cycle.axes.digest()` flows into L1, L2, L3 prompts.
 - Cadence rules engine (`application/optimization/cadence/{rules,evaluator}.py`); `EscalationState.observe_round` delegates to `evaluate_round(SignalInputs)` over `DEFAULT_ROUND_RULES`. Opt-in `l2_axis_yield_drought` rule via `campaign.json::optimization.escalate_on_yield_drought`.
 - `domain/decision_trace.py` — frozen Pydantic `DecisionTrace` (extra-forbid, JSON-roundtrip-stable). PoBB writes traces at promote/eliminate decision points → `RoundResult.decision_traces`; surfaced to `l1_critique` via the new `decision_trace_summary` signal.
-- New `SignalsProjection` (`infrastructure/projections/signals.py`) appends `cadence/rule_fired` PhaseRecords to `.runtime/signals.jsonl`; `LiveDashboardProjection` mirrors firings into `dashboard.json::recent_rules` (rolling 8) + `current_signals` (latest per layer); webapp gains `SignalsPanel.tsx` (chronological readout) + `StuckDiagnosis.tsx` (per-layer verdict from latest `signal_inputs`).
+- New `SignalsProjection` (`infrastructure/projections/signals.py`) appends `cadence/rule_fired` PhaseRecords to `.runtime/signals.jsonl`; `LiveDashboardProjection` mirrors firings into `dashboard.json::recent_rules` (rolling 8) + `current_signals` (latest per layer); webapp gains `SignalsPanel.tsx` (chronological readout) + `StuckDiagnosis.tsx` (per-layer verdict from latest `signal_inputs`). *(This whole surface was later retired — there is no `signals.jsonl`, `recent_rules` or `current_signals`. Escalation firings ride the ledger as `PhaseRecord(phase="escalation", event="rule_fired")`.)*
 
 ### Changed
 - Replaced Wilcoxon+Holm sequential elimination with Bayesian Posterior-of-Being-Best (PoBB)
@@ -288,77 +288,9 @@ This release is a five-week arc, and the order the work landed *is* the story �
 - Standardized `api/services/stores/` facade pattern in `ProjectStore`
 - Refactored grid search and API router conventions
 
-## [0.6.0] — Spec rewrite and M2 close
+## Pre-0.7.0
 
-### Changed
-- Complete rewrite of all spec documents (project-charter, PRD, ADD, WBS, roadmap) to v0.6.0,
-  reflecting the actual codebase state after M2
-- M3 (Registry and Tracking) absorbed into M2; milestones renumbered
-- Evaluator/workflow infrastructure documented as architectural north star for M3 migration
-- Removed unused settings `MAX_DATASET_SIZE` and `MAX_ITERATIONS`
-- Removed dead code: `OptimizationDefaults`, `_layer_for_field()`
-- Migrated Pydantic V1 `class Config` to V2 `model_config` in settings and workflow models
-- API version bump to 0.6.0
-
-## [0.4.0] — M2: Core Optimizer
-
-### Added
-- **HITL Campaign Notebook** (`notebooks/optimization_campaign.ipynb`): interactive optimization
-  with editable config, candidate coverage diagnostics, iterative prompt optimization,
-  LLM-generated phrase fragment suggestions, patience-based stopping
-- **Grid Search** (`api/services/grid_search.py`): cartesian product over Layer 1 prompt axes,
-  distance-weighted stratified sampling with `grid_budget` + `exploration_rate`, two eval modes
-  (backend full-pipeline via `/matches` + local LLM fallback), per-point caching + incremental
-  writes + partial-run resume
-- `_campaign_lib.py` notebook helper extracted from inline notebook code
-- Eval caching at service level with content-addressed SHA256 keys
-- Incremental `.partial.jsonl` writes for crash protection and resume
-- Per-query HIT/MISS progress logging and training-style progress display
-- Rate-limit backoff for Groq API (exponential backoff on 429s)
-- Two primary optimization knobs: `n_samples` (queries per eval) + `exploration_rate`
-- Exploration strategy presets for grid search
-- Trace sync from backend with Langfuse-style eval data parsing
-
-### Changed
-- Optimization architecture: two primary knobs replace multi-parameter config
-- `_campaign_lib.py` refactored into thin wrapper over `api/services/`
-
-## [0.3.0] — M1: Foundation
-
-### Added
-- **PromptState model** (`api/models/prompt_state.py`): immutable 3-layer architecture
-  (Generate / Refine Context / Modify Plan) with `render()`, `derive()`, and `OptimizationDefaults`
-- **ProjectStore** (`api/services/project_store.py`): file-based storage under
-  `.promptpotter/projects/` with incremental writes
-- **Backends router** (`api/routers/backends.py`): register, sync, execute, compare endpoints
-- **Comparison service** (`api/services/comparison.py`): McNemar's test, Wilcoxon signed-rank,
-  hit@k, MRR
-- **Pipeline parameter passthrough**: 11 controllable TermNorm pipeline knobs forwarded,
-  echoed, and logged
-- Test suite: evaluators, workflow runner, PromptState, incremental writes, API endpoints
-- Test fixtures and dataset helpers in `tests/conftest.py`
-- GitHub Actions CI (lint + test)
-
-### Changed
-- Replaced ablation system with project-based backend storage
-- Replaced flat search optimizer with DAG-based optimization workflow
-
-## [0.2.0] — M0: Specifications
-
-### Added
-- Project charter, PRD, ADD, WBS, roadmap
-- Literature review of prompt optimization frameworks (DSPy, TextGrad, EvoPrompt)
-- User guide with setup, optimization workflow, configuration reference
-- TermNorm connector contract documentation
-
-## [0.1.0] — Initial Setup
-
-### Added
-- FastAPI application skeleton with health, workflow, and backend routers
-- Multi-provider LLM client (OpenAI, Anthropic, Groq via OpenAI-compatible SDK)
-- Node-based workflow execution system (DAG runner with topological sort)
-- Evaluators: ExactMatch and CriteriaEvaluator (LLM-as-judge)
-- Langfuse cloud integration for observability
-- TermNorm-to-Langfuse sync script
-- Docker setup with JupyterLab + FastAPI
-- Exploration notebook (`notebooks/termnorm_backend.ipynb`)
+0.6.0 and below described the pre-M9 architecture — `api/services/`, `ProjectStore`,
+`PromptState`, `_campaign_lib.py` — none of which survives, and 0.7.0's note above already
+sent readers past them. `git log v0.1.0..v0.7.0` has them; the GitHub release notes have the
+headline summary.

@@ -29,13 +29,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 ## Headline ≠ focus
 
-| Role | Dataset(s) | Why |
-|---|---|---|
-| **Headline benchmark** (publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
-| **Self-optimizing campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`); BBEH-mini @ `low` held as secondary in-band candidate. Next-priority queue: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
-| **Connector validation** | TermNorm (lca-termnorm) | Per-connector regression, not optimizer iteration. |
-
-When the optimizer matures enough that L1 prompts produce measurable lift on BBEH, the focus role collapses back into the headline role. Until then, they are separate jobs.
+**Which dataset holds which role, and why the headline is the wrong iteration target** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Order of use. This page adds only what the roster does not carry: the **next-priority queue** behind `justlogic-d234` is **PlanBench task_1** (36%, PDDL planning — a brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut). Both diversify into planning with no overlap against the current portfolio, and BBEH-mini @ `low` is held as the secondary in-band candidate. TermNorm (`lca-termnorm`) sits outside the question entirely — per-connector regression, not optimizer iteration.
 
 ## Why `gpt-oss-20b @ reasoning_effort: low` (operator commitment 2026-05-19)
 

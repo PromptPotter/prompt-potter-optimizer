@@ -23,7 +23,7 @@ Every figure below carries its corpus size and date. **Recompute before citing**
 
 The optimizer is three nested generation loops (`promptpotter/CLAUDE.md`):
 
-- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders: `critique`, `mutation_memory`, `axis_memory`, `escalation_panel`, `failing_samples`, `answer_distribution`, plus `inner_narratives` at L4 — with `task_context` from L2 and `plan` from L3.
+- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — with `task_context` from L2 and `plan` from L3.
 - **L2** (`l2_context`) refines `task_context` on L1 stall.
 - **L3** (`l3_plan`) replans on L2 stall.
 
@@ -244,7 +244,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 ## Edit etiquette (the non-negotiables)
 
 - **One edit per pass.** Multiple simultaneous edits destroy the signal that lets you tell which one helped.
-- **You may not add a field to the response contract from the prompt side.** `L1Variant` is `extra="forbid"` with exactly five fields — `evidence_grounding`, `pipeline_params_override`, `prompt_fields_override`, `task_context_override`, `changes_description`. A prompt demanding anything else fails **every** variant at validation. Adding one for real means the Pydantic model, both `answer_format`s and `resolved_schemas` move in **one commit**, or the loop stops parsing. Prefer riding `changes_description`.
+- **You may not add a field to the response contract from the prompt side.** `L1Variant` is `extra="forbid"` and its field set is `dispatch/schemas.py::L1Variant` — read it there. Note `targets_cluster`, which binds a variant to one `l1_critique` root cause: it is the STRUCTURAL answer to semantic restatement, already shipped, so do not re-prescribe a prompt clause for it. A prompt demanding anything else fails **every** variant at validation. Adding one for real means the Pydantic model, both `answer_format`s and `resolved_schemas` move in **one commit**, or the loop stops parsing. Prefer riding `changes_description`.
 - **No backward compatibility.** Zero released versions. Change a slot name everywhere — no fallback chains, no defaults. See the STOP section in root `CLAUDE.md`.
 - **Slots flow through `DispatchHub`.** New `{{slot}}` names go in `INJECTIONS` (`dispatch/injections/registry.py`); `validate_template` raises at module load on typos. Never summarize a field at the prompt site.
 - **L1 owns `pipeline_params`.** If the diagnosis points at the framing surface, write down "→ L2 should refine task_context to X" and stop. That is L2's contract, not yours.
@@ -263,7 +263,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 
-- **L1/L2/L3 agent contracts** — `promptpotter/CLAUDE.md` (read first: what each layer reads/writes).
+- **L1/L2/L3 agent contracts** — `promptpotter/application/optimization/CLAUDE.md` (what each layer reads, writes and decides).
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
 - **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).
