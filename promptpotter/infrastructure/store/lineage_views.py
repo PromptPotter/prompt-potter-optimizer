@@ -192,7 +192,10 @@ class LineageNode(StrictModel):
         "without a `samples=` mask, or when this candidate never ran any selected sample.",
     )
     sample_set_n: int | None = Field(
-        default=None, description="How many of the `samples=` subset this candidate ran."
+        default=None,
+        description="How many of the `samples=` subset this candidate carries a SCOREABLE verdict "
+        "for — the denominator `sample_set_accuracy` is the mean over. Below the subset size, the "
+        "candidate sat a different exam from one that answered all of it.",
     )
     divergence: LineageDivergence | None = Field(
         default=None,

@@ -4046,9 +4046,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     from promptpotter.domain.results import (
         RoundResult,
         ScoredCandidate,
+        adopted_line,
         choose_overlap_set,
         measured_cells,
-        winner_trajectory,
     )
 
     def rows(*ids: int) -> list[dict[str, object]]:
@@ -4082,7 +4082,7 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
         rnd(2, "w2", "C2.1", "edited", 5, 6, 7, 9),
         rnd(3, "l2-remint", "C3.1", "edited", 5, 6),
     ]
-    line = winner_trajectory(history)
+    line = adopted_line(history)
     # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]

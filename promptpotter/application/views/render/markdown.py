@@ -89,7 +89,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     if series := overlap_series(rd.overlap):
         # The one row two rounds can be differenced on — `accuracy` above is read on whatever
         # subset this round bought, and the acquisition does not hold it still.
-        parts.append(f"- trajectory: {series}")
+        parts.append(f"- overlap: {series}")
     if rd.verdict_reason:
         parts.append(f"- verdict: {rd.verdict_reason}")
     if rd.changes_description:

@@ -20,9 +20,10 @@ class MaskCandidate(StrictModel):
     candidate_id: str
     evaluators: dict[str, float] = Field(default_factory=dict)
     accuracy: float = 0.0
-    # How many samples this candidate was actually scored on — the full measured set,
-    # or the intersection with the sample-set mask. Lets a subset re-score serve an
-    # honest "n of N" (a candidate that never ran some chosen samples reads a smaller n).
+    # How many samples this candidate carries a SCOREABLE verdict for — the full measured set,
+    # or the intersection with the sample-set mask. Lets a subset re-score serve an honest
+    # "n of N": a candidate that never ran some chosen samples, or errored on them, reads a
+    # smaller n, and `accuracy` beside it is the mean over exactly these.
     n_scored: int = 0
     is_winner: bool = False
     is_eligible: bool = True

@@ -2427,7 +2427,10 @@ components:
             a fabricated 0%.
         sample_set_n:
           type: [integer, "null"]
-          description: How many of the `samples=` subset this candidate actually ran.
+          description: |
+            How many of the `samples=` subset this candidate carries a SCOREABLE verdict for —
+            the denominator `sample_set_accuracy` is the mean over. Below the subset size, it
+            sat a different exam from a candidate that answered all of it.
         divergence:
           oneOf:
             - $ref: '#/components/schemas/LineageDivergence'

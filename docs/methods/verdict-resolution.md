@@ -121,8 +121,8 @@ off this sentence — it said "two" while listing three:
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
   underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
   identify the incumbent better than the arms it judges. Round documents, `log.md`, `review.md`,
-  the round-close terminal line and the candidates chart's `trajectory` series all render the same
-  reading. It does not repair the acquisition — it measures around it.
+  the round-close terminal line and the candidates chart's `overlap` series all render the same
+  reading, under that one name. It does not repair the acquisition — it measures around it.
 - **A ruler HOLE — impossible now, and named because it was silent for so long.** A cell missing
   from a warm ruler was graded δ=0, which is a *position* on the scale rather than a neutral value:
   against a centre near +2.1 it scored an unmeasured cell as easier than anything ever measured and

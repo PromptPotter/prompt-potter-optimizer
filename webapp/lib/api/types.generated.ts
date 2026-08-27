@@ -1207,7 +1207,10 @@ export interface LineageNode {
   /** Scorer-faithful accuracy over the request's `samples=` subset. Null without a
    * `samples=` mask, or when this candidate never ran any selected sample. */
   sample_set_accuracy: number | null;
-  /** How many of the `samples=` subset this candidate ran. */
+  /** How many of the `samples=` subset this candidate carries a SCOREABLE verdict
+   * for — the denominator `sample_set_accuracy` is the mean over. Below the
+   * subset size, the candidate sat a different exam from one that answered
+   * all of it. */
   sample_set_n: number | null;
   /** Set when the request's lens would have FORKED the record at this node. Only
    * ever set on a closed round's node. */

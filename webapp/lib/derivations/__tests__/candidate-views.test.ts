@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { barsAreCourses, candidateViews, forkKeysOf } from "../candidate-views";
-import type { DashboardCandidate, LineageNode } from "@/lib/api";
+import type { DashboardCandidate, LineageNode, OverlapMember } from "@/lib/api";
 
 // `candidateViews` decides WHICH served number each bar is allowed to show. Every rule it
 // applies is a suppression or a source choice, and every one of them was prose until now —
@@ -82,6 +82,7 @@ const EMPTY = {
   lensSubsetExact: false,
   diagByLabel: new Map(),
   overlapByCandidate: new Map(),
+  overlapSize: null,
 };
 
 const course = (kids: LineageNode[]) => node({ kind: "course", id: "c0", label: "root", children: kids });
@@ -156,6 +157,7 @@ describe("course bars carry no verdict", () => {
     const views = candidateViews({
       ...EMPTY,
       viewedNode: runs,
+      overlapSize: 20,
       overlapByCandidate: new Map([["r1", { candidate_id: "r1", accuracy: 0.55, total: 20 }]] as never),
     });
     expect(views[0]).toMatchObject({
@@ -181,7 +183,7 @@ describe("course bars carry no verdict", () => {
   });
 });
 
-describe("the fixed sample set re-bases the bars", () => {
+describe("a picked sample set moves the overlap bars, and nothing else", () => {
   const arm = course([
     node({
       kind: "candidate",
@@ -192,34 +194,66 @@ describe("the fixed sample set re-bases the bars", () => {
       theta: 1.2,
       composite_fitness: 0.65,
       cached_samples: 4,
+      scored_samples: 12,
+      matched_parent_lift: 0.09,
       sample_set_accuracy: 0.5,
       sample_set_n: 6,
     }),
   ]);
 
-  it("reads the SERVED sliced value and suppresses what cannot be re-sliced", () => {
+  // The whole point of the split: before the overlap series existed, "compare these on one
+  // basis" could only be said by re-basing the metric bars themselves, which then forced θ,
+  // the composite and the lift to be suppressed wholesale. They are on this candidate's OWN
+  // cells and stay there whatever is picked here.
+  it("leaves every metric bar on the candidate's own cells", () => {
     const views = candidateViews({ ...EMPTY, viewedNode: arm, sampleSet: [1, 2, 3, 4, 5, 6] });
     expect(views[0]).toMatchObject({
-      accuracy: 0.5,
-      n_samples: 6,
-      n_expected: 6,
-      // Election aggregates can't be re-sliced per sample, so they go rather than appear on
-      // a different basis than the bar beside them.
-      theta: null,
-      composite: null,
-      cached_samples: null,
-      // The lift is over the cells this candidate measured; re-basing the bars leaves it
-      // describing a different set.
-      matchedParentLift: null,
+      accuracy: 0.7,
+      theta: 1.2,
+      composite: 0.65,
+      cached_samples: 4,
+      n_samples: 12,
+      matchedParentLift: 0.09,
+      // The one bar that moves — the SERVED re-score over the picked cells.
+      overlapAccuracy: 0.5,
+      overlapN: 6,
     });
   });
 
-  // The silent harm is the FALSE arm: a criterion naming an evaluator that only exists in the
-  // full-set snapshot re-scores partly on the subset and partly on everything, and renders as a
-  // subset number either way. The TRUE arm is pinned beside it so a future edit cannot collapse
-  // the pair back into "suppress whenever sliced" — that dropped a value the server had already
-  // computed over these very cells, in the same read that produced the bars.
-  it("keeps a masked value that re-derives whole from the sliced rows, drops one that cannot", () => {
+  it("blanks a candidate that answered only PART of the picked set", () => {
+    const views = candidateViews({
+      ...EMPTY,
+      viewedNode: arm,
+      sampleSet: [1, 2, 3, 4, 5, 6, 7, 8],
+    });
+    // 6 of 8 is a different exam from 8 of 8, and these bars exist to be differenced against
+    // each other — so it is blank, never a short bar beside a full one.
+    expect(views[0]).toMatchObject({ overlapAccuracy: null, overlapN: null, accuracy: 0.7 });
+  });
+
+  it("applies the same completeness rule to the SERVED reading", () => {
+    const member = (total: number): Map<string, OverlapMember> =>
+      new Map([["a", { round: 1, candidate_id: "a", label: "C1.1", accuracy: 0.55, total }]]);
+    // A member whose cell came back unscoreable holds 19 of the line's 20 and is not readable
+    // against the members that hold all of it.
+    const on = (total: number) =>
+      candidateViews({
+        ...EMPTY,
+        viewedNode: arm,
+        overlapSize: 20,
+        overlapByCandidate: member(total),
+      })[0];
+    expect(on(20)).toMatchObject({ overlapAccuracy: 0.55, overlapN: 20 });
+    expect(on(19)).toMatchObject({ overlapAccuracy: null, overlapN: null });
+  });
+
+  // The one channel a picked set still moves besides the overlap bars, because the route
+  // composes `lens` and `samples` in the same read. The silent harm is the FALSE arm: a
+  // criterion naming an evaluator that only exists in the full-set snapshot re-scores partly on
+  // the subset and partly on everything, and renders as a subset number either way. The TRUE arm
+  // is pinned beside it so a future edit cannot collapse the pair back into "suppress whenever a
+  // set is picked" — that dropped a value the server had already computed over these very cells.
+  it("keeps a masked value that re-derives whole from the picked rows, drops one that cannot", () => {
     const lensed = course([
       node({
         kind: "candidate",
@@ -232,24 +266,23 @@ describe("the fixed sample set re-bases the bars", () => {
         lens_rank: 1,
       }),
     ]);
-    const sliced = { ...EMPTY, viewedNode: lensed, sampleSet: [1, 2, 3, 4, 5, 6] };
-    expect(candidateViews({ ...sliced, lensSubsetExact: true })[0]).toMatchObject({
+    const picked = { ...EMPTY, viewedNode: lensed, sampleSet: [1, 2, 3, 4, 5, 6] };
+    expect(candidateViews({ ...picked, lensSubsetExact: true })[0]).toMatchObject({
       lensValue: 0.42,
       lensRank: 1,
     });
-    expect(candidateViews({ ...sliced, lensSubsetExact: false })[0]).toMatchObject({
+    expect(candidateViews({ ...picked, lensSubsetExact: false })[0]).toMatchObject({
       lensValue: null,
       lensRank: null,
     });
   });
 
-  it("does not slice a run — the server decorates candidates only", () => {
+  it("gives a run no basis at all — the server decorates candidates only", () => {
     const runs = course([node({ kind: "course", id: "r1", label: "run-1", best_accuracy: 0.6 })]);
     const views = candidateViews({ ...EMPTY, viewedNode: runs, sampleSet: [1, 2] });
-    // Reading `sample_set_accuracy` off a course yields null, which `started` would then
-    // render as "never ran" — the one lie this card must not tell.
     expect(views[0]?.accuracy).toBe(0.6);
     expect(views[0]?.started).toBe(true);
+    expect(views[0]?.overlapAccuracy).toBeNull();
   });
 });
 

@@ -297,7 +297,7 @@ def _render_round(
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
         if series := overlap_series(round_data.overlap):
-            parts.append(f"- trajectory: {series}")
+            parts.append(f"- overlap: {series}")
         if round_data.verdict_reason:
             # The round is won on θ-lift, so `improved` above names the outcome and nothing on
             # this page named the number behind it.

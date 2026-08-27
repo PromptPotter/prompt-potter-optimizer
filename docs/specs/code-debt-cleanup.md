@@ -51,14 +51,28 @@ decisions → [`../architecture.md`](../architecture.md).
   `descend=` may already answer the L4 half. Blocker: none.
 
 - **The three states where θ is NOT ability are not rendered beside the θ they invalidate.** The
-  layout half of this entry shipped: `trajectory` is a first-class chip on the candidates card with
-  its own ladder, and the elected metric — served `headline_metric`, not a client guess — is now the
+  layout half of this entry shipped: `overlap` is a first-class chip on the candidates card — show
+  the reading, then pick which cells it is read on, with the metric bars never leaving each
+  candidate's own — and the elected metric — served `headline_metric`, not a client guess — is now the
   loud bar and the dendrogram's label (`candidates/series.ts::metricInkToken`,
   `headline-stats.ts::primaryMetric`). What remains is the second half: an arm at 0.0 on every cell,
   a cold ruler, and a collapsed selection band are each backend-decidable, and a θ read under any of
   them is a number the screen currently vouches for. Action: **serve** the state (§ Scoring
   authority, `webapp/CLAUDE.md` — this is not a client derivation) and render it on the θ it
   invalidates. Blocker: none.
+
+- **"trajectory" still names two things it should not, and the candidates card has stopped being
+  one of them.** The winner chain read on ONE shared set is `overlap` from disk to screen now, but
+  two uses remain and each is its own PR. (1) `evidence.py::TrajectoryPoint` / `?trajectory=` /
+  `--trajectory` is the SAME winner chain read on each point's OWN cells — the opposite basis, with
+  no qualifier on either name, which is exactly the pair a reader cannot tell apart. Action: qualify
+  it; blocker: it is a wire type, a CLI flag and a generated OpenAPI schema at once. (2)
+  `round_diagnostics.py::TrajectoryClass` is a health enum (`healthy|oscillating|plateau|ceiling`)
+  and the ONLY on-disk `trajectory` key — 384 round documents, and `RoundResult` reads back with
+  `extra="ignore"`, so a rename degrades to the field's default rather than raising. `trend` or
+  `shape` fits it; the migration is the work. `p_best_trajectory`, `adopted_level_trajectory` and
+  the Sample-trajectory grid keep the word — they are genuine trajectories, which is the point of
+  giving it up on the card.
 
 - **Absent-vs-zero is a rule, and only its named instances have been fixed.** Every number reaches
   the screen as measured / not-measured / not-applicable and may not lose which one on the way; the

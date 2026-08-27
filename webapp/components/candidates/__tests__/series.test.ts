@@ -53,7 +53,7 @@ const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
   metrics: new Set(["accuracy", "ability"]),
   showMask: false,
   showCache: false,
-  showTrajectory: false,
+  showOverlap: false,
   views: [],
   unit: "sample",
   electedMetric: "ability",
@@ -76,9 +76,9 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
   // θ is a LOGIT: 0 is a real, middling ability, so a floored θ is a fabricated
   // measurement rather than an empty slot. Same for the two sparse evidence channels — a
   // floored 0 there claims a candidate scored nothing rather than that it was never read.
-  it("never floors θ, trajectory or verify — not even on a started bar", () => {
+  it("never floors θ, overlap or verify — not even on a started bar", () => {
     const started = [view({ started: true })];
-    for (const key of ["ability", "trajectory", "verify"]) {
+    for (const key of ["ability", "overlap", "verify"]) {
       expect(seriesColumn(spec(key), started)).toEqual([null]);
     }
   });
@@ -86,7 +86,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
   it("reads its own served number and nothing else", () => {
     const v = view({ accuracy: 0.7, theta: -1.5, overlapAccuracy: 0.5, cached_samples: 3, n_samples: 6 });
     expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
-    expect(seriesColumn(spec("trajectory"), [v])).toEqual([0.5]);
+    expect(seriesColumn(spec("overlap"), [v])).toEqual([0.5]);
     // Provenance is a share of a served pair, and it is the only computed number here.
     expect(seriesColumn(spec("cached"), [v])).toEqual([0.5]);
     // A zero denominator is a gap, not a division.
@@ -120,14 +120,17 @@ describe("the axis and sign facts the chart cannot re-derive", () => {
 });
 
 describe("what is on screen", () => {
-  it("shows the trajectory only when elected AND a reading exists", () => {
+  it("shows the overlap bars at BOTH on-rungs, and only when a reading exists", () => {
     const withReading = [view({ overlapAccuracy: 0.5 })];
     const on = (c: Partial<SeriesCtx>) => activeSeries(ctx(c)).map((s) => s.key);
-    expect(on({ showTrajectory: true, views: withReading })).toContain("trajectory");
-    // Elected but nothing measured on the shared set yet.
-    expect(on({ showTrajectory: true, views: [view({})] })).not.toContain("trajectory");
+    // `showOverlap` is `rung > 0`, so this is on for both the served set and a picked one —
+    // the press that opens the picker used to DELETE this series, which is what made the
+    // picker's own overlap button turn the overlap bars off.
+    expect(on({ showOverlap: true, views: withReading })).toContain("overlap");
+    // On, but nothing has been read on the whole set yet.
+    expect(on({ showOverlap: true, views: [view({})] })).not.toContain("overlap");
     // A reading exists but the operator stepped the control off.
-    expect(on({ showTrajectory: false, views: withReading })).not.toContain("trajectory");
+    expect(on({ showOverlap: false, views: withReading })).not.toContain("overlap");
   });
 });
 

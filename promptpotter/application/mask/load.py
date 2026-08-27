@@ -14,7 +14,12 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import ScoredCandidate, is_electable, merge_known_outcomes
+from promptpotter.domain.results import (
+    ScoredCandidate,
+    is_electable,
+    measured_cells,
+    merge_known_outcomes,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_decisions,
     scan_ledger_elections,
@@ -123,7 +128,11 @@ def _candidates(
         if evaluators and rows:
             evaluators.update(materialize_row_derivable(rows))
             accuracy = evaluators["accuracy"]
-        out.append(_mask_candidate(sc, evaluators, accuracy, len(rows), rows, winner_label))
+        # SCOREABLE rows, not rows held — `accuracy` above is the mean over exactly these, and a
+        # reader comparing the count to the subset size must not be told an errored cell scored.
+        out.append(
+            _mask_candidate(sc, evaluators, accuracy, len(measured_cells(rows)), rows, winner_label)
+        )
     return out
 
 

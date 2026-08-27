@@ -159,7 +159,7 @@ def render_round_stats(
     # ONLY line here two rounds can be differenced on — every other number above is read on the
     # subset this round happened to buy. Silent until the line has a second member.
     if series := overlap_series(round_result.overlap):
-        lines.append(_node_line(f"trajectory ({series})"))
+        lines.append(_node_line(f"overlap ({series})"))
 
     # Degradation verdict — the served ``round_result.health`` (R-36: rendered,
     # not recomputed). Loudness scales with grade; ``healthy`` stays silent.

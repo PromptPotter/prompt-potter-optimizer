@@ -64,16 +64,11 @@ import type { CandidateView } from "@/lib/types";
 
 // The candidates card — this cycle's population and its ancestry, in one surface.
 //
-// The bars and the dendrogram under them ride the SAME flat candidate spine
-// (`roundCandidates` → C0, C1.1, C1.2, C2.1 …) and the bar chart's x categories ARE
-// that spine — so the tree shares the bars' x-axis exactly, which is why it belongs
-// beneath them, in their box. Everything in this card is bound to that alignment.
+// The bars and the dendrogram under them ride the SAME flat candidate spine, and the bar
+// chart's x categories ARE that spine — everything here is bound to that alignment.
 //
-// The multi-cycle FOREST is deliberately NOT in here — it lives in `ForestCard`.
-// It shares no axis with the bars (it is a cladogram of cycles on its own
-// round-column grid), so binding it to this card's geometry bought nothing and
-// cost it the width and height it actually wants. The quiet toggle beside the
-// dendrogram opens it; that toggle is the only trace of it here.
+// The multi-cycle FOREST is deliberately NOT in here: it shares no axis with the bars, so it
+// lives in `ForestCard` and the quiet toggle beside the dendrogram is its only trace here.
 //
 // `heading` rows are optgroup labels; the rest are pickable. One flat list, so the
 // menu markup stays a map() instead of nested groups.
@@ -111,19 +106,15 @@ export function CandidatesCard() {
     setSelectionForSampleSet,
   } = useSelection();
   // The Compare tab's subject set, shell-level so it survives the navigation between picking one
-  // searchpoint and picking the next. The address is the LEAF's campaign paired with the
-  // candidate's own cycle, and the hops ABOVE the leaf as its sandbox chain — a cycle_id alone
-  // repeats across `.inner/` sandboxes, so an inner searchpoint needs both halves. The CHANNEL
-  // then carries the TOP-LEVEL campaign instead: that is the one the registry lists and the one
-  // its card draws a tree from, and an inner campaign is in neither.
+  // searchpoint and picking the next.
   const comparing = useCompareSelection();
 
   const {
     showForest,
     metrics,
     metricsSeededForCycle,
-    showTrajectory,
-    trajectorySeededForCycle,
+    showOverlap,
+    overlapSeededForCycle,
     showCache,
   } = useCandidatesState();
   // The metric this campaign's ENGINE elects on (served `CampaignConfig.headline_metric`,
@@ -136,25 +127,15 @@ export function CandidatesCard() {
   // below converge instead of looping setState every render.
   const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
 
-  // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
-  // of truth for historical bars. The projection accumulates these at
-  // `round:display` so the chart never has to stitch live + finalized
-  // round-file fetches.
-  // Key on `dash?.rounds` (the only slice `sortedRounds` reads), not on `dash`,
-  // so unrelated per-poll dash mutations don't re-sort (render-cost guard).
+  // ── 2. Completed-round summaries from `dash.rounds[]` — sole source for historical bars, so
+  // the chart never stitches live + round-file fetches. Keyed on `dash?.rounds` (the only slice
+  // `sortedRounds` reads) so unrelated per-poll mutations don't re-sort.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
 
-  // ── 2b. Diagnostic-run records — one per `python -m promptpotter verify`
-  // invocation, persisted at diagnostics/runs/*.json. Fetched per
-  // cycle switch; not polled (the card never auto-refreshes verify state,
-  // re-run verify + reload for a fresh red bar). Filtered to runs whose
-  // (source_campaign, source_cycle) match the unit currently in view, then
-  // keyed by source_label so the assembly memo can attach diag data to the
-  // matching candidate.
-  // Gate on a confirmed session — diagnostic-runs is workspace-scoped and
-  // 401s for anon; `null` fetcher means useFetch fires nothing on the public
-  // preview (frontend-surface-contract.md § I5), matching VerifyPane.
+  // ── 2b. Diagnostic-run records — one per `promptpotter verify`. Fetched per cycle switch,
+  // never polled: re-run verify and reload for a fresh red bar. Gated on a confirmed session,
+  // because the route is workspace-scoped and 401s for anon (I5).
   const { status } = useAuth();
   const { data: diagRunsResp } = useFetch(
     status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
@@ -177,17 +158,13 @@ export function CandidatesCard() {
   // wrong frame.
   const { open: maskOpen, mask } = useScoringMask();
   const evaluators = useCycleEvaluators({ cycleId, dash, inflightCandidates, history });
-  // The criterion on screen, in the two spellings that read it: the LENS the tree and a compare
-  // address are masked by, and the bare FORMULA a fork's `scoring` override takes. Derived once —
-  // three consumers asking `lensOf` separately is three chances to disagree about whether the
-  // panel is even open.
+  // The criterion on screen. Derived once — three consumers asking `lensOf` separately is three
+  // chances to disagree about whether the panel is even open.
   const activeLens = maskOpen ? lensOf(mask) : null;
 
-  // The Compare address of the selected searchpoint, CARRYING whatever mask is on screen. That
-  // is the handoff: a scenario built here opens over there as a channel reading the same thing,
-  // rather than being retyped into a second editor. Both segments are the ones already on this
-  // card — the lens the bars are drawn under, and the fixed sample set they are drawn over — so
-  // the channel that lands is the picture the operator is looking at.
+  // The Compare address of the selected searchpoint, CARRYING whatever mask is on screen: a
+  // scenario built here opens over there as a channel reading the same thing, rather than being
+  // retyped into a second editor.
   const compareKey =
     selectedCandidate && leafCampaignId && viewedPath
       ? withMask(
@@ -200,13 +177,9 @@ export function CandidatesCard() {
         )
       : null;
 
-  // Render-phase seed of the metric axis, once per cycle. Two bars per candidate by
-  // default: accuracy (a candidate is rarely bad on it, and it's the universal read)
-  // PLUS the campaign's ACTIVE metric — the served `CampaignConfig.headline_metric`,
-  // the one the loop actually follows (usually θ). Composite stays hidden unless it is
-  // the active metric. Gated on `dash`: on the first poll the field isn't there yet,
-  // and seeding without it would ignore the campaign's own choice. θ is offered, never
-  // forced — the engine always GATES on θ regardless of what's displayed here.
+  // Render-phase seed of the metric axis, once per cycle: accuracy plus the campaign's served
+  // `headline_metric`. Gated on `dash`, or the first poll seeds before that field arrives and
+  // ignores the campaign's own choice.
   if (cycleId && dash && metricsSeededForCycle !== cycleId) {
     setCandidatesState({
       metrics: new Set<HeadlineMetric>(["accuracy", electedMetric]),
@@ -214,11 +187,9 @@ export function CandidatesCard() {
     });
   }
 
-  // The adopted line's shared reading, off the LATEST round that has one: the set drifts as
-  // the line grows, and the newest round names the basis the bars are on now. Served
-  // (`RoundSummary.overlap`) and only re-keyed here by candidate id — the browser computes no
-  // rate. `overlap.sample_ids` doubles as the fixed-sample-set quick-pick below, so the strip
-  // and this series are the same set by construction rather than by agreement.
+  // The adopted line's shared reading, off the LATEST round that has one: the set drifts as the
+  // line grows, so the newest round names the basis. Served, only re-keyed here by candidate id,
+  // and its `sample_ids` is the picker's quick-pick — same set by construction.
   const overlap = useMemo(
     () => history.reduce<RoundSummary["overlap"]>((best, r) => r.overlap ?? best, null),
     [history],
@@ -228,9 +199,9 @@ export function CandidatesCard() {
     [overlap],
   );
 
-  // The measured-sample universe the bars can be sliced over — used to seed the
+  // The measured-sample universe a basis can be built out of — used to seed the
   // set when the operator first turns the mode on. The chip strip + per-round
-  // picks + trajectory drill all live in `SampleSetControl`.
+  // picks + sample-trajectory drill all live in `SampleSetControl`.
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
   // The shared served overlay — the node's own `lens_value` is the masked bar value
@@ -238,17 +209,10 @@ export function CandidatesCard() {
   const overlay = useViewedLineage();
   const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
 
-  // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
-  // left is parked on, and the same children it draws under it.
-  //
-  //   course viewed    → its timeline: every candidate on it, including the attempts its
-  //                      forks contributed.
-  //   candidate viewed → the courses that measured it (an L4 candidate's inner runs).
-  //
-  // The viewed node is `viewedPath` + `viewedCandidateId` — NAVIGATION, written only by the
-  // tree. It is deliberately not `selectedCandidate` (INSPECTION, written by a bar click):
-  // one slot for both makes the chart its own input, so clicking a bar re-plots it under
-  // the cursor.
+  // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — a course's timeline, or the
+  // courses that measured a candidate. `viewedPath` + `viewedCandidateId` is NAVIGATION, written
+  // only by the tree, and deliberately not `selectedCandidate` (INSPECTION, written by a bar
+  // click): one slot for both makes the chart its own input.
   const viewedNode = useMemo(() => {
     if (!viewedPath) return undefined;
     const entry = overlay.index.get(encodeCyclePath(viewedPath));
@@ -282,8 +246,9 @@ export function CandidatesCard() {
         lensSubsetExact: subsetExactFor(mask),
         diagByLabel,
         overlapByCandidate,
+        overlapSize: overlap?.sample_ids.length ?? null,
       }),
-    [viewedNode, inflightByLabel, sampleSet, mask, diagByLabel, overlapByCandidate],
+    [viewedNode, inflightByLabel, sampleSet, mask, diagByLabel, overlapByCandidate, overlap],
   );
 
   const forkKeys = useMemo(() => forkKeysOf(viewedNode), [viewedNode]);
@@ -298,11 +263,9 @@ export function CandidatesCard() {
     electedMetric,
   });
 
-  // The bar chart's plot geometry, published by its `xBridge` plugin — the one
-  // thing the dendrogram needs in order to sit under the right bars. `geomEqual`
-  // returning `prev` makes React bail out of the render entirely, which is what
-  // keeps a window resize from ever reaching React (the fractions don't change;
-  // only the px gutters could, and they don't under a pure width change).
+  // The bar chart's plot geometry, published by its `xBridge` plugin — the one thing the
+  // dendrogram needs to sit under the right bars. `geomEqual` returning `prev` bails React out
+  // of the render, which is what keeps a window resize from ever reaching it.
   // Local, not on the store: the θ explainer is a one-off read inside an already
   // ephemeral menu — nothing to preserve across a tab swap.
   const [showTheta, setShowTheta] = useState(false);
@@ -319,14 +282,9 @@ export function CandidatesCard() {
         setSelectionForCandidate(null);
         return;
       }
-      // A bar click INSPECTS. It never navigates — the chart must not move under the
-      // cursor that clicked it, and the tree on the left is the only navigator. A course
-      // bar (a fork, an inner run) is no exception: it is a measured thing with data
-      // under it like any other, so it lights up and reports what it measured.
-      //
-      // Atomic candidate+round write — the round axis follows the candidate's round, so
-      // picking one re-anchors the optimizer card on the round that produced it. The bars
-      // plot `dash`, which is the LEAF's, so the leaf cycle produced this candidate.
+      // A bar click INSPECTS, never navigates: the chart must not move under the cursor that
+      // clicked it, and a course bar is no exception. Atomic candidate+round write, so the
+      // optimizer card re-anchors on the round that produced this candidate.
       setSelectionForCandidate({
         cycle_id: leafCycleId,
         round: v.round,
@@ -396,50 +354,45 @@ export function CandidatesCard() {
 
   const lensActive = lens !== "" && !scoringMaskActive;
 
-  // Read off the SERVED reading, not off the bars: slicing nulls every candidate's
-  // `overlapAccuracy`, so asking the views would say "no trajectory" for the one state that
-  // exists because of it.
-  const hasTrajectory = overlap != null && !areCourses;
+  // Off the SERVED reading, not the bars: the completeness rule nulls `overlapAccuracy` for
+  // everyone off the set, so the views would say "no reading" exactly where one exists.
+  const hasOverlap = overlap != null && !areCourses;
 
   // Seeded ON the render a reading first appears, so the default view is what it always was.
   // Latched per cycle, like the metric axis — the operator can then turn it off and it stays
   // off for that cycle.
-  if (cycleId && overlap != null && trajectorySeededForCycle !== cycleId) {
-    setCandidatesState({ showTrajectory: true, trajectorySeededForCycle: cycleId });
+  if (cycleId && overlap != null && overlapSeededForCycle !== cycleId) {
+    setCandidatesState({ showOverlap: true, overlapSeededForCycle: cycleId });
   }
 
-  // ONE control, three rungs, because its two on-states are the same idea at two strengths:
-  // SHOW the adopted line's reading on the cells all of it answered, then put EVERY bar on
-  // those same cells. That is also why the series itself drops out at rung 2 — once all the
-  // bars are read on that set, a separate "read on the shared set" series is the same bars
-  // twice. The rung is DERIVED: the slice is `SelectionContext.sampleSet`, which already
-  // owns "which cells are the bars on", so this reads it rather than keeping a second copy.
-  const sliceOn = sampleSet != null && !areCourses;
-  const rung = sliceOn ? 2 : showTrajectory && hasTrajectory ? 1 : 0;
-  const trajectoryDisabled = areCourses || (!hasTrajectory && sampleUniverse.length === 0);
-  const stepTrajectory = () => {
+  // ONE control, three rungs: SHOW the overlap bars on the served set, then CHOOSE which cells
+  // that set is. Neither touches the metric bars. The rung is DERIVED from
+  // `SelectionContext.sampleSet`, which already owns which cells, rather than a second copy.
+  const pickedSet = sampleSet != null && !areCourses;
+  const rung = pickedSet ? 2 : showOverlap && hasOverlap ? 1 : 0;
+  const overlapDisabled = areCourses || (!hasOverlap && sampleUniverse.length === 0);
+  const stepOverlap = () => {
     if (rung === 2) {
       setSelectionForSampleSet(null);
-      setCandidatesState({ showTrajectory: false });
-    } else if (rung === 1 || !hasTrajectory) {
-      // The cells the bars move onto are the trajectory's OWN where there are any, so the
-      // series and the slice are the same set by construction rather than by agreement.
+      setCandidatesState({ showOverlap: false });
+    } else if (rung === 1 || !hasOverlap) {
+      // Opening the picker seeds it with the set the bars are already on, so the first thing
+      // the operator sees is the reading they were reading — editable.
       setSelectionForSampleSet(overlap?.sample_ids ?? sampleUniverse);
-      setCandidatesState({ showTrajectory: hasTrajectory });
+      setCandidatesState({ showOverlap: true });
     } else {
-      setCandidatesState({ showTrajectory: true });
+      setCandidatesState({ showOverlap: true });
     }
   };
-  // What the NEXT press does, per rung. With no trajectory reading yet, rung 1 does not
-  // exist and the first press goes straight to the slice — so it must not promise a series
-  // the campaign cannot draw, and it says WHY there is none: a run reads as "still loading"
-  // otherwise, when in fact nothing is pending.
-  const trajectoryNext = [
-    hasTrajectory
-      ? "Show the winner trajectory — every candidate on the adopted line, read on the one set of cells all of them answered."
-      : "Re-base every bar onto one fixed set of cells so the candidates compare on the same basis. There is no trajectory to show yet: the adopted line is still C0 alone, and a second member arrives with the first round that promotes a winner — a held round leaves nothing to read C0 against.",
-    "Re-base every bar onto those same cells, so all the candidates compare on one basis. The trajectory series folds in — at that point it would be the same bars twice.",
-    "Back to each candidate's own measured subset.",
+  // What the NEXT press does, per rung. With no served reading, rung 1 does not exist and the
+  // first press goes to the picker — so it must not promise a series the campaign cannot draw,
+  // and it says WHY there is none, or the card reads as still loading when nothing is pending.
+  const overlapNext = [
+    hasOverlap
+      ? "Read C0 and every winner since on the one set of cells all of them answered. The bars beside it stay on each candidate's own cells."
+      : "Pick a set of cells and read every candidate that answered all of it on that one basis. There is no reading to show yet: the adopted line is still C0 alone, and a second member arrives with the first round that promotes a winner — a held round leaves nothing to read C0 against.",
+    "Choose which cells the overlap bars are read on — any round's set, or your own pick.",
+    "Hide the overlap bars and drop the picked set.",
   ];
 
   // What the chart is currently painting, and the half of it the header does not already
@@ -450,7 +403,7 @@ export function CandidatesCard() {
       metrics,
       showMask: maskOpen,
       showCache,
-      showTrajectory: rung === 1,
+      showOverlap: rung > 0,
       views,
       unit,
       electedMetric,
@@ -527,13 +480,11 @@ export function CandidatesCard() {
             </Badge>
           )}
           <ToolbarSep />
-          {/* WHICH BARS — four facets of one question, hence `joined`. The first three are
-              the metric axis, which also names every dendrogram node; the fourth is the
-              trajectory, not a fourth number but `accuracy` on a fixed basis, which is why
-              it keeps its own ink and stays out of `metrics`. Each chip's underline wears
-              that ink, so this group IS the legend for what it switches and the row below
-              carries only the chipless channels. Display only — the engine gates on θ
-              whatever is lit here. */}
+          {/* WHICH BARS — four facets of one question, hence `joined`. The first three are the
+              metric axis, which also names every dendrogram node; `∩` is not a fourth number but
+              `accuracy` on a fixed basis, so it keeps its own ink and stays out of `metrics`.
+              Each chip's underline wears its ink, making this group the legend for what it
+              switches. Display only — the engine gates on θ whatever is lit here. */}
           <ChipGroup label="Bars" joined>
             {HEADLINE_METRICS.map((m) => (
               <Chip
@@ -548,36 +499,30 @@ export function CandidatesCard() {
                 {m.glyph}
               </Chip>
             ))}
-            {/* `∩` — the trajectory IS the intersection: the cells every candidate on the
-                adopted line answered. Notation, like the three beside it. Teal ink, because
-                it is not a fourth number but `accuracy` on a fixed basis, and it stays out
-                of `metrics` for the same reason (that set names the dendrogram's node
-                labels, and most candidates were never read on this set at all). */}
+            {/* `∩` — the overlap IS the intersection: the cells every drawn candidate
+                answered. Notation, like the three beside it. */}
             <Chip
               icon
               on={rung > 0}
-              // The chip wears the ink of what it put ON SCREEN, so it can never imply a series
-              // the campaign has not drawn: teal while the trajectory series is up, and the
-              // sample-set ink once every bar is on the slice — which is the colour of the panel
-              // that press opens. A run that has held every round has NO second line member, so
-              // its trajectory rung does not exist and teal must never appear for it.
+              // The ink of what the press put ON SCREEN, never of what the chip names: teal for
+              // the bars, the picker's own colour once rung 2 opens it.
               ink={rung === 2 ? "var(--color-new)" : "var(--color-overlap)"}
-              disabled={trajectoryDisabled}
+              disabled={overlapDisabled}
               ariaLabel={
                 rung === 2
-                  ? "Every bar is on one shared set of cells; press to leave"
+                  ? "Choosing which cells the overlap bars are read on; press to turn them off"
                   : rung === 1
-                    ? "Trajectory shown — press to put every bar on its cells"
-                    : hasTrajectory
-                      ? "Show the winner trajectory"
-                      : "Compare every candidate on one fixed set of cells"
+                    ? "Overlap shown — press to choose its cells"
+                    : hasOverlap
+                      ? "Show the overlap reading — the adopted line on one shared set of cells"
+                      : "Pick a set of cells to read the candidates on"
               }
               title={
                 areCourses
                   ? "These bars are runs, not scored cells — open a run to compare its candidates."
-                  : trajectoryNext[rung]
+                  : overlapNext[rung]
               }
-              onClick={stepTrajectory}
+              onClick={stepOverlap}
             >
               ∩
             </Chip>
@@ -700,7 +645,7 @@ export function CandidatesCard() {
             views={views}
             metrics={metrics}
             showMask={maskOpen}
-            showTrajectory={rung === 1}
+            showOverlap={rung > 0}
             showCache={showCache}
             divergenceBoundary={divergenceBoundary}
             inFlightIndex={inFlightIndex}

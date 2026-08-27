@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.domain.results import (
+    AdoptedStep,
     OverlapMember,
     OverlapReading,
-    TrajectoryStep,
+    adopted_line,
     choose_overlap_set,
     incumbent_key,
     measured_cells,
     merge_known_outcomes,
-    winner_trajectory,
 )
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
@@ -46,7 +46,7 @@ async def measure_overlap(
         return
     # The line INCLUDING this round: on a HELD round the subject is the retained incumbent, whose
     # coverage this round's parent re-score just widened, and on a won round it is the new arm.
-    steps = winner_trajectory([*cycle.rounds, round_result])
+    steps = adopted_line([*cycle.rounds, round_result])
     # By CONFIGURATION, never by id: an L2/L3 transition re-mints the incumbent's OSP, so this
     # round's `winner_id` can differ from the id the same configuration first arrived as.
     key = incumbent_key(round_result)
@@ -60,7 +60,7 @@ async def measure_overlap(
     common = set.intersection(*(measured_cells(s.rows) for s in others)) & poolable
     if not common:
         logger.info(
-            "trajectory overlap: round %d shares no measurable cell with the line before it — "
+            "overlap: round %d shares no measurable cell with the line before it — "
             "no 1-to-1 reading is possible on this round",
             round_result.round,
         )
@@ -89,7 +89,7 @@ async def measure_overlap(
     round_result.overlap = OverlapReading(sample_ids=chosen, members=members, measured=len(fresh))
 
 
-def _member(step: TrajectoryStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
+def _member(step: AdoptedStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
     on_set = [r for r in rows if (sid := r.get("sample_id")) is not None and int(sid) in keep]
     stats = _compute_accuracy(cast("list[QueryMeasurement]", on_set))
     return OverlapMember(
@@ -107,7 +107,7 @@ async def _measure_gaps(
     gaps: list[int],
     scoring_pool: list[Sample],
     *,
-    subject: TrajectoryStep,
+    subject: AdoptedStep,
 ) -> list[dict[str, Any]]:
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -118,7 +118,7 @@ async def _measure_gaps(
     want = set(gaps)
     samples = [s for s in scoring_pool if s.id in want]
     logger.info(
-        "trajectory overlap: measuring %s on %d cell(s) its line had already answered",
+        "overlap: measuring %s on %d cell(s) its line had already answered",
         subject.label,
         len(samples),
     )

@@ -19,7 +19,7 @@ export type SeriesKey =
   | "ability"
   | "composite"
   | "mask"
-  | "trajectory"
+  | "overlap"
   | "verify"
   | "cached";
 
@@ -27,7 +27,7 @@ export interface SeriesCtx {
   metrics: ReadonlySet<HeadlineMetric>;
   showMask: boolean;
   showCache: boolean;
-  showTrajectory: boolean;
+  showOverlap: boolean;
   views: readonly CandidateView[];
   unit: MeasuredUnit;
   // Served `dash.headline_metric` — the one input deciding which channel reads primary.
@@ -81,8 +81,9 @@ export const SERIES_INK_TOKENS = [
   "--color-cache",
 ] as const;
 
-// The set drifts as the adopted line grows, so the legend reads its size off the data.
-function overlapN(ctx: SeriesCtx): number {
+// The set drifts as the adopted line grows and changes outright when the operator pins one, so
+// the legend reads its size off the data.
+function basisN(ctx: SeriesCtx): number {
   let n = 0;
   for (const v of ctx.views) if (v.overlapN != null && v.overlapN > n) n = v.overlapN;
   return n;
@@ -143,31 +144,31 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     tip: (v) => `masked: ${fmtNum(v.lensValue)}`,
   },
   {
-    key: "trajectory",
-    legend: (c) => `trajectory · ${overlapN(c)}`,
+    key: "overlap",
+    legend: (c) => `overlap · ${basisN(c)}`,
     hint: (c) =>
-      `Every candidate on the winner trajectory, read on the same ${unitCount(overlapN(c), c.unit)} — the only pair of bars here that can be differenced.`,
+      `Read on the same ${unitCount(basisN(c), c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and every winner since all answered; pin your own with the set below.`,
     ink: () => "--color-overlap",
     kind: "bar",
     axis: "y",
-    // Only the adopted line is measured on the shared set, so a floored 0 claims an
-    // off-line candidate scored nothing rather than that it was never read.
+    // A candidate that did not answer the whole basis is not drawn at all, so a floored 0
+    // would claim it scored nothing rather than that it was never read on this set.
     gap: "sparse",
     valueOf: (v) => v.overlapAccuracy,
-    applies: (c) => c.showTrajectory && c.views.some((v) => v.overlapAccuracy != null),
+    applies: (c) => c.showOverlap && c.views.some((v) => v.overlapAccuracy != null),
     tip: (v, c) =>
       v.overlapAccuracy == null
-        ? "trajectory: not on the winner trajectory"
+        ? "overlap: not read on the whole set"
         : // The COUNT travels with the rate: a percentage over an unnamed denominator is
           // the reading this series exists to replace.
-          `trajectory: ${fmtNum(v.overlapAccuracy)}${v.overlapN ? ` on ${unitCount(v.overlapN, c.unit)} shared` : ""}`,
+          `overlap: ${fmtNum(v.overlapAccuracy)}${v.overlapN ? ` on ${unitCount(v.overlapN, c.unit)} shared` : ""}`,
   },
   {
     key: "verify",
     legend: () => "verify",
     hint: () =>
       "A `promptpotter verify` re-run of this candidate over the workspace set — did the verdict hold on more cells?",
-    // Shares the evidence ink with `trajectory` and separates by fill, rhyming with the
+    // Shares the evidence ink with `overlap` and separates by fill, rhyming with the
     // dendrogram's filled-winner / hollow-eliminated dot directly beneath.
     ink: () => "--color-overlap",
     hollow: true,

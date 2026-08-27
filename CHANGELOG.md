@@ -13,6 +13,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A cell nobody measured is not a zero.** A coverage strip says which absence each blank is, and a channel on a different ruler or dataset is tagged rather than averaged in.
 - **"What if we had scored it differently"** — put a branch on the chart twice, once as it ran and once under another formula or fewer samples, and read what changed: the winner, the round the two lineages part at, how much of the record survives.
 
+### Changed
+
+- **Picking a set of cells moves only the `overlap` bars.** Accuracy, θ and the composite stay on each candidate's own cells instead of vanishing, and a candidate that answered part of the set is blank rather than drawn short beside a full one.
+- **The shared reading is `overlap` everywhere** — chart, terminal line, `log.md`, `review.md`, round document. It read "trajectory" on screen only, a word two other things already mean.
+
 ## [0.8.12] — 2026-08-24
 
 > Start and pause the optimizer from the chat itself, read what every account on the install spent beside what it produced, and compare any campaigns across datasets. 77 commits since `v0.8.11`.

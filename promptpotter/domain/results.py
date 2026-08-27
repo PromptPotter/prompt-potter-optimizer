@@ -27,6 +27,7 @@ __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
+    "AdoptedStep",
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
@@ -44,8 +45,8 @@ __all__ = [
     "ScoreboardRow",
     "ScoredCandidate",
     "SweepBatchResult",
-    "TrajectoryStep",
     "WarningDict",
+    "adopted_line",
     "best_round_by_measured_accuracy",
     "candidate_label",
     "choose_overlap_set",
@@ -57,7 +58,6 @@ __all__ = [
     "merge_known_outcomes",
     "overlap_series",
     "unscoreable_cells",
-    "winner_trajectory",
 ]
 
 
@@ -175,20 +175,14 @@ class ScoredCandidate(StrictModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # The PARENT as this candidate's comparison floor — the origin at round 0 and the prior winner
-    # after it (``RoundParent``), which is why these are not named for the origin. ``None`` unless
-    # the candidate covered the parent's whole panel, and NOT the population ``theta`` is ``None``
-    # for (θ is subset-invariant, an accuracy is not). These MUST NOT default to 0.0: an unstamped
-    # 0.0 is indistinguishable from a parent that scored nothing, and reads as "this candidate beat
-    # its parent by its whole accuracy".
+    # The PARENT as this candidate's comparison floor (``RoundParent``), which is why these are not
+    # named for the origin. ``None`` unless the candidate covered the parent's whole panel. MUST
+    # NOT default to 0.0: an unstamped 0.0 is indistinguishable from a parent that scored nothing.
     matched_parent_accuracy: float | None = None
     matched_parent_composite: float | None = None
-    # The BLOCKED lift over that floor: mean per-cell ``(candidate − parent)`` across the cells
-    # both measured, Student-t bracketed (``scoring/selection.py::matched_parent_lift``). Sharper
-    # than ``mean_fitness_ci_*`` on the same rows because pairing removes the parent's cell-to-cell
-    # variation instead of carrying it as noise. ``None`` below two shared cells — an interval
-    # from one pair is a fiction. It reads at EVERY level: inner cells are samples, outer cells
-    # whole inner campaigns, and the arithmetic does not care which.
+    # The BLOCKED lift over that floor: mean per-cell ``(candidate − parent)`` over the cells both
+    # measured, Student-t bracketed. Sharper than ``mean_fitness_ci_*`` because pairing removes the
+    # parent's variation. ``None`` below two shared cells — an interval from one pair is a fiction.
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
@@ -375,7 +369,7 @@ class OverlapReading(StrictModel):
     measured: int = 0
 
 
-class TrajectoryStep(NamedTuple):
+class AdoptedStep(NamedTuple):
     """One adopted incumbent and every cell the cycle has measured it on.
 
     ``key`` is :func:`incumbent_key` — the identity a caller must match a round against, since
@@ -416,7 +410,7 @@ def incumbent_key(rr: RoundResult) -> str:
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
     prompt strings — it writes ``l1_layout`` / ``l1_overrides`` / ``plan``, which steer the
     OPTIMIZER, not the target prompt — so the incumbent's id changes while the thing being
-    measured does not. Keyed on the id, that put ONE configuration on the trajectory twice, at
+    measured does not. Keyed on the id, that put ONE configuration on the adopted line twice, at
     the same rate by construction, the second time under a label naming no candidate. Keyed here,
     the two fold into one member, which is also what the measurement archive already believes:
     it is content-addressed on the node configs, so the re-measure cache-hit anyway.
@@ -435,7 +429,7 @@ def incumbent_key(rr: RoundResult) -> str:
     return stable_hash([fields, params])
 
 
-def winner_trajectory(rounds: Sequence[RoundResult]) -> list[TrajectoryStep]:
+def adopted_line(rounds: Sequence[RoundResult]) -> list[AdoptedStep]:
     """The campaign's adopted line — C0, then every round that adopted a different configuration
     — each member carrying the union of every cell the cycle measured it on, in adoption order.
 
@@ -462,7 +456,7 @@ def winner_trajectory(rounds: Sequence[RoundResult]) -> list[TrajectoryStep]:
     # is a genuine anomaly rather than the routine L2 case, and a truncated id in its place would
     # be a hash the operator cannot join to anything on screen.
     return [
-        TrajectoryStep(
+        AdoptedStep(
             key=key, round=rnd, candidate_id=cid, label=labels.get(cid) or f"R{rnd}", rows=rows[key]
         )
         for key, (rnd, cid) in first.items()
@@ -554,21 +548,16 @@ class RoundResult(StrictModel):
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
-    # Did the round resolve anything — did ANY electable arm's lift interval clear 0? `improved`
-    # beside it is the point estimate, and the two answer different questions: a round can crown a
-    # winner (`improved`) out of arms none of which separated from the parent, which is the best of
-    # what it saw rather than a measured advance. Escalation reads BOTH, so a round that resolved
-    # nothing counts as a stall and reaches L2 instead of resetting its patience. `None` when no arm
-    # carries an interval — below two shared cells there is nothing to be inconclusive ABOUT, and
-    # that is not the same fact as a round that measured cleanly and tied.
+    # Did ANY electable arm's lift interval clear 0? Not `improved` beside it, which is the point
+    # estimate: a round can crown a winner out of arms none of which separated from the parent.
+    # Escalation reads BOTH, so a round that resolved nothing stalls instead of resetting patience.
+    # `None` when no arm carries an interval — not the same fact as measuring cleanly and tying.
     separable: bool | None = None
-    # Subset-invariant peer of this round's own `accuracy`: the cumulative frontier's ability,
-    # with the scale it was read on, so a drifting per-round subset cannot inflate the outer
-    # fitness signal. `None` = never fit. The SE inside is a precision, never a penalty: the spec
-    # forbids it in the election rank key or as a `mean - λ·se` haircut. There is deliberately no
-    # `cumulative_accuracy` beside it — pooling rows of mixed provenance is modelled against an
-    # explicit per-sample δ, while a plain mean over them silently attributes one
-    # configuration's score to another.
+    # Subset-invariant peer of this round's `accuracy`: the cumulative frontier's ability with the
+    # scale it was read on, so a drifting subset cannot inflate the outer signal. `None` = never
+    # fit. The SE inside is a precision, never a penalty — forbidden in the election rank key and
+    # as a `mean - λ·se` haircut. No `cumulative_accuracy` beside it: a plain mean over rows of
+    # mixed provenance silently attributes one configuration's score to another.
     ability: AbilityReading | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
@@ -715,15 +704,12 @@ class CycleResult(StrictModel):
     # other basis is comparing two different measurements.
     origin_accuracy: float
     origin_composite_fitness: float = 0.0
-    # The L4 outer proxy's inner-search signal: the origin's level and the ability of the
-    # incumbent each round ADOPTED — the CROWNED frontier, never the round's proposals, which
-    # turn the metric NEGATIVE for exactly the generators that explore. Both live in ONE space
-    # (θ on the cycle's fixed δ ruler when warm, else the cycle is excluded), so no proxy delta
-    # subtracts across scales, and levels are NOT floored at origin: a regressing optimizer
-    # prompt must yield a level below origin or the outer loses the gradient away from it.
-    # `origin_level` is `None`, not `0.0`, when the origin was never scored — every round's lift
-    # is differenced against it, so a fabricated 0.0 reports the trajectory as an enormous
-    # improvement over nothing. Absent ⇒ the cycle is excluded.
+    # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
+    # ADOPTED — the CROWNED frontier, never the proposals, which turn the metric NEGATIVE for
+    # exactly the generators that explore. Both live in ONE space, so no proxy delta subtracts
+    # across scales, and levels are NOT floored at origin or the outer loses the gradient away
+    # from a regressing prompt. `origin_level` is `None`, not `0.0`, when the origin was never
+    # scored: a fabricated 0.0 reports the climb as an enormous improvement over nothing.
     origin_level: float | None = None
     round_adopted_levels: list[float] = Field(default_factory=list)
     # Index-aligned with the two above: a round that did not move the incumbent did not sharpen

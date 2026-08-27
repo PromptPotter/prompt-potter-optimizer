@@ -21,18 +21,12 @@ import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
 
-// Published plot geometry — the bridge that lets the dendrogram strip, an SVG
-// sibling rendered UNDER this canvas, land its nodes exactly on the bar category
-// centers.
+// Published plot geometry — the bridge that lands the dendrogram strip's SVG nodes exactly on
+// this canvas's bar category centers.
 //
-// FRACTION space, deliberately. chart.js's category scale is linear in the plot
-// width (the bar controller sets `offset:true` on the index scale), so a centre's
-// fraction is INVARIANT under a pure width change — only the two px gutters and
-// the bar COUNT can move it. A window resize, the mask panel opening, or the sidebar
-// collapsing therefore costs no React work at all: the strip's percentage
-// coordinates track the canvas through the browser's own layout pass, in the same
-// frame. Publishing raw pixels would re-render on every resize tick and still
-// leave the genealogy one frame behind the bars mid-drag.
+// FRACTION space, deliberately: chart.js's category scale is linear in the plot width, so a
+// centre's fraction is INVARIANT under a pure width change and a resize costs no React work at
+// all. Raw pixels would re-render every resize tick and still leave the strip a frame behind.
 export interface PlotGeometry {
   // px inset, canvas left edge → plot area.
   left: number;
@@ -135,14 +129,9 @@ const barCapsPlugin: Plugin<
 // show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
 // CI are skipped.
 //
-// ONE band per candidate, on ONE percent-axis bar. There is no scale to resolve: a single
-// writer stamps it when the candidate finishes scoring. Do not reintroduce a per-bar scale;
-// make the one band mean one thing instead.
-//
-// WHICH bar is `whiskerAnchor(ctx)`, and it is a `SeriesKey` for a reason. This used to be
-// the bare literal `"accuracy"`, so turning that one series off left every band undrawn with
-// nothing on screen to say so — the second time this exact failure shipped. A key cannot
-// drift from the dataset it names without the compiler noticing.
+// ONE band per candidate, on ONE percent-axis bar. Do not reintroduce a per-bar scale; make the
+// one band mean one thing instead. WHICH bar is `whiskerAnchor(ctx)`, a `SeriesKey` rather than
+// a literal so the join cannot drift from the dataset it names without the compiler noticing.
 const meanFitnessCiWhiskerPlugin: Plugin<
   "bar",
   { anchor: SeriesKey | null; ciLo: (number | null)[]; ciHi: (number | null)[] }
@@ -225,15 +214,9 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
-// The in-flight candidate's bar pulses a green glow around its outline while it
-// is still accumulating samples — the same success-green glow the optimizer
-// canvas casts around the active node, here hugging the bar's box (no
-// background fill, just the glow around the box). Bars are canvas-drawn (not
-// DOM), so a CSS animation can't reach them: this plugin strokes the glow in
-// `afterDatasetsDraw` (on top of the bars) and drives its own redraw via
-// requestAnimationFrame. The loop runs ONLY while `index` is a real bar (a
-// candidate is scoring) and cancels itself the moment scoring ends or the chart
-// is destroyed — no standing animation against `animation:false`.
+// The scoring candidate's bar pulses a glow around its outline. Bars are canvas-drawn, so no CSS
+// animation can reach them: this strokes in `afterDatasetsDraw` and drives its own rAF redraw,
+// running ONLY while `index` is a real bar and cancelling itself when scoring ends.
 const PULSE_PERIOD_MS = 1600;
 const pulseRaf = new WeakMap<object, number>();
 const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
@@ -354,8 +337,8 @@ interface Props {
   showMask: boolean;
   // Draw the dashed cache-provenance line at each candidate's replayed share.
   showCache: boolean;
-  // Draw the adopted line's reading on the cells all of it answered.
-  showTrajectory: boolean;
+  // Draw every candidate's reading on the one set of cells all of them answered.
+  showOverlap: boolean;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
   // Bar index where the active mask first diverges from the realized record —
@@ -380,7 +363,7 @@ export const FitnessChart = memo(function FitnessChart({
   metrics,
   showMask,
   showCache,
-  showTrajectory,
+  showOverlap,
   selectedKey,
   onSelect,
   divergenceBoundary,
@@ -399,8 +382,8 @@ export const FitnessChart = memo(function FitnessChart({
   const labels = useMemo(() => views.map((v) => v.label), [views]);
 
   const ctx = useMemo<SeriesCtx>(
-    () => ({ metrics, showMask, showCache, showTrajectory, views, unit, electedMetric }),
-    [metrics, showMask, showCache, showTrajectory, views, unit, electedMetric],
+    () => ({ metrics, showMask, showCache, showOverlap, views, unit, electedMetric }),
+    [metrics, showMask, showCache, showOverlap, views, unit, electedMetric],
   );
   const active = useMemo(() => activeSeries(ctx), [ctx]);
   const showAbility = metrics.has("ability");

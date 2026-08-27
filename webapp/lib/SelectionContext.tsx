@@ -9,10 +9,9 @@ import type { SelectedCandidate } from "@/lib/types";
 //                 surfaces scoped to (null = follow live in-flight)
 //   - node      — which node is open for drill, AND which canvas it was
 //                 clicked on (see SelectedNode)
-//   - sampleSet — a fixed set of sample ids to recompute the per-candidate
-//                 fitness bars over (null = each bar over its own samples).
-//                 Populated by the Sample-trajectory "Steps" view; consumed
-//                 by the candidates card's "fixed sample set" mode. Independent axis.
+//   - sampleSet — the cells the candidates card's OVERLAP bars are read on
+//                 (null = the served reading). It moves that one series and
+//                 nothing else. Independent axis.
 //
 // The candidate and round axes are coupled: a candidate selection
 // implies a round (the candidate's). Writes go through the helpers
@@ -126,10 +125,10 @@ export function SelectionProvider({
   }, []);
 
   const setSelectionForSampleSet = useCallback((ids: number[] | null) => {
-    // `null` = mode off (per-candidate-own-samples). An empty array is a
-    // DISTINCT state: mode on, nothing selected — the chart blanks and the
-    // operator builds the set up sample-by-sample. Only the panel's own
-    // "Sample set" chip flips back to null.
+    // `null` = no pick, so the overlap bars fall back to the served set. An empty
+    // array is a DISTINCT state: the picker is open with nothing selected — the
+    // overlap bars blank and the operator builds the set up sample-by-sample. Only
+    // the card's ∩ chip flips back to null.
     setSampleSet(ids);
   }, []);
 
