@@ -1014,3 +1014,67 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     assert sorted(lifted) == [0, 1]
     assert [d["kind"] for d in lifted[0]] == ["round_winner"]
     assert [d["kind"] for d in lifted[1]] == ["elimination_cut"]
+
+
+def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
+    built_stores: Stores,
+) -> None:
+    """ "Apply this criterion from round N" must lift rounds 0..N-1 AND land the criterion.
+
+    Both halves are silent when wrong. A fork that took the OFFSHOOT branch would restart round
+    numbering at 1 and re-measure an origin the operator meant to keep — no error, just a branch
+    answering a different question. And a `scoring` override dropped on the way in leaves the fork
+    running under the parent's criterion, which is the one thing the operator pressed the button to
+    change: every round it then produces is evidence for a formula that was never applied.
+
+    `scoring` sits on `CampaignConfig` itself rather than under `optimization`, so it needs its own
+    bucket in `_apply_config_overrides` — folded into the nested copy beside the run limits it
+    would vanish with every gate green.
+    """
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+        mint_operator_fork,
+    )
+    from promptpotter.application.runner.entry import _apply_config_overrides
+    from promptpotter.domain.run_records import ConfigOverrides
+
+    store = built_stores.campaigns
+    parent = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_applyscenario")
+    store.create(parent, {"parent_session_id": "sess-apply"})
+    criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
+
+    fork_id = mint_operator_fork(
+        stores=built_stores,
+        hop=parent,
+        from_round=2,
+        from_candidate_id="",
+        seed=CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
+        steered_by="tester",
+        keep_rounds=True,
+    )
+    child = parent.model_copy(update={"cycle_id": fork_id})
+
+    # The REBASE branch: the record says which act this was, and it is the one that lifts rounds.
+    assert (store.load(child) or {}).get("fork", {}).get("trigger") == "operator_rewind"
+    assert (store.load(child) or {}).get("forked_from_round") == 2
+
+    # …and the criterion survives the ledger round-trip into the fork's effective config.
+    seed = store.read_cycle_seed(child)
+    assert seed is not None
+    base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    applied = _apply_config_overrides(base, seed.config_overrides)
+    assert applied.scoring == criterion
+    assert base.scoring is None  # the parent's frozen config is never mutated
+
+    # An origin-bearing seed asks for two different origins at once — the lifted round 0 already
+    # is one. Refused rather than silently dropped.
+    with pytest.raises(ValueError, match="origin_prompt_fields"):
+        mint_operator_fork(
+            stores=built_stores,
+            hop=parent,
+            from_round=1,
+            from_candidate_id="",
+            seed=CycleSeed(origin_prompt_fields={"instruction": "x"}, origin_source="fork_seed"),
+            steered_by="tester",
+            keep_rounds=True,
+        )

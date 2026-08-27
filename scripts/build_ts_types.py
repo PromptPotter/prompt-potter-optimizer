@@ -19,7 +19,6 @@ sys.path.insert(0, str(_REPO))
 
 from promptpotter.application.evidence import (
     ArmReplicate,
-    CampaignReading,
     Comparability,
     EditSpread,
     EffectProvenance,
@@ -30,6 +29,10 @@ from promptpotter.application.evidence import (
     OrderConfound,
     PairwiseComparison,
     RankedEdit,
+    ScenarioReading,
+    SubjectMask,
+    SubjectReading,
+    TrajectoryPoint,
 )
 from promptpotter.application.evidence_metrics import MetricSpec
 from promptpotter.domain.cycle_paths import CycleHop
@@ -213,7 +216,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
-    # --- cross-campaign evidence (application/evidence) — nested types first ---
+    # --- cross-subject evidence (application/evidence) — nested types first ---
     EffectProvenance,
     EditSpread,
     RankedEdit,
@@ -223,7 +226,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     EvidencePower,
     OrderConfound,
     MetricSpec,
-    CampaignReading,
+    SubjectMask,
+    ScenarioReading,
+    TrajectoryPoint,
+    SubjectReading,
     PairwiseComparison,
     MetricReading,
     Evidence,
@@ -467,6 +473,7 @@ def _emit_evaluator_meta() -> str:
         # Through ``str`` first: a StrEnum member's ``repr`` is ``<NodeType.RANKER: 'ranker'>``,
         # which emits as TS the compiler cannot parse. Every other emitter here renders ``.value``.
         f" node_type: {repr(str(m['node_type'])) if m['node_type'] else 'null'},"
+        f" from_rows: {'true' if m['from_rows'] else 'false'},"
         f" description: {m['description']!r} }},"
         for m in evaluators_meta()
     )
@@ -476,6 +483,7 @@ def _emit_evaluator_meta() -> str:
         '  scope: "per_round" | "per_sample";\n'
         '  direction: "high" | "low";\n'
         "  node_type: string | null;\n"
+        "  from_rows: boolean;\n"
         "  description: string;\n"
         "}\n\n"
         "// The evaluator registry, mirrored from application/scoring/evaluators.py.\n"

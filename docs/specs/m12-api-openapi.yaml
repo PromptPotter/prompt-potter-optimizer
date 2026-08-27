@@ -2844,6 +2844,19 @@ components:
               description: |
                 Operator identity stamped into lineage as the human who steered
                 this fork. Recorded, not gated — operators may act; we record it.
+            keep_rounds:
+              type: boolean
+              default: false
+              description: |
+                Which of the two acts this fork is. `false` (default) is
+                `operator_steered`: a clean offshoot branching from the origin,
+                re-scoring the edited searchpoint, rounds numbered from 1. `true`
+                is `operator_rewind` — rounds `0..round-1` are LIFTED from the
+                parent and the fork continues at `round` under the seed's
+                overrides. That is what an "apply this from here" press means, and
+                the same act the terminal spells `resume --rewind N`. It refuses a
+                seed carrying `origin_prompt_fields`: the lifted round 0 already
+                IS the origin, so declaring a second one is contradictory.
             seed:
               $ref: '#/components/schemas/OperatorForkOverride'
 
@@ -2852,9 +2865,11 @@ components:
       additionalProperties: false
       description: |
         The edited-searchpoint origin override that makes a fork's origin =
-        chosen searchpoint + operator edits. Required on every operator fork
-        (all are `operator_steered`). Persisted to the fork's ledger as a read-once
-        `CycleSeedRecord` (read at init) and onto the parent's `FORK_CUT` ledger record.
+        chosen searchpoint + operator edits. Required on every operator fork.
+        Under `keep_rounds` the origin is the LIFTED round 0 instead, so only the
+        override half of this applies and `origin_prompt_fields` is refused.
+        Persisted to the fork's ledger as a read-once `CycleSeedRecord` (read at
+        init) and onto the parent's `FORK_CUT` ledger record.
       properties:
         origin_prompt_fields:
           type: object
@@ -2904,17 +2919,18 @@ components:
       type: object
       additionalProperties: false
       description: |
-        The fork's `OptimizationConfig` delta. Every field optional — absent
+        The fork's campaign-config delta. Every field optional — absent
         inherits the parent's value; applied to the fork's snapshot at init,
-        never mutates the parent's frozen config. Three kinds of knob ride here:
+        never mutates the parent's frozen config. Four kinds of knob ride here:
         (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
         the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
         toggle (`per_round_resubset`) → the nested
         `mechanisms.selection`; (3) the search-space policy toggle
-        (`schema_field_rename`). Every policy knob
-        invalidates search comparability, so a fork-at-offset-0 is how you A/B one
-        without touching the global default or the parent cycle.
+        (`schema_field_rename`); (4) the composite criterion (`scoring`), which
+        sits on `CampaignConfig` itself rather than under `optimization`. Every
+        policy knob invalidates search comparability, so a fork-at-offset-0 is how
+        you A/B one without touching the global default or the parent cycle.
       properties:
         max_rounds:
           type: integer
@@ -2951,6 +2967,20 @@ components:
           minimum: 0
           maximum: 1
           description: Per-candidate P(best) elimination threshold.
+        scoring:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: { type: string }
+          nullable: true
+          description: |
+            The composite-fitness criterion (`CampaignConfig.scoring`) — a formula
+            string, or the per-node map. The ONE override a what-if can preview
+            against the record: a lens re-elects every round from rows already
+            measured, so the round the preview parts at is the round a
+            `keep_rounds` fork carrying this is minted at. Every other field here
+            moves a ceiling or a patience count, which no measurement can be
+            re-read under, so those forks preview nothing.
         per_round_resubset:
           type: boolean
           nullable: true

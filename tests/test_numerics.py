@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import yaml
 
-from promptpotter.application.evidence import CampaignReading, _comparability
+from promptpotter.application.evidence import SubjectReading, _comparability, _stamp_comparable
 from promptpotter.application.intelligence.exploration import (
     Observation,
     adopted_level_trajectory,
@@ -3904,24 +3904,38 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
     """The one reading that must not degrade quietly: a `None` here says "we cannot tell", and
     collapsing it to `len(ids) == 1` would answer YES for a roster where nothing is stamped."""
 
-    def origin(ruler: str | None) -> CampaignReading:
-        return CampaignReading(
+    def origin(ruler: str | None, dataset: str = "d") -> SubjectReading:
+        return SubjectReading(
+            key="campaign:c",
+            kind="campaign",
+            inside=[],
             campaign_id="c",
-            dataset_name="d",
+            cycle_id="cycle_0",
+            candidate_id="origin",
+            label="c",
+            dataset_name=dataset,
             created_at="",
+            comparable=None,
+            comparable_note="",
+            mask=None,
+            scenario=None,
+            trajectory=None,
+            config=None,
             arm_id="a",
             instrument_id=None,
             ability=AbilityReading(
                 theta=0.0, se=None, ruler_id=ruler, ruler_n=1, calibration_model=None
             ),
-            spend_usd=None,
-            rounds_scored=0,
+            round=0,
+            cycle_spend_usd=None,
+            cycle_rounds_scored=0,
+            spend_to_round={},
             values={"q1": 0.0},
             value=0.0,
             ci_lo=None,
             ci_hi=None,
             n_cells=1,
-            n_unscorable=0,
+            unscorable_cells=[],
         )
 
     def verdict(*rulers: str | None) -> tuple[bool | None, str]:
@@ -3933,6 +3947,89 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
     # Unstamped, and mixed-with-stamped: neither is a yes.
     assert verdict(None, None) == (None, "ruler_unstamped")
     assert verdict("r1", None) == (None, "ruler_unstamped")
+
+    # The PER-SUBJECT twin, and the same rule: a surface strikes one channel through on it, so an
+    # unknown that degraded to `True` would render the odd row as a peer of the rest. The minority
+    # is what gets marked — the majority defines the scale everything else is judged against.
+    def marks(*rows: SubjectReading) -> list[bool | None]:
+        return [r.comparable for r in _stamp_comparable(list(rows))]
+
+    assert marks(origin("r1"), origin("r1"), origin("r2")) == [True, True, False]
+    assert marks(origin("r1"), origin("r1"), origin(None)) == [True, True, None]
+    assert marks(origin(None), origin(None)) == [None, None]
+    # A different dataset is not a ruler question at all — nothing about the scale rescues it.
+    assert marks(origin("r1"), origin("r1"), origin("r1", "other")) == [True, True, False]
+
+
+def test_a_scenario_chain_stops_where_the_record_parts() -> None:
+    """The what-if's silent failure: walking PAST the round the two readings part. Every step after
+    it is judged against a parent the run never carried — no candidate was measured against it, and
+    L1 would have generated a different population from it — yet those steps render exactly like
+    the prefix that is real, so a chart of "what would have happened" plots rounds that could not
+    have. The round the walk stops on is also the round a fork applying this criterion is minted at
+    (`resume_and_fork/resume.py`), so a chain that runs long misreports where that fork goes.
+
+    Also pins the self-consistency floor: fed the criterion the run actually realized, the chain
+    reproduces the recorded winners and never parts. One that cannot reproduce the record under its
+    own formula is measuring the fold, not the formula.
+    """
+    from promptpotter.application.mask.record import MaskCandidate, MaskCycle, MaskRound
+    from promptpotter.application.mask.scenario import scenario_spine
+
+    def cand(cid: str, acc: float, latency: float, *, winner: bool = False) -> MaskCandidate:
+        return MaskCandidate(
+            candidate_id=cid,
+            evaluators={"accuracy": acc, "mean_latency_s": latency},
+            accuracy=acc,
+            n_scored=4,
+            is_winner=winner,
+        )
+
+    origin = cand("c0", 0.50, 1.0)
+    # Round 1: `slow` is the most accurate and is crowned. Round 2 exists only so that "the walk
+    # stopped" is a claim with something to stop BEFORE — with no round after the parting, a chain
+    # that ran on and one that halted are the same list.
+    slow = cand("slow", 0.80, 9.0, winner=True)
+    fast = cand("fast", 0.60, 1.0)
+    steady = cand("steady", 0.85, 8.0, winner=True)
+    cycle = MaskCycle(
+        cycle_id="cycle_0",
+        rounds=[
+            MaskRound(cycle_id="cycle_0", round=0, candidates=[origin]),
+            MaskRound(
+                cycle_id="cycle_0",
+                round=1,
+                candidates=[slow, fast],
+                parent_evaluators=dict(origin.evaluators),
+                parent_accuracy=origin.accuracy,
+            ),
+            MaskRound(
+                cycle_id="cycle_0",
+                round=2,
+                candidates=[steady],
+                parent_evaluators=dict(slow.evaluators),
+                parent_accuracy=slow.accuracy,
+            ),
+        ],
+    )
+
+    # Realized criterion ⇒ the record, reproduced, the two readings agreeing on every round.
+    realized = scenario_spine(cycle, "accuracy")
+    assert [(s.round, s.candidate_id, s.recorded_id) for s in realized] == [
+        (0, "c0", "c0"),
+        (1, "slow", "slow"),
+        (2, "steady", "steady"),
+    ]
+
+    # Flip to a criterion that punishes latency: round 1 elects `fast` (0.55) over the origin
+    # (0.45), where `slow` scores 0.35 — so it parts from the record's `slow` right there, and the
+    # walk ends. Round 2 is NOT on the chain: `steady` was measured against `slow`, and what it
+    # would have scored against `fast` is not a thing the record knows.
+    flipped = scenario_spine(cycle, "accuracy - 0.05 * mean_latency_s")
+    assert [(s.round, s.candidate_id, s.recorded_id) for s in flipped] == [
+        (0, "c0", "c0"),
+        (1, "fast", "slow"),
+    ]
 
 
 def test_overlap_set_is_one_every_member_actually_answered() -> None:

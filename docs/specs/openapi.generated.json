@@ -259,7 +259,7 @@
       },
       "ArmReplicate": {
         "additionalProperties": false,
-        "description": "One arm that ran more than once. ``level_spread`` is the cheapest noise reading on the\nboard — taken from campaigns already paid for, and invisible to a roster that lists campaigns\nrather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
+        "description": "One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran\nmore than once. Computed over ``campaign`` subjects only: a course and a candidate share their\ncampaign's round-0 hashes, so grouping them by it would report a branch as a replicate of the\ntrunk it grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from\ncampaigns already paid for, and invisible to a roster that lists campaigns rather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
         "properties": {
           "arm_id": {
             "title": "Arm Id",
@@ -541,137 +541,6 @@
         "title": "CampaignListResponse",
         "type": "object"
       },
-      "CampaignReading": {
-        "additionalProperties": false,
-        "description": "One campaign, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same campaign, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
-        "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AbilityReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "arm_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Arm Id"
-          },
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Lo"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "instrument_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Id"
-          },
-          "n_cells": {
-            "title": "N Cells",
-            "type": "integer"
-          },
-          "n_unscorable": {
-            "title": "N Unscorable",
-            "type": "integer"
-          },
-          "rounds_scored": {
-            "title": "Rounds Scored",
-            "type": "integer"
-          },
-          "spend_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Spend Usd"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "values": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Values",
-            "type": "object"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "dataset_name",
-          "created_at",
-          "arm_id",
-          "instrument_id",
-          "ability",
-          "spend_usd",
-          "rounds_scored",
-          "values",
-          "value",
-          "ci_lo",
-          "ci_hi",
-          "n_cells",
-          "n_unscorable"
-        ],
-        "title": "CampaignReading",
-        "type": "object"
-      },
       "CampaignStorageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -858,7 +727,7 @@
       },
       "Comparability": {
         "additionalProperties": false,
-        "description": "Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a\nreader must be able to tell them apart.\n\n``verdict`` is ``None`` for UNKNOWN, which is not ``True`` and must never render as it.\n``datasets_differ`` dominates: campaigns on different datasets measure different things, so no\nruler agreement could rescue the comparison. Their cells never intersect either, which is why\nthe variance decomposition is correctly absent rather than empty.",
+        "description": "Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a\nreader must be able to tell them apart.\n\n``verdict`` is ``None`` for UNKNOWN, which is not ``True`` and must never render as it.\n``datasets_differ`` dominates: subjects on different datasets measure different things, so no\nruler agreement could rescue the comparison. Their cells never intersect either, which is why\nthe variance decomposition is correctly absent rather than empty.\n\nThis is the SELECTION's verdict; ``SubjectReading.comparable`` is the same question asked of\none channel, and it is what a surface strikes a row through on.",
         "properties": {
           "datasets": {
             "items": {
@@ -1900,15 +1769,8 @@
       },
       "Evidence": {
         "additionalProperties": false,
-        "description": "The whole read for one selection of campaigns — recomputed on every fetch.",
+        "description": "The whole read for one selection of subjects — recomputed on every fetch.",
         "properties": {
-          "campaigns": {
-            "items": {
-              "$ref": "#/components/schemas/CampaignReading"
-            },
-            "title": "Campaigns",
-            "type": "array"
-          },
           "comparability": {
             "$ref": "#/components/schemas/Comparability"
           },
@@ -1961,11 +1823,18 @@
           "spread": {
             "$ref": "#/components/schemas/EditSpread"
           },
-          "unread_campaigns": {
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/SubjectReading"
+            },
+            "title": "Subjects",
+            "type": "array"
+          },
+          "unread_subjects": {
             "items": {
               "type": "string"
             },
-            "title": "Unread Campaigns",
+            "title": "Unread Subjects",
             "type": "array"
           },
           "variance": {
@@ -1981,7 +1850,7 @@
         },
         "required": [
           "generated_at",
-          "campaigns",
+          "subjects",
           "comparability",
           "metric"
         ],
@@ -1990,7 +1859,7 @@
       },
       "EvidencePower": {
         "additionalProperties": false,
-        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per arm it\nwould take to resolve the biggest gap the roster already shows.\n\nThe last two are the harder limit and they answer a different question. Effect size decides the\nfirst three; ``exact_p_floor`` is what the WIDTH alone permits, so a panel below\n``cells_for_corrected_verdict`` cannot produce a Holm-corrected result however large the effect —\na clean sweep of every cell included. Buy width to that line before buying it for power.",
+        "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject\nit would take to resolve the biggest gap the roster already shows.\n\nThe last two are the harder limit and they answer a different question. Effect size decides the\nfirst three; ``exact_p_floor`` is what the WIDTH alone permits, so a panel below\n``cells_for_corrected_verdict`` cannot produce a Holm-corrected result however large the effect —\na clean sweep of every cell included. Buy width to that line before buying it for power.",
         "properties": {
           "cells_for_corrected_verdict": {
             "title": "Cells For Corrected Verdict",
@@ -2007,16 +1876,16 @@
             ],
             "title": "Cells For Largest Gap"
           },
-          "cells_per_arm": {
-            "title": "Cells Per Arm",
+          "cells_per_subject": {
+            "title": "Cells Per Subject",
             "type": "integer"
           },
           "exact_p_floor": {
             "title": "Exact P Floor",
             "type": "number"
           },
-          "largest_arm_gap": {
-            "title": "Largest Arm Gap",
+          "largest_subject_gap": {
+            "title": "Largest Subject Gap",
             "type": "number"
           },
           "min_detectable_effect": {
@@ -2031,8 +1900,8 @@
         "required": [
           "paired_se",
           "min_detectable_effect",
-          "largest_arm_gap",
-          "cells_per_arm",
+          "largest_subject_gap",
+          "cells_per_subject",
           "cells_for_largest_gap",
           "exact_p_floor",
           "cells_for_corrected_verdict"
@@ -2042,45 +1911,45 @@
       },
       "EvidenceVariance": {
         "additionalProperties": false,
-        "description": "The additive cell + arm decomposition over the cells every campaign measured.\n\n``arm_effect_sd`` alone decides nothing: under the null an arm mean still scatters by\n``null_arm_scatter``, so an arm SD at or below it is noise wearing a ranking.",
+        "description": "The additive cell + subject decomposition over the cells every subject measured.\n\n``subject_effect_sd`` alone decides nothing: under the null a subject mean still scatters by\n``null_subject_scatter``, so a subject SD at or below it is noise wearing a ranking.",
         "properties": {
-          "arm_effect_sd": {
-            "title": "Arm Effect Sd",
-            "type": "number"
-          },
-          "arm_sd_below_noise": {
-            "title": "Arm Sd Below Noise",
-            "type": "boolean"
-          },
           "cell_effect_sd": {
             "title": "Cell Effect Sd",
             "type": "number"
-          },
-          "n_arms": {
-            "title": "N Arms",
-            "type": "integer"
           },
           "n_cells": {
             "title": "N Cells",
             "type": "integer"
           },
-          "null_arm_scatter": {
-            "title": "Null Arm Scatter",
+          "n_subjects": {
+            "title": "N Subjects",
+            "type": "integer"
+          },
+          "null_subject_scatter": {
+            "title": "Null Subject Scatter",
             "type": "number"
           },
           "residual_sd": {
             "title": "Residual Sd",
             "type": "number"
+          },
+          "subject_effect_sd": {
+            "title": "Subject Effect Sd",
+            "type": "number"
+          },
+          "subject_sd_below_noise": {
+            "title": "Subject Sd Below Noise",
+            "type": "boolean"
           }
         },
         "required": [
           "cell_effect_sd",
-          "arm_effect_sd",
+          "subject_effect_sd",
           "residual_sd",
-          "null_arm_scatter",
-          "arm_sd_below_noise",
+          "null_subject_scatter",
+          "subject_sd_below_noise",
           "n_cells",
-          "n_arms"
+          "n_subjects"
         ],
         "title": "EvidenceVariance",
         "type": "object"
@@ -3093,6 +2962,13 @@
             "title": "Catalogue",
             "type": "array"
           },
+          "covered_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Covered Cells",
+            "type": "array"
+          },
           "n_tests": {
             "title": "N Tests",
             "type": "integer"
@@ -3127,6 +3003,7 @@
           "catalogue",
           "namespace",
           "scored_cells",
+          "covered_cells",
           "pairwise",
           "n_tests"
         ],
@@ -3293,7 +3170,7 @@
       },
       "OrderConfound": {
         "additionalProperties": false,
-        "description": "Run order against outcome. A campaign-at-a-time comparison confounds the arm with WHEN it\nran — the archive grows between runs, so the ruler and the caches both move with the calendar.",
+        "description": "Run order against outcome. A one-at-a-time comparison confounds the subject with WHEN it\nran — the archive grows between runs, so the ruler and the caches both move with the calendar.",
         "properties": {
           "level_vs_order": {
             "anyOf": [
@@ -3306,8 +3183,8 @@
             ],
             "title": "Level Vs Order"
           },
-          "n_campaigns": {
-            "title": "N Campaigns",
+          "n_subjects": {
+            "title": "N Subjects",
             "type": "integer"
           },
           "order_confounded": {
@@ -3329,7 +3206,7 @@
         "required": [
           "level_vs_order",
           "spend_vs_order",
-          "n_campaigns",
+          "n_subjects",
           "order_confounded"
         ],
         "title": "OrderConfound",
@@ -3430,16 +3307,8 @@
       },
       "PairwiseComparison": {
         "additionalProperties": false,
-        "description": "One unordered pair, blocked on the cells BOTH campaigns scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
+        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
         "properties": {
-          "campaign_a": {
-            "title": "Campaign A",
-            "type": "string"
-          },
-          "campaign_b": {
-            "title": "Campaign B",
-            "type": "string"
-          },
           "ci_hi": {
             "anyOf": [
               {
@@ -3491,11 +3360,19 @@
               }
             ],
             "title": "P Value"
+          },
+          "subject_a": {
+            "title": "Subject A",
+            "type": "string"
+          },
+          "subject_b": {
+            "title": "Subject B",
+            "type": "string"
           }
         },
         "required": [
-          "campaign_a",
-          "campaign_b",
+          "subject_a",
+          "subject_b",
           "median_shift",
           "ci_lo",
           "ci_hi",
@@ -3868,6 +3745,77 @@
         "title": "SampleSeries",
         "type": "object"
       },
+      "ScenarioReading": {
+        "additionalProperties": false,
+        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/scenario.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\n``note`` carries the caveat as a SERVED FACT, the way ``Comparability.note`` does — because the\nhonest limit of a lens is not something a surface can be trusted to remember.",
+        "properties": {
+          "first_divergent_round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Divergent Round"
+          },
+          "invariant_rounds": {
+            "title": "Invariant Rounds",
+            "type": "integer"
+          },
+          "n_samples_scored": {
+            "title": "N Samples Scored",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "recorded_winner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Winner Id"
+          },
+          "scenario_winner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Winner Id"
+          },
+          "total_rounds": {
+            "title": "Total Rounds",
+            "type": "integer"
+          },
+          "winner_changed": {
+            "title": "Winner Changed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recorded_winner_id",
+          "scenario_winner_id",
+          "winner_changed",
+          "first_divergent_round",
+          "invariant_rounds",
+          "total_rounds",
+          "n_samples_scored",
+          "note"
+        ],
+        "title": "ScenarioReading",
+        "type": "object"
+      },
       "SpawnedBy": {
         "additionalProperties": false,
         "description": "The outer work-item an L4 inner cycle was spawned to measure.\n\nStamped at inner-cycle mint (``runner/inner/spawn.py``) — an inner campaign's own\nids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its\nOWN origin), so without this the fan-out can only be numbered by launch order.",
@@ -3944,6 +3892,297 @@
         "title": "SpawnedBy",
         "type": "object"
       },
+      "SubjectMask": {
+        "additionalProperties": false,
+        "description": "The mask this channel is read under, echoed back. Served rather than left implicit in the\nkey, so a chart legend can say what a channel IS without re-splitting an address.",
+        "properties": {
+          "lens": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lens"
+          },
+          "samples": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples"
+          }
+        },
+        "required": [
+          "lens",
+          "samples"
+        ],
+        "title": "SubjectMask",
+        "type": "object"
+      },
+      "SubjectReading": {
+        "additionalProperties": false,
+        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
+        "properties": {
+          "ability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AbilityReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arm_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arm Id"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "comparable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparable"
+          },
+          "comparable_note": {
+            "title": "Comparable Note",
+            "type": "string"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "cycle_rounds_scored": {
+            "title": "Cycle Rounds Scored",
+            "type": "integer"
+          },
+          "cycle_spend_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cycle Spend Usd"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "inside": {
+            "items": {
+              "$ref": "#/components/schemas/CycleHop"
+            },
+            "title": "Inside",
+            "type": "array"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "campaign",
+              "course",
+              "candidate"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectMask"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "scenario": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScenarioReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spend_to_round": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Spend To Round",
+            "type": "object"
+          },
+          "trajectory": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TrajectoryPoint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trajectory"
+          },
+          "unscorable_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unscorable Cells",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "inside",
+          "campaign_id",
+          "cycle_id",
+          "candidate_id",
+          "label",
+          "dataset_name",
+          "created_at",
+          "comparable",
+          "comparable_note",
+          "mask",
+          "scenario",
+          "trajectory",
+          "config",
+          "arm_id",
+          "instrument_id",
+          "ability",
+          "round",
+          "cycle_spend_usd",
+          "cycle_rounds_scored",
+          "spend_to_round",
+          "values",
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n_cells",
+          "unscorable_cells"
+        ],
+        "title": "SubjectReading",
+        "type": "object"
+      },
       "TermsConsent": {
         "additionalProperties": false,
         "description": "Consent state echoed back after an accept (same fields the gate reads on\n``/me``). The accepted timestamp stays server-side in ``user.json``.",
@@ -3969,6 +4208,72 @@
           "terms_accepted_version"
         ],
         "title": "TermsConsent",
+        "type": "object"
+      },
+      "TrajectoryPoint": {
+        "additionalProperties": false,
+        "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_trajectory``), because every point past the origin opens a round document.",
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "round",
+          "label",
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n_cells"
+        ],
+        "title": "TrajectoryPoint",
         "type": "object"
       },
       "UserSettings": {
@@ -6363,56 +6668,80 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "Roster, comparability, replicates, the cell/arm/residual decomposition, what the selection\ncan resolve, the run-order confound, and — under the selected metric — a merged interval per\ncampaign with every pairwise test. Reduced fresh from disk on each fetch (on-demand, not the\n2 s poll); zero LLM, nothing persisted.",
+        "description": "Roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {
-            "description": "Campaign ids to pool. Repeat the parameter; may span datasets.",
+            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA WHAT-IF rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, caveat included.",
             "in": "query",
-            "name": "campaign",
+            "name": "subject",
             "required": false,
             "schema": {
               "default": [],
-              "description": "Campaign ids to pool. Repeat the parameter; may span datasets.",
+              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA WHAT-IF rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, caveat included.",
               "items": {
                 "type": "string"
               },
-              "title": "Campaign",
+              "title": "Subject",
               "type": "array"
             }
           },
           {
-            "description": "Pool every campaign bound to this dataset, in addition to any named by `campaign`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
+            "description": "Expand to one `campaign:` subject per campaign bound to this dataset, in addition to any named by `subject`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
             "in": "query",
             "name": "dataset",
             "required": false,
             "schema": {
               "default": "",
-              "description": "Pool every campaign bound to this dataset, in addition to any named by `campaign`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
+              "description": "Expand to one `campaign:` subject per campaign bound to this dataset, in addition to any named by `subject`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
               "title": "Dataset",
               "type": "string"
             }
           },
           {
-            "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the widest walk here: the origin half reads one round-0 document per campaign, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+            "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
             "in": "query",
             "name": "ranking",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Also rank the candidate edits measured across the selection. OFF by default because it is the widest walk here: the origin half reads one round-0 document per campaign, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+              "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
               "title": "Ranking",
               "type": "boolean"
             }
           },
           {
-            "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected campaign carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
+            "description": "Also serve the branch standing behind each course / candidate subject — the winner chain from its origin to its head, each point read on its own cells. OFF by default for the same reason as `ranking`: every point past the origin opens a round document. A campaign subject serves none, having no branch.",
+            "in": "query",
+            "name": "trajectory",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also serve the branch standing behind each course / candidate subject — the winner chain from its origin to its head, each point read on its own cells. OFF by default for the same reason as `ranking`: every point past the origin opens a round document. A campaign subject serves none, having no branch.",
+              "title": "Trajectory",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Also serve WHAT each searchpoint is — one flat `key -> value` map over its RESOLVED node config plus its prompt fields, which is what lines two of them up against each other. OFF by default because a prompt field is the largest thing this read puts on the wire and a four-channel comparison carries four.",
+            "in": "query",
+            "name": "config",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also serve WHAT each searchpoint is — one flat `key -> value` map over its RESOLVED node config plus its prompt fields, which is what lines two of them up against each other. OFF by default because a prompt field is the largest thing this read puts on the wire and a four-channel comparison carries four.",
+              "title": "Config",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected subject carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
             "in": "query",
             "name": "metric",
             "required": false,
             "schema": {
               "default": "measurand",
-              "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected campaign carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
+              "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected subject carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
               "title": "Metric",
               "type": "string"
             }

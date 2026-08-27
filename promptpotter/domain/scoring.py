@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, NotRequired, TypedDict, cast
@@ -202,6 +203,69 @@ class ScoringSpec(NamedTuple):
     per_sample: str | None
     per_round: str | None
     scorer_id: str
+
+
+def _summands(node: ast.expr) -> list[ast.expr]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_summands(node.left), node.right]
+    return [node]
+
+
+def _weighted_name(node: ast.expr) -> tuple[str, float] | None:
+    """One ``w * name`` / ``name * w`` / ``w * (1 - name)`` term, or a bare name at weight 1.0 —
+    which the default formula (`accuracy`) is, and rejecting it would leave the common case
+    unseeded."""
+    if isinstance(node, ast.Name):
+        return (node.id, 1.0)
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Mult):
+        return None
+    coef, term = (node.left, node.right)
+    if not isinstance(coef, ast.Constant):
+        coef, term = (node.right, node.left)
+    if not isinstance(coef, ast.Constant) or isinstance(coef.value, bool):
+        return None
+    if not isinstance(coef.value, int | float):
+        return None
+    # `(1 - name)` is how a lower-is-better evaluator enters a sum; the weight is the operator's
+    # either way, so the two shapes report the same number.
+    if (
+        isinstance(term, ast.BinOp)
+        and isinstance(term.op, ast.Sub)
+        and isinstance(term.left, ast.Constant)
+        and term.left.value == 1
+        and isinstance(term.right, ast.Name)
+    ):
+        return (term.right.id, float(coef.value))
+    return (term.id, float(coef.value)) if isinstance(term, ast.Name) else None
+
+
+def weighted_sum_weights(formula: str | None) -> dict[str, float] | None:
+    """*formula*'s per-evaluator coefficient where it IS a weighted sum — the shape every default
+    and operator formula takes.
+
+    ``None`` where it is not one, and that is the load-bearing answer rather than a failure: a
+    control offering one weight per evaluator can only describe a weighted sum, so inventing
+    entries for a formula that is not one hands the operator sliders that do not add up to what is
+    being scored. The browser did exactly that with a regex, silently substituting a fixed default
+    for every name it could not parse. A name appearing twice is refused for the same reason —
+    one slider cannot stand for two terms.
+
+    Whether a term is INVERTED is deliberately not returned: the evaluator registry already says
+    which are lower-is-better, and a second answer here is one that can disagree with it.
+    """
+    if not formula:
+        return None
+    try:
+        tree = ast.parse(formula, "<scoring formula>", "eval")
+    except SyntaxError:
+        return None
+    weights: dict[str, float] = {}
+    for summand in _summands(tree.body):
+        term = _weighted_name(summand)
+        if term is None or term[0] in weights:
+            return None
+        weights[term[0]] = term[1]
+    return weights or None
 
 
 def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:

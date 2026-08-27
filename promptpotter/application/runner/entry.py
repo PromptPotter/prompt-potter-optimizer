@@ -148,16 +148,20 @@ def _apply_config_overrides(
         }.items()
         if v is not None
     }
-    if not opt_updates and not sel_updates:
+    # `scoring` sits on CampaignConfig itself, not under `optimization` — the one override whose
+    # home is the outer model, so it rides its own bucket rather than being folded into a nested
+    # copy that would silently drop it.
+    top_updates: dict[str, Any] = {"scoring": overrides.scoring} if overrides.scoring else {}
+    if not opt_updates and not sel_updates and not top_updates:
         return config
     if sel_updates:
         mech = config.optimization.mechanisms
         opt_updates["mechanisms"] = mech.model_copy(
             update={"selection": mech.selection.model_copy(update=sel_updates)}
         )
-    return config.model_copy(
-        update={"optimization": config.optimization.model_copy(update=opt_updates)}
-    )
+    if opt_updates:
+        top_updates["optimization"] = config.optimization.model_copy(update=opt_updates)
+    return config.model_copy(update=top_updates)
 
 
 def _read_cycle_seed(session: Session) -> CycleSeed | None:

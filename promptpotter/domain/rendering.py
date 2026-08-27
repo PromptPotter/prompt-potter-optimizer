@@ -43,7 +43,7 @@ def display_rank_key(
     round — no candidate carrying a θ, nothing crowned yet — orders on the composite alone.
 
     ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
-    DIFFERENT ordering under a what-if formula, and pinning the active-formula winner to rank 1
+    DIFFERENT ordering under a masked formula, and pinning the active-formula winner to rank 1
     there would leave it unable to disagree."""
     return (
         is_winner,

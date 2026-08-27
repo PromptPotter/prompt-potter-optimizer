@@ -358,13 +358,33 @@ def mint_operator_fork(
     from_candidate_id: str,
     seed: CycleSeed,
     steered_by: str,
+    keep_rounds: bool = False,
 ) -> str:
     """The operator-initiated fork entry; no parallel creation path exists. Every operator fork is a clean
-    offshoot carrying *seed* — recorded, not forbidden: operators may act, and we record that they did."""
+    offshoot carrying *seed* — recorded, not forbidden: operators may act, and we record that they did.
+
+    ``keep_rounds`` picks which of the two the act is. Default is the OFFSHOOT: branch from the
+    origin, re-score the edited searchpoint, number rounds from 1 — the steer that starts over from
+    a point. Set, it is the REWIND the terminal spells ``resume --rewind N``: rounds ``0..N-1`` are
+    lifted and the fork continues at N under the seed's overrides. That is the shape a mask
+    preview earns — the preview names the round the record stops holding, and this is the fork that
+    keeps everything before it."""
     parent_index = stores.campaigns.load(hop) or {}
+    if keep_rounds and seed.origin_prompt_fields:
+        # Two different origins asked for at once: the lifted round 0 is already the origin, so a
+        # declared one would either be ignored or overwrite measured rows. Refused rather than
+        # silently dropped — the caller meant one of the two acts and this says which it cannot be.
+        raise ValueError(
+            "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
+            "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
+        )
     spec = ForkSpec(
-        trigger=ForkTrigger.OPERATOR_STEERED,
-        reason=f"operator-steered fork from {hop.cycle_id}",
+        trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
+        reason=(
+            f"operator-applied from round {from_round} of {hop.cycle_id}"
+            if keep_rounds
+            else f"operator-steered fork from {hop.cycle_id}"
+        ),
         issued_by=steered_by or UNATTRIBUTED_OPERATOR,
         from_round=from_round,
         from_candidate_id=from_candidate_id or None,
@@ -374,6 +394,6 @@ def mint_operator_fork(
         stores.campaigns,
         hop,
         str(parent_index.get("parent_session_id", "")),
-        0,
+        from_round if keep_rounds else 0,
         spec,
     )

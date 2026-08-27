@@ -184,7 +184,7 @@ def _verify_outer_panel_contract(
     session: Session, campaign_config: CampaignConfig, dataset_dir: Path
 ) -> None:
     """An emitted-but-undeclared key is dropped by ``sample_measurement`` and never reaches
-    ``pipeline_data``, so the what-if panel would score a term nobody measured. Fail at arm time."""
+    ``pipeline_data``, so a mask would score a term nobody measured. Fail at arm time."""
     schema = session.pipeline_schema
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():

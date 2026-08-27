@@ -10,7 +10,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, decode_cycle_path
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.layout import cycle_dir_for
@@ -80,17 +80,12 @@ def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, stores: Stores) -> Pat
 
 
 def decode_descend(descend: str | None) -> CyclePath:
-    """Parse a ``?descend=`` tail into a :data:`CyclePath`, mirroring the webapp's ``encodeDescend``. The
-    wire CODEC and nothing more — component validation and the descent itself are ``descend_store``'s."""
-    if not descend:
-        return ()
-    hops: list[CycleHop] = []
-    for seg in descend.split("~"):
-        cmp, sep, cyc = seg.partition("::")
-        if not sep or not cmp or not cyc:
-            raise BadRequestError(f"Malformed descend hop: {seg!r}")
-        hops.append(CycleHop(campaign_id=cmp, cycle_id=cyc))
-    return tuple(hops)
+    """A ``?descend=`` tail as a :data:`CyclePath` — this route's refusal over the ONE codec
+    (:func:`decode_cycle_path`), which the evidence read's ``;in=`` segment shares."""
+    try:
+        return decode_cycle_path(descend or "")
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
 
 
 def get_job_registry(request: Request) -> JobRegistry:

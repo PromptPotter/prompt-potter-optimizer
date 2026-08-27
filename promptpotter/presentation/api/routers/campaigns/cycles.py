@@ -10,7 +10,7 @@ from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from promptpotter.application.mask.divergence import Verdict, find_divergences
-from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
 from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.scoring.formula import compile_round_scorer
@@ -222,18 +222,6 @@ def _resolve_lens(lens: str | None) -> _Lens:
     return _Lens(make_scoring_verdict(criterion), criterion if lens else None)
 
 
-def _parse_samples(samples: str | None) -> frozenset[int] | None:
-    """Parse the ``samples`` lens param — a comma-separated sample-id list — into a frozenset.
-    Empty / unset ⇒ None (full-set mask). A non-integer token is a 400."""
-    if not samples or not samples.strip():
-        return None
-    try:
-        ids = frozenset(int(tok) for tok in samples.split(",") if tok.strip())
-    except ValueError as exc:
-        raise BadRequestError(f"Invalid samples list: {samples!r} ({exc})") from exc
-    return ids or None
-
-
 def _mask_records(
     stores: Stores, tree: LineageNode, samples: frozenset[int] | None
 ) -> dict[CyclePath, MaskRecord]:
@@ -384,7 +372,10 @@ def get_lineage_tree(
         return Response(status_code=304, headers=headers)
 
     tree = build_lineage_tree(stores, path)
-    sample_ids = _parse_samples(samples)
+    try:
+        sample_ids = parse_sample_ids(samples)
+    except ValueError as exc:
+        raise BadRequestError(f"Invalid samples list: {samples!r} ({exc})") from exc
     if lens or sample_ids:
         # One record read per campaign: an `abort:` lens reads the firing log rather than
         # evaluators, so it loads the full set. The same records feed the divergence fold AND

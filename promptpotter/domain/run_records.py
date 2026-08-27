@@ -435,6 +435,11 @@ class ConfigOverrides(StrictModel):
     pobb_epsilon: float | None = None
     per_round_resubset: bool | None = None
     schema_field_rename: bool | None = None
+    # The composite-fitness criterion (`CampaignConfig.scoring`). The one setting a mask can
+    # PREVIEW against the record — a lens re-elects every round from rows already measured, so the
+    # round it parts at is the round a fork carrying this is minted at. Every other field here moves
+    # a ceiling or a patience count, which no measurement can be re-read under.
+    scoring: str | dict[str, str] | None = None
 
 
 class CycleSeed(StrictModel):

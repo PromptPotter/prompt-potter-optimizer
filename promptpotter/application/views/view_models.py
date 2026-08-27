@@ -79,7 +79,7 @@ class WarningEntry:
 @dataclass(frozen=True)
 class InitEnterView:
     """Pre-origin init banner. ``composite_fitness_formula`` rides here so the dashboard stamps it BEFORE origin scoring;
-    otherwise the What-If panel has no formula reference during the origin."""
+    otherwise the mask editor has no formula reference during the origin."""
 
     warnings: tuple[WarningEntry, ...] = ()
     max_rounds: int = 0

@@ -413,24 +413,48 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_evidence = sub.add_parser(
         "evidence",
-        help="What a SET of campaigns jointly says: the roster, whether their levels are "
-        "comparable at all, the cell/arm/residual decomposition, what the selection can resolve "
-        "at its current width, the run-order confound, and (with --ranking) the measured edits. "
-        "Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
+        help="What a SET of subjects jointly says: the roster, whether their levels are "
+        "comparable at all, the cell/subject/residual decomposition, what the selection can "
+        "resolve at its current width, the run-order confound, and (with --ranking) the measured "
+        "edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
     )
     p_evidence.add_argument(
         "dataset",
         nargs="?",
         default="",
-        help="Pool every campaign on this dataset. Omit it and pass --campaign instead.",
+        help="Pool every campaign on this dataset. Omit it and pass --subject instead.",
     )
     p_evidence.add_argument(
-        "--campaign",
-        dest="campaign",
+        "--subject",
+        dest="subject",
         action="append",
         default=[],
-        help="Campaign id to pool; repeat for a set. May span datasets, which the comparability "
-        "line then reports on. Overrides the dataset argument.",
+        help="What to pool, repeated for a set: 'campaign:<id>' (its root origin), "
+        "'course:<campaign>/<cycle>' (one branch, at its last elected winner) or "
+        "'candidate:<campaign>/<cycle>/<candidate>' (one searchpoint). The campaign id accepts "
+        "the same short prefix every other verb does. May span datasets, which the comparability "
+        "line then reports on. Overrides the dataset argument. An L4 inner run names the sandbox "
+        "chain it lives in, same codec as the API's '?descend=': "
+        "';in=<outer_campaign>::<outer_cycle>', one hop per level. A mask rides the same "
+        "address, ';'-separated: ';samples=3,7,11' reads every value over those samples only, and "
+        "';lens=score:<formula>' (courses only) re-decides the branch's elections under another "
+        "criterion — so the record and the counterfactual pool as two channels of one read.",
+    )
+    p_evidence.add_argument(
+        "--config",
+        dest="config",
+        action="store_true",
+        help="Also line the searchpoints up on WHAT THEY ARE — one row per configured key over "
+        "each one's resolved node config and prompt fields, differing keys only. Off by default: "
+        "a prompt field is the largest thing this read carries.",
+    )
+    p_evidence.add_argument(
+        "--trajectory",
+        dest="trajectory",
+        action="store_true",
+        help="Also print the branch behind each course / candidate subject — the winner chain "
+        "from its origin to its head, each point read on its own cells. OFF by default: every "
+        "point past the origin opens a round document.",
     )
     p_evidence.add_argument(
         "--metric",

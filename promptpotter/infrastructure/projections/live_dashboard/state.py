@@ -220,6 +220,11 @@ class LiveDashboardState(StrictModel):
     # round draws a fresh subset, so a max over rounds selects the luckiest draw.
     ability_delta: float | None = None
     composite_fitness_formula: str | None = None
+    # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the
+    # the mask editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them, and
+    # the control disables rather than guessing; the browser used to parse this out of the string
+    # with a regex and substitute a default for whatever it missed.
+    composite_fitness_weights: dict[str, float] | None = None
     # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
     # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
     headline_metric: HeadlineMetric = "accuracy"

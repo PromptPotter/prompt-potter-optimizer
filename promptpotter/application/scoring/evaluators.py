@@ -282,7 +282,7 @@ class Evaluator:
     # loud (``round_scorer``) instead of scoring on a number nobody computed. An
     # empty-collection default reads as PERFECT here — inverted for every health term.
     compute: Callable[..., float | None]
-    # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
+    # `high` = larger is better; `low` = larger is worse (the webapp's mask editor direction-corrects).
     direction: Literal["high", "low"] = "high"
     node_type: NodeType | None = None
     # An extra structural requirement no node type can express (``has_limit_node``). The declared
@@ -423,7 +423,7 @@ def all_evaluators() -> list[Evaluator]:
 
 
 def evaluators_meta() -> list[dict[str, Any]]:
-    """JSON-serializable registry projection for the webapp What-If panel — drops ``compute``/``requires``."""
+    """JSON-serializable registry projection for the webapp's scoring-mask editor — drops ``compute``/``requires``."""
     return [
         {
             "name": ev.name,
@@ -431,6 +431,10 @@ def evaluators_meta() -> list[dict[str, Any]]:
             "scope": ev.scope,
             "direction": ev.direction,
             "node_type": ev.node_type,
+            # Carried because the browser has to know which evaluators survive a SAMPLE-SET mask
+            # intact: only these recompute from the filtered rows, so a mask mixing them with
+            # snapshot-only names reports a subset number added to a whole-set one.
+            "from_rows": ev.from_rows,
         }
         for ev in _REGISTRY
     ]

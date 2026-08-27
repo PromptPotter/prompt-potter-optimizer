@@ -254,10 +254,20 @@ class DescendableCyclePayload(CyclePayload):
 class ForkCyclePayload(CyclePayload):
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
-    # Required — every operator fork is `operator_steered`. Kept as a dict here and validated into
-    # a typed `CycleSeed` at the applier, which stamps the lineage provenance the wire omits.
+    # Kept as a dict here and validated into a typed `CycleSeed` at the applier, which stamps the
+    # lineage provenance the wire omits.
     seed: dict[str, Any]
     steered_by: str = Field(default="", max_length=256)
+    keep_rounds: bool = Field(
+        default=False,
+        description=(
+            "False (the default) is `operator_steered`: a clean offshoot from the origin, "
+            "re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 "
+            "are lifted and the fork continues at `round` under the seed's overrides, which is "
+            "what an 'apply this from here' press means and what the terminal spells "
+            "`resume --rewind N`."
+        ),
+    )
 
 
 class SkipSearchpointPayload(CyclePayload):
@@ -828,6 +838,7 @@ class CommandDispatcher:
                     from_candidate_id=payload.candidate_id,
                     seed=seed,
                     steered_by=payload.steered_by,
+                    keep_rounds=payload.keep_rounds,
                 )
                 await self._apply_start_run(
                     hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),

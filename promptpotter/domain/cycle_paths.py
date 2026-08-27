@@ -50,3 +50,19 @@ def encode_cycle_path(path: CyclePath) -> str:
     """A path as its one string form: ``~``-joined ``campaign::cycle``, root → leaf. The SAME codec as the wire's
     ``descend`` tail and the webapp's encoder — only the slice encoded differs, never the grammar."""
     return "~".join(f"{hop.campaign_id}::{hop.cycle_id}" for hop in path)
+
+
+def decode_cycle_path(encoded: str) -> CyclePath:
+    """The inverse, and it lives here so the two halves of one grammar cannot drift apart. Raises
+    ``ValueError`` on a malformed hop, for each entry point to turn into its own refusal — a 400 on
+    the route, a printed line on the terminal. Component VALIDATION is ``descend_store``'s, which
+    also owns the descent itself; this is the codec and nothing more."""
+    if not encoded:
+        return ()
+    hops: list[CycleHop] = []
+    for seg in encoded.split("~"):
+        campaign, sep, cycle = seg.partition("::")
+        if not sep or not campaign or not cycle:
+            raise ValueError(f"Malformed cycle-path hop: {seg!r} (expected 'campaign::cycle').")
+        hops.append(CycleHop(campaign_id=campaign, cycle_id=cycle))
+    return tuple(hops)

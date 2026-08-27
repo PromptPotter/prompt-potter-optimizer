@@ -2982,8 +2982,6 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
     a week of commits were never replicates — and the read said "that spread is noise, not an
     effect" over what is actually the engine's own drift. Nothing raises; the number just gets
     believed, and every later power calculation is anchored to it."""
-    from promptpotter.application.evidence import campaign_evidence
-
     arm = {"l1_generate": "same-arm-hash"}
     cells = {"q1": 0.20, "q2": 0.80, "q3": 0.50}
     for cid, instrument, shift in [
@@ -3001,12 +2999,12 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
             instrument_id=instrument,
         )
 
-    held = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
+    held = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
     assert [r.n_instruments for r in held.replicates] == [1]
 
     # Same arm, one campaign read on a second instrument — the group is still SERVED, because
     # "your replicates were never replicates" is the finding, but it may not read as noise.
-    moved = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
+    moved = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
     assert [r.n_instruments for r in moved.replicates] == [2]
     assert moved.replicates[0].level_spread > held.replicates[0].level_spread
 
@@ -3312,6 +3310,14 @@ def test_a_descend_tail_arms_the_inner_cycle_and_never_the_outer() -> None:
     assert "descend" not in armed.model_dump()
 
 
+def _evidence(stores: Any, campaign_ids: list[str], **kwargs: Any) -> Any:
+    """Read those campaigns as `campaign:` subjects — one root origin each, which is what every
+    assertion below is about."""
+    from promptpotter.application.evidence import SubjectSpec, subject_evidence
+
+    return subject_evidence(stores, [SubjectSpec("campaign", c) for c in campaign_ids], **kwargs)
+
+
 def _write_campaign(
     stores: Any,
     campaign_id: str,
@@ -3347,14 +3353,28 @@ def _write_campaign(
         encoding="utf-8",
     )
     pd = origin_pipeline_data or {}
+    # Every real row carries the `sample_id` it was measured on — the key a sample-set mask
+    # filters by, and without it a fixture cannot express a masked read at all.
     acr: dict[str, list[dict[str, Any]]] = {
         "origin": [
-            {"query": q, "fitness": v, **({"pipeline_data": pd[q]} if q in pd else {})}
-            for q, v in origin_cells.items()
+            {
+                "query": q,
+                "sample_id": i,
+                "fitness": v,
+                **({"pipeline_data": pd[q]} if q in pd else {}),
+            }
+            for i, (q, v) in enumerate(origin_cells.items())
         ]
     }
     rounds = campaign_cycles_dir(root) / "cycle_0" / "rounds"
-    round_zero: dict[str, Any] = {"round": 0, "accuracy": 0.5, "all_candidate_results": acr}
+    round_zero: dict[str, Any] = {
+        "round": 0,
+        "accuracy": 0.5,
+        # Round 0 names its single arm on `candidate_scores` exactly as every later round does —
+        # `C0`, one entry. A fixture without it can express a document the engine never writes.
+        "candidate_scores": [{"candidate_id": "origin", "label": "C0"}],
+        "all_candidate_results": acr,
+    }
     if arm_hashes is not None:
         round_zero["optimizer_prompt_hashes"] = arm_hashes
     if instrument_id is not None:
@@ -3401,8 +3421,6 @@ def _write_campaign(
 def test_evidence_reads_an_ordinary_campaign_with_no_l4_anywhere(built_stores: Any) -> None:
     """The non-L4 path has no data in any dev store, so nothing else exercises it. If the level
     fallback broke, every ordinary comparison would render an empty chart and no error."""
-    from promptpotter.application.evidence import campaign_evidence
-
     cells_a = {"q1": 0.2, "q2": 0.8, "q3": 0.5}
     _write_campaign(
         built_stores, "gsm8k__aaaaaa", "gsm8k", created_at="2026-01-01", origin_cells=cells_a
@@ -3417,16 +3435,16 @@ def test_evidence_reads_an_ordinary_campaign_with_no_l4_anywhere(built_stores: A
 
     # The third id answers nothing, and must be NAMED rather than quietly dropped: a selection
     # that thins itself in silence is how a two-campaign reading gets read as a three-campaign one.
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__ghost0"])
-    assert ev.unread_campaigns == ["gsm8k__ghost0"]
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__ghost0"])
+    assert ev.unread_subjects == ["campaign:gsm8k__ghost0"]
 
     # Levels come off each row's own `fitness` — the L4 proxy is simply absent here.
-    assert [c.value for c in ev.campaigns] == [pytest.approx(1.5 / 3), pytest.approx(1.9 / 3)]
+    assert [c.value for c in ev.subjects] == [pytest.approx(1.5 / 3), pytest.approx(1.9 / 3)]
     assert ev.metric.scored_cells == ["q1", "q2", "q3"]
-    assert {c.campaign_id for c in ev.campaigns} == {"gsm8k__aaaaaa", "gsm8k__bbbbbb"}
+    assert {c.campaign_id for c in ev.subjects} == {"gsm8k__aaaaaa", "gsm8k__bbbbbb"}
     # The plotted values and the merged estimate are fields of ONE row, so no join can put a bar
     # and its interval on two different campaigns.
-    assert ev.campaigns[0].values == {"q1": 0.2, "q2": 0.8, "q3": 0.5}
+    assert ev.subjects[0].values == {"q1": 0.2, "q2": 0.8, "q3": 0.5}
     # Two campaigns, three shared cells — the decomposition answers, on fitness cells.
     assert ev.variance is not None and ev.variance.n_cells == 3
     assert ev.power is not None
@@ -3437,8 +3455,6 @@ def test_evidence_reads_an_ordinary_campaign_with_no_l4_anywhere(built_stores: A
 def test_evidence_refuses_to_pool_levels_across_datasets(built_stores: Any) -> None:
     """Different datasets measure different things, so the levels are not one quantity — and the
     cells never intersect, which is what makes the decomposition ABSENT rather than empty."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "gsm8k__aaaaaa",
@@ -3454,7 +3470,7 @@ def test_evidence_refuses_to_pool_levels_across_datasets(built_stores: Any) -> N
         origin_cells={"z1": 0.3, "z2": 0.7},
     )
 
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "bbeh__cccccc"])
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa", "bbeh__cccccc"])
 
     assert ev.comparability.reason == "datasets_differ"
     assert ev.comparability.verdict is False
@@ -3470,8 +3486,6 @@ def test_latency_reads_banked_step_timings_not_this_replays_wall_clock(built_sto
     the seconds the work actually cost, so a latency metric built on ``total_time`` reports a
     replayed campaign as near-instant — a plausible number, no error, and wrong. Measured on the
     dev store: one campaign there reads 693.7 s the right way and 222.9 s the wrong way."""
-    from promptpotter.application.evidence import campaign_evidence
-
     cells = {"q1": 0.2, "q2": 0.8, "q3": 0.5}
     replayed = {q: {"total_time": 0.0, "step_timings": {"a": 600.0, "b": 400.0}} for q in cells}
     _write_campaign(
@@ -3483,19 +3497,17 @@ def test_latency_reads_banked_step_timings_not_this_replays_wall_clock(built_sto
         origin_pipeline_data=replayed,
     )
 
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], metric="latency")
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa"], metric="latency")
 
-    reading = ev.campaigns[0]
+    reading = ev.subjects[0]
     assert reading.value == pytest.approx(1000.0)  # not 0.0, which `total_time` would have given
     assert reading.n_cells == 3
-    assert reading.n_unscorable == 0
+    assert reading.unscorable_cells == []
 
 
 def test_an_unreadable_channel_is_absent_never_zero(built_stores: Any) -> None:
     """The same silent class one layer down: a row with no ``step_tokens`` must make cost and
     tokens UNAVAILABLE, not free. A zero here would rank an unmeasured campaign cheapest."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "gsm8k__aaaaaa",
@@ -3504,7 +3516,7 @@ def test_an_unreadable_channel_is_absent_never_zero(built_stores: Any) -> None:
         origin_cells={"q1": 0.2, "q2": 0.8},
     )
 
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa"])
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa"])
     # Not offered at all — a picker listing a metric nothing here can answer is how an operator
     # reads a wall of "unavailable" and concludes the number is broken.
     assert {m.key for m in ev.metric.catalogue} == {"measurand"}
@@ -3512,10 +3524,10 @@ def test_an_unreadable_channel_is_absent_never_zero(built_stores: Any) -> None:
 
     # Named anyway, through the composed-expression door, it is UNSCORABLE — never a free zero.
     for channel in ("cost", "tokens"):
-        ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], metric=f"expr:{channel}")
-        reading = ev.campaigns[0]
+        ev = _evidence(built_stores, ["gsm8k__aaaaaa"], metric=f"expr:{channel}")
+        reading = ev.subjects[0]
         assert reading.value is None, channel
-        assert (reading.n_cells, reading.n_unscorable) == (0, 2), channel
+        assert (reading.n_cells, reading.unscorable_cells) == (0, ["q1", "q2"]), channel
         assert ev.metric.scored_cells == []
         # Absent rather than zeroed all the way down: nothing to decompose, nothing to resolve.
         assert ev.variance is None and ev.power is None
@@ -3525,8 +3537,6 @@ def test_a_cell_that_genuinely_cost_nothing_reads_zero_not_absent(built_stores: 
     """The converse of the rule above, and the easier one to write by accident: `x or y` treats a
     real 0.0 as falsy, so a cell that genuinely cost nothing falls through and reports as one that
     was never priced. Free and unmeasured are different facts and must not render the same."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "gsm8k__aaaaaa",
@@ -3539,9 +3549,9 @@ def test_a_cell_that_genuinely_cost_nothing_reads_zero_not_absent(built_stores: 
         },
     )
 
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], metric="cost")
-    assert ev.campaigns[0].value == pytest.approx(0.0)
-    assert ev.campaigns[0].n_cells == 2 and ev.campaigns[0].n_unscorable == 0
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa"], metric="cost")
+    assert ev.subjects[0].value == pytest.approx(0.0)
+    assert ev.subjects[0].n_cells == 2 and ev.subjects[0].unscorable_cells == []
     assert "cost" in {m.key for m in ev.metric.catalogue}
 
 
@@ -3550,21 +3560,17 @@ def test_a_metric_selector_the_layer_cannot_resolve_raises_rather_than_scores(
 ) -> None:
     """Every rejection is the CALLER's mistake, surfaced as one. A formula reaching a name no cell
     carries must not fall through to a default measurand and answer under the wrong one."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores, "gsm8k__aaaaaa", "gsm8k", created_at="2026-01-01", origin_cells={"q1": 0.2}
     )
     for selector in ("bogus", "expr:", "expr:fitness +", "expr:__import__('os')", "expr:nope * 2"):
         with pytest.raises((ValueError, SyntaxError)):
-            campaign_evidence(built_stores, ["gsm8k__aaaaaa"], metric=selector)
+            _evidence(built_stores, ["gsm8k__aaaaaa"], metric=selector)
 
     # A cell that divides by zero is UNSCORABLE — not a 400, and not an infinity carried forward.
-    ev = campaign_evidence(
-        built_stores, ["gsm8k__aaaaaa"], metric="expr:fitness / (fitness - fitness)"
-    )
-    assert ev.campaigns[0].value is None
-    assert ev.campaigns[0].n_unscorable == 1
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa"], metric="expr:fitness / (fitness - fitness)")
+    assert ev.subjects[0].value is None
+    assert ev.subjects[0].unscorable_cells == ["q1"]
 
 
 def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
@@ -3573,8 +3579,6 @@ def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
     """Two campaigns, one test; three campaigns, three — and an adjusted value is never smaller
     than the raw one it corrects. A raw p read as if it were the only comparison is the error the
     whole table exists to prevent."""
-    from promptpotter.application.evidence import campaign_evidence
-
     cells = {"q1": 0.20, "q2": 0.80, "q3": 0.50, "q4": 0.35}
     for i, (cid, shift) in enumerate(
         [("gsm8k__aaaaaa", 0.0), ("gsm8k__bbbbbb", 0.05), ("gsm8k__cccccc", 0.11)]
@@ -3587,12 +3591,15 @@ def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
             origin_cells={q: v + shift for q, v in cells.items()},
         )
 
-    two = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
+    two = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
     assert len(two.metric.pairwise) == 1
     assert two.metric.n_tests == 1
     only = two.metric.pairwise[0]
     # `a` precedes `b` in the roster's oldest-first order, so `median_shift = b - a` reads one way.
-    assert (only.campaign_a, only.campaign_b) == ("gsm8k__aaaaaa", "gsm8k__bbbbbb")
+    assert (only.subject_a, only.subject_b) == (
+        "campaign:gsm8k__aaaaaa",
+        "campaign:gsm8k__bbbbbb",
+    )
     assert only.median_shift == pytest.approx(0.05)
     assert only.n_cells == 4
     assert only.p_adjusted == pytest.approx(only.p_value)  # m=1 is the identity
@@ -3600,7 +3607,7 @@ def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
     # the width's floor. A t-test reports 0.0 here, which is resolution four pairs do not hold.
     assert only.p_value == pytest.approx(2 / 2**4)
 
-    three = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
+    three = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb", "gsm8k__cccccc"])
     assert len(three.metric.pairwise) == 3
     for row in three.metric.pairwise:
         assert row.p_value is not None and row.p_adjusted is not None
@@ -3613,8 +3620,6 @@ def test_pairwise_pairs_on_shared_cells_and_holm_corrects_across_the_table(
 def test_one_shared_cell_reports_a_value_and_refuses_an_interval(built_stores: Any) -> None:
     """A bracket from one reading is a fiction, and `fmt_ci`'s rule is that an absent interval must
     READ as absent. Serve the point estimate; serve no bounds and no test."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores, "gsm8k__aaaaaa", "gsm8k", created_at="2026-01-01", origin_cells={"q1": 0.2}
     )
@@ -3622,9 +3627,9 @@ def test_one_shared_cell_reports_a_value_and_refuses_an_interval(built_stores: A
         built_stores, "gsm8k__bbbbbb", "gsm8k", created_at="2026-01-02", origin_cells={"q1": 0.6}
     )
 
-    ev = campaign_evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
+    ev = _evidence(built_stores, ["gsm8k__aaaaaa", "gsm8k__bbbbbb"])
 
-    first = ev.campaigns[0]
+    first = ev.subjects[0]
     assert first.value == pytest.approx(0.2)
     assert first.ci_lo is None and first.ci_hi is None
     pair = ev.metric.pairwise[0]
@@ -3638,8 +3643,6 @@ def test_the_edit_ranking_is_read_on_the_SELECTED_metric(built_stores: Any) -> N
     answered in level units whatever was picked, so "this edit is worth +0.45" read as seconds on
     a latency read. Same edit, same rows, two metrics — the numbers must differ and each must be
     in its own units."""
-    from promptpotter.application.evidence import campaign_evidence
-
     seconds = {q: {"step_timings": {"a": 600.0, "b": 400.0}} for q in ("q1", "q2")}
     faster = {q: {"step_timings": {"a": 400.0, "b": 200.0}} for q in ("q1", "q2")}
     _write_campaign(
@@ -3653,12 +3656,10 @@ def test_the_edit_ranking_is_read_on_the_SELECTED_metric(built_stores: Any) -> N
         candidate_pipeline_data=faster,
     )
 
-    on_level = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True)
+    on_level = _evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True)
     assert on_level.edits[0].anchor_effect == pytest.approx(0.45)  # (0.6-0.2 + 0.9-0.4) / 2
 
-    on_latency = campaign_evidence(
-        built_stores, ["gsm8k__aaaaaa"], include_ranking=True, metric="latency"
-    )
+    on_latency = _evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True, metric="latency")
     # The edit cut 1000 s to 600 s on both cells: seconds SAVED read as a negative effect, and
     # `latency`'s own direction (lower is better) is what tells the reader that is an improvement.
     assert on_latency.edits[0].anchor_effect == pytest.approx(-400.0)
@@ -3666,11 +3667,9 @@ def test_the_edit_ranking_is_read_on_the_SELECTED_metric(built_stores: Any) -> N
 
 
 def test_a_cell_no_row_answered_is_not_counted_against_the_metric(built_stores: Any) -> None:
-    """`n_unscorable` is what the surface turns into "could not read N of its measured cells". A
+    """`unscorable_cells` is what a surface renders as `x` on the cell axis. A
     row carrying no fitness and no pipeline_data measured NOTHING, so counting it there blames the
     metric for a cell that was never on the board — a plausible number, and no error anywhere."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "gsm8k__aaaaaa",
@@ -3679,8 +3678,8 @@ def test_a_cell_no_row_answered_is_not_counted_against_the_metric(built_stores: 
         origin_cells={"q1": 0.2, "q2": 0.8, "q3": None},
     )
 
-    row = campaign_evidence(built_stores, ["gsm8k__aaaaaa"]).campaigns[0]
-    assert (row.n_cells, row.n_unscorable) == (2, 0)
+    row = _evidence(built_stores, ["gsm8k__aaaaaa"]).subjects[0]
+    assert (row.n_cells, row.unscorable_cells) == (2, [])
     assert set(row.values) == {"q1", "q2"}
 
 
@@ -3689,8 +3688,6 @@ def test_the_measurand_is_named_for_what_the_selection_actually_carries(built_st
     lift over its OWN origin; a cell on an ordinary dataset is a sample, which has no origin to
     lift over. One catalogue entry, labelled for what it is — the same number under two names is
     what sent a reader to the wrong column."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "gsm8k__aaaaaa",
@@ -3698,7 +3695,7 @@ def test_the_measurand_is_named_for_what_the_selection_actually_carries(built_st
         created_at="2026-01-01",
         origin_cells={"q1": 0.2, "q2": 0.8},
     )
-    plain = campaign_evidence(built_stores, ["gsm8k__aaaaaa"]).metric.spec
+    plain = _evidence(built_stores, ["gsm8k__aaaaaa"]).metric.spec
     assert (plain.key, plain.expression, plain.label) == ("measurand", "fitness", "Fitness")
 
     seeded = {q: {"mean_round_delta": v} for q, v in {"q1": 0.3, "q2": 0.9}.items()}
@@ -3710,12 +3707,12 @@ def test_the_measurand_is_named_for_what_the_selection_actually_carries(built_st
         origin_cells={"q1": 0.2, "q2": 0.8},
         origin_pipeline_data=seeded,
     )
-    inner = campaign_evidence(built_stores, ["ppself__bbbbbb"]).metric.spec
+    inner = _evidence(built_stores, ["ppself__bbbbbb"]).metric.spec
     assert (inner.key, inner.expression, inner.label) == ("measurand", "lift", "Lift over origin")
     # …and the composed score the campaign's own formula made of that lift is a DIFFERENT number,
     # so it is offered beside it rather than as a second name for it.
-    ev = campaign_evidence(built_stores, ["ppself__bbbbbb"])
-    assert ev.campaigns[0].value == pytest.approx(0.6)  # the lift, not the 0.5 fitness
+    ev = _evidence(built_stores, ["ppself__bbbbbb"])
+    assert ev.subjects[0].value == pytest.approx(0.6)  # the lift, not the 0.5 fitness
     assert [m.key for m in ev.metric.catalogue][:2] == ["measurand", "fitness"]
 
 
@@ -3723,8 +3720,6 @@ def test_a_mixed_selection_offers_only_what_BOTH_campaigns_carry(built_stores: A
     """Availability is INTERSECTED. Unioned, a metric only one campaign carries is offered as a
     comparison — one side plots bars and the other an em-dash, which reads as a result rather than
     as a question that was never asked of it."""
-    from promptpotter.application.evidence import campaign_evidence
-
     _write_campaign(
         built_stores,
         "ppself__aaaaaa",
@@ -3741,14 +3736,14 @@ def test_a_mixed_selection_offers_only_what_BOTH_campaigns_carry(built_stores: A
         origin_cells={"q1": 0.4, "q2": 0.9},
     )
 
-    both = campaign_evidence(built_stores, ["ppself__aaaaaa", "plain__bbbbbb"])
+    both = _evidence(built_stores, ["ppself__aaaaaa", "plain__bbbbbb"])
     # The seed lift is one campaign's alone, so the measurand falls back to what both answer.
     assert both.metric.spec.expression == "fitness"
     assert "lift" not in both.metric.namespace
-    assert all(c.value is not None for c in both.campaigns)
+    assert all(c.value is not None for c in both.subjects)
 
     # Alone, that campaign is read on its lift — the intersection is not a global downgrade.
-    assert campaign_evidence(built_stores, ["ppself__aaaaaa"]).metric.spec.expression == "lift"
+    assert _evidence(built_stores, ["ppself__aaaaaa"]).metric.spec.expression == "lift"
 
 
 def test_a_backfilled_seed_fact_lands_on_ITS_OWN_cell(built_stores: Any, monkeypatch: Any) -> None:
@@ -3826,10 +3821,16 @@ def _write_inner_cycle(
     )
 
 
-def test_ranking_is_opt_in_and_opens_no_later_round_until_asked(built_stores: Any) -> None:
-    """The one expensive walk. Off, a round-1 document on disk must not reach the response at
-    all — a flag that merely hides the result would still have paid for the walk."""
-    from promptpotter.application.evidence import campaign_evidence
+def test_a_course_reads_at_the_winner_its_LEDGER_crowned(built_stores: Any) -> None:
+    """Two silent ways a branch reads as the wrong thing, and neither errors — the chart just
+    plots a candidate that never won.
+
+    The crown is joined on LABEL: a resume re-mints `candidate_id`, so joining on the id resolves
+    to nothing and the course silently falls back to its origin, reading a branch that improved as
+    one that never moved. And the head is the LAST crowned round, not the best-scoring candidate
+    on the branch: a round that HELD crowns nobody, so the head must stay where the run left it.
+    """
+    from promptpotter.application.evidence import SubjectSpec, subject_evidence
 
     _write_campaign(
         built_stores,
@@ -3839,11 +3840,146 @@ def test_ranking_is_opt_in_and_opens_no_later_round_until_asked(built_stores: An
         origin_cells={"q1": 0.2, "q2": 0.4},
         candidate_cells={"q1": 0.6, "q2": 0.9},
     )
+    # The ledger crowns `C1.1` at round 1 under a candidate_id it does NOT carry — which is what a
+    # resume leaves behind, and the state an id-join reads as "no winner".
+    _write_election(built_stores, "gsm8k__aaaaaa", "cycle_0", round_num=1, winner_label="C1.1")
 
-    off = campaign_evidence(built_stores, ["gsm8k__aaaaaa"])
+    course = SubjectSpec("course", "gsm8k__aaaaaa", "cycle_0")
+    ev = subject_evidence(built_stores, [course], include_trajectory=True)
+    head = ev.subjects[0]
+    assert head.values == {"q1": 0.6, "q2": 0.9}, "the branch reads at its crowned winner"
+    # The channel is named for the BRANCH; the searchpoint it currently reads at is resolved
+    # beside it, so "which point am I looking at" needs no trajectory to answer.
+    assert (head.label, head.candidate_id) == ("cycle_0", "c1")
+
+    # The branch BEHIND it — origin first, each point on its own cells, so a round that scored a
+    # different subset is not redrawn on evidence it never had.
+    assert head.trajectory is not None
+    assert [(p.round, p.label, p.n_cells) for p in head.trajectory] == [
+        (0, "C0", 2),
+        (1, "C1.1", 2),
+    ]
+    assert head.trajectory[0].value == pytest.approx(0.3)
+
+    # A campaign subject is the ORIGIN of the same cycle and stays there — the two are different
+    # questions, and collapsing them would make "compare the branches" unaskable.
+    root = subject_evidence(built_stores, [SubjectSpec("campaign", "gsm8k__aaaaaa")])
+    assert root.subjects[0].values == {"q1": 0.2, "q2": 0.4}
+    assert root.subjects[0].trajectory is None
+
+    # One searchpoint, addressed directly: the same rows, keyed and labelled as itself.
+    point = subject_evidence(
+        built_stores, [SubjectSpec("candidate", "gsm8k__aaaaaa", "cycle_0", "c1")]
+    ).subjects[0]
+    assert (point.key, point.label, point.values) == (
+        "candidate:gsm8k__aaaaaa/cycle_0/c1",
+        "C1.1",
+        {"q1": 0.6, "q2": 0.9},
+    )
+
+    # An id nothing measured is NAMED, never quietly dropped — the same rule a missing campaign
+    # rides, one address level down.
+    ghost = SubjectSpec("candidate", "gsm8k__aaaaaa", "cycle_0", "nope")
+    assert subject_evidence(built_stores, [course, ghost]).unread_subjects == [ghost.key]
+
+
+def test_a_masked_channel_plots_measurements_and_never_the_full_set(built_stores: Any) -> None:
+    """The what-if's two silent harms, both of which render as an ordinary bar.
+
+    A sample mask must DROP rows, never re-derive them: a value averaged over 28 samples plotted
+    under a 17-sample label is not the answer to "what if we had used fewer", and nothing on the
+    chart would say so. And a masked channel must key APART from the unmasked one, or the two
+    collapse to one row and the comparison the mask was opened for silently disappears.
+    """
+    from promptpotter.application.evidence import SubjectSpec, parse_subject, subject_evidence
+
+    _write_campaign(
+        built_stores,
+        "gsm8k__aaaaaa",
+        "gsm8k",
+        created_at="2026-01-01",
+        origin_cells={"q1": 0.2, "q2": 0.4, "q3": 0.9},
+    )
+    plain = SubjectSpec("course", "gsm8k__aaaaaa", "cycle_0")
+    masked = parse_subject(f"{plain.key};samples=0,1")
+
+    ev = subject_evidence(built_stores, [plain, masked])
+    assert [r.key for r in ev.subjects] == [plain.key, masked.key], "the mask is part of the key"
+    full, subset = ev.subjects[0], ev.subjects[1]
+    assert full.values == {"q1": 0.2, "q2": 0.4, "q3": 0.9}
+    assert full.mask is None
+    # Rows DROPPED, never re-derived: the third cell is absent rather than folded into a mean
+    # that would read as this branch's answer over a set it was never asked about.
+    assert subset.values == {"q1": 0.2, "q2": 0.4}
+    assert subset.mask is not None and subset.mask.samples == [0, 1]
+
+    # A mask that matches nothing is UNREAD, not an empty bar at zero — the same rule a campaign
+    # with no scored origin rides.
+    nothing = parse_subject(f"{plain.key};samples=41,42")
+    assert subject_evidence(built_stores, [plain, nothing]).unread_subjects == [nothing.key]
+
+    # A lens is a COURSE question — a campaign is an origin no election reaches, and offering it
+    # there would answer under a criterion that decided nothing.
+    for bad in (
+        "campaign:gsm8k__aaaaaa;lens=score:accuracy",
+        "course:gsm8k__aaaaaa/cycle_0;lens=abort:all_off",
+        "course:gsm8k__aaaaaa/cycle_0;nope=1",
+        "course:gsm8k__aaaaaa/cycle_0;in=missing-the-separator",
+    ):
+        with pytest.raises(ValueError):
+            parse_subject(bad)
+
+    # WHERE a subject lives is part of its key. An inner cycle id repeats across sibling `.inner/`
+    # sandboxes, so two seeds of one L4 panel are addressed by the same `(campaign, cycle)` pair —
+    # drop the sandbox chain from the key and the second silently overwrites the first in the
+    # read's own subject map, plotting one seed's cells under both channels' names.
+    here = SubjectSpec("course", "inner__x", "cycle_0")
+    a = parse_subject(f"{here.key};in=outer__a::cycle_1")
+    b = parse_subject(f"{here.key};in=outer__b::cycle_1")
+    assert a.key != b.key != here.key
+    assert parse_subject(a.key) == a, "the key round-trips, so a served row re-addresses itself"
+    assert a.inside[0].campaign_id == "outer__a"
+    # Nothing on disk answers either, and an unresolvable sandbox is UNREAD rather than a raise:
+    # one dead channel must not take the other channels of the read down with it.
+    assert subject_evidence(built_stores, [plain, a]).unread_subjects == [a.key]
+
+
+def _write_election(
+    stores: Any, campaign_id: str, cycle_id: str, *, round_num: int, winner_label: str
+) -> None:
+    """One `election` record on the cycle's ledger — the only place a crown is written, and the
+    only thing that separates a round that elected from one still scoring."""
+    from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+
+    layout = CycleLayout(
+        campaign_cycles_dir(stores.campaigns._campaigns_root() / campaign_id) / cycle_id
+    )
+    layout.ledger.parent.mkdir(parents=True, exist_ok=True)
+    with layout.ledger.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {"record_type": "election", "round": round_num, "winner_label": winner_label}
+            )
+            + "\n"
+        )
+
+
+def test_ranking_is_opt_in_and_opens_no_later_round_until_asked(built_stores: Any) -> None:
+    """The one expensive walk. Off, a round-1 document on disk must not reach the response at
+    all — a flag that merely hides the result would still have paid for the walk."""
+    _write_campaign(
+        built_stores,
+        "gsm8k__aaaaaa",
+        "gsm8k",
+        created_at="2026-01-01",
+        origin_cells={"q1": 0.2, "q2": 0.4},
+        candidate_cells={"q1": 0.6, "q2": 0.9},
+    )
+
+    off = _evidence(built_stores, ["gsm8k__aaaaaa"])
     assert off.ranking_computed is False and off.edits == []
 
-    on = campaign_evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True)
+    on = _evidence(built_stores, ["gsm8k__aaaaaa"], include_ranking=True)
     assert on.ranking_computed is True and len(on.edits) == 1
     # Paired candidate − origin on the cells both measured: (0.6-0.2 + 0.9-0.4) / 2.
     assert on.edits[0].anchor_effect == pytest.approx(0.45)

@@ -25,6 +25,17 @@ from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 
 
+def parse_sample_ids(text: str | None) -> frozenset[int] | None:
+    """The sample-set mask as a CALLER names it — a comma-separated id list. Empty / unset ⇒
+    ``None``, the full-set mask; a non-integer token raises ``ValueError`` for the entry point to
+    turn into its own refusal. Here rather than at either edge, because both the lineage-tree
+    route and an evidence subject address the same mask and may not spell it two ways."""
+    if not text or not text.strip():
+        return None
+    ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
+    return ids or None
+
+
 def _cycle_edge(index: dict[str, Any]) -> tuple[str | None, int | None]:
     """``(parent_cycle_id, fork_from_round)`` off a cycle manifest — read by both loaders below,
     so it is spelled once rather than in whichever of them was written first."""
@@ -85,7 +96,7 @@ def _candidates(
     # (accuracy, output_compactness, mean_latency_s, …) is recomputed from these and
     # merged over the stored snapshot — present on every record regardless of when it
     # was written. A sample-set mask filters the rows to the selected subset first, so
-    # those same evaluators (accuracy especially) re-score on the subset and a What-If
+    # those same evaluators (accuracy especially) re-score on the subset and a mask
     # formula reshapes the election there.
     # `.get`, not a subscript: this walk is tolerant by contract, and the subscript raised
     # `KeyError` on a document missing the key.
@@ -256,4 +267,4 @@ def load_mask_record(
     return MaskRecord(cycles=cycles)
 
 
-__all__ = ["load_lineage_spine", "load_mask_record"]
+__all__ = ["load_lineage_spine", "load_mask_record", "parse_sample_ids"]
