@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ConfigOverrides } from "@/lib/api";
+import type { RunLimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -13,7 +13,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 // the parent by default and live behind an "Advanced" disclosure (placeholders
 // show the inherited value; blank = inherit).
 //
-// Emits a sparse `ConfigOverrides` on every edit: a field is included only when
+// Emits a sparse `RunLimitOverrides` on every edit: a field is included only when
 // the operator's value is present + valid, so blank = inherit. Self-contained
 // presentational input; the parent panel folds the result into the OperatorForkOverride.
 
@@ -30,7 +30,7 @@ interface Fields {
 export function LimitReconcile({
   onChange,
 }: {
-  onChange: (limits: ConfigOverrides) => void;
+  onChange: (limits: RunLimitOverrides) => void;
 }) {
   const { dash } = useDashboard();
   // Snapshot the defaults once at open — the cycle is stopped/paused while
@@ -50,7 +50,7 @@ export function LimitReconcile({
 
   const set = (next: Fields) => {
     setF(next);
-    const limits: ConfigOverrides = {};
+    const limits: RunLimitOverrides = {};
     // 0 is meaningful on every one of these, so the floor is 0, not 1. `max_rounds: 0` means
     // "measure the origin and stop"; `l1_patience: 0` is what the CLI sweep sets to make L1
     // stall after round 1. A `>= 1` floor did not reject those — it dropped the key, so the

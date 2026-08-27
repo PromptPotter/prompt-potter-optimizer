@@ -22,15 +22,43 @@ import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 // Cladogram dimensions. Each round is one column; each course gets its own
 // horizontal lane (one row collapsed, N rows expanded).
-export const COL_W = 110;          // width per round-column
+//
+// The HORIZONTAL half is a density, because a tree's width is set by the text on it: a labelled
+// node needs a column wide enough to print `C1.2 33%`, an unlabelled one needs room for a dot.
+// So a surface that must fit two trees beside each other drops the text and the columns close up
+// — never a scaled `viewBox`, which compresses until labels collide with nothing to say so.
+// The VERTICAL half is not a density: rows stay the height of a click target either way.
+export interface Density {
+  colW: number;        // width per round-column
+  leftPad: number;     // left margin before column 0
+  rightPad: number;    // room past the rightmost node
+  stub: number;        // horizontal stub before a collapsed round node
+  candStub: number;    // horizontal stub before an expanded candidate node
+  // Print the per-node text. Off, every label still rides the node's `<title>` and the surface
+  // names what was clicked, so nothing is unreachable — only unprinted.
+  labels: boolean;
+}
+
+export const ROOMY: Density = {
+  colW: 110,
+  leftPad: 48,
+  rightPad: 80,
+  stub: 14,
+  candStub: 22,
+  labels: true,
+};
+export const DENSE: Density = {
+  colW: 34,
+  leftPad: 18,
+  rightPad: 24,
+  stub: 7,
+  candStub: 10,
+  labels: false,
+};
+
 export const LANE_H = 26;          // height per lane-row
-const STUB = 14;            // horizontal stub before a collapsed round node
-export const CAND_STUB = 22;       // horizontal stub before an expanded candidate node
-// Left margin before column 0 — room for round 1's left-anchored stub + label.
-export const LEFT_PAD = 48;
 export const HEADER_H = 18;        // column-header row at the top
 export const TOP_PAD = HEADER_H + 8; // first lane sits below the header row
-export const RIGHT_PAD = 80;       // room for the rightmost label
 export const NODE_R = 3.5;         // round-node circle radius
 
 // A course's kind, as the tree serves it. `inner` is an L4 seed run — a course
@@ -121,12 +149,87 @@ export interface LaneLayout {
   parentKey: string | null;
 }
 
+// A point on the drawing, as an address rather than a position — what a surface hands in when it
+// wants a searchpoint found. The two halves are what a placed node publishes, and both are
+// needed: a candidate id repeats across `.inner/` sandboxes, and a course path holds many.
+export interface CladogramAnchor {
+  coursePathKey: string;
+  candidateId: string;
+}
+
+// What a point CAME FROM, as a set of candidate addresses (`nodeKeyOf`) — its extent. Three
+// parts, and each stands in a different relation to the anchor:
+//
+//   · its own course up to its own round — the rounds it stands on and the arms it beat;
+//   · every course ABOVE it, cut at the candidate the next one hangs off — the chain that reached
+//     it, which for an L4 seed is the outer campaign stopped at the point that seed measured;
+//   · the seed runs that measured the ANCHOR ITSELF, whole and at any depth: an `inner` course IS
+//     that point's number, so it belongs to the point rather than to what came after it.
+//
+// What is deliberately OUT: a sibling seed measuring the same ancestor (it produced a different
+// number), a fork off the anchor (a line that continued instead), and every later round. This was
+// briefly a column comparison — "at or before the anchor's round-column" — which reads plausibly
+// and is wrong twice over: a seed is drawn one column RIGHT of the point it measures, so a
+// campaign read at its own origin lost every seed, and exempting seeds from the column then made
+// their own interiors uncuttable, so a searchpoint INSIDE one kept everything after it.
+//
+// `null` where this tree does not hold the anchor at all — the ordinary case on a board that
+// spans campaigns.
+export function extentKeys(
+  root: LineageNode,
+  anchor: CladogramAnchor,
+): ReadonlySet<string> | null {
+  const keys = new Set<string>();
+  const addMeasurements = (cand: LineageNode): void => {
+    for (const child of cand.children) {
+      if (child.kind !== "course" || child.course_kind !== "inner") continue;
+      for (const c of candidatesOf(child)) {
+        keys.add(nodeKeyOf(c));
+        addMeasurements(c);
+      }
+    }
+  };
+  // Down to the anchor; on the way back up each course keeps its rounds through the one the
+  // chain leaves it on.
+  const walk = (course: LineageNode): boolean => {
+    const cands = candidatesOf(course);
+    const keepThrough = (round: number): void => {
+      for (const c of cands) if ((c.round ?? 0) <= round) keys.add(nodeKeyOf(c));
+    };
+    const own =
+      encodeCyclePath(pathOf(course)) === anchor.coursePathKey
+        ? cands.find((c) => c.id === anchor.candidateId)
+        : undefined;
+    if (own) {
+      keepThrough(own.round ?? 0);
+      addMeasurements(own);
+      return true;
+    }
+    for (const cand of cands) {
+      for (const child of cand.children) {
+        if (child.kind === "course" && walk(child)) {
+          keepThrough(cand.round ?? 0);
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  return walk(root) ? keys : null;
+}
+
 // A lane is addressed by `nodeKeyOf`, never by `course.id`. Inner cycle ids REPEAT
 // across sibling `.inner/` sandboxes — one id is on disk three times today — so a
 // map keyed on the bare id silently drops one sibling's lane onto another's.
+//
+// `keep` is an extent (`extentKeys`): only those candidates are laid out, and a course the
+// extent never reaches takes no lane row and no column rather than being drawn empty — so rows,
+// width and columns all fall out of the smaller shape instead of being trimmed afterwards.
+// `null` lays out the whole family, which is the identity of the cut.
 export function layout(
   root: LineageNode,
   expanded: ReadonlySet<string>,
+  keep: ReadonlySet<string> | null = null,
 ): {
   laneByKey: Map<string, LaneLayout>;
   totalLaneRows: number;
@@ -142,7 +245,11 @@ export function layout(
     parentKey: string | null,
   ): void => {
     const key = nodeKeyOf(course);
-    const cands = candidatesOf(course);
+    const cands = candidatesOf(course).filter((c) => keep === null || keep.has(nodeKeyOf(c)));
+    // A course the extent never reaches contributed nothing to the point — it takes no lane row
+    // and no column, rather than being drawn empty. Its subtree goes with it: the extent keeps
+    // the candidate a child hangs off whenever it keeps the child.
+    if (keep !== null && cands.length === 0) return;
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
@@ -196,8 +303,15 @@ export interface RoundNodePos {
   x: number;
   y: number;
   // Short candidate label ("C1.2") for expanded nodes; "" for a collapsed round that
-  // elected nobody (Forest draws "R{n}" for collapsed nodes).
+  // elected nobody (Forest draws "R{n}" for collapsed nodes). DISPLAY ONLY — it is this
+  // candidate's renumbered position on the campaign's one timeline.
   candidateLabel: string;
+  // The SERVED node this geometry was placed from. A drawing's node is a position; every
+  // question about the searchpoint itself — its config, its scalars, its `course_label` join key
+  // — is answered by the tree, so it rides along rather than being re-found by key at each
+  // click. Copying the few fields a renderer reads is fine; re-deriving a searchpoint from a
+  // placed dot is a second answer to what the tree already says.
+  node: LineageNode;
   // The candidate's address (`nodeKeyOf`) — what the value/θ overlays are keyed on.
   candKey: string;
   // Stable id for selection routing — the MINTED candidate id, never a position.
@@ -243,8 +357,8 @@ function bandCenterY(l: LaneLayout): number {
 }
 
 // Left x of a lane's column band — what the band-left fork fallback anchors to.
-function bandLeftX(l: LaneLayout): number {
-  return LEFT_PAD + l.baseCol * COL_W;
+function bandLeftX(l: LaneLayout, d: Density): number {
+  return d.leftPad + l.baseCol * d.colW;
 }
 
 // One placed node — named for what it BUILDS, never for what it looks up. Addressing lives
@@ -268,6 +382,10 @@ function placedNode(
     x,
     y,
     candidateLabel: label,
+    // The PLACED node, which is the one `candidateId` and `candKey` also name — the collapsed
+    // band passes the winner's label for DISPLAY while standing on `stand`, so the two can differ
+    // and only this one answers for the searchpoint.
+    node: cand,
     // The candidate's OWN address. A fork-contributed candidate carries the fork's
     // path, not this lane's, so this is not the lane key plus an id.
     candKey: nodeKeyOf(cand),
@@ -285,7 +403,7 @@ function placedNode(
   };
 }
 
-export function placeNodes(layouts: Map<string, LaneLayout>): {
+export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
   nodes: RoundNodePos[];
   segs: BranchSeg[];
   // Per (lane, round) winner/summary node — the fork-anchor spine, keyed by the
@@ -305,7 +423,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   for (const [laneKey, l] of layouts) {
     const rounds = [...groupRounds(l.candidates).entries()].sort((a, b) => a[0] - b[0]);
     const lastRound = rounds.at(-1)?.[0] ?? 0;
-    const colX = (round: number): number => LEFT_PAD + (l.baseCol + round) * COL_W;
+    const colX = (round: number): number => d.leftPad + (l.baseCol + round) * d.colW;
 
     if (!l.expanded) {
       // Collapsed: one summary node per round on the band's single row.
@@ -335,8 +453,8 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         if (winner) nodeByCandidate.set(winner.id, node);
         if (round === lastRound) node.isLastInLane = true;
         if (prev) {
-          segs.push({ x1: prev.x, y1: prev.y, x2: node.x - STUB, y2: node.y, variant: "chain" });
-          segs.push({ x1: node.x - STUB, y1: node.y, x2: node.x, y2: node.y, variant: "chain" });
+          segs.push({ x1: prev.x, y1: prev.y, x2: node.x - d.stub, y2: node.y, variant: "chain" });
+          segs.push({ x1: node.x - d.stub, y1: node.y, x2: node.x, y2: node.y, variant: "chain" });
         }
         prev = node;
       }
@@ -365,7 +483,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         // Parent winner → this child's stub start. The stub itself (and the label) is
         // drawn by the node group in lineage style, so emit only the slant here.
         if (parent) {
-          segs.push({ x1: parent.x, y1: parent.y, x2: x - CAND_STUB, y2: y, variant: "chain" });
+          segs.push({ x1: parent.x, y1: parent.y, x2: x - d.candStub, y2: y, variant: "chain" });
         }
       });
       const winner = pickWinner(cands);
@@ -399,11 +517,11 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       : undefined;
     // A collapsed parent draws only winners, so a course cut from an eliminated
     // candidate has no node to hang on — anchor it to the parent's band instead.
-    const anchorX = anchorNode?.x ?? bandLeftX(parentLayout);
+    const anchorX = anchorNode?.x ?? bandLeftX(parentLayout, d);
     const anchorY = anchorNode?.y ?? bandCenterY(parentLayout);
 
     const childBandY = bandCenterY(l);
-    const minChildX = anchorX + COL_W;
+    const minChildX = anchorX + d.colW;
     // Anchor the child stem at its first node; an empty course at the clamped
     // minimum so the stem always slants rightward.
     const firstRound = l.candidates.length > 0
@@ -415,8 +533,8 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       if (firstNode) childX = firstNode.x;
     }
     if (childX < minChildX) childX = minChildX;
-    segs.push({ x1: anchorX, y1: anchorY, x2: childX - STUB, y2: childBandY, variant: "fork" });
-    segs.push({ x1: childX - STUB, y1: childBandY, x2: childX, y2: childBandY, variant: "fork" });
+    segs.push({ x1: anchorX, y1: anchorY, x2: childX - d.stub, y2: childBandY, variant: "fork" });
+    segs.push({ x1: childX - d.stub, y1: childBandY, x2: childX, y2: childBandY, variant: "fork" });
   }
 
   return { nodes, segs, spineByKeyRound };

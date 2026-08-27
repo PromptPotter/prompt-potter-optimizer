@@ -5,16 +5,15 @@ import {
   postForkCycle,
   postPauseCycle,
   type DraftPatch,
-  type ConfigOverrides,
+  type RunLimitOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
-import type { NodeSearchNarrowing } from "@/lib/api/types";
+import type { NodeConfigParam, NodeOutputSchema, NodeSearchNarrowing } from "@/lib/api/types";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { useConnector } from "@/lib/hooks/useConnector";
-import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
+import type { CyclePath } from "@/lib/ids";
+import type { DashboardSnapshot } from "@/lib/poll";
 import {
   candidateSearchPoint,
   liveCandidateSearchPoint,
@@ -44,37 +43,51 @@ import { LimitReconcile } from "./LimitReconcile";
 // input (so you can steer-fork a still-running candidate without 404ing on its
 // not-yet-written round file).
 //
-// Shared by `ScoringInspector` (candidate drill-in) + `BackendNodeDetail`
-// (node click on a stopped cycle). Self-contained: it owns its source pick and
-// the fork write, and reads the shared connector view via `useConnector()`, so
-// any caller under `ConnectorProvider` can mount it.
+// Opened by `SteerForkAction`, which both hosts of the searchpoint drill-in mount. It owns its
+// source pick and the fork write; everything that varies with WHICH searchpoint is being steered
+// arrives as a prop.
+//
+// **The ADDRESS is the caller's.** Read off the workspace instead, this panel could only ever
+// steer the cycle the browser happened to be viewing — which is exactly the campaign a Compare
+// channel is NOT on. The pipeline SCHEMA is the caller's for the same reason: it is per-dataset,
+// and the app's connector view answers for the viewed one.
 
 export function SteerForkPanel({
   candidate,
+  path,
+  dash,
+  parentIsLive,
+  schema,
+  outputSchema,
   onDone,
   onCancel,
 }: {
   candidate: SelectedCandidate;
+  // The searchpoint's cycle — which the fork verb addresses AND whose round file seeds the
+  // editors. ONE address, because `SteerForkAction` refuses anything below the top level:
+  // `ForkCyclePayload` carries no `descend`, so a point whose round file lives in an `.inner/`
+  // sandbox is one this command cannot name at all, and the two could only differ there.
+  path: CyclePath;
+  // The live snapshot for `pointPath`'s cycle, or `null` where this browser holds no stream for
+  // it — exactly one cycle streams (`webapp/CLAUDE.md` § Polling shape), so a caller reading some
+  // other branch has none and the seed comes from the round file, which is the only honest source.
+  dash: DashboardSnapshot | null;
+  // Is the parent CYCLE running — confirm stops it before forking. Distinct from `roundIsLive`
+  // below, which asks whether `candidate.round` is the in-flight one.
+  parentIsLive: boolean;
+  // The point's OWN dataset's pipeline. Per-dataset, so it cannot be self-sourced: the app-level
+  // connector view answers for whichever campaign is being VIEWED, which would seed these editors
+  // from the wrong pipeline for any point outside it.
+  schema: Record<string, NodeConfigParam[]> | null;
+  outputSchema: Record<string, NodeOutputSchema | null> | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
-  // Self-sourced live snapshot + ids + connector view. `isLive` (is the parent
-  // cycle running — confirm stops it before forking) is the connector's
-  // liveness; `roundIsLive` (is `candidate.round` the in-flight round) is
-  // distinct — the live round's seed comes from `dashboard.json`, a completed
-  // round's from its round file.
-  const { dash } = useDashboard();
-  // Control verbs (pause/fork) bind to the ROOT hop — they steer the operator's
-  // top-level conversation. The candidate's round FILE, though, follows the
-  // VIEWED leaf hop (an L4 inner loop seeds from the inner cycle's round file).
-  const { campaignId, cycleId, viewedPath } = useWorkspace();
-  const cv = useConnector();
-  const isLive = cv.isLive;
-  const { isLive: roundIsLive, doc } = useRoundSource(
-    viewedPath,
-    candidate.round,
-    dash,
-  );
+  const hop = path.at(0);
+  const campaignId = hop?.campaignId ?? "";
+  const cycleId = hop?.cycleId ?? "";
+  const isLive = parentIsLive;
+  const { isLive: roundIsLive, doc } = useRoundSource(path, candidate.round, dash);
   const { me } = useAuth();
   const seed = roundIsLive
     ? liveCandidateSearchPoint(dash, candidate.candidate_id)
@@ -86,7 +99,7 @@ export function SteerForkPanel({
   // list also carries the prompt + nested params, which have no widget, so the
   // widget filter is what keeps a prompt-only pipeline (pp-self) hiding the lock
   // block entirely rather than printing a "no configurable params" box per node.
-  const lockableNodes = Object.entries(cv.nodeConfigSchema ?? {})
+  const lockableNodes = Object.entries(schema ?? {})
     .filter(([, params]) => params.some((p) => isWidgetParam(p) && p.kind !== "model"))
     .map(([nodeId]) => nodeId);
   // The origin's declared model allow-list (`CampaignConfig.allowed_models`). Absent /
@@ -140,7 +153,9 @@ export function SteerForkPanel({
   // Seed with the pre-filled "remaining" defaults so confirming an untouched
   // reconcile dialog forks with the SHOWN ceilings — not a silent inherit of
   // the parent's full budget. `LimitReconcile.onChange` overwrites on edit.
-  const limits = useRef<ConfigOverrides>(configOverridesFromDefaults(forkReconcileDefaults(dash)));
+  const limits = useRef<RunLimitOverrides>(
+    configOverridesFromDefaults(forkReconcileDefaults(dash)),
+  );
 
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -212,8 +227,8 @@ export function SteerForkPanel({
         node={null}
         point={searchPoint(seedPrompt, overlay)}
         configSeed={overlay}
-        schema={cv.nodeConfigSchema}
-        outputSchema={cv.nodeOutputSchema}
+        schema={schema}
+        outputSchema={outputSchema}
         mode="values"
         babysitEditable={canBabysit}
         onApply={(p) => {
@@ -244,7 +259,7 @@ export function SteerForkPanel({
               key={nodeId}
               mode="search-space"
               locksOnly
-              schema={cv.nodeConfigSchema}
+              schema={schema}
               node={nodeId}
               seedOverlay={{}}
               onApply={(patch) => captureLocks(nodeId, patch)}

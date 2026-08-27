@@ -1,14 +1,21 @@
 "use client";
 import type { SampleRow } from "@/lib/types";
 
+// How many of a candidate's rows are put in the DOM before the rest become a count. A rendering
+// bound, never a claim about the data: both surfaces print the remainder rather than dropping it,
+// and the served tallies beside them are over the whole set. One constant because it is one
+// number — two of them, with a "mirrors the other" note, is a value nobody can change once.
+export const SAMPLE_RENDER_CAP = 250;
+
 function truncate(s: string | undefined, n: number): string {
   if (!s) return "—";
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
 // One per-sample row inside a candidate group, expanding to query / ground-truth /
-// predicted. Pure renderer — extracted from RoundSamplesView, which owns the source +
-// selection state.
+// predicted. Pure renderer — the host owns the source + selection state. Chrome rather than
+// dashboard-local: the round-wide samples table and the searchpoint drill-in both render it, and
+// the drill-in is itself on two tabs.
 export function SampleRowItem({ row }: { row: SampleRow }) {
   // Three marks, three tags — `ERR` shares no colour with `MISS`
   // (`lib/types/sample.ts::SampleStatus`).

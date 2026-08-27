@@ -1,7 +1,7 @@
 "use client";
 import { isSelectedCandidate, type CandidateRow, type SampleRow, type SampleStatus, type SelectedCandidate } from "@/lib/types";
 import type { LineageNode } from "@/lib/api";
-import { SampleRowItem } from "./SampleRowItem";
+import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 import { PanelCellRow } from "./PanelCellRow";
 import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
 import type { MeasuredUnit } from "@/lib/api/types";
@@ -18,11 +18,6 @@ const STATUS_FILTERS: readonly Segment<StatusFilter>[] = [
   { value: "MISS", label: "MISS" },
   { value: "ERR", label: "ERR" },
 ];
-
-// Cap on rendered rows per candidate group so the DOM stays bounded
-// even on long rounds. Operator can expand the candidate to see all
-// rows the source has — the cap only affects DOM rendering count.
-const PER_GROUP_CAP = 250;
 
 interface Props {
   candidates: CandidateRow[];
@@ -110,7 +105,7 @@ export function RoundSamplesBody({
             g.candidate.candidate_id,
           );
           const cached = g.samples.reduce((n, s) => n + (s.cached ? 1 : 0), 0);
-          const display = g.samples.slice(0, PER_GROUP_CAP);
+          const display = g.samples.slice(0, SAMPLE_RENDER_CAP);
           const truncated = g.samples.length - display.length;
           return (
             <section
@@ -170,7 +165,7 @@ export function RoundSamplesBody({
                   )}
                   {truncated > 0 && (
                     <div className="rsv-empty-row">
-                      +{truncated} more (rendering capped at {PER_GROUP_CAP}).
+                      +{truncated} more (rendering capped at {SAMPLE_RENDER_CAP}).
                     </div>
                   )}
                 </div>

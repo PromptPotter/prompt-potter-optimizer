@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { LineageNode } from "@/lib/api";
 import {
-  COL_W,
+  ROOMY,
   LANE_H,
-  LEFT_PAD,
   TOP_PAD,
+  extentKeys,
   expandedLaneSpan,
   layout,
   placeNodes,
@@ -95,17 +95,21 @@ function course(
   children: LineageNode[],
   over: Partial<LineageNode> = {},
 ): LineageNode {
+  // A course is addressed by its PATH, and the lane key is built from it. Default to
+  // the tenant's own store; a sandboxed course passes its own `path` via `over`.
+  const path = over.path ?? [{ campaign_id: "camp", cycle_id: id }];
   return node({
     kind: "course",
     id,
     label: id,
     course_kind: id.includes("_fork_") ? "fork" : "root",
     dataset_name: "ds",
-    // A course is addressed by its PATH, and the lane key is built from it. Default to
-    // the tenant's own store; a sandboxed course passes its own `path` via `over`.
-    path: [{ campaign_id: "camp", cycle_id: id }],
-    children,
     ...over,
+    path,
+    // A candidate wears its COURSE's path, as the server stamps it — `nodeKeyOf` is
+    // `(path, id)`, so without it two seeds' identically-labelled arms share one address and
+    // anything keyed on it silently folds them together.
+    children: children.map((c) => (c.kind === "candidate" ? { ...c, path } : c)),
   });
 }
 
@@ -213,12 +217,102 @@ describe("layout", () => {
     // Cut at the parent's round 2 (column 2) ⇒ the fork's round 0 is column 3.
     expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.baseCol).toBe(3);
   });
+
+  // A cut has to take the SHAPE down, not just hide nodes: a fork cut after the point would
+  // otherwise reserve a lane row and widen the drawing with nothing drawn on it.
+  it("cut at a candidate: later rounds and the courses cut after it take no row", () => {
+    const tree = hangOffWinner(
+      course("cycle_a", cands([2, 2])),
+      2,
+      course("cycle_a_fork_b", cands([1])),
+    );
+    const here = layout(tree, new Set()).laneByKey.get(laneKey("cycle_a"))!.coursePathKey;
+    const keep = extentKeys(tree, { coursePathKey: here, candidateId: "c1_1" })!;
+    const cut = layout(tree, new Set([laneKey("cycle_a")]), keep);
+    expect(cut.laneByKey.size).toBe(1);
+    expect(cut.maxCol).toBe(1);
+    // Round 1 entire — the arm it beat comes with it — and nothing past it.
+    expect(cut.laneByKey.get(laneKey("cycle_a"))!.candidates.map((c) => c.id)).toEqual([
+      "c1_0",
+      "c1_1",
+    ]);
+    // Uncut is the identity: the same call with no extent lays out the whole family.
+    expect(layout(tree, new Set()).laneByKey.size).toBe(2);
+  });
+
+  // The L4 case, and the reason the extent is a WALK rather than a round-column test. A seed run
+  // measured the candidate it hangs off — it is how that point got its number — but it is drawn
+  // one column RIGHT of it, so a column test drops every seed of a campaign read at its own
+  // origin: a `promptpotter-self` card showing one dot where six lineages ran.
+  it("the seed runs that measured the point stay whole; a fork beside it goes", () => {
+    const seed = (cycle: string, rounds: number[]): LineageNode =>
+      course(cycle, cands(rounds), {
+        course_kind: "inner",
+        path: [
+          { campaign_id: "camp", cycle_id: "cycle_a" },
+          { campaign_id: "inner_camp", cycle_id: cycle },
+        ],
+      });
+    const measured = seed("cycle_seed", [1, 1]);
+    const tree = hangOffWinner(
+      hangOffWinner(course("cycle_a", cands([1, 1])), 1, measured),
+      1,
+      course("cycle_a_fork_b", cands([1])),
+    );
+    const here = layout(tree, new Set()).laneByKey.get(laneKey("cycle_a"))!.coursePathKey;
+    const keep = extentKeys(tree, { coursePathKey: here, candidateId: "c1_0" })!;
+    const { laneByKey } = layout(tree, new Set(), keep);
+    // The seed rides in whole — both its rounds — though both sit past the anchor's own column.
+    const seedLane = laneByKey.get(nodeKeyOf(measured))!;
+    expect(seedLane.candidates.length).toBe(2);
+    expect(seedLane.baseCol).toBeGreaterThan(laneByKey.get(laneKey("cycle_a"))!.baseCol);
+    // The fork hangs off the same candidate and is a line BESIDE it, not its measurement.
+    expect(laneByKey.has(laneKey("cycle_a_fork_b"))).toBe(false);
+  });
+
+  // The other half of the same rule, and the one an exemption gets wrong: a point INSIDE a seed
+  // is cut inside it, and the seeds measuring its ANCESTOR are not its history — they produced
+  // some other number for the same outer point.
+  it("a point inside a seed cuts within it, and the sibling seeds are out", () => {
+    const seed = (cycle: string): LineageNode =>
+      course(cycle, cands([1, 1, 1]), {
+        course_kind: "inner",
+        path: [
+          { campaign_id: "camp", cycle_id: "cycle_a" },
+          { campaign_id: "inner_camp", cycle_id: cycle },
+        ],
+      });
+    const mine = seed("cycle_seed0");
+    const sibling = seed("cycle_seed1");
+    let tree = hangOffWinner(course("cycle_a", cands([1])), 1, mine);
+    tree = hangOffWinner(tree, 1, sibling);
+    const keep = extentKeys(tree, {
+      coursePathKey: layout(tree, new Set()).laneByKey.get(nodeKeyOf(mine))!.coursePathKey,
+      candidateId: "c2_0",
+    })!;
+    const { laneByKey } = layout(tree, new Set(), keep);
+    // Rounds 1-2 of my own seed; round 3 is after the point and gone.
+    expect(laneByKey.get(nodeKeyOf(mine))!.candidates.map((c) => c.id)).toEqual(["c1_0", "c2_0"]);
+    // The sibling measured the same outer candidate and is not how THIS point came to be.
+    expect(laneByKey.has(nodeKeyOf(sibling))).toBe(false);
+    // The outer chain is kept, cut at the candidate the seed hangs off.
+    expect(laneByKey.get(laneKey("cycle_a"))!.candidates.map((c) => c.id)).toEqual(["c1_0"]);
+  });
+
+  // A point on ANOTHER campaign's tree — the ordinary case once a board holds channels from
+  // several. Answering with an extent would cut this drawing to a history it has none of.
+  it("an anchor this tree does not hold has no extent", () => {
+    const tree = course("cycle_a", cands([2]));
+    const here = layout(tree, new Set()).laneByKey.get(laneKey("cycle_a"))!.coursePathKey;
+    expect(extentKeys(tree, { coursePathKey: here, candidateId: "nope" })).toBeNull();
+    expect(extentKeys(tree, { coursePathKey: "other::cycle_z", candidateId: "c1_0" })).toBeNull();
+  });
 });
 
 describe("placeNodes", () => {
   it("collapsed: one summary node per round, chained", () => {
     const { laneByKey } = layout(course("cycle_a", cands([2, 3])), new Set());
-    const { nodes } = placeNodes(laneByKey);
+    const { nodes } = placeNodes(laneByKey, ROOMY);
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary).toHaveLength(2);
     expect(summary.map((n) => n.round)).toEqual([1, 2]);
@@ -228,7 +322,7 @@ describe("placeNodes", () => {
 
   it("expanded: one node per candidate per round + winner→child chain segs", () => {
     const { laneByKey } = layout(course("cycle_a", cands([3, 2])), new Set([laneKey("cycle_a")]));
-    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey);
+    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
     const placed = nodes.filter((n) => n.isExpanded && n.round > 0);
     expect(placed).toHaveLength(5); // 3 + 2
     // Exactly one winner per round.
@@ -254,7 +348,7 @@ describe("placeNodes", () => {
       course("cycle_a_fork_b", cands([1])),
     );
     const { laneByKey } = layout(tree, new Set([laneKey("cycle_a")]));
-    const { segs, spineByKeyRound } = placeNodes(laneByKey);
+    const { segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
     const parentR2Winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r2`)!;
     const forkStem = segs.find(
       (s) => s.variant === "fork" && s.x1 === parentR2Winner.x && s.y1 === parentR2Winner.y,
@@ -268,7 +362,7 @@ describe("placeNodes", () => {
       course("cycle_a", candsH([{ n: 2 }, { n: 2, held: true }, { n: 2 }])),
       new Set([laneKey("cycle_a")]),
     );
-    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey);
+    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
 
     const r1winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!;
     // A held round mints NO new spine node — its spine entry is the retained
@@ -301,7 +395,7 @@ describe("placeNodes", () => {
       course("cycle_a", candsH([{ n: 2 }, { n: 2, held: true }])),
       new Set(),
     );
-    const { nodes } = placeNodes(laneByKey);
+    const { nodes } = placeNodes(laneByKey, ROOMY);
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary.find((n) => n.round === 1)!.isWinner).toBe(true);
     expect(summary.find((n) => n.round === 2)!.isWinner).toBe(false);
@@ -312,7 +406,7 @@ describe("placeNodes", () => {
       course("cycle_a", candsH([{ n: 1 }, { n: 1, held: true }])),
       new Set([laneKey("cycle_a")]),
     );
-    const { nodes } = placeNodes(laneByKey);
+    const { nodes } = placeNodes(laneByKey, ROOMY);
     // Being the only candidate there is not an election.
     expect(nodes.find((n) => n.round === 2)!.isWinner).toBe(false);
     expect(nodes.find((n) => n.round === 1)!.isWinner).toBe(true);
@@ -323,12 +417,12 @@ describe("placeNodes", () => {
       course("cycle_a", cands([2, 2, 1])),
       new Set([laneKey("cycle_a")]),
     );
-    const { nodes, spineByKeyRound } = placeNodes(laneByKey);
+    const { nodes, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
     // 2 + 2 + 1 candidate nodes (no origin trunk)
     expect(nodes).toHaveLength(5);
     // A winner spine entry per round, columns ascending.
-    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!.x).toBe(LEFT_PAD + 1 * COL_W);
-    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r3`)!.x).toBe(LEFT_PAD + 3 * COL_W);
+    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!.x).toBe(ROOMY.leftPad + 1 * ROOMY.colW);
+    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r3`)!.x).toBe(ROOMY.leftPad + 3 * ROOMY.colW);
     expect(maxCol).toBe(3);
     // Band-centered round-1 fan: top candidate above center for span 2.
     const r1 = nodes.filter((n) => n.round === 1).sort((a, b) => a.y - b.y);

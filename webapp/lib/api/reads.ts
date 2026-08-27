@@ -42,6 +42,7 @@ import type {
   OriginListResponse,
   QuotaStatus,
   RayResponse,
+  SubjectReading,
   UserSettings,
   WorkspaceStorageResponse,
 } from "./types";
@@ -376,30 +377,108 @@ export function fetchConfigMap(
   );
 }
 
-// --- Cross-campaign evidence (the Compare tab) ------------------------------------
-// What an arbitrary SET of campaigns jointly says: the roster, whether their levels are
-// comparable at all, the per-cell levels to plot, the cell/arm/residual decomposition, what the
-// selection can resolve, and the run-order confound. The selection may span datasets, and there
-// is no L4 gate — an ordinary campaign and a self-optimizing one take the same path.
+// --- Cross-subject evidence (the Compare tab) ------------------------------------
+// What an arbitrary SET of subjects jointly says: the roster, whether their levels are
+// comparable at all, the per-cell levels to plot, the cell/subject/residual decomposition, what
+// the selection can resolve, and the run-order confound. The selection may span campaigns and
+// datasets, and there is no L4 gate — an ordinary campaign and a self-optimizing one take the
+// same path.
+//
+// A SUBJECT is what one channel of the comparison is anchored on: a whole campaign (its root
+// origin), a course (one branch, read at its last elected winner), or a single candidate. The
+// address grammar is spelled by `subjectKey` below and NOWHERE else in the browser — every other
+// module passes the opaque string, which is also what the response keys its rows and its pairwise
+// refs on, so nothing downstream re-splits it.
 //
 // `metric` picks WHICH number all of it is about — a catalogue key, or a formula composed over
 // the channel names the response echoes back in `metric.namespace`. The `expr:` prefix is spelled
 // HERE and nowhere else, so no component has to know the wire encoding.
 //
-// `ranking` is the widest walk and is off by default: everything else opens one round-0 document
-// per campaign, while the ranking walks every round of every campaign selected. That is why the
-// pane puts it behind a press instead of a poll.
+// `ranking` and `trajectory` are the two walks that open round documents, and both are off by
+// default: everything else reads one document per subject. That is why the pane puts them behind
+// a press instead of a poll.
 //
 // Every shape is GENERATED from the Pydantic source (`Evidence` &c in
 // `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`,
 // the same setup that let the resource-matrix types drift two fields behind their model.
+// `inside` is the sandbox chain the address lives in — the hops ABOVE the leaf, which for a
+// tree node is `coursePath.slice(0, -1)`. Empty for a top-level campaign; one hop per L4
+// recursion below it. It rides the same `campaign::cycle` codec as `?descend=` because it is the
+// same question, so `encodeCyclePath` is the encoder here too.
+export function subjectKey(
+  kind: SubjectReading["kind"],
+  ids: readonly string[],
+  inside: CyclePath = [],
+): string {
+  const address = `${kind}:${ids.join("/")}`;
+  return inside.length > 0 ? `${address};in=${encodeCyclePath(inside)}` : address;
+}
+
+// A served reading's COURSE, as one address: the sandbox chain it lives in with its own leaf hop
+// on the end. Every joiner against the lineage tree needs exactly this — the ids alone name the
+// leaf, and a depth-1 guess never matches a node inside a sandbox — and four surfaces were
+// spelling the `inside` conversion inline, which is one wire-shape decision copied five ways.
+export function readingPath(reading: SubjectReading): CyclePath {
+  return [
+    ...reading.inside.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id })),
+    { campaignId: reading.campaign_id, cycleId: reading.cycle_id },
+  ];
+}
+
+// One searchpoint's address, from the path it sits at. The leaf/`inside` split is the grammar's,
+// so it is made here rather than at each caller: a point's own hop names it, and everything above
+// is the sandbox chain the read descends. Empty for a pathless node, which addresses nothing.
+export function candidateSubject(path: CyclePath, candidateId: string): string {
+  const leaf = path.at(-1);
+  if (!leaf) return "";
+  return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, candidateId], path.slice(0, -1));
+}
+
+// The WHAT-IF segments of the same address — a scoring lens and/or a sample subset, appended to
+// the subject a served reading was already resolved from. `;` separates them because it cannot
+// appear in a safe-AST formula, which is also why the server splits on it. Blank values drop the
+// segment, so clearing both fields is how a channel goes back to the record.
+//
+// The subject's `inside` completes its address: the id fields name the LEAF, so rebuilding from
+// them alone silently re-addressed every inner subject to the outer tree.
+export function withMask(
+  address: string,
+  mask: { lens?: string | null; samples?: string | null },
+): string {
+  const segments = [
+    mask.lens ? `lens=${mask.lens}` : "",
+    mask.samples ? `samples=${mask.samples}` : "",
+  ].filter(Boolean);
+  return [address, ...segments].join(";");
+}
+
+export function maskedSubject(
+  subject: SubjectReading,
+  mask: { lens?: string | null; samples?: string | null },
+): string {
+  return withMask(
+    subjectKey(
+      subject.kind,
+      [
+        subject.campaign_id,
+        ...(subject.kind === "campaign" ? [] : [subject.cycle_id]),
+        ...(subject.kind === "candidate" ? [subject.candidate_id] : []),
+      ],
+      readingPath(subject).slice(0, -1),
+    ),
+    mask,
+  );
+}
+
 export function fetchEvidence(
-  campaignIds: readonly string[],
-  opts: { ranking?: boolean; metric?: string } = {},
+  subjects: readonly string[],
+  opts: { ranking?: boolean; trajectory?: boolean; config?: boolean; metric?: string } = {},
   signal?: AbortSignal,
 ): Promise<Evidence> {
-  const qs = campaignIds.map((id) => `campaign=${encodeURIComponent(id)}`);
+  const qs = subjects.map((s) => `subject=${encodeURIComponent(s)}`);
   if (opts.ranking) qs.push("ranking=true");
+  if (opts.trajectory) qs.push("trajectory=true");
+  if (opts.config) qs.push("config=true");
   // A catalogue key or a composed `expr:…`, opaque here — the server owns both spellings, and
   // `components/compare/MetricPicker.tsx` is the one place the browser spells the prefix.
   if (opts.metric) qs.push(`metric=${encodeURIComponent(opts.metric)}`);

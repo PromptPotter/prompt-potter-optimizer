@@ -7,6 +7,7 @@
 // never re-derived from a list position.
 
 import type { LineageNode } from "@/lib/api";
+import type { SelectedCandidate } from "@/lib/types";
 import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
 
 // A node's address. The served hops are the wire's snake_case; `CyclePath` is the app's.
@@ -98,6 +99,31 @@ export function nodeKeyOf(node: LineageNode): string {
   return nodeAddress(pathOf(node), node.id);
 }
 
+// A served node as the app's SELECTION — the one mint, because the `label` field is the trap.
+// `SelectedCandidate.label` is consumed as a JOIN KEY (`candidateObserveConfig`, the steer
+// panel's seed, the samples groups), never as display text, so it carries the MINTING course's
+// label: an attempt a fork contributed is renumbered onto the timeline it is drawn on while its
+// round document still speaks the label its own course gave it, and an id join misses in silence.
+// Three surfaces built this object by hand and one of them wrote `label` — the renumbered one.
+//
+// The CYCLE is the caller's: a node's own path names the course that minted it, while a drawing
+// hands the lane it was placed on, and the two differ for exactly that fork-contributed attempt.
+// The accuracy likewise, because a cladogram's node carries whichever metric it is inked with.
+export function selectedCandidateOf(
+  node: LineageNode,
+  cycleId: string,
+  accuracy: number | null = node.accuracy,
+): SelectedCandidate {
+  return {
+    cycle_id: cycleId,
+    round: node.round ?? 0,
+    candidate_id: node.id,
+    label: node.course_label,
+    accuracy,
+    is_winner: node.is_winner,
+  };
+}
+
 // ONE walk, indexed by encoded path — and THE lookup every surface uses. `candidatesAtPath`
 // re-walks the whole tree per call; a surface that looks up per render (or holds several
 // lookups) rides an index built once per tree instead. Semantics per entry:
@@ -130,6 +156,37 @@ export function indexLineage(root: LineageNode | null): LineageIndex {
   };
   visit(root);
   return index;
+}
+
+// What a cladogram paints ON its nodes, keyed by the candidate's address. Deliberately apart
+// from the geometry: a value tick repaints node text without re-flowing the tree.
+//
+// ONE SOURCE — the served tree. A second pass used to overwrite the in-view course's entries
+// from `dashboard.json` "so the in-flight round tracks the poll", and it could never have done
+// that: a live row's id is POSITIONAL (`r{round}_{idx}`) while every key here is `nodeKeyOf`.
+// θ rides its own map because it is a logit, not a percent.
+export interface NodeOverlays {
+  valueByKey: ReadonlyMap<string, number | null>;
+  thetaByKey: ReadonlyMap<string, number | null>;
+}
+
+export function nodeOverlays(
+  courses: readonly LineageNode[],
+  composite: boolean,
+): NodeOverlays {
+  const valueByKey = new Map<string, number | null>();
+  const thetaByKey = new Map<string, number | null>();
+  for (const course of courses) {
+    for (const cand of candidatesOf(course)) {
+      const key = nodeKeyOf(cand);
+      // Accuracy view: every node paints what IT measured. The winner used to paint the
+      // round's cumulative frontier — a pool of rows scored by different configurations — so
+      // the spine read higher than anything the run had measured.
+      valueByKey.set(key, composite ? cand.composite_fitness : (cand.accuracy ?? null));
+      thetaByKey.set(key, cand.theta);
+    }
+  }
+  return { valueByKey, thetaByKey };
 }
 
 // The label of the candidate a fork was CUT FROM — a badge, never the name. Null for

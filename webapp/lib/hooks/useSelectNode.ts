@@ -19,7 +19,7 @@
 import { useCallback } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
-import { pathOf } from "@/lib/derivations";
+import { pathOf, selectedCandidateOf } from "@/lib/derivations";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
 import type { LineageNode } from "@/lib/api";
 
@@ -57,18 +57,7 @@ export function useSelectNode(
       const selected = isSelectedCandidate(candidate, cycleId, node.round ?? 0, node.id);
       if (selected) selectCyclePath(timeline, null);
       else selectCyclePath(nodePath, node.id);
-      setSelectionForCandidate(
-        selected
-          ? null
-          : {
-              cycle_id: cycleId,
-              round: node.round ?? 0,
-              candidate_id: node.id,
-              label: node.label,
-              accuracy: node.accuracy,
-              is_winner: node.is_winner,
-            },
-      );
+      setSelectionForCandidate(selected ? null : selectedCandidateOf(node, cycleId));
     },
     [candidate, selectCyclePath, setSelectionForCandidate],
   );
