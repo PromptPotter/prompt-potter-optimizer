@@ -101,7 +101,7 @@ invariants:
                       DatasetPickList, CandidatesCard), `ability_delta` (headline-stats,
                       run-summary), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
-                      `matched_parent_*` field, wherever it surfaces (ScoringInspector,
+                      `matched_parent_*` field, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
                       elects on the parent (architecture.md §0), so a pane labelling a
                       `matched_parent_*` value "origin" states a comparison the run never made.

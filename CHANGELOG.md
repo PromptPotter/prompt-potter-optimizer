@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Compare anything against anything.** Tick two campaigns and each gets a card on its own winner. Every card carries the dashboard's cladogram as a map: walk back through the rounds and click any searchpoint to move that card onto it, or add it beside the winner. Inner runs are channels too, at any depth.
+- **What two searchpoints ARE, not just what they scored** — configurations lined up key by key, differing ones first, beside the parent chain that led to each.
+- **A cell nobody measured is not a zero.** A coverage strip says which absence each blank is, and a channel on a different ruler or dataset is tagged rather than averaged in.
+- **"What if we had scored it differently"** — put a branch on the chart twice, once as it ran and once under another formula or fewer samples, and read what changed: the winner, the round the two lineages part at, how much of the record survives.
+
 ## [0.8.12] — 2026-08-24
 
 > Start and pause the optimizer from the chat itself, read what every account on the install spent beside what it produced, and compare any campaigns across datasets. 77 commits since `v0.8.11`.

@@ -43,7 +43,7 @@ def get_evidence(
                 "in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as "
                 "`?descend=` because it is the same question. A sandbox is structurally an "
                 "ordinary projects tree, so every kind above resolves inside one unchanged.\n\n"
-                "A WHAT-IF rides the address, `;`-separated, so the record and the "
+                "A MASK rides the address, `;`-separated, so the record and the "
                 "counterfactual can be two channels of one read: `;samples=3,7,11` restricts "
                 "every value to those samples, and `;lens=score:<formula>` (courses only) "
                 "re-decides the branch's elections under another criterion and reads it at the "

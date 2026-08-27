@@ -3884,7 +3884,7 @@ def test_a_course_reads_at_the_winner_its_LEDGER_crowned(built_stores: Any) -> N
 
 
 def test_a_masked_channel_plots_measurements_and_never_the_full_set(built_stores: Any) -> None:
-    """The what-if's two silent harms, both of which render as an ordinary bar.
+    """The mask's two silent harms, both of which render as an ordinary bar.
 
     A sample mask must DROP rows, never re-derive them: a value averaged over 28 samples plotted
     under a 17-sample label is not the answer to "what if we had used fewer", and nothing on the

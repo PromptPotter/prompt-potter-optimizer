@@ -75,11 +75,12 @@ arms still prints a leader, and reading that leader as a finding is the failure 
 exposed to.
 
 - **Served at zero spend** by `application/evidence.py` (`python -m promptpotter
-  evidence promptpotter-self --ranking`, `GET /evidence?campaign=…&ranking=`): each arm's anchor-to-origin paired
+  evidence promptpotter-self --ranking`, `GET /evidence?subject=campaign:…&ranking=`): each arm's
+  anchor-to-origin paired
   effect with its own interval, plus `EditSpread` — how far apart those effects are. Beside them, and
   answering at round 0 where the ranking cannot: whether the campaigns' levels are comparable at all
-  (`ruler_id`), which arms are replicates, the cell/arm/residual decomposition against the scatter an arm
-  mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`
+  (`ruler_id`), which arms are replicates, the cell/subject/residual decomposition against the scatter a
+  subject mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`
   reports one round's estimation noise beside its observed between-cell spread, off `mean_adopted_level_se`.
   **Two bars, never their ratio**: the ratio shipped once as `estimation_share`, and `min(1.0, …)` rendered a
   raw 5.55 — noise claiming to exceed the spread it is a component of — as a tidy "100% measurement noise".

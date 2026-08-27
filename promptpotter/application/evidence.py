@@ -102,7 +102,7 @@ _LENS_SCORE_PREFIX = "score:"
 
 
 class SubjectSpec(NamedTuple):
-    """One addressed subject, plus the WHAT-IF mask it is read under. INTERNAL — what crosses the
+    """One addressed subject, plus the MASK it is read under. INTERNAL — what crosses the
     wire is the ``key`` spelling and, coming back, a :class:`SubjectReading`.
 
     The mask is part of the ADDRESS, not a second query parameter, which is what lets one read

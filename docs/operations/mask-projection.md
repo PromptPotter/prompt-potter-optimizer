@@ -59,10 +59,50 @@ replaying; ask `ab` whether the run would have moved.
 `?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples. No
 lens and no samples is the raw read.
 
+### The second consumer: a mask as a compare CHANNEL
+
+The tree answers *where does the record first disagree*. `GET /evidence` answers *and then
+what*, by carrying the same two segments on a subject address —
+`subject=course:<campaign>/<cycle>;lens=score:<formula>;samples=3,7,11` — so a branch and the
+same branch under another criterion pool as two channels of one read instead of two page loads.
+The mask is part of the subject KEY, which is what keeps them apart.
+
+Two folds, one round-level ranking. `verdicts.py::masked_election` decides one round against a
+stated parent floor; `find_divergences` asks it against the RECORDED parent one round at a time,
+while `scenario.py::scenario_spine` walks the chain — each round judged against the winner the
+scenario is standing on — and **ends on the round the two part**. Past that the run would have
+stood on a parent it never had, so no measurement describes it; that round is also where a fork
+applying the criterion is minted, which `resume_and_fork/resume.py` branches at on a scoring
+divergence, carrying the rounds before it. Every step is an arm the run measured; the fold picks
+among them and invents none.
+
+What the evidence read serves back per masked channel — the round the two part, who each reading
+stood on there, invariant rounds, samples scored, and the caveat as a served sentence — is
+`ScenarioReading` (`application/evidence.py`). The caveat is the same boundary this section
+already draws: θ is not re-fitted and no election is replayed, so the round it names is where the
+two readings part rather than a verdict the campaign reached.
+
+### Applying one — the preview IS the fork point
+
+A `score:` mask is the one setting an operator can change mid-campaign and see the cost of first,
+and the round it parts at is the round the fork is cut at. `fork-cycle` carries `keep_rounds`,
+which swaps the offshoot trigger for `OPERATOR_REWIND` — rounds `0..N-1` lifted, the branch
+continuing at N — and `ConfigOverrides.scoring` carries the criterion into the fork's effective
+config. Preview and action are one fact rather than two surfaces that have to agree, which is why
+the apply affordance sits beside the mask editor rather than in a fork dialog of its own.
+
+**Two settings preview; everything else forks blind, and the difference is the point.** A criterion
+and a sample subset are re-projections of rows already measured. A node parameter, a model or a
+prompt field is not: nothing ever ran at the edited value, so no measurement on that searchpoint
+carries over and the honest render is unknown rather than a recomputed anything. Budget and sample
+look-ahead are the only two settings that move a RUNNING cycle in place. A surface offering the
+change is obliged to say which of the three it is.
+
 `ab` is the one that answers question 2 out loud. It reports where the change departs the
 record, how many rounds that leaves counterfactual, and the decisions that re-derived
 differently up to those points — then stops, because replaying past a departure describes a
-history that would not have happened. Zero divergences means the whole forest survives the
+history that would not have happened. The lens takes the same stopping rule; what separates them
+is how exactly each locates the departure, not how far past it either will speak. Zero divergences means the whole forest survives the
 change and no fork is needed. It reads through the store's typed round loader, so a round
 file the current models cannot parse stops it loudly; a `score:` or `abort:` lens reads the
 summary fields instead and still serves such a cycle.
@@ -87,9 +127,11 @@ summary fields instead and still serves such a cycle.
 
 ## Design decisions (the non-derivable rationale)
 
-1. **No persisted mask until a reader exists.** The reuse is the fold plus the verdicts; the
-   criterion rides the request and is computed-then-discarded. Persisted, addressable mask
-   identity lands with the fork-from-divergence write-side — its first real reader.
+1. **No persisted mask, and the write side did not create one.** The reuse is the fold plus the
+   verdicts; the criterion rides the request and is computed-then-discarded. Fork-from-divergence
+   was expected to be its first real reader and turned out not to be: an applied criterion rides
+   `CycleSeed.config_overrides`, which the fork already writes, so mask identity would be a second
+   home for a value the seed holds.
 2. **A mask is a verdict over the record, not a data-kind.** The value face is
    scoring-specific and stays out of the shared fold; a verdict reads whatever features it
    needs and the fold is indifferent. This is why a verdict lives beside the math it asks
@@ -127,6 +169,6 @@ summary fields instead and still serves such a cycle.
   never a disabled interaction.
 
 Code is the source of truth: `promptpotter/application/mask/`. Composite-fitness chain and
-scoring authority: [`../architecture.md`](../architecture.md) §0.5. The deferred write-side —
-minting a fork *at* a divergence point, carrying the mask as its new criterion-of-record — is
-[`../specs/roadmap.md`](../specs/roadmap.md) § Lineage mask.
+scoring authority: [`../architecture.md`](../architecture.md) §0.5. What of the write side is
+still open — the SAMPLE-SET half, which needs a replayable measurement order the fork seed does
+not carry — is [`../specs/roadmap.md`](../specs/roadmap.md) § Lineage mask.

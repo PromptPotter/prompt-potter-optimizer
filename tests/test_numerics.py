@@ -3962,7 +3962,7 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
 
 
 def test_a_scenario_chain_stops_where_the_record_parts() -> None:
-    """The what-if's silent failure: walking PAST the round the two readings part. Every step after
+    """The mask's silent failure: walking PAST the round the two readings part. Every step after
     it is judged against a parent the run never carried — no candidate was measured against it, and
     L1 would have generated a different population from it — yet those steps render exactly like
     the prefix that is real, so a chart of "what would have happened" plots rounds that could not

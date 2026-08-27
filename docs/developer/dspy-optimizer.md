@@ -19,7 +19,7 @@ the same distribution, so those verbs are already on your PATH:
 |---|---|---|
 | **Live view of a run** — phase, round, candidate, in-flight query | the terminal readout · `dashboard.json` on disk · an MLflow child run per trial | the same, plus the operator webapp |
 | **Pause and resume** · **rewind and fork** | `promptpotter pause` · `resume --from N` · `--fork-on-divergence`, against the campaign `compile()` minted | the same |
-| **Rescore without re-measuring** — change the formula, replay the decisions | what-if · lens · replay, off the measurements your run stored | the same |
+| **Rescore without re-measuring** — change the formula, replay the decisions | mask · lens · replay, off the measurements your run stored | the same |
 | **Diagnostics before you spend** | `noise-floor` · `seed-screen` · `ab` · `verify` | the same |
 | **The operator webapp** — live tree, candidate diffs, run control from a browser | ✗ | ✓ |
 | **An agent driving the campaign** — launch, supervise, diagnose, act on a stall | ✗ | `/potter-run` in Claude Code |

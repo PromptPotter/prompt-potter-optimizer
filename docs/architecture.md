@@ -713,10 +713,9 @@ the PR description.
 
 - **Composite-fitness resolution chain** — **fitness is never one fixed
   number; always ask "under which formula?"** It is formula-relative — the
-  **active** formula the run actually used; a **what-if** preview when the
-  operator re-weights the evaluators; a **lens** that re-projects the lineage
-  under an alternative criterion to show where rankings diverge
-  (`lib/lineage.tsx`); a **replay** that re-scores the whole cycle under a new
+  **active** formula the run actually used; a **mask** — an alternative
+  criterion projected over the record, picked by a **lens** (`?lens=`,
+  `;lens=`) and shown as where the rankings diverge (`lib/lineage.tsx`); a **replay** that re-scores the whole cycle under a new
   config — and mode-relative (`measured`, the samples that round actually ran,
   vs `all`, the full dataset). Two values appear in the data:
   `composite_fitness` (the score under the active formula, **served already
@@ -737,8 +736,7 @@ the PR description.
   accuracy only on genuine `None`; `display_rank_key` is its
   argmax-over-candidates form, and **is not the election** — that is
   `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces.
-  Alternative formulas (what-if, the
-  `score:<formula>` lens, replay) never recompute in the consumer — they
+  Alternative formulas (a `score:<formula>` mask, replay) never recompute in the consumer — they
   re-project from the stored evaluator namespace via
   `value_with_mask_applied` (`metrics.py`) and are **served** — every
   score, active or alternative, is backend-computed and the webapp never

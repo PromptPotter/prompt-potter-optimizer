@@ -2975,7 +2975,7 @@ components:
           nullable: true
           description: |
             The composite-fitness criterion (`CampaignConfig.scoring`) — a formula
-            string, or the per-node map. The ONE override a what-if can preview
+            string, or the per-node map. The ONE override a mask can preview
             against the record: a lens re-elects every round from rows already
             measured, so the round the preview parts at is the round a
             `keep_rounds` fork carrying this is minted at. Every other field here

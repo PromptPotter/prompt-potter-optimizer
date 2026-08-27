@@ -29,7 +29,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Question | Read first |
 |---|---|
 | Which file owns the thing called **X** — a bare word, a class name? | **Search the repo.** There is no term index and there will not be one: a definition beside the code is a copy that drifts. |
-| Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
+| Under which fitness formula? active / mask (picked by a lens) / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (one-budget / simplify-the-problem / surface-ledger / entry-point-parity / read-once / wall-clock)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine |
 | How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
