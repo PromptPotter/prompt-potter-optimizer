@@ -14,8 +14,7 @@ import type { LineageNode } from "@/lib/api/types";
 import { reportIncident } from "@/lib/diagnostics";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
-import { useCandidatesState } from "@/components/candidates/candidates-store";
-import { formulaFromWeights } from "@/components/candidates/fitness-bars";
+import { lensOf, useScoringMask } from "@/components/shell/mask/scoring-mask";
 import { useAuthGate } from "@/lib/auth-context";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { usePoll } from "@/lib/hooks/usePoll";
@@ -58,14 +57,14 @@ export interface ViewedLineage {
   // per-render lookups ride this instead of re-walking with `candidatesAtPath`.
   index: LineageIndex;
   // The PRESET lens dropdown value: "" (off), "score:<formula>", or "abort:<variant>".
-  // The What-If card overrides it as the master when open.
+  // The scoring-mask panel overrides it as the master when open.
   lens: string;
   setLens: (lens: string) => void;
   // A mask actually produced a divergence (drives the red tag) + its short label;
-  // whether the What-If card is the active master (preset dropdown overridden).
+  // whether the scoring-mask panel is the active master (preset dropdown overridden).
   maskActive: boolean;
   maskLabel: string;
-  whatifActive: boolean;
+  scoringMaskActive: boolean;
 }
 
 interface LineageData {
@@ -108,7 +107,7 @@ export function LineageProvider({
 
   const [lens, setLens] = useState<string>("");
   // Lens is a campaign-level view choice; reset it when the campaign changes so a preset /
-  // What-If selection can't leak across campaigns (this provider lives at the shell root,
+  // scoring-mask selection can't leak across campaigns (this provider lives at the shell root,
   // persisting across cycle + tab switches).
   const [prevCampaign, setPrevCampaign] = useState(campaignId);
   if (campaignId !== prevCampaign) {
@@ -116,10 +115,9 @@ export function LineageProvider({
     setLens("");
   }
 
-  // The What-If card is the master: when open, the tree follows its live selection +
-  // weights (the SAME weighted criterion as the bars), debounced so a continuous drag
-  // doesn't spam the fetch.
-  const { selected: whatifSelected, weights: whatifWeights, showWhatIf } = useCandidatesState();
+  // The scoring-mask panel is the master: when open, the tree follows its live mask (the SAME
+  // criterion as the bars), debounced so a continuous drag doesn't spam the fetch.
+  const { open: maskOpen, mask } = useScoringMask();
   // The fixed sample-set chip is ALSO a mask: re-score accuracy over only those ids
   // backend-side. Serialized to a stable string so a same-content set doesn't re-fire.
   const { sampleSet } = useSelection();
@@ -128,19 +126,17 @@ export function LineageProvider({
     [sampleSet],
   );
   const samplesKey = samplesParam ? samplesParam.join(",") : "";
-  const liveWhatifFormula = useMemo(
-    () => (showWhatIf ? formulaFromWeights(whatifSelected, whatifWeights) : null),
-    [showWhatIf, whatifSelected, whatifWeights],
-  );
-  const whatifFormula = useDebounced(liveWhatifFormula, 250);
-  // One lens value drives the fetch: the What-If `score:` formula when its card is master,
-  // else the preset dropdown (already a `score:`/`abort:` value).
+  const liveMaskLens = useMemo(() => (maskOpen ? lensOf(mask) : null), [maskOpen, mask]);
+  const maskLens = useDebounced(liveMaskLens, 250);
+  // One lens value drives the fetch: the scoring mask's own when its panel is master, else the
+  // preset dropdown (already a `score:`/`abort:` value). `lensOf` is the single place either
+  // spelling is minted.
   const lensParam = useMemo(() => {
-    if (showWhatIf) return whatifFormula ? `score:${whatifFormula}` : null;
+    if (maskOpen) return maskLens;
     return lens || null;
-  }, [showWhatIf, whatifFormula, lens]);
-  const maskLabel = showWhatIf
-    ? "What-If"
+  }, [maskOpen, maskLens, lens]);
+  const maskLabel = maskOpen
+    ? "Scoring mask"
     : samplesParam
       ? "Sample set"
       : (LENS_LABELS[lens] ?? "");
@@ -271,9 +267,9 @@ export function LineageProvider({
       setLens,
       maskActive,
       maskLabel,
-      whatifActive: showWhatIf,
+      scoringMaskActive: maskOpen,
     }),
-    [viewedTree, index, lens, maskActive, maskLabel, showWhatIf],
+    [viewedTree, index, lens, maskActive, maskLabel, maskOpen],
   );
 
   const data = useMemo<LineageData>(
@@ -295,7 +291,7 @@ function useLineageData(): LineageData {
 }
 
 // The VIEWED campaign's tree plus its mask state — the surfaces that render the
-// counterfactual (the bars, the forest, the What-If tag).
+// counterfactual (the bars, the forest, the mask tag).
 export function useViewedLineage(): ViewedLineage {
   const ctx = useContext(ViewedLineageContext);
   if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");

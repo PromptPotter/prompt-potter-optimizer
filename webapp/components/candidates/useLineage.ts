@@ -23,6 +23,7 @@ import {
   candidatesOf,
   countDescendants,
   nodeKeyOf,
+  nodeOverlays,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
@@ -204,43 +205,13 @@ export function useLineage({
     return m;
   }, [index, viewedKey]);
 
-  // Per-candidate percent-metric overlay, keyed by `nodeKeyOf`. The tree serves
-  // `composite_fitness` per candidate, so settled/sibling courses honor the composite
-  // selection on the SAME basis as the active cycle — one tree, one basis, nothing
-  // recomputed client-side. θ is a separate overlay (`thetaByKey`) since it is a logit,
-  // not a percent.
-  //
-  // ONE SOURCE. A second pass used to overwrite the in-view course's entries from
-  // `dashboard.json` "so the in-flight round tracks the 2 s poll", and it could never have
-  // done that: a live row's id is POSITIONAL (`r{round}_{idx}`), while every key here is
-  // `nodeKeyOf` = `{path}|{minted id}`. The in-flight half matched no node at all, and the
-  // historical half rewrote the tree's own numbers with themselves.
-  const usesComposite = metric === "composite";
-  const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
-    const m = new Map<string, number | null>();
-    // Accuracy view: every node paints what IT measured. The winner used to paint the
-    // round's "cumulative frontier" instead — a pool of rows scored by different
-    // configurations — so the spine read higher than anything the run had measured, and
-    // a bar's height disagreed with the node text beneath it. One basis now: `accuracy`.
-    for (const course of courses) {
-      for (const cand of candidatesOf(course)) {
-        m.set(nodeKeyOf(cand), usesComposite ? cand.composite_fitness : (cand.accuracy ?? null));
-      }
-    }
-    return m;
-  }, [courses, usesComposite]);
-
-  // Parallel overlay carrying each candidate's difficulty-adjusted ability θ, same key shape
-  // as `valueByKey`. Painted into the node tooltip so a θ-elected winner shown below a
-  // higher-accuracy sibling is explainable on the node itself. `null` where there's no
-  // election fit (in-flight / eliminated).
-  const thetaByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
-    const m = new Map<string, number | null>();
-    for (const course of courses) {
-      for (const cand of candidatesOf(course)) m.set(nodeKeyOf(cand), cand.theta);
-    }
-    return m;
-  }, [courses]);
+  // The node overlays. The tree serves `composite_fitness` per candidate, so settled and
+  // sibling courses honor the composite selection on the SAME basis as the active cycle —
+  // one tree, one basis, nothing recomputed client-side.
+  const { valueByKey, thetaByKey } = useMemo(
+    () => nodeOverlays(courses, metric === "composite"),
+    [courses, metric],
+  );
 
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1). Own-path candidates, not a course lookup —

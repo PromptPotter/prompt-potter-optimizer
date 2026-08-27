@@ -13,6 +13,7 @@ export * from "./headline-stats";
 export * from "./hearts";
 export * from "./inner-panel";
 export * from "./lineage-candidates";
+export * from "./lineage-descendants";
 export * from "./nodeConfig";
 export * from "./pipeline-layout";
 export * from "./pipeline-nodes";

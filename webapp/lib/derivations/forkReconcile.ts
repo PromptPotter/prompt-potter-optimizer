@@ -13,7 +13,7 @@
 // `max_rounds`. Floored at 1 — a fork that runs zero rounds is never the
 // intent; the operator can still raise it before confirming.
 
-import type { ConfigOverrides } from "@/lib/api";
+import type { RunLimitOverrides } from "@/lib/api";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { readSpend } from "./spend";
 
@@ -65,14 +65,14 @@ export function forkReconcileDefaults(dash: DashboardSnapshot | null): ForkRecon
   };
 }
 
-// The `ConfigOverrides` a fresh reconcile dialog represents BEFORE the operator
+// The `RunLimitOverrides` a fresh reconcile dialog represents BEFORE the operator
 // touches anything — the pre-filled "remaining" values. The steer panel seeds
 // its working copy with this so confirming an untouched dialog forks with the
 // shown ceilings (not a silent inherit of the parent's full budget). A null
 // default (unknown parent ceiling/cap) is omitted = inherit. Matches what
 // `LimitReconcile` re-emits from its initial input strings.
-export function configOverridesFromDefaults(d: ForkReconcileDefaults): ConfigOverrides {
-  const limits: ConfigOverrides = {};
+export function configOverridesFromDefaults(d: ForkReconcileDefaults): RunLimitOverrides {
+  const limits: RunLimitOverrides = {};
   if (d.roundsRemaining != null) limits.max_rounds = d.roundsRemaining;
   if (d.spendRemaining != null) limits.spend_budget_usd = d.spendRemaining;
   return limits;

@@ -199,6 +199,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     current_acc: 0,
     ability_delta: null,
     composite_fitness_formula: null,
+    composite_fitness_weights: null,
     headline_metric: "accuracy",
     degraded_count: 0,
     error_count: 0,

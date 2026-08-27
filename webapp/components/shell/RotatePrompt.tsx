@@ -1,6 +1,6 @@
 "use client";
 // Wraps a surface that cannot meaningfully fit on a portrait phone
-// (the candidates Forest view, WhatIfGrid, the Optimizer card, HardSamplesHeatmap,
+// (the candidates Forest view, the scoring-mask grid, the Optimizer card, HardSamplesHeatmap,
 // RoundFileView, etc.). On portrait <768px the children are hidden via
 // CSS and a branded "rotate to landscape" card renders in their place.
 // On landscape or ≥768px the children render normally.

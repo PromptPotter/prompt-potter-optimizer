@@ -7,9 +7,8 @@
 // are seven plus a composed one) and rather than `Chip` (a non-exclusive toggle; this is a single
 // choice). Never a hand-rolled dropdown.
 
-import { useState } from "react";
 
-import { Menu, MenuRadioGroup } from "@/components/ui";
+import { CommitInput, Menu, MenuRadioGroup } from "@/components/ui";
 import type { MetricReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 
@@ -89,32 +88,22 @@ export function MetricExpression({
   onMetric: (metric: string) => void;
 }) {
   const expression = expressionOf(metric);
-  const [draft, setDraft] = useState(expression);
-  const commit = () => {
-    const next = draft.trim();
-    if (next && next !== expression) onMetric(customMetric(next));
-  };
   return (
     <div className="cmp-expr">
       <label className="cmp-expr-label" htmlFor="cmp-expr-input">
         Compose a metric
       </label>
-      <input
+      <CommitInput
         id="cmp-expr-input"
         className={cx("cmp-expr-input", invalid && "cmp-expr-bad")}
-        value={draft}
-        spellCheck={false}
-        autoComplete="off"
+        value={expression}
         placeholder="lift / latency"
         aria-invalid={invalid ? true : undefined}
         aria-describedby="cmp-expr-names"
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          }
+        // A blank commit is not a metric — it clears the field, and the picker above is how the
+        // selection goes back to a catalogue key.
+        onCommit={(v: string) => {
+          if (v.trim()) onMetric(customMetric(v.trim()));
         }}
       />
       <p className="l4-subtle" id="cmp-expr-names">

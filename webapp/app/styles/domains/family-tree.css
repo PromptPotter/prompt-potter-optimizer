@@ -55,6 +55,27 @@
 .family-cladogram-dot.kind-sweep{fill:var(--color-text-secondary)}
 .family-cladogram-dot.kind-diag{fill:var(--color-success)}
 .family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
+/* COMPARISON CHANNELS — a searchpoint some card on the Compare tab is anchored on, marked in
+   that channel's own series ink. The hue itself is inline (`CladogramCtx.inkOf`, a `var()` so it
+   flips with the theme); everything that is the same for every channel is here. The stroke ring
+   is what keeps it legible on both themes and against the divergence red — the ink alone on a
+   3.5px dot is a smudge. Colour is never the only carrier: the node's `<title>` and its
+   aria-label say it is a channel in words. */
+.lineage-channel-mark{stroke:var(--color-background-primary);stroke-width:1}
+/* WHICH searchpoint is highlighted — a ring, because the two things that would otherwise carry it
+   cannot here: at DENSE there is no label, and a channel node's stub colour is an inline style. It
+   sits outside `.lineage-channel-mark`, so a node that is both a channel and the pick reads as
+   both rather than one hiding the other. */
+.lineage-pick-mark{fill:none;stroke:var(--color-selection);stroke-width:1.5}
+/* UNKNOWN — a setting was changed at or above this point, so nothing measured here describes it
+   any more. Dashed, because it is neither a counterfactual (`mask-divergent`, which the server
+   computed) nor a record (`retired`): there is no reading at all, and the node says `?` where its
+   value would be. The dash + the glyph carry it; the aria-label and `<title>` say it in words. */
+.lineage-node.unknown .lineage-stub,
+.family-cladogram-node.unknown .family-cladogram-dot{stroke-dasharray:2 2;opacity:0.6}
+.lineage-node.unknown .lineage-label{fill:var(--color-text-tertiary);font-style:italic}
+.lineage-node.channel .lineage-stub{stroke-width:2.25}
+.family-cladogram-node.channel .family-cladogram-dot{stroke-width:1.5}
 .family-cladogram-node.selected .family-cladogram-dot{stroke:var(--color-accent);stroke-width:2}
 .family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
 .family-cladogram-node:hover .family-cladogram-dot{r:5}

@@ -62,11 +62,34 @@ interface RawHistoricalSample {
   error_category?: unknown;
 }
 
+// The ROUND DOCUMENT'S OWN id for a candidate, found by the served join key.
+//
+// Every per-candidate slice of that document — `scoreboard`, `all_candidate_results` — is keyed on
+// this id, and it is NOT the id the lineage tree serves: a lineage id is a fresh uuid per
+// construction and a resumed run re-scores the origin, so the tree hands out a new C0 id while
+// `round_0000.json`, written by the earlier run, still holds the old one. Joining a tree id
+// straight into the document finds nothing and blanks every panel with no error.
+//
+// So the LABEL resolves the id once, at the document boundary, and the id addresses the document
+// from there. `courseLabel` is the label the MINTING course gave the candidate — the same key
+// `candidateObserveConfig` joins on, and never the renumbered timeline `label`.
+export function docCandidateId(doc: RoundResult | null, courseLabel: string): string | null {
+  if (!doc || !courseLabel) return null;
+  const scores = doc.candidate_scores as { label?: string; candidate_id?: string }[] | undefined;
+  const row = Array.isArray(scores) ? scores.find((c) => c.label === courseLabel) : undefined;
+  return row?.candidate_id || null;
+}
+
 // Historical-mode samples for one candidate. Reads
 // `round_NNNN.json::all_candidate_results[candidate_id]` only.
 // `roundDoc` is the document already loaded by `useRoundFile`; this
 // function is pure and synchronous.
-function historicalSamplesFor(
+//
+// Exported because a surface reading a point on a branch it holds no stream for has a document and
+// a searchpoint but no `CandidateRow` to route with — `samplesForRow` below stays the live/history
+// router where one exists, and both call this. Its `candidate_id` is the DOCUMENT's, via
+// `docCandidateId`.
+export function historicalSamplesFor(
   roundDoc: RoundResult | null,
   round: number,
   candidate_id: string,

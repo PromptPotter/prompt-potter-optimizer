@@ -3,7 +3,7 @@
    x-axis. The multi-cycle forest is NOT in here (see `.forest-card`) — it shares
    no axis with the bars, so it gets its own box.
 
-   Compact, and it only grows for What-If's second column. The bars keep the
+   Compact, and it only grows for the scoring mask's second column. The bars keep the
    footprint the fitness panel always had, so they never reflow underneath you.
    The dendrogram needs no sizing rule at all: its x is a FRACTION of the plot
    width, so it re-aligns at any card size. */
@@ -94,71 +94,79 @@
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
 .ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
-/* What-If opens to the RIGHT of the chart (side-by-side) inside the
+/* The scoring mask opens to the RIGHT of the chart (side-by-side) inside the
    fitness card. .fitness-chart-wrap groups the legend + chart so the
    legend stays positioned above the bars (matching the Composite-only
    placement) when the card stretches; without the wrap, the legend
    centres itself across the full widened card. The wrap is locked to
    432px (= 460px card - 28px padding) so bars don't shift on toggle.
    The card itself stretches to the full triad-row width via the :has()
-   rule above; the What-If panel fills everything to the right. */
+   rule above; the mask panel fills everything to the right. */
 .fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
-/* When What-If is open, the card becomes a 2-column grid so the WhatIf
+/* When the scoring mask is open, the card becomes a 2-column grid so the mask
    panel can span the FULL card height (rows 1+2 of col 2) instead of
    sitting below the title in only-the-body row. The title pins to col 1
    (432px), chart sits below it; the right panel starts at the very top
    of the card — no wasted empty space above the legend. .fitness-body
    uses display:contents so its children participate directly in the
    card's grid without needing a JSX restructure. */
-/* Two rows: title (auto) + a flexible chart row. The What-If panel spans
+/* Two rows: title (auto) + a flexible chart row. The mask panel spans
    both rows in col 2; because the panel is taller than title+chart, the
    1fr chart row soaks up that extra height and `align-self:start` pins the
    chart directly under the title — the slack lands BELOW the chart, never
    as a gap above it. (Pre-fix the chart dropped to the bottom-left.) */
-/* What-If adds a second column, so the compact Sequence cap has to lift — the
+/* The scoring mask adds a second column, so the compact Sequence cap has to lift — the
    bars stay at 432px inside it, so they don't shift when the panel opens. */
-.cand-card.whatif-open{max-width:100%;display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:var(--space-18);align-items:start}
-.cand-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
+.cand-card.mask-open{max-width:100%;display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:var(--space-18);align-items:start}
+.cand-card.mask-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
 /* min-width:0 lets .fitness-body shrink once the stacked layout below makes
    it a flex item (flex default min-width:auto would pin it to the grid row). */
-.cand-card.whatif-open > .fitness-body{display:contents;min-width:0}
+.cand-card.mask-open > .fitness-body{display:contents;min-width:0}
 /* Chart caps at 432px but shrinks with the container (column is minmax(0,432px)),
    so it never spills off a narrow card. */
-.cand-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:100%;max-width:432px;align-self:start}
-.cand-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border)}
+.cand-card.mask-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:100%;max-width:432px;align-self:start}
+.cand-card.mask-open .fitness-mask{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border)}
 /* Stacked layout: align-items:stretch (overriding the grid layout's `start`) so
    flex children fill the card width instead of hugging their max-content (the
-   ~455px what-if grid row), which would overflow a narrow card. */
+   ~455px mask grid row), which would overflow a narrow card. */
 @media (max-width:960px){
-  .cand-card.whatif-open{display:flex;flex-direction:column;align-items:stretch}
-  .cand-card.whatif-open > .card-title{max-width:none}
-  .cand-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
-  .cand-card.whatif-open .fitness-chart-wrap{width:100%}
-  .cand-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
+  .cand-card.mask-open{display:flex;flex-direction:column;align-items:stretch}
+  .cand-card.mask-open > .card-title{max-width:none}
+  .cand-card.mask-open > .fitness-body{display:flex;flex-direction:column}
+  .cand-card.mask-open .fitness-chart-wrap{width:100%}
+  .cand-card.mask-open .fitness-mask{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
 }
-.fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border)}
+.fitness-mask{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border)}
+/* The mode switch and the sentence it heads. Wraps rather than shrinking the control — the
+   segmented control is the one thing here that must stay legible at any width. */
+.mask-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8);margin-bottom:var(--space-10)}
+.mask-head > :first-child{flex:0 0 auto}
+.mask-field{display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-10)}
+/* Where the preview becomes the run. Set apart because pressing it mints a branch — the one
+   control in this panel that spends anything. */
+.mask-apply{margin-top:var(--space-12);padding-top:var(--space-12);border-top:0.5px solid var(--color-border);display:flex;flex-direction:column;gap:var(--space-6);align-items:flex-start}
 .fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:var(--text-sm);padding:var(--space-16) 0;text-align:center}
-.whatif-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
-.whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:var(--text-xs);font-weight:900}
-.whatif-legend .swatch.optional{border-style:dashed}
-.whatif-legend .swatch.checked{color:var(--color-accent)}
-.whatif-legend .swatch.active{
+.mask-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
+.mask-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:var(--text-xs);font-weight:900}
+.mask-legend .swatch.optional{border-style:dashed}
+.mask-legend .swatch.checked{color:var(--color-accent)}
+.mask-legend .swatch.active{
   background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.16) 0%,rgba(var(--color-accent-rgb),0.05) 100%);
   border:1.5px solid rgba(var(--color-accent-rgb),0.32);
   box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
 }
 /* Two rows of tiles visible: 2 × 126px tile + 1 × 10px gap + 2 × 6px wrap
    padding = 274px. The tile carries a toggle button + a weight thermometer. */
-.whatif-grid-wrap{overflow-y:auto;max-height:274px;padding:var(--space-6) var(--space-4) var(--space-6) 0;margin-bottom:12px}
-.whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:var(--space-10)}
-.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
-.whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
+.mask-grid-wrap{overflow-y:auto;max-height:274px;padding:var(--space-6) var(--space-4) var(--space-6) 0;margin-bottom:12px}
+.mask-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:var(--space-10)}
+.mask-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
+.mask-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
 /* The toggle is the upper area (tick/dir/icon/name); the weight row sits below. */
-.whatif-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;padding:var(--space-12) var(--space-6) var(--space-4);background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
-.whatif-sq-toggle:disabled{cursor:not-allowed}
-.whatif-weight{display:flex;align-items:center;gap:var(--space-4);width:100%;min-height:18px;padding:0 var(--space-6) var(--space-8)}
-.whatif-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
-.whatif-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
+.mask-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;padding:var(--space-12) var(--space-6) var(--space-4);background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
+.mask-sq-toggle:disabled{cursor:not-allowed}
+.mask-weight{display:flex;align-items:center;gap:var(--space-4);width:100%;min-height:18px;padding:0 var(--space-6) var(--space-8)}
+.mask-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
+.mask-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
 /* Phone (≤640px): lay every tile in ONE horizontally-scrolling row (the
    .wf-hero-flow pattern) instead of the two-row vertical-scroll grid —
    one swipe sweeps the whole evaluator set. Tiles drop to ~70% in both
@@ -166,16 +174,16 @@
    to match so the smaller tile stays legible. Overrides glass.css sizes
    here (never edits the glass file itself). */
 @media (max-width:640px){
-  .whatif-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:var(--space-6) 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-  .whatif-grid-wrap::-webkit-scrollbar{display:none}
-  .whatif-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:var(--space-6)}
-  .whatif-sq{width:70px;height:92px;padding:0;gap:0}
-  .whatif-sq-toggle{padding:var(--space-8) var(--space-4) 3px;gap:3px}
-  .whatif-weight{min-height:14px;padding:0 var(--space-4) var(--space-4)}
-  .whatif-weight-val{display:none}
-  .whatif-ico{width:19px;height:19px;margin-top:3px}
-  .whatif-name{font-size:var(--text-xs);line-height:1.15}
-  .whatif-tick{width:11px;height:11px;top:4px;left:4px}
-  .whatif-tick svg{width:16px;height:16px}
-  .whatif-dir{font-size:var(--text-xs);top:4px;right:5px}
+  .mask-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:var(--space-6) 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .mask-grid-wrap::-webkit-scrollbar{display:none}
+  .mask-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:var(--space-6)}
+  .mask-sq{width:70px;height:92px;padding:0;gap:0}
+  .mask-sq-toggle{padding:var(--space-8) var(--space-4) 3px;gap:3px}
+  .mask-weight{min-height:14px;padding:0 var(--space-4) var(--space-4)}
+  .mask-weight-val{display:none}
+  .mask-ico{width:19px;height:19px;margin-top:3px}
+  .mask-name{font-size:var(--text-xs);line-height:1.15}
+  .mask-tick{width:11px;height:11px;top:4px;left:4px}
+  .mask-tick svg{width:16px;height:16px}
+  .mask-dir{font-size:var(--text-xs);top:4px;right:5px}
 }

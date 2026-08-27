@@ -72,8 +72,22 @@ export function cssRgba(rgbVar: string, alpha: number): string {
 // it through here, because a hardcoded copy beside a canvas is a palette that never flips theme.
 const SERIES_SLOTS = 8;
 
+function seriesToken(index: number): string {
+  return `--chart-series-${(index % SERIES_SLOTS) + 1}`;
+}
+
+// RESOLVED, for a `<canvas>` — it has no cascade to read a token off, so the value has to be
+// looked up and the surface re-read on a theme flip (`useThemeVersion`).
 export function seriesColor(index: number): string {
-  return getCss(`--chart-series-${(index % SERIES_SLOTS) + 1}`);
+  return getCss(seriesToken(index));
+}
+
+// The same ink as a `var()` reference — for inline SVG and `style={{}}`, which read the token off
+// the cascade and repaint themselves on a theme flip with no read, no subscription and no
+// re-render. A swatch built from `seriesColor` instead freezes at whatever the theme was when its
+// component last rendered, which is a stale colour beside a chart that repainted.
+export function seriesVar(index: number): string {
+  return `var(${seriesToken(index)})`;
 }
 
 // Updates Chart.defaults to the current theme's CSS-var colours. Called

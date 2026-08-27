@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import type { DraftPatch, NodeConfigParam } from "@/lib/api";
+import { CommitInput } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import {
   configRows,
@@ -398,7 +399,11 @@ function ConfigRowView({
             onChange={(e) => onValue(e.target.checked ? "true" : "false")}
           />
         ) : (
-          <input
+          // Commits on Enter or blur, never per keystroke. It only mutated a ref inside a modal
+          // once, so nobody saw it — but the same emission now strikes a searchpoint and
+          // everything descending from it off the Compare cladogram, and per-keystroke that
+          // happens on `"1"` en route to `"12"`.
+          <CommitInput
             type={row.kind === "number" ? "number" : "text"}
             inputMode={row.kind === "number" ? "decimal" : undefined}
             className="config-input"
@@ -406,7 +411,7 @@ function ConfigRowView({
             disabled={readOnly}
             placeholder={row.kind === "number" ? "inherit" : undefined}
             aria-label={row.key}
-            onChange={(e) => onValue(e.target.value)}
+            onCommit={onValue}
           />
           )
         ) : null}

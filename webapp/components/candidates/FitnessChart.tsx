@@ -28,7 +28,7 @@ ensureChartRegistered();
 // FRACTION space, deliberately. chart.js's category scale is linear in the plot
 // width (the bar controller sets `offset:true` on the index scale), so a centre's
 // fraction is INVARIANT under a pure width change — only the two px gutters and
-// the bar COUNT can move it. A window resize, What-If opening, or the sidebar
+// the bar COUNT can move it. A window resize, the mask panel opening, or the sidebar
 // collapsing therefore costs no React work at all: the strip's percentage
 // coordinates track the canvas through the browser's own layout pass, in the same
 // frame. Publishing raw pixels would re-render on every resize tick and still
@@ -351,7 +351,7 @@ interface Props {
   views: CandidateView[];
   // The card's metric axis — one bar series per selected metric. Never empty.
   metrics: ReadonlySet<HeadlineMetric>;
-  showWhatIf: boolean;
+  showMask: boolean;
   // Draw the dashed cache-provenance line at each candidate's replayed share.
   showCache: boolean;
   // Draw the adopted line's reading on the cells all of it answered.
@@ -378,7 +378,7 @@ interface Props {
 export const FitnessChart = memo(function FitnessChart({
   views,
   metrics,
-  showWhatIf,
+  showMask,
   showCache,
   showTrajectory,
   selectedKey,
@@ -399,8 +399,8 @@ export const FitnessChart = memo(function FitnessChart({
   const labels = useMemo(() => views.map((v) => v.label), [views]);
 
   const ctx = useMemo<SeriesCtx>(
-    () => ({ metrics, showWhatIf, showCache, showTrajectory, views, unit, electedMetric }),
-    [metrics, showWhatIf, showCache, showTrajectory, views, unit, electedMetric],
+    () => ({ metrics, showMask, showCache, showTrajectory, views, unit, electedMetric }),
+    [metrics, showMask, showCache, showTrajectory, views, unit, electedMetric],
   );
   const active = useMemo(() => activeSeries(ctx), [ctx]);
   const showAbility = metrics.has("ability");

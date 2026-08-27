@@ -25,6 +25,7 @@ import type {
   CandidateSource,
   ElectedRow,
   RoundCandidates,
+  RoundResult,
   RoundSummary,
 } from "@/lib/types";
 
@@ -115,6 +116,51 @@ function rowOf(
     n_expected: c.expected_samples,
     cached_samples: c.cached_samples,
     source,
+  };
+}
+
+// The same row, off a ROUND DOCUMENT instead of the live snapshot — for a searchpoint on a cycle
+// this browser holds no stream for. `dashboard.json` is one cycle's projection and there is exactly
+// one of it (`webapp/CLAUDE.md` § Polling shape), so every surface reading a point on some OTHER
+// branch — the Compare tab's channels — has the round file and nothing else.
+//
+// Not a stitch: `ScoreboardRow` and `DashboardCandidate` are two projections of one
+// `ScoredCandidate`, and this reads ONE of them whole rather than filling a row from both. What
+// the scoreboard does not carry is left NULL — `expected_samples` and `cached_samples` describe a
+// panel still filling, which a written round file no longer has, and `evaluators` is the lens's
+// input rather than anything a drill-in renders. `total` IS the scored count there.
+export function scoreboardRow(
+  doc: RoundResult | null,
+  candidateId: string,
+  label: string,
+  round: number,
+  idx: number,
+): ElectedRow | null {
+  const c = doc?.scoreboard.find((r) => r.candidate_id === candidateId);
+  if (!c) return null;
+  return {
+    key: `R${round}.${idx}`,
+    round,
+    idx,
+    candidate_id: candidateId,
+    label,
+    accuracy: c.accuracy,
+    composite: c.composite_fitness,
+    theta: c.theta,
+    theta_se: c.theta_se,
+    meanFitnessCiLo: c.mean_fitness_ci_lo,
+    meanFitnessCiHi: c.mean_fitness_ci_hi,
+    matchedParentAccuracy: c.matched_parent_accuracy,
+    matchedParentComposite: c.matched_parent_composite,
+    matchedParentLift: c.matched_parent_lift,
+    matchedParentLiftCiLo: c.matched_parent_lift_ci_lo,
+    matchedParentLiftCiHi: c.matched_parent_lift_ci_hi,
+    evaluators: {},
+    is_winner: c.is_winner,
+    n_samples: c.total,
+    n_expected: null,
+    cached_samples: null,
+    source: "history",
   };
 }
 

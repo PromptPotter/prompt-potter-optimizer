@@ -18,14 +18,14 @@ export type SeriesKey =
   | "accuracy"
   | "ability"
   | "composite"
-  | "what-if"
+  | "mask"
   | "trajectory"
   | "verify"
   | "cached";
 
 export interface SeriesCtx {
   metrics: ReadonlySet<HeadlineMetric>;
-  showWhatIf: boolean;
+  showMask: boolean;
   showCache: boolean;
   showTrajectory: boolean;
   views: readonly CandidateView[];
@@ -128,19 +128,19 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     tip: (v) => `composite: ${fmtNum(v.composite)}`,
   },
   {
-    key: "what-if",
-    legend: () => "what-if",
+    key: "mask",
+    legend: () => "masked",
     hint: () =>
-      "Every score recomputed under the evaluators and weights you picked — the on-disk composite is untouched.",
+      "Every score re-read under the criterion you built — the on-disk composite is untouched.",
     // A criterion like the three above, just a counterfactual one — its own step in the
     // accent family rather than a rival hue.
     ink: () => "--series-counterfactual",
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => v.whatif,
-    applies: (c) => c.showWhatIf,
-    tip: (v) => `what-if: ${fmtNum(v.whatif)}`,
+    valueOf: (v) => v.lensValue,
+    applies: (c) => c.showMask,
+    tip: (v) => `masked: ${fmtNum(v.lensValue)}`,
   },
   {
     key: "trajectory",

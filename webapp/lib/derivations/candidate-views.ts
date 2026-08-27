@@ -1,5 +1,5 @@
 // The candidates card's bar spine — the served tree's children of the VIEWED node, turned
-// into the one row shape the bars, the dendrogram and the What-If panel all read.
+// into the one row shape the bars, the dendrogram and the scoring-mask panel all read.
 //
 // Peer of `round-candidates.ts`, and the two answer different questions on purpose: that one
 // normalizes ONE cycle's own rounds out of `dashboard.json` for the sample-scoped surfaces;
@@ -71,6 +71,9 @@ export interface CandidateViewsInput {
   inflightByLabel: ReadonlyMap<string, DashboardCandidate>;
   // The fixed sample set the operator pinned, or null. Re-bases every bar.
   sampleSet: number[] | null;
+  // Whether the mask in force re-derives whole from the masked rows (`scoring-mask::subsetExactFor`).
+  // Decided off the evaluator registry, not here — this only says which of the two the bars carry.
+  lensSubsetExact: boolean;
   diagByLabel: ReadonlyMap<string, DiagnosticRunRecord>;
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
 }
@@ -79,6 +82,7 @@ export function candidateViews({
   viewedNode,
   inflightByLabel,
   sampleSet,
+  lensSubsetExact,
   diagByLabel,
   overlapByCandidate,
 }: CandidateViewsInput): CandidateView[] {
@@ -138,11 +142,16 @@ export function candidateViews({
       n_expected: sliced ? (sampleSet?.length ?? null) : (m.expected_samples ?? null),
       cached_samples: sliced ? null : (m.cached_samples ?? null),
       source: useLive ? "inflight" : "history",
-      whatif: sliced ? null : n.lens_value,
-      // Ranks follow their values exactly: suppressed on the same two conditions, or a
-      // bar would carry a position in an ordering whose number it is not showing.
+      // The one masked value that SURVIVES a slice, when every evaluator in it re-derives from
+      // the rows: the server composed `lens` + `samples` in the same read, so the number beside
+      // the sliced bars is already on their own cells. Suppressing it wholesale was the client
+      // declining the answer to its own request; suppressing it when the criterion mixes in a
+      // snapshot-only evaluator is the honest half of that rule, kept.
+      lensValue: sliced && !lensSubsetExact ? null : n.lens_value,
+      // Ranks follow their values exactly: suppressed on the same conditions, or a bar would
+      // carry a position in an ordering whose number it is not showing.
       compositeRank: sliced || isCourse ? null : n.composite_rank,
-      whatifRank: sliced ? null : n.lens_rank,
+      lensRank: sliced && !lensSubsetExact ? null : n.lens_rank,
       started: accuracy != null,
       // SERVED, not inferred from whether the round has closed. `is_winner: false` says
       // nothing on its own — a round that HELD crowned nobody and every bar in it reads the

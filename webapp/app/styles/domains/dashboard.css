@@ -87,7 +87,7 @@
 /* The Now row — Optimizer first, then Candidates. Both cards size to their own
    content, so the wrap is content-driven: Candidates keeps its compact Sequence
    footprint and sits beside the optimizer, but the moment it needs the full band
-   (Forest, or What-If opening its second column) its 100% basis can't share the
+   (Forest, or the scoring mask opening its second column) its 100% basis can't share the
    line and it drops to the next row. Nothing here has to know which view is on. */
 .dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-18);width:100%}
 .dash-now-row > *{margin-bottom:0}

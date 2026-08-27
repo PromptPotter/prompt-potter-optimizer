@@ -26,7 +26,7 @@ const ALLOWED_BREAKPOINTS = new Set<number>([
   767, // --bp-rotate - 1 (rotate-prompt cutoff)
   768, // --bp-rotate
   880, // --bp-md   (small tablet / landscape phone)
-  960, // pre-foundation: the candidates card's chart/what-if reflow
+  960, // pre-foundation: the candidates card's chart/mask reflow
   980, // pre-foundation: .chat-grid 2-col→1fr
 ]);
 

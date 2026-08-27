@@ -82,16 +82,16 @@ export interface ElectedRow extends CandidateRow {
 // halves of the Sequence view cannot disagree on count, order, or label —
 // there is nothing for them to disagree with.
 export interface CandidateView extends CandidateRow {
-  // Served What-If lens value (the node's own `lens_value`),
-  // never recomputed client-side. `null` when no `score:` lens is active or the
-  // candidate is unscorable under it.
-  whatif: number | null;
-  // Served 1-based sibling ranks by `composite` and by `whatif` (the node's own
+  // The node's own served `lens_value` — this candidate under the active scoring mask, never
+  // recomputed client-side. `null` when no `score:` lens is active or the candidate is unscorable
+  // under it.
+  lensValue: number | null;
+  // Served 1-based sibling ranks by `composite` and by `lensValue` (the node's own
   // `composite_rank` / `lens_rank`). An ordering IS a score, so these come down the wire —
   // the rank-shift read-out compares two served numbers rather than sorting its own bars.
   // `null` wherever the underlying value is, and on a sliced or course bar.
   compositeRank: number | null;
-  whatifRank: number | null;
+  lensRank: number | null;
   // Any sign of activity. `false` = the slot exists but nothing is scored yet,
   // which the chart must render as a BLANK, never as a 0.
   started: boolean;

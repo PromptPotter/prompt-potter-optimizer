@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyFlatEdits,
   configRows,
   nodeOverlayPatch,
+  overlayEdits,
   seedOverlayFromRows,
   type ConfigRow,
 } from "../nodeConfig";
@@ -182,5 +184,43 @@ describe("seedOverlayFromRows (values emit)", () => {
   it("lets the operator override the optimizer-locked model", () => {
     const overlay = seedOverlayFromRows(rows, { "llm_only.model": "openai/gpt-oss-20b" });
     expect(overlay.llm_only!.model).toBe("openai/gpt-oss-20b");
+  });
+});
+
+// The values editor emits the searchpoint's WHOLE running configuration, never a delta — the test
+// directly above pins that. So a surface reading the emission as "what the operator changed" marks
+// every parameter edited on the first keystroke, which on Compare blanks the channel instantly.
+// These two are what stands between that emission and an honest scenario.
+describe("overlayEdits + applyFlatEdits", () => {
+  const seed = { steps: ["llm_only"], llm_only: { reasoning_effort: "high", temperature: 0.2 } };
+
+  it("an untouched emission is no edit at all", () => {
+    const rows = configRows(schema, seed, "values");
+    expect(overlayEdits(seedOverlayFromRows(rows, {}), seed)).toEqual({});
+  });
+
+  it("names only what moved", () => {
+    const rows = configRows(schema, seed, "values");
+    const emitted = seedOverlayFromRows(rows, { "llm_only.temperature": "0.7" });
+    expect(overlayEdits(emitted, seed)).toEqual({ "llm_only.temperature": "0.7" });
+  });
+
+  it("a param the seed carried and the emission dropped reads as cleared", () => {
+    expect(overlayEdits({ llm_only: { reasoning_effort: "high" } }, seed)).toEqual({
+      "llm_only.temperature": "",
+    });
+  });
+
+  it("re-seeding with an edit makes the emission idempotent", () => {
+    // The editor drops its own draft when the seed changes, so the scenario has to survive the
+    // round trip — otherwise a second keystroke would clear the first.
+    const edits = new Map([["llm_only.temperature", "0.7"]]);
+    const reseeded = applyFlatEdits(seed, edits);
+    const emitted = seedOverlayFromRows(configRows(schema, reseeded, "values"), {});
+    expect(overlayEdits(emitted, seed)).toEqual({ "llm_only.temperature": "0.7" });
+  });
+
+  it("leaves the seed alone with nothing edited", () => {
+    expect(applyFlatEdits(seed, new Map())).toBe(seed);
   });
 });

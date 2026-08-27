@@ -192,6 +192,69 @@ export function nodeOverlayPatch(
   return { pipeline_overlay: overlay };
 }
 
+/** The flat `node.param` spelling, minted in ONE place. `seedOverlayFromRows` keys its edit map
+ *  on it, the server's `flatten_sp_summary` writes it on the wire, and the Compare tab's scenario
+ *  edits are keyed on it — so a second function inventing the same string is a drift waiting to
+ *  happen. */
+export function flatConfigKey(node: string, param: string): string {
+  return `${node}.${param}`;
+}
+
+// What the operator actually CHANGED — the values editor's emission minus the config it was
+// seeded from.
+//
+// **The emission is not a diff, and reading it as one is the trap.** `configRows` sets
+// `fromCandidate` for every param the resolved config carries, and a searchpoint's resolved config
+// carries every param's running value rather than a sparse delta. So `seedOverlayFromRows` emits
+// the WHOLE running configuration on the first keystroke, and anything treating that as "what
+// changed" marks every parameter edited at once.
+//
+// Compared as STRINGS, and against the browser's own flattening of the seed — never against the
+// server-rendered `SubjectReading.config`, whose `_fmt_pp_val` is Python `str`: a bool reads
+// `"True"` there and `"true"` from every widget here, which would report a phantom edit on every
+// boolean param.
+export function overlayEdits(
+  emitted: Record<string, Record<string, unknown>>,
+  seed: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [node, params] of Object.entries(emitted)) {
+    const seeded = asObj(seed[node]);
+    for (const [param, value] of Object.entries(params)) {
+      const was = param in seeded ? String(seeded[param]) : "";
+      if (String(value) !== was) out[flatConfigKey(node, param)] = String(value);
+    }
+  }
+  // A param the seed carried and the emission dropped was CLEARED — `seedOverlayFromRows` drops an
+  // empty value to mean "inherit", which is a change like any other and would otherwise vanish.
+  for (const [node, params] of Object.entries(seed)) {
+    const seeded = asObj(params);
+    for (const param of Object.keys(seeded)) {
+      if (!(param in (emitted[node] ?? {}))) out[flatConfigKey(node, param)] = "";
+    }
+  }
+  return out;
+}
+
+/** The seed with the operator's edits written back in, so the editor re-seeds from their scenario
+ *  rather than from the record. That is what makes a restore actually restore: `ValuesEditor`
+ *  drops its own draft when the seed changes, so clearing an edit puts the input back by itself. */
+export function applyFlatEdits(
+  seed: Record<string, unknown>,
+  flat: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  if (flat.size === 0) return seed;
+  const out: Record<string, unknown> = { ...seed };
+  for (const [key, value] of flat) {
+    const cut = key.indexOf(".");
+    if (cut <= 0) continue;
+    const node = key.slice(0, cut);
+    const param = key.slice(cut + 1);
+    out[node] = { ...asObj(out[node]), [param]: value };
+  }
+  return out;
+}
+
 // values emit: the sparse `{node:{param:value}}` fork seed, from the rows + the
 // operator's edited string values (keyed `"{node}.{key}"`). A param lands when it
 // came from the candidate OR the operator changed it from the seeded value —

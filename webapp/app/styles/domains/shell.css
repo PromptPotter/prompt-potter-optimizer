@@ -183,6 +183,14 @@
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xs);padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}
+/* The Compare tick. It lives in the row's chrome rather than on the Compare tab, so the campaign
+   library is the one place campaigns are picked — for viewing and for comparing alike. Quiet until
+   hovered or ticked: every row carries one, and a column of loud boxes would read as the point of
+   the sidebar. */
+.unit-library-compare{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:var(--text-xs);padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px;opacity:0.45}
+.unit-library-family:hover .unit-library-compare{opacity:1}
+.unit-library-compare[aria-pressed="true"]{opacity:1;color:var(--color-accent)}
+.unit-library-compare:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 /* The rail owns the whole indent — margin sets the rail's offset, padding the gap
    between rail and text. The child rows add none of their own; two rules each adding
    depth stacked to 25px a level and read as a double indent. */

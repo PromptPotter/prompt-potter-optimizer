@@ -11,7 +11,7 @@ import { useSelection } from "@/lib/SelectionContext";
 // Candidates card (bars + genealogy) share one row, optimizer first — you read
 // what the loop is DOING, then what it PRODUCED. Both size to their content, so
 // the row wraps on its own: the moment Candidates needs the full band (Forest
-// view, or What-If opening its second column), it drops to the next line instead
+// view, or the scoring mask opening its second column), it drops to the next line instead
 // of squeezing the optimizer. No breakpoint decides that; the content does.
 //
 // The drill-downs then stack full-width below: the Scoring inspector when a

@@ -20,6 +20,7 @@ import { JobsDock } from "@/components/shell/JobsDock";
 import { MobileAppBar } from "@/components/shell/MobileAppBar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { ComparePane } from "@/components/compare/ComparePane";
+import { CompareSelectionProvider } from "@/lib/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
@@ -71,9 +72,15 @@ export function AppShell() {
   // `campaignId`/`cycleId` exports), so the conversation stays on the outer
   // thread while the dashboard follows an inner cycle.
   return (
-    <CycleStreamProvider path={viewedPath}>
-      <AppShellInner />
-    </CycleStreamProvider>
+    // The compare selection sits OUTSIDE both the stream and `SelectionProvider`: those are
+    // keyed on the viewed cycle and reset when it changes, while a comparison spans campaigns by
+    // construction — picking a searchpoint, navigating to another run and picking a second is the
+    // whole point, and a cycle-scoped holder would drop the first on the way.
+    <CompareSelectionProvider>
+      <CycleStreamProvider path={viewedPath}>
+        <AppShellInner />
+      </CycleStreamProvider>
+    </CompareSelectionProvider>
   );
 }
 

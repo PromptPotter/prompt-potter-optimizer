@@ -21,6 +21,7 @@ import {
   toggleInSet,
 } from "@/lib/sample-set";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
+import { subsetExactFor, useScoringMask } from "@/components/shell/mask/scoring-mask";
 
 const BTN: CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -52,8 +53,10 @@ export function SampleSetControl({
   unit: MeasuredUnit;
 }) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
+  const { open: maskOpen, mask } = useScoringMask();
   const [detailOpen, setDetailOpen] = useState(false);
   const [includePlanned, setIncludePlanned] = useState(false);
+  const maskSurvives = maskOpen && subsetExactFor(mask);
 
   if (sampleSet == null) return null; // mode off — nothing to control
 
@@ -179,7 +182,9 @@ export function SampleSetControl({
           }}
         >
           {sampleSet.length}/{universe.length}
-          · composite/what-if off
+          {/* The mask is only dropped when its criterion cannot re-derive whole from the
+              masked rows — the composite always is, being a stored full-set aggregate. */}
+          {maskSurvives ? " · composite off" : " · composite/mask off"}
         </span>
       </div>
 

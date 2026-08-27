@@ -79,6 +79,7 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
 const EMPTY = {
   inflightByLabel: new Map<string, DashboardCandidate>(),
   sampleSet: null,
+  lensSubsetExact: false,
   diagByLabel: new Map(),
   overlapByCandidate: new Map(),
 };
@@ -210,6 +211,35 @@ describe("the fixed sample set re-bases the bars", () => {
       // The lift is over the cells this candidate measured; re-basing the bars leaves it
       // describing a different set.
       matchedParentLift: null,
+    });
+  });
+
+  // The silent harm is the FALSE arm: a criterion naming an evaluator that only exists in the
+  // full-set snapshot re-scores partly on the subset and partly on everything, and renders as a
+  // subset number either way. The TRUE arm is pinned beside it so a future edit cannot collapse
+  // the pair back into "suppress whenever sliced" — that dropped a value the server had already
+  // computed over these very cells, in the same read that produced the bars.
+  it("keeps a masked value that re-derives whole from the sliced rows, drops one that cannot", () => {
+    const lensed = course([
+      node({
+        kind: "candidate",
+        id: "a",
+        label: "C1.1",
+        round: 1,
+        sample_set_accuracy: 0.5,
+        sample_set_n: 6,
+        lens_value: 0.42,
+        lens_rank: 1,
+      }),
+    ]);
+    const sliced = { ...EMPTY, viewedNode: lensed, sampleSet: [1, 2, 3, 4, 5, 6] };
+    expect(candidateViews({ ...sliced, lensSubsetExact: true })[0]).toMatchObject({
+      lensValue: 0.42,
+      lensRank: 1,
+    });
+    expect(candidateViews({ ...sliced, lensSubsetExact: false })[0]).toMatchObject({
+      lensValue: null,
+      lensRank: null,
     });
   });
 

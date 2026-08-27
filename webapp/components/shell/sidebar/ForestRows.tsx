@@ -35,6 +35,7 @@ import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import type { NodeKind } from "./grouping";
 import type { OriginGroup, RunGroup } from "./grouping";
 import { CampaignMenu } from "./CampaignMenu";
+import { CompareToggle } from "./CompareToggle";
 import { RowHoverCard } from "./RowHoverCard";
 
 // What every row needs to render itself and answer clicks. Threaded down rather than
@@ -173,7 +174,15 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
       ctx={ctx}
       label={campaignDisplayName(campaign)}
       campaign={campaign}
-      chrome={<CampaignMenu campaign={campaign} />}
+      chrome={
+        <>
+          <CompareToggle
+            campaignId={campaign.campaign_id}
+            answeringCycleId={run.answering.cycle_id}
+          />
+          <CampaignMenu campaign={campaign} />
+        </>
+      }
       // The campaign row answers for its whole family: the winner often lives in a fork,
       // and `/cycles` already knows the max across it.
       bestAccuracy={run.bestAccuracy}

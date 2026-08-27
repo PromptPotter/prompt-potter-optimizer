@@ -9,21 +9,24 @@ function ranks(lines: { key: string; r: number | null }[]): Map<string, number> 
 }
 
 // Top bar by composite value — NOT the campaign winner (the real crown is
-// θ-elected `isWinner`). This what-if panel ranks on composite; no θ-election claim.
+// θ-elected `isWinner`). This mask panel ranks on composite; no θ-election claim.
 function topByFitness(rank: Map<string, number>): string | null {
   for (const [key, r] of rank) if (r === 1) return key;
   return null;
 }
 
-// Rank-shift read-out for the what-if ablation — compares each candidate's
-// actual composite rank against its what-if rank and flags whether the top
+// Rank-shift read-out for the scoring mask — compares each candidate's
+// actual composite rank against its masked rank and flags whether the top
 // fitness bar flips. Spans every bar including origin and historical rounds.
 export function FitnessRankSummary({
   views,
-  selected,
+  criterion,
 }: {
   views: CandidateView[];
-  selected: Set<string>;
+  // Whether the editor above has produced a criterion at all — `lensOf(mask) != null`. Asked as
+  // the one question rather than "are tiles ticked", because the expression mode builds a
+  // criterion with no tiles at all and read the empty-selection way.
+  criterion: boolean;
 }) {
   if (views.length === 0) {
     return (
@@ -32,10 +35,10 @@ export function FitnessRankSummary({
       </span>
     );
   }
-  if (selected.size === 0) {
+  if (!criterion) {
     return (
       <span className="empty">
-        No evaluators selected — pick one or more tiles above to recompute scores.
+        No criterion yet — tick a tile above, or type one in Expression mode.
       </span>
     );
   }
@@ -43,20 +46,20 @@ export function FitnessRankSummary({
     key: b.key,
     label: b.label,
     actual: b.composite ?? null,
-    whatif: b.whatif,
+    masked: b.lensValue,
     actualRank: b.compositeRank,
-    whatifRank: b.whatifRank,
+    maskedRank: b.lensRank,
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, r: l.actualRank })));
-  const rankWhatif = ranks(lines.map((l) => ({ key: l.key, r: l.whatifRank })));
+  const rankMasked = ranks(lines.map((l) => ({ key: l.key, r: l.maskedRank })));
   const wA = topByFitness(rankActual);
-  const wW = topByFitness(rankWhatif);
+  const wW = topByFitness(rankMasked);
   const topLabel = (k: string | null) =>
     k == null ? "—" : (lines.find((l) => l.key === k)?.label ?? "—");
   let movedUp = 0, movedDown = 0, flat = 0;
   for (const l of lines) {
     const rA = rankActual.get(l.key);
-    const rW = rankWhatif.get(l.key);
+    const rW = rankMasked.get(l.key);
     if (rA == null || rW == null) continue;
     if (rA > rW) movedUp += 1;
     else if (rA < rW) movedDown += 1;
@@ -76,14 +79,14 @@ export function FitnessRankSummary({
       <div style={{ marginTop: 6 }}>
         candidates: {lines.map((l, i) => {
           const rA = rankActual.get(l.key);
-          const rW = rankWhatif.get(l.key);
+          const rW = rankMasked.get(l.key);
           const arrow = rA != null && rW != null
             ? (rA > rW ? <span className="rank-up">▲</span> : rA < rW ? <span className="rank-down">▼</span> : <span className="rank-flat">·</span>)
             : <span className="rank-flat">—</span>;
           return (
             <span key={l.key}>
               {i > 0 && " · "}
-              {l.label} {fmtNum(l.actual, 3)}→{fmtNum(l.whatif, 3)} {arrow}
+              {l.label} {fmtNum(l.actual, 3)}→{fmtNum(l.masked, 3)} {arrow}
             </span>
           );
         })}

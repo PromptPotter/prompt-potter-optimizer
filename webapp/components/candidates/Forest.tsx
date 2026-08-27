@@ -1,5 +1,5 @@
 "use client";
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { fmtPct0 } from "@/lib/format";
 import {
   fmtHeadlineValue,
@@ -8,29 +8,61 @@ import {
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
-import { useSelection } from "@/lib/SelectionContext";
-import { useWorkspace } from "@/lib/workspace";
-import { isSelectedCandidate } from "@/lib/types";
+import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { heartsText } from "@/lib/derivations";
 import type { LineageNode } from "@/lib/api";
 import {
-  CAND_STUB,
-  COL_W,
   DIRECTION_GLYPH,
   HEADER_H,
   KIND_GLYPH,
   TRIGGER_GLYPH,
   LANE_H,
-  LEFT_PAD,
   NODE_R,
-  RIGHT_PAD,
   TOP_PAD,
+  extentKeys,
   layout,
   placeNodes,
+  type CladogramAnchor,
+  type Density,
   type LaneLayout,
   type RoundNodePos,
 } from "./forest-layout";
+
+// What a cladogram needs from the surface it is drawn on — injected, so the dashboard and the
+// Compare tab draw the SAME tree and differ only in what a click there means. A second
+// cladogram would be a second answer to "what descends from what".
+// One comparison channel, as this drawing sees it: where it is anchored, and the ink it owns.
+export interface CladogramChannel extends CladogramAnchor {
+  // A `var()` reference, never a resolved value, so it repaints on a theme flip like everything
+  // else in the SVG (`theme.ts::seriesVar`).
+  ink: string;
+}
+
+export interface CladogramCtx {
+  // The read course's encoded address; its lane band renders highlighted.
+  viewedKey: string | null;
+  // Is this the searchpoint the surface is reading at?
+  isPicked: (n: RoundNodePos) => boolean;
+  // A searchpoint clicked, carrying the value painted on it — the surface holds no overlay.
+  onPickCandidate: (n: RoundNodePos, value: number | null) => void;
+  // Every comparison channel on this drawing. A channel's EXTENT is everything at or before its
+  // anchor's round-column — the drawing's own time axis — so the extents NEST, and a node wears
+  // the ink of the NARROWEST one holding it. That is what makes a comparison something to look
+  // at: the campaign's own channel colours the whole family, and a channel picked at round 2
+  // takes the first three columns off it. Empty on a surface with no comparison on it.
+  channels: readonly CladogramChannel[];
+  // The channel this drawing is FOR — the family is cut to its extent. What came after a
+  // searchpoint is no part of how that searchpoint came to be, and drawing it made every card
+  // show the same picture. `null` draws the whole family.
+  clip: CladogramAnchor | null;
+  // Searchpoints whose CONFIGURATION the operator has changed, and everything descending from
+  // one. Nothing ran at the edited value, so every measurement at or below it describes a
+  // searchpoint that no longer exists — the drawing WITHDRAWS those numbers rather than showing
+  // them under a changed setup. A different fact from `mask-divergent`, which recedes a
+  // counterfactual the server actually computed; here there is nothing to compute. Empty on every
+  // surface that offers no config editor. Candidate ids, the space `parent_id` speaks.
+  invalidated?: ReadonlySet<string>;
+}
 
 // A course's operator-facing name: a root wears its dataset, a branch its short tail.
 function courseName(course: LineageNode): string {
@@ -52,6 +84,9 @@ const CandidateNode = memo(function CandidateNode({
   dimmed,
   alt,
   divergence,
+  invalidated,
+  ink,
+  d,
 }: {
   n: RoundNodePos;
   // The live percent-metric value painted on this node (the `valueByKey` overlay)
@@ -72,6 +107,12 @@ const CandidateNode = memo(function CandidateNode({
   dimmed: boolean;
   alt: boolean;
   divergence: boolean;
+  // A setting was changed at this point or above it, so nothing measured here describes it any
+  // more (`CladogramCtx.invalidated`).
+  invalidated: boolean;
+  // The comparison channel anchored here, as its ink (`CladogramCtx.inkOf`).
+  ink: string | null;
+  d: Density;
 }) {
   // Served (`superseded_by`): this attempt was replaced when the run branched away. It
   // recedes like a lens counterfactual but is a different fact — what the run DID, not
@@ -86,11 +127,13 @@ const CandidateNode = memo(function CandidateNode({
         retiredBy && "retired",
         alt && "mask-alt",
         divergence && "mask-divergence",
+        invalidated && "unknown",
+        ink && "channel",
       )}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isElected ? ", round winner" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -101,9 +144,15 @@ const CandidateNode = memo(function CandidateNode({
       style={{ cursor: "pointer" }}
     >
       <title>
-        {n.candidateLabel} · {fmtHeadlineValue(metric, accuracy, theta)}
-        {metric !== "ability" && typeof theta === "number"
+        {n.candidateLabel} ·{" "}
+        {invalidated
+          ? "unknown"
+          : fmtHeadlineValue(metric, accuracy, theta)}
+        {!invalidated && metric !== "ability" && typeof theta === "number"
           ? ` · ability θ ${theta.toFixed(2)}`
+          : ""}
+        {invalidated
+          ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
         {n.isElected
           ? "\nround winner — elected on difficulty-adjusted ability θ, not raw accuracy"
@@ -113,26 +162,56 @@ const CandidateNode = memo(function CandidateNode({
         {retiredBy
           ? `\nretired — the run branched to ${shortFamilyTail(retiredBy)} and continued there; kept as the record of what ran`
           : ""}
+        {ink ? "\na channel of the comparison — its colour here is the one its bar carries" : ""}
       </title>
       {/* The alternative candidate is marked by its own branch line glowing red
           (`.mask-alt .lineage-stub`) — no glyph. */}
       <line
-        x1={n.x - CAND_STUB}
+        x1={n.x - d.candStub}
         y1={n.y}
         x2={n.x}
         y2={n.y}
         className={cx("lineage-stub", n.isWinner && "winner")}
+        style={ink ? { stroke: ink } : undefined}
       />
-      <text
-        x={n.x + 4}
-        y={n.y + 3}
-        className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
-      >
-        {n.candidateLabel} {fmtHeadlineValue(metric, accuracy, theta)}
-      </text>
+      {/* SELECTED is a shape for the same two reasons the channel mark below is, and it needed
+          both: at DENSE the stub is a few px and unlabelled, so a stroke colour is invisible —
+          and on a channel node the ink is an INLINE style, which no class rule can beat. Drawn
+          first so a node that is both wears the ring outside its channel dot. */}
+      {selected && (
+        <circle cx={n.x} cy={n.y} r={NODE_R + 2.5} className="lineage-pick-mark" />
+      )}
+      {/* The channel's own mark. It has to be a SHAPE, not the stub's colour alone: at DENSE the
+          stub is a few px and unlabelled, which is exactly the width two channels are compared
+          at. The `<title>` and the aria-label carry the same fact in words. */}
+      {ink && (
+        <circle
+          cx={n.x}
+          cy={n.y}
+          r={NODE_R + 0.5}
+          className="lineage-channel-mark"
+          style={{ fill: ink }}
+        />
+      )}
+      {d.labels && (
+        <text
+          x={n.x + 4}
+          y={n.y + 3}
+          className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
+          style={ink ? { fill: ink } : undefined}
+        >
+          {n.candidateLabel} {invalidated ? "?" : fmtHeadlineValue(metric, accuracy, theta)}
+        </text>
+      )}
       {/* Invisible click target: the candidate's own slot — its stub plus the one
           column-width its label occupies before the next round's node. */}
-      <rect x={n.x - CAND_STUB} y={n.y - 10} width={CAND_STUB + COL_W} height={20} fill="transparent" />
+      <rect
+        x={n.x - d.candStub}
+        y={n.y - 10}
+        width={d.candStub + d.colW}
+        height={20}
+        fill="transparent"
+      />
     </g>
   );
 });
@@ -146,6 +225,8 @@ export function Forest({
   metric,
   expanded,
   onLaneActivate,
+  ctx,
+  d,
 }: {
   // The served genealogy's root course. Nodes alternate course → candidate →
   // (course | sample), so forks and L4 inner runs need no special case here.
@@ -165,12 +246,12 @@ export function Forest({
   // between its expanded candidate cladogram and the compact summary row, in
   // place. Never changes the dashboard's selected cycle.
   onLaneActivate: (courseKey: string) => void;
+  // Where this cladogram is drawn and what a searchpoint click does there.
+  ctx: CladogramCtx;
+  // How much width it may spend. `DENSE` is what lets two trees sit beside each other.
+  d: Density;
 }) {
-  const { candidate, setSelectionForCandidate } = useSelection();
-  // The viewed address, read here rather than threaded in: navigation is `selectCyclePath`
-  // on the node's OWN path, so nothing needs a campaignId + cycleId pair to rebuild one.
-  const { viewedPath, selectCyclePath } = useWorkspace();
-  const viewedKey = viewedPath ? encodeCyclePath(viewedPath) : null;
+  const { viewedKey, isPicked, onPickCandidate, channels, clip } = ctx;
   // The live fitness painted on a node — the `valueByKey` overlay, looked up by
   // the same candidate identity the bars use. Outside the layout memo, so it
   // updates each poll without re-flowing the tree.
@@ -179,14 +260,39 @@ export function Forest({
   // Difficulty-adjusted ability for the node tooltip — what the winner was elected on.
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(n.candKey) ?? null;
+  // Stable across a poll tick, because `CandidateNode` is memoized and an inline arrow here
+  // re-renders every node on every tick.
+  const onPick = useCallback(
+    (n: RoundNodePos) => onPickCandidate(n, valueByKey.get(n.candKey) ?? null),
+    [onPickCandidate, valueByKey],
+  );
   // Layout is pure and the tree changes identity only on a real refetch, so this
   // memo re-runs only on a shape change (new round / candidate / winner flip / lane
   // toggle), never on a bare 2 s poll — the value overlay rides outside it.
+  //
   const { laneByKey, totalLaneRows, maxCol } = useMemo(
-    () => layout(tree, expanded),
-    [tree, expanded],
+    () => layout(tree, expanded, clip && extentKeys(tree, clip)),
+    [tree, expanded, clip],
   );
-  const { nodes, segs } = useMemo(() => placeNodes(laneByKey), [laneByKey]);
+  const { nodes, segs } = useMemo(() => placeNodes(laneByKey, d), [laneByKey, d]);
+  // Each channel's extent, NARROWEST FIRST — so the first one holding a node is the one whose ink
+  // it wears, and a channel this tree does not hold is simply not in the list. The SAME set the
+  // cut is made from, so what a card draws and what it colours cannot disagree.
+  const extents = useMemo(
+    () =>
+      channels
+        .flatMap((c) => {
+          const keys = extentKeys(tree, c);
+          return keys === null ? [] : [{ ink: c.ink, keys }];
+        })
+        .sort((a, b) => a.keys.size - b.keys.size),
+    [channels, tree],
+  );
+  const inkOf = useCallback(
+    (n: RoundNodePos): string | null =>
+      extents.find((e) => e.keys.has(n.candKey))?.ink ?? null,
+    [extents],
+  );
   // The candidates a lens would have elected instead. The marker rides the round's
   // WINNER and names its alternative, so the alternative learns of itself here —
   // one pass over the placed nodes, no parallel array to re-join.
@@ -200,11 +306,11 @@ export function Forest({
     [nodes],
   );
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
-  const width = LEFT_PAD + (maxCol + 1) * COL_W + RIGHT_PAD;
+  const width = d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
 
   // Round-number header — one label per column across the whole family.
   const headerCols: number[] = [];
-  for (let c = 1; LEFT_PAD + c * COL_W <= width - RIGHT_PAD + COL_W / 2; c += 1) {
+  for (let c = 1; d.leftPad + c * d.colW <= width - d.rightPad + d.colW / 2; c += 1) {
     headerCols.push(c);
   }
 
@@ -212,33 +318,6 @@ export function Forest({
   // Band y/height for a lane (covers all its rows when expanded).
   const bandTop = (l: LaneLayout): number => TOP_PAD + l.laneOffset * LANE_H - LANE_H / 2 + 2;
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
-
-  // Candidate click: inspect that searchpoint. A node in a non-selected lane also
-  // navigates the dashboard to its course, so the inspector/samples follow it — but
-  // it SELECTS either way: the selection names the course being navigated to, so the
-  // provider's cycle-change clear keeps it. This used to navigate and drop the pick on
-  // the floor, because the clear ate any candidate written across a cycle change.
-  //
-  // Navigation rides the node's OWN `coursePath`. It used to rebuild an address as
-  // `(campaignId, n.cycleId)` — the card's campaign plus a bare cycle id — which names the
-  // wrong run for anything inside an `.inner/` sandbox, where cycle ids repeat.
-  const onPickCandidate = (n: RoundNodePos): void => {
-    const nodeCycleId = pathLeaf(n.coursePath).cycleId;
-    if (n.coursePathKey !== viewedKey) selectCyclePath(n.coursePath, null);
-    const isSel = isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId);
-    setSelectionForCandidate(
-      isSel
-        ? null
-        : {
-            cycle_id: nodeCycleId,
-            round: n.round,
-            candidate_id: n.candidateId,
-            label: n.candidateLabel,
-            accuracy: valOf(n),
-            is_winner: n.isWinner,
-          },
-    );
-  };
 
   return (
     <div className="family-cladogram-forest">
@@ -252,7 +331,7 @@ export function Forest({
           shapeRendering="crispEdges"
         >
           {headerCols.map((c) => {
-            const x = LEFT_PAD + c * COL_W;
+            const x = d.leftPad + c * d.colW;
             return (
               <g key={`hdr-${c}`} className="family-cladogram-header-col">
                 <line
@@ -370,6 +449,10 @@ export function Forest({
                 : "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
+              // A collapsed lane still carries its channels — the round the comparison is
+              // anchored on is a summary dot here, and leaving it black is what made an
+              // unexpanded seed indistinguishable from every other lane on the drawing.
+              const ink = inkOf(n);
               return (
                 <g
                   key={`n-${n.courseKey}-${n.round}`}
@@ -378,10 +461,11 @@ export function Forest({
                     cycleSelected && "selected",
                     isDivergent && "mask-divergent",
                     isDivergence && "mask-divergence",
+                    ink && "channel",
                   )}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Expand ${cycName}`}
+                  aria-label={`Expand ${cycName}${ink ? ", holding a channel of the comparison" : ""}`}
                   onClick={() => onLaneActivate(n.courseKey)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -394,8 +478,9 @@ export function Forest({
                   <circle
                     cx={n.x}
                     cy={n.y}
-                    r={NODE_R}
+                    r={ink ? NODE_R + 1.5 : NODE_R}
                     className={`family-cladogram-dot kind-${n.courseKind}`}
+                    style={ink ? { fill: ink } : undefined}
                   />
                   {isDivergence && (
                     <circle
@@ -405,15 +490,17 @@ export function Forest({
                       className="family-cladogram-divergence-ring"
                     />
                   )}
-                  <text
-                    x={n.x}
-                    y={n.y - 6}
-                    className="family-cladogram-roundlabel"
-                    textAnchor="middle"
-                  >
-                    R{n.round} {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
-                  </text>
-                  {rowLabelText && (
+                  {d.labels && (
+                    <text
+                      x={n.x}
+                      y={n.y - 6}
+                      className="family-cladogram-roundlabel"
+                      textAnchor="middle"
+                    >
+                      R{n.round} {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
+                    </text>
+                  )}
+                  {d.labels && rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
                       <tspan className="family-cladogram-glyph">
                         {KIND_GLYPH[n.courseKind]}
@@ -436,6 +523,7 @@ export function Forest({
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
+                    {ink ? "\na channel of the comparison — expand the lane to reach it" : ""}
                   </title>
                 </g>
               );
@@ -451,21 +539,19 @@ export function Forest({
                 accuracy={valOf(n)}
                 theta={thetaOf(n)}
                 metric={metric}
-                selected={isSelectedCandidate(
-                  candidate,
-                  pathLeaf(n.coursePath).cycleId,
-                  n.round,
-                  n.candidateId,
-                )}
-                onPick={onPickCandidate}
+                selected={isPicked(n)}
+                onPick={onPick}
                 dimmed={n.divergent}
                 alt={altIds.has(n.candidateId)}
                 divergence={n.divergence !== null}
+                invalidated={!!ctx.invalidated?.has(n.candidateId)}
+                ink={inkOf(n)}
+                d={d}
               />
             ))}
 
           {/* Expanded lanes carry their cycle label beside the last winner. */}
-          {nodes
+          {(d.labels ? nodes : [])
             .filter((n) => n.isExpanded && n.isLastInLane)
             .map((n) => {
               const course = laneByKey.get(n.courseKey)?.course;
@@ -473,7 +559,7 @@ export function Forest({
               return (
                 <text
                   key={`elabel-${n.courseKey}`}
-                  x={n.x + CAND_STUB + 84}
+                  x={n.x + d.candStub + 84}
                   y={n.y + 3}
                   className="family-cladogram-cyclelabel"
                 >

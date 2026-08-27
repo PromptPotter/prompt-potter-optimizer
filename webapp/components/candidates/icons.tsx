@@ -111,6 +111,6 @@ const FALLBACK_ICON: ReactNode = (
   </svg>
 );
 
-export function whatifIconFor(displayName: string, registryName: string): ReactNode {
+export function maskIconFor(displayName: string, registryName: string): ReactNode {
   return ICONS[displayName] ?? ICONS[registryName] ?? FALLBACK_ICON;
 }

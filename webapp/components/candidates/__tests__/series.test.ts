@@ -38,9 +38,9 @@ function view(over: Partial<CandidateView>): CandidateView {
     n_expected: null,
     cached_samples: null,
     source: "history",
-    whatif: null,
+    lensValue: null,
     compositeRank: null,
-    whatifRank: null,
+    lensRank: null,
     started: false,
     electionPending: false,
     overlapAccuracy: null,
@@ -51,7 +51,7 @@ function view(over: Partial<CandidateView>): CandidateView {
 
 const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
   metrics: new Set(["accuracy", "ability"]),
-  showWhatIf: false,
+  showMask: false,
   showCache: false,
   showTrajectory: false,
   views: [],
@@ -65,9 +65,9 @@ const spec = (key: string) => CANDIDATE_SERIES.find((s) => s.key === key)!;
 describe("a missing value renders as a gap or a floor, never as a measurement", () => {
   // A candidate that has STARTED but has no number yet gets a stub, so "still computing"
   // reads differently from "not yet started".
-  it("floors accuracy, composite and what-if once scoring has begun", () => {
+  it("floors accuracy, composite and the mask once scoring has begun", () => {
     const started = [view({ started: true })];
-    for (const key of ["accuracy", "composite", "what-if"]) {
+    for (const key of ["accuracy", "composite", "mask"]) {
       expect(seriesColumn(spec(key), started)).toEqual([0]);
       expect(seriesColumn(spec(key), [view({ started: false })])).toEqual([null]);
     }

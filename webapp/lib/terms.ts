@@ -35,8 +35,8 @@ export const TERMS: Record<string, string> = {
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",
 
   // What-if direction arrows
-  whatif_up:   "Higher value is better — counted positively in the what-if mean.",
-  whatif_down: "Lower value is better — direction-corrected (1 − x) before averaging.",
+  mask_up:   "Higher value is better — counted positively in the masked mean.",
+  mask_down: "Lower value is better — direction-corrected (1 − x) before averaging.",
 
   // Stub badges + placeholder labels
   stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",

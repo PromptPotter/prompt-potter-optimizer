@@ -2,10 +2,9 @@
 // Cross-mount view state for the candidates card (bars + genealogy + forest).
 //
 // Module-scoped rather than a context because TWO SUBTREES read it and they are not in an
-// ancestor/descendant relation: the card itself, and `lib/lineage.tsx`, which turns the
-// What-If picks into the served tree's `?lens=` mask. There is no component that contains
-// both, so there is nothing to hold this state. It survives the card's own remounts as a
-// side effect, not as its reason.
+// ancestor/descendant relation: the card itself, and `lib/lineage.tsx`. There is no component
+// that contains both, so there is nothing to hold this state. It survives the card's own
+// remounts as a side effect, not as its reason.
 //
 // Seeding is scoped to the cycle: the `*ForCycle` latches record which cycle the
 // current selection was seeded for, so binding a fresh cycle re-seeds against
@@ -48,15 +47,10 @@ interface CandidatesState {
   showTrajectory: boolean;
   trajectorySeededForCycle: string | null;
 
-  // What-If ablation. A lens, not a metric — it re-projects the record under an
-  // alternative criterion rather than picking a different served number.
-  showWhatIf: boolean;
-  selected: Set<string>;
-  // Per-evaluator what-if weight (the slider value). Seeded from the realized
-  // composite formula's coefficients per cycle; the operator reweights to
-  // explore. Keyed by evaluator display name; missing ⇒ DEFAULT_WHATIF_WEIGHT.
-  weights: Record<string, number>;
-  seededForCycle: string | null;
+  // The scoring MASK is NOT here. It is a lens rather than a metric — it re-projects the record
+  // under an alternative criterion — and Compare re-projects the same way, so its value and
+  // its form live in `components/shell/mask/`, which both surfaces mount. A copy of the
+  // picks here would be a second answer to "what am I reading this under".
 
   // The dashed cache-provenance line. Off until asked for, and asked for is the only way it
   // appears — the card never answers "was this paid for?" unprompted.
@@ -79,10 +73,6 @@ let state: CandidatesState = {
   metricsSeededForCycle: null,
   showTrajectory: false,
   trajectorySeededForCycle: null,
-  showWhatIf: false,
-  selected: new Set<string>(),
-  weights: {},
-  seededForCycle: null,
   showCache: false,
   expanded: new Set<string>(),
   expandedForCampaign: null,

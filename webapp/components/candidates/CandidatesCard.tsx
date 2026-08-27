@@ -22,9 +22,20 @@ import {
 import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
+import { subjectKey, withMask } from "@/lib/api/reads";
+import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { WhatIfGrid } from "./WhatIfGrid";
+import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
+import { ApplyScenarioPanel } from "@/components/dashboard/control/ApplyScenarioPanel";
+import {
+  criterionOf,
+  lensOf,
+  setScoringMask,
+  subsetExactFor,
+  useScoringMask,
+} from "@/components/shell/mask/scoring-mask";
+import { FitnessRankSummary } from "./FitnessRankSummary";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import type { LineageNode } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -44,7 +55,7 @@ import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
-import { useWhatIf } from "./useWhatIf";
+import { useCycleEvaluators } from "./useCycleEvaluators";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -84,6 +95,7 @@ export function CandidatesCard() {
   const {
     campaignId,
     cycleId,
+    leafCampaignId,
     leafCycleId,
     viewedPath,
     viewedCandidateId,
@@ -98,6 +110,13 @@ export function CandidatesCard() {
     sampleSet,
     setSelectionForSampleSet,
   } = useSelection();
+  // The Compare tab's subject set, shell-level so it survives the navigation between picking one
+  // searchpoint and picking the next. The address is the LEAF's campaign paired with the
+  // candidate's own cycle, and the hops ABOVE the leaf as its sandbox chain — a cycle_id alone
+  // repeats across `.inner/` sandboxes, so an inner searchpoint needs both halves. The CHANNEL
+  // then carries the TOP-LEVEL campaign instead: that is the one the registry lists and the one
+  // its card draws a tree from, and an inner campaign is in neither.
+  const comparing = useCompareSelection();
 
   const {
     showForest,
@@ -152,10 +171,34 @@ export function CandidatesCard() {
     return m;
   }, [diagRunsResp, campaignId, cycleId]);
 
-  // ── 3. The What-If ablation's evaluator machinery. Called UNCONDITIONALLY — see the hook's
-  // own warning: `lib/lineage.tsx` reads the same store to build the tree's `?lens=` mask, so
-  // a seed deferred to the panel's mount costs an unmasked refetch and one wrong frame.
-  const whatIf = useWhatIf({ cycleId, dash, inflightCandidates, history });
+  // ── 3. The scoring mask: the shared value, plus this cycle's own evaluator rows. The hook is
+  // called UNCONDITIONALLY — see its own warning: `lib/lineage.tsx` reads the same store to build
+  // the tree's `?lens=`, so a seed deferred to the panel's mount costs an unmasked refetch and one
+  // wrong frame.
+  const { open: maskOpen, mask } = useScoringMask();
+  const evaluators = useCycleEvaluators({ cycleId, dash, inflightCandidates, history });
+  // The criterion on screen, in the two spellings that read it: the LENS the tree and a compare
+  // address are masked by, and the bare FORMULA a fork's `scoring` override takes. Derived once —
+  // three consumers asking `lensOf` separately is three chances to disagree about whether the
+  // panel is even open.
+  const activeLens = maskOpen ? lensOf(mask) : null;
+
+  // The Compare address of the selected searchpoint, CARRYING whatever mask is on screen. That
+  // is the handoff: a scenario built here opens over there as a channel reading the same thing,
+  // rather than being retyped into a second editor. Both segments are the ones already on this
+  // card — the lens the bars are drawn under, and the fixed sample set they are drawn over — so
+  // the channel that lands is the picture the operator is looking at.
+  const compareKey =
+    selectedCandidate && leafCampaignId && viewedPath
+      ? withMask(
+          subjectKey(
+            "candidate",
+            [leafCampaignId, selectedCandidate.cycle_id, selectedCandidate.candidate_id],
+            viewedPath.slice(0, -1),
+          ),
+          { lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null },
+        )
+      : null;
 
   // Render-phase seed of the metric axis, once per cycle. Two bars per candidate by
   // default: accuracy (a candidate is rarely bad on it, and it's the universal read)
@@ -190,10 +233,10 @@ export function CandidatesCard() {
   // picks + trajectory drill all live in `SampleSetControl`.
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
-  // The shared served overlay — the node's own `lens_value` is the What-If bar value
+  // The shared served overlay — the node's own `lens_value` is the masked bar value
   // (R-36, never recomputed here), and its divergence facts drive the boundary below.
   const overlay = useViewedLineage();
-  const { lens, setLens, maskActive, maskLabel, whatifActive } = overlay;
+  const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
 
   // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
   // left is parked on, and the same children it draws under it.
@@ -236,10 +279,11 @@ export function CandidatesCard() {
         viewedNode,
         inflightByLabel,
         sampleSet,
+        lensSubsetExact: subsetExactFor(mask),
         diagByLabel,
         overlapByCandidate,
       }),
-    [viewedNode, inflightByLabel, sampleSet, diagByLabel, overlapByCandidate],
+    [viewedNode, inflightByLabel, sampleSet, mask, diagByLabel, overlapByCandidate],
   );
 
   const forkKeys = useMemo(() => forkKeysOf(viewedNode), [viewedNode]);
@@ -315,24 +359,27 @@ export function CandidatesCard() {
     [views, selectedCandidate, leafCycleId],
   );
 
-  // Mask divergence boundary → the bar index where the active lens first parts
-  // ways with the realized record. We read the shared served overlay; we map its
-  // earliest divergent round for THIS cycle to the first bar at/after it, and the
-  // chart draws a red divider at that bar's left edge. null whenever no mask is
-  // active or nothing diverges.
-  const divergenceBoundary = useMemo(() => {
-    if (!overlay.maskActive) return null;
-    // Parked on a candidate, the bars are sibling courses inside ONE round — no round
-    // boundary to draw.
-    if (viewedCandidateId) return null;
+  // The round where the active lens first parts ways with the realized record — served
+  // (`divergence` on the tree overlay), read here and never derived. It is the SAME fact the
+  // apply panel below acts on: a fork carrying this criterion is minted exactly here, because
+  // rounds before it are a stretch both readings agree on. null whenever no mask is active or
+  // nothing diverges. Parked on a candidate, the bars are sibling courses inside ONE round, so
+  // there is no round boundary at all.
+  const divergentRound = useMemo(() => {
+    if (!overlay.maskActive || viewedCandidateId) return null;
     const { points, subtree } = divergenceRoundsFor(overlay.index, viewedPath);
-    let firstRound = Infinity;
-    for (const r of points) firstRound = Math.min(firstRound, r);
-    for (const r of subtree) firstRound = Math.min(firstRound, r);
-    if (!Number.isFinite(firstRound)) return null;
-    const idx = views.findIndex((v) => v.round >= firstRound);
+    let first = Infinity;
+    for (const r of points) first = Math.min(first, r);
+    for (const r of subtree) first = Math.min(first, r);
+    return Number.isFinite(first) ? first : null;
+  }, [overlay.maskActive, overlay.index, viewedPath, viewedCandidateId]);
+
+  // …and the bar it lands on, so the chart can draw its divider at that bar's left edge.
+  const divergenceBoundary = useMemo(() => {
+    if (divergentRound == null) return null;
+    const idx = views.findIndex((v) => v.round >= divergentRound);
     return idx >= 0 ? idx : null;
-  }, [overlay.maskActive, overlay.index, viewedPath, views, viewedCandidateId]);
+  }, [divergentRound, views]);
 
   // The bar of the candidate currently accumulating samples — it blinks while
   // live. The scoring candidate is `dash.candidate` ("C2.3/4"); gate on the
@@ -347,7 +394,7 @@ export function CandidatesCard() {
     return idx >= 0 ? idx : null;
   }, [isLive, dash?.current_round.active_node, dash?.candidate, views]);
 
-  const lensActive = lens !== "" && !whatifActive;
+  const lensActive = lens !== "" && !scoringMaskActive;
 
   // Read off the SERVED reading, not off the bars: slicing nulls every candidate's
   // `overlapAccuracy`, so asking the views would say "no trajectory" for the one state that
@@ -401,14 +448,14 @@ export function CandidatesCard() {
   const seriesCtx = useMemo<SeriesCtx>(
     () => ({
       metrics,
-      showWhatIf: whatIf.open,
+      showMask: maskOpen,
       showCache,
       showTrajectory: rung === 1,
       views,
       unit,
       electedMetric,
     }),
-    [metrics, whatIf.open, showCache, rung, views, unit, electedMetric],
+    [metrics, maskOpen, showCache, rung, views, unit, electedMetric],
   );
   const legend = useMemo(
     () => activeSeries(seriesCtx).filter((s) => s.metric == null),
@@ -449,7 +496,7 @@ export function CandidatesCard() {
     <CardFrame
       className={cx(
         "cand-card",
-        whatIf.open && "whatif-open",
+        maskOpen && "mask-open",
       )}
       // ONE short row, and only what the operator reads constantly: which number
       // am I looking at (Metric), and the escape hatches (⋯, copy). Everything
@@ -540,9 +587,9 @@ export function CandidatesCard() {
             renderTrigger={({ open, toggle }) => (
               <Chip
                 icon
-                on={open || lensActive || whatIf.open || showCache}
+                on={open || lensActive || maskOpen || showCache}
                 ariaLabel="More candidate options"
-                title="Lens, What-If, cache overlay, and the θ explainer"
+                title="Lens, scoring mask, cache overlay, and the θ explainer"
                 onClick={toggle}
               >
                 <IconMore />
@@ -554,24 +601,24 @@ export function CandidatesCard() {
                 {/* Lens: re-project the record under an alternative criterion and
                     mark where it would have forked the realized lineage. Backend
                     projection; this only picks which served overlay renders.
-                    Disabled while What-If drives the lens itself. */}
+                    Disabled while the scoring mask drives the lens itself. */}
                 <MenuRadioGroup
-                  label={whatifActive ? "Lens — driven by What-If" : "Lens"}
-                  value={whatifActive ? "" : lens}
+                  label={scoringMaskActive ? "Lens — driven by the scoring mask" : "Lens"}
+                  value={scoringMaskActive ? "" : lens}
                   options={LENS_OPTIONS}
                   onChange={(v) => {
-                    if (whatifActive) return;
+                    if (scoringMaskActive) return;
                     setLens(v);
                     close();
                   }}
                 />
                 <MenuSep />
                 <MenuCheck
-                  on={whatIf.open}
-                  onClick={() => whatIf.setOpen(!whatIf.open)}
+                  on={maskOpen}
+                  onClick={() => setScoringMask({ open: !maskOpen })}
                   title="Pick evaluators and reweight them to recompute every score under a criterion you choose."
                 >
-                  What-If ablation
+                  Scoring mask
                 </MenuCheck>
                 {/* Never disabled — the origin is normally the cached one, so greying out
                     when only C0 was replayed hides the case this is opened for. */}
@@ -581,6 +628,28 @@ export function CandidatesCard() {
                   title="Show how much of each candidate's samples were replayed from the archive instead of measured."
                 >
                   Loaded from cache{cacheHitCount > 0 ? ` · ${cacheHitCount}` : ""}
+                </MenuCheck>
+                <MenuSep />
+                {/* A searchpoint is picked where it is being LOOKED AT — the lit bar, the
+                    dendrogram node and the forest stub all write one selection slot, so the
+                    affordance rides that slot rather than being drawn three times. Compare then
+                    reads it off the shell-level set, which outlives this cycle. */}
+                <MenuCheck
+                  on={!!compareKey && comparing.hasSubject(compareKey)}
+                  disabled={!compareKey || !campaignId}
+                  onClick={() => {
+                    if (!compareKey || !campaignId) return;
+                    if (comparing.hasSubject(compareKey)) comparing.remove(compareKey);
+                    else comparing.addSubject({ rootCampaignId: campaignId, subject: compareKey });
+                    close();
+                  }}
+                  title={
+                    compareKey
+                      ? "Read this searchpoint beside other campaigns, branches and searchpoints on the Compare tab."
+                      : "Pick a candidate first — a bar, a dendrogram node or a forest stub."
+                  }
+                >
+                  Compare this searchpoint
                 </MenuCheck>
                 <MenuSep />
                 {/* The θ explainer — read once, then never again, so it lives here
@@ -630,7 +699,7 @@ export function CandidatesCard() {
           <FitnessChart
             views={views}
             metrics={metrics}
-            showWhatIf={whatIf.open}
+            showMask={maskOpen}
             showTrajectory={rung === 1}
             showCache={showCache}
             divergenceBoundary={divergenceBoundary}
@@ -662,8 +731,29 @@ export function CandidatesCard() {
             {forestToggle}
           </div>
         </div>
-        {whatIf.open && !viewedCandidateId && (
-          <WhatIfGrid whatIf={whatIf} views={views} />
+        {maskOpen && !viewedCandidateId && (
+          <ScoringMaskEditor
+            rows={evaluators.rows}
+            inActive={evaluators.inActive}
+            mask={mask}
+            onMask={(next) => setScoringMask({ mask: next })}
+            seeded={evaluators.seeded}
+            // No samples field here: the chip strip above owns that axis, with per-round picks and
+            // coverage this input cannot show. Two writers on one fact is what the card avoids.
+            summary={<FitnessRankSummary views={views} criterion={activeLens != null} />}
+          />
+        )}
+        {/* The preview's other half: the round it names is the round a fork carrying it is cut
+            at, so the two sit in one box rather than in two surfaces that have to agree. */}
+        {maskOpen && !viewedCandidateId && (
+          <ApplyScenarioPanel
+            campaignId={campaignId}
+            cycleId={cycleId}
+            isLive={isLive}
+            criterion={criterionOf(mask)}
+            divergentRound={divergentRound}
+            nextRound={history.length}
+          />
         )}
       </div>
     </CardFrame>

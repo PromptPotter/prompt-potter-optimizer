@@ -40,17 +40,16 @@ export async function postCommand<T = CommandAcceptedBody>(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as T;
 }
-// The fork's `OptimizationConfig` delta — twin of the OpenAPI `ConfigOverrides`.
-// Every field optional; absent inherits the parent. Values are ABSOLUTE for the
-// fork (the dialog defaults rounds/spend to the parent's remaining, then the
-// operator confirms the fork's own ceiling).
-//
-// Deliberately the RUN-LIMIT subset: the wire also carries the policy knobs
-// (`per_round_resubset`, `schema_field_rename`), which invalidate search
-// comparability and are set at mint or by an L2/L3 `fork_proposal` — never by a
-// checkbox on a dialog whose job is "how much budget does this fork get". A
-// human-set model/provider value rides the fork's `pipeline_overlay`, not here.
-export type ConfigOverrides = Partial<
+// The fork's campaign-config delta — twin of the OpenAPI `ConfigOverrides`. Every field
+// optional; absent inherits the parent. Values are ABSOLUTE for the fork.
+export type ConfigOverrides = Partial<WireConfigOverrides>;
+// What the RECONCILE DIALOG may set, which is a narrower question than what the wire carries:
+// "how much budget does this fork get". The policy knobs beside them (`per_round_resubset`,
+// `schema_field_rename`) invalidate search comparability and are set at mint or by an L2/L3
+// `fork_proposal`, never by a checkbox on that dialog; `scoring` is set by the scoring mask's own
+// apply, which is the affordance that can say WHERE it applies from. A human-set model/provider
+// value rides the fork's `pipeline_overlay`, not here.
+export type RunLimitOverrides = Partial<
   Pick<
     WireConfigOverrides,
     | "max_rounds"
@@ -72,14 +71,19 @@ export type ConfigOverrides = Partial<
 export type OperatorForkOverride = Partial<
   Omit<CycleSeed, "origin_source" | "config_overrides">
 > & { config_overrides?: ConfigOverrides };
-// Mint an `operator_steered` fork rooted at the selected searchpoint, carrying
-// the operator's edits + reconciled limits. The single fork write path.
+// Mint a fork rooted at the selected searchpoint, carrying the operator's edits +
+// reconciled limits. The single fork write path, and the two acts it spells differ only
+// in `keepRounds`: unset is `operator_steered` (a clean offshoot from the origin, rounds
+// numbered from 1); set is `operator_rewind`, which LIFTS rounds 0..round-1 and continues
+// at `round` under the seed's overrides — what "apply this from here" means, and what the
+// terminal spells `resume --rewind N`. The server refuses the second with an
+// `origin_prompt_fields` seed: the lifted round 0 already is the origin.
 export async function postForkCycle(
   campaignId: string,
   cycleId: string,
   round: number,
   candidateId: string,
-  opts: { seed: OperatorForkOverride; steeredBy?: string },
+  opts: { seed: OperatorForkOverride; steeredBy?: string; keepRounds?: boolean },
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
@@ -89,6 +93,7 @@ export async function postForkCycle(
     seed: opts.seed,
   };
   if (opts.steeredBy) payload.steered_by = opts.steeredBy;
+  if (opts.keepRounds) payload.keep_rounds = true;
   return postCommand("fork-cycle", payload);
 }
 // Rewrite a campaign's inner-optimizer model allow-list — the frozen
