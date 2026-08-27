@@ -1,19 +1,12 @@
 "use client";
-// State for the candidates card's Forest view. Everything that is NOT geometry
-// (forest-layout.ts), NOT markup (CandidatesCard/Forest), and NOT the shared
-// fetch/overlay (lib/lineage) lives here: the per-candidate value overlays,
-// the fork map, and the empty-stub cleanup mutation. The tree itself and the
-// mask/lens counterfactual are owned by `LineageProvider` and read via
-// `useViewedLineage()` — the SINGLE source both this view and the bars render.
+// State for the candidates card's Forest view: the per-candidate value overlays, the fork map,
+// and the empty-stub cleanup mutation. Geometry is `forest-layout.ts`, markup is Forest, and the
+// tree plus its mask counterfactual belong to `LineageProvider` — the SINGLE source both this
+// view and the bars render.
 //
-// **The structure is the served tree, and nothing else** — no source-by-cycle-role merge,
-// and since the dead live overlay went, no `dashboard.json` read at all. The tree rides the
-// LEDGER, which mints a candidate the moment it exists, so the in-flight round is already in
-// it and there is nothing to stitch.
-//
-// View state (which metric, which lanes are open) is NOT here — it belongs to the
-// card as a whole and lives in `candidates-store`, so the Sequence and Forest
-// views cannot disagree about which number they are painting.
+// **The structure is the served tree, and nothing else**: it rides the LEDGER, which mints a
+// candidate the moment it exists, so the in-flight round is already in it and there is nothing
+// to stitch. View state (which metric, which lanes are open) lives in `candidates-store`.
 
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
@@ -121,19 +114,11 @@ export function useLineage({
     return viewed ? nodeKeyOf(viewed) : null;
   }, [index, viewedKey]);
 
-  // Render-phase expand reset (React's sanctioned adjust-state-on-prop-change).
-  // A campaign switch resets to the clean view (the in-view lane expanded); selecting
-  // another fork ensure-expands it. The `expandedForLane` latch is what stops a manual
-  // collapse of the in-view lane from being re-expanded on the next render.
-  //
-  // Keyed on the LANE, which only the tree can name — so a campaign switch clears here
-  // and the default expansion settles on the render the tree lands, rather than being
-  // guessed from `cycleId` (which is not a lane key: inner ids repeat).
-  //
-  // On a campaign switch the seed is what the operator LEFT expanded here (view memory,
-  // lane keys — the same `nodeKeyOf` space `forest-layout::layout` matches), unioned with
-  // the in-view lane. Read during render via `useSyncExternalStore`, so the restore and the
-  // reset commit together and no frame shows the un-restored state.
+  // Render-phase expand reset (React's sanctioned adjust-state-on-prop-change), keyed on the
+  // LANE, which only the tree can name — `cycleId` is not a lane key, since inner ids repeat.
+  // The `expandedForLane` latch stops a manual collapse being re-expanded next render. The seed
+  // is view memory unioned with the in-view lane, read during render so restore and reset commit
+  // together and no frame shows the un-restored state.
   if (campaignId !== expandedForCampaign) {
     const remembered = viewFor(campaignId).expandedLanes;
     setCandidatesState({

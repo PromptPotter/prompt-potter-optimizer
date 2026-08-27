@@ -1,25 +1,15 @@
-// Bracket-dendrogram geometry for the Sequence view — the strip that hangs
-// directly under the fitness bars and draws the intra-cycle genealogy of the
-// SAME flat candidate spine the bars plot (`roundCandidates(dash)`).
+// Bracket-dendrogram geometry for the strip under the fitness bars, drawing the intra-cycle
+// genealogy of the SAME flat candidate spine the bars plot.
 //
-// Why a shallow fixed strip works at all: the genealogy is spine-and-fan — every
-// candidate of round r descends from the winner of the last ADVANCING round
-// before r (`forest-layout.ts` is the other reader of that rule). In the flat
-// (round asc, idx asc) order that puts every parent strictly LEFT of every
-// child, so a bracket is a plain x-interval and the whole picture is INTERVAL
-// PACKING, not tree layout — no crossing edges, nothing to route around.
+// The genealogy is spine-and-fan — every candidate of round r descends from the winner of the
+// last ADVANCING round before r — so in flat (round asc, idx asc) order every parent sits
+// strictly LEFT of every child and a bracket is a plain x-interval: INTERVAL PACKING, not tree
+// layout. Two rows suffice while every round advances, but a HELD round crowns no winner and its
+// brackets NEST, so packing is greedy lowest-free-row and the height falls out — nothing
+// hardcodes "2".
 //
-// Depth: bracket r runs from inside block r-1 to the end of block r, so bracket
-// r+1 always collides with it — but bracket r+2 starts inside block r+1, which
-// lies entirely right of block r, so brackets two generations apart never
-// overlap and TWO rows suffice while every round advances. HELD rounds refute
-// that constant: a held round crowns no winner, so rounds r+1 and r+2 both hang
-// off w_r and their brackets NEST. Greedy lowest-free-row packing covers both
-// cases and the strip height falls out of it — nothing here hardcodes "2".
-//
-// x arrives as FRACTIONS of the chart's plot width (the bar chart's own category
-// centers, published by its `xBridge` plugin) and leaves untouched, so this
-// module is pure numbers and unit-testable without a canvas.
+// x arrives and leaves as FRACTIONS of the chart's plot width, so this module is pure numbers
+// and unit-testable without a canvas.
 
 import { roundSizes, wasElected } from "@/lib/derivations";
 

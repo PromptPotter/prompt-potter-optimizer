@@ -67,14 +67,9 @@ interface WorkspaceState {
   // hop of a path — the course carries the address — so it rides beside `viewedPath`
   // rather than inside it.
   //
-  // An ID, never a LABEL. `C1.1` is a course's PRIVATE position and every course mints
-  // one, so a label addresses nothing across a campaign; the id is minted and unique. Both
-  // halves of the address are read off the node that was clicked — nothing builds one.
-  //
-  // This is NAVIGATION: "which node's children do the bars plot". It is NOT
-  // `SelectionContext.candidate`, which is INSPECTION: "which bar is lit". Only the tree
-  // writes this one; a bar click writes the other. They were one slot, which made the
-  // chart its own input — clicking a bar re-plotted the chart under the operator's cursor.
+  // An ID, never a LABEL: `C1.1` is a course's PRIVATE position, so a label addresses nothing
+  // across a campaign. This is NAVIGATION ("whose children do the bars plot"), written only by
+  // the tree — not `SelectionContext.candidate`, which is INSPECTION and written by a bar click.
   viewedCandidateId: string | null;
   datasetName: string | null;
   following: boolean; // the viewed path tracks the active pointer
@@ -279,18 +274,11 @@ export function WorkspaceProvider({
     return () => window.removeEventListener("hashchange", onHash);
   }, [adoptAddress]);
 
-  // TWO poll cadences. The active pointer (`/sessions/active` — three opaque
-  // ids) is staleness-critical: when the CLI mints a fresh cycle
-  // (`new`/fork/sweep all rewrite active_session.json) the viewed unit must
-  // yank to it promptly, so it rides the live dashboard's 2 s beat. The cycle
-  // list + campaign registry (`/cycles` + `/campaigns`) is heavier and changes
-  // rarely, so it stays on the 10 s floor. Polling them together at 10 s was
-  // the stale-window bug: pointer discovery lagged the 2 s data poll by up to
-  // 10 s, so a CLI-minted run left the dashboard pinned to the dead cycle until
-  // the next registry tick. `usePoll` owns each loop's interval, hidden-tab
-  // pause, focus wake (a `new` run in another terminal shows within a frame),
-  // and per-tick aborts; a `useRevalidation` bump forces an immediate re-tick
-  // on both so an in-app fork / stop lands without a poll-interval wait.
+  // TWO poll cadences. The active pointer is staleness-critical — a CLI-minted cycle must yank
+  // the viewed unit to it — so it rides the dashboard's fast beat; the cycle list and campaign
+  // registry are heavier and change rarely, so they stay on the slow floor. `usePoll` owns each
+  // loop's interval, hidden-tab pause, focus wake and per-tick aborts; a `useRevalidation` bump
+  // re-ticks both, so an in-app fork or stop lands without a poll-interval wait.
   const reval = useRevalidation();
 
   // Fast loop — the active pointer + the follow-snap. Sole owner of the pointer

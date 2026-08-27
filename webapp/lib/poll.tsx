@@ -5,14 +5,12 @@
 // The dashboard's `rounds[]` summary block is the sole "completed rounds" surface —
 // round_NNNN.json is deep-audit only and fetched lazily via `useRoundFile`.
 //
-// They share a timer because they share a FILE. Observed on unrelated cadences they drift,
-// and every surface reading one against the other then reports a disagreement that does not
-// exist on disk. `usePoll`'s two keys keep them independent where it matters: a slow window
-// fetch holds back nothing but itself.
+// They share a timer because they share a FILE: on unrelated cadences they drift, and any
+// surface reading one against the other reports a disagreement that is not on disk.
 //
-// The viewed MOMENT (`at`) is the seam between them. A ray step names a physical offset in
-// the leaf cycle's own ledger; handing that offset to the dashboard route replays the fold
-// to it, so scrubbing the chronology moves every panel on the page. `null` is the head.
+// The viewed MOMENT (`at`) is the seam. A ray step names a physical offset in the leaf cycle's
+// ledger, and handing it to the dashboard route replays the fold to that point, so scrubbing the
+// chronology moves every panel on the page. `null` is the head.
 
 import {
   createContext,
@@ -220,17 +218,11 @@ export interface CycleStreamState {
   statusHint: string;
   termKey: string;
   error: string | null;
-  // The optimizer is actively executing this cycle — the composition of three
-  // orthogonal axes: the run declares `run_phase === "running"`, the connection
-  // is fresh (`status === "live"`), AND the page is showing the head rather than
-  // a replayed moment. A paused run declares "paused" → isLive false immediately
-  // (no 30 s freshness lag — the old bug). A silently-dead producer ("detached")
-  // keeps run_phase "running" on disk but its poll goes stale → isLive false. The
-  // single gate for every transient indicator (blinking rows, pulsing nodes, the
-  // round-strip "live" pill, the Pause affordance) — which is why the moment
-  // belongs in it: a past moment has no in-flight anything, so every one of those
-  // indicators goes quiet without a single panel testing `at` for itself.
-  // Composed once, in `useCycleStreamSource`; consumers never re-derive it.
+  // Three orthogonal axes at once: the run declares `run_phase === "running"`, the connection is
+  // fresh, AND the page is showing the head rather than a replayed moment. The single gate for
+  // every transient indicator — which is why the moment belongs in it: a past moment has no
+  // in-flight anything, so they all go quiet without a panel testing `at` for itself. Composed
+  // once, in `useCycleStreamSource`; consumers never re-derive it.
   isLive: boolean;
   // `dash.state` lifted to the top level so transient indicators can gate on
   // the phase (e.g. only blink a sample row when `phase === "scoring"`).

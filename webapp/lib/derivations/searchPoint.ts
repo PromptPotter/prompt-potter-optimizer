@@ -1,19 +1,13 @@
-// Observe-side resolver: the read-only "what config does THIS searchpoint run"
-// view behind the chat-hero LLM node. Two states — the live in-flight candidate
-// and a completed one out of its round file — each reading the SAME
-// server-resolved, config-only `resolved_pipeline_params` (origin floor ⊕
-// candidate delta, prompt stripped; JobSearchPoint.config_params).
+// Observe-side resolver: the read-only "what config does THIS searchpoint run" view. Two states,
+// the live in-flight candidate and a completed one out of its round file, both reading the same
+// server-resolved `resolved_pipeline_params`.
 //
-// The ORIGIN is not a third state. C0 is a candidate of round 0, located by
-// `candidate_id` in `round_0000.json` like any other — so it rides
-// `candidateObserveConfig` and needs no branch here. Typing it as a state of its
-// own makes the origin a mode of LOOKING rather than a thing to look AT.
+// The ORIGIN is not a third state — C0 is a candidate of round 0 like any other, and typing it
+// as its own state makes the origin a mode of LOOKING rather than a thing to look AT.
 //
-// No client re-merge: the server computes the effective config once and projects
-// it; this module only selects which searchpoint's resolved config to show. Pure
-// data → data. The STEER fork seed (`candidateSearchPoint.ts`) reads the same
-// `resolved_pipeline_params` but for a different purpose — an editable fork seed,
-// not a read-only view — so the two stay separate functions over one served field.
+// No client re-merge; this module only SELECTS which searchpoint's resolved config to show. The
+// STEER fork seed (`candidateSearchPoint.ts`) reads the same field for a different purpose — an
+// editable seed, not a view — so the two stay separate functions over one served field.
 
 import {
   liveInputCandidate,
@@ -36,10 +30,6 @@ import { wasElected } from "./election";
 //              the last candidate the last closed round measured.
 //   selected — the candidate picked on another surface (a candidates-card bar,
 //              a sidebar row). Offered ONLY while such a pick exists.
-//
-// The predecessors were `live | historical`, and both misreported themselves:
-// `live` was offered (disabled) on a stopped run, and `historical` silently meant
-// "whatever you clicked on the Dashboard tab", with no label saying so.
 export type ObserveState = "best" | "latest" | "selected";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
@@ -147,19 +137,14 @@ export function liveCandidateObserveConfig(
   return rowConfig(liveInputCandidate(dash, liveRound, candidateId), `live — ${label}`, nodeId);
 }
 
-// Historical: a specific past candidate out of its lazily-loaded round file, located by its
-// POSITIONAL label (`C{round}.{idx}`) — `courseLabel`, the identity the minting course gave
-// it. Any round including 0; C0 resolves through here, which is what makes the origin an
-// ordinary observe target.
+// Historical: a past candidate out of its lazily-loaded round file, located by its POSITIONAL
+// label — any round including 0, which is what makes the origin an ordinary observe target.
 //
-// **Not `candidate_id`, and the difference is only visible after a resume.** A lineage id is
-// a fresh uuid per construction, and a resumed run re-scores the origin — so the tree serves
-// C0 under a NEW id while `round_0000.json`, written by the earlier run, still holds the old
-// one. An id join then finds nothing and the config table blanks with no error. The live
-// sibling above may join on id precisely because it cannot cross a run.
-//
-// `display` is what the header reads (`selected · C0`, `winner · C2.1`); it is decoration and
-// must never be the join key.
+// **Not `candidate_id`, and the difference is only visible after a resume.** A lineage id is a
+// fresh uuid per construction and a resumed run re-scores the origin, so the tree serves C0 under
+// a NEW id while the round file still holds the old one; an id join then finds nothing and the
+// table blanks with no error. The live sibling above may join on id only because it cannot cross
+// a run. `display` is decoration and must never be the join key.
 export function candidateObserveConfig(
   doc: RoundResult | null,
   courseLabel: string,
@@ -201,17 +186,11 @@ function targetAt(
   return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
 }
 
-// THE INCUMBENT — the individual the search is currently expanding from. Walk the
-// closed rounds back to the most recent SERVED crown (`is_winner`); a round that
-// crowned nobody (no candidate was electable) is skipped rather than inventing one,
-// which is why this is a walk and not `rounds.at(-1)`. Round 0 is included: on a
-// campaign that has only measured its origin, C0 IS the incumbent.
-//
-// It reads served crowns and takes the most recent — it re-sorts nothing and computes
-// no number, so it stays inside the scoring-authority rule. **Under a REWIND** (the
-// search re-expanding an earlier ancestor) the most recent crown is still what the
-// search expands from, but it is not necessarily the highest-θ individual ever
-// measured; a strict global best would need a SERVED pointer, not a client re-pick.
+// THE INCUMBENT — the individual the search expands from. A WALK back to the most recent SERVED
+// crown, not `rounds.at(-1)`: a round that crowned nobody is skipped rather than inventing one.
+// Round 0 is included, since on a campaign that only measured its origin C0 IS the incumbent.
+// **Under a REWIND** the most recent crown is still what the search expands from but need not be
+// the highest-θ individual ever measured; a strict global best needs a SERVED pointer.
 export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
   const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
   for (const r of rounds) {

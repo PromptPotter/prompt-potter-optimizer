@@ -434,7 +434,7 @@ export function candidateSubject(path: CyclePath, candidateId: string): string {
   return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, candidateId], path.slice(0, -1));
 }
 
-// The WHAT-IF segments of the same address — a scoring lens and/or a sample subset, appended to
+// The MASK segments of the same address — a scoring lens and/or a sample subset, appended to
 // the subject a served reading was already resolved from. `;` separates them because it cannot
 // appear in a safe-AST formula, which is also why the server splits on it. Blank values drop the
 // segment, so clearing both fields is how a channel goes back to the record.

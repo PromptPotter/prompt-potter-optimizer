@@ -1,20 +1,10 @@
-// Cladogram geometry for the served lineage tree. Pure layout: walks the ONE tree
-// `/tree` serves, assigns lanes, and resolves SVG node + branch coordinates. No
-// React — CandidatesCard and Forest own the rendering.
+// Cladogram geometry for the served lineage tree. Pure layout: walks the ONE tree `/tree`
+// serves, assigns lanes, resolves SVG node + branch coordinates. No React.
 //
-// The tree alternates `course → candidate → (course | sample)` at every depth, so
-// this is one recursion rather than a per-tier rule: a fork and an L4 inner run are
-// the same edge (a course hanging off a candidate), and L5+ needs nothing new.
-//
-// Two depths per course lane:
-//   collapsed — one summary node per round (the round winner), the compact
-//               course view. laneSpan = 1 row.
-//   expanded  — the full intra-course candidate cladogram: one node per candidate
-//               per round, winner→children branches. laneSpan = the widest round's
-//               candidate count, so an expanded lane pushes the lanes below it down.
-//
-// No client-side tree build: a course hangs off a candidate, so its columns start
-// one right of THAT candidate — the served tree's own shape answers it.
+// The tree alternates at every depth, so this is one recursion rather than a per-tier rule, and
+// a course's columns start one right of the candidate it hangs off — the served shape answers
+// it, with no client-side tree build. A collapsed lane spans one row; an expanded one spans the
+// widest round's candidate count and pushes the lanes below it down.
 
 import type { LineageDivergence, LineageNode } from "@/lib/api";
 import { candidatesOf, nodeKeyOf, pathOf, wasElected } from "@/lib/derivations";
@@ -157,24 +147,10 @@ export interface CladogramAnchor {
   candidateId: string;
 }
 
-// What a point CAME FROM, as a set of candidate addresses (`nodeKeyOf`) — its extent. Three
-// parts, and each stands in a different relation to the anchor:
-//
-//   · its own course up to its own round — the rounds it stands on and the arms it beat;
-//   · every course ABOVE it, cut at the candidate the next one hangs off — the chain that reached
-//     it, which for an L4 seed is the outer campaign stopped at the point that seed measured;
-//   · the seed runs that measured the ANCHOR ITSELF, whole and at any depth: an `inner` course IS
-//     that point's number, so it belongs to the point rather than to what came after it.
-//
-// What is deliberately OUT: a sibling seed measuring the same ancestor (it produced a different
-// number), a fork off the anchor (a line that continued instead), and every later round. This was
-// briefly a column comparison — "at or before the anchor's round-column" — which reads plausibly
-// and is wrong twice over: a seed is drawn one column RIGHT of the point it measures, so a
-// campaign read at its own origin lost every seed, and exempting seeds from the column then made
-// their own interiors uncuttable, so a searchpoint INSIDE one kept everything after it.
-//
-// `null` where this tree does not hold the anchor at all — the ordinary case on a board that
-// spans campaigns.
+// What a point CAME FROM, as a set of candidate addresses (`nodeKeyOf`) — its extent, defined by
+// `webapp/CLAUDE.md` § Component conventions, including why it is never a round-COLUMN test.
+// Deliberately OUT: a sibling seed of the same ancestor, a fork off the anchor, every later
+// round. `null` where this tree does not hold the anchor at all.
 export function extentKeys(
   root: LineageNode,
   anchor: CladogramAnchor,

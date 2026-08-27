@@ -34,7 +34,7 @@ export const TERMS: Record<string, string> = {
   // composite_fitness — wired on the "Pass Rate (composite)" card title
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",
 
-  // What-if direction arrows
+  // Mask direction arrows
   mask_up:   "Higher value is better — counted positively in the masked mean.",
   mask_down: "Lower value is better — direction-corrected (1 − x) before averaging.",
 

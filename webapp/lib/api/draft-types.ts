@@ -8,13 +8,9 @@
 import type { NodeConfigParam, NodeOutputSchema } from "./types";
 import type { PipelineView } from "@/components/workflow";
 
-// M13 chat-first dataset ingest. `postIngestDataset` uploads a CSV + mints a
-// durable `checkin` campaign, returning its `DraftCampaign` (`draft_id` IS the
-// `campaign_id`); `postEditDraftCampaign` sparse-patches the draft (both the chat
-// assistant tool-call and the panel "Apply" button ride this); `postStartCheckin`
-// gates + commits + spawns the runner, flipping the check-in to `active`. Wire
-// contract pinned in `docs/specs/m12-api-openapi.yaml` (`POST /datasets/ingest`,
-// `POST /commands/edit-draft-campaign`, `POST /commands/start-checkin`).
+// M13 chat-first dataset ingest: upload + mint a durable `checkin` campaign (`draft_id` IS the
+// `campaign_id`), sparse-patch the draft, then gate + commit + spawn. Wire contract pinned in
+// `docs/specs/m12-api-openapi.yaml`.
 
 // One uploaded column header's provenance tag — mirrors the server's
 // `domain/origin_provenance.Provenance` StrEnum. `unset` = no value yet,
@@ -22,12 +18,9 @@ import type { PipelineView } from "@/components/workflow";
 // operator-stated or auto-confirmed. No field reaches mint while `unset`
 // or `proposed` (the deterministic `origin_readiness` gate).
 export type ProvenanceTag = "unset" | "proposed" | "confirmed";
-// The backend-pipeline permission surface the new-campaign UI renders before
-// commit. A draft's `pipeline_overlay` is empty until commit, so the connector
-// node-config seed (TermNorm's reasoning clamp) is otherwise invisible — this
-// block carries it so the UI can show the optimizer is *locked out* of certain
-// params (model/provider campaign-wide; thinking above the connector floor),
-// not merely that a value is the default. Server-derived per request.
+// The permission surface the new-campaign UI renders before commit. A draft's `pipeline_overlay`
+// is empty until then, so the connector's node-config seed would otherwise be invisible and a
+// locked-out param would read as merely defaulted. Server-derived per request.
 export interface OptimizerLocks {
   // Connector default pipeline step list (e.g. `["llm_only"]`).
   pipeline: string[];
@@ -44,12 +37,9 @@ export interface OptimizerNodeLocks {
   // renders crossed-out (optimizer locked out).
   param_allowed_values: Record<string, string[]>;
 }
-// A categorical input the draft's active pipeline requires beyond
-// (pipeline + dataset + origin), derived server-side from the pipeline's node
-// types. `kind` is the dependency family (`candidate_library` today); `node`
-// names the node that raised it; `fulfilled` is whether the draft already
-// carries it. The ingest UI renders the unfulfilled ones with a drop-zone so the
-// operator supplies the missing input in place.
+// A categorical input the draft's pipeline requires beyond (pipeline + dataset + origin),
+// derived server-side from the node types. The ingest UI gives each unfulfilled one a drop-zone
+// so the operator supplies it in place.
 export interface PipelineDependencyWire {
   kind: string;
   node: string;
@@ -81,13 +71,9 @@ export interface DraftCampaignWire {
   optimization_overrides: OptimizationOverridesWire;
   raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
-  // Header-agnostic ingest (A3 origin-resolution gate). `headers` are the
-  // uploaded file's columns in order; `column_query` / `column_ground_truth`
-  // are the operator-resolved input/target mapping (empty until picked);
-  // `field_provenance` carries per-field provenance keyed by dotted field name
-  // (`column.query`, `column.ground_truth`, `task_description`). The mint gate
-  // blocks until both columns are `confirmed` and members of `headers`. Config
-  // is not gated — it carries no provenance entry.
+  // Header-agnostic ingest: the uploaded columns in order, the operator-resolved input/target
+  // mapping, and per-field provenance keyed by dotted field name. The mint gate blocks until both
+  // columns are `confirmed` and members of `headers`; config is not gated.
   headers: string[];
   column_query: string;
   column_ground_truth: string;
@@ -134,11 +120,9 @@ export interface OriginGap {
   reason: string;
   hint: string;
 }
-// Version-and-repoint an existing dataset so its name frees for new data —
-// the "Replace" collision choice. Data-safe: the old data + every prior
-// campaign's results are preserved under `{slug}-vN` (never overwritten); the
-// freed name is then re-ingested via `postIngestDataset(file, slug)`. Wire
-// contract: `docs/specs/m12-api-openapi.yaml::replaceDataset`.
+// Version-and-repoint a dataset so its name frees for new data — the "Replace" collision choice.
+// Data-safe: the old data and every prior campaign's results are preserved under `{slug}-vN`,
+// never overwritten. Wire contract: `docs/specs/m12-api-openapi.yaml::replaceDataset`.
 // A bare acknowledgement — the archival name and the repointed/re-stamped counts are
 // recorded by the migration itself (log + on-disk marker); no client reads them back.
 export interface ReplaceDatasetResponse {

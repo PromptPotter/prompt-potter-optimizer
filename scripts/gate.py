@@ -103,22 +103,24 @@ def _node(exe: str, *args: str) -> list[str]:
 
 
 def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
-    """Regenerate a surface, then fail if the worktree moved.
+    """Regenerate a surface, then fail if the generator moved it.
 
     All three come off the Pydantic models. Ungated, a drifted model ships a stale
-    schema the webapp typechecks against and the LLM is asked to fill. The generators
-    read the worktree rather than the index, so this stays whole-tree even under
-    ``--staged``.
+    schema the webapp typechecks against and the LLM is asked to fill. The comparison is
+    against the file's own prior CONTENT, never the index: a model edit leaves the
+    regenerated file correct but unstaged, and asking git would then fail on a tree that
+    is already right and only go green on `git add`. Snapshot-vs-output is the same
+    verdict on CI's clean checkout and stops firing here once the file is regenerated.
     """
 
     def check(_sel: Sel) -> Outcome:
+        target = _REPO / path
+        before = target.read_bytes() if target.exists() else None
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
             return rc, out
-        rc, _ = _run(["git", "diff", "--quiet", "--", path], _REPO)
-        if rc:
-            _, stat = _run(["git", "diff", "--stat", "--", path], _REPO)
-            return 1, f"{path} was stale — regenerated in place; `git add` it.\n{stat}"
+        if target.read_bytes() != before:
+            return 1, f"{path} was stale — regenerated in place; re-run to confirm."
         return 0, ""
 
     return check

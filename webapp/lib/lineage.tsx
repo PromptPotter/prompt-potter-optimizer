@@ -22,13 +22,9 @@ import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useRevalidation } from "@/lib/revalidate";
 import { useSelection } from "@/lib/SelectionContext";
 
-// One cadence for every subscribed tree. It is the sidebar's old interval, not the
-// overlay's event-driven revalidation: the server validator is the subtree's ledger mtime,
-// which bumps the moment a candidate is minted, so a 5 s tick sees an in-flight candidate
-// at its start and costs a 304 the rest of the time. The overlay's `dashChangeKey` proxy
-// ("the dashboard moved, so the tree might have") is gone — it was guessing at what the
-// validator now answers directly, and it forced this provider to sit under the dashboard
-// stream for no other reason.
+// One cadence for every subscribed tree. The server validator is the subtree's ledger mtime,
+// which bumps the moment a candidate is minted, so a tick sees an in-flight candidate at its
+// start and costs a 304 the rest of the time — no proxy for "the dashboard moved" is needed.
 const POLL_MS = 5000;
 
 // Short label per preset lens for the mask tag.

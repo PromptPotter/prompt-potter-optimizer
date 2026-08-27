@@ -136,13 +136,9 @@ function AppShellInner() {
     return () => window.clearTimeout(t);
   }, [goneAddress, recordView, dismissGoneNotice]);
 
-  // RESTORE. Clicking a campaign's ROOT row means "open this campaign", and what the
-  // operator means by that is where they left it — the inner run they had drilled into,
-  // parked on the node they were reading. Any deeper or more specific click is an explicit
-  // address and is honored as-is; memory never overrides a live intent.
-  //
-  // Guarded on the remembered leaf still being a cycle the workspace knows: a fork deleted
-  // between visits must open the campaign at its root, not spin on an address that 404s.
+  // RESTORE. A click on a campaign's ROOT row means "where I left it"; any deeper click is an
+  // explicit address, and memory never overrides a live intent. Guarded on the remembered leaf
+  // still being a cycle the workspace knows, or a deleted fork spins on an address that 404s.
   const restoreNavigation = useCallback(
     (path: CyclePath, candidate?: string | null): [CyclePath, string | null] => {
       if (path.length !== 1 || candidate) return [path, candidate ?? null];
@@ -167,26 +163,18 @@ function AppShellInner() {
     },
     [campaignId, viewFor, cycles],
   );
-  // The DISPLAY panes (connector, pipeline hero, hard-samples) follow the VIEWED
-  // LEAF hop — the same hop the dashboard stream re-roots to — so drilling into an
-  // L4 inner loop shows the inner run's connector + samples, not the outer loop
-  // pipeline. The CHAT THREAD (live feed, control verbs, session, Files, checkin)
-  // stays on the root hop below. At depth 1 leaf == root, so every leaf value
-  // equals its root counterpart and the top-level view is unchanged. `leafCreatedAt`
-  // is the inner cycle's own start time (null at depth 1 → keep the root value).
+  // The DISPLAY panes follow the VIEWED LEAF hop, so drilling into an L4 inner loop shows that
+  // run's connector and samples; the CHAT THREAD stays on the root hop below. At depth 1 the two
+  // coincide, so the top-level view is unchanged.
   const { datasetName: leafDatasetName, createdAt: leafCreatedAt } = useLeafCycleIndex(
     viewedPath,
     datasetName,
   );
-  // The per-campaign view (Chat / Dashboard / Records) is ON THE ADDRESS
-  // (`lib/address.ts`), so the workspace holds it — a reload or a copied link now
-  // restores the pane the operator was reading instead of dropping them on Chat.
-  // The unit header's strip renders it, at every width.
-  // Which of the two PHONE screens is showing. `false` = the campaign screen,
-  // which is also the desktop-equivalent default and the public landing surface
-  // (the Chat pane) — booting an anon phone visitor onto a list that reads "Sign
-  // in to see your campaigns" would bury the thing they came for. Inert above
-  // --bp-md: no desktop rule reads the class.
+  // The per-campaign view is ON THE ADDRESS (`lib/address.ts`), so the workspace holds it and a
+  // reload or copied link restores the pane rather than dropping the operator on Chat.
+  // Which of the two PHONE screens is showing. `false` = the campaign screen, the public landing
+  // surface: an anon visitor booted onto "Sign in to see your campaigns" never reaches what they
+  // came for. Inert above --bp-md — no desktop rule reads the class.
   const [listScreen, setListScreen] = useState(false);
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   // Bumped each time "New campaign" is hit while the chat tab is in view —
@@ -403,13 +391,10 @@ function AppShellInner() {
           if (checkin) openView("chat");
         }}
         onNewCycle={() => {
-          // Two entry points, picked by the view in front of the operator. On the
-          // chat tab, "New campaign" resets the thread in place to its empty
-          // first-run state — no modal over the chat (that detour buried the menu
-          // and read as "nothing happened"). On any other tab — INCLUDING while a
-          // check-in owns the chat tab (its takeover replaces ChatPane, so the
-          // in-place reset has no consumer) — open the self-contained modal, which
-          // overlays everything and is the escape hatch out of the check-in.
+          // Two entry points, picked by the view in front of the operator: on the chat tab the
+          // thread resets in place, anywhere else the modal opens. A check-in counts as
+          // "anywhere else" — its takeover replaces ChatPane, so the in-place reset has no
+          // consumer, and the modal is the escape hatch out of it.
           if (tab === "chat" && !showCheckin) setNewCampaignTick((t) => t + 1);
           else setNewCampaignOpen(true);
           // On a phone the sidebar IS the list screen, so the reset it triggers
