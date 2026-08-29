@@ -51,6 +51,15 @@ class LLMResponse(StrictModel):
             "instead of quoting a zero nobody measured."
         ),
     )
+    served_by: str | None = Field(
+        None,
+        description=(
+            "WHICH upstream host answered, where the provider is a gateway that routes "
+            "onward; ``None`` where it is its own host. Distinct from the provider, which "
+            "names who we called and so reads the same for every route through it. "
+            "Analytical like ``reasoning`` — never a gate, metric or cache key."
+        ),
+    )
     parsed: Any | None = Field(
         None,
         description=(

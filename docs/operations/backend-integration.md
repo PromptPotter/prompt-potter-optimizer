@@ -14,6 +14,20 @@ Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md).
 
 **A gateway (OmniRoute, OpenRouter) is a backend like any other, and a campaign points at a pinned model — never at a router that chooses one per request.** A gateway picks per request on live heuristics where PromptPotter picks once on measured evidence; both choosing on the eval path means the rows were not measured on one model, and no fork or `verify` recovers that campaign.
 
+**Pinning the model does not pin the HOST, and that is what `served_by` is for.** A `:nitro`-style suffix routes to whichever provider is fastest, and hosts of one model disagree *systematically* rather than randomly — measured 2026-08-29, five hosts of `gpt-oss-20b` splitting on a claim four of them got wrong. So a backend may report, per LLM node on `step_tokens`, WHICH upstream host answered; PromptPotter banks it on `TokenUsageRecord.served_by` and a later comparison can ask whether two disagreeing readings even ran on the same silicon.
+
+### Optional `step_tokens` fields — read, never required
+
+Every key below is ABSENT when the backend reported nothing, and PromptPotter reads absence as "not reported" rather than as a value. **The coupling is soft by construction: an older backend that sends none of them degrades what can be asked afterwards and breaks nothing**, so these need no version gate between the two repos and no release may claim one.
+
+| Key | What it is | Missing ⇒ |
+|---|---|---|
+| `cost_usd` | what the provider billed for that call | falls back to the bundled rate table |
+| `model` | the upstream model id | spend buckets by the provider slug instead |
+| `served_by` | the upstream HOST, where `provider` names a gateway that routes onward | host attribution unavailable; nothing else changes |
+
+**Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
+
 ## Connection security
 
 The client talks to each backend over HTTP(S) with optional bearer-token auth. Four layers, all set at registration time:

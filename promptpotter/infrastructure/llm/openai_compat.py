@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -100,6 +101,14 @@ def _billed_cost(first: float | None, second: float | None) -> float | None:
     return (first or 0.0) + (second or 0.0)
 
 
+def _served_by(response: ChatCompletion) -> str | None:
+    """The upstream host the gateway routed to. OpenRouter reports it on the response root (the
+    SDK's models are ``extra="allow"``); a provider that IS the host reports nothing, and ``None``
+    says we do not know rather than naming the gateway a second time."""
+    served = (getattr(response, "model_extra", None) or {}).get("provider")
+    return str(served) if served else None
+
+
 def _finish_reason(response: ChatCompletion) -> str | None:
     return response.choices[0].finish_reason if getattr(response, "choices", None) else None
 
@@ -146,7 +155,11 @@ class OpenAICompatibleClient(LLMClientBase):
             try:
                 from openai import AsyncOpenAI
             except ImportError as err:
-                raise ImportError("openai package not installed. Run: pip install openai") from err
+                raise ImportError(
+                    f"openai is a core dependency, so its absence means {sys.executable} is not "
+                    "the interpreter promptpotter was installed into. Re-run from the repo venv — "
+                    "installing openai here would hide the broken install, not fix it."
+                ) from err
 
             kwargs: dict[str, Any] = {
                 "api_key": self._api_key,
@@ -418,6 +431,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 "cache_write_tokens": billed.cache_write,
             },
             cost_usd=_billed_cost(first_cost, _attempt_cost(response)),
+            served_by=_served_by(response),
             parsed=parsed,
             schema_repair_attempts=schema_repair_attempts,
         )

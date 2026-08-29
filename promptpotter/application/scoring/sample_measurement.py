@@ -14,7 +14,7 @@ import httpx
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.diagnostics import find_rank
 from promptpotter.config.settings import NO_RESULT
-from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, INNER_FACT_KEYS
+from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, is_hit
@@ -120,7 +120,7 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
         # here rather than as a declared observation because the panel reads it and the scoring
         # formula must not — see the emit site in `runner/inner/spawn.py`.
-        ADOPTED_LEVEL_SE_KEY,
+        PARENT_LEVEL_SE_KEY,
         # L4: what the inner campaign knows about ITSELF (`domain/l4/proxies.py`). Infra keys, so
         # they need no dataset `observation_mapping` — an undeclared observation is dropped here
         # silently, which is exactly the trap `_verify_outer_panel_contract` exists to catch.
@@ -139,6 +139,9 @@ class StepTokenUsage(TypedDict):
     cost_usd: NotRequired[float]
     model: NotRequired[str]
     provider: NotRequired[str]
+    # WHICH upstream host answered, where `provider` names a gateway that routes onward; the
+    # backend forwards it, and it is absent for a provider that is its own host.
+    served_by: NotRequired[str]
     finish_reason: NotRequired[str]
     reasoning: NotRequired[int]
 
@@ -169,6 +172,7 @@ def emit_step_token_usage(
             duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
             model=entry.get("model"),
             provider=entry.get("provider"),
+            served_by=entry.get("served_by"),
             cost_usd=cost_usd,
             cached=cached,
         )

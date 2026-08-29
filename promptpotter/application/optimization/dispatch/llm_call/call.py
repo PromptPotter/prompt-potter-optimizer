@@ -373,6 +373,7 @@ async def llm_call(
         cache_read_tokens=response.usage.get("cache_read_tokens", 0),
         cache_write_tokens=response.usage.get("cache_write_tokens", 0),
         provider=merged["provider"],
+        served_by=response.served_by,
         duration_s=duration_s,
         model=response.model,
         cost_usd=response.cost_usd,
