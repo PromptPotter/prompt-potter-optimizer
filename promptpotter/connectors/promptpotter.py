@@ -87,17 +87,18 @@ def _measurement_source_digest() -> str:
     It replaced ``APP_VERSION`` in the fingerprint. That constant voided every banked cell on
     every release while saying nothing about whether the measurement had actually changed — the
     two costs run opposite ways, and a corpus that cannot survive a version bump cannot
-    accumulate at all. These four modules are what genuinely decides the number: the composite,
-    the election and its intervals, the ability fit the levels are expressed in, and the law
-    that reads a finished inner cycle. Same AST normalization as its prompt-side twin
-    ``injection_source_digest`` — a docstring is free, an expression is not.
+    accumulate at all. These five modules are what genuinely decides the number: the composite,
+    the election and its intervals, the ability fit the levels are expressed in, the SCALE that
+    fit is read on, and the law that reads a finished inner cycle. Same AST normalization as its
+    prompt-side twin ``injection_source_digest`` — a docstring is free, an expression is not.
     """
     from promptpotter.application.intelligence import exploration
+    from promptpotter.application.runner.inner import ruler
     from promptpotter.application.scoring import metrics, selection
     from promptpotter.domain.l4 import proxies
     from promptpotter.shared.hashing import module_source_digest
 
-    return module_source_digest(exploration, metrics, selection, proxies)
+    return module_source_digest(exploration, metrics, selection, proxies, ruler)
 
 
 def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:

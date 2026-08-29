@@ -8,7 +8,8 @@ import contextlib
 import contextvars
 import logging
 import time
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,14 +24,14 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.seed_screen import class_floor, draw_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
-    ADOPTED_LEVEL_SE_KEY,
     OUTER_PROXY_KEYS,
+    PARENT_LEVEL_SE_KEY,
     InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
-    held_levels,
     inner_cell_facts,
-    mean_adopted_level_se,
+    mean_parent_level_se,
+    parent_level_series,
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.shared.identity import IdentityContext
 
@@ -105,6 +107,9 @@ class InnerSpawnContext:
     spawn_campaign_id: str
     spawn_cycle_id: str
     asking_cycle_id: str
+    # The δ scale each inner dataset's cells read on, refreshed at every outer round boundary by
+    # `ruler.py`. Empty until one can be identified, which is the cold path a cell self-fits.
+    rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
 
 
 _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.ContextVar(
@@ -137,6 +142,16 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             asking_cycle_id=cycle_id,
         )
     )
+
+
+def inner_spawn_context() -> InnerSpawnContext | None:
+    """What this task will spawn inner cells under, or ``None`` outside a campaign that spawns."""
+    return _INNER_SPAWN.get()
+
+
+def set_inner_rulers(ctx: InnerSpawnContext) -> None:
+    """Publish a context carrying refreshed δ scales — ``ruler.py``'s half of the round boundary."""
+    _INNER_SPAWN.set(ctx)
 
 
 def retarget_inner_spawn(session: Session) -> None:
@@ -245,18 +260,18 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     # otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
     assert result.origin_level is not None
     origin = result.origin_level
-    levels = result.round_adopted_levels
+    levels = result.round_parent_levels
     # Lead with `mean_round_delta`, the term the outer formula scores — a headline the generator
     # is not graded on teaches the wrong lesson, so this line moves whenever the measurand does.
-    # `held_levels`, not `levels`: the law averages over the round BUDGET, and dividing by the
-    # rounds that ran would disagree with the score.
-    held = held_levels(result)
-    mean = sum(held) / len(held)
+    # `parent_level_series`, not `levels`: the law averages over the round BUDGET, and dividing by
+    # the rounds that ran would disagree with the score.
+    series = parent_level_series(result)
+    mean = sum(series) / len(series)
     lines = [
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
         f" -> mean-over-rounds D{mean - origin:+.3f} (the scored lift)"
         f", ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}), peak {max(levels):+.2f}"
-        f" over {result.n_l1_rounds} of {len(held)} rounds; stop={result.stop_reason}.",
+        f" over {result.n_l1_rounds} of {len(series)} rounds; stop={result.stop_reason}.",
         _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
@@ -528,9 +543,12 @@ async def _run_inner_campaign(
         if spec.inner_optimizer_temperature is None
         else {"temperature": spec.inner_optimizer_temperature, "seed": spec.seed}
     )
+    # THE scale, not a scale: the outer round fixed one, so every candidate measured against this
+    # cell reads its origin at the same θ.
     enter_instrument_mode(
         evidence_epoch=capture_evidence_epoch(store),
         optimizer_clamp=clamp,
+        ruler=ctx.rulers.get(spec.inner_dataset),
     )
 
     # enable_tracing=False: cloud traces for an ephemeral fitness measurement piled
@@ -846,7 +864,7 @@ async def _measure_inner_cell(
         # formula's namespace, and a standard error inside the formula is one keystroke from the
         # `mean - λ·se` haircut the spec forbids. Precision travels beside the measurement; it
         # never grades it.
-        ADOPTED_LEVEL_SE_KEY: mean_adopted_level_se(result),
+        PARENT_LEVEL_SE_KEY: mean_parent_level_se(result),
         # The rest of what this seed knows about itself, as numbers rather than as the sentence
         # in `reasoning_trace`. Same infra slot and the same rule: they travel beside the
         # measurement and never grade it. `None` on a floored cell, whose keys are then absent.

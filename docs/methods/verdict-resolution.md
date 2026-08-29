@@ -85,7 +85,7 @@ so it is not comparable across rounds or across arms within a round:
   both settle every round re-picks the same argmax — measured, two consecutive rounds drawing an
   identical 28 ids. Neither state makes the two rounds' accuracies comparable.
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early, and `build_round_order`
-  front-loads the incumbent's misses (a hit enters only every 4th slot), so a cut arm was graded on
+  front-loads the parent's misses (a hit enters only every 4th slot), so a cut arm was graded on
   a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
 
 So **a winner with lower accuracy than a rival, or than the previous round, is normally correct** —
@@ -120,7 +120,7 @@ off this sentence — it said "two" while listing three:
   already shares and topped up on the new winner alone. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
   underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
-  identify the incumbent better than the arms it judges. Round documents, `log.md`, `review.md`,
+  identify the parent better than the arms it judges. Round documents, `log.md`, `review.md`,
   the round-close terminal line and the candidates chart's `overlap` series all render the same
   reading, under that one name. It does not repair the acquisition — it measures around it.
 - **A ruler HOLE — impossible now, and named because it was silent for so long.** A cell missing
@@ -129,11 +129,53 @@ off this sentence — it said "two" while listing three:
   pulled θ down ~2 logits. `fit_theta_given_delta` raises on it now, and `Cycle.calibrate_ruler`
   makes coverage a postcondition by EXTENDING the ruler onto each round's cells.
 
+## ⚠️ The crowning bar is an OPEN defect — be skeptical of anything resting on it
+
+**Unresolved as of 2026-08-29. This is not a caveat on a working mechanism; it is a known bug with
+no fix chosen.** Everything above tells you which COLUMN the election reads. This section says the
+BAR it reads that column against does not currently test anything, so a crowned winner is weaker
+evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
+provisional, and say so rather than passing it on.
+
+- **The bar is a bare point estimate.** `selection.py` admits on `lift > 0.0` — no interval, no
+  multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
+  P(at least one positive | every arm identical to the parent) is **0.875 per round**.
+- **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
+  fired 362 times. `separable` gates the L1 patience reset — it does NOT gate adoption.
+- **The posterior did no work, and that half is FIXED.** The quasi-likelihood dispersion φ was
+  floored at a constant, which caught 8 of 9 outer arms (raw median 0.0127) and left θ_se not
+  varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so
+  rank-by-posterior WAS rank-by-gap. φ is now shrunk toward the nominal dispersion on its own
+  degrees of freedom (the inverse-gamma the two σ already use), so the same 9 arms carry 7
+  distinct dispersions instead of 2. Posteriors are WIDER — the near-tie in
+  `test_pobb_epsilon_is_graded_by_depth_not_scalar` now dies one sample later — so expect PoBB to
+  eliminate slightly more slowly and a round to cost a little more.
+- **The right toolkit exists and is not on this path.** `holm_adjusted`, `exact_paired_reading`,
+  `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`, `panel_precision` are wired
+  to `application/evidence.py`, the offline read verb, and to nothing the election calls.
+- **At the current width it could not pass anyway.** `cells_for_exact_verdict(3) = 7` against a
+  6-cell panel, so no Holm-corrected exact verdict is reachable at α=0.05 at ANY effect size.
+
+**Why it is still open rather than fixed.** The largest error was elsewhere — each inner cell fit
+its own δ scale, so re-reading identical rows moved θ by a whole winning margin (§ above,
+`runner/inner/ruler.py`). That is fixed, and it changes what a re-read of separability would say.
+Redesigning the bar against the old numbers would be tuning to noise. **The next step is to
+re-read separability on a run that used the shared ruler, and only then choose a bar** — not to
+tighten one now.
+
 **The ruler grows; the anchor does not.** `ruler_id` names the ANCHORING fit, not the membership, so
 it is stable across the extensions that add cells within a cycle — that is what lets two θ read at
 different depths stay comparable. `ruler_n` on each round says how many cells the scale carried when
 that round was read. The ruler is persisted (`RulerRecord`), so a resume reuses it rather than
 re-deriving a different one from a grown archive, and a fork inherits its parent's.
+
+**On the recursion the scale is the SPAWNER's, not the cell's.** An inner cell's evidence epoch
+hides everything banked before it started, so the only arms it could fit against were its own —
+the δ came out of the treatment under test, and re-running byte-identical origin rows returned θ
+spread over a whole winning margin. `application/runner/inner/ruler.py` fits it once at the outer
+round boundary, pooled over every arm that dataset has banked, and hands it down through
+instrument mode; the cell reads on it rather than deriving one. Same anchor for every candidate
+measured against a cell, so the origin level genuinely cancels in `variant − origin`.
 
 ## What this is for — separability
 

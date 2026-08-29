@@ -51,7 +51,7 @@ _ROUTES: dict[type, str | None] = {
     CommandRecord: None,
     CommandAckRecord: None,
     # Read once, by a scan, at the moment it is needed: the cycle seed at the runner seam
-    # (`scan_ledger_cycle_seed`) and the δ ruler on resume (`scan_ledger_ruler`). Folding either
+    # (`scan_ledger_cycle_seed`) and the δ rulers on resume (`scan_ledger_rulers`). Folding either
     # continuously would hold a second copy of a fact one reader wants once.
     CycleSeedRecord: None,
     RulerRecord: None,

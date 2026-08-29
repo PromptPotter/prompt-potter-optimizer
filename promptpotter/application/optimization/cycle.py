@@ -33,6 +33,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -197,16 +198,23 @@ def _calibrate_delta_ruler(
     return ruler, theta.get(ORIGIN_ABILITY_ID)
 
 
-def _read_persisted_ruler(session: Session) -> DeltaRuler | None:
-    """The ruler this cycle already owns, off its own ledger. ``None`` on a fresh mint — nothing
-    appended yet — which is the cold path. A fork inherits its parent's through
-    ``CycleEventLog.inherit_from``, so its θ stay on the parent's scale rather than a fresh fit."""
-    if not session.state.cycle_id:
-        return None
-    ruler = session.store.campaigns.read_ruler(session.hop)
-    if ruler is None:
+def _given_ruler(session: Session) -> DeltaRuler | None:
+    """The scale something outside this cycle already fixed, never re-derived: its OWN ledger
+    (resume — a re-fit walks an archive grown since the lock), then the INSTRUMENT (L4 — the
+    spawner's pooled fit, so every arm on a cell shares one δ and the origin cancels)."""
+    if session.state.cycle_id:
+        # A δ key names a sample only within one dataset, so an unnamed cycle has no scale to
+        # read back — and still owes the refusal, which is what its rounds on disk answer.
+        own = (
+            session.store.campaigns.read_ruler(session.hop, dataset_name=session.dataset_name)
+            if session.dataset_name
+            else None
+        )
+        if own is not None:
+            return own
         _refuse_unreproducible_rounds(session)
-    return ruler
+    mode = instrument_mode()
+    return mode.ruler if mode is not None else None
 
 
 def _refuse_unreproducible_rounds(session: Session) -> None:
@@ -396,14 +404,10 @@ class Cycle:
             dataset_name=session.dataset_name,
             origin_sp_hash=origin_sp_hash,
         )
-        # A cycle that already OWNS a ruler reads it back rather than re-deriving one. Re-deriving
-        # was the resume half of the off-ruler bug: `_calibrate_delta_ruler` walks the archive,
-        # which has GROWN since the lock, so a resumed cycle silently continued on a different
-        # scale under a different id — visible on disk as one cycle carrying two `ruler_id`s.
-        persisted = _read_persisted_ruler(session)
+        given = _given_ruler(session)
         ruler: DeltaRuler | None
-        if persisted is not None:
-            ruler = persisted
+        if given is not None:
+            ruler = given
             origin_theta = _origin_theta_on(origin_results, ruler, archive_obs)
         else:
             ruler, origin_theta = _calibrate_delta_ruler(
@@ -595,7 +599,7 @@ class Cycle:
         ]
         # …and every L1 round that already closed: a round that closed on a flat ruler had its θ
         # fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
-        # ``round_adopted_levels`` for the L4 law to average. The ROUND's frontier θ only —
+        # ``round_parent_levels`` for the L4 law to average. The ROUND's frontier θ only —
         # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
         frontier: list[dict[str, Any]] = []
         for rr in self.rounds:
@@ -619,19 +623,23 @@ class Cycle:
         fit while the cycle still has no id to write it under, and round 0 is stamped and saved
         from that lock — so waiting for the first ``calibrate_ruler`` puts a whole round of
         scoring between the stamp and the record."""
-        if self.ruler is None or not self.session.state.cycle_id:
+        dataset_name = self.session.dataset_name
+        if self.ruler is None or not self.session.state.cycle_id or not dataset_name:
             return
         self.session.store.campaigns.write_ruler(
-            self.session.hop, self.ruler, round_num=max(len(self.rounds) - 1, 0)
+            self.session.hop,
+            self.ruler,
+            dataset_name=dataset_name,
+            round_num=max(len(self.rounds) - 1, 0),
         )
 
-    def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
+    def adopt(self, new_parent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
         """The ONE adoption seam for an L1 win and an L2/L3 transition alike: persistent memory
-        carries from the outgoing incumbent, and only ``advanced`` comes from the new one."""
-        self.opt_sp.copy_memory_to(new_incumbent)
+        carries from the outgoing parent, and only ``advanced`` comes from the new one."""
+        self.opt_sp.copy_memory_to(new_parent)
         for surface, val in advanced.items():
-            setattr(new_incumbent.memory, surface, val)
-        self.opt_sp = new_incumbent
+            setattr(new_parent.memory, surface, val)
+        self.opt_sp = new_parent
 
     def absorb_round(
         self,
@@ -655,7 +663,7 @@ class Cycle:
 
         self.rounds.append(rr)
         # The winner OSP carries its own lineage, so IDENTITY moves forward rather than just
-        # the six prompt strings. A HELD round returns the incumbent itself, so the lineage ids
+        # the six prompt strings. A HELD round returns the parent itself, so the lineage ids
         # match, nothing is adopted and no node is minted.
         winner_opt_sp = rr.opt_sp
         if winner_opt_sp is not None and winner_opt_sp.lineage.id != self.opt_sp.lineage.id:
@@ -666,8 +674,8 @@ class Cycle:
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         tr.current_results = merge_known_outcomes(tr.current_results, list(rr.results))
-        # "Current" is what the incumbent SCORED, never an accuracy over the mixed-provenance
-        # pool above. On a held round `rr` already carries the incumbent's re-score for this
+        # "Current" is what the parent SCORED, never an accuracy over the mixed-provenance
+        # pool above. On a held round `rr` already carries the parent's re-score for this
         # round's subset, so this stays a real measurement either way.
         tr.current_accuracy, tr.current_composite_fitness = rr.accuracy, rr.composite_fitness
         if tr.current_composite_fitness > tr.best_composite_fitness:

@@ -10,6 +10,7 @@ validators that score a proposal's conformance. Every assertion is wrong-reveal
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -18,12 +19,12 @@ import yaml
 from promptpotter.application.evidence import SubjectReading, _comparability, _stamp_comparable
 from promptpotter.application.intelligence.exploration import (
     Observation,
-    adopted_level_trajectory,
     extend_ruler,
     fit_rasch,
     fit_rasch_2pl,
     fit_theta_given_delta,
     graduate_ruler_model,
+    parent_level_trajectory,
     ruler_expected_accuracy,
     select_round_subset,
 )
@@ -436,7 +437,7 @@ def test_composite_fitness_matches_default_formula():
 def test_matched_parent_stats_refuses_a_prefix_it_cannot_measure():
     """A wrong number carried forward with no error — this file's own bar.
 
-    ``build_round_order`` stratifies the round on the INCUMBENT's grades: every 4th slot is
+    ``build_round_order`` stratifies the round on the PARENT's grades: every 4th slot is
     a cell it passed, the rest are cells it missed. So origin's rate on a truncated
     candidate's prefix is ``⌊n/4⌋/n`` — set by where PoBB stopped, not by the data — and
     both halves of the comparison are conditioned on the outcome that chose the subset, so
@@ -938,12 +939,24 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     assert ruler_expected_accuracy(None, ruler) is None
 
 
-def test_adopted_level_trajectory_is_honest_single_scale() -> None:
+def test_parent_level_trajectory_is_honest_single_scale() -> None:
     # The L4 outer proxy's inner-search signal. Every branch here is a SILENT wrong-number
     # class: a completed inner run reports a plausible number and the outer optimizes on it,
     # so a mis-built level is invisible — the run looks fine and the outer fitness is wrong.
     ruler = _ruler({1: -1.0, 2: 0.0, 3: 1.0})
-    origin_theta = (0.0, 0.30)
+
+    def on(theta: float, se: float, *, scale: DeltaRuler | None = ruler) -> AbilityReading:
+        """A reading, not a bare pair — a level carries the SCALE it was read on, because that is
+        what says whether it may be differenced against the next one."""
+        return AbilityReading(
+            theta=theta,
+            se=se,
+            ruler_id=ruler_id(scale),
+            ruler_n=len(scale.delta) if scale is not None else 0,
+            calibration_model=scale.calibration_model if scale is not None else None,
+        )
+
+    origin_theta = on(0.0, 0.30)
 
     def thetas(levels: list[tuple[float, float]]) -> list[float]:
         return [t for t, _ in levels]
@@ -953,8 +966,8 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # sits. Projecting each θ back through the ruler's sigmoid before differencing compressed the
     # gain near the ceiling, so the strong-origin arm scored less for the same ability climb.
     # SILENT: the outer ranks optimizer prompts partly by which seed happened to draw an easy origin.
-    low_o, low = adopted_level_trajectory((-1.0, 0.2), [(-0.5, 0.2)], ruler)
-    high_o, high = adopted_level_trajectory((1.5, 0.2), [(2.0, 0.2)], ruler)
+    low_o, low = parent_level_trajectory(on(-1.0, 0.2), [on(-0.5, 0.2)], ruler)
+    high_o, high = parent_level_trajectory(on(1.5, 0.2), [on(2.0, 0.2)], ruler)
     assert low_o is not None and high_o is not None
     assert (
         thetas(low)[0] - low_o[0]
@@ -962,7 +975,7 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
         == pytest.approx(0.5)
     )
 
-    # THE INCUMBENT THE ROUND ADOPTED — never a statistic over the round's proposals. A round's
+    # THE PARENT THE ROUND ADOPTED — never a statistic over the round's proposals. A round's
     # value to the search is what it CROWNS; the arms it discards are the price of finding that,
     # and averaging them prices exploration as damage. For any mutation operator with mass below
     # the parent (all of them — that is why selection exists) E[mean θ] < θ_parent, so the mean
@@ -972,32 +985,32 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # of -0.79 — a 0.88-logit REGRESSION stamped on a round the loop marked improved=True. Over
     # the campaign the seed that gained 30 accuracy points scored 2.9x WORSE than one that gained
     # 4.6. SILENT throughout: every run completed and every number looked plausible.
-    o_lvl, levels = adopted_level_trajectory(origin_theta, [(0.2702, 0.21)], ruler)
-    assert o_lvl == origin_theta
+    o_lvl, levels = parent_level_trajectory(origin_theta, [on(0.2702, 0.21)], ruler)
+    assert o_lvl == (origin_theta.theta, origin_theta.se)
     assert levels == [(pytest.approx(0.2702), pytest.approx(0.21))]
 
     # A peak followed by a collapse must read LOWER than a sustained peak. Under a running max
     # the two are byte-identical, so an optimizer prompt that destroys the inner loop after one good
     # round scored as its best round forever.
-    _, spike = adopted_level_trajectory(origin_theta, [(1.2, 0.2), (-2.0, 0.2)], ruler)
-    _, held = adopted_level_trajectory(origin_theta, [(1.2, 0.2), (1.2, 0.2)], ruler)
+    _, spike = parent_level_trajectory(origin_theta, [on(1.2, 0.2), on(-2.0, 0.2)], ruler)
+    _, held = parent_level_trajectory(origin_theta, [on(1.2, 0.2), on(1.2, 0.2)], ruler)
     assert thetas(spike)[1] < thetas(spike)[0] and sum(thetas(spike)) < sum(thetas(held))
 
     # A round whose frontier could not be fit (every row errored) carries the PRIOR level: the
-    # incumbent persists, and nothing says it moved. SILENT otherwise: a phantom negative, or a
+    # parent persists, and nothing says it moved. SILENT otherwise: a phantom negative, or a
     # dropped round that shortens the series the mean divides by.
     #
     # It carries BOTH HALVES of that level, and the SE half is the one that can go wrong quietly:
     # a carried θ paired with a fresh round's SE would report the panel a precision no measurement
     # bought, and an inverse-variance pool then weights the cell that measured nothing the highest.
-    o2, lv2 = adopted_level_trajectory(origin_theta, [None], ruler)
+    o2, lv2 = parent_level_trajectory(origin_theta, [None], ruler)
     assert o2 is not None and lv2 == [o2]
-    _, carried = adopted_level_trajectory(origin_theta, [(1.0, 0.11), None], ruler)
+    _, carried = parent_level_trajectory(origin_theta, [on(1.0, 0.11), None], ruler)
     assert carried == [(1.0, 0.11), (1.0, 0.11)]
 
-    # Regression preserved: an incumbent below origin yields a level BELOW origin (the negative
+    # Regression preserved: an parent below origin yields a level BELOW origin (the negative
     # delta the outer steers away from), NOT floored at origin.
-    o3, lv3 = adopted_level_trajectory(origin_theta, [(-2.0, 0.2)], ruler)
+    o3, lv3 = parent_level_trajectory(origin_theta, [on(-2.0, 0.2)], ruler)
     assert o3 is not None and thetas(lv3)[0] < o3[0]
 
     # An origin that was never fit, or a COLD ruler, yields `(None, [])` so the caller EXCLUDES
@@ -1005,11 +1018,23 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # every sample at δ=0 there, so θ collapses to that round's logit-accuracy and stops being
     # subset-invariant — differencing it across rounds compares two different scales.
     # SILENT: a dead inner campaign differenced against an invented floor reads as a huge lift.
-    assert adopted_level_trajectory(None, [(1.0, 0.2)], ruler) == (None, [])
-    assert adopted_level_trajectory(origin_theta, [(1.0, 0.2)], None) == (None, [])
+    assert parent_level_trajectory(None, [on(1.0, 0.2)], ruler) == (None, [])
+    assert parent_level_trajectory(origin_theta, [on(1.0, 0.2)], None) == (None, [])
+
+    # A level read on ANOTHER SCALE is not a level on this one: differencing a flat reading
+    # against a warm origin subtracts two estimators, not two abilities. It carries the prior
+    # level forward, like a round that crowned nobody. SILENT — both numbers are plausible.
+    _, mixed = parent_level_trajectory(origin_theta, [on(9.0, 0.2, scale=None)], ruler)
+    assert mixed == [(origin_theta.theta, origin_theta.se)]
+    # …and an origin off the cycle's own scale leaves nothing to difference against at all.
+    assert parent_level_trajectory(on(0.0, 0.3, scale=None), [on(1.0, 0.2)], ruler) == (None, [])
+    # A DIFFERENT warm ruler is just as incomparable as a flat one — the id is the whole test.
+    other = _ruler({1: -0.5, 2: 0.25, 3: 2.0})
+    _, foreign = parent_level_trajectory(origin_theta, [on(9.0, 0.2, scale=other)], ruler)
+    assert foreign == [(origin_theta.theta, origin_theta.se)]
 
 
-def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None:
+def test_compute_proxies_is_one_exact_mean_over_the_parent_levels() -> None:
     # SILENT wrong-score: the outer signal is ONE number, so any error in it is the whole
     # ranking. It must be the mean of the adopted levels minus the origin, over the cycle's
     # ROUND BUDGET. A divisor of any OTHER shape reappearing here (a declared target, or the
@@ -1018,7 +1043,7 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     from promptpotter.domain.l4.proxies import (
         OUTER_PROXY_KEYS,
         compute_outer_proxies,
-        mean_adopted_level_se,
+        mean_parent_level_se,
     )
 
     px = compute_outer_proxies(
@@ -1059,44 +1084,44 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     ran_out = cycle_result(
         [0.30, 0.60, 0.60, 0.60], 0.30, [round_result(i) for i in (1, 2, 3, 4)], round_budget=4
     )
-    # THE PADDING MUST NOT REACH THE PRECISION. `held_levels` stretches a short series by
+    # THE PADDING MUST NOT REACH THE PRECISION. `parent_level_series` stretches a short series by
     # repeating its last value; those slots carry no measurement. If they entered the cell's SE
     # as if they did, a cell that quit after 2 of 4 rounds would report itself SHARPER than one
     # that ran the budget out, and an inverse-variance pool would weight the cell that measured
     # LEAST the most. SILENT: the panel would report a tighter CI it never earned, and buy its
     # confidence from the arms that did the least work.
-    se_kw = {"origin_level_se": 0.20, "round_adopted_level_ses": [0.30, 0.40]}
+    se_kw = {"origin_level_se": 0.20, "round_parent_level_ses": [0.30, 0.40]}
     padded = cycle_result(
         [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=4, **se_kw
     )
     unpadded = cycle_result(
         [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=2, **se_kw
     )
-    assert mean_adopted_level_se(padded) == pytest.approx(mean_adopted_level_se(unpadded))
+    assert mean_parent_level_se(padded) == pytest.approx(mean_parent_level_se(unpadded))
     # mean(0.30, 0.40) and NOTHING ELSE — never sigma/sqrt(n), which would divide correlated,
     # NESTED frontier fits as if they were independent draws.
-    assert mean_adopted_level_se(padded) == pytest.approx(0.35)
-    assert mean_adopted_level_se(padded) > 0.35 / 2
+    assert mean_parent_level_se(padded) == pytest.approx(0.35)
+    assert mean_parent_level_se(padded) > 0.35 / 2
 
     # SILENT wrong-number: the origin's own SE must NOT be in here. Every arm on a cell replays
     # the same round-0 rows, so `origin_level` is ONE measurement shared by both sides of
     # `variant - origin` and cancels exactly. Folding it in counted it twice, and on the banked
     # corpus that made the claimed noise 2.4x the total spread it is a component of — a ratio
     # that is impossible rather than merely large, and it read out as "100% noise" after clamping.
-    assert mean_adopted_level_se(padded) != pytest.approx((0.35**2 + 0.20**2) ** 0.5)
+    assert mean_parent_level_se(padded) != pytest.approx((0.35**2 + 0.20**2) ** 0.5)
     # ...so the cell's own SE cannot depend on whether the origin was ever fit.
     no_origin_se = cycle_result(
         [0.30, 0.60],
         0.30,
         [round_result(i) for i in (1, 2)],
         round_budget=4,
-        round_adopted_level_ses=[0.30, 0.40],
+        round_parent_level_ses=[0.30, 0.40],
     )
-    assert mean_adopted_level_se(no_origin_se) == pytest.approx(0.35)
+    assert mean_parent_level_se(no_origin_se) == pytest.approx(0.35)
 
     # No SE at all yields None — the same answer as "this cell was never fit". A fabricated 0.0
     # reads as an infinitely sharp cell and would dominate every weighting it entered.
-    assert mean_adopted_level_se(cycle_result([0.30], 0.30, [round_result(1)])) is None
+    assert mean_parent_level_se(cycle_result([0.30], 0.30, [round_result(1)])) is None
 
     assert compute_outer_proxies(quit_early).mean_round_delta == pytest.approx(0.225)
     assert compute_outer_proxies(ran_out).mean_round_delta == pytest.approx(0.225)
@@ -1163,7 +1188,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
     # plausible-looking number for "no measurement", which is what makes it dangerous.
     levelless = cycle_result([], 0.30, [round_result(1)])
-    with pytest.raises(InnerCycleUnscoreableError, match="no levels"):
+    with pytest.raises(InnerCycleUnscoreableError, match="no parent levels"):
         compute_outer_proxies(levelless)
 
     # Rounds AND levels, but the origin was never scored. Every delta here is measured against
@@ -2361,7 +2386,12 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     """A raised ε must not spend its aggression at ``n_min``, where ONE discordant sample already
     drives ``p_best`` to ~0.2. The bar is ``epsilon_floor`` at the floor and the full ``epsilon``
     by twice that depth, so an arm one sample behind buys a short reprieve while an arm further
-    behind still dies at the floor. Equal floor and ε — the default — leaves the bar flat."""
+    behind still dies at the floor. Equal floor and ε — the default — leaves the bar flat.
+
+    The ramp itself is what this pins. The DEPTHS below are a consequence of the dispersion rule
+    and moved by one sample when φ stopped being floored at a constant (`fit_theta_given_delta`):
+    an honest posterior is wider, so the near-tie dies at 9 rather than 8. Re-derive them, do not
+    restore them, if that rule changes again."""
     cfg = PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.15)
     graded = PoBBCheck(cfg, n_samples=28, ruler=None)
     assert graded.epsilon_at(6) == pytest.approx(0.15)
@@ -2389,13 +2419,14 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
             n_total_candidates=2,
         )
 
-    # One discordant loss survives the floor that used to cut it, and dies two samples later.
+    # One discordant loss survives the floor that used to cut it, and dies a few samples later.
     assert arm_behind_perfect_prior(6, 1) is None
-    cut = arm_behind_perfect_prior(8, 1)
+    assert arm_behind_perfect_prior(8, 1) is None
+    cut = arm_behind_perfect_prior(9, 1)
     assert cut is not None
-    # The bar that FIRED is what the decision archives — a reader must see 0.20 at n=8, never
-    # the configured 0.30, or the record cannot explain its own cut.
-    assert cut.check_result["epsilon"] == pytest.approx(0.20)
+    # The bar that FIRED is what the decision archives — a reader must see the ramped 0.225 at
+    # n=9, never the configured 0.30, or the record cannot explain its own cut.
+    assert cut.check_result["epsilon"] == pytest.approx(0.225)
     # Two behind is still cut at the floor: the reprieve is for a near-tie, not for a loser.
     assert arm_behind_perfect_prior(6, 2) is not None
 
@@ -3463,7 +3494,7 @@ def test_headline_best_is_always_a_number_something_measured():
     Round 7's 0.775 was 12 rows from round 6's config glued to 28 from round 7's, while the
     best candidate the run ever measured scored 0.679. The sidebar read `57%→78%`, the
     candidate chart read 0.679, every gate was green, and nothing raised for months — the
-    docstrings on both sides asserted the union WAS "the incumbent rescored over every
+    docstrings on both sides asserted the union WAS "the parent rescored over every
     sample probed so far", a rescore that never happened.
 
     Because the round subset is the CONTESTED one, the carried rows are the easy tail the
@@ -3520,19 +3551,19 @@ def test_panel_precision_names_the_lever_the_panel_needs() -> None:
     # sharpen the instrument, or widen the panel/candidates — and the operator picks from these two
     # numbers. SILENT: every wrong value here is a plausible-looking bar that sends the next spend
     # at the wrong problem.
-    from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, panel_precision
+    from promptpotter.domain.l4.proxies import PARENT_LEVEL_SE_KEY, panel_precision
 
     # The on-disk key, pinned as a literal: it is a wire contract between the emit site, the
     # infra-key allow-list and the reader, and a rename that moved only the constant would
     # silently stop the panel finding any SE at all — which reads as "no cells", not as an error.
-    assert ADOPTED_LEVEL_SE_KEY == "mean_adopted_level_se"
+    assert PARENT_LEVEL_SE_KEY == "mean_parent_level_se"
 
     def rows(cells: dict[str, tuple[float, float]]) -> list[dict]:
         return [
             {
                 "query": c,
                 "fitness": (v + 1.0) / 3.0,
-                "pipeline_data": {"mean_round_delta": v, "mean_adopted_level_se": se},
+                "pipeline_data": {"mean_round_delta": v, "mean_parent_level_se": se},
             }
             for c, (v, se) in cells.items()
         ]
@@ -3647,7 +3678,7 @@ def test_inner_narratives_never_rank_a_cell_noise_put_first() -> None:
     def cell(sid: int, delta: float, se: float | None) -> dict:
         pd: dict = {"mean_round_delta": delta, "reasoning_trace": trace}
         if se is not None:
-            pd["mean_adopted_level_se"] = se
+            pd["mean_parent_level_se"] = se
         return {"sample_id": sid, "query": f"seed-{sid}", "pipeline_data": pd}
 
     from promptpotter.application.optimization.dispatch.compose import SECTION_SEP
@@ -3802,7 +3833,7 @@ def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
                 "fitness": fitness,
                 "ground_truth": gt,
                 "predicted": "T" if constant else gt,
-                "pipeline_data": {"mean_round_delta": fitness, "mean_adopted_level_se": se},
+                "pipeline_data": {"mean_round_delta": fitness, "mean_parent_level_se": se},
             }
             for i, (q, gt) in enumerate(truths)
         ]
@@ -3812,7 +3843,7 @@ def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
             "query": q,
             "sample_id": i,
             "fitness": 0.4,
-            "pipeline_data": {"mean_round_delta": 0.4, "mean_adopted_level_se": 0.01},
+            "pipeline_data": {"mean_round_delta": 0.4, "mean_parent_level_se": 0.01},
         }
         for i, (q, _) in enumerate(truths)
     ]
@@ -3874,6 +3905,61 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     assert set(grown.delta) == {1, 2, 3, 9}
     assert ruler_id(grown) == ruler_id(fitted)
     assert all(grown.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
+
+
+def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> None:
+    """The dominant error in the L4 loop was the ESTIMATOR, not the measurement: an inner cell's
+    evidence epoch hides everything banked before it started, so the only arms its δ fit could see
+    were its OWN and the scale came out of the treatment under test. Byte-identical origin rows
+    returned θ spread wider than a winning margin.
+
+    Drop the instrument branch and nothing raises — every cell silently self-fits again and the
+    loop keeps electing winners on a scale each of them invented."""
+    import contextvars
+    import types
+
+    from promptpotter.application.optimization.cycle import _given_ruler
+    from promptpotter.shared.instrument import enter_instrument_mode
+
+    given = _ruler({1: 0.5, 2: -0.25, 3: 0.0})
+
+    session: Any = types.SimpleNamespace(
+        dataset_name="inner-bench", state=types.SimpleNamespace(cycle_id="")
+    )
+    # No mode bound: an ordinary campaign fits its own, exactly as before.
+    assert _given_ruler(session) is None
+
+    def _inside_instrument() -> Any:
+        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=given)
+        return _given_ruler(session)
+
+    # Its own context, as a real spawn binds it — so the scale cannot leak back to the spawner.
+    assert contextvars.copy_context().run(_inside_instrument) is given
+
+
+def test_one_ledger_carries_a_scale_per_dataset_and_a_fork_lifts_them_all(tmp_path: Path) -> None:
+    """An L4 outer cycle owns two scales at once: its own cells, and the shared inner one its
+    cells read. Keyed by nothing, the second write silently supersedes the first and half the
+    campaign reads on the wrong scale with every number still rendering."""
+    from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+
+    store = CampaignStore(WorkspaceDir(tmp_path / "tenant"))
+    hop = CycleHop(campaign_id="c", cycle_id="cyc")
+    outer, inner = _ruler({1: 0.5, 2: -0.25}), _ruler({7: 1.25, 8: -1.0, 9: 0.0})
+    store.write_ruler(hop, outer, dataset_name="promptpotter-self", round_num=0)
+    store.write_ruler(hop, inner, dataset_name="justlogic-d234", round_num=0)
+
+    assert store.read_ruler(hop, dataset_name="promptpotter-self") == outer
+    assert store.read_ruler(hop, dataset_name="justlogic-d234") == inner
+    assert store.read_ruler(hop, dataset_name="never-run") is None
+
+    # A fork that lifted only its own scale would re-fit the inner one from an archive that has
+    # grown since the lock — the resume half of this bug, one level down.
+    store.copy_rulers(hop, "cyc_fork_a1", round_num=1)
+    fork = CycleHop(campaign_id="c", cycle_id="cyc_fork_a1")
+    assert store.read_ruler(fork, dataset_name="promptpotter-self") == outer
+    assert store.read_ruler(fork, dataset_name="justlogic-d234") == inner
 
 
 def test_two_way_decomposition_reads_only_the_cells_every_arm_measured() -> None:
@@ -4033,22 +4119,22 @@ def test_a_scenario_chain_stops_where_the_record_parts() -> None:
 
 
 def test_overlap_set_is_one_every_member_actually_answered() -> None:
-    """The 1-to-1 bars rest on one property: every member of the adopted line has answered every
+    """The 1-to-1 bars rest on one property: every member of the parent line has answered every
     cell of the set its rate is read over. Break it and each bar still renders — over a smaller
     denominator, at a rate nothing measured, side by side as if comparable.
 
     Also pins the three rules that keep the set affordable and honest: a HELD round's parent
-    re-score widens the incumbent's coverage; the choice prefers cells the new member already
+    re-score widens the parent's coverage; the choice prefers cells the new member already
     holds; and a member is a CONFIGURATION, not a lineage id — an L2/L3 transition re-mints the
-    incumbent's OSP from the same prompt fields, which put one configuration on the chart twice,
+    parent's OSP from the same prompt fields, which put one configuration on the chart twice,
     at the same rate by construction, under a label naming no candidate.
     """
     from promptpotter.domain.results import (
         RoundResult,
         ScoredCandidate,
-        adopted_line,
         choose_overlap_set,
         measured_cells,
+        parent_line,
     )
 
     def rows(*ids: int) -> list[dict[str, object]]:
@@ -4075,18 +4161,18 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
         )
 
     # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9; round 3
-    # HELD but an L2 transition re-minted the incumbent — same instruction, new id, no label.
+    # HELD but an L2 transition re-minted the parent — same instruction, new id, no label.
     history = [
         rnd(0, "c0", "C0", "base", 1, 2, 3, 4, 5, 6),
         rnd(1, "c0", "C0", "base", 7, 8),
         rnd(2, "w2", "C2.1", "edited", 5, 6, 7, 9),
         rnd(3, "l2-remint", "C3.1", "edited", 5, 6),
     ]
-    line = adopted_line(history)
+    line = parent_line(history)
     # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
-    # The held round WIDENED the incumbent rather than replacing it — without that, 7 and 8 are
+    # The held round WIDENED the parent rather than replacing it — without that, 7 and 8 are
     # lost and cell 7 could never join the set below.
     assert measured_cells(line[0].rows) == {1, 2, 3, 4, 5, 6, 7, 8}
 

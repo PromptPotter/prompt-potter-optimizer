@@ -32,6 +32,7 @@ from promptpotter.application.run_observers import (
     run_limits_from,
 )
 from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import flush_pending_decisions
@@ -43,6 +44,7 @@ from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.results import CycleResult, RoundResult
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
@@ -377,12 +379,12 @@ async def _prepare_run(
     )
 
 
-def _level_of(rr: RoundResult) -> tuple[float, float] | None:
-    """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if never fit. The halves are
-    written and read together: one alone is a level with no precision."""
+def _level_of(rr: RoundResult) -> AbilityReading | None:
+    """A round's frontier reading, or ``None`` if never fit. WHOLE — θ, its precision and the scale
+    travel together, because a level with no scale cannot be differenced against another."""
     if rr.ability is None or rr.ability.se is None:
         return None
-    return rr.ability.theta, rr.ability.se
+    return rr.ability
 
 
 def _build_cycle_result(
@@ -399,7 +401,7 @@ def _build_cycle_result(
     """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback. Both
     ``winner_*`` read ``best_sp``, since ``cycle.opt_sp`` is overwritten every round."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    from promptpotter.application.intelligence.exploration import adopted_level_trajectory
+    from promptpotter.application.intelligence.exploration import parent_level_trajectory
 
     # Round 0 is the reference the whole result is differenced against, carried beside it as
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
@@ -409,7 +411,7 @@ def _build_cycle_result(
     origin_lv: tuple[float, float] | None = None
     levels: list[tuple[float, float]] = []
     if cycle is not None:
-        origin_lv, levels = adopted_level_trajectory(
+        origin_lv, levels = parent_level_trajectory(
             _level_of(cycle.origin_round),
             [_level_of(rr) for rr in cycle_rounds],
             ds,
@@ -425,8 +427,8 @@ def _build_cycle_result(
         ),
         origin_level=origin_lv[0] if origin_lv is not None else None,
         origin_level_se=origin_lv[1] if origin_lv is not None else None,
-        round_adopted_levels=[t for t, _ in levels],
-        round_adopted_level_ses=[se for _, se in levels],
+        round_parent_levels=[t for t, _ in levels],
+        round_parent_level_ses=[se for _, se in levels],
         round_budget=(cycle.config.optimization.max_rounds if cycle is not None else 0),
         winner_prompt_fields=best_sp.prompt_fields if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
@@ -755,6 +757,9 @@ async def run_optimization(
     # Unconditional (the runner cannot know a child will recurse) and re-entrant (each level
     # publishes its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session, campaign_config)
+    # Round 0's cells need it too: their origin level is the baseline every candidate is
+    # differenced against.
+    refresh_inner_rulers(session, campaign_config, round_num=0)
     # Read here, before anything binds, so it is still a parent's and not our own.
     session.inherited_pause_check = get_abort_check()
     # Bound through the same per-node override channel the inner runner uses — task-isolated,

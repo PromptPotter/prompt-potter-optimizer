@@ -73,6 +73,12 @@ class InnerTasks(StrictModel):
     inner_benchmark_config: InnerBenchmarkConfig
     tasks: list[InnerTask] = Field(min_length=1)
 
+    def dataset_for(self, cell: InnerTask | None) -> str:
+        """Which benchmark a cell runs — its own where it names one, the panel's otherwise. The
+        ONE spelling of that fallback: the distinctness check, the spec resolver and the shared
+        δ scale all key on it, and three copies is three chances to key on a different answer."""
+        return cell.inner_dataset if cell and cell.inner_dataset else self.inner_benchmark
+
     @model_validator(mode="after")
     def _cells_are_distinct(self) -> InnerTasks:
         """Two cells resolving to one spec are one cell wearing two names, and the panel is a
@@ -88,7 +94,7 @@ class InnerTasks(StrictModel):
             # The fields a CELL declares that reach `InnerTaskSpec`; the rest of the spec is
             # shared by every cell on the panel, so matching on these is matching on the spec.
             key = (
-                task.inner_dataset or self.inner_benchmark,
+                self.dataset_for(task),
                 task.inner_dataset_seed,
                 task.n_inner_rounds,
                 task.inner_model,
@@ -150,9 +156,7 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
     return InnerTaskSpec(
-        inner_dataset=(
-            cell.inner_dataset if cell and cell.inner_dataset else panel.inner_benchmark
-        ),
+        inner_dataset=panel.dataset_for(cell),
         seed=cell.inner_dataset_seed if cell else 0,
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,

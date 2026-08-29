@@ -132,6 +132,10 @@ class TokenUsageRecord(StrictModel):
     and the rate table registers the same model under many vendors at prices that differ
     several-fold, so a model alone cannot be priced (``shared/pricing.py::lookup_rate``).
     ``None`` on a row written before this field, where only an exact key resolves."""
+    served_by: str | None = None
+    """WHICH upstream host answered, where the one above is a GATEWAY that routes onward. The pair
+    is the point: ``provider`` is who bills, this is whose silicon ran it, and hosts of one model
+    disagree systematically. ``None`` where the provider is its own host."""
     input_tokens: int
     output_tokens: int
     reasoning_tokens: int = 0
@@ -563,17 +567,21 @@ class ElectionRecord(StrictModel):
 
 
 class RulerRecord(StrictModel):
-    """The cycle's δ ruler as it stands. Appended at LOCK and after every EXTENSION; the LAST
-    record wins, exactly as a re-seed supersedes. Written WHOLE rather than as a delta: `append`
-    is not crash-atomic, so a torn line falls back to the previous complete ruler — a valid,
-    merely smaller scale the next round re-extends — where a folded delta would lose cells
+    """A δ ruler as it stands. Appended at LOCK and after every EXTENSION; the LAST record for a
+    ``dataset_name`` wins, exactly as a re-seed supersedes. Written WHOLE rather than as a delta:
+    `append` is not crash-atomic, so a torn line falls back to the previous complete ruler — a
+    valid, merely smaller scale the next round re-extends — where a folded delta would lose cells
     silently. A fork inherits its parent's virtually, so its θ stay on the parent's scale.
-    Not a progress event — the SSE tail skips it."""
+    Not a progress event — the SSE tail skips it.
+
+    ``dataset_name`` says whose sample ids the δ keys ARE — one ledger carries more than one,
+    since an L4 outer cycle also owns the shared inner scale its cells read."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["ruler"] = "ruler"
     ruler: DeltaRuler
+    dataset_name: str
     round: int
     timestamp: str = Field(default_factory=utcnow_iso)
 

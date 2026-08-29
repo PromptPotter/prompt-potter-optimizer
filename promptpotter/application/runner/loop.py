@@ -17,6 +17,7 @@ from promptpotter.application.optimization.l1.execute import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.generation_only import run_generation_only_round
+from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     close_round,
@@ -138,6 +139,9 @@ async def run_round_loop(
                 "build_run_observers must bind state.ledger before the round loop"
             )
             ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
+            # One batch at the boundary, so the arms this round spawns share a scale that already
+            # absorbed the last round's cells.
+            refresh_inner_rulers(session, config, round_num=round_num)
 
             # The calendar cap's half of "no round will follow this one". The lives bank's
             # half can only be known after the round is scored, so `execute_round` /

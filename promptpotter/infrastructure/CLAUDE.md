@@ -299,12 +299,16 @@ campaign-origin's typed `CycleSeed`, written by `_mint_fork` / the mint seam,
 read once at the runner seam; the pure scan lives in `ledger_scan.py`, no
 subscribers fire). The seed rides the replayable spine — a fork inherits the
 parent's seed record virtually then appends its own, so a scan of the cycle's
-own ledger returns that cycle's seed. `write_ruler`/`read_ruler` ride the same shape for the
-cycle's δ ruler (`RulerRecord`, last-wins, appended at lock and after every extension) — WHOLE
-each time rather than as a delta, because `append` is not crash-atomic and a torn line must fall
-back to a smaller-but-valid scale rather than lose cells silently; it lands BEFORE the round
+own ledger returns that cycle's seed. `write_ruler`/`read_ruler` ride the same shape for a δ
+ruler (`RulerRecord`, last-wins PER `dataset_name`, appended at lock and after every extension) —
+WHOLE each time rather than as a delta, because `append` is not crash-atomic and a torn line must
+fall back to a smaller-but-valid scale rather than lose cells silently; it lands BEFORE the round
 document naming it, since a ruler with unmentioned cells is harmless and a round whose θ nothing
-can reproduce is the state it exists to end. Distinct from `.runtime/{skip,pause,spend_cap}`
+can reproduce is the state it exists to end. **One ledger carries more than one** — δ keys are
+sample ids, which name a sample only within one dataset, and an L4 outer cycle owns a scale over
+its own cells plus the shared inner one every cell it spawns reads on
+(`application/runner/inner/ruler.py`). So `copy_rulers` is what a fork lifts, never one of them.
+Distinct from `.runtime/{skip,pause,spend_cap}`
 (the **polled** per-checkpoint flags — consumed at the next sample boundary, NOT
 held to the round close; a `pause.flag` written mid-candidate pauses within seconds,
 `runtime_flags.py`): one is a durable ledger fact, the others are transient flags.

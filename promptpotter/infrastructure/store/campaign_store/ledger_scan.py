@@ -47,17 +47,18 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     return found
 
 
-def scan_ledger_ruler(ledger_path: Path) -> DeltaRuler | None:
-    """The cycle's δ ruler, or ``None`` while it is still cold. Appended at lock and after every
-    extension, so the LAST match wins — that record carries the widest membership."""
-    found: DeltaRuler | None = None
+def scan_ledger_rulers(ledger_path: Path) -> dict[str, DeltaRuler]:
+    """Every δ scale this ledger carries, by the dataset whose sample ids its keys ARE. Appended
+    at lock and after every extension, so the LAST record per dataset wins — that one carries the
+    widest membership. A cycle owns one; an L4 outer cycle also owns the shared inner scale."""
+    found: dict[str, DeltaRuler] = {}
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"ruler"})):
-        if rec.get("record_type") != "ruler":
+        name, data = rec.get("dataset_name"), rec.get("ruler")
+        if rec.get("record_type") != "ruler" or not isinstance(name, str):
             continue
-        data = rec.get("ruler")
         if isinstance(data, dict):
             try:
-                found = DeltaRuler.model_validate(data)
+                found[name] = DeltaRuler.model_validate(data)
             except ValidationError:
                 continue
     return found

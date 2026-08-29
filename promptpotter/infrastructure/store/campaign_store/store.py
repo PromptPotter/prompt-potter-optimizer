@@ -33,7 +33,7 @@ from promptpotter.infrastructure.store.account_spend import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_round_closes,
-    scan_ledger_ruler,
+    scan_ledger_rulers,
 )
 from promptpotter.infrastructure.store.io import (
     read_json,
@@ -1085,15 +1085,30 @@ class CampaignStore:
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
-    def write_ruler(self, hop: CycleHop, ruler: DeltaRuler, *, round_num: int) -> None:
+    def write_ruler(
+        self, hop: CycleHop, ruler: DeltaRuler, *, dataset_name: str, round_num: int
+    ) -> None:
         """Appended BEFORE the round document that names it. A crash between the two leaves a ruler
         carrying cells no round mentions, which is harmless; the reverse leaves a round whose θ
         nothing can reproduce, which is the state this record exists to end."""
         cycle_dir = self.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(RulerRecord(ruler=ruler, round=round_num))
+        CycleEventLog.open(CycleDir(cycle_dir)).append(
+            RulerRecord(ruler=ruler, dataset_name=dataset_name, round=round_num)
+        )
 
-    def read_ruler(self, hop: CycleHop) -> DeltaRuler | None:
-        return scan_ledger_ruler(self._layout(hop).ledger)
+    def read_ruler(self, hop: CycleHop, *, dataset_name: str) -> DeltaRuler | None:
+        return scan_ledger_rulers(self._layout(hop).ledger).get(dataset_name)
+
+    def copy_rulers(self, parent: CycleHop, new_cycle_id: str, *, round_num: int) -> None:
+        """Re-append every scale the parent holds — ALL of them, since an L4 outer cycle also owns
+        the shared inner one, and a fork lifting only its own would re-fit the other."""
+        for dataset_name, ruler in scan_ledger_rulers(self._layout(parent).ledger).items():
+            self.write_ruler(
+                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
+                ruler,
+                dataset_name=dataset_name,
+                round_num=round_num,
+            )
 
 
 __all__ = ["CampaignStore", "origin_accuracy_of"]

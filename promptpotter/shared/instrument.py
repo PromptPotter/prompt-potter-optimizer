@@ -8,7 +8,10 @@ import contextvars
 import enum
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from promptpotter.domain.ruler import DeltaRuler
 
 __all__ = [
     "MAX_INSTRUMENT_DEPTH",
@@ -31,11 +34,15 @@ MAX_INSTRUMENT_DEPTH = 2
 @dataclass(frozen=True)
 class InstrumentMode:
     """``evidence_epoch`` keeps the archive a shared CACHE while withholding it as cross-run MEMORY:
-    an instrument must not depend on how often it has been used. ``temperature`` and ``seed`` clamp only together."""
+    an instrument must not depend on how often it has been used. ``temperature`` and ``seed`` clamp only together.
+
+    ``ruler`` is the δ scale the SPAWNER fixed — the third subtraction: without it a cell fits its
+    own from whatever the epoch leaves visible, which is the arms under test."""
 
     depth: int
     evidence_epoch: frozenset[str]
     optimizer_clamp: dict[str, Any] | None
+    ruler: DeltaRuler | None
 
 
 _MODE: contextvars.ContextVar[InstrumentMode | None] = contextvars.ContextVar(
@@ -47,6 +54,7 @@ def enter_instrument_mode(
     *,
     evidence_epoch: frozenset[str],
     optimizer_clamp: dict[str, Any] | None,
+    ruler: DeltaRuler | None,
 ) -> InstrumentMode:
     """Declare this task's cycle a measurement instrument. Call once at the spawn site, INSIDE the
     inner cycle's own ``asyncio.Task``, so the mode cannot leak back to the spawning cycle."""
@@ -54,6 +62,7 @@ def enter_instrument_mode(
         depth=instrument_depth() + 1,
         evidence_epoch=evidence_epoch,
         optimizer_clamp=optimizer_clamp,
+        ruler=ruler,
     )
     _MODE.set(mode)
     return mode
