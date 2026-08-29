@@ -217,7 +217,7 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
         mine_earned_blocks(store)
 
     def _inside_instrument() -> dict[str, Any]:
-        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None)
+        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=None)
         return mine_earned_blocks(store)
 
     # Own context, exactly as a real spawn binds it — and so the mode cannot leak sideways.
@@ -348,6 +348,55 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     clean_only = archive.load_reusable_results(node_configs, dataset_name="aime", min_grade="A")
     assert set(clean_only) == {7}
     assert clean_only[7]["query"] == "q_clean"
+
+
+def test_reuse_serves_the_best_match_not_the_last_one_walked(tmp_path: Path) -> None:
+    """``find_by_node_configs`` sorts best-first, and a walk that assigns unconditionally runs
+    that order to its END — serving the row matching the FEWEST nodes. Nothing to see: both rows
+    are real measurements, so the served answer is merely the wrong one of two."""
+    archive = MeasurementArchive(tmp_path)
+    chain = [("a", {"k": 1}), ("b", {"k": 2}), ("c", {"k": 3})]
+
+    def _seed(run_id: str, configs: list[tuple[str, dict[str, Any]]], predicted: str) -> None:
+        _archive(
+            archive,
+            run_id,
+            {
+                "run_id": run_id,
+                "name": run_id,
+                "content_hash": f"hash_{run_id}",
+                "prompt_fields_id": "pf",
+                "item_count": 1,
+                "scores": {"accuracy": 1.0, "total": 1},
+                "node_configs": configs,
+                "pipeline_params": {},
+                "created_at": "2026-07-03T00:00:00Z",
+                "measurements": [
+                    {
+                        "sample_id": 1,
+                        "query": "q",
+                        "ground_truth": "g",
+                        "predicted": predicted,
+                        "hit": True,
+                        "fitness": 1.0,
+                        # Inside the trusted prefix either way, so the terminal-node rule below
+                        # admits both rows and the ONLY thing separating them is match length.
+                        "pipeline_data": {"terminal_node": "a"},
+                    }
+                ],
+                "dataset_name": "d",
+            },
+        )
+
+    # `narrow` matches one node, `wide` all three. Seeded narrow-first so a stable sort alone
+    # cannot produce the right answer — the walk has to actually prefer the longer match.
+    _seed("narrow", [("a", {"k": 1}), ("b", {"k": 99})], "from_narrow")
+    _seed("wide", chain, "from_wide")
+
+    cache = archive.load_reusable_results(chain, dataset_name="d")
+    assert cache[1]["predicted"] == "from_wide", (
+        "served the shorter prefix match — the sort's whole purpose is thrown away"
+    )
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
@@ -498,7 +547,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
             best_round=1,
             origin_accuracy=0.458,
             origin_level=0.458,
-            round_adopted_levels=levels,
+            round_parent_levels=levels,
             winner_prompt_fields={},
             stop_reason="max_rounds",
             started_at="t0",
@@ -1017,35 +1066,35 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
 
 def test_adopt_advances_identity_and_carries_the_wound_ledger():
     """The single adoption seam (``Cycle.adopt``) — used for an L1 win and an L2/L3
-    transition alike — must ADVANCE lineage to the new incumbent (parent = the outgoing
-    one) while CARRYING the outgoing incumbent's persistent memory: the wound ledger and
+    transition alike — must ADVANCE lineage to the new parent (parent = the outgoing
+    one) while CARRYING the outgoing parent's persistent memory: the wound ledger and
     L2's l1_layout. ``mutate`` deliberately resets those two on a child, so a seam that
     forgets to carry them silently drops the failures the search already paid to discover
     — no error, the next round just re-invites the mistake. The surface the adoption
-    OWNS (here task_context) must instead come from the new incumbent.
+    OWNS (here task_context) must instead come from the new parent.
     """
     from promptpotter.application.optimization.cycle import Cycle
 
-    incumbent = OptSearchPoint(persona="Expert", instruction="Rank.")
-    incumbent.memory.wounds.l3_note = "prior failure ledger"
+    parent = OptSearchPoint(persona="Expert", instruction="Rank.")
+    parent.memory.wounds.l3_note = "prior failure ledger"
     # An L1 winner is a `mutate` child: it inherits task_context but resets wounds.
-    winner = incumbent.mutate(
+    winner = parent.mutate(
         source="l1_generate", changes_description="try X", task_context={"domain": "biotech"}
     )
     assert winner.memory.wounds.l3_note == ""  # the reset adopt must repair
-    prior_id = incumbent.lineage.id
+    prior_id = parent.lineage.id
 
     cyc = object.__new__(Cycle)
-    cyc.opt_sp = incumbent
+    cyc.opt_sp = parent
     cyc.adopt(winner, advanced={"task_context": winner.memory.task_context})
 
-    # Identity advanced to the winner, parented on the outgoing incumbent.
+    # Identity advanced to the winner, parented on the outgoing parent.
     assert cyc.opt_sp is winner
     assert cyc.opt_sp.lineage.id == winner.lineage.id
     assert cyc.opt_sp.lineage.parent_id == prior_id
     # The wound ledger carried forward (would be silently lost without copy_memory_to).
     assert cyc.opt_sp.memory.wounds.l3_note == "prior failure ledger"
-    # The OWNED surface came from the new incumbent, not the carried memory.
+    # The OWNED surface came from the new parent, not the carried memory.
     assert cyc.opt_sp.memory.task_context.domain == "biotech"
 
 
@@ -3014,7 +3063,7 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
 # What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
 # is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose — the
 # reason for a move belongs in the commit body, which is what this test's own message asks for.
-L4_INNER_ORIGIN = "40f684de7293"
+L4_INNER_ORIGIN = "59372f827e55"
 
 
 def test_the_two_optimizer_manifests_describe_one_graph() -> None:
@@ -4108,7 +4157,13 @@ def test_a_mandatory_panel_larger_than_the_budget_is_still_served() -> None:
     what shipped: at L4 ``rendered_prompt`` renders the inner optimizer prompts at ~9.1k against a
     ~7.1k injection budget, so it was refused WHOLE on every round and the outer generator spent a
     whole campaign rewriting prompts it had never been shown. The floor is the node's SUBJECT — it
-    is admitted whatever it costs, and the discretionary set is what gives way.
+    is admitted whatever it costs.
+
+    And charged SEPARATELY, which is the second half of the same lesson: paying the floor out of the
+    discretionary purse only moved which half went missing. `promptpotter-self__d9b228` then ran a
+    10.5k floor against the 7k allowance and refused EVERY evidence panel on every call, so the
+    generator saw the prompt it was rewriting and nothing it had already measured. A node's
+    allowance must mean the same thing at every depth, or its evidence is rationed by frame size.
     """
     from promptpotter.application.optimization.dispatch.bundle import Item
     from promptpotter.application.optimization.dispatch.compose import select
@@ -4129,8 +4184,10 @@ def test_a_mandatory_panel_larger_than_the_budget_is_still_served() -> None:
     )
     assert len(served["rendered_prompt"]) >= 3000, "the node was handed no subject"
     assert coverage["rendered_prompt"].dropped == 0
-    # The overspend lands on the DISCRETIONARY set, which is the whole point of the split.
-    assert not served["mutation_memory"]
+    # And the evidence beside it survives: the floor does not spend the allowance, so a large
+    # subject costs the node nothing it would otherwise have been shown.
+    assert served["mutation_memory"], "the floor ate the evidence budget"
+    assert coverage["mutation_memory"].dropped == 0
 
 
 def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
@@ -4465,7 +4522,7 @@ def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
     the round-2 candidate that provoked the gate (`C2.1`).
 
     LEVEL — a seed is one whole inner run, so a rule keyed to the seed panel renders empty where
-    it lands: the candidate is unrunnable rather than wrong, and re-measures the incumbent.
+    it lands: the candidate is unrunnable rather than wrong, and re-measures the parent.
     Verbatim from `C2.2`, and round 1 crowned prose of the same shape before it.
 
     The other half is the one that costs more to get wrong: a REJECTION is destructive and leaves
@@ -4516,24 +4573,24 @@ def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
 
 
 def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
-    """An override REPLACES its field whole, so a short replacement for a long incumbent deletes
-    every contract the incumbent carried in plain prose — the output shape, the forbidden moves,
+    """An override REPLACES its field whole, so a short replacement for a long parent deletes
+    every contract the parent carried in plain prose — the output shape, the forbidden moves,
     the evidence it must ground on. `L1_PROMPT_PLACEHOLDERS_INTACT` catches only the contracts
     spelled as `{{slots}}`; the rest raise nothing and read as a bold edit, and the round then
     measures a crippled inner optimizer against a whole one.
 
-    The incumbent is resolved the way the run resolves it, so the length compared against is the
+    The parent is resolved the way the run resolves it, so the length compared against is the
     text the generator was shown — parent override first, manifest template otherwise."""
     from promptpotter.application.optimization.validators.l1_strict import (
         _GUTTABLE_MIN_CHARS,
         L1_PROMPT_FIELD_NOT_GUTTED,
-        _incumbent_field_text,
+        _parent_field_text,
     )
 
-    incumbent = {"l1_critique": {"instruction": "x" * 3000}}
+    parent = {"l1_critique": {"instruction": "x" * 3000}}
 
     outcome = L1_PROMPT_FIELD_NOT_GUTTED.run(
-        {"l1_critique": {"instruction": "y" * 400}}, pipeline_params=incumbent
+        {"l1_critique": {"instruction": "y" * 400}}, pipeline_params=parent
     )
     assert outcome is not None
     (failure,) = outcome.evidence["failures"]
@@ -4543,7 +4600,7 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
     # A real tightening keeps the contracts and survives.
     assert (
         L1_PROMPT_FIELD_NOT_GUTTED.run(
-            {"l1_critique": {"instruction": "y" * 2000}}, pipeline_params=incumbent
+            {"l1_critique": {"instruction": "y" * 2000}}, pipeline_params=parent
         )
         is None
     )
@@ -4558,6 +4615,6 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
         is None
     )
 
-    # The manifest fallback is live: with no parent override, the incumbent is the template's own
+    # The manifest fallback is live: with no parent override, the parent is the template's own
     # text and it is long enough to be reachable. Pins the wiring, not a byte count.
-    assert len(_incumbent_field_text("l1_critique", "instruction", None)) > _GUTTABLE_MIN_CHARS
+    assert len(_parent_field_text("l1_critique", "instruction", None)) > _GUTTABLE_MIN_CHARS

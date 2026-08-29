@@ -172,7 +172,13 @@ IDEA_MATCH_REJECT = 0.70
 
 def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     """It catches a re-proposal that REUSES vocabulary, and nothing else — a zero repeat count is not
-    evidence the generator is exploring. Left lexical: the alternatives buy little for their cost."""
+    evidence the generator is exploring.
+
+    It IS blind to within-cycle continuity, measured: a forced-choice judge matches an edit to its
+    own cycle's next round well above chance across pairs this test calls distinct. That argues for
+    a better signal on the VALUES, never for tightening ``IDEA_MATCH_REJECT`` — the same reading
+    cannot separate a re-proposal from the critique steering two rounds at one failure. Run on
+    ``changes_description`` instead it sits at chance, so build no successor on that prose."""
     words = re.findall(r"[a-z]+", " ".join(values).lower())
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 

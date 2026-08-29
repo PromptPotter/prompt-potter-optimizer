@@ -106,8 +106,9 @@ def select(
 
     *budget* bounds the DISCRETIONARY panels alone. *mandatory* names the ones the node cannot
     operate without: they are admitted whatever they cost — a first claim on a budget is not the
-    same promise as being present — and their only bound is ``char_cap`` at render. They spend
-    first, so a node whose floor exceeds its allowance shows the floor and no evidence.
+    same promise as being present — and their only bound is ``char_cap`` at render. They are served
+    first but charged SEPARATELY, so the allowance a discretionary panel competes for is the same
+    number at every depth rather than whatever the floor happened to leave.
 
     *exempt* names the panels placed whole or not at all; the caller derives it from
     ``InjectionKind.divisible`` rather than this looking it up, so this stays a pure allocator.
@@ -162,6 +163,7 @@ def select(
                 placed_any = True
 
     serve([n for n in order if n in mandatory], bounded=False)
+    spent = 0
     serve([n for n in order if n not in mandatory], bounded=True)
 
     # EVERY name in the layout gets an entry, silent ones as "". The caller indexes this by

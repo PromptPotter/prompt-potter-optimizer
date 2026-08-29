@@ -482,8 +482,25 @@ class PipelineSchema(StrictModel):
         )
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-        """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing."""
-        result: list[tuple[str, dict[str, Any]]] = []
+        """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing.
+
+        Spans what the optimizer may EDIT (:attr:`config_nodes`), not just what this round RUNS — an
+        escalation node reached only on a stall still changes the measurement, and keyed on the
+        chain alone an edit landing there is indistinguishable from its parent.
+
+        Off-chain nodes LEAD, and only where configured. ``MeasurementArchive.find_by_node_configs``
+        matches a prefix whose partial arm forgives divergence past a row's terminal node; an
+        off-chain node has no chain position, so trailing it would read as a reusable partial.
+        Leading breaks the match at position 0. Configured-only keeps an untouched point on the
+        chain-length tuple already banked."""
+        in_chain = {node.name for node in self.nodes}
+        result: list[tuple[str, dict[str, Any]]] = [
+            (node.name, cfg)
+            for node in self.config_nodes
+            if node.name not in in_chain
+            and isinstance(cfg := pipeline_params.get(node.name, {}), dict)
+            and cfg
+        ]
         for node in self.nodes:
             cfg = pipeline_params.get(node.name, {})
             if not isinstance(cfg, dict):

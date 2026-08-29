@@ -41,7 +41,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.l4.proxies import ADOPTED_LEVEL_SE_KEY, OUTER_PROXY_KEYS
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
@@ -428,7 +428,7 @@ def _paired_cell(
     base = _pd_number(origin, OUTER_PROXY_KEYS[0]) if origin else None
     if origin is None or base is None:
         return (lift, None)
-    se, base_se = _pd_number(r, ADOPTED_LEVEL_SE_KEY), _pd_number(origin, ADOPTED_LEVEL_SE_KEY)
+    se, base_se = _pd_number(r, PARENT_LEVEL_SE_KEY), _pd_number(origin, PARENT_LEVEL_SE_KEY)
     # Quadrature, for the reason `panel_precision` gives: each arm carries its OWN half, the
     # shared origin LEVEL already cancelled by the subtraction beside it.
     bar = (se**2 + base_se**2) ** 0.5 if se is not None and base_se is not None else None
@@ -465,7 +465,7 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         # itself — `+0.000` on every seed, which reads as a measured null and is not one. The
         # seed's own lift is the measurement there, carrying its own SE rather than a difference's.
         d, bar = (
-            (lift, _pd_number(r, ADOPTED_LEVEL_SE_KEY))
+            (lift, _pd_number(r, PARENT_LEVEL_SE_KEY))
             if b.is_origin_round
             else _paired_cell(lift, r, origin.get(r.get("sample_id")))
         )
@@ -748,7 +748,7 @@ def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
     by_round: list[tuple[int, list[tuple[str, frozenset[str]]]]] = []
     for i, rr in enumerate(prior):
         parent = rr.prompt_fields
-        # The PRIOR round's resolved params — the incumbent this round mutated from.
+        # The PRIOR round's resolved params — the parent this round mutated from.
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
         attempts: list[tuple[str, frozenset[str]]] = []
         for cand in rr.candidate_scores:
@@ -889,17 +889,21 @@ def _r_rare_hit_samples(b: InjectionBundle) -> list[Item]:
 
 @signal("measurand", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_measurand(b: InjectionBundle) -> list[Item]:
-    """The ACTIVE composite-fitness formula and where this round landed on it — resolved, not the
-    raw block, so a node reads the terms rather than parsing an expression."""
+    """What ELECTS, then what is reported. ``elect_round_winner`` admits and ranks on θ lift over
+    the parent alone; composite fitness grades degradation and headlines the round. Named as one
+    objective, a formula carrying a term the election does not read steers at nothing."""
     fitness = b.digest.composite_fitness
     if fitness is None:
         return []
     body = render_composite_fitness_block(
         fitness, b.digest.evaluators, b.cycle_slice.composite_formula
     )
-    return [
-        Item("OBJECTIVE — the number this round is won on:\n" + "\n".join(f"  {ln}" for ln in body))
-    ]
+    lines = ["ELECTION — a round is won on θ lift over the parent, and on nothing else."]
+    if (a := b.digest.ability) is not None:
+        lines.append(f"  this round: θ {a.theta:+.3f}  ({a.scale()})")
+    lines.append("REPORTED FITNESS — the headline number and the degradation scale:")
+    lines.extend(f"  {ln}" for ln in body)
+    return [Item("\n".join(lines))]
 
 
 @signal("precision", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
@@ -934,14 +938,14 @@ def _r_detectable_move(b: InjectionBundle) -> list[Item]:
     se = b.digest.ability.se if b.digest.ability is not None else None
     if se is None or se <= 0.0:
         return []
-    # A CONTRAST, not a level: an edit is judged against the incumbent, so both arms' error enters.
+    # A CONTRAST, not a level: an edit is judged against the parent, so both arms' error enters.
     # Equal precision is the honest approximation while the round carries one SE.
     contrast_se = se * (2.0**0.5)
     mde = min_detectable_effect(contrast_se)
     return [
         Item(
             "DETECTABLE MOVE — the bar this round can actually clear:\n"
-            f"  an edit must move ability by at least {mde:+.3f} logits to separate from the incumbent "
+            f"  an edit must move ability by at least {mde:+.3f} logits to separate from the parent "
             f"(contrast se {contrast_se:.3f}, 95%/80%). Anything smaller is inside the noise however "
             "the column reads, so prefer one edit with a large expected effect to several small ones."
         )

@@ -80,8 +80,9 @@ Five decisions the models cannot state:
 - **Declaring a node and running it are separate, and the CONFIG surface follows the declaration.**
   `PipelineSchema.config_nodes` covers every node under `nodes:`, whether or not a pipeline names
   it — a node absent from the surface is not a locked node the operator can open, it is nothing at
-  all, with no row and no lock. `nodes` (the running chain) stays the identity: `node_configs` →
-  `sp_hash` reads it alone, so declaring a step no round takes re-keys no banked measurement.
+  all, with no row and no lock. Identity follows the declaration too, but only where a point
+  CONFIGURES an off-chain node (`node_configs` → `sp_hash`) — an escalation node reached on a stall
+  still changes the measurement, while merely declaring a step re-keys no banked cell.
 - **`runtime` is orthogonal to `Connector.execution`.** It says where a node runs inside the
   *backend's* topology (`backend` / `frontend` / `in_process`); `Connector.execution` says how
   PromptPotter reaches the backend. One `remote_http` connector legitimately mixes all three —

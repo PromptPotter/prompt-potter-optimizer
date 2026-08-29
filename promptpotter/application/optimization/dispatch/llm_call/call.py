@@ -243,7 +243,11 @@ async def llm_call(
         # says so, which is the normal, healthy way a budget reports what it cost.
         by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
         thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
-        dropped = (" · NO ROOM: " + ", ".join(no_room[:4]) if no_room else "") + (
+        # `refused_panels` sorts by NAME, so truncating it reports the alphabet rather than the
+        # loss. Re-ranked here, and the remainder counted, so a cut list reads as cut.
+        worst = sorted(no_room, key=lambda n: -context.injection_dropped.get(n, 0))
+        more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
+        dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
             " · thinned: " + ", ".join(thinned) if thinned else ""
         )
         log(

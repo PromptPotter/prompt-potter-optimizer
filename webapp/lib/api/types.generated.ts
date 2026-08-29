@@ -90,7 +90,7 @@ export interface RoundSummaryCandidate {
 /** Context-aware degradation verdict for a round (origin included), computed */
 export interface DegradationHealth {
   grade: 'healthy' | 'degraded' | 'critical';
-  cause: 'origin_unmeasured' | 'backend_unreachable' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
+  cause: 'origin_unmeasured' | 'origin_incomplete' | 'backend_unreachable' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
   samples: number;
   structural_count: number;
   transient_count: number;
@@ -113,7 +113,7 @@ export interface PanelPrecision {
   n_cells: number;
 }
 
-/** One adopted incumbent, read on the round's overlap set. */
+/** One parent, read on the round's overlap set. */
 export interface OverlapMember {
   round: number;
   candidate_id: string;
@@ -122,7 +122,7 @@ export interface OverlapMember {
   total: number;
 }
 
-/** The cells EVERY adopted incumbent has answered, and each one's rate over them. */
+/** The cells EVERY parent has answered, and each one's rate over them. */
 export interface OverlapReading {
   sample_ids: number[];
   members: OverlapMember[];
@@ -196,8 +196,8 @@ export interface ValidationFailure {
    * (an L4 override making an inner node reason over the seed panel, which
    * exists only one level up — the rule renders empty where it lands),
    * ``guts_inherited_contract`` (an L4 override replacing a long prompt field
-   * with a fraction of its length, deleting contracts the incumbent carried
-   * in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-
+   * with a fraction of its length, deleting contracts the parent carried in
+   * plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-
    * detect), ``hallucinated_node`` (named a node absent from the schema —
    * NON-fatal: the phantom edit is stripped, the candidate still scores;
    * routed as signal, not a synthetic-0). */
@@ -1184,7 +1184,7 @@ export interface LineageNode {
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather
    * than measured. `None` on a course and on any candidate never measured. */
   cached_samples: number | null;
-  /** Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-
+  /** Ability of the parent lineage on the cycle's fixed δ ruler — the subset-
    * invariant, cross-round-comparable series the trend plots. Carried by the
    * round's WINNER only: it is a property of the advancing spine, and a
    * losing sibling never joined it. Its accuracy-space predecessor was a mean

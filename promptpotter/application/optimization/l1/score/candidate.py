@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
     build_score_report,
+    fatal_validation_failures,
 )
 from promptpotter.application.optimization.l1.score.signal_effect import (
     CandidateOutcome,
@@ -86,10 +87,7 @@ async def score_one_candidate(
     # score stands and the wound rides along as routed signal (``l1_wounds`` +
     # ``validation_failure_rate``), not a synthetic-0. Every other failure (forbidden axis,
     # type mismatch, out-of-enum value) is a genuinely invalid program and still nukes it.
-    fatal_failures = [
-        vf for vf in opt_sp_c.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
-    ]
-    if fatal_failures:
+    if fatal_validation_failures(opt_sp_c):
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],

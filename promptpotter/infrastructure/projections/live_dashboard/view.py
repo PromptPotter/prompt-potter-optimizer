@@ -132,7 +132,7 @@ if set(_STATE_TO_NODE) != set(DashboardState):
 
 def _ability_delta(rounds: list[RoundSummary]) -> float | None:
     """Latest round carrying an ability, over the origin — never the max (winner's curse in logit
-    space). Skipping only unfit rounds is ``adopted_level_trajectory``'s own carry-forward rule."""
+    space). Skipping only unfit rounds is ``parent_level_trajectory``'s own carry-forward rule."""
     origin = next((r.ability for r in rounds if r.round == 0 and r.ability is not None), None)
     if origin is None:
         return None
@@ -896,11 +896,25 @@ class LiveDashboardView(DerivedView):
     def _persist(self) -> None:
         """Compose, then swap atomically via ``write_json`` — polling readers never see a torn
         payload. A fold with no ``state_path`` composes on demand instead (``compose``), so
-        nothing here fires per record for a replay that will be read once."""
+        nothing here fires per record for a replay that will be read once.
+
+        A refused swap is reported, never raised: the ledger is the truth here, so the cost is one
+        stale poll, while raising costs the caller whatever it was measuring."""
         if self.state_path is None:
             return
         self.compose()
-        write_json(self.state_path, self.state.model_dump(), default=str)
+        try:
+            write_json(self.state_path, self.state.model_dump(), default=str)
+        except OSError as exc:
+            # Logged, not emitted: a round warning appends to the ledger and this view subscribes
+            # to that append, so reporting the failure re-enters the path that failed.
+            logger.warning(
+                "dashboard write refused — %s: %s · %s is stale until the next write lands "
+                "(the run is unaffected; the ledger holds every fact this file shows)",
+                exc.__class__.__name__,
+                exc,
+                self.state_path,
+            )
 
     def compose(self) -> LiveDashboardState:
         """Settle the served shape onto ``state`` and return it — everything a reader needs that is

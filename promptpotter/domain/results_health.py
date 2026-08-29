@@ -146,6 +146,11 @@ def compute_degradation_health(
         grade, cause = "critical", "structural_untested"
     elif consecutive_degraded_rounds >= CONSECUTIVE_DEGRADED_CRITICAL:
         grade, cause = "critical", "persistent"
+    elif is_origin and (hole_count or no_result_count):
+        # ANY missing cell, not a rate: this baseline is permanent, and every later round quotes
+        # the survivors as though nothing were absent. Below every critical cause — it grades
+        # `degraded`, and a chain ordered by severity may not let it mask one.
+        grade, cause = "degraded", "origin_incomplete"
     elif degraded_rate >= DEGRADED_RATE_FLAG:
         grade, cause = "degraded", "degraded"
     else:
@@ -209,6 +214,15 @@ def compute_degradation_health(
                 f"fault, not noise.{_reported_by(dominant_node)} "
                 "Consider aborting, fixing config, and re-minting."
             )
+    elif cause == "origin_incomplete":
+        missing = hole_count + no_result_count
+        suggested_action = (
+            f"the origin measured {attempted - missing} of {attempted} cells — {missing} never "
+            "reported. This baseline is what every later round's lift is read against, so the "
+            "shortfall is permanent and silent: overlap lines will quote the surviving cells as "
+            "though nothing were missing. Re-measure the origin before spending a round on top of "
+            "it — a plain `resume` re-runs errored cells, which are never served from cache."
+        )
     elif grade == "degraded":
         # This grade fires on structural AND transient together, so a reader told "transient"
         # is told something the split here can contradict.

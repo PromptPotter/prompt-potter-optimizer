@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -9,11 +10,13 @@ import numpy as np
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import expected_order
 from promptpotter.domain.ruler import (
+    AbilityReading,
     CalibrationModel,
     DeltaRuler,
     Ruler,
     anchor_id_of,
     ruler_entry,
+    ruler_id,
 )
 from promptpotter.shared.errors import RulerCoverageError, is_error_result
 
@@ -21,6 +24,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
+
+logger = logging.getLogger(__name__)
 
 # C0 inside the δ-calibrating fit; the archive's copies of the origin fold onto this one id.
 ORIGIN_ABILITY_ID = "__origin__"
@@ -32,7 +37,6 @@ __all__ = [
     "PARENT_ABILITY_ID",
     "Observation",
     "RaschPosterior",
-    "adopted_level_trajectory",
     "build_observations",
     "candidate_abilities",
     "dedup_observations",
@@ -43,6 +47,7 @@ __all__ = [
     "graded_response",
     "graduate_ruler_model",
     "observations_from_results",
+    "parent_level_trajectory",
     "ruler_expected_accuracy",
     "select_round_subset",
     "theta_lift_over_parent",
@@ -74,30 +79,38 @@ def ruler_expected_accuracy(theta: float | None, ruler: DeltaRuler | None) -> fl
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
-def adopted_level_trajectory(
-    origin: tuple[float, float] | None,
-    incumbents: Sequence[tuple[float, float] | None],
+def parent_level_trajectory(
+    origin: AbilityReading | None,
+    winners: Sequence[AbilityReading | None],
     ruler: DeltaRuler | None,
 ) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
-    """Origin ability plus the per-round ability of the incumbent the search ADOPTED, in logits on
-    the locked ruler. Why the incumbent: ``specs/l4-outer-loop.md`` § The measurand."""
-    if origin is None or ruler is None or not ruler.delta:
+    """Origin ability plus the per-round ability of the PARENT the search stood on, in logits on
+    the locked ruler — a round that crowned nobody carries the previous one forward. Why the
+    parent rather than the proposals: ``specs/l4-outer-loop.md`` § The measurand.
+
+    Readings, not bare pairs: these levels are differenced, and that is only a difference if they
+    share a scale — ``comparable_to`` is what a bare ``(θ, θ_se)`` cannot be asked. An off-scale
+    round carries the previous level forward, exactly as a round that crowned nobody does."""
+    if origin is None or origin.se is None or ruler is None or not ruler.delta:
         return None, []
-    prev = origin
+    if origin.ruler_id != ruler_id(ruler):
+        # No reference on this scale ⇒ nothing to difference against; the L4 law reads it as
+        # no evidence.
+        logger.warning(
+            "origin ability sits on %s, not the cycle's ruler %s — no level series on this scale",
+            origin.scale(),
+            ruler_id(ruler),
+        )
+        return None, []
+    origin_pair = (origin.theta, origin.se)
+    prev = origin_pair
     out: list[tuple[float, float]] = []
-    for level in incumbents:
-        if level is not None:
-            prev = level
+    for level in winners:
+        if level is not None and level.se is not None and level.comparable_to(origin):
+            prev = (level.theta, level.se)
         out.append(prev)
-    return origin, out
+    return origin_pair, out
 
-
-# Floor on the quasi-likelihood dispersion φ (`fit_theta_given_delta`). A response with no
-# residual spread — a constant, a single observation — says nothing about its own dispersion,
-# and an unfloored φ→0 would turn that silence into infinite confidence in θ. 0.05 caps the
-# precision claim at ~4.5x the Bernoulli one, comfortably past the ×4.66 measured on the
-# most underdispersed real backend (the L4 outer composite) so it never binds on live data.
-_MIN_DISPERSION = 0.05
 
 # Broad EB starting priors — first inner MAP fit is barely regularized.
 _INIT_SIGMA_THETA = 1.5
@@ -346,12 +359,12 @@ def fit_theta_given_delta(
                 break
         p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
-        # Quasi-likelihood dispersion off this candidate's own residuals (see docstring):
-        # ≈1 on binary data, <1 on a graded one, >1 on an overdispersed one. `n - 1` because
-        # θ was estimated from these same rows; a single row has no spare df and takes the floor.
+        # Dispersion shrunk toward the nominal 1.0, the same inverse-gamma the two σ above use.
+        # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
         var = np.clip(p * (1.0 - p), 1e-6, None)
         dof = max(len(rows) - 1, 1)
-        phi = max(float(np.sum((h_arr - p) ** 2 / var)) / dof, _MIN_DISPERSION)
+        raw_phi = float(np.sum((h_arr - p) ** 2 / var)) / dof
+        phi = (dof * raw_phi + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
         out[cid] = (theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9))))
     return out
 
@@ -670,7 +683,7 @@ def candidate_abilities(
     """The PARENT is folded in as a pseudo-candidate under ``PARENT_ABILITY_ID`` so it shares the arms'
     scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable.
 
-    ``parent_results`` is the incumbent RE-SCORED on this round's panel, never C0's banked rows —
+    ``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows —
     an arm is crowned on a lift over what it must actually beat."""
     obs = observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
     fit = fit_theta_given_delta(

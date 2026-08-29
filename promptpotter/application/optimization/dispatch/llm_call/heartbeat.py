@@ -3,6 +3,7 @@ of its own MUST heartbeat** — silence is how this package says the producer di
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -12,6 +13,8 @@ from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat"]
 
@@ -56,6 +59,20 @@ async def heartbeat(
                 node=node,
                 round=round_num,
                 elapsed_s=elapsed,
-                detail=detail_fn() if detail_fn is not None else None,
+                detail=_safe_detail(detail_fn),
             )
         )
+
+
+def _safe_detail(detail_fn: Callable[[], str | None] | None) -> str | None:
+    """A tick's status line, and never a reason the call it describes fails.
+
+    A detail function reads a surface another process is writing — that is what makes it one — so
+    it can raise where nothing about the await has gone wrong."""
+    if detail_fn is None:
+        return None
+    try:
+        return detail_fn()
+    except Exception as exc:
+        logger.warning("heartbeat detail unavailable — %s: %s", exc.__class__.__name__, exc)
+        return None

@@ -141,7 +141,10 @@ def paired_reading(
     cannot draw an interval and a p-value that disagree about zero.
 
     ``two`` asks whether two arms differ, with no pre-registered direction, so reading a pair in either order gives one number;
-    ``greater`` asks whether the candidate BEAT the prior, which is directional on purpose.
+    ``greater`` asks whether the candidate BEAT the prior, which is directional on purpose. **The bracket is two-sided under
+    both**, so those agree about zero only under ``two`` — a document pairing a ``greater`` p with this interval reports two
+    different tests as one verdict, and in the band between the tails they disagree outright. Take both from one call, or
+    take the p alone.
 
     Below two pairs the bracket and the test are ``None``: nothing was tested, and a ``1.0`` there would misreport that as a
     test that found nothing. The SE is :func:`paired_diff_posterior`'s, floored at ``1/(4n)``, so ``p`` is CONSERVATIVE wherever

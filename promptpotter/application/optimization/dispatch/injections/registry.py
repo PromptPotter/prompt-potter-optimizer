@@ -45,11 +45,16 @@ def injection_source_digest() -> str:
     layouts. Its estimator-side twin is ``connectors/promptpotter.py::_measurement_source_digest``.
 
     ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
-    prompt receives live there rather than in the renderer that spends them, and ``compose`` because
-    it decides which of those panels a prompt receives AT ALL. A module that shapes the prompt and
-    is not hashed here pools corpora the fingerprint exists to keep apart.
+    prompt receives live there rather than in the renderer that spends them, ``compose`` because
+    it decides which of those panels a prompt receives AT ALL, and ``facade`` because it picks the
+    allowance and derives the mandatory/exempt sets those two are handed. A module that shapes the
+    prompt and is not hashed here pools corpora the fingerprint exists to keep apart.
+
+    ``facade`` imports this module, so it is resolved at call time rather than above.
     """
-    return module_source_digest(bundle, compose, *_RENDERER_MODULES)
+    from promptpotter.application.optimization.dispatch import facade
+
+    return module_source_digest(bundle, compose, facade, *_RENDERER_MODULES)
 
 
 def citable_fields(

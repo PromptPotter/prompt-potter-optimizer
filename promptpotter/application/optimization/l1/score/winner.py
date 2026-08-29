@@ -3,13 +3,17 @@ recomputed here."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
-from promptpotter.application.optimization.l1.population import parse_population
+from promptpotter.application.optimization.l1.population import (
+    fatal_validation_failures,
+    parse_population,
+)
 from promptpotter.application.optimization.l1.score.loop import (
     score_population,
 )
@@ -116,6 +120,21 @@ def _verdict_reason(
     )
 
 
+def _fold_strict_rejections(
+    stats: L1YieldStats, population: list[OptSearchPoint], *, n_proposed: int
+) -> L1YieldStats:
+    """Re-derive ``l1_yield`` as the share of proposals that can still MEASURE.
+
+    ``detect_invariants`` counts only the three round-local collapses, and the strict validators
+    run later, in ``parse_population``. Both land on the same wound channel, so ONE predicate spans
+    them — subtracting the collapse counters as well would charge those candidates twice. The
+    counters stay as they are; they name three specific shapes, and a strict rejection is none."""
+    if not n_proposed:
+        return stats
+    live = sum(1 for ind in population if not fatal_validation_failures(ind))
+    return replace(stats, l1_yield=live / n_proposed)
+
+
 def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | None:
     """Did the round resolve anything — did any arm's lift interval clear 0? ``None`` when no arm
     carries one: below two shared cells there is nothing to be inconclusive ABOUT.
@@ -170,6 +189,9 @@ async def l1_score(
         pipeline_params,
         schema,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
+    )
+    yield_stats = _fold_strict_rejections(
+        yield_stats, opt_sp_population, n_proposed=len(candidates)
     )
     # By identity, not position: `scored` below is filtered, so its index no longer aligns
     # with this full-population list.
@@ -230,14 +252,14 @@ async def l1_score(
     parent_election_results: list[QueryMeasurement] = list(
         cast("list[QueryMeasurement]", parent.results)
     )
-    # The no-winner headline: the RETAINED incumbent re-scored on this round's panel — one
+    # The no-winner headline: the RETAINED parent re-scored on this round's panel — one
     # configuration, on named samples, actually measured. Never publish `tracking.current_*`
     # here, which unions rows measured by DIFFERENT configurations and so reports a number no
     # individual scored. All nine are overwritten when a winner is elected.
     best_acc = parent.report.accuracy
     best_comp = parent.report.composite_fitness
     # Must share the headline's sample basis, or a held round renders a phantom lift. No winner
-    # ⇒ both are the incumbent's standing; a winner keeps the matched reference set below.
+    # ⇒ both are the parent's standing; a winner keeps the matched reference set below.
     best_parent_accuracy = parent.report.accuracy
     best_opt_sp: OptSearchPoint = parent.opt_sp
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
@@ -366,8 +388,10 @@ async def l1_score(
         # A recorded diagnostic; it does not gate promotion. Significance runs on the per-sample
         # FITNESS rather than binary hits: a candidate lifting ground-truth's rank without yet
         # landing it at rank 1 is real improvement a binary-hit test is blind to.
+        # TWO-SIDED to match the winner's `matched_parent_lift_ci_*` beside it; the directional
+        # decision is `elect_round_winner`'s, on θ.
         cand_fit, parent_fit = paired_fitness(best_results, parent_election_results)
-        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit, tail="greater")
+        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit)
 
     # A round improved iff it crowned somebody. ``elect_round_winner`` admits a candidate only on
     # a STRICTLY positive ability lift over the parent on the cycle's fixed δ ruler, so the

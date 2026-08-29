@@ -441,12 +441,12 @@ class MeasurementArchive:
                     terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
                     if not (terminal_node and terminal_node in trusted_nodes):
                         continue
+                # FIRST wins: `find_by_node_configs` sorted best-first, so assigning
+                # unconditionally would serve the row matching the FEWEST nodes. The one upgrade
+                # allowed is replacing a fatal row, which is not an answer, with a live one.
                 existing = cache.get(sid)
-                if (
-                    existing is not None
-                    and is_fatal is not None
-                    and is_fatal(item)
-                    and not is_fatal(existing)
+                if existing is not None and not (
+                    is_fatal is not None and is_fatal(existing) and not is_fatal(item)
                 ):
                     continue
                 cache[sid] = item

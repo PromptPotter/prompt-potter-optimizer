@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "INVALID_SCORES",
     "build_score_report",
+    "fatal_validation_failures",
     "merge_pipeline_params",
     "parse_population",
     "pobb_decision_data",
@@ -112,7 +113,7 @@ def parse_population(
             # Mandatory placeholders intact — the evolved TARGET prompt (runs even when the
             # mutation is prompt-fields-only, the exact case that drops {{combined_text}})
             # AND, on an L4 campaign, the MERGED inner optimizer prompts (a child of a broken
-            # incumbent inherits a severed port without re-proposing it).
+            # parent inherits a severed port without re-proposing it).
             ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
                 merged_pp or {},
                 opt_sp=opt_sp,
@@ -220,3 +221,14 @@ INVALID_SCORES: dict[str, Any] = {
     "errors": 0,
     "invalid": True,
 }
+
+
+def fatal_validation_failures(opt_sp: OptSearchPoint) -> list[ValidationFailure]:
+    """The failures that cost a candidate its measurement, as opposed to riding along as signal.
+
+    ``hallucinated_node`` is the one non-fatal reason — the phantom edit is stripped and the real
+    edits still ran. One definition, because the scorer and the yield count must agree on which
+    candidates measured."""
+    return [
+        vf for vf in opt_sp.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
+    ]
