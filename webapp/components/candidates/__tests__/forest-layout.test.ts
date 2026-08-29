@@ -68,13 +68,13 @@ function node(
 
 // `counts` is one entry per round (round number is the index + 1); each value is
 // the candidate count for that round. The last candidate wins, so every round here
-// closes AND advances the incumbent.
+// closes AND advances the parent.
 function cands(counts: number[]): LineageNode[] {
   return candsH(counts.map((n) => ({ n })));
 }
 
 // `held` marks a round that crowned nobody — it either closed with no candidate
-// beating the incumbent, or never closed at all. Either way there is no winner.
+// beating the parent, or never closed at all. Either way there is no winner.
 function candsH(rounds: { n: number; held?: boolean }[]): LineageNode[] {
   return rounds.flatMap((r, ri) =>
     Array.from({ length: r.n }, (_, i) =>
@@ -366,7 +366,7 @@ describe("placeNodes", () => {
 
     const r1winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!;
     // A held round mints NO new spine node — its spine entry is the retained
-    // incumbent (round 1's winner), so a course cut here still anchors correctly.
+    // parent (round 1's winner), so a course cut here still anchors correctly.
     expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r2`)).toBe(r1winner);
     // No round-2 candidate is crowned.
     expect(nodes.filter((n) => n.round === 2 && n.isWinner)).toHaveLength(0);

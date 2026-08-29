@@ -60,7 +60,7 @@ class PipelineData(LedgerPipelineData, total=False):
     reasoning_trace: str
     # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
     # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
-    mean_adopted_level_se: float
+    mean_parent_level_se: float
     # The rest of that inner campaign's own trajectory and cost, carried beside the lift so a
     # reader can ask what the run DID rather than only what it scored. `inner_spend_usd` /
     # `inner_tokens` are reporting figures and bill nothing — see `InnerCellFacts`.

@@ -213,7 +213,7 @@ class LiveDashboardState(StrictModel):
     # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
     best: float | None = None
     current_acc: float | None = None
-    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the incumbent's ``ability``
+    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the parent's ``ability``
     # minus the origin's, ``None`` unless the two share a ruler. The ONE derivation — the chip
     # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
     # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each

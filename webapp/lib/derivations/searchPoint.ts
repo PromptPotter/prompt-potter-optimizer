@@ -25,7 +25,7 @@ import { wasElected } from "./election";
 // WHICH searchpoint the observe box shows. Each state answers a question an
 // operator actually asks, which is why none of them names a data source:
 //
-//   best     — the incumbent: what the search is currently expanding from.
+//   best     — the parent: what the search is currently expanding from.
 //   latest   — the newest searchpoint touched: in-flight while running, else
 //              the last candidate the last closed round measured.
 //   selected — the candidate picked on another surface (a candidates-card bar,
@@ -186,9 +186,9 @@ function targetAt(
   return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
 }
 
-// THE INCUMBENT — the individual the search expands from. A WALK back to the most recent SERVED
+// THE PARENT — the individual the search expands from. A WALK back to the most recent SERVED
 // crown, not `rounds.at(-1)`: a round that crowned nobody is skipped rather than inventing one.
-// Round 0 is included, since on a campaign that only measured its origin C0 IS the incumbent.
+// Round 0 is included, since on a campaign that only measured its origin C0 IS the parent.
 // **Under a REWIND** the most recent crown is still what the search expands from but need not be
 // the highest-θ individual ever measured; a strict global best needs a SERVED pointer.
 export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {

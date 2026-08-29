@@ -383,7 +383,7 @@ async def _run_transition(
             return
 
     # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
-    # incumbent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
+    # parent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
     # installed by `transition.apply` below, so no `advanced` overlay is passed here.
     new_opt = result.opt_sp
     cycle.adopt(new_opt, advanced={})

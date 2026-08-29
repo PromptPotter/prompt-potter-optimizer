@@ -585,7 +585,7 @@ the PR description.
   (`domain/results.py`) — deriving either from the other silently corrupts
   the difficulty ruler. `exploration.build_observations` flattens
   `all_candidate_results` across every round with no round filter and no
-  dedup, so a retained incumbent — one lineage id held across k no-winner
+  dedup, so a retained parent — one lineage id held across k no-winner
   rounds — would contribute each observation k+1 times to a subset-invariant
   fit. `all_candidate_results` means "measured in THIS round".
 

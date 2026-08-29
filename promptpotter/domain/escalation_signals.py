@@ -127,7 +127,7 @@ class ValidationFailure(StrictModel):
             "``steers_across_seeds`` (an L4 override making an inner node reason over the seed "
             "panel, which exists only one level up — the rule renders empty where it lands), "
             "``guts_inherited_contract`` (an L4 override replacing a long prompt field with a "
-            "fraction of its length, deleting contracts the incumbent carried in plain prose), "
+            "fraction of its length, deleting contracts the parent carried in plain prose), "
             "``no_op_variant`` / ``duplicate_variant`` (invariant-detect), "
             "``hallucinated_node`` (named a node absent from the schema — "
             "NON-fatal: the phantom edit is stripped, the candidate still scores; "

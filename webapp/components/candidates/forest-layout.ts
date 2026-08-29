@@ -440,7 +440,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
     // Expanded: the full intra-course candidate cladogram. The first round has no
     // parent node — its candidates draw only their own stub; each later round chains
     // from the last WINNING round's winner. A held round advances nothing: its
-    // candidates still fan from the retained incumbent, and the incumbent stays the
+    // candidates still fan from the retained parent, and that parent stays the
     // parent of the following round — a held round never becomes a parent.
     let parent: { x: number; y: number } | null = null;
     let lastWinnerNode: RoundNodePos | null = null;

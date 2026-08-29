@@ -95,7 +95,7 @@ export function useObserveSearchPoint(
   }
 
   // Auto-pick: follow an explicit selection, else show what the run is doing now
-  // while it runs, else the incumbent.
+  // while it runs, else the parent.
   const auto: ObserveState = avail.selected
     ? "selected"
     : liveLatest

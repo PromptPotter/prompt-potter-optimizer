@@ -352,7 +352,7 @@ class PoBBCheck:
 
         # ε is the ONLY futility gate, and it now tests the SAME bar adoption does:
         # ``elimination_p_best`` compares strictly better-than-prior (no margin) and crowning
-        # needs a strictly positive θ lift over the parent. The prior set includes the incumbent
+        # needs a strictly positive θ lift over the parent. The prior set includes the parent
         # (``l1/score/loop.py`` registers it as ``R{n}_winner``), so ε asks exactly "can this beat
         # the parent". The band of arms that survived ε yet could never be crowned closed with the
         # accuracy-recalibrated bar that opened it.

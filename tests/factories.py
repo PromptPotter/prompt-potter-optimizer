@@ -175,7 +175,7 @@ def cycle_result(
         best_round=len(rounds),
         origin_accuracy=origin or 0.0,
         origin_level=origin,
-        round_adopted_levels=levels,
+        round_parent_levels=levels,
         winner_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",

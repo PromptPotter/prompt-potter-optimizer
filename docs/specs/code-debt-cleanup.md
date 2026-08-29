@@ -70,7 +70,7 @@ decisions → [`../architecture.md`](../architecture.md).
   `round_diagnostics.py::TrajectoryClass` is a health enum (`healthy|oscillating|plateau|ceiling`)
   and the ONLY on-disk `trajectory` key — 384 round documents, and `RoundResult` reads back with
   `extra="ignore"`, so a rename degrades to the field's default rather than raising. `trend` or
-  `shape` fits it; the migration is the work. `p_best_trajectory`, `adopted_level_trajectory` and
+  `shape` fits it; the migration is the work. `p_best_trajectory`, `parent_level_trajectory` and
   the Sample-trajectory grid keep the word — they are genuine trajectories, which is the point of
   giving it up on the card.
 

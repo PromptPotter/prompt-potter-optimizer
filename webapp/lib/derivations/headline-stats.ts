@@ -107,7 +107,7 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // it is NOT composite-based). `abilityDelta` is SERVED (`ability_delta`) — never
   // recomputed here, so this chip and the L4 inner progress line read one number (R-36).
   // The two are on DIFFERENT bases now, deliberately: `best` answers "what did a round
-  // measure", `abilityDelta` answers "how far above origin is the incumbent".
+  // measure", `abilityDelta` answers "how far above origin is the parent".
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;
@@ -128,7 +128,7 @@ export interface FitnessTrend {
 // running-best fold. Takes `rounds` so callers memo on `dash?.rounds`.
 //
 // Plots each round's MEASURED `accuracy` — the elected winner on the samples that
-// round drew, or a held round's retained incumbent re-scored on them. It matches the
+// round drew, or a held round's retained parent re-scored on them. It matches the
 // Best/current tiles, which settle to the same basis.
 //
 // Never `cumulative_accuracy`: it pools rows measured by DIFFERENT configurations, so the line

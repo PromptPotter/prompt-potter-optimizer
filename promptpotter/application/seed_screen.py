@@ -50,7 +50,7 @@ class SeedReading:
     # (``domain/scoring.py::modal_answer_share``); ``None`` where the answer space makes the
     # question meaningless. The bank-side twin of ``class_floor``: that says how much a
     # constant answer would SCORE here, this says how nearly the model IS one. A candidate
-    # model can clear the floor while hedging almost everything — measured, the incumbent
+    # model can clear the floor while hedging almost everything — measured, the parent
     # answered one label 95% of the time for +0.05 over a 0.400 floor — and a screen that
     # ranks models has to show the operator which kind of margin they are buying.
     answer_modal_share: float | None = None
@@ -105,7 +105,7 @@ class SeedReading:
     @property
     def rewards_collapse(self) -> bool:
         """A bool, not a number to weigh: below the origin a skewed bank only distorts how hard it
-        LOOKS and that cancels, while above it a candidate that gives up outscores the incumbent."""
+        LOOKS and that cancels, while above it a candidate that gives up outscores the parent."""
         return self.class_floor > self.origin_accuracy
 
     @property

@@ -58,7 +58,7 @@ def _headline_disagrees(t: RoundResult) -> bool:
     rows = t.all_candidate_results.get(winner_id)
     cs = next((c for c in t.candidate_scores if c.candidate_id == winner_id), None)
     if rows is None or cs is None:
-        return False  # a HELD round — `results` carry the retained incumbent, not a candidate
+        return False  # a HELD round — `results` carry the retained parent, not a candidate
     return list(t.results) != list(rows) or t.total != cs.total
 
 

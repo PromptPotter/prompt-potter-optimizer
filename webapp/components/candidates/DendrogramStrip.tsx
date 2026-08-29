@@ -136,7 +136,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                   {n.isFork
                     ? " · a fork — a sibling course cut from this cycle. Click to open it."
                     : n.isElected
-                      ? " · round winner (the incumbent this round elected)"
+                      ? " · round winner (the parent this round elected)"
                       : n.isWinner
                         ? " · the round's only arm — it advances without an election"
                         : " · eliminated"}

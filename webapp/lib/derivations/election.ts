@@ -1,7 +1,7 @@
 // Was a crown EARNED? One rule, every surface that draws one.
 //
 // The server stamps `is_winner` by identity on `candidate_id` — the round's
-// incumbent, which is a true and useful fact. But round 0 runs exactly one
+// parent, which is a true and useful fact. But round 0 runs exactly one
 // candidate (the origin), so C0's crown comes from having nobody to beat. That
 // is a fact about the round's SHAPE, not an achievement: badging it "won" puts
 // two winners on one course, and the θ-election copy claims an election that

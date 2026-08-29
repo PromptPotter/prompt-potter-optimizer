@@ -39,15 +39,15 @@ OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 # the infra-key allow-list carrying it (`scoring/sample_measurement.py`), and
 # `panel_precision` below.
 # Deliberately NOT derived as f"{OUTER_PROXY_KEYS[0]}_se": it is the SE of the arm's own
-# adopted level, not of the delta, and a derived name would assert an identity that is false.
-ADOPTED_LEVEL_SE_KEY = "mean_adopted_level_se"
+# parent level, not of the delta, and a derived name would assert an identity that is false.
+PARENT_LEVEL_SE_KEY = "mean_parent_level_se"
 
 
 class InnerCellFacts(StrictModel):
     """What one inner campaign knows about ITSELF, carried BESIDE the measurement rather than
     inside it. Deliberately not ``OuterSampleProxies`` fields: those are what the outer formula
     scores, and a trajectory detail reachable from the formula is one keystroke from grading on
-    something the law never measured. Same slot as :data:`ADOPTED_LEVEL_SE_KEY`.
+    something the law never measured. Same slot as :data:`PARENT_LEVEL_SE_KEY`.
 
     Every one of these reached the outer row only inside ``reasoning_trace``'s prose before, where
     no reader could compute on them — which is why the outer surfaces could report the scored lift
@@ -86,12 +86,12 @@ INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
 def inner_cell_facts(
     result: CycleResult, campaign_id: str, *, unworked_s: float
 ) -> InnerCellFacts | None:
-    """``None`` where the cycle has no trajectory to describe — a FLOORED cell adopted no levels
-    and an unscored origin is no floor to difference against. Absent, never zeroed.
+    """``None`` where the cycle has no trajectory to describe — a FLOORED cell held no parent
+    levels and an unscored origin is no floor to difference against. Absent, never zeroed.
 
     ``unworked_s`` has no default: only the spawner holding the deadline can measure it, and a
     caller that omitted it would report a fairly-run cell on a box that was thrashing."""
-    levels = result.round_adopted_levels
+    levels = result.round_parent_levels
     if result.origin_level is None or not levels:
         return None
     origin = result.origin_level
@@ -100,7 +100,7 @@ def inner_cell_facts(
         inner_final_lift=levels[-1] - origin,
         inner_peak_lift=max(levels) - origin,
         inner_rounds_ran=result.n_l1_rounds,
-        inner_round_budget=len(held_levels(result)),
+        inner_round_budget=len(parent_level_series(result)),
         inner_stop_reason=str(result.stop_reason),
         inner_unworked_s=unworked_s,
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
@@ -109,29 +109,31 @@ def inner_cell_facts(
     )
 
 
-def held_levels(result: CycleResult) -> list[float]:
-    """ONE denominator for every cell on a panel: dividing by the series length instead makes the
-    denominator a per-cell quantity, and the panel then compares two estimands rather than one."""
-    levels = result.round_adopted_levels
+def parent_level_series(result: CycleResult) -> list[float]:
+    """The parent's level per round, padded forward to the ROUND BUDGET.
+
+    That denominator is ONE for every cell on a panel: dividing by the series length instead makes
+    it a per-cell quantity, and the panel then compares two estimands rather than one."""
+    levels = result.round_parent_levels
     if not levels:
         return []
     n = max(result.round_budget, len(levels))
     return levels + [levels[-1]] * (n - len(levels))
 
 
-def mean_adopted_level_se(result: CycleResult) -> float | None:
+def mean_parent_level_se(result: CycleResult) -> float | None:
     """This arm's OWN half of a paired cell difference: two of these in quadrature give the
     difference's error. A PRECISION, never a penalty — no ``mean - λ·se``, never a rank key."""
-    ses = result.round_adopted_level_ses
+    ses = result.round_parent_level_ses
     if not ses:
         return None
     # `origin_level` is deliberately absent: every arm on a cell replays the same round-0 rows,
     # so it is ONE shared measurement that cancels in `variant - origin`, and folding it into
     # each side counts it twice in a quantity it vanishes from.
     #
-    # Over the DISTINCT levels — `held_levels`' padding carries no measurement, so a 2-of-4-round
-    # cell contributes the precision of 2 rounds. Mean of the SEs, not `σ/√n`: the levels NEST,
-    # so dividing by n would manufacture power.
+    # Over the DISTINCT levels — `parent_level_series`' padding carries no measurement, so a
+    # 2-of-4-round cell contributes the precision of 2 rounds. Mean of the SEs, not `σ/√n`: the
+    # levels NEST, so dividing by n would manufacture power.
     return float(sum(ses) / len(ses))
 
 
@@ -154,8 +156,8 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
     if result.origin_level is None:
         return "its origin was never scored, so there is no floor to difference its rounds against"
-    if not result.round_adopted_levels:
-        return "it adopted no levels to difference against its origin"
+    if not result.round_parent_levels:
+        return "it held no parent levels to difference against its origin"
     return None
 
 
@@ -194,9 +196,9 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
     # unbounded quantities. The only divisor is the round budget the mean is taken over;
     # nothing normalizes for difficulty.
-    adopted = held_levels(result)
+    levels = parent_level_series(result)
     return OuterSampleProxies(
-        mean_round_delta=sum(adopted) / len(adopted) - result.origin_level,
+        mean_round_delta=sum(levels) / len(levels) - result.origin_level,
     )
 
 
@@ -246,10 +248,10 @@ def panel_precision(
     """``None`` below two cells both arms measured AND both priced — one cell has no spread to
     decompose, and a fabricated 0.0 would read as a perfect instrument."""
     # Level and SE are two reads, not one tuple. A FLOORED cell carries a real `mean_round_delta`
-    # of -1.0 and no adopted levels to have an SE over, so bundling them makes the SE optional —
+    # of -1.0 and no parent levels to have an SE over, so bundling them makes the SE optional —
     # and the corpus ranking, which wants only the level, then filters on a field it never asked
     # about, dropping exactly the cells that record the worst optimizer prompts.
-    level, se = OUTER_PROXY_KEYS[0], ADOPTED_LEVEL_SE_KEY
+    level, se = OUTER_PROXY_KEYS[0], PARENT_LEVEL_SE_KEY
     v_level, o_level = cell_values(variant_rows, level), cell_values(origin_rows, level)
     v_se, o_se = cell_values(variant_rows, se), cell_values(origin_rows, se)
     cells = sorted(v_level.keys() & o_level.keys() & v_se.keys() & o_se.keys())
@@ -263,9 +265,9 @@ def panel_precision(
 
 
 __all__ = [
-    "ADOPTED_LEVEL_SE_KEY",
     "INNER_FACT_KEYS",
     "OUTER_PROXY_KEYS",
+    "PARENT_LEVEL_SE_KEY",
     "InnerCellFacts",
     "InnerCycleUnscoreableError",
     "OuterSampleProxies",
@@ -273,9 +275,9 @@ __all__ = [
     "cell_values",
     "compute_outer_proxies",
     "floor_reason",
-    "held_levels",
     "inner_cell_facts",
-    "mean_adopted_level_se",
+    "mean_parent_level_se",
     "no_evidence_reason",
     "panel_precision",
+    "parent_level_series",
 ]

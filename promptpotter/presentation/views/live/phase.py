@@ -155,7 +155,7 @@ def render_round_stats(
             )
         )
 
-    # The 1-to-1 series: the adopted line read on the cells all of it has answered. It is the
+    # The 1-to-1 series: the parent line read on the cells all of it has answered. It is the
     # ONLY line here two rounds can be differenced on — every other number above is read on the
     # subset this round happened to buy. Silent until the line has a second member.
     if series := overlap_series(round_result.overlap):

@@ -2229,7 +2229,7 @@
                 "type": "null"
               }
             ],
-            "description": "Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant, cross-round-comparable series the trend plots. Carried by the round's WINNER only: it is a property of the advancing spine, and a losing sibling never joined it. Its accuracy-space predecessor was a mean over rows measured by different configurations and is gone; `accuracy` is what this node MEASURED.",
+            "description": "Ability of the parent lineage on the cycle's fixed δ ruler — the subset-invariant, cross-round-comparable series the trend plots. Carried by the round's WINNER only: it is a property of the advancing spine, and a losing sibling never joined it. Its accuracy-space predecessor was a mean over rows measured by different configurations and is gone; `accuracy` is what this node MEASURED.",
             "title": "Cumulative Theta"
           },
           "dataset_name": {

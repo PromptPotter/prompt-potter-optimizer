@@ -156,7 +156,7 @@ function fmtTheta(v: number | null): string {
 // it explains the percent instead of competing with it.
 //
 // `theta` arrives only when the picker is on `best`, because `ability_delta` is the
-// INCUMBENT's lift over origin — served per cycle, not per candidate. Showing it beside
+// PARENT's lift over origin — served per cycle, not per candidate. Showing it beside
 // another candidate's rate would caption one individual with another's number.
 //
 // The pair is subset-matched, which is why it may be read as a before/after at all. The

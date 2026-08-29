@@ -19,7 +19,7 @@ inner_benchmark: justlogic-d234
 # majority terminated ON the cap rather than on `inner_lives`, and most used every round. That is
 # not a defect: the cap IS the estimand. Every arm on the panel is graded on what it delivered
 # over this one budget, and `mean_round_delta` now divides by the budget rather than by the rounds
-# a cell happened to run (`domain/l4/proxies.py::held_levels`) — so a cell `inner_lives` stopped
+# a cell happened to run (`domain/l4/proxies.py::parent_level_series`) — so a cell `inner_lives` stopped
 # early is measured on the same denominator as one that ran the cap out, instead of being paid for
 # quitting. Raising it changes what the panel measures and costs proportional spend, so it is an
 # operator decision, not a tuning detail; read a delta as "lift under a 4-round budget", which is a
@@ -41,7 +41,7 @@ inner_benchmark_config:
 # RETIRED, each on the strongest evidence available for it — and NOT all on the same test.
 #   seed-1 — REWARDS COLLAPSE. Constant-answer floor 0.550 (exact) against origin reads of 0.525
 #     and 0.500: below on both, so a candidate that stops reasoning and answers a single label
-#     outscores the incumbent, every round.
+#     outscores the parent, every round.
 #   seed-5 — 11 of its 40 rows carried NO information (7 that nothing solved across 44-69
 #     measurements apiece, 4 that everything solved): a 16-row instrument at a 40-row price. And
 #     dropping it took the outer panel's residual from 0.134 to 0.100, where no other seed's

@@ -128,7 +128,7 @@ per-outcome choice to store.
 
 The fields that travel with each candidate cross-round are `domain/opt_search_point.py::L2L3Memory` — read the roster and each field's lifecycle off the model, which is frozen and cannot drift from itself.
 
-Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every incumbent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, which is the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads from `cycle.latest_round.critique`, the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
+Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, which is the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads from `cycle.latest_round.critique`, the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
 
 ## Mid-eval termination — what is and isn't healing
 

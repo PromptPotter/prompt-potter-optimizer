@@ -111,7 +111,7 @@ def _render_round_start(v: RoundStartView) -> str:
             "",
             _node_block(
                 "GENERATE",
-                f"Incumbent       {v.current_acc:.1%}",
+                f"Parent accuracy {v.current_acc:.1%}",
                 f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {v.n_variants}   Prior critique: {crit}",
                 f"Model           {v.model}",

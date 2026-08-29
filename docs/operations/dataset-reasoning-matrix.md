@@ -53,7 +53,7 @@ without a re-read. Rows marked ✅ were measured on JustLogic in the section bel
 | gpt-oss-120b               | baseline opt  | 33.3      | 216 tok/s          | 0.46s           | $0.037 / $0.170 | high / low / med  | |
 | GLM-4.7                    | Smarter opt   | 42.1      | 79.8 tok/s         | 0.84s           | $0.40 / $1.75 | reasoning | queued as an OUTER arm, unrun |
 | GLM-5.2                    | High-end opt  | 51        | 176 tok/s          | 1.50s           | unconfirmed | thinking-effort | excluded by operator decision — do not add to an arm list |
-| Nemotron 3 Ultra           | candidate opt | unknown   | 65 tok/s           | unknown         | $0.60 / $3.60 | unknown     | ~20× the incumbent optimizer's output price; the 65 tok/s makes it the likeliest speed-gate casualty |
+| Nemotron 3 Ultra           | candidate opt | unknown   | 65 tok/s           | unknown         | $0.60 / $3.60 | unknown     | ~20× the parent optimizer's output price; the 65 tok/s makes it the likeliest speed-gate casualty |
 | gpt-oss-20b                | Worker        | 61.1      | 265 tok/s          | 0.46s           | $0.030 / $0.130 | high / low | ✅ |
 | inclusionai/ling-3.0-flash | Fast worker    | unknown   | vendor: 1000 tok/s peak | <100 ms claimed | $0.075 / $0.220 | hybrid reasoning  | ✅ **out** — no structured-output support |
 | nemotron-3-nano-30b-a3b    | Agentic worker | unknown   | unknown | unknown | $0.050 / $0.200 | low  | ✅ |
@@ -74,7 +74,7 @@ panel bank — `draw_bank` samples, so a 10-draw is a different bank, not a pref
 | `openai/gpt-oss-20b:nitro` | **3.5s** | $0.0088 | 619 (453) | 95% | 9/20 | ✅ **retained** — fastest by 2×, and speed is axis 1 |
 | `mistralai/mistral-small-3.2-24b-instruct:nitro` | 6.8s | **$0.0053** | 325 (0) | 50% | 12/20 | cheaper *and* less degenerate, but ~2× the wall-clock — rejected on axis 1 |
 | `nvidia/nemotron-3-nano-30b-a3b:nitro` | 9.1s | $0.0207 | 2424 (2208) | 85% | 11/20 | rejected — the 3B-active speed advantage is spent on reasoning tokens |
-| `xiaomi/mimo-v2.5:nitro` | 17.9s (mean 25, max 92) | $0.1142 | 1358 (1039) | 50% | 18/20 | clearly the smartest; ~13× the cost and ~5× the latency. ~$6.4 per L4 C0 panel vs the incumbent's ~$0.49 |
+| `xiaomi/mimo-v2.5:nitro` | 17.9s (mean 25, max 92) | $0.1142 | 1358 (1039) | 50% | 18/20 | clearly the smartest; ~13× the cost and ~5× the latency. ~$6.4 per L4 C0 panel vs the parent's ~$0.49 |
 | `z-ai/glm-4.7-flash` | 35-40s then ReadTimeout, both routes | — | — | 100% | **dead** | returns `content_empty` + `finish_reason=stop` + 5352 reasoning chars, triggering a schema-repair re-prompt before timing out |
 | `inclusionai/ling-3.0-flash` | HTTP 405 | — | — | — | **dead** | DeepInfra: `json_schema response format is not supported` — every node here is schema-bearing |
 

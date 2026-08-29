@@ -163,7 +163,7 @@ class RunCallbacks:
             ElectionRecord(
                 round=round_result.round,
                 # `winner_id` is non-empty on a HELD round too — it names the retained
-                # incumbent, which is no candidate of THIS round, so the match fails and the
+                # parent, which is no candidate of THIS round, so the match fails and the
                 # crown is empty. The emptiness is in the match, never in the id.
                 winner_label=next(
                     (

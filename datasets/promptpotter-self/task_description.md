@@ -32,7 +32,7 @@ finding the discipline; do not hard-code task answers into it.
 ONE number, in ``campaign.yaml::scoring``:
 
 - ``mean_round_delta`` — the mean, over the inner rounds, of the ability the
-  incumbent that round ADOPTED, minus where the search started; in logits on one
+  parent that round ADOPTED, minus where the search started; in logits on one
   difficulty-adjusted ruler. Linearly re-anchored into [0,1].
 
 Better = the inner optimizer adopted a stronger prompt EARLY and kept it. The mean

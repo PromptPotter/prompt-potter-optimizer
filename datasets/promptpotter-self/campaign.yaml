@@ -12,7 +12,7 @@ campaign_config:
     - qwen/qwen3.8-27b:nitro
     - openai/gpt-oss-120b
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
-  # incumbent, so exploring costs nothing. The four-factor composite this replaces is described
+  # parent, so exploring costs nothing. The four-factor composite this replaces is described
   # in `domain/l4/proxies.py`; measured over a 39-cell panel, only this term discriminated
   # between optimizer prompts, and the quality factors carried more seed variance than arm variance
   # while holding authority over the ordering.

@@ -511,7 +511,7 @@ def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
     Read from the inner cycle rather than from the outer row's ``reasoning_trace`` sentence, which
     prints its levels at 2dp. Only the fields checked against that sentence cell-by-cell are
     written: ``rounds[].ability.theta`` reproduces the narrated origin and ending exactly on
-    every cell on disk, but its PEAK and its length do not — so it is the adopted frontier at the
+    every cell on disk, but its PEAK and its length do not — so it is the parent frontier at the
     endpoints and something else in between, and ``inner_peak_lift`` / ``inner_round_budget`` are
     left ABSENT rather than filled from a series that disagrees. ``inner_unworked_s`` is absent for
     a harder reason: only the spawner holding the cell's deadline ever measured it, and no file

@@ -8,7 +8,7 @@ data_characteristics: >-
   fields, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but improvement
   is real and infrequent.
 optimization_goals: >-
-  Maximize mean_round_delta (the MEAN, over inner rounds, of the ability the incumbent that
+  Maximize mean_round_delta (the MEAN, over inner rounds, of the ability the parent that
   round ADOPTED, minus its origin, in logits) on the inner benchmark. That is the whole score,
   and it averages the staircase rather than reading its last step: a lift bought in round 1 is
   worth more than the same lift bought in round 4. So winning edits make the inner optimizer
@@ -58,7 +58,7 @@ raw_description: |
   ONE number, in ``campaign.yaml::scoring``:
 
   - ``mean_round_delta`` — the mean, over the inner rounds, of the ability the
-    incumbent that round ADOPTED, minus where the search started; in logits on one
+    parent that round ADOPTED, minus where the search started; in logits on one
     difficulty-adjusted ruler. Linearly re-anchored into [0,1].
 
   Better = the inner optimizer adopted a stronger prompt EARLY and kept it. The mean

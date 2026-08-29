@@ -1,4 +1,4 @@
-"""The adopted line, read on one shared set of cells — see ``domain/results.py::OverlapReading``
+"""The parent line, read on one shared set of cells — see ``domain/results.py::OverlapReading``
 for what the reading means and why measuring the winner ALONE is unbiased."""
 
 from __future__ import annotations
@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.domain.results import (
-    AdoptedStep,
     OverlapMember,
     OverlapReading,
-    adopted_line,
+    ParentStep,
     choose_overlap_set,
-    incumbent_key,
     measured_cells,
     merge_known_outcomes,
+    parent_key,
+    parent_line,
 )
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
@@ -33,7 +33,7 @@ __all__ = ["measure_overlap"]
 async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample]
 ) -> None:
-    """Read this round's incumbent on the cells its whole line has already answered — buying only
+    """Read this round's parent on the cells its whole line has already answered — buying only
     the ones it is missing — and stamp the reading onto *round_result*.
 
     Called after the election, the ruler extension and the panel gate, so every decision this
@@ -44,12 +44,12 @@ async def measure_overlap(
     winner_id = round_result.winner_id
     if not winner_id:
         return
-    # The line INCLUDING this round: on a HELD round the subject is the retained incumbent, whose
+    # The line INCLUDING this round: on a HELD round the subject is the retained parent, whose
     # coverage this round's parent re-score just widened, and on a won round it is the new arm.
-    steps = adopted_line([*cycle.rounds, round_result])
-    # By CONFIGURATION, never by id: an L2/L3 transition re-mints the incumbent's OSP, so this
+    steps = parent_line([*cycle.rounds, round_result])
+    # By CONFIGURATION, never by id: an L2/L3 transition re-mints the parent's OSP, so this
     # round's `winner_id` can differ from the id the same configuration first arrived as.
-    key = incumbent_key(round_result)
+    key = parent_key(round_result)
     subject = next((s for s in steps if s.key == key), None)
     others = [s for s in steps if s.key != key]
     if subject is None or not others:
@@ -89,7 +89,7 @@ async def measure_overlap(
     round_result.overlap = OverlapReading(sample_ids=chosen, members=members, measured=len(fresh))
 
 
-def _member(step: AdoptedStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
+def _member(step: ParentStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
     on_set = [r for r in rows if (sid := r.get("sample_id")) is not None and int(sid) in keep]
     stats = _compute_accuracy(cast("list[QueryMeasurement]", on_set))
     return OverlapMember(
@@ -107,7 +107,7 @@ async def _measure_gaps(
     gaps: list[int],
     scoring_pool: list[Sample],
     *,
-    subject: AdoptedStep,
+    subject: ParentStep,
 ) -> list[dict[str, Any]]:
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 

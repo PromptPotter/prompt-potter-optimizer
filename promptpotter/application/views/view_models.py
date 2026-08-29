@@ -339,7 +339,7 @@ class RoundDigestView:
     ability: AbilityReading | None = None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
     verdict_reason: str | None = None
-    # The adopted line read on ONE shared set of cells — the only row in this view two rounds can
+    # The parent line read on ONE shared set of cells — the only row in this view two rounds can
     # be differenced on, since `accuracy` above is read on whatever subset the round bought.
     overlap: OverlapReading | None = None
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;

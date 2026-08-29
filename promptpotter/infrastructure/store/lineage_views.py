@@ -162,7 +162,7 @@ class LineageNode(StrictModel):
     )
     cumulative_theta: float | None = Field(
         default=None,
-        description="Ability of the adopted lineage on the cycle's fixed δ ruler — the "
+        description="Ability of the parent lineage on the cycle's fixed δ ruler — the "
         "subset-invariant, cross-round-comparable series the trend plots. Carried by the "
         "round's WINNER only: it is a property of the advancing spine, and a losing sibling "
         "never joined it. Its accuracy-space predecessor was a mean over rows measured by "
@@ -410,7 +410,7 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         close = closes.get(cand.round)
         if election is None and close is None:
             continue
-        # A HELD round adopted the incumbent, which is not among these — so nobody is crowned.
+        # A HELD round adopted the parent, which is not among these — so nobody is crowned.
         won = (
             election is not None
             and bool(election.winner_label)

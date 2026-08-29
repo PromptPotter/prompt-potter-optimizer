@@ -178,7 +178,7 @@ class RoundSummary(StrictModel):
     # Round-close degradation verdict, origin included. ``None`` only when the round measured
     # zero samples. Webapp/CLI render it; never recompute.
     health: DegradationHealth | None = None
-    # The adopted line read on ONE shared set of cells — C0 and every winner since, on the same
+    # The parent line read on ONE shared set of cells — C0 and every winner since, on the same
     # exam. `accuracy` above and this are not rivals: that one is the round's own subset, this one
     # is the only basis two rounds can be differenced on. `None` until the line has a second
     # member. Mirrors `RoundResult.overlap`; the rows behind it stay on the round

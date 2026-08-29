@@ -27,7 +27,6 @@ __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
-    "AdoptedStep",
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
@@ -39,6 +38,7 @@ __all__ = [
     "HeadlineMetric",
     "OverlapMember",
     "OverlapReading",
+    "ParentStep",
     "PayloadOutcome",
     "RoundParent",
     "RoundResult",
@@ -46,17 +46,17 @@ __all__ = [
     "ScoredCandidate",
     "SweepBatchResult",
     "WarningDict",
-    "adopted_line",
     "best_round_by_measured_accuracy",
     "candidate_label",
     "choose_overlap_set",
-    "incumbent_key",
     "is_electable",
     "is_leader_eligible",
     "is_round_winner",
     "measured_cells",
     "merge_known_outcomes",
     "overlap_series",
+    "parent_key",
+    "parent_line",
     "unscoreable_cells",
 ]
 
@@ -323,7 +323,7 @@ class RoundParent(StrictModel):
 
 
 class OverlapMember(StrictModel):
-    """One adopted incumbent, read on the round's overlap set."""
+    """One parent, read on the round's overlap set."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -341,7 +341,7 @@ class OverlapMember(StrictModel):
 
 
 class OverlapReading(StrictModel):
-    """The cells EVERY adopted incumbent has answered, and each one's rate over them.
+    """The cells EVERY parent has answered, and each one's rate over them.
 
     The comparison no other surface can make. Not a second fitness: a round's own accuracy is
     read on the subset that round bought, and the acquisition maximises information about one
@@ -350,7 +350,7 @@ class OverlapReading(StrictModel):
 
     REPORT-ONLY, and that is what makes measuring the winner ALONE unbiased. These rows reach no
     election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
-    incumbent would be better-identified than the arms it was judged against. The rows live on
+    parent would be better-identified than the arms it was judged against. The rows live on
     ``RoundResult.overlap_results``, outside ``results`` and
     ``all_candidate_results``, because those two are exactly where every one of those paths reads.
     """
@@ -364,15 +364,15 @@ class OverlapReading(StrictModel):
     # Adoption order — C0 first.
     members: list[OverlapMember] = Field(default_factory=list)
     # What this round PAID: the new winner on the cells its line had answered and it had not.
-    # Zero on a held round, since the retained incumbent is already on the set. Sole count of
+    # Zero on a held round, since the retained parent is already on the set. Sole count of
     # those rows — nothing re-derives it from the row list beside it.
     measured: int = 0
 
 
-class AdoptedStep(NamedTuple):
-    """One adopted incumbent and every cell the cycle has measured it on.
+class ParentStep(NamedTuple):
+    """One parent and every cell the cycle has measured it on.
 
-    ``key`` is :func:`incumbent_key` — the identity a caller must match a round against, since
+    ``key`` is :func:`parent_key` — the identity a caller must match a round against, since
     ``candidate_id`` is the id this configuration FIRST arrived as and a later round can carry
     the same configuration under a new one.
     """
@@ -385,7 +385,7 @@ class AdoptedStep(NamedTuple):
 
 
 def overlap_series(overlap: OverlapReading | None) -> str:
-    """The adopted line on one line — every member's rate over the SAME cells, plus what the
+    """The parent line on one line — every member's rate over the SAME cells, plus what the
     round paid to keep the set whole. Empty when there is no reading, so a caller appends
     nothing rather than printing a header over an absence."""
     if overlap is None or not overlap.members:
@@ -403,14 +403,14 @@ def measured_cells(rows: Sequence[Mapping[str, Any]]) -> set[int]:
     }
 
 
-def incumbent_key(rr: RoundResult) -> str:
-    """What makes two rounds' incumbents the SAME measurable individual: the configuration they
+def parent_key(rr: RoundResult) -> str:
+    """What makes two rounds' parents the SAME measurable individual: the configuration they
     are scored under — the prompt fields and the pipeline params, with ``lineage`` dropped.
 
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
     prompt strings — it writes ``l1_layout`` / ``l1_overrides`` / ``plan``, which steer the
-    OPTIMIZER, not the target prompt — so the incumbent's id changes while the thing being
-    measured does not. Keyed on the id, that put ONE configuration on the adopted line twice, at
+    OPTIMIZER, not the target prompt — so the parent's id changes while the thing being
+    measured does not. Keyed on the id, that put ONE configuration on the parent line twice, at
     the same rate by construction, the second time under a label naming no candidate. Keyed here,
     the two fold into one member, which is also what the measurement archive already believes:
     it is content-addressed on the node configs, so the re-measure cache-hit anyway.
@@ -429,11 +429,11 @@ def incumbent_key(rr: RoundResult) -> str:
     return stable_hash([fields, params])
 
 
-def adopted_line(rounds: Sequence[RoundResult]) -> list[AdoptedStep]:
-    """The campaign's adopted line — C0, then every round that adopted a different configuration
+def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
+    """The campaign's parent line — C0, then every round that adopted a different configuration
     — each member carrying the union of every cell the cycle measured it on, in adoption order.
 
-    ONE rule covers both round shapes: ``results`` belongs to the round's incumbent whether the
+    ONE rule covers both round shapes: ``results`` belongs to the round's parent whether the
     round crowned an arm or retained one, so a HELD round's parent re-score WIDENS that member's
     coverage instead of being lost. The overlap rows an earlier round paid for join it too — they
     are that individual's own measurement, quarantined from the decisions and from nothing else.
@@ -448,7 +448,7 @@ def adopted_line(rounds: Sequence[RoundResult]) -> list[AdoptedStep]:
         cid = rr.winner_id
         if not cid:
             continue
-        key = incumbent_key(rr)
+        key = parent_key(rr)
         first.setdefault(key, (rr.round, cid))
         merged = merge_known_outcomes(rows.get(key, []), list(rr.results))
         rows[key] = merge_known_outcomes(merged, list(rr.overlap_results))
@@ -456,7 +456,7 @@ def adopted_line(rounds: Sequence[RoundResult]) -> list[AdoptedStep]:
     # is a genuine anomaly rather than the routine L2 case, and a truncated id in its place would
     # be a hash the operator cannot join to anything on screen.
     return [
-        AdoptedStep(
+        ParentStep(
             key=key, round=rnd, candidate_id=cid, label=labels.get(cid) or f"R{rnd}", rows=rows[key]
         )
         for key, (rnd, cid) in first.items()
@@ -571,7 +571,7 @@ class RoundResult(StrictModel):
     # How many candidates actually entered the election — measured, leader-eligible, not
     # answer-collapsed. `candidates_scored` counts one step earlier, so the gap is exactly the
     # candidates carrying no measurement of ability at all. Zero is a DIFFERENT round from
-    # "everyone lost": nothing was compared against the incumbent, so it says l1_generate
+    # "everyone lost": nothing was compared against the parent, so it says l1_generate
     # produced no testable variant rather than that the search has stalled — which is what the
     # life bank reads it for.
     electable_count: int = 0
@@ -584,7 +584,7 @@ class RoundResult(StrictModel):
     # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
     # a parse failure yields no candidate to charge. One of the three constants above.
     l1_parse_failure: str | None = None
-    # The 1-to-1 reading of the adopted line on one shared set of cells, and the rows this round
+    # The 1-to-1 reading of the parent line on one shared set of cells, and the rows this round
     # bought to keep it whole. Two fields for the same reason `accuracy` and `results` are two:
     # one is what a reader is told, the other is what it was read off. The rows are HERE and not
     # in `results` / `all_candidate_results` by design — see `OverlapReading`. `None` before
@@ -705,20 +705,21 @@ class CycleResult(StrictModel):
     origin_accuracy: float
     origin_composite_fitness: float = 0.0
     # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
-    # ADOPTED — the CROWNED frontier, never the proposals, which turn the metric NEGATIVE for
-    # exactly the generators that explore. Both live in ONE space, so no proxy delta subtracts
-    # across scales, and levels are NOT floored at origin or the outer loses the gradient away
-    # from a regressing prompt. `origin_level` is `None`, not `0.0`, when the origin was never
-    # scored: a fabricated 0.0 reports the climb as an enormous improvement over nothing.
+    # The PARENT each round ended on — the winner it crowned, or the one carried forward when it
+    # crowned nobody — never the proposals, which turn the metric NEGATIVE for exactly the
+    # generators that explore. Both live in ONE space, so no proxy delta subtracts across scales,
+    # and levels are NOT floored at origin or the outer loses the gradient away from a regressing
+    # prompt. `origin_level` is `None`, not `0.0`, when the origin was never scored: a fabricated
+    # 0.0 reports the climb as an enormous improvement over nothing.
     origin_level: float | None = None
-    round_adopted_levels: list[float] = Field(default_factory=list)
-    # Index-aligned with the two above: a round that did not move the incumbent did not sharpen
-    # the reading of it either. The WITHIN-cell precision an L4 panel needs to tell estimation
-    # noise from between-cell heterogeneity. Precision only — never a penalty term.
+    round_parent_levels: list[float] = Field(default_factory=list)
+    # Index-aligned with the two above: a round that did not move the parent did not sharpen the
+    # reading of it either. The WITHIN-cell precision an L4 panel needs to tell estimation noise
+    # from between-cell heterogeneity. Precision only — never a penalty term.
     origin_level_se: float | None = None
-    round_adopted_level_ses: list[float] = Field(default_factory=list)
+    round_parent_level_ses: list[float] = Field(default_factory=list)
     # The denominator the L4 law averages over, and it must come from the config rather than
-    # ``len(round_adopted_levels)``: a cycle stopped early by ``lives`` adopted fewer levels, so
+    # ``len(round_parent_levels)``: a cycle stopped early by ``lives`` holds fewer levels, so
     # a mean over "rounds that happened" compares two estimands — and it points the wrong way,
     # since ``lives`` stops a STALLING cycle and the shorter series pays it for quitting once it
     # had lifted. 0 = never declared, and the law falls back to the series length.
@@ -797,6 +798,9 @@ HealthGrade = Literal["healthy", "degraded", "critical"]
 # a cause no producer emits is a type error rather than a notice that silently never renders.
 HealthCause = Literal[
     "origin_unmeasured",
+    # The origin measured SOME of its cells — distinct from `origin_unmeasured` (none) and `holed`
+    # (a rate, any round): the baseline every later round reads against is permanently short.
+    "origin_incomplete",
     "backend_unreachable",
     "structural",
     "unscoreable",

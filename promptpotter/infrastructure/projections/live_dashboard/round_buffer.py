@@ -121,7 +121,7 @@ class RoundBuffer:
         ``is_round_winner`` warns off — ``changes_description`` is the prose, and it can repeat.
 
         A HELD round crowns nobody, and the record says so by carrying an EMPTY label rather than
-        the retained incumbent's, which belongs to no slot of this round."""
+        the retained parent's, which belongs to no slot of this round."""
         for entry in self.candidates.values():
             label = str((entry.get("scores") or {}).get("label") or "")
             entry["is_winner"] = bool(winner_label) and label == winner_label

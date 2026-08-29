@@ -208,7 +208,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     delta = None if matched_parent_acc is None else w_acc - matched_parent_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
-        # BOTH move, or the candidate box renders an accuracy Δ against the new incumbent
+        # BOTH move, or the candidate box renders an accuracy Δ against the new parent
         # above a composite Δ against C0, under one word and with nothing to tell them apart.
         ctx.parent_accuracy = w_acc
         w_comp = d.get("winner_composite_fitness")

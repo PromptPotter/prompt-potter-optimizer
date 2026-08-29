@@ -135,7 +135,7 @@ describe("candidateObserveConfig", () => {
 // The two observe TARGETS. Both read served facts only — a crown (`is_winner`) and a
 // position — so neither may re-rank, and a round that crowned nobody must not have one
 // invented for it.
-describe("bestObserveTarget — the incumbent", () => {
+describe("bestObserveTarget — the parent", () => {
   const crowned = (round: number, winnerIdx: number, n: number) =>
     summaryRound({
       round,

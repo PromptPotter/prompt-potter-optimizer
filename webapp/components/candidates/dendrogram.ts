@@ -142,7 +142,7 @@ export function dendrogram(
     return rowRight.length - 1;
   };
 
-  // The incumbent — the winner of the last ADVANCING round. A held round crowns
+  // The parent — the winner of the last ADVANCING round. A held round crowns
   // nobody and so never becomes a parent: the next round still fans from this
   // same node. `is_winner` already carries the held-round fact (a held round has
   // no winner), so the flat spine is the only input this needs.

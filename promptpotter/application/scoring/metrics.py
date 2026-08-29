@@ -130,7 +130,7 @@ def matched_parent_stats(
     round_scorer: RoundScorer | str | None = None,
 ) -> dict[str, Any] | None:
     """``None`` unless the candidate measured EVERY cell the PARENT did — the origin at round 0 and the prior winner after,
-    never the origin throughout. Pairing does not rescue a truncated prefix — the shared cells ARE the incumbent's
+    never the origin throughout. Pairing does not rescue a truncated prefix — the shared cells ARE the parent's
     failures, so both halves are conditioned on what selected the subset."""
     parent_sids = {r.get("sample_id") for r in parent_results}
     if not parent_sids or not parent_sids <= {r.get("sample_id") for r in candidate_results}:

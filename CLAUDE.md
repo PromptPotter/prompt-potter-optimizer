@@ -77,6 +77,7 @@ Six *situational* guardrails against recurring AI blind spots live in [`docs/dev
 ## Commands
 
 ```bash
+# Every `python` below is the repo venv — `.venv\Scripts\python.exe` (Windows) / `.venv/bin/python`. Bare `python` is a PATH lottery, and the losing ticket is silent: a system interpreter imports promptpotter fine but not its dependencies, so a run starts, replays cache, spawns an inner campaign and only dies at the first live LLM call. `gate.py` re-execs to dodge this; the CLI cannot, because wrapping a run in a subprocess would break the Ctrl+C pause contract.
 pip install -e ".[all,dev]"                                  # add `,benchmarks` ONLY to fetch a public bank — opt-in, third-party surface
 python scripts/gate.py                                       # EVERY check CI runs, one invocation, nothing masking anything; re-execs itself into the locked env, so the verdict never depends on which python you had. --py / --web to halve it, --only NAME for the one check that owns what you touched
 git config core.hooksPath .githooks                           # one-time per clone: `gate.py --staged`, the same list scoped to what you staged

@@ -50,7 +50,7 @@ declare module "chart.js" {
   // Type param arity must match chart.js's own declaration to merge; unused here.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
-    barCaps?: { counts: (number | null)[]; incumbent: number | null; crown: string };
+    barCaps?: { counts: (number | null)[]; parent: number | null; crown: string };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     meanFitnessCiWhisker?: {
@@ -66,13 +66,13 @@ declare module "chart.js" {
 }
 
 // The strip above the bars — one pass, because both marks answer "what does this group need
-// said above it": the CROWN on the incumbent (one mark, not one per advancing round; the
+// said above it": the CROWN on the parent (one mark, not one per advancing round; the
 // per-round crowns are the dendrogram's job), and the sample COUNT only where
 // `partialPanels` judges it news.
 const CROWN = "♛";
 const barCapsPlugin: Plugin<
   "bar",
-  { counts: (number | null)[]; incumbent: number | null; crown: string }
+  { counts: (number | null)[]; parent: number | null; crown: string }
 > = {
   id: "barCaps",
   afterDatasetsDraw(chart, _args, opts) {
@@ -104,7 +104,7 @@ const barCapsPlugin: Plugin<
       ctx.fillStyle = getCss("--color-text-tertiary");
       ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
     });
-    const w = opts?.incumbent;
+    const w = opts?.parent;
     if (w != null && w >= 0) {
       const topY = topOf(w);
       if (Number.isFinite(topY)) {
@@ -401,12 +401,12 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [views, selectedKey, themeVersion]);
 
-  // The INCUMBENT — the last bar on the spine wearing a crown. Not `findIndex`: this chart
+  // THE PARENT — the last bar on the spine wearing a crown. Not `findIndex`: this chart
   // plots a whole timeline, so every advancing round has a winner and the first one is C0.
   // The per-round crowns stay legible as filled dots on the dendrogram directly beneath; up
   // here one mark answers "who holds the title now", which is the question the card is for.
   // Null on a view with nothing crowned — a held round, a course, a round still scoring.
-  const incumbentIdx = useMemo(() => {
+  const parentIdx = useMemo(() => {
     for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_winner) return i;
     return null;
   }, [views]);
@@ -417,12 +417,12 @@ export const FitnessChart = memo(function FitnessChart({
   // there would report a win the measurement does not support. The number is in the tooltip
   // either way; the crown alone is the honest caption when the round cannot say.
   const crown = useMemo(() => {
-    const v = incumbentIdx == null ? undefined : views[incumbentIdx];
+    const v = parentIdx == null ? undefined : views[parentIdx];
     const { matchedParentLift: lift, matchedParentLiftCiLo: lo, matchedParentLiftCiHi: hi } =
       v ?? {};
     if (lift == null || lo == null || hi == null || (lo <= 0 && hi >= 0)) return "";
     return ` ${fmtSigned(lift, 2)}`;
-  }, [views, incumbentIdx]);
+  }, [views, parentIdx]);
 
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     // BAR series only — the cache line sits on top of the group rather than inside it, so
@@ -435,7 +435,7 @@ export const FitnessChart = memo(function FitnessChart({
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
     // Per-bar outline. A hollow series keeps its own edge; the selected bar overrides it (it
-    // must match the dendrogram dot beneath). The incumbent deliberately gets none: on the
+    // must match the dendrogram dot beneath). The parent deliberately gets none: on the
     // elected series its fill already IS the accent, so a ring would be invisible and any
     // other colour would compete with the selection stroke and the in-flight pulse. Its
     // marks — the crown and the lit x-axis label — sit off the bar, where contrast is free.
@@ -514,10 +514,10 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements?.[0] ? "pointer" : "default";
     },
     scales: {
-      // The incumbent's own label lights up — the second half of its mark, and the half that
+      // The parent's own label lights up — the second half of its mark, and the half that
       // works: it sits in the axis gutter, so unlike a ring on a filled bar it has nothing to
       // lose contrast against, at any bar count and in either theme.
-      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === incumbentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === incumbentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
+      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === parentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === parentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
       // θ's own axis, declared only while the ability series shows — otherwise the
       // right-hand gutter (which every dendrogram fraction is measured against)
@@ -603,7 +603,7 @@ export const FitnessChart = memo(function FitnessChart({
           },
         },
       },
-      barCaps: { counts: partialPanels(views), incumbent: incumbentIdx, crown },
+      barCaps: { counts: partialPanels(views), parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       meanFitnessCiWhisker: {
@@ -614,7 +614,7 @@ export const FitnessChart = memo(function FitnessChart({
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, incumbentIdx, crown, onGeometry]);
+  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, onGeometry]);
 
   return (
     <div className="fitness-chart-frame">

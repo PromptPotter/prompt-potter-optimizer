@@ -159,7 +159,7 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 `build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts seed-MISS win-opportunities
 first (ascending δ) and slots seed-HIT regression probes every 4th position, so every arm ends
 `…1111111` and opens near zero. The late run is the bank, not momentum, and paired against an
-incumbent that also wins those rows it carries no information.
+parent that also wins those rows it carries no information.
 
 **The promotion gate and the PoBB posterior can disagree — they are asking different questions.**
 `p_better` is a **stopping** posterior (is more measurement worth buying?); `improved` is a
@@ -168,7 +168,7 @@ ruler — `headline_metric` is DISPLAY config, never what the gate compares. The
 disagree without either being broken. Read both, name both.
 
 **A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_parent_*` strata
-are defined by the *incumbent's own* grades, so on a truncated prefix the score is fixed by
+are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
 `⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
 covered the origin's panel, so a cut arm reports where it stopped plus its θ, never a standing.

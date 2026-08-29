@@ -12,8 +12,8 @@ its own prompts, at bounded and visible cost.
 
 ## The measurand
 
-`mean_round_delta` — the MEAN, over the inner rounds, of the incumbent each round **adopted**, minus the
-origin, in logits on one ability ruler (`exploration.py::adopted_level_trajectory`). `campaign.yaml::scoring`
+`mean_round_delta` — the MEAN, over the inner rounds, of the parent each round **adopted**, minus the
+origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring`
 re-anchors it `(x+1)/3`: linear, clipping nothing in the banked range, so the paired estimator's effect × 3
 IS the mean logit lift — a number to read, not merely to order by.
 
@@ -27,12 +27,16 @@ IS the mean logit lift — a number to read, not merely to order by.
   beat neither. It also matches what a healthy search looks like: lifting early and holding scores above
   reaching the same place in the last round.
 - **The denominator is the round BUDGET**, holding the last adopted level forward across rounds a cell
-  never ran (`domain/l4/proxies.py::held_levels`). Dividing by the series length makes the denominator a
+  never ran (`domain/l4/proxies.py::parent_level_series`). Dividing by the series length makes the denominator a
   per-cell quantity, and since `inner_lives` stops a *stalling* cell, the short series is the one that
   lifted early and went quiet — it would be divided by its own brake.
-- **No difficulty denominator.** Every level is a θ on the cycle's own fixed δ ruler, so two levels already
-  sit on one interval scale across seeds of different origin strength. Per-cell difficulty is modelled where
-  it belongs: the round-winner election and PoBB, which fit an explicit per-cell δ.
+- **No difficulty denominator.** Every level is a θ on ONE δ ruler shared by every cell of the panel, so two
+  levels already sit on one interval scale across seeds of different origin strength. Per-cell difficulty is
+  modelled where it belongs: the round-winner election and PoBB, which fit an explicit per-cell δ.
+  The sharing is what makes the sentence true and is not free — `application/runner/inner/ruler.py` fits the
+  scale at the outer round boundary and hands it down. A cell left to derive its own saw only its own arms
+  (its evidence epoch hides the rest), so the scale came out of the treatment: measured over 107 banked
+  cycles, byte-identical origin rows read at θ spread up to 1.201 logits.
 - **The row carries the seed's whole trajectory, and only ONE term of it scores.** An outer cell's
   `pipeline_data` holds `mean_round_delta` (the scored measurand) plus `InnerCellFacts`
   (`domain/l4/proxies.py`): that seed's origin level, where it ended, its peak, its round count,
@@ -81,13 +85,16 @@ exposed to.
   answering at round 0 where the ranking cannot: whether the campaigns' levels are comparable at all
   (`ruler_id`), which arms are replicates, the cell/subject/residual decomposition against the scatter a
   subject mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`
-  reports one round's estimation noise beside its observed between-cell spread, off `mean_adopted_level_se`.
+  reports one round's estimation noise beside its observed between-cell spread, off `mean_parent_level_se`.
   **Two bars, never their ratio**: the ratio shipped once as `estimation_share`, and `min(1.0, …)` rendered a
   raw 5.55 — noise claiming to exceed the spread it is a component of — as a tidy "100% measurement noise".
-- **There is no within-cell noise term, by design.** The inner instrument is content-addressed end to end, so
-  asking twice replays rather than re-measures and the spread is zero by construction. Manufacturing one
-  measures how noisy an LLM is on an identical request, which is not a quantity the loop can act on. Depth on
-  a specific candidate is `verify`'s job — it re-scores on MORE samples without touching the cycle.
+- **There is no within-cell noise term, by design** — and the claim is about the ESTIMATOR as much as the
+  rows, which is the half it silently did not cover. The inner instrument is content-addressed, so asking
+  twice replays rather than re-measures; but a replayed row still had to be READ, and while each cell fit its
+  own scale the reading moved even where the rows did not. Both halves are fixed now: same rows plus the
+  shared ruler above is the same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
+  request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
+  re-scores on MORE samples without touching the cycle.
 - **A cell that failed is not a cell that scored zero** (`scoring/selection.py::_scoreable`). The election
   grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not: at
   L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".

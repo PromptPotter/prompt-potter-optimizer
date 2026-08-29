@@ -403,7 +403,7 @@ def _check_l1_inner_steer_is_legal(
     (``max_rounds`` / ``lives`` / the spend ceiling), the same way ``model`` is the operator's.
 
     Level: an edit keyed to the seed panel renders nothing one level down, so it costs a candidate
-    and measures the incumbent. It is not wrong the way a bad hypothesis is wrong — it is unrunnable,
+    and measures the parent. It is not wrong the way a bad hypothesis is wrong — it is unrunnable,
     which the round has no way to report as anything but a flat result.
 
     The sibling of ``_check_l1_prompt_placeholders_intact``: that one forbids DELETING a channel,
@@ -447,17 +447,17 @@ L1_INNER_STEER_IS_LEGAL: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-# An override REPLACES its field whole, so a short replacement for a long incumbent is a deletion
-# of every contract the incumbent carried — and the generator is told to carry them forward, or to
+# An override REPLACES its field whole, so a short replacement for a long parent is a deletion
+# of every contract the parent carried — and the generator is told to carry them forward, or to
 # say in `changes_description` what it dropped and why. Nothing can read that prose, so the
 # measurable half is the collapse itself. Both constants are first estimates off the only gutted
-# candidates on disk (two at ~14% of their incumbent); a genuine tightening lands far above them,
+# candidates on disk (two at ~14% of their parent); a genuine tightening lands far above them,
 # and the floor keeps short fields — a 132-char `thinking_style` — out of reach entirely.
 _GUTTABLE_MIN_CHARS = 1000
 _GUT_RATIO = 0.35
 
 
-def _incumbent_field_text(node: str, field: str, pipeline_params: Mapping[str, Any] | None) -> str:
+def _parent_field_text(node: str, field: str, pipeline_params: Mapping[str, Any] | None) -> str:
     """What this field says BEFORE the candidate's edit — the parent's own override where it made
     one, else the manifest template. The same two-step the run resolves, so the length compared
     against is the text the generator was shown as CURRENT INNER OPTIMIZER PROMPTS."""
@@ -478,7 +478,7 @@ def _check_l1_prompt_field_not_gutted(
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Reject a replacement so much shorter than what it replaces that it cannot have carried the
-    incumbent's contracts forward. Distinct from ``_check_l1_prompt_placeholders_intact``, which
+    parent's contracts forward. Distinct from ``_check_l1_prompt_placeholders_intact``, which
     catches only the contracts spelled as ``{{slots}}``: everything else an inner optimizer prompt
     declares — the output shape, the forbidden moves, the evidence it must ground on — is ordinary
     prose, and deleting it raises nothing and reads as a bold edit.
@@ -493,15 +493,15 @@ def _check_l1_prompt_field_not_gutted(
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
                 continue
-            incumbent = _incumbent_field_text(node_name, field, pipeline_params)
-            if len(incumbent) < _GUTTABLE_MIN_CHARS:
+            parent = _parent_field_text(node_name, field, pipeline_params)
+            if len(parent) < _GUTTABLE_MIN_CHARS:
                 continue
-            if len(value) >= _GUT_RATIO * len(incumbent):
+            if len(value) >= _GUT_RATIO * len(parent):
                 continue
             failures.append(
                 ValidationFailure(
                     axis=f"{node_name}.{field}",
-                    value=f"{len(value)}B replaces {len(incumbent)}B",
+                    value=f"{len(value)}B replaces {len(parent)}B",
                     allowed=[],
                     reason="guts_inherited_contract",
                 )
