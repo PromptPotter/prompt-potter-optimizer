@@ -60,20 +60,35 @@ export function PromptFieldsEditor({
   // Fingerprint the incoming prompt; render-phase reset when it changes (e.g.
   // the check-in just populated it) so external updates flow in without a stale
   // frame. Local edits between resets are the operator's working copy.
+  //
+  // TWO latches, `ui/CommitInput`'s discipline over a record rather than a scalar: `prevFp` is
+  // "the prop moved", `sentFp` is "what was last handed UP", and one slot cannot tell them apart.
+  // The component itself is not reusable here — it commits one value, while this surface merges
+  // all six into ONE `edit-draft-campaign` patch, so six of them would make the wire chattier
+  // rather than quieter.
   const fingerprint = JSON.stringify(asStrings(value));
   const [prevFp, setPrevFp] = useState(fingerprint);
+  const [sentFp, setSentFp] = useState(fingerprint);
   const [fields, setFields] = useState<Record<string, string>>(() => asStrings(value));
   if (fingerprint !== prevFp) {
     setPrevFp(fingerprint);
+    setSentFp(fingerprint);
     setFields(asStrings(value));
   }
 
   const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
 
-  // Persist on blur — never when readonly. Merge over `value` so
-  // few_shot_examples / plan survive untouched.
+  // Persist on blur — never when readonly, and never for a value already sent: tabbing across the
+  // six boxes fired six identical `edit-draft-campaign` patches, each a CommandRecord on the
+  // check-in ledger for an edit nobody made. Merge over `value` so few_shot_examples / plan
+  // survive untouched.
   const commit = () => {
     if (readOnly || !onApply) return;
+    // Through `asStrings` so both sides of the compare are keyed in `FIELDS` order — comparing the
+    // raw state would make correctness depend on React preserving insertion order.
+    const draftFp = JSON.stringify(asStrings(fields));
+    if (draftFp === sentFp) return;
+    setSentFp(draftFp);
     const merged: Record<string, unknown> = { ...value };
     for (const f of FIELDS) merged[f.key] = fields[f.key];
     onApply({ origin_prompt_fields: merged });

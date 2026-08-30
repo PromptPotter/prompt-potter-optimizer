@@ -83,11 +83,9 @@ class TransitionResult:
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
     terminate_proposal: TerminateProposal | None = None
-    debug_prompt: str = ""
-    debug_response: dict[str, Any] | None = None
 
 
-ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
+ParseFn = Callable[[Any, OptSearchPoint], TransitionResult]
 ApplyFn = Callable[["Cycle", TransitionResult, int], None]
 PayloadFn = Callable[["Cycle"], dict[str, Any]]
 ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
@@ -104,7 +102,7 @@ class LayerStrategy:
     exit_payload_fn: ExitFn
 
 
-def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
     # An absent reason is REPORTED, never replaced. The placeholder that stood here read as a
     # sentence L2 had written, so the one surface carrying the fire forward said "refine_strategy
     # transition" whether L2 had diagnosed anything or not — and the empty state survived only as a
@@ -154,8 +152,6 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         l2_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
         terminate_proposal=raw.terminate_proposal,
-        debug_prompt=prompt,
-        debug_response=raw.model_dump(),
     )
 
 
@@ -212,7 +208,7 @@ L2 = LayerStrategy(
 )
 
 
-def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint) -> TransitionResult:
     new_plan = raw.plan or opt_sp.plan
     rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
     failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
@@ -230,8 +226,6 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
         l3_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
         terminate_proposal=raw.terminate_proposal,
-        debug_prompt=prompt,
-        debug_response=raw.model_dump(),
     )
 
 
@@ -334,7 +328,7 @@ async def _run_transition(
             node=transition.template_name,
         )
         try:
-            raw, prompt, _ = await run_optimizer_node(
+            raw, _, _ = await run_optimizer_node(
                 template_name=transition.template_name,
                 prompt_vars=prompt_vars,
                 template=template,
@@ -347,7 +341,7 @@ async def _run_transition(
                     injection_silent=tuple(injection_silent_panels(coverage)),
                 ),
             )
-            result = transition.parse(raw, cycle.opt_sp, prompt)
+            result = transition.parse(raw, cycle.opt_sp)
         except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
             # it kills the cycle — and under L4 that voids a whole outer sample, scoring one

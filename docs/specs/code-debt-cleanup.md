@@ -131,7 +131,7 @@ decisions → [`../architecture.md`](../architecture.md).
 - `cleanup-empty-cycles` — `CleanupEmptyCyclesPayload(campaign_id, cycle_id)` → `dispatch_cycle_command`.
 - `replace-dataset` — `ReplaceDatasetPayload(slug)` → `dispatch_workspace_command`. On a slug collision the CLI tells the operator to pick a different name (`new.py::SlugTakenError`) where the browser offers version-and-repoint.
 - `step-cycle` — `StepCyclePayload(campaign_id, cycle_id, rounds=1)` → `dispatch_cycle_command`. Has NO client at all, browser included, so today it is reachable only by hand-rolled HTTP.
-- ⚠️ **The mirror is wider and shares this blocker: the browser can watch a run and not answer it.** `pause` is the only control-plane verb the webapp fires — `resume`, `resume --from N`, `--fork-on-divergence`, `set-budget` and the lifecycle verbs have no browser half at all. The spend ceiling is the sharp case, because the tier-3 deploy is where a cloud operator lives: its own budget halts their cycle and the only continuation is `set-budget` then `resume` from a terminal they may not have. One invariant breached in both directions, so the grouping decision settles both at once — and [`chat-foundation.md`](chat-foundation.md) already specifies the shape (decisions surface as buttons firing existing verbs), which makes this wiring rather than design.
+- ⚠️ **The mirror is narrow, and the entry that stood here was wrong in the direction that stops anyone re-looking.** It claimed `pause` was the only control-plane verb the webapp fires and named a budget-halted cloud operator as the sharp case. `webapp/lib/api/commands.ts` exports **fifteen** posters — `postChangeSpendBudget`, `postStartRun(…, "resume")` and the three lifecycle verbs among them — so that sharp case is closed. What is genuinely absent from the browser is **two arms**: in-place rewind (`postStartRun` carries no `from_round`, and `postForkCycle` mints a fork rather than rewinding) and `--fork-on-divergence`. Both are `resume` shapes, so they land with the same grouping decision. **Recount before re-citing any figure here** — the posters build their URL as `` `${API}/commands/${kind}` ``, so a literal `commands/<kind>` grep sees three routes and misses twelve.
 - **Blocker: the UI grouping is being reworked, and a CLI verb should not be pinned to a coordinate the surface is about to move.** Land them once the grouping settles, so the terminal's vocabulary and the browser's read as one product rather than two.
 - **Deliberately no test.** A missing verb fails LOUD — argparse answers "invalid choice" — which is the `tests/CLAUDE.md` bar for not writing one. This entry is the ledger.
 - ⚠️ **`set-sample-lookahead` is NOT on this list and must never join it** — browser-only is the deliberate `<entry-point-parity>` inversion, and the absence IS the boundary (root `CLAUDE.md` § Conventions).
@@ -158,6 +158,39 @@ decisions → [`../architecture.md`](../architecture.md).
 **Needs a capability the closing directive does not open:**
 - **Nothing probes whether a route implements `response_format` before a run spends money** — an unsupporting model is discovered by paying for it (HTTP 405 outright, or empty content plus a burned schema-repair re-prompt). Same shape: swapping a model means hand-editing two `pipeline.yaml` lines and remembering to revert both, and a leaked pin mislabels the next run. Blocker: a probe and a swap-verb are both new capabilities.
 - **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` meters a fabricated ZERO** — it rebuilds `LLMResponse` with `usage` hardcoded to zeros after a `json_validate_failed` 400 that was already billed. The 400 body carries no `usage`, so the count is unrecoverable, and `unpriced_tokens` is the wrong home: it means price unknown, not count unknown. Never estimate from content length. Dormant — Groq-only, every configured provider is `openrouter`. Blocker: `TokenUsageRecord` has no unknown-count dimension, and the account gate leans on a count always being knowable.
+
+**Names that stopped describing what they name:**
+- **`sp_budget_ttest` names a t-test nothing has run since 2026-05-01.** Paired t-test → Wilcoxon (`689d5dec`) → Bayesian PoBB (`3fbaf215`); the knob survived all three. Live across `datasets/*/campaign.yaml`, `scripts/smoke_campaign.py`, `.claude/skills/potter-run/SKILL.md`, `test_numerics.py`, `test_integrity.py`. Action: rename writer→reader in one commit. Blocker: it is an on-disk config key under operator-curated `datasets/` — the rename is the operator's call, not a sweep's.
+- **`docs/specs/m12-api-openapi.yaml` / `m12-events-asyncapi.yaml` carry a milestone the repo retired** (`16934d29`, `61cbf5d8`). Action: drop the prefix. Blocker: reaches root `CLAUDE.md`, `presentation/CLAUDE.md`, `test_integrity.py`, ADR-0001 and the generated-spec build in one commit — a contract-surface change, not a rename.
+
+**Declared, no reader — each blocked on a served-surface decision, not on finding out:**
+- **`manifests.py::ConfigCoupling.estimand` and `.knobs`** ride `openapi.generated.json` + `types.generated.ts`, and the one consumer (`ConfigMapPanel.tsx`) renders `severity`/`labels`/`relation`/`consequence`/`active`/`name` and neither of these; no CLI reader either (`check_couplings` takes `Coupling` objects direct). Action: drop from the response model. Blocker: deleting a served field is a wire decision.
+- **`domain/ruler.py::DeltaRuler.anchored_at_round`** is required (no default), persisted in every `RulerRecord`, and read by nothing — the class docstring's own list of what an anchored extension needs omits it. Blocker: the per-candidate 0.0-floor state is in flight and touches `domain/ruler.py`; land that first or the two collide.
+- **`domain/results.py::CycleResult.origin_level_se`** — the L4 reader its own field comment names explicitly refuses it (`l4/proxies.py::mean_adopted_level_se`: *"`origin_level` is deliberately absent … folding it into each side counts it twice"*). Blocker: it rides `cycle_result_command`'s `model_dump()` into CLI `--json`, so it wants a decision rather than a deletion.
+- **`scoring/formula/matchers.py::SCORING_FUNCTIONS["relu"]` and `["smoothstep"]`** — no `campaign.yaml`, fixture or test uses either, and no doc names `SCORING_FUNCTIONS` or tabulates the DSL vocabulary, so an operator cannot discover them. Their five neighbours all land. Action: document the DSL or drop the two. Blocker: it is an operator-facing DSL — reach is a product call.
+
+**One rule, two languages, kept in sync by hand:**
+- **`config/settings.py::PROMPT_STRING_FIELDS` is hand-mirrored** at `webapp/lib/prompt-fields.ts` under a header saying it "MUST stay in sync" — the note beside a copy that `94d52a74` removed for `PipelineView`. `scripts/build_ts_types.py` already emits a non-model constant table (`STOP_REASON_LABELS`), so the machinery exists. Riding with it: **`webapp/lib/derivations/allowedModels.ts::overlaySetsModelOutsideAllowed` re-implements `domain/pipeline_overlay.py`'s predicate line-for-line**, node-config walk included, with a Vitest suite locking the TS side against itself — and it has already drifted, its header citing the Python function at `domain/opt_search_point.py`, where it does not live. Action: generate the constant; serve the predicate's verdict beside the fork affordance. Blocker: the second half is a new served field.
+
+**Concurrency semantics — a design question, not a wiring gap:**
+- **Launch admission runs on the API paths only, so a terminal run is invisible to the machine.**
+  `recover_pending_replacements` → `check_launch_quotas` → `_admit(job_registry.reserve(...))` is
+  the prologue in `jobs/launcher/mint_and_start.py` and `jobs/launcher/checkin.py`; the CLI reaches
+  `run_optimization` through `cli/commands/_shared.py::drive_cycle` and runs none of it. Verified
+  consequences: a terminal run holds no slot and never appears in `JobRegistry.list_running`, so the
+  browser will admit a second run on the same box — including **a second producer on the same
+  cycle**, since `_apply_start_run` has no live-producer check (only `_dispatch_delete_cycle`
+  consults `live_cycle_ids`); `User.max_concurrent_cycles` counts neither; and
+  `recover_pending_replacements` — whose own call site is commented *"a resumed cycle must not
+  resolve a pin a crashed Replace left dangling"* — never runs before a CLI `resume`.
+  **Explicitly NOT part of it:** the host-wallet arm is CLI-exempt by design
+  (`jobs/quota.py::lifetime_ceilings`, `::spends_the_hosts_own_key`), so this is the SLOT and the
+  Replace-heal, not the money. Precedent that the class is real: the reaper had the identical shape
+  and now runs from `campaign_runner.py::main::sweep_dead_cycles`.
+  **Why it is not simply "call the prologue from `drive_cycle`":** the CLI is a foreground process
+  the operator can Ctrl+C, and a reservation it fails to release wedges the box at capacity — so
+  what a terminal run should hold, and for how long, is a decision about the concurrency model
+  rather than a missing call. Settle that first.
 
 **Needs a live run, not a decision:**
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is reasoned, not seen. Repair a fork; confirm each corrected round carries its own `round:complete` on the branch.

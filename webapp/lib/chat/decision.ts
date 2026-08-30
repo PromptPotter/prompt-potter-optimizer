@@ -25,7 +25,7 @@ export interface DecisionItem {
   title: string;
   lead: string;
   // The origin verdict the gate holds on — round 0's backend-computed `health`
-  // block, the generated type (no loose re-parse; R-36: served, never recomputed).
+  // block, the generated type (no loose re-parse; served, never recomputed).
   verdict: DegradationHealth | null;
   buttons: DecisionButton[];
 }

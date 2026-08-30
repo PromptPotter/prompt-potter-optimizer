@@ -211,7 +211,7 @@ export function CandidatesCard() {
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
   // The shared served overlay — the node's own `lens_value` is the masked bar value
-  // (R-36, never recomputed here), and its divergence facts drive the boundary below.
+  // (never recomputed here), and its divergence facts drive the boundary below.
   const overlay = useViewedLineage();
   const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
 

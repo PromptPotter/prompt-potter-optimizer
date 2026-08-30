@@ -5,7 +5,7 @@
 // stays quiet — an amber chip per round, never a banner.
 //
 // Pure + reader-side: reads the backend-computed `health` verdict off each round
-// summary and never recomputes it (R-36). Sits in the Vitest derivation scope.
+// summary and never recomputes it. Sits in the Vitest derivation scope.
 
 import type { DegradationHealth } from "@/lib/api/types";
 import { fmtPct0 } from "@/lib/format";

@@ -78,7 +78,6 @@ function isWarming(d: unknown): d is WarmingSnapshot {
 export interface LiveCandidate {
   idx?: number;
   label?: string;
-  model?: string;
   // ONE shape, whatever the round's state — the served row, already graded by the producer,
   // so no reader re-derives a verdict the row states. It was a string tape here and dicts in
   // the audit twin, which is what forced the browser to regex a rendering.

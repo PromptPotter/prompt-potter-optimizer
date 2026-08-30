@@ -1,7 +1,8 @@
 /* L4 dashboard boxes — the outer pp-self loop's extra surfaces (outer verdict,
-   champion table, capability matrix), folded into the Dashboard tab and gated to
-   the outer loop. Theme-aware (reads tokens); leans operator/dense. Not shown to
-   whitelabeled end-users (they never run a self-optimizing campaign). */
+   the prompt-ranking readings table, the `ov-*` effect rows `compare.css` also
+   borrows), folded into the Dashboard tab and gated to the outer loop.
+   Theme-aware (reads tokens); leans operator/dense. Not shown to whitelabeled
+   end-users (they never run a self-optimizing campaign). */
 
 .l4-lede,
 .l4-note,

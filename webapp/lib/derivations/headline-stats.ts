@@ -9,7 +9,7 @@
 // its accuracy is the round-0 entry's accuracy. The candidate list
 // (round-candidates.ts) reads the same round-0 entry through the generic loop.
 
-import type { RoundSummary } from "@/lib/api/types";
+import type { LiveDashboardState, RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPct0 } from "@/lib/format";
 
@@ -20,7 +20,7 @@ import { fmtPct0 } from "@/lib/format";
 // client-overridable. `composite_fitness` is served on every settled row
 // (dashboard candidates AND `/tree` nodes), so all cycles honor the composite
 // selection on one basis.
-export type HeadlineMetric = "accuracy" | "composite" | "ability";
+export type HeadlineMetric = LiveDashboardState["headline_metric"];
 
 // The toggle's options, in display order, each with the teaching tooltip that
 // keeps θ from reading as an unexplained jargon number (the `AbilityInfo`
@@ -105,7 +105,7 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // `best` is the server-side rolling max of `rounds[].accuracy` — what each round
   // actually MEASURED (LiveDashboardView._absorb_round_complete is the sole writer;
   // it is NOT composite-based). `abilityDelta` is SERVED (`ability_delta`) — never
-  // recomputed here, so this chip and the L4 inner progress line read one number (R-36).
+  // recomputed here, so this chip and the L4 inner progress line read one number.
   // The two are on DIFFERENT bases now, deliberately: `best` answers "what did a round
   // measure", `abilityDelta` answers "how far above origin is the parent".
   const best = finite(dash?.best);

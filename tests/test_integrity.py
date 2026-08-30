@@ -2189,6 +2189,20 @@ def test_claude_md_claims_resolve() -> None:
         for label, pattern in _CLAUDE_BANNED.items():
             broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
 
+    # The `R-NN` half runs over CODE as well. It bans a citation of a registry that no longer
+    # exists, and that is true of a comment as much as of prose — where the line-number ban is a
+    # docs shape and stays one. `d2f7a4f5` retired the tags and gated only `docs/`, so ten tags
+    # sat in `.py`/`.ts` comments citing a registry deleted 2026-06-18, gate green throughout.
+    for rel in (
+        p
+        for p in tracked
+        if p.endswith((".py", ".ts", ".tsx", ".css", ".yaml")) and not p.startswith("docs/")
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        broken += [
+            f"{rel}: R-NN rule tag {hit!r}" for hit in _CLAUDE_BANNED["R-NN rule tag"].findall(text)
+        ]
+
     for rel in (p for p in tracked if p.endswith(".md")):
         text = (root / rel).read_text(encoding="utf-8")
         for target, anchor in _GITHUB_BLOB.findall(text):

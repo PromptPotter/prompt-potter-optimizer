@@ -350,8 +350,8 @@ def get_lineage_tree(
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``
     marker where that criterion would have elected someone else); ``lens=abort:<variant>``,
-    variant ∈ {``epsilon_off``, ``lock_in_off``, ``all_off``} = switch off a PoBB abort
-    contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
+    variant ∈ ``_ABORT_SUPPRESS`` (one ``<gate>_off`` per ``EliminationGate``, plus
+    ``all_off``) = switch off a PoBB abort contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.
 
     A shell, deliberately: resolve the path, build the view, serve it. The assembly rules

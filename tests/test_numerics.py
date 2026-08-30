@@ -2890,7 +2890,7 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
 
     AND it must NEVER auto-halt: the deterministic health→StopReason tripwire
     (the only one) must stay blind to ``evidence_starved`` — the stop authority
-    belongs to the intelligent tiers, not this backend-coupled signal (R-48)."""
+    belongs to the intelligent tiers, not this backend-coupled signal."""
     from promptpotter.application.runner.termination import backend_unreachable_tripped
     from promptpotter.domain.results_health import compute_round_health
 
@@ -2905,7 +2905,7 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     assert h.dominant_node == "web_search"
     assert h.node_failure_rates.get("web_search") == 0.5
     assert h.suggested_action and "web_search" in h.suggested_action
-    # The deterministic tripwire must NOT consume this signal — no auto-halt (R-48).
+    # The deterministic tripwire must NOT consume this signal — no auto-halt.
     assert backend_unreachable_tripped(h) is None
 
 

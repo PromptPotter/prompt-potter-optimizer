@@ -29,10 +29,11 @@ what may not happen here is § Out-of-bounds.
 ## No ad-hoc mutating routes
 
 **Add no mutating route touching campaign / cycle state** — that is
-Control-remote highway territory, and out of charter here. `api/` is
-read-only by design beyond the sanctioned endpoints listed below; webapp
-panels poll `dashboard.json` plus a few JSON endpoints and never drive
-the loop.
+Control-remote highway territory, and out of charter here. Every campaign-state
+write goes through `CommandDispatcher` and the sanctioned endpoints listed
+below; a route that writes beside it is the bug this section exists to stop.
+The webapp drives the loop through exactly those — it is a control plane, not
+a viewer.
 
 This is *not* a ban on every mutation in the codebase. **Identity-surface
 administration** (editing the sign-in blocklist, provider config) is a
@@ -52,9 +53,10 @@ operator-admin channel.
   command is appended to its target ledger (per-cycle, campaign root
   cycle, or workspace ledger at `projects/{tenant}/.workspace/events.jsonl`)
   as a `CommandRecord`; inline-applied; paired `CommandAckRecord` written
-  by the same dispatcher — every kind, cycle-scoped included. A separate
-  `RunnerCommandSubscriber` for the cycle-scoped acks was specified and
-  never written; nothing else has ever produced one.
+  by the same dispatcher — every kind, cycle-scoped included. **One writer for
+  both** — owned by
+  [`../../docs/adr/0001-m12-control-plane.md`](../../docs/adr/0001-m12-control-plane.md);
+  don't add a second ack producer here.
 - `POST /datasets/ingest` — multipart CSV upload; mints a durable `checkin` campaign and returns its `DraftCampaign` (`draft_id` IS the `campaign_id`; declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md` § Ingest + chat-first web). Workspace-scoped, identity-bound; the check-in shows in the sidebar + survives a restart, but nothing runs until the operator starts it via the separate `/commands/start-checkin` verb. Mutation verbs (`edit-draft-campaign`, `resolve-origin`) key on the `campaign_id` and persist to `campaigns/{id}/checkin/` via `CheckinDraftStore`.
 - `POST /datasets/draft/candidate-library` and its `/from-column` sibling — **ingresses, not write paths.** A multipart upload and a column name are two ways to *derive* a `candidate_library`; both hand the derived terms to `middleware/command_dispatcher.py::dispatch_draft_patch` and dispatch as `edit-draft-campaign`, so the edit is a `CommandRecord` on the check-in ledger. **Any** ingress mutating a draft outside that function is the bug this collapsed. It is not in a router, because a CLI verb cannot import one without FastAPI and writes a narrower copy instead; the RULES it applies are one layer further down (`application/datasets/draft_patch.py`), and only the record-and-apply order is ours.
 

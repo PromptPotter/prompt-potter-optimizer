@@ -22,7 +22,6 @@ class Sample(StrictModel):
     ground_truth: str
 
     # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
-    escalation_count: int = 0
     run_ids: list[str] = Field(default_factory=list)
 
     @classmethod

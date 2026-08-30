@@ -95,7 +95,7 @@ export function useLineage({
   // across sibling sandboxes, so every tree lookup and every overlay key rides this.
   path: CyclePath | null;
 }): Lineage {
-  // The shared tree from the single fetch both views render (R-36). The mask/lens
+  // The shared tree from the single fetch both views render. The mask/lens
   // fields are NOT re-exposed here — the card and `Forest` read the counterfactual
   // off the nodes themselves, so this hook owns only the value/fork/cleanup state.
   const { tree, index } = useViewedLineage();

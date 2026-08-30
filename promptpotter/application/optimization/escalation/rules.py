@@ -35,7 +35,7 @@ class EscalationInputs:
     l1_zero_candidates: bool = False
     # A node failed across ~all of the round's samples (evidence-starvation — accumulated, not
     # one fluke). A weak preemptor brings L2 in to diagnose; L2 self-heals or requests human
-    # action. It NEVER stops the loop here — the stop authority stays with the LLM tier (R-48).
+    # action. It NEVER stops the loop here — the stop authority stays with the LLM tier.
     evidence_starved: bool = False
 
 

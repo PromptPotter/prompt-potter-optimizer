@@ -1,8 +1,7 @@
 // Read endpoints — thin GET wrappers over the FastAPI surface.
 //
-// **The response shapes are GENERATED, not declared here.** They used to be ~25 hand-mirrored
-// interfaces that bypassed `scripts/build_ts_types.py` entirely — the same setup that let the
-// resource-matrix types drift two fields behind their model. Everything below imports from
+// **The response shapes are GENERATED, not declared here.** A hand-mirrored interface bypasses
+// `scripts/build_ts_types.py` and drifts behind its model silently. Everything below imports from
 // `./types`; adding a field to a Pydantic response model now reaches this file by regeneration.
 //
 // Three exceptions, each because the server has nothing to generate FROM, and each named so
@@ -399,8 +398,8 @@ export function fetchConfigMap(
 // a press instead of a poll.
 //
 // Every shape is GENERATED from the Pydantic source (`Evidence` &c in
-// `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`,
-// the same setup that let the resource-matrix types drift two fields behind their model.
+// `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`
+// and drifts behind the model silently.
 // `inside` is the sandbox chain the address lives in — the hops ABOVE the leaf, which for a
 // tree node is `coursePath.slice(0, -1)`. Empty for a top-level campaign; one hop per L4
 // recursion below it. It rides the same `campaign::cycle` codec as `?descend=` because it is the

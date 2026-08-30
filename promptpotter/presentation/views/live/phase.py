@@ -161,8 +161,8 @@ def render_round_stats(
     if series := overlap_series(round_result.overlap):
         lines.append(_node_line(f"overlap ({series})"))
 
-    # Degradation verdict — the served ``round_result.health`` (R-36: rendered,
-    # not recomputed). Loudness scales with grade; ``healthy`` stays silent.
+    # Degradation verdict — the served ``round_result.health`` (rendered, not
+    # recomputed). Loudness scales with grade; ``healthy`` stays silent.
     h = round_result.health
     if h is not None and h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
@@ -214,7 +214,7 @@ def render_round_stats(
                 )
     except Exception:
         # Resilient by design — a render glitch must not abort the live readout —
-        # but surface it (R-48 fail-loud), never swallow silently.
+        # but surface it (fail-loud), never swallow silently.
         logger.warning("round-stats render block failed; lines dropped", exc_info=True)
 
     return "\n".join(lines)
