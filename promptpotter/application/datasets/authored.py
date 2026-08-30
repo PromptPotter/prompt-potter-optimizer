@@ -16,6 +16,8 @@ from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
+from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
+from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.shared.errors import StoredConfigInvalidError
@@ -111,6 +113,19 @@ def load_dataset_campaign_config(
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
 
 
+def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
+    """The scorer a DATASET declares, for a reader that has no campaign of its own to ask.
+
+    Two callers, both grading archive rows outside any one campaign: the shared inner δ scale
+    (``runner/inner/ruler.py`` — the outer session's scorer names a measurand the inner rows do
+    not carry) and the dataset-scope heatmap. A campaign that HAS a scorer uses its own; this is
+    not a fallback for one that forgot to compile."""
+    spec = split_scoring_block(
+        load_dataset_campaign_config(dataset_campaign_path(dataset_dir)).scoring
+    )
+    return compile_scorer(spec.per_sample, spec.per_cell), spec.scorer_id
+
+
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     campaign_config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
 
@@ -133,4 +148,9 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     )
 
 
-__all__ = ["load_dataset_campaign_config", "read_authored_dataset", "read_campaign_config_file"]
+__all__ = [
+    "dataset_cell_scorer",
+    "load_dataset_campaign_config",
+    "read_authored_dataset",
+    "read_campaign_config_file",
+]

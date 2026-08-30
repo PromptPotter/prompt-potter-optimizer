@@ -26,6 +26,23 @@ def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+def dataset_declared_nodes(dataset_dir: Path) -> frozenset[str]:
+    """The node names the dataset's ``pipeline.yaml`` DECLARES — what this campaign can configure.
+
+    A discovered backend answers ``GET /pipeline`` with its WHOLE inventory, so without this the
+    schema carries every node that backend can serve and the optimizer prompt advertises levers the
+    campaign cannot pull.
+
+    Its sibling above keeps only nodes carrying a non-empty ``config``, which is the wrong question
+    here: a node declared ``config: {}`` is still the campaign's (every ``promptpotter-self``
+    optimizer node is one). Empty where the dataset ships no ``pipeline.yaml`` — "no opinion",
+    never "no nodes"."""
+    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    if not raw:
+        return frozenset()
+    return frozenset(raw.get("nodes") or {})
+
+
 def dataset_prompt_dir(dataset_dir: Path) -> Path:
     return dataset_dir / "prompts"
 

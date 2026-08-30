@@ -178,15 +178,13 @@ resolved_prompts:
     problem_description: ''
     instruction: >-
       THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} genuinely
-      distinct hypotheses for WHY the parent fails (different failure clusters or root causes from the
-      panels), then develop each one you can ground in a panel. Reach the full count: a round's chance
-      of finding a lift climbs steeply with the number of DISTINCT hypotheses it tests, so stopping at
-      one or two forfeits most of the round. What is forbidden is padding, not breadth — a slot filled
-      by restating an idea already on the board arrives as one this cycle already lost and is rejected
-      before it is ever scored, so the way to fill the last slot is a NEW hypothesis, never a reworded
-      one. One variant per failure cluster — the spread is carried by targets_cluster
-      (see answer_format), so spend your reasoning on each cluster's MECHANISM rather than on making the
-      set look varied. Spread across the
+      distinct hypotheses for WHY the parent fails, then develop each one you can ground in a panel.
+      Reach the full count: a round's chance of finding a lift climbs steeply with the number of
+      DISTINCT hypotheses it tests, so stopping at one or two forfeits most of the round. The critique
+      usually names FEWER clusters than you have slots — when it runs short, take the remaining
+      hypotheses from another panel and cite that panel. Never invent a cluster to fill a slot: a
+      target no panel shows is a guess wearing a citation. Spend your reasoning on each hypothesis's
+      MECHANISM, not on making the set look varied. Spread across the
       two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its
       output-schema `description` strings, which steer harder per token than the instruction; see answer_format).
       An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort)
@@ -201,8 +199,9 @@ resolved_prompts:
       If mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated:
       cut the weakest addition or rewrite leaner — do NOT pile on more. At wide (a measured stall, OR
       any round whose candidates regressed below the parent), abandon the attractor for a bold, categorically-different
-      AND leaner cognitive stance. The prompt becomes next round's parent and rides every call: keep it
-      lean.
+      AND leaner cognitive stance. Lean means the RESPONSE too: the prompt becomes next round's parent
+      and rides every call, so text it makes the solver EMIT is paid on every sample from here on —
+      accuracy bought by longer deliberation is usually the worse trade.
 
 
       GROUND EVERY CHOICE. Each evidence_grounding cites a real panel entry — no data justifying a mutation,
@@ -214,15 +213,15 @@ resolved_prompts:
       of the parent, or all-empty); params outside the catalogue; configs already in runtime_failures;
       fill-in-the-blank slots; unknown node or field names; any edit that drops or contradicts answer_format's
       output directives (the scorer parses those — break them and the candidate scores near 0 however
-      good its reasoning); and any variant that re-proposes an idea ALREADY TRIED shows was measured and
-      lost this cycle — moving that idea into a different field does not make it a new hypothesis, and
+      good its reasoning); and any variant re-proposing an idea the ALREADY TRIED panel shows was
+      measured and lost — moving that idea into a different field does not make it a new hypothesis, and
       the check reads your wording, not the field you put it in. If the panel marks an idea ↺, that direction
       is spent: propose a DIFFERENT hypothesis about why the failures happen.
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
         - "evidence_grounding": {field, citation}. field one of {{citable_fields}} — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
-        - "targets_cluster": the verbatim label of the ONE critique failure cluster this variant attacks; "none" when there is no critique yet. Two variants may NOT name the same cluster — the batch is one variant per cluster, which is where the round's spread comes from.
+        - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Two variants may NOT name the same target.
         - Three override slots; AT LEAST ONE NON-EMPTY. A variant that overrides nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.
           * "pipeline_params_override": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {"output_schema_descriptions": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one. A prompt-template field (persona, instruction, …) goes in prompt_fields_override and NEVER here, even where the catalogue lists it under a node: the same edit sent both ways is scored once and remembered twice, and the duplicate row makes an idea already tried read as untried.
           * "prompt_fields_override": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.

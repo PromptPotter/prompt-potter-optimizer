@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.prompts import (
+    dataset_declared_nodes,
     has_dataset_prompts,
     load_dataset_node_overlay,
     load_node_prompt,
@@ -139,6 +140,7 @@ def _resolve_active_schema(
     *,
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
+    dataset_dir: Path | None,
 ) -> tuple[list[str], PipelineSchema]:
     """``steps`` is two shapes under one word: here the BACKEND's ``list[dict]`` from ``GET
     /pipeline``, on ``pipeline_params`` the reserved ``list[str]`` of active node names."""
@@ -148,6 +150,15 @@ def _resolve_active_schema(
     filtered = pipeline_schema
     if exclude:
         filtered = pipeline_schema.filter_to_steps(active)
+    # A discovered backend answers with its whole inventory; the DATASET says which of those nodes
+    # are this campaign's. Unioned with the running chain so narrowing can only ever drop a node
+    # nothing executes — a dataset that declares fewer nodes than its own pipeline runs must not
+    # lose the difference. NOT `active_steps` alone: `promptpotter-self` declares `l2_context` and
+    # `l3_plan` off-chain on purpose, and they are the L4 arc's main mutation targets.
+    declared = dataset_declared_nodes(dataset_dir) if dataset_dir is not None else frozenset()
+    if declared:
+        keep = declared | set(filtered.active_steps)
+        filtered = filtered.filter_to_steps(sorted(keep))
     # Campaign search-space narrowing — the per-node param-lock + allowed-values
     # subset, peer to exclude (above). The dataset declares the max; the campaign
     # snapshot may only narrow it.
@@ -249,14 +260,15 @@ def configure_and_apply_pipeline(
 ) -> dict[str, Any]:
 
     exclude = list(campaign_config.exclude_nodes)
+    dataset_name = resolved_dataset_name(session, campaign_config)
+    dataset_dir = session.dataset_config_dir
+
     active, filtered = _resolve_active_schema(
         session.pipeline_schema,
         exclude=exclude,
         narrowing=campaign_config.optimizer_narrowing,
+        dataset_dir=dataset_dir,
     )
-
-    dataset_name = resolved_dataset_name(session, campaign_config)
-    dataset_dir = session.dataset_config_dir
 
     # The dataset→effective node-config merge (sparse `{steps}` base + dataset overlay +
     # campaign overrides) is the shared resolver — the SAME definition the prospective-origin
