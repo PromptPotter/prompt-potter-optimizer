@@ -459,6 +459,27 @@ def _emit_stop_reason_labels() -> str:
     )
 
 
+def _emit_abort_lens_labels() -> str:
+    """Emit ``ABORT_LENS_LABELS`` (domain/results.py) as the browser's abort-lens picklist.
+
+    Hand-authored twice before — ``CandidatesCard::LENS_OPTIONS`` and ``lib/lineage::LENS_LABELS``
+    — three members each against the four the API edge accepts, with two different words for the
+    ε one. Emitting it in ORDER matters: this is a picklist, and the dict's order is the order the
+    operator reads.
+    """
+    from promptpotter.domain.results import ABORT_LENS_LABELS
+
+    rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
+    return (
+        "// Abort-lens variant -> operator label, in picklist order. Mirror of\n"
+        "// domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
+        "// own `_ABORT_SUPPRESS` at import. Don't hand-list these.\n"
+        "export const ABORT_LENS_LABELS: Record<string, string> = {\n"
+        f"{rows}\n"
+        "};"
+    )
+
+
 def _emit_evaluator_meta() -> str:
     """Emit the evaluator registry (``application/scoring/evaluators.py``) as a TS const.
 
@@ -539,6 +560,7 @@ def main() -> int:
     blocks.append(_emit_command_kinds())
     blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_labels())
+    blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_evaluator_meta())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

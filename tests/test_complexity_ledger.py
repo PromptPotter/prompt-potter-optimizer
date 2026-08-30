@@ -15,9 +15,16 @@ LEDGER_BASELINE = {
     "settings_env": 31,
     "settings_const": 14,
     "opt_search_point_fields": 39,
-    "cycle_result_fields": 158,
+    # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of
+    # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
+    # than only on the round's scale reading. A served state, not a derived one: the rows a
+    # client would test are the per-sample arrays the candidate row exists to avoid shipping.
+    "cycle_result_fields": 159,
     "any_params": 50,
-    "domain_any_maps": 83,
+    # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
+    # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
+    # mapping, so a narrower annotation here would be a claim the callers cannot honour.
+    "domain_any_maps": 84,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,

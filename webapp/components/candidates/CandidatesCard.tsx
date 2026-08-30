@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
+import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
@@ -72,14 +73,19 @@ import type { CandidateView } from "@/lib/types";
 //
 // `heading` rows are optgroup labels; the rest are pickable. One flat list, so the
 // menu markup stays a map() instead of nested groups.
+// The abort half is DERIVED from the served vocabulary, not listed: hand-authored it carried
+// three of the edge's four variants, so `abort:collapsed_off` was reachable only by typing a URL
+// — the exact failure `_ABORT_SUPPRESS`'s own comment says deriving it from `EliminationGate`
+// prevents, defeated one layer up. The realized/scoring rows stay literal; they are not a gate set.
 const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
   { value: "", label: "Realized" },
   { heading: "Scoring" },
   { value: "score:accuracy", label: "Accuracy" },
   { heading: "Abort off" },
-  { value: "abort:epsilon_off", label: "No ε-elimination" },
-  { value: "abort:lock_in_off", label: "No lock-in" },
-  { value: "abort:all_off", label: "No early abort" },
+  ...Object.entries(ABORT_LENS_LABELS).map(([variant, label]) => ({
+    value: `abort:${variant}`,
+    label,
+  })),
 ];
 
 export function CandidatesCard() {
@@ -255,6 +261,13 @@ export function CandidatesCard() {
         overlapSize: overlap?.sample_ids.length ?? null,
       }),
     [viewedNode, inflightByLabel, sampleSet, mask, diagByLabel, overlapByCandidate, overlap],
+  );
+
+  // The arms whose θ is a floor constant rather than a reading. Off `views`, so it follows the
+  // same half of the payload the bars do and cannot disclaim a bar that is not on screen.
+  const floorPinned = useMemo(
+    () => views.filter((v) => v.thetaCaveat === "floor_pinned").map((v) => v.label),
+    [views],
   );
 
   const forkKeys = useMemo(() => forkKeysOf(viewedNode), [viewedNode]);
@@ -629,7 +642,21 @@ export function CandidatesCard() {
       <div className="fitness-body">
         {/* On the θ it invalidates, not behind the `⋯` disclosure: a reading that is not ability
             renders every number and raises nothing, so the screen has to say so unprompted. */}
-        {!areCourses && <ThetaCaveatNotice ability={history.at(-1)?.ability ?? null} />}
+        {!areCourses && (
+          <ThetaCaveatNotice
+            caveat={history.at(-1)?.ability?.caveat ?? null}
+            ability={history.at(-1)?.ability ?? null}
+          />
+        )}
+        {/* The per-ARM state, once for the round rather than once per bar: it is the same
+            sentence whichever arm pinned, and N copies of it would bury the scale caveat
+            above. Named arms, so the reader knows which bars to distrust. */}
+        {!areCourses && floorPinned.length > 0 && (
+          <>
+            <ThetaCaveatNotice caveat="floor_pinned" />
+            <div className="theta-caveat-arms">Affected: {floorPinned.join(", ")}.</div>
+          </>
+        )}
         {sampleSet && !areCourses && (
           <SampleSetControl rounds={history} overlap={overlap} unit={unit} />
         )}

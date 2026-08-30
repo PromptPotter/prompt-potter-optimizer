@@ -46,10 +46,16 @@ BAND_COLLAPSE_LOGITS = 1.0
 class ThetaCaveat(StrEnum):
     """A state in which θ is NOT ability — decided beside the ruler, never in a view.
 
-    All three render every number and raise nothing, so the round looks identical to a sound one.
+    All four render every number and raise nothing, so the reading looks identical to a sound one.
     WHICH one fired is the whole value, because the fix differs: one is an instrument, one is an
-    acquisition, one is the absence of a scale. The ABSENCE of a caveat is the fourth state, and
-    the only one where θ is ability.
+    acquisition, one is the absence of a scale, one is the arm itself. The ABSENCE of a caveat is
+    the fifth state, and the only one where θ is ability.
+
+    **Two SCOPES, one vocabulary.** The first three are facts about the ROUND's scale, decided by
+    :func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about
+    ONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because
+    the question a reader asks is identical — *may I read this θ as ability?* — and a second
+    vocabulary for it would be a synonym, not a channel.
 
     `docs/methods/verdict-resolution.md` § Reading a round."""
 
@@ -61,6 +67,12 @@ class ThetaCaveat(StrEnum):
     # The ACQUISITION: a warm, wide ruler, and this round bought a thin slice of it. The silent
     # one — the ruler id matches, the cell count is healthy, and every number renders.
     COLLAPSED_BAND = "collapsed_band"
+    # The ARM: it scored 0.0 on every cell it answered, so the fit has no response to separate
+    # ability from the prior and θ settles on the floor the δ vector and n imply. Per-CANDIDATE,
+    # so it rides the candidate row rather than the round's reading — and it is the one caveat
+    # that makes a LIFT unreadable rather than a level: every lift measured against a floor
+    # constant reads `0.000` whatever the arm did.
+    FLOOR_PINNED = "floor_pinned"
 
 
 def theta_caveat(
@@ -69,11 +81,16 @@ def theta_caveat(
     round_span: float | None,
     ruler_span: float | None,
 ) -> ThetaCaveat | None:
-    """Which of the three states this reading is in, or ``None`` where θ is genuinely ability.
+    """Which of the three SCALE states this reading is in, or ``None`` where θ is genuinely
+    ability on the evidence this function can see.
 
-    The SOLE decision: the served reading and the optimizer's ``confounds`` panel both call here,
-    or the screen and the generator disagree about whether a number means anything. Spans below
-    two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a narrow one.
+    The SOLE decision for those three: the served reading and the optimizer's ``confounds`` panel
+    both call here, or the screen and the generator disagree about whether a number means anything.
+    Spans below two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a
+    narrow one.
+
+    Never returns ``FLOOR_PINNED``: that one is a property of ONE ARM's responses, which are not an
+    input here. A round can be sound by this function and still carry a floor-pinned arm.
     """
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER

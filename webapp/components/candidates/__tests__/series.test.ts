@@ -27,6 +27,7 @@ function view(over: Partial<CandidateView>): CandidateView {
     composite: null,
     theta: null,
     theta_se: null,
+  thetaCaveat: null,
     meanFitnessCiLo: null,
     meanFitnessCiHi: null,
     matchedParentLift: null,

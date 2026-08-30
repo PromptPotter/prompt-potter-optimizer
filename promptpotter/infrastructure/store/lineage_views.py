@@ -12,6 +12,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     ForkDirection,
@@ -135,6 +136,13 @@ class LineageNode(StrictModel):
         "a lower-accuracy winner. Null outside the round's election fit.",
     )
     theta_se: float | None = None
+    theta_caveat: ThetaCaveat | None = Field(
+        default=None,
+        description="Why the theta above is not this arm's ability. Only ever `floor_pinned` — "
+        "the arm scored 0.0 on every cell it answered, so the fit had no response to separate "
+        "ability from the prior and every lift against it reads 0.000. The other three caveats "
+        "are properties of the round's scale and ride the round's own reading.",
+    )
     evaluators: dict[str, float] = Field(
         default_factory=dict,
         description="The candidate's stored evaluator namespace — the measurement a `score:` "
@@ -363,6 +371,7 @@ class _RoundFacts(NamedTuple):
     is_winner: bool = False
     theta: float | None = None
     theta_se: float | None = None
+    theta_caveat: ThetaCaveat | None = None
     matched_parent_lift: float | None = None
     matched_parent_lift_ci_lo: float | None = None
     matched_parent_lift_ci_hi: float | None = None
@@ -395,13 +404,14 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         # round 0's warm-ruler restamp arrives on. Everywhere else the two agree — same
         # `candidate_scores`, read twice — so the election's copy is simply the earlier one.
         ability = (close.abilities.get(cand.label) if close is not None else None) or LedgerAbility(
-            theta=fit.theta, theta_se=fit.theta_se
+            theta=fit.theta, theta_se=fit.theta_se, theta_caveat=fit.theta_caveat
         )
         out[cand.candidate_id] = _RoundFacts(
             election_held=election is not None,
             is_winner=won,
             theta=ability.theta,
             theta_se=ability.theta_se,
+            theta_caveat=ability.theta_caveat,
             matched_parent_lift=fit.matched_parent_lift,
             matched_parent_lift_ci_lo=fit.matched_parent_lift_ci_lo,
             matched_parent_lift_ci_hi=fit.matched_parent_lift_ci_hi,
@@ -725,6 +735,7 @@ def _candidate_node(
         is_winner=close.is_winner and retired_by is None,
         theta=close.theta,
         theta_se=close.theta_se,
+        theta_caveat=close.theta_caveat,
         superseded_by=retired_by,
         children=children,
     )

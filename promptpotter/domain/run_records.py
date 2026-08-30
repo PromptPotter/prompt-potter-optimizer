@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.ruler import AbilityReading, DeltaRuler
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -542,6 +542,10 @@ class LedgerAbility(StrictModel):
 
     theta: float | None = None
     theta_se: float | None = None
+    # This ARM's own reason θ is not ability — only ever ``FLOOR_PINNED``. Rides the base rather
+    # than :class:`LedgerFit` so the CLOSE carries it too: the tree prefers the close where it
+    # answers, and a θ arriving without the caveat that voids it is the silent half of the state.
+    theta_caveat: ThetaCaveat | None = None
 
 
 class LedgerFit(LedgerAbility):

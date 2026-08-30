@@ -17,7 +17,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import DegradationHealth, OverlapReading
-from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
@@ -105,6 +105,12 @@ class DashboardCandidate(StrictModel):
     # not carry rather than defaulting it to a position on the scale.
     theta: float | None = None
     theta_se: float | None = None
+    # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — only ever
+    # `FLOOR_PINNED`, since the other three are facts about the round's scale and ride
+    # `RoundResult.ability` once instead of being copied onto every row. Served rather than
+    # derived in the browser: the rows a client would test are the fat per-sample arrays the
+    # candidate row exists to avoid shipping.
+    theta_caveat: ThetaCaveat | None = None
     # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), folded off the
     # candidate's own rows by the scoring gateway (`search_point_scorer::_composite`) on every
     # sample, so it widens with the bar instead of arriving whole when the walk ends. ONE band per

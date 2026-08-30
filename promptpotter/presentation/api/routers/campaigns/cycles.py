@@ -16,7 +16,7 @@ from promptpotter.application.mask.verdicts import make_abort_verdict, make_scor
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
-from promptpotter.domain.results import EliminationGate
+from promptpotter.domain.results import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
@@ -57,6 +57,17 @@ _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
     **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
     "all_off": frozenset(g.value for g in EliminationGate),
 }
+
+# The picklist the browser offers must be exactly what this edge accepts. A LABEL cannot be
+# derived — it is copy — so the key set is asserted instead, at import: the browser's options are
+# emitted from `ABORT_LENS_LABELS` by `scripts/build_ts_types.py`, and a gate added to
+# `EliminationGate` without a word for it would otherwise be served and unofferable, which is how
+# `collapsed_off` spent its life reachable only by hand-typing a URL.
+assert set(ABORT_LENS_LABELS) == set(_ABORT_SUPPRESS), (
+    "abort-lens vocabulary drift: "
+    f"unlabelled {sorted(set(_ABORT_SUPPRESS) - set(ABORT_LENS_LABELS))}, "
+    f"unserved {sorted(set(ABORT_LENS_LABELS) - set(_ABORT_SUPPRESS))}"
+)
 
 
 def serve_dashboard_response(

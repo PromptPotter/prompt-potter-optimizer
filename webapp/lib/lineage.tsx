@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { failureKind, fetchLineageTree } from "@/lib/api";
+import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { LineageNode } from "@/lib/api/types";
 import { reportIncident } from "@/lib/diagnostics";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
@@ -28,11 +29,14 @@ import { useSelection } from "@/lib/SelectionContext";
 const POLL_MS = 5000;
 
 // Short label per preset lens for the mask tag.
+// The abort half comes from the served vocabulary. This list was the SECOND hand-authored copy —
+// three of four variants, and abbreviating two of the labels, so the same lens read as "No ε-elim"
+// in the chip and "No ε-elimination" in the picker that set it.
 const LENS_LABELS: Record<string, string> = {
   "score:accuracy": "Accuracy",
-  "abort:epsilon_off": "No ε-elim",
-  "abort:lock_in_off": "No lock-in",
-  "abort:all_off": "No abort",
+  ...Object.fromEntries(
+    Object.entries(ABORT_LENS_LABELS).map(([variant, label]) => [`abort:${variant}`, label]),
+  ),
 };
 
 export interface CampaignTree {

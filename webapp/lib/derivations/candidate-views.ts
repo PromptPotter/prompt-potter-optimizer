@@ -118,6 +118,9 @@ export function candidateViews({
       composite: isCourse ? null : (m.composite_fitness ?? null),
       theta: m.theta ?? null,
       theta_se: m.theta_se ?? null,
+      // Off the same half as the θ it qualifies — a caveat read from the other clock could
+      // disclaim a number that is no longer on screen, or leave the one that is undisclaimed.
+      thetaCaveat: m.theta_caveat ?? null,
       // From the same row as the bar above it, whichever half that was.
       meanFitnessCiLo: m.mean_fitness_ci_lo ?? null,
       meanFitnessCiHi: m.mean_fitness_ci_hi ?? null,

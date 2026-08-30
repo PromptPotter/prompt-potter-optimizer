@@ -11,7 +11,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | null;
+  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
 }
 
 /** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
@@ -29,6 +29,7 @@ export interface DashboardCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   matched_parent_accuracy: number | null;
@@ -80,6 +81,7 @@ export interface RoundSummaryCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   matched_parent_accuracy: number | null;
@@ -270,6 +272,7 @@ export interface ScoredCandidate {
   matched_parent_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
 }
@@ -289,6 +292,7 @@ export interface ScoreboardRow {
   mean_fitness_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
   matched_parent_lift: number | null;
   matched_parent_lift_ci_lo: number | null;
   matched_parent_lift_ci_hi: number | null;
@@ -1168,6 +1172,12 @@ export interface LineageNode {
    * lower-accuracy winner. Null outside the round's election fit. */
   theta: number | null;
   theta_se: number | null;
+  /** Why the theta above is not this arm's ability. Only ever `floor_pinned` — the
+   * arm scored 0.0 on every cell it answered, so the fit had no response to
+   * separate ability from the prior and every lift against it reads 0.000.
+   * The other three caveats are properties of the round's scale and ride the
+   * round's own reading. */
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
   evaluators: Record<string, number>;
@@ -1723,6 +1733,16 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'render_error': 'Render error',
   'diverged': 'Diverged',
   'optimizer_timeout': 'Optimizer timeout',
+};
+
+// Abort-lens variant -> operator label, in picklist order. Mirror of
+// domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's
+// own `_ABORT_SUPPRESS` at import. Don't hand-list these.
+export const ABORT_LENS_LABELS: Record<string, string> = {
+  'epsilon_off': 'No ε-elimination',
+  'lock_in_off': 'No lock-in',
+  'collapsed_off': 'No collapse cut',
+  'all_off': 'No early abort',
 };
 
 export interface EvaluatorMeta {

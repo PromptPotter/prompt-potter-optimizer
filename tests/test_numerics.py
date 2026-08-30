@@ -64,7 +64,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundResult, is_floor_pinned
 from promptpotter.domain.ruler import (
     AbilityReading,
     DeltaRuler,
@@ -75,7 +75,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import extract_item_label
+from promptpotter.domain.scoring import extract_item_label, is_answer_collapsed
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import RulerCoverageError
@@ -4118,6 +4118,46 @@ def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
     # Every arm refused — the round measured nothing it can attribute, so there is no instrument
     # reading. Reported as absence, never off the least-bad arm.
     assert summarize(hot).panel_precision is None
+
+
+def test_an_arm_at_zero_on_every_cell_is_floor_pinned_and_a_scale_verdict_is_not() -> None:
+    """The FOURTH state θ can be in, and the only per-ARM one.
+
+    An all-zero response vector carries no information about ability, so the fit falls back on the
+    prior and θ lands wherever the δ vector and n put it — a constant of the CELLS. Every lift
+    taken against it then reads `0.000` whatever the arm did, which is the damage: the level looks
+    merely bad, the comparison looks settled.
+    """
+    zeros = [{"sample_id": i, "objective": 0.0} for i in range(4)]
+    assert is_floor_pinned(zeros)
+    # ONE non-zero cell is a measurement, not a floor — the vector has variance to fit.
+    assert not is_floor_pinned([*zeros[:3], {"sample_id": 3, "objective": 0.25}])
+
+    # Absence is not a zero, in both directions. An arm that answered nothing is UNMEASURED, and
+    # an errored cell is absence too — counting either would pin an arm that never scored.
+    assert not is_floor_pinned([])
+    assert not is_floor_pinned([{"sample_id": 1, "error": "boom"}])
+    assert not is_floor_pinned([{"sample_id": 1}])
+    # …and an errored cell beside real zeros does not rescue the arm from the verdict either.
+    assert is_floor_pinned([*zeros, {"sample_id": 9, "error": "boom"}])
+
+    # Distinct from answer-collapse, which is a PoBB CUT: that one is about the arm saying one
+    # thing. An arm can be wrong on every cell while answering differently every time, and that is
+    # a real measurement — electable, scoreable, and still not a θ.
+    varied = [
+        {"sample_id": 0, "objective": 0.0, "predicted": "a", "ground_truth": "x"},
+        {"sample_id": 1, "objective": 0.0, "predicted": "b", "ground_truth": "y"},
+    ]
+    assert is_floor_pinned(varied)
+    assert not is_answer_collapsed(varied)
+
+    # The two SCOPES stay apart: `theta_caveat` reads the round's scale and cannot see an arm's
+    # responses, so a perfectly sound ruler still returns None while an arm on it is pinned.
+    assert theta_caveat(calibration_model="1PL", round_span=4.0, ruler_span=5.0) is None
+    assert ThetaCaveat.FLOOR_PINNED not in {
+        theta_caveat(calibration_model=m, round_span=r, ruler_span=s)
+        for m, r, s in [(None, 4.0, 5.0), ("1PL", 0.1, 5.0), ("1PL", 0.5, 0.5)]
+    }
 
 
 def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:

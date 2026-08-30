@@ -24,7 +24,9 @@ from promptpotter.domain.results import (
     DegradationContext,
     EliminationContext,
     ScoredCandidate,
+    is_floor_pinned,
 )
+from promptpotter.domain.ruler import ThetaCaveat
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +174,11 @@ def build_score_report(
     return ScoredCandidate(
         mean_fitness_ci_lo=score_summary.get("mean_fitness_ci_lo"),
         mean_fitness_ci_hi=score_summary.get("mean_fitness_ci_hi"),
+        # Decided HERE, from the rows, rather than beside the θ it qualifies: this is the one
+        # `ScoredCandidate` construction site, so stamping it at the election would miss round 0,
+        # which holds no election fit — and an ORIGIN at 0.0 on every cell is the instance that
+        # matters most, since every later round's lift is measured against it.
+        theta_caveat=ThetaCaveat.FLOOR_PINNED if is_floor_pinned(query_results) else None,
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

@@ -128,6 +128,7 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 # before it: the fit needs two arms, and a cold ruler stamps no θ at all.
                 theta=served.get("theta"),
                 theta_se=served.get("theta_se"),
+                theta_caveat=served.get("theta_caveat"),
                 matched_parent_accuracy=served.get("matched_parent_accuracy"),
                 matched_parent_composite=served.get("matched_parent_composite"),
                 matched_parent_lift=served.get("matched_parent_lift"),

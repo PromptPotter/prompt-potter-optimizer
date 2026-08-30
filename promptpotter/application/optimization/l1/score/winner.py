@@ -343,10 +343,12 @@ async def l1_score(
             continue
         cs_idx = cs_by_id[cid]
         cs = candidate_scores[cs_idx]
-        # θ and its SE only — the whisker is NOT rewritten here. A second estimator writing the
-        # same bounds reaches only the arms this loop reaches, so the band would appear and
-        # vanish by election gating rather than by evidence. One band, stamped at
-        # `candidate_scored`, is the whole mechanism.
+        # θ and its SE only — the whisker is NOT rewritten here, and neither is `theta_caveat`.
+        # A second estimator writing the same bounds reaches only the arms this loop reaches, so
+        # the band would appear and vanish by election gating rather than by evidence. One band,
+        # stamped at `candidate_scored`, is the whole mechanism — and the floor-pinned caveat is
+        # stamped there too, for the same reason plus one more: round 0 holds no election fit, so
+        # an origin scoring 0.0 on every cell would never be reached from here.
         candidate_scores[cs_idx] = cs.model_copy(
             update={"theta": theta_c, "theta_se": abilities.theta_se[cid]}
         )

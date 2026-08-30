@@ -2584,6 +2584,17 @@
             "description": "Difficulty-adjusted Rasch ability the election ranked on — what explains a lower-accuracy winner. Null outside the round's election fit.",
             "title": "Theta"
           },
+          "theta_caveat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaCaveat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the theta above is not this arm's ability. Only ever `floor_pinned` — the arm scored 0.0 on every cell it answered, so the fit had no response to separate ability from the prior and every lift against it reads 0.000. The other three caveats are properties of the round's scale and ride the round's own reading."
+          },
           "theta_se": {
             "anyOf": [
               {
@@ -4234,11 +4245,12 @@
         "type": "object"
       },
       "ThetaCaveat": {
-        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll three render every number and raise nothing, so the round looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale. The ABSENCE of a caveat is the fourth state, and\nthe only one where θ is ability.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
+        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll four render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the arm itself. The ABSENCE of a caveat is\nthe fifth state, and the only one where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first three are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
         "enum": [
           "cold_ruler",
           "flat_ruler",
-          "collapsed_band"
+          "collapsed_band",
+          "floor_pinned"
         ],
         "title": "ThetaCaveat",
         "type": "string"

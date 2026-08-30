@@ -100,6 +100,9 @@
 .theta-caveat{margin:0 0 var(--space-8);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 .theta-caveat strong{color:var(--color-text-primary)}
 .theta-caveat-spans{color:var(--color-text-tertiary)}
+/* Hangs under the notice it qualifies — same left inset, no second rule, so the two read as one
+   block rather than as two warnings. */
+.theta-caveat-arms{margin:calc(var(--space-8) * -1) 0 var(--space-8);padding:0 var(--space-8) var(--space-6) calc(var(--space-8) + 2px);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-tertiary)}
 /* The scoring mask opens to the RIGHT of the chart (side-by-side) inside the
    fitness card. .fitness-chart-wrap groups the legend + chart so the
    legend stays positioned above the bars (matching the Composite-only

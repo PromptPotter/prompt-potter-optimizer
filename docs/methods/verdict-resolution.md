@@ -95,15 +95,30 @@ reads the accuracy column and calls the election wrong, say which column the ele
 treat the inversion as a defect on their word.
 
 **States where θ is NOT ability, and the pushback above is wrong.** Count them off the list, not
-off this sentence — it said "two" while listing three:
+off this sentence — it said "two" while listing three, then listed three while the code served four.
 
-- **The 0% floor.** An arm that misses every cell gives the fit no information, so θ pins to the
-  same constant regardless of which samples it saw — every zero arm reads identically. At 0% the
-  column is a floor, not a measurement, and any lift computed from it is exactly `0.000`.
-- **A cold ruler.** Before the δ ruler warms, θ degenerates to logit-accuracy over the arm's own
-  subset and is not on the shared scale its name promises. Check `calibration_model` (`None` = cold)
-  and `ruler_id` — two θ readings are comparable only when their `ruler_id` matches.
-- **A collapsed band.** Acquisition buys the cells whose δ sits nearest the leader's θ, and against
+**All four are now SERVED as a `ThetaCaveat` (`domain/ruler.py`), so the screen and the optimizer's
+`confounds` panel read one verdict rather than each deciding.** They arrive on two carriers,
+because they are facts about different things: the three SCALE states are decided by
+`ruler.py::theta_caveat` and ride the round's `AbilityReading.caveat`; the 0% floor is decided by
+`results.py::is_floor_pinned` and rides the candidate row, since it is a property of one arm's
+responses. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
+
+- **The 0% floor** (`floor_pinned`, per-ARM). An arm that misses every cell gives the fit no
+  information, so θ pins to the same constant regardless of which samples it saw — every zero arm
+  reads identically. At 0% the column is a floor, not a measurement, and any lift computed from it
+  is exactly `0.000`. Distinct from an answer-COLLAPSED arm, which PoBB cuts: that one says a single
+  thing everywhere. An arm can answer differently every time and still be wrong every time, and
+  that is a real measurement — electable, scoreable, and still not a θ.
+- **A flat ruler** (`flat_ruler`). The instrument rather than the draw: the ruler's own δ span is
+  below `BAND_COLLAPSE_LOGITS`, so no round could have read wider and θ is accuracy plus a constant
+  however many cells it carries. This is what a ruler fitted on an all-zeros response matrix looks
+  like from the outside, which is how it went unseen — the collapsed-band check below is a RATIO,
+  and a globally flat ruler gives a ratio near 1.
+- **A cold ruler** (`cold_ruler`). Before the δ ruler warms, θ degenerates to logit-accuracy over
+  the arm's own subset and is not on the shared scale its name promises. Check `calibration_model`
+  (`None` = cold) and `ruler_id` — two θ readings are comparable only when their `ruler_id` matches.
+- **A collapsed band** (`collapsed_band`). Acquisition buys the cells whose δ sits nearest the leader's θ, and against
   a wide bank that collapses onto a razor-thin range — measured, 28 cells spanning 0.63 logits on a
   ruler spanning 11.4. Inside a band that narrow every cell is equally hard, so the 1PL fit reduces
   to `θ = logit(accuracy) + c` and the adjustment does no work: ranking on θ and ranking on accuracy
@@ -112,7 +127,9 @@ off this sentence — it said "two" while listing three:
   one is SILENT — the ruler is warm, `ruler_id` matches, every number renders.
   Check the round's own cells against the ruler's δ spread before trusting a θ lift: a panel whose
   δ all sit within a logit of each other carries no difficulty information to adjust for, so the
-  θ column there is logit-accuracy wearing a ruler's name.
+  θ column there is logit-accuracy wearing a ruler's name. The ratio is measured against the ruler,
+  so a flat ruler makes the yardstick the thing under test — which is why `flat_ruler` above is
+  checked FIRST and has an absolute floor rather than a ratio.
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads

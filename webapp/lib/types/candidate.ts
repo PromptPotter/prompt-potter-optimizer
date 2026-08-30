@@ -8,7 +8,14 @@
 // `round = 0` is the origin round (a single candidate, labelled "C0") — not a special row, just
 // the first round. Any `(round, idx)` is a candidate.
 
+import type { AbilityReading } from "@/lib/api/types";
+
 export type CandidateSource = "history" | "inflight";
+
+// Derived from the wire, never re-listed: the members are a Python `StrEnum` and a hand-written
+// union drifts the moment one is added — which is exactly what happened when `floor_pinned` was.
+// One declaration, so the copy map and the candidate row cannot disagree about the vocabulary.
+export type ThetaCaveat = NonNullable<AbilityReading["caveat"]>;
 
 export interface CandidateRow {
   // React + dedup key, stable across renders: "C0" for origin, `R${round}.${idx}` otherwise.
@@ -29,6 +36,10 @@ export interface CandidateRow {
   // than from its close; `null` before it, and for candidates outside the fit.
   theta: number | null;
   theta_se: number | null;
+  // Why that θ is NOT this arm's ability, served. Only ever `floor_pinned` — the other three
+  // members describe the round's SCALE and ride `RoundSummary.ability`, once, rather than being
+  // copied onto every bar.
+  thetaCaveat: ThetaCaveat | null;
   // The CI whisker (served): the normal-CLT mean interval over the candidate's own rows, folded by
   // the scoring gateway on every sample — so it widens with the bar from the first graded cell.
   meanFitnessCiLo: number | null;

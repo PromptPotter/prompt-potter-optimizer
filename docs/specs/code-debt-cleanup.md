@@ -57,21 +57,6 @@ decisions → [`../architecture.md`](../architecture.md).
   nothing on screen says so. Action: name the surface each one writes to *before* adding a surface;
   `descend=` may already answer the L4 half. Blocker: none.
 
-- **The three states where θ is NOT ability are not rendered beside the θ they invalidate.** The
-  layout half of this entry shipped: `overlap` is a first-class chip on the candidates card — show
-  the reading, then pick which cells it is read on, with the metric bars never leaving each
-  candidate's own — and the elected metric — served `headline_metric`, not a client guess — is now the
-  loud bar and the dendrogram's label (`candidates/series.ts::metricInkToken`,
-  `headline-stats.ts::primaryMetric`). **The two RULER states shipped**: `domain/ruler.py::
-  theta_caveat` is the one verdict, `AbilityReading.caveat` serves it beside the `round_span` /
-  `ruler_span` pair it was read from, `panels.py` calls the same function rather than re-deriving
-  it, and `ThetaCaveatNotice` renders it on the candidates card — silent unless live. What remains
-  is the THIRD state, which is not a ruler property at all: **an arm at 0.0 on every cell** pins to
-  a floor constant, so every lift against it reads `0.000` while θ and the bars render normally.
-  That one is per-CANDIDATE, so it belongs on the candidate row rather than on the round's
-  `AbilityReading` — which is why it did not ride the same change. Action: decide it where the
-  candidate is scored, serve it, and render it on the arm it invalidates. Blocker: none.
-
 - **"trajectory" still names two things it should not, and the candidates card has stopped being
   one of them.** The winner chain read on ONE shared set is `overlap` from disk to screen now, but
   two uses remain and each is its own PR. (1) `evidence.py::TrajectoryPoint` / `?trajectory=` /
@@ -170,7 +155,7 @@ decisions → [`../architecture.md`](../architecture.md).
 - **`scoring/formula/matchers.py::SCORING_FUNCTIONS["relu"]` and `["smoothstep"]`** — no `campaign.yaml`, fixture or test uses either, and no doc names `SCORING_FUNCTIONS` or tabulates the DSL vocabulary, so an operator cannot discover them. Their five neighbours all land. Action: document the DSL or drop the two. Blocker: it is an operator-facing DSL — reach is a product call.
 
 **One rule, two languages, kept in sync by hand:**
-- **`config/settings.py::PROMPT_STRING_FIELDS` is hand-mirrored** at `webapp/lib/prompt-fields.ts` under a header saying it "MUST stay in sync" — the note beside a copy that `94d52a74` removed for `PipelineView`. `scripts/build_ts_types.py` already emits a non-model constant table (`STOP_REASON_LABELS`), so the machinery exists. Riding with it: **`webapp/lib/derivations/allowedModels.ts::overlaySetsModelOutsideAllowed` re-implements `domain/pipeline_overlay.py`'s predicate line-for-line**, node-config walk included, with a Vitest suite locking the TS side against itself — and it has already drifted, its header citing the Python function at `domain/opt_search_point.py`, where it does not live. Action: generate the constant; serve the predicate's verdict beside the fork affordance. Blocker: the second half is a new served field.
+- **`config/settings.py::PROMPT_STRING_FIELDS` is hand-mirrored** at `webapp/lib/prompt-fields.ts` under a header saying it "MUST stay in sync" — the note beside a copy that `94d52a74` removed for `PipelineView`. `scripts/build_ts_types.py` already emits a non-model constant table (`STOP_REASON_LABELS`), so the machinery exists — and `ABORT_LENS_LABELS` is now a worked precedent for retiring a hand-mirror with it, key set asserted against its consumer at import. Riding with it: **`webapp/lib/derivations/allowedModels.ts::overlaySetsModelOutsideAllowed` re-implements `domain/pipeline_overlay.py`'s predicate line-for-line**, node-config walk included, with a Vitest suite locking the TS side against itself — and it has already drifted, its header citing the Python function at `domain/opt_search_point.py`, where it does not live. Action: generate the constant; serve the predicate's verdict beside the fork affordance. Blocker: the second half is a new served field.
 
 **Concurrency semantics — a design question, not a wiring gap:**
 - **Launch admission runs on the API paths only, so a terminal run is invisible to the machine.**

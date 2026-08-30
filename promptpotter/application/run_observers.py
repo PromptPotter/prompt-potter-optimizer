@@ -116,7 +116,12 @@ def _round_abilities(round_result: RoundResult) -> dict[str, LedgerAbility]:
     return {
         cs.label: ability
         for cs in round_result.candidate_scores
-        if (ability := LedgerAbility(theta=cs.theta, theta_se=cs.theta_se)) != LedgerAbility()
+        if (
+            ability := LedgerAbility(
+                theta=cs.theta, theta_se=cs.theta_se, theta_caveat=cs.theta_caveat
+            )
+        )
+        != LedgerAbility()
     }
 
 
@@ -133,6 +138,7 @@ def _round_fit(round_result: RoundResult) -> dict[str, LedgerFit]:
             fit := LedgerFit(
                 theta=cs.theta,
                 theta_se=cs.theta_se,
+                theta_caveat=cs.theta_caveat,
                 matched_parent_accuracy=cs.matched_parent_accuracy,
                 matched_parent_composite=cs.matched_parent_composite,
                 matched_parent_lift=cs.matched_parent_lift,

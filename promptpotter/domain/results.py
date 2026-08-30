@@ -16,7 +16,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.spend import SpendRollup
@@ -24,6 +24,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
 
 __all__ = [
+    "ABORT_LENS_LABELS",
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
@@ -50,6 +51,7 @@ __all__ = [
     "candidate_label",
     "choose_overlap_set",
     "is_electable",
+    "is_floor_pinned",
     "is_leader_eligible",
     "is_round_winner",
     "measured_cells",
@@ -70,6 +72,19 @@ class EliminationGate(StrEnum):
     EPSILON = "epsilon"  # posterior fell below ε — measurement stopped, NOT a verdict
     LOCK_IN = "lock_in"  # the opposite verdict: far enough ahead to stop buying
     COLLAPSED = "collapsed"  # one label for every sample — the ABSENCE of a measurement
+
+
+# The operator's word for switching one gate off, keyed by the `abort:` lens variant the API edge
+# accepts (`routers/campaigns/cycles.py::_ABORT_SUPPRESS`, which derives its keys from the same
+# enum). Here rather than in the browser because the picklist was hand-authored TWICE, three
+# members against the four the edge serves — so `abort:collapsed_off` was reachable only by typing
+# a URL, and the two copies disagreed about what to call the first one.
+ABORT_LENS_LABELS: dict[str, str] = {
+    f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
+    f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
+    f"{EliminationGate.COLLAPSED.value}_off": "No collapse cut",
+    "all_off": "No early abort",
+}
 
 
 class EliminationContext(TypedDict, total=False):
@@ -240,6 +255,11 @@ class ScoredCandidate(StrictModel):
     # candidate saw, so it explains a lower-accuracy winner. `None` outside the election fit.
     theta: float | None = None
     theta_se: float | None = None
+    # SERVED, never re-derived: this ARM's own reason θ is not ability, or ``None``. Only ever
+    # ``FLOOR_PINNED`` — the other three ``ThetaCaveat`` members are facts about the round's scale
+    # and ride ``RoundResult.ability`` instead, once, rather than copied onto every arm. Stamped at
+    # the election beside ``theta``, from the same rows the fit read.
+    theta_caveat: ThetaCaveat | None = None
     # Normal-CLT CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
     # accuracy's own fold, so it brackets accuracy whatever the active composite formula is, which
     # is why it is not named for the composite. Present for any candidate with ≥1 scored cell,
@@ -312,6 +332,7 @@ _SCOREBOARD_INCLUDE: set[str] = {
     # for a bug in a round that was decided correctly.
     "theta",
     "theta_se",
+    "theta_caveat",
     "matched_parent_lift",
     "matched_parent_lift_ci_lo",
     "matched_parent_lift_ci_hi",
@@ -341,6 +362,10 @@ class ScoreboardRow(StrictModel):
     # shared cells. Ranking reads ``theta``, so the row and its rank cannot disagree.
     theta: float | None
     theta_se: float | None
+    # Carried so the round FILE and the live dashboard answer the same way: `round-candidates.ts`
+    # reads this table when the round has closed, so an absence here would show a floor-pinned arm
+    # disclaimed while in flight and clean once persisted.
+    theta_caveat: ThetaCaveat | None
     matched_parent_lift: float | None
     matched_parent_lift_ci_lo: float | None
     matched_parent_lift_ci_hi: float | None
@@ -450,6 +475,24 @@ def measured_cells(rows: Sequence[Mapping[str, Any]]) -> set[int]:
     return {
         int(sid) for r in rows if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     }
+
+
+def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether every cell this arm ANSWERED graded 0.0 — :class:`ThetaCaveat.FLOOR_PINNED`.
+
+    A response vector with no variance carries no information about ability, so the fit falls back
+    on the prior and θ settles wherever the δ vector and n put it. That value is a constant of the
+    CELLS, not a reading of the arm, and the damage lands on the lift: every difference taken
+    against a floor constant reads `0.000` however the arm actually behaved.
+
+    Distinct from ``scoring.py::is_answer_collapsed``, which is about the arm saying ONE THING and
+    is a PoBB cut. An arm can be floor-pinned while answering differently every time — that is
+    simply an arm getting everything wrong, which is measurable, electable, and still not a θ.
+    Errored cells are excluded: they are absence, and ``graded_response`` raises on an unstamped
+    row rather than reading it as a zero, so a 0.0 reaching here was really scored 0.0.
+    """
+    graded = [r for r in rows if not is_error_result(r) and "objective" in r]
+    return bool(graded) and all(float(r["objective"] or 0.0) <= 0.0 for r in graded)
 
 
 def parent_key(rr: RoundResult) -> str:
