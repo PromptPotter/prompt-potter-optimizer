@@ -1,0 +1,13 @@
+persona: >-
+  You judge what someone will enjoy from a short list of things they already like.
+task_intent: >-
+  Read the titles this person likes, then order the candidates by how much they would like each.
+problem_description: ''
+instruction: >-
+  Put every candidate in order, best first. Use all of them exactly once. Do not add titles that
+  are not among the candidates.
+thinking_style: Decide quickly. Read what the liked titles have in common and order the candidates by it.
+answer_format: >-
+  Respond with the candidate titles, one per line, best first, copied exactly as they were given.
+  Nothing before or after the list — no numbering, no year, no explanation, no commentary on the
+  same line as a title.

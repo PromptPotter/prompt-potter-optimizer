@@ -1,0 +1,10 @@
+campaign_config:
+  dataset_name: screen-taste-v0
+  scoring: list_rr(predicted, ground_truth)
+  exclude_nodes: []
+  optimization:
+    l1_patience: 3
+    max_rounds: 7
+    n_variants: 3
+    degradation_threshold: 0.4
+    spend_budget_usd: 0.30

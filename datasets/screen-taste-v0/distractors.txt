@@ -1,0 +1,66 @@
+# The slate's WRONG answers — widely-known titles this person did not list. One per line.
+#
+# Deliberately spread across taste profiles rather than picked to be "not their kind of
+# thing": a distractor set with one shape teaches the model to spot that shape instead of
+# reading the person, which scores well and means nothing. Overlap with titles/txt is
+# checked by build_rows.py, which refuses to run on a collision.
+Avatar
+The Avengers
+Titanic
+Forrest Gump
+The Notebook
+Love Actually
+Bridesmaids
+The Hangover
+Jurassic Park
+Top Gun
+Rocky
+Home Alone
+Frozen
+Toy Story
+The Lion King
+Shrek
+Harry Potter and the Philosopher's Stone
+Twilight
+The Fast and the Furious
+Mission: Impossible
+Gladiator
+Braveheart
+The Departed
+Goodfellas
+The Silence of the Lambs
+Se7en
+Django Unchained
+No Country for Old Men
+There Will Be Blood
+La La Land
+Whiplash
+Black Swan
+Call Me by Your Name
+Lady Bird
+Moonlight
+The Revenant
+Mad Max: Fury Road
+Dunkirk
+Interstellar
+Arrival
+Get Out
+Hereditary
+The Conjuring
+A Quiet Place
+Knives Out
+The Grand Budapest Hotel
+Amelie
+Life Is Beautiful
+Cinema Paradiso
+Crouching Tiger, Hidden Dragon
+Oldboy
+Train to Busan
+Your Name
+Spirited Away
+Breaking Bad
+The Office
+Friends
+Stranger Things
+The Crown
+Ted Lasso

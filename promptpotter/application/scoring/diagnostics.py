@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import extract_item_label
+from promptpotter.shared import text_list_items, text_list_rank
 from promptpotter.shared.errors import has_pipeline_warnings
 
 if TYPE_CHECKING:
@@ -22,7 +23,23 @@ __all__ = [
     "count_degraded_samples",
     "extract_sample_diagnostics",
     "find_rank",
+    "rank_ground_truth",
 ]
+
+
+def rank_ground_truth(
+    ranked: Sequence[Any], predicted: str, ground_truth: str
+) -> tuple[int | None, int]:
+    """Where the held-out item landed in one measured row, and how many candidates it was ranked
+    among — the ONE answer both the measurement producer and ``compare_rerun`` read.
+
+    Two shapes reach here. A node emitting ITEMS is walked as objects. A node emitting its whole
+    ordered list as a single text blob (``llm_only``) is read the way the scorer reads it, since
+    ``predicted`` IS that list — walked as one object it reports not-found and a single candidate
+    for every row of a pipeline that is answering correctly."""
+    if len(ranked) == 1 and "\n" in predicted:
+        return text_list_rank(predicted, ground_truth), len(text_list_items(predicted))
+    return find_rank(list(ranked), ground_truth), len(ranked)
 
 
 def find_rank(items: list[Any], ground_truth: str) -> int | None:

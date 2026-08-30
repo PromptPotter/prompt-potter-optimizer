@@ -11,6 +11,7 @@ from promptpotter.shared import (
     extract_gsm8k_number,
     extract_last_bold,
     sigmoid,
+    text_list_rank,
 )
 
 
@@ -44,6 +45,17 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if pred == gt else 0.0
 
 
+def _list_rr(predicted: str, ground_truth: str) -> float:
+    """Reciprocal rank of ``ground_truth`` within a LIST the model returned, else 0.0.
+
+    The recommendation shape: the answer is not one label but an ordered set, and the held-out
+    item is either somewhere in it or not. Graded rather than binary on purpose — naming the
+    right film first and naming it tenth are different answers, and a hit/miss matcher would
+    hand the optimizer the same number for both."""
+    rank = text_list_rank(predicted, ground_truth)
+    return 1.0 / rank if rank else 0.0
+
+
 def _exact_match(predicted: str, ground_truth: str) -> float:
     """Exact match after bold-strip + lowercase. Markdown bold markers stripped both sides."""
     p = extract_last_bold(predicted).strip().lower()
@@ -73,6 +85,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,
     "exact_match": _exact_match,
+    "list_rr": _list_rr,
     "relu": _relu,
     "hockeystick": _hockeystick,
     "sigmoid": sigmoid,
@@ -107,6 +120,13 @@ EXTRACTION_NOTES: dict[str, str] = {
     "gsm8k_match": (
         "Scoring reads the answer from the '#### N' field (else the last number in "
         "the text). End with the final number on its own line as '#### 42'."
+    ),
+    "list_rr": (
+        "Scoring reads an ORDERED LIST, one item per line, and looks for the held-out "
+        "item in it — earlier scores higher. Emit only the list: one item per line, "
+        "nothing before or after it, no commentary on the same line. Bullets and '1.' "
+        "numbering are stripped, so they neither help nor hurt; prose wrapped around "
+        "the list makes its own line an item and pushes the real ones down."
     ),
 }
 

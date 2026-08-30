@@ -27,6 +27,10 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 8. **Contamination-resistant.** 2024+ release preferred. Synthetic generation a plus.
 9. **Anchored by measurement, not projection.** A 25-sample recon on `gpt-oss-20b @ low` via Groq is the verdict — projections from Llama-3-8B / T5-XL / GPT-3.5 anchors systematically underpredict `gpt-oss-20b`'s reasoning strength (§ What the selection trail established).
 
+## Toy and demo datasets — picked on deliberation length, not difficulty
+
+The criteria above buy **signal**; a toy, demo or test dataset buys **turnaround**, and what costs turnaround is how long the model thinks per cell — not how many cells there are. Prefer a task answerable in one pass (recognition, extraction, ordering a given set) over one that invites the model to reason its way there, and read the split off `dashboard.json::spend.backend` (`reasoning_tokens` against `output_tokens`) on the first round rather than after the campaign: hidden reasoning is most of what a `gpt-oss`-class model emits, and it is paid on every candidate of every round. **The same test applies when EVOLVING one** — a toy task that has grown a deliberation step has stopped being a toy.
+
 ## Headline ≠ focus
 
 **Which dataset holds which role, and why the headline is the wrong iteration target** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Order of use. This page adds only what the roster does not carry: the **next-priority queue** behind `justlogic-d234` is **PlanBench task_1** (36%, PDDL planning — a brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut). Both diversify into planning with no overlap against the current portfolio, and BBEH-mini @ `low` is held as the secondary in-band candidate. TermNorm (`lca-termnorm`) sits outside the question entirely — per-connector regression, not optimizer iteration.

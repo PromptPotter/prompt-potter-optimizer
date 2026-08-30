@@ -9,6 +9,8 @@ __all__ = [
     "extract_gsm8k_number",
     "extract_last_bold",
     "sigmoid",
+    "text_list_items",
+    "text_list_rank",
     "truncate",
 ]
 
@@ -45,6 +47,33 @@ normalises raw ground truth to the same shape."""
 NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
 _BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
+# Leading list furniture on one returned item: "1.", "1)", "-", "*", "•".
+_LIST_ITEM_RE = re.compile(r"^\s*(?:\d+\s*[.)]|[-*•])\s*")
+
+
+def text_list_items(text: str) -> list[str]:
+    """The ordered items of a newline-listed *text*, normalised for comparison.
+
+    The family above exists so the scored label and the reported one cannot diverge, and this is
+    the member a text-list ranker needs: its node emits the whole ordered list as ONE blob, so a
+    walk over ranked-item OBJECTS sees a single unsplittable entry — reporting one candidate and
+    not-found for a row that answered correctly. Blank lines, bullets and ``1.`` numbering are
+    dropped so the prompt's own formatting is not what scores."""
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = _LIST_ITEM_RE.sub("", raw.strip()).strip().strip("*_").strip().lower().strip(".")
+        if line:
+            out.append(line)
+    return out
+
+
+def text_list_rank(text: str, item: str) -> int | None:
+    """1-based position of *item* among :func:`text_list_items`, else ``None``."""
+    want = item.strip().lower().strip(".")
+    if not want:
+        return None
+    items = text_list_items(text)
+    return items.index(want) + 1 if want in items else None
 
 
 def extract_last_bold(text: str) -> str:

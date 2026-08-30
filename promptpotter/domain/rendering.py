@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
-from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
+from promptpotter.shared import (
+    extract_boxed_number,
+    extract_gsm8k_number,
+    extract_last_bold,
+    text_list_items,
+)
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -284,6 +289,12 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
 # --------------------------------------------------------------------------- #
 
 
+def _one_line(text: str) -> str:
+    # Collapses every whitespace run, newlines included, and strips — one call so no extractor
+    # has to remember it.
+    return " ".join(text.split())
+
+
 def _extract_gsm8k_display(text: str) -> str:
     n = extract_gsm8k_number(text or "")
     if n is None:
@@ -302,22 +313,35 @@ def _extract_boxed_display(text: str) -> str:
     return str(int(n)) if n.is_integer() else str(n)
 
 
+def _extract_list_display(text: str) -> str:
+    # A list matcher's answer is the whole ORDERED SET, so route through the same
+    # `text_list_items` walk `_list_rr` scores on: bullets and `1.` numbering stripped
+    # the same way, joined so the slate the scorer read stays one readable line.
+    items = text_list_items(text or "")
+    return " | ".join(items) if items else (text or "")
+
+
 DISPLAY_EXTRACTORS: dict[str, Any] = {
     "exact_match": extract_last_bold,
     "gsm8k_match": _extract_gsm8k_display,
     "aime_match": _extract_boxed_display,
+    "list_rr": _extract_list_display,
 }
 
 
 def extract_display_answer(predicted: str, formula: str | None) -> str:
-    """Return the parsed answer for *predicted* under *formula*; falls back to stripped text."""
-    text = (predicted or "").strip()
-    if not formula:
-        return text
-    for name, extractor in DISPLAY_EXTRACTORS.items():
-        if name in formula:
-            return str(extractor(predicted or "")).strip()
-    return text
+    """The parsed answer for *predicted* under *formula*, on ONE line; stripped text when no
+    extractor claims the formula.
+
+    Single-line is the CONTRACT, not the caller's to re-impose: every consumer renders into a
+    one-line-per-sample readout, so a multi-line answer — a ranked slate, reasoning no extractor
+    isolates — splits the row and the ANSI-stripped `logs/latest.log` mirror with it."""
+    text = predicted or ""
+    if formula:
+        for name, extractor in DISPLAY_EXTRACTORS.items():
+            if name in formula:
+                return _one_line(str(extractor(text)))
+    return _one_line(text)
 
 
 __all__ = [

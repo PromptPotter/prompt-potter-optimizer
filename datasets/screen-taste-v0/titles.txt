@@ -1,0 +1,34 @@
+# The pool — films and series one person likes. Titles only, canonical English, one per
+# line: a held-out title is compared against a line the model RETURNS, so anything extra
+# here (a year, a note, a German title) has to be typed back exactly or the row scores 0.
+# What to do after editing is build_rows.py's docstring.
+The Talented Mr. Ripley
+Before Sunrise
+Spartacus
+General Education
+Margin Call
+Bhagam Bhag
+Pushing Hands
+Galaxy Quest
+Serenity
+Ne Zha
+Ne Zha 2
+Dr. Strangelove
+The Place Beyond the Pines
+That's My Boy
+2 Guns
+Pump Up the Volume
+Zero Effect
+WarGames
+The Game
+The Day After
+Perfect Blue
+Hackers
+Saltburn
+The Rainmaker
+Once Upon a Time in Hollywood
+The Good Bad Mother
+Poker Face
+Firefly
+Yellowstone
+Chuck
