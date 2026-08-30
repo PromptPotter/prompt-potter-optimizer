@@ -38,6 +38,7 @@ from promptpotter.presentation.views.display import (
     _box_bottom_info,
     _box_line,
     _box_top,
+    _fmt_delta,
     _node_bottom,
     _node_line,
     _node_top,
@@ -484,11 +485,7 @@ class LiveDisplay(DerivedView):
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
-        parent_acc = self._phase_ctx.get("parent_accuracy", self.origin_acc)
-        parent_comp = self._phase_ctx.get("parent_composite_fitness")
-        summary = individual_summary_from_dict(
-            scores, parent_acc, parent_composite_fitness=parent_comp, unit=self.measured_unit
-        )
+        summary = individual_summary_from_dict(scores, unit=self.measured_unit)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -500,45 +497,37 @@ class LiveDisplay(DerivedView):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        # Skip invalid + degradation-aborted candidates — partial accuracy can inflate above parent.
-        if summary.status != "invalid" and not scores.get("degradation_context"):
-            acc = scores.get("accuracy")
-            comp = scores.get("composite_fitness")
-            if isinstance(acc, int | float):
-                self._write(
-                    self._fmt_round_leader(
-                        label,
-                        float(acc),
-                        parent_acc,
-                        float(comp) if isinstance(comp, int | float) else None,
-                    )
+        acc = scores.get("accuracy")
+        comp = scores.get("composite_fitness")
+        if isinstance(acc, int | float):
+            self._write(
+                self._fmt_round_leader(
+                    label,
+                    float(acc),
+                    scores.get("matched_parent_lift"),
+                    float(comp) if isinstance(comp, int | float) else None,
                 )
+            )
 
     def _fmt_round_leader(
-        self, label: str, acc: float, parent_acc: float, composite: float | None
+        self, label: str, acc: float, lift: float | None, composite: float | None
     ) -> str:
         """Scoreboard one-liner, ordered by the shared ``display_rank_key``.
 
-        Two arguments deliberately: mid-round no arm carries a θ and nobody is crowned, so the key
-        degrades to the composite it always was. The θ-ordered scoreboard prints at round close,
-        once the election has fit one."""
-        delta_parent = acc - parent_acc
+        Ranks the round's arms AGAINST EACH OTHER, which needs no parent — mid-round no arm
+        carries a θ and nobody is crowned, so the key degrades to the composite it always was.
+        The θ-ordered scoreboard prints at round close, once the election has fit one.
+
+        The Δ is the SERVED ``matched_parent_lift``, absent until round close stamps it: recomputed
+        here it crowns whichever arm was cut earliest."""
         key = display_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            if delta_parent > 0:
-                return (
-                    f"  {GREEN}★ leader: {label} {acc:.1%}  "
-                    f"(Δ +{delta_parent:.1%} vs parent){RESET}"
-                )
-            if delta_parent == 0:
-                return f"  {YELLOW}= ties parent: {label} {acc:.1%}  (Δ ±0.0% vs parent){RESET}"
-            return (
-                f"  {DIM}→ round-best: {label} {acc:.1%}  (Δ {delta_parent:.1%} vs parent){RESET}"
-            )
+            vs = f"  (Δ {_fmt_delta(lift)} vs parent)" if isinstance(lift, int | float) else ""
+            return f"  {GREEN}★ leader: {label} {acc:.1%}{vs}{RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"

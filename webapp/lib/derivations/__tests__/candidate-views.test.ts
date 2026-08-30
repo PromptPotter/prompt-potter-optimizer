@@ -310,6 +310,23 @@ it("carries the election's lift verdict straight off the tree", () => {
   });
 });
 
+it("drops the tail a supersede cut retired — one round of three, never six", () => {
+  const views = candidateViews({
+    ...EMPTY,
+    // What a fork's fold serves: the retired trio and the trio replacing it, one flat timeline
+    // sharing labels. Both sides carry a distinct id, so nothing but `superseded_by` separates them.
+    viewedNode: course([
+      node({ kind: "candidate", id: "old1", label: "C10.1", round: 10, accuracy: 0.29, superseded_by: "cycle_fork" }),
+      node({ kind: "candidate", id: "old2", label: "C10.2", round: 10, accuracy: 0.43, superseded_by: "cycle_fork" }),
+      node({ kind: "candidate", id: "new1", label: "C10.1", round: 10, accuracy: 0.26 }),
+      node({ kind: "candidate", id: "new2", label: "C10.2", round: 10 }),
+    ]),
+  });
+  expect(views.map((v) => v.candidate_id)).toEqual(["new1", "new2"]);
+  // `idx` numbers the bars actually drawn — it is the join to the dendrogram beneath them.
+  expect(views.map((v) => v.idx)).toEqual([0, 1]);
+});
+
 it("says an uncrowned bar has not been judged yet, off the SERVED election flag", () => {
   const views = candidateViews({
     ...EMPTY,

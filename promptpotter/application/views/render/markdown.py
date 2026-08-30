@@ -53,10 +53,11 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
     """Per-round P(best) sparkline section; silent when JSONL is absent (resumed cycles, pre-PoBB rounds)."""
     if not rd.p_best_trajectory:
         return []
-    # Sort by final P(best) desc so the round winner reads first.
+    # The ELECTED arm first, then by final P(best) desc — a round is won on θ lift, and the arm
+    # this posterior likes most is regularly not it.
     ordered = sorted(
         rd.p_best_trajectory.items(),
-        key=lambda kv: -(kv[1][-1] if kv[1] else 0.0),
+        key=lambda kv: (kv[0] != rd.winner_id, -(kv[1][-1] if kv[1] else 0.0)),
     )
     lines: list[str] = ["", "P(best) trajectory:", "```"]
     for cid, traj in ordered[:8]:
@@ -65,7 +66,7 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
         spark = _spark(traj)
         final = traj[-1] * 100
         suffix = ""
-        if final >= 50.0:
+        if cid == rd.winner_id:
             suffix = " [winner]"
         elif final < 5.0:
             suffix = " [stopped]"

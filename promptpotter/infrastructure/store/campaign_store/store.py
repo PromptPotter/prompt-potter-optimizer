@@ -12,7 +12,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
+from promptpotter.domain.results import RoundResult, best_round_on_shared_cells, overlap_row
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
     MINT_KIND_FOR_TRIGGER,
@@ -70,11 +70,14 @@ logger = logging.getLogger(__name__)
 
 
 def _index_round(rr: RoundResult) -> dict[str, Any]:
-    """One closed round, as the LISTING path needs it — the two facts every reader of this list
+    """One closed round, as the LISTING path needs it — the three facts every reader of this list
     asks for. It carried five more that nothing read, `label` among them, which is the winner's
     whole `changes_description`: prose duplicated per round into a manifest the sidebar, the tree
-    and every resume open. The round DOCUMENT is where a round is read in full."""
-    return {"round": rr.round, "accuracy": rr.accuracy}
+    and every resume open. The round DOCUMENT is where a round is read in full.
+
+    The overlap pair is this round's winner scored on the cells its whole line has answered — the
+    number `best_round_on_shared_cells` elects on, and the one shape every carrier projects."""
+    return {"round": rr.round, "accuracy": rr.accuracy, **overlap_row(rr.overlap)}
 
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
@@ -86,8 +89,32 @@ def origin_accuracy_of(index: dict[str, Any]) -> float | None:
 
 def _apply_best(data: dict[str, Any]) -> None:
     """Never argmax ``cumulative_accuracy``: no rescore backs that series, so the headline
-    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5."""
-    data["best_accuracy"], data["best_round"] = best_round_by_measured_accuracy(data["rounds"])
+    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5.
+
+    The derivation FILLS round 0's shared-cell score on the rows handed to it, which is how the
+    origin reaches an election it records no reading for; writing them back persists that."""
+    data["best_accuracy"], data["best_round"] = best_round_on_shared_cells(data["rounds"])
+
+
+def reproject_round_index(
+    index_path: Path, round_docs: Sequence[Path], *, apply: bool = True
+) -> bool:
+    """Rebuild a cycle index's ``rounds[]`` from the round DOCUMENTS, which are the source of truth.
+    The index is a derived read model, so a projection that gains a field leaves every index written
+    before it stale — silently, since the derivation reads the row it was handed and `_apply_best`
+    then falls through to the origin. Sole rebuild: the rewind path and the maintenance walk are two
+    callers, never two definitions. Returns whether the projection differs from disk."""
+    data = read_json(index_path)
+    before = (data.get("rounds"), data.get("best_accuracy"), data.get("best_round"))
+    data["rounds"] = [
+        _index_round(RoundResult.model_validate(read_json(p))) for p in sorted(round_docs)
+    ]
+    data["n_rounds"] = len(data["rounds"])
+    _apply_best(data)
+    if apply:
+        data["updated_at"] = utcnow_iso()
+        write_json(index_path, data)
+    return before != (data["rounds"], data["best_accuracy"], data["best_round"])
 
 
 def _branch_offset(parent_dir: Path) -> int:
@@ -626,16 +653,7 @@ class CampaignStore:
         hop: CycleHop,
         survivors: list[Path],
     ) -> None:
-        index_path = self._index_path(hop)
-        data = read_json(index_path)
-
-        data["rounds"] = [
-            _index_round(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
-        ]
-        data["n_rounds"] = len(data["rounds"])
-        _apply_best(data)
-        data["updated_at"] = utcnow_iso()
-        write_json(index_path, data)
+        reproject_round_index(self._index_path(hop), survivors)
 
     def mark_finished(
         self,

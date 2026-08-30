@@ -94,7 +94,7 @@ export function ScoringMaskEditor({
           <CommitInput
             className={cx("cmp-expr-input", invalid && "cmp-expr-bad")}
             value={mask.lens}
-            placeholder="score:accuracy - 0.05 * mean_latency_s"
+            placeholder="score:accuracy - 0.05 * latency"
             aria-invalid={invalid ? true : undefined}
             onCommit={(lens) => onMask({ kind: "expression", lens })}
           />

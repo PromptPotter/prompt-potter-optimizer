@@ -20,7 +20,12 @@ violation, not a cosmetic issue.
 ```yaml
 states:
   anon:      not logged in — the public preview at /. Demo/showcase content only.
-  auth_empty: logged in, no active campaign selected.
+  auth_empty: 'logged in, no active campaign selected — including a brand-new account that
+             has never run one. Nothing is wrong in this state, so no surface may present it
+             as a failure: no error styling, no alert role, and no remediation the visitor
+             cannot perform where they are standing. Same distinction `gone` draws below,
+             one state earlier — collapsing it into offline is what once met a first-run
+             account with a critical alert telling it to go run a CLI command.'
   warming:   campaign selected, origin running, dashboard.json not yet written (warming_up:true).
   live:      logged in, campaign streaming dashboard.json.
   loading:   a fetch is in flight — transient, MUST resolve to live/empty/error.

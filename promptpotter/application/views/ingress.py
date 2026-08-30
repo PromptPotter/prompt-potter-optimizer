@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
-from promptpotter.application.scoring.evaluators import resolve_round_formula
+from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -29,6 +29,7 @@ from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate
+from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate
 
 __all__ = [
@@ -61,7 +62,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
     # priority: explicit campaign override > schema default > None).
-    full, short = resolve_round_formula(session.scoring.scorer_round_formula, schema)
+    full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 
@@ -85,10 +86,15 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     session = d["env"]
     ctx.parent_accuracy = cycle.tracking.current_accuracy
     ctx.parent_composite_fitness = cycle.tracking.current_composite_fitness
+    # The FSM owns this count and has just been rebuilt from the ledger; `_init_enter` could only
+    # invent a 0. Advanced after this by `on_round_complete`, so reading it any earlier reports a
+    # resumed cycle as further from escalation than it is.
+    ctx.l1_stall_count = cycle.escalation.l1_stall_count
     schema = session.pipeline_schema
-    full, short = resolve_round_formula(session.scoring.scorer_round_formula, schema)
+    full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
+    ctx.headline_metric = session.scoring.headline_metric
 
     for field_name, value in cycle.opt_sp.prompt_field_dict().items():
         if value:
@@ -207,6 +213,16 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     matched_parent_composite = d.get("winner_matched_parent_composite")
     delta = None if matched_parent_acc is None else w_acc - matched_parent_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
+    # The WHOLE reading is emitted, so a cold scale is legible here rather than arriving as a
+    # bare float indistinguishable from a warm one — headline `ability` declines the cold case.
+    raw_ability = d.get("ability")
+    ability_theta = (
+        float(t)
+        if isinstance(raw_ability, dict)
+        and not is_flat_ruler_id(str(raw_ability.get("ruler_id") or ""))
+        and isinstance(t := raw_ability.get("theta"), int | float)
+        else None
+    )
     if improved:
         # BOTH move, or the candidate box renders an accuracy Δ against the new parent
         # above a composite Δ against C0, under one word and with nothing to tell them apart.
@@ -234,6 +250,8 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         matched_parent_accuracy=matched_parent_acc,
         matched_parent_composite=matched_parent_composite,
+        headline_metric=ctx.headline_metric,
+        ability_theta=ability_theta,
     )
 
 

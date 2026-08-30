@@ -6,7 +6,7 @@ answer different questions and only one of them is adaptive:
 
 | | Question | Function | When |
 |---|---|---|---|
-| **Acquisition score** | Which sample is worth measuring at all? | `pick_value = decision_information_gain + delta_learning_gain` | **Between** rounds (`select_round_subset`) + the persisted hard-samples ranking |
+| **Acquisition score** | Which sample is worth measuring at all? | `pick_value = decision_information_gain + delta_learning_gain`; the between-round pick ranks on term 1 alone | the persisted hard-samples ranking (both terms) + **between** rounds (`select_round_subset`, term 1 + a reserved δ-learning tail) |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
 Both live in `application/intelligence/adaptive_queue_mechanism.py`. **There is no online per-sample
@@ -270,16 +270,25 @@ campaign, so the sample set is fixed across rounds and accuracies are directly c
 ## The round order — `build_round_order`, one static order per round
 
 Within a round there is **one** scoring order, shared by every candidate, and nothing re-sorts
-mid-round. It is built by partitioning on the **seed's** per-sample grades:
+mid-round. It is built by partitioning on the **parent's** per-sample grades — three strata,
+because the grade is a three-state fact:
 
-- **MISS-stratum** — seed grade < 1.0, *or not yet measured by the seed* (an unknown is a potential
-  win, and fronting it warms the per-sample backfill earliest). Ordered by **ascending δ**: easiest
-  win opportunities first — a live candidate proves itself immediately, and a dead one's misses on
-  the easiest wins are the strongest futility evidence.
-- **HIT-stratum** — seed grade ≥ 1.0. Ordered by **descending δ**: likeliest regression points first.
+- **MISS-stratum** — parent grade < 1.0. Ordered by **ascending δ**: easiest win opportunities
+  first — a live candidate proves itself immediately, and a dead one's misses on the easiest wins
+  are the strongest futility evidence.
+- **HIT-stratum** — parent grade ≥ 1.0. Ordered by **descending δ**: likeliest regression points first.
+- **UNKNOWN-stratum** — the parent never answered this cell. Ordered by **ascending |δ − μ_δ|**:
+  most discriminating first, since there is no evidence either way and neither end of the scale is
+  the useful one. Drained after the misses — a measured opportunity outranks an untried one.
 
-Every 4th position takes the next HIT-stratum sample (the regression probe); all other positions
-take the next MISS-stratum sample; when a stratum runs dry the other's remainder follows.
+Every 4th position takes the next HIT-stratum sample (the regression probe); otherwise misses, then
+unknowns; when a stratum runs dry the remainder follows.
+
+**Why unknown is not a miss.** `is_hit` returns False for a miss and for `None` alike. Under
+`per_round_resubset` round 1's panel shares no cell with the parent, so filing unknowns as
+win-opportunities put *every* cell in the miss stratum, left the hit stratum empty, never fired the
+`k=4` probe, and led with the easiest cells — on `justlogic-d234__8f6499`, three of the first six
+had been missed by nothing in 8–15 archived measurements. Harmless only while δ was flat.
 
 **Why k=4.** Pure miss-first defers all regression evidence past the miss block. A proportional
 interleave spreads the misses so thin that a futility kill lands at the very end. k=4 costs a
@@ -332,7 +341,10 @@ campaign owns it, and `GET /datasets/{name}/heatmap` folds it from the archive p
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
 - Persisted ranking writer — `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,
-  which calls the same `pick_value` the between-round pick calls: one function, two trigger points.
+  the one caller of the two-term `pick_value`. The between-round pick deliberately does NOT use it:
+  summing let `delta_learning_gain` dominate (0.085 against 0.053 on a live round) and the panel
+  bought whatever the ruler knew least, so `select_round_subset` ranks on
+  `::decision_order` — term 1 alone — and buys the ruler its cells as a reserved tail instead.
 
 ## Phase 2 sketch — origin-relative weighting (not shipped)
 

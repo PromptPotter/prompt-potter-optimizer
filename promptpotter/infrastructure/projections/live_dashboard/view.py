@@ -10,8 +10,9 @@ from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
     HeadlineMetric,
-    best_round_by_measured_accuracy,
+    best_round_on_shared_cells,
     candidate_label,
+    overlap_row,
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
@@ -588,6 +589,10 @@ class LiveDashboardView(DerivedView):
                 self._open_samples.clear()
             self._update_current_acc(scores)
             self._buffer.set_candidate_scores(ci, ct, scores)
+        elif ev == "sample_order_preview":
+            order = payload.get("sample_order")
+            if isinstance(order, list):
+                self.state.declared_sample_order = [int(sid) for sid in order]
         elif ev == "p_best_update":
             current_id = payload.get("current_id") or ""
             n_samples = int(payload.get("n_samples") or 0)
@@ -977,7 +982,12 @@ def resolve_resume_state(
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
-    best, _ = best_round_by_measured_accuracy([r.model_dump() for r in surviving])
+    # A `RoundSummary` carries the reading WHOLE and the election reads the flattened pair, so the
+    # rows go through the same projection the cycle index does — handed the summary's own dump the
+    # derivation sees no shared cell anywhere and collapses the whole trajectory onto round 0.
+    best, _ = best_round_on_shared_cells(
+        [{**r.model_dump(), **overlap_row(r.overlap)} for r in surviving]
+    )
     rounds_dir = CycleLayout(active_cycle_dir).rounds
     on_disk = max(
         (n for p in rounds_dir.glob(ROUND_GLOB) if (n := round_number(p)) is not None),

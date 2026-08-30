@@ -198,6 +198,7 @@ def from_disk_log(
                 verdict_reason=t.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
+                winner_id=t.winner_id or "",
             )
         )
 
@@ -240,7 +241,7 @@ def from_disk_log(
         status=status,
         rounds=tuple(round_views),
         # Top-level key is the running cycle's copy, stamped at init; `final` only exists at stop.
-        formula=final.get("scorer_round_formula") or index.get("scorer_round_formula"),
+        formula=final.get("scorer_cell_formula") or index.get("scorer_cell_formula"),
         hard_samples=hard,
         final=final_view,
         forks=fork_views,

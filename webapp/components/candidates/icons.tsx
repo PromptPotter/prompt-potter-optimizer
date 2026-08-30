@@ -34,13 +34,7 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M3 12h4l2-6 4 12 2-6h6" />
     </svg>
   ),
-  runtime_failure_rate: (
-    <svg {...COMMON} aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="m8 8 8 8M16 8l-8 8" />
-    </svg>
-  ),
-  mean_latency_s: (
+  latency: (
     <svg {...COMMON} aria-hidden="true">
       <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" fillOpacity={0.15} />
     </svg>
@@ -79,23 +73,14 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M14 7h7v7" />
     </svg>
   ),
-  pipeline_compactness: (
-    <svg {...COMMON} aria-hidden="true">
-      <circle cx="6" cy="6" r="2.5" />
-      <circle cx="6" cy="18" r="2.5" />
-      <circle cx="18" cy="12" r="2.5" />
-      <path d="M8 6h6a4 4 0 0 1 4 4v.5" />
-      <path d="M8 18h6a4 4 0 0 0 4-4v-.5" />
-    </svg>
-  ),
-  prompt_compactness: (
+  tokens: (
     <svg {...COMMON} aria-hidden="true">
       <path d="M5 4h14v3" />
       <path d="M9 20h6" />
       <path d="M12 7v13" />
     </svg>
   ),
-  output_compactness: (
+  cost: (
     <svg {...COMMON} aria-hidden="true">
       <circle cx="12" cy="12" r="8" />
       <path d="M12 7v10" />

@@ -16,7 +16,7 @@ import type {
 } from "@/lib/api/types";
 import type { CandidateView } from "@/lib/types";
 import { panelCellLabel } from "./inner-panel";
-import { nodeKeyOf } from "./lineage-candidates";
+import { nodeKeyOf, splitRetired } from "./lineage-candidates";
 
 // A course is a run, not a scored row, so the server decorates it with no basis. Children
 // strictly alternate, so this is all-or-nothing and the basis never mixes within one chart.
@@ -85,7 +85,11 @@ export function candidateViews({
   // ONE half per bar, ALL-OR-NOTHING: the tree, unless it holds no measurement for this
   // candidate yet. The ledger mints a candidate before it measures one and snapshots the score
   // only at completion, so a bar mid-scoring is the one thing the tree cannot answer.
-  return (viewedNode?.children ?? []).map<CandidateView>((n, i) => {
+  // The LIVE side of every supersede cut. A fork's attempts are folded onto the parent's one
+  // timeline, so the tail it retired sits here too — left in, a round of three reads as a round
+  // of six, half of them blank and wearing the live half's labels. The retired branches stay
+  // legible as their own collapsed rows in the forest.
+  return splitRetired(viewedNode?.children ?? []).live.map<CandidateView>((n, i) => {
     const isCourse = n.kind === "course";
     // A course shows what it reached, else what it started from. A cut that broke before
     // measuring anything has no number and must render blank, never as its origin's.

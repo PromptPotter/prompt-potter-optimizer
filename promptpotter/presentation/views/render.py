@@ -171,17 +171,29 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else "no matched parent — winner stopped before covering the panel"
     )
 
+    # The campaign says WHICH number headlines this line. `ability` is what a resubset campaign
+    # sets (`knobs.py::headline_subset_relative_under_resubset`), because the panel is re-picked
+    # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
+    # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
+    # no reading.
+    if v.headline_metric == "ability" and v.ability_theta is not None:
+        headline = f"θ {v.ability_theta:+.3f}"
+        detail = f"{v.winner_accuracy:.1%}, {versus}"
+    else:
+        headline = f"{v.winner_accuracy:.1%}"
+        detail = versus
+
     if v.improved:
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
-            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {v.winner_accuracy:.1%}"
-            f" ({versus}){comp_tag}{sig_tag}"
+            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {headline}"
+            f" ({detail}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
     else:
         out.append(
-            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
-            f" ({versus}, n={v.winner_total}){comp_tag}"
+            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {headline}"
+            f" ({detail}, n={v.winner_total}){comp_tag}"
         )
     # The round is won on θ-lift, so the accuracy on the line above is never the number that
     # decided it. The reason prints whichever way the round went — on a win as much as a hold, or

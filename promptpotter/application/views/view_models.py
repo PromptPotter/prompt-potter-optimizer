@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.results import HardSampleOrder, OverlapReading
+from promptpotter.domain.results import HardSampleOrder, HeadlineMetric, OverlapReading
 from promptpotter.domain.ruler import AbilityReading
 
 __all__ = [
@@ -55,18 +55,20 @@ class ViewContext:
     parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
+    headline_metric: HeadlineMetric = "accuracy"
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
 
     def ledger_anchors(self) -> dict[str, Any]:
-        """The four scalars a ledger subscriber re-syncs from (``LiveDisplay._phase_ctx``). Not
+        """The five scalars a ledger subscriber re-syncs from (``LiveDisplay._phase_ctx``). Not
         ``asdict``: that re-emitted both whole ``*_sp_flat`` prompts per candidate and per round."""
         return {
             "parent_accuracy": self.parent_accuracy,
             "parent_composite_fitness": self.parent_composite_fitness,
             "composite_fitness_formula": self.composite_fitness_formula,
             "composite_fitness_formula_short": self.composite_fitness_formula_short,
+            "headline_metric": self.headline_metric,
         }
 
 
@@ -222,6 +224,13 @@ class RoundCompleteView:
     # "was 0.0%" on any round whose payload lacked the key.
     matched_parent_accuracy: float | None
     matched_parent_composite: float | None = None
+    # WHICH number headlines the verdict line. Carried rather than read from config at render
+    # time: a knob resolved in the renderer is one the disk round-trip cannot reproduce.
+    headline_metric: HeadlineMetric = "accuracy"
+    # ``RoundResult.ability``'s θ. ``None`` while the ruler is cold, where the headline falls back
+    # to accuracy — a cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
+    # subset-relative number as the difficulty-adjusted one.
+    ability_theta: float | None = None
 
 
 @dataclass(frozen=True)
@@ -345,6 +354,9 @@ class RoundDigestView:
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
     # empty for resumed / pre-PoBB rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
+    # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
+    # its argmax is regularly not the elected arm, and can name two of them or none.
+    winner_id: str = ""
 
 
 @dataclass(frozen=True)

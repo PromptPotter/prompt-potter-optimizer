@@ -43,7 +43,11 @@ export function useEvidence(
     "invalid",
   );
 
-  const invalid = error !== null && kind === "invalid";
+  // `survive` needs a last-good read to survive ON (webapp/CLAUDE.md § Failure handling). With
+  // none, the "invalid metric" message renders inside the evidence branch the missing data has
+  // already switched off — and it is not one anyway: `/evidence` 400s on an unmeasured selection
+  // too, which is what a campaign whose origin has not run produces.
+  const invalid = error !== null && kind === "invalid" && data !== null;
   return {
     evidence: data,
     loading,

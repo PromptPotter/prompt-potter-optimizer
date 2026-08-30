@@ -56,12 +56,13 @@ class IndividualSummary:
 
 def individual_summary_from_dict(
     scores: dict[str, Any],
-    parent_acc: float,
     *,
-    parent_composite_fitness: float | None = None,
     unit: MeasuredUnit = "sample",
 ) -> IndividualSummary:
-    """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok."""
+    """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok.
+
+    Takes no parent: the comparison against it is SERVED (``matched_parent_*``), never differenced
+    here. See the note on ``body_line`` below for why a view may not compute one."""
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
@@ -88,11 +89,18 @@ def individual_summary_from_dict(
     n = scores.get("total", 0)
     # The served composite interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
-    delta = acc - parent_acc
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
     tag = f"{acc:.1%} {ci}"
 
     aborted = bool(scores.get("escalation_aborted"))
+    status: Literal["ok", "aborted", "eliminated"]
+    if aborted:
+        status = "aborted"
+    elif scores.get("elimination_stopped"):
+        status = "eliminated"
+    else:
+        status = "ok"
+
     if aborted:
         scored_q = scores.get("scored_samples", n)
         expected_q = scores.get("expected_samples", n)
@@ -103,7 +111,20 @@ def individual_summary_from_dict(
     n_cached = int(scores.get("cached_samples") or 0)
     if n_cached:
         n_str += f" ({n_cached}📖)"
-    body_line = f"{mutations_chunk}{n_str}  vs parent: {_fmt_delta(delta)}"
+    # THE SERVED LIFT, never `acc - parent_acc` recomputed here: `matched_parent_lift` is the
+    # paired difference on the cells the arm and the parent BOTH measured, `None` until round
+    # close stamps it (`l1/score/winner.py`) or below two shared cells. Absent means absent —
+    # a cut arm's rate on its own prefix outruns the parent's on a fuller panel.
+    lift = scores.get("matched_parent_lift")
+    vs_parent = ""
+    if isinstance(lift, int | float):
+        band = fmt_ci(
+            scores.get("matched_parent_lift_ci_lo"),
+            scores.get("matched_parent_lift_ci_hi"),
+            spec="{:+.1%}",
+        )
+        vs_parent = f"  vs parent: {_fmt_delta(float(lift))} {band}"
+    body_line = f"{mutations_chunk}{n_str}{vs_parent}"
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
@@ -144,19 +165,14 @@ def individual_summary_from_dict(
     degraded = scores.get("degraded_samples", 0)
 
     if comp is not None:
+        # Same rule, same source: the parent's composite ON THIS ARM'S CELLS, or no Δ at all.
+        # The cycle-wide `parent_composite_fitness` was read over the parent's own panel.
         detail_lines.append(
-            render_composite_fitness_oneliner(comp, parent=parent_composite_fitness)
+            render_composite_fitness_oneliner(comp, parent=scores.get("matched_parent_composite"))
         )
     if degraded:
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
 
-    status: Literal["ok", "aborted", "eliminated"]
-    if aborted:
-        status = "aborted"
-    elif scores.get("elimination_stopped"):
-        status = "eliminated"
-    else:
-        status = "ok"
     return IndividualSummary(
         status=status,
         tag=tag,

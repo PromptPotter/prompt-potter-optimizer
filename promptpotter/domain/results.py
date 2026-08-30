@@ -46,7 +46,7 @@ __all__ = [
     "ScoredCandidate",
     "SweepBatchResult",
     "WarningDict",
-    "best_round_by_measured_accuracy",
+    "best_round_on_shared_cells",
     "candidate_label",
     "choose_overlap_set",
     "is_electable",
@@ -54,6 +54,7 @@ __all__ = [
     "is_round_winner",
     "measured_cells",
     "merge_known_outcomes",
+    "overlap_row",
     "overlap_series",
     "parent_key",
     "parent_line",
@@ -119,18 +120,66 @@ def candidate_label(round_num: int, idx: int) -> str:
     return f"C{round_num}.{idx + 1}"
 
 
-def best_round_by_measured_accuracy(
+def overlap_row(overlap: OverlapReading | None) -> dict[str, float | None]:
+    """The pair ``best_round_on_shared_cells`` elects on, flattened out of a round's reading.
+    Members are ordered by round, so the last is this round's own subject and the first is C0.
+    Every carrier of a round row projects through here, or the cycle index and the resume rebuild
+    read different shapes of one fact."""
+    members = overlap.members if overlap else []
+    if not members:
+        return {"overlap_accuracy": None, "overlap_origin_accuracy": None}
+    return {
+        "overlap_accuracy": members[-1].accuracy,
+        "overlap_origin_accuracy": members[0].accuracy,
+    }
+
+
+def best_round_on_shared_cells(
     rounds: list[dict[str, Any]],
 ) -> tuple[float, int | None]:
     """Sole definition of the headline-best derivation, so the cycle index and the resume rebuild
-    agree by construction. NOT the winner export, which argmaxes ``composite_fitness`` — §0.5."""
-    # `or 0.0` would rank a round that never recorded an accuracy alongside one that
-    # genuinely scored 0% — and could crown it. A round with no number doesn't back the headline.
-    scored = [r for r in rounds if r.get("accuracy") is not None]
-    best = max(scored, key=lambda r: float(r["accuracy"]), default=None)
-    if best is None:
-        return (0.0, None)
-    return (float(best["accuracy"]), best.get("round"))
+    agree by construction. NOT the winner export, which argmaxes ``composite_fitness`` — §0.5.
+
+    Elected on ``overlap_accuracy``, the one per-round number that is neither confounded nor
+    biased: ``accuracy`` rides whatever subset the acquisition bought, and θ is the elected arm's
+    own maximum draw and so carries the winner's curse.
+
+    The ORIGIN competes like any round, and round 0 is FILLED here rather than read — C0 alone has
+    nothing to read against, and a headline blind to it crowns rounds the shared cells put BELOW
+    the origin. Newest wins, because rows compared against each other must be on one set. The fill
+    lands on the caller's rows, which is what persists it into the cycle index. A cycle whose line
+    shares no measurable cell has run only its origin, and answers with it."""
+    # A row carrying the reading WHOLE but not the flattened pair skipped `overlap_row` — the one
+    # failure this derivation cannot survive quietly, since the fall-through below then crowns C0
+    # with a plausible number on every resume. Rows that carry NEITHER are simply older than the
+    # projection and are read as unmeasured, which is what they are.
+    unprojected = [
+        r.get("round")
+        for r in rounds
+        if r.get("overlap") is not None and "overlap_accuracy" not in r
+    ]
+    if unprojected:
+        raise ValueError(
+            f"rounds {unprojected} carry an `overlap` reading but no `overlap_accuracy`: this row "
+            "shape reached the election without `results.py::overlap_row`, which would collapse "
+            "the whole trajectory onto round 0. Project every carrier's rows through it."
+        )
+    # By ROUND, not by list order: the append path rewrites one row in place, so position does not
+    # order this list. `is not None` because a 0.0 origin is a measurement, not an absence.
+    read = [r for r in rounds if r.get("overlap_origin_accuracy") is not None]
+    if read:
+        newest = max(read, key=lambda r: int(r.get("round") or 0))
+        for r in rounds:
+            if r.get("round") == 0:
+                r["overlap_accuracy"] = newest["overlap_origin_accuracy"]
+    # `or 0.0` would rank a round that never recorded a score alongside one that genuinely scored
+    # 0% — and could crown it. A round with no number doesn't back the headline.
+    shared = [r for r in rounds if r.get("overlap_accuracy") is not None]
+    if shared:
+        best = max(shared, key=lambda r: float(r["overlap_accuracy"]))
+        return (float(best["overlap_accuracy"]), best.get("round"))
+    origin = next((r for r in rounds if r.get("accuracy") is not None), None)
+    return (float(origin["accuracy"]), origin.get("round")) if origin else (0.0, None)
 
 
 def is_round_winner(candidate_id: str, winner_id: str) -> bool:
