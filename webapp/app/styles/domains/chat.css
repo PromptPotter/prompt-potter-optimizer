@@ -289,6 +289,11 @@
 .chat-panel-header{padding:var(--space-14) var(--space-18);border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between}
 .chat-panel-title{font-size:var(--text-lg);font-weight:500;color:var(--color-text-primary)}
 .chat-messages{flex:1;overflow-y:auto;padding:var(--space-18);display:flex;flex-direction:column;gap:var(--space-12)}
+/* A column flex child defaults to shrinking, so an overfull thread COMPRESSES its
+   entries instead of scrolling — and the live feed loses, being the one child with no
+   padding or max-height to floor it: it collapsed to a sliver under the run card.
+   On the container, so a child added later inherits the rule instead of rediscovering it. */
+.chat-messages>*{flex-shrink:0}
 .chat-msg{max-width:75%;padding:var(--space-10) var(--space-14);border-radius:14px;font-size:var(--text-md);line-height:1.5}
 .chat-msg.user{
   align-self:flex-end;
@@ -380,12 +385,14 @@
    not danger — the draft still resolved, just thinly. */
 .chat-msg.chat-msg-warn{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn)}
 
-/* Unified ingest conversation — the shared thread + input row, rendered both
-   inline on the chat tab (`--inline`) and inside the New campaign modal
-   (`--modal`). It flexes to fill its parent so `.chat-messages` scrolls. */
+/* The one ingest conversation — the shared thread + input row. It flexes to fill
+   its parent so `.chat-messages` scrolls. Hosted by the chat tab, and by the New
+   campaign modal for its resting entry list; the modal's own box is what needs
+   the extra padding, so that rides the host rather than a variant class on the
+   thread (there is no variant — the surfaces differ only in where they sit). */
 .ingest-conversation{display:flex;flex-direction:column;flex:1;min-height:0}
-.ingest-conversation--modal{flex:1 1 auto;min-height:0}
-.ingest-conversation--modal .chat-input-row{padding:var(--space-14) var(--space-18) var(--space-18)}
+.new-campaign-modal .ingest-conversation{flex:1 1 auto;min-height:0}
+.new-campaign-modal .chat-input-row{padding:var(--space-14) var(--space-18) var(--space-18)}
 /* The entry list + setup blocks are containers, not chat bubbles — full width,
    no bubble chrome (the controls inside provide their own). */
 .chat-msg.ingest-picklist,.chat-msg.ingest-ready{max-width:100%;width:100%;align-self:stretch;background:none;border:0;padding:0}
@@ -402,7 +409,7 @@
 .ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .ingest-ready{display:flex;flex-direction:column;gap:var(--space-12)}
 /* Degraded check-in banner in the ready panel — the resolver turn hiccuped, so
-   the draft landed in review (not auto-minted) with a re-run affordance. */
+   the draft carries a re-run affordance beside the Start button. */
 .ingest-degraded{display:flex;flex-direction:column;gap:var(--space-8);align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:var(--space-10) var(--space-12);font-size:var(--text-base);line-height:1.5}
 .ingest-degraded p{margin:0}
 /* The server gate's open fields — what still blocks Start, one hint per line.
@@ -500,22 +507,19 @@
    — no border, no fill — so the boxes read as separate objects sitting on
    the chat's own background rather than as panels planted in a frame.
 
-   Each box is compact BY DEFAULT and complete on click; the height budget
-   is what makes the card liveable in a thread, so keep summaries to one
-   line and put everything else behind the disclosures.
+   Each box is compact BY DEFAULT and complete on click, so keep summaries
+   to one line and put everything else behind the disclosures.
 
-   LIVE it pins to the bottom of the scrollport (`.chat-messages` is the
-   scroll container) and is height-capped, so a tall card cannot eat the
-   conversation it belongs to; stopped, it un-pins and sits in the log. The
-   cap budgets the SUMMARY — a disclosure spends it, and gets both axes.
-   The columns wrap via auto-fit — no breakpoint of its own, which keeps
-   this out of the css-breakpoints allowlist. */
+   IN FLOW at the tail of the log, live or stopped — never pinned. Sticking
+   it to the bottom of the scrollport (`.chat-messages`) buried the thread it
+   reports on the moment the reader scrolled up. The columns wrap via
+   auto-fit — no breakpoint of its own, which keeps this out of the
+   css-breakpoints allowlist. */
 /* Two boxes SIDE BY SIDE, and no titles on either: the card gets about six
    lines in a chat thread, and three of them used to go to headings that named
    what the content already showed. `flex-wrap` stacks them again when the
    thread is too narrow to hold both — no breakpoint of its own. */
 .run-card{display:flex;flex-direction:row;flex-wrap:wrap;gap:var(--space-8);width:100%;align-self:stretch}
-.run-card.is-live{position:sticky;bottom:0;z-index:2;max-height:min(48vh,460px);overflow:auto;padding-top:6px}
 /* The SECONDARY surface, not the primary one: `.chat-panel` is primary, so a
    primary box was a card the reader could not see the edges of. This is the
    same surface the thread's own AI messages sit on. */
@@ -525,12 +529,6 @@
    for a summary and the wrong size for a prompt or a 400-row table, and the
    thing the reader just opened is the thing that should get the width. */
 .run-box:has(.run-diff[open]),.run-box:has(.hsp-full){flex-basis:100%}
-/* …and the height with it. `.hs-block` is 492px on its own, so the live cap could
-   never hold the table it hides: the card scrolled inside the thread's scroll and
-   the table inside that. Un-pinned too — a sticky card at full height buries the
-   log it sits in, which is what stopping the run already does to it. */
-.run-card.is-live:has(.run-diff[open]),
-.run-card.is-live:has(.hsp-full){position:static;max-height:none;overflow:visible}
 /* The head is ONE row and stays one — the picker and the copy button hold their
    width, the numbers give theirs up first. */
 .run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:nowrap;min-height:20px}

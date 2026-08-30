@@ -211,6 +211,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     current_query_payload: null,
     current_sample_id: null,
     open_sample_ids: [],
+    declared_sample_order: [],
     sample_lookahead: 1,
     sample_lookahead_discards: 0,
     sample_lookahead_armed: 1,

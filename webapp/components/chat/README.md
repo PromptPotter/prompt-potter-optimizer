@@ -29,7 +29,7 @@ assistant" endpoint is a deferred Arc 2 —
 - **The decision surface** — `lib/chat/decision.ts` + `components/chat/LiveSegment.tsx`
   (button-gated agency over the existing `/commands/{kind}` set; the origin gate
   was folded in here from the removed global modal).
-- **The sticky-then-frozen shape** — an always-current pane pinned to the thread tail
+- **The live-then-frozen shape** — an always-current pane at the thread tail
   while the task runs, snapshotted into the durable message list when it ends (the
   `run` `ChatMsg` kind). The *shape* is reusable for any long task; what fills it here
   is not (see the delete-list).

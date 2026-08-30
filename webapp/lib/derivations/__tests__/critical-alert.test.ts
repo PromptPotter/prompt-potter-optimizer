@@ -41,6 +41,31 @@ describe("criticalAlert", () => {
     });
   });
 
+  it("stays silent for an empty workspace, despite the poll's resting offline", () => {
+    // A first-run account: no cycle, so the poll never left INITIAL_STATE. Without
+    // its own signal this is indistinguishable from an outage and paints red.
+    expect(
+      criticalAlert({
+        ...base,
+        bannerStatus: "offline",
+        bannerText: "Connecting…",
+        emptyWorkspace: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("a genuinely unreachable server still wins over an empty workspace", () => {
+    // The caller subtracts netDown before setting emptyWorkspace; this pins that
+    // the derivation does not silence a real outage if that ever slips.
+    const out = criticalAlert({
+      ...base,
+      bannerStatus: "offline",
+      bannerText: "Server unreachable — retrying",
+      emptyWorkspace: false,
+    });
+    expect(out?.title).toBe("Server unreachable — retrying");
+  });
+
   it("flags a gone-silent run (server says running, this poll has gone stale) as a warning", () => {
     const dash = { run_phase: "running" } as DashboardSnapshot;
     expect(

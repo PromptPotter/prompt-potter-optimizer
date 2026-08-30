@@ -8,8 +8,10 @@
 // question an operator asks the moment a row surprises them.
 //
 // Two sources, each the only one that answers its question, neither recomputed here:
-//   • the AXIS — the declared order off the SSE stream (`sample_order_preview`), which
-//     nothing persists, so the stream is the only channel that carries it.
+//   • the AXIS — the declared order. The SSE stream (`sample_order_preview`) carries it
+//     first, and `dashboard.json::declared_sample_order` carries the same list for any
+//     reader that missed the event. The stream wins only because it lands sooner; a
+//     reload used to leave the axis empty for the rest of the candidate.
 //   • the CURSOR — `dashboard.json::current_sample_id` while a sample is in flight,
 //     falling back to how far the live candidate's own tape has got when it is not.
 //
@@ -57,21 +59,26 @@ export function sampleWalk(
   const inFlight = typeof dash.current_sample_id === "number" ? dash.current_sample_id : null;
   const walkKey = `${dash.cycle_id}:${dash.current_round.round}:${latest?.idx ?? "-"}`;
 
-  if (order && order.length > 0) {
+  // The stream's copy if it arrived, else the served one — the same list, and the served
+  // half is what a reader who joined mid-candidate has.
+  const served = dash.declared_sample_order;
+  const axis = order && order.length > 0 ? order : served.length > 0 ? served : null;
+
+  if (axis) {
     // Anchor on the in-flight id when there is one — it survives a walk that did not
     // follow the declared order exactly. Between samples, anchor on the last measured
     // id's own position, so a re-ordered tail cannot slide the cursor.
-    let cursor = inFlight != null ? order.indexOf(inFlight) : -1;
+    let cursor = inFlight != null ? axis.indexOf(inFlight) : -1;
     if (cursor < 0) {
       const lastId = measured.at(-1);
-      const at = lastId != null ? order.indexOf(lastId) : -1;
-      cursor = at >= 0 ? Math.min(at + 1, order.length - 1) : Math.min(measured.length, order.length - 1);
+      const at = lastId != null ? axis.indexOf(lastId) : -1;
+      cursor = at >= 0 ? Math.min(at + 1, axis.length - 1) : Math.min(measured.length, axis.length - 1);
     }
-    return { ids: order, cursor, walkKey };
+    return { ids: axis, cursor, walkKey };
   }
 
-  // No order (a reconnect that has not seen a candidate start). The past is still
-  // known; the future is not invented — the window simply cannot scroll forward.
+  // No order from either channel — a candidate whose preview has not landed yet. The past
+  // is still known; the future is not invented, so the window cannot scroll forward.
   const ids = [...measured];
   if (inFlight != null && ids.at(-1) !== inFlight) ids.push(inFlight);
   if (ids.length === 0) return EMPTY;

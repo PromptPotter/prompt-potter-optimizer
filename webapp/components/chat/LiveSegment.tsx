@@ -63,16 +63,13 @@ export function LiveSegment({
   };
   const busy = pending !== null;
 
+  // ONE row that means "now": the in-flight chip, or — with nothing landed yet —
+  // the placeholder saying the socket is open. `empty` already implies no
+  // progress, so the two can never both be due.
+  const now = progress ?? (empty && listening ? { icon: "·", label: "Listening for activity…", detail: null } : null);
+
   return (
     <div className="chat-live">
-      {empty && listening ? (
-        <div className="chat-activity tone-muted kind-progress" role="status" aria-live="polite">
-          <span className="chat-activity-icon" aria-hidden="true">
-            ·
-          </span>
-          <span className="chat-activity-label">Listening for activity…</span>
-        </div>
-      ) : null}
       {activity.map((a) => (
         <div
           key={a.id}
@@ -86,22 +83,15 @@ export function LiveSegment({
         </div>
       ))}
 
-      {progress ? (
-        <div
-          className="chat-activity tone-muted kind-progress"
-          role="status"
-          aria-live="polite"
-        >
+      {now ? (
+        <div className="chat-activity tone-muted kind-progress" role="status" aria-live="polite">
           <span className="chat-activity-icon" aria-hidden="true">
-            {progress.icon}
+            {now.icon}
           </span>
-          <span className="chat-activity-label">{progress.label}</span>
-          {progress.detail ? (
-            <span className="chat-activity-detail">{progress.detail}</span>
-          ) : null}
-          {/* The ♥ bank rides the PROGRESS chip, not the round rows above it: the feed is a
-              history, and painting the current bank onto a finished round would misdate it.
-              The chip is the one row that means "now". */}
+          <span className="chat-activity-label">{now.label}</span>
+          {now.detail ? <span className="chat-activity-detail">{now.detail}</span> : null}
+          {/* The ♥ bank rides this chip, not the round rows above it: the feed is a
+              history, and painting the current bank onto a finished round would misdate it. */}
           {hearts != null && (
             <Hearts hearts={hearts} cap={livesCap} className="chat-activity-hearts" />
           )}

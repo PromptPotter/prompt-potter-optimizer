@@ -56,6 +56,44 @@ describe("sampleWalk", () => {
     expect(w.cursor).toBe(2);
   });
 
+  // `sample_order_preview` fires ONCE per candidate, so a reader that joined mid-candidate
+  // never receives it. Before the projection carried the order, that reader got the past and
+  // nothing ahead — and on a candidate that had scored nothing yet, exactly one row with both
+  // arrows dead. The served copy answers the same question for them.
+  it("takes the SERVED order when the stream never delivered one", () => {
+    const served = dash({
+      current_sample_id: 419,
+      declared_sample_order: order,
+      current_round: currentRound({
+        round: 1,
+        candidates: [liveRow({ label: "C1.1" })],
+        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: tape }] } } },
+      }),
+    });
+    const w = sampleWalk(served, null, true);
+    expect(w.ids).toEqual(order);
+    expect(w.cursor).toBe(2);
+  });
+
+  // A candidate that has just started has NO tape, which is the state that rendered the single
+  // dead row: without the served order there is nothing but the in-flight sample.
+  it("shows the road ahead on a candidate that has measured nothing yet", () => {
+    const fresh = dash({
+      current_sample_id: 99,
+      declared_sample_order: order,
+      current_round: currentRound({
+        round: 1,
+        candidates: [liveRow({ label: "C1.1" })],
+        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: [] }] } } },
+      }),
+    });
+    expect(sampleWalk(fresh, null, true).ids).toEqual(order);
+    expect(sampleWalk(fresh, null, true).cursor).toBe(0);
+    // The bug, pinned: with neither channel it collapses to the one in-flight row.
+    const blind = { ...fresh, declared_sample_order: [] } as DashboardSnapshot;
+    expect(sampleWalk(blind, null, true).ids).toEqual([99]);
+  });
+
   it("has no axis when the tape carries no sample ids and nothing is in flight", () => {
     const idless = [sampleRow({ qi: 1 }), sampleRow({ qi: 2, status: "MISS" })];
     expect(sampleWalk(live(idless, null), null, true).ids).toEqual([]);

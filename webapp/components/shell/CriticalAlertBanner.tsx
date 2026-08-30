@@ -17,6 +17,9 @@ interface Props {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
+  // Reconciled by AppShell — the cycle list loaded and came back empty, with the
+  // server reachable. Silences the bar: a first run has nothing wrong with it.
+  emptyWorkspace?: boolean;
   onOpenFiles: () => void;
   // Invoked by the one-click "Pause campaign" button the banner shows when the
   // verdict is structurally-degraded (`alert.action === "pause"`). The run never
@@ -28,6 +31,7 @@ export function CriticalAlertBanner({
   bannerStatus,
   bannerText,
   bannerHint,
+  emptyWorkspace,
   onOpenFiles,
   onPauseCampaign,
 }: Props) {
@@ -45,6 +49,7 @@ export function CriticalAlertBanner({
     bannerStatus,
     bannerText,
     bannerHint,
+    emptyWorkspace,
     dash,
     connectorDown,
     connectorName: connector,

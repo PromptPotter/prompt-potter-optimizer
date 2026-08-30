@@ -74,61 +74,100 @@ function CheckinLoadingWindow({ model }: { model: string }) {
   );
 }
 
-// The single ingest conversation, driven by `useIngestFlow`. Rendered by BOTH
-// the "New campaign" modal (`variant="modal"`, with the dataset entry list) and
-// the dashboard chat tab (`variant="inline"`, with the first-run illustration).
+// How far off the bottom still counts as being AT the tail. Sub-pixel scroll
+// heights and a half-drawn row must not read as the reader having scrolled away.
+const FOLLOW_SLACK_PX = 24;
+
+// The single ingest conversation, driven by the one shared `useIngestFlow`
+// (`lib/ingest-flow.tsx`). The chat tab hosts it; the "New campaign" modal shows
+// the same resting entry list and hands the thread over the moment a pick or a
+// drop advances it, so the conversation only ever happens in one place.
 // One thread: pick/drop → ask context only if missing → one check-in → Start →
 // then the live cycle's curated activity + decisions (`liveSegment`).
 export function IngestConversation({
   flow,
   origins,
   datasets,
-  variant,
   liveSegment,
   runCard,
 }: {
   flow: IngestFlow;
-  // Only the modal supplies the entry lists: existing origins to reuse +
-  // datasets to make a new origin from.
+  // The entry lists: existing origins to reuse + datasets to make a new origin
+  // from. Both surfaces supply them — withholding them from the chat tab is
+  // what left a visitor with no file and no way in.
   origins?: OriginEntry[];
   datasets?: DatasetIndexEntry[];
-  variant: "modal" | "inline";
   // The live tail (curated activity feed + decision buttons) appended into the
-  // thread once a cycle is bound. Present only on the inline chat tab. When set
-  // and showing content it also collapses the welcome illustration — the thread
-  // must never render the placeholder over live activity.
+  // thread once a cycle is bound. Present only on the chat tab.
   liveSegment?: ReactNode;
-  // The run card — LAST in the thread, which is what lets it pin to the bottom
-  // while the run is live. Kept a separate slot from `liveSegment`: that one is the
-  // append-only activity history, this one is a single always-current pane, and
-  // folding them would put the card's stickiness at the mercy of the feed's order.
+  // The run card — LAST in the thread. Kept a separate slot from `liveSegment`:
+  // that one is the append-only activity history, this one is a single
+  // always-current pane.
   runCard?: ReactNode;
 }) {
   const { phase, messages } = flow;
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const showEntryList =
-    variant === "modal" && phase.stage === "idle" && datasets !== undefined;
-  const showIllustration =
-    variant === "inline" &&
-    messages.length === 0 &&
-    phase.stage === "idle" &&
-    !liveSegment &&
-    !runCard;
+  // The resting state of either surface: what you can start from. Gated on the
+  // collection having arrived, never on which pane is hosting the thread.
+  const showEntryList = phase.stage === "idle" && datasets !== undefined;
+  // Open on an empty thread — it is the only thing to do — and folded to its summary
+  // once the thread has anything of its own, because a wall of every origin and dataset
+  // is otherwise the tallest thing above the conversation. No state behind it: React
+  // writes `open` only when the PROP changes, so a poll tick leaves a hand-opened list
+  // alone, and the flip re-asserts exactly when the thread gains or loses content.
+  const threadHasContent = messages.length > 0 || !!liveSegment || !!runCard;
+
+  // Follow the tail. Nothing in the thread is pinned, so a live run would otherwise
+  // append its newest step below the fold and leave the reader watching a stale
+  // frame. Re-run on EVERY render because the growth arrives as `liveSegment` /
+  // `runCard` elements, which no dependency list can compare.
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  // A ref, not state: scrolling must not itself cause a render. Scrolling UP to read
+  // is deliberate and the next poll tick must not undo it; scrolling back to the
+  // bottom re-engages, which is the whole of the contract.
+  const followRef = useRef(true);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  });
 
   return (
-    <div className={cx("ingest-conversation", `ingest-conversation--${variant}`)}>
-      <div className="chat-messages" aria-live="polite">
-        {showIllustration ? <FirstRunIllustration /> : null}
+    <div className="ingest-conversation">
+      <div
+        className="chat-messages"
+        aria-live="polite"
+        ref={threadRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          followRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_SLACK_PX;
+        }}
+      >
+        {/* FIRST in the thread, and inside the scroller with it: it scrolls away with
+            everything else instead of holding a slot above the conversation. */}
         {showEntryList ? (
-          <DatasetPickList
-            origins={origins ?? []}
-            datasets={datasets!}
-            onOpenOrigin={flow.openOrigin}
-            onPick={flow.pickDataset}
-            busy={flow.busy}
-          />
+          <details
+            className="new-campaign-optional"
+            open={!threadHasContent}
+            // The list expands ABOVE the tail, so a still-following thread would scroll
+            // straight past what was just opened. Opening it is a read, and a read wins.
+            onToggle={(e) => {
+              if (e.currentTarget.open) followRef.current = false;
+            }}
+          >
+            <summary>
+              Start a campaign — {origins?.length ?? 0} origins · {datasets!.length} datasets
+            </summary>
+            <DatasetPickList
+              origins={origins ?? []}
+              datasets={datasets!}
+              onOpenOrigin={flow.openOrigin}
+              onPick={flow.pickDataset}
+              busy={flow.busy}
+            />
+          </details>
         ) : null}
 
         {messages.map((msg) =>
@@ -443,27 +482,5 @@ function CollisionCard({
         </button>
       </div>
     </div>
-  );
-}
-
-// First-run illustration — shown on the dashboard chat tab until the operator
-// drops a file, so a newcomer sees what the surface is for. Replaced by the live
-// ingest thread on first drop.
-function FirstRunIllustration() {
-  return (
-    <>
-      <div className="chat-msg user">My pipeline above is stuck at 73%. Can&apos;t push past that.</div>
-      <div className="chat-msg ai">Share the eval set you&apos;re scoring against?</div>
-      <ChatFileChip name="email-tagging.csv" rows={15} />
-      <div className="chat-msg ai">Got your pipeline + the project. Flip on Auto-tune (BETA) — I&apos;ll find a better prompt for it. Want me to turn it on?</div>
-      <div className="chat-msg ai">Which parameter do you want to explore?</div>
-      <div className="chat-msg ai">
-        Few things to tune this right:<br />
-        • <strong>Which evaluators matter most?</strong> Easy picks: speed (time per query), # of websites checked, accuracy, cost per query — pick whatever you care about.<br />
-        • <strong>Preferred LLM</strong>, or should I pick one?<br />
-        • <strong>Pipeline type</strong> — LLM-driven (a model decides each step) or deterministic (fixed rules, no AI in the loop)?<br />
-        • <strong>Time ceiling</strong> — any hard cap on how long one query is allowed to take?
-      </div>
-    </>
   );
 }

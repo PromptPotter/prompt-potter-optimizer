@@ -30,15 +30,14 @@ import { candidateLabel } from "@/lib/candidate-label";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
 import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 
-// THE SCORING ORDER, and the only channel that carries it.
+// THE SCORING ORDER, on the channel that carries it FIRST.
 //
 // `sample_order_preview` is emitted once per candidate start (`l1/score/loop.py`)
-// with the shared order the scorer will walk. It is deliberately NOT an activity
-// item — nothing happened — but it is the sole source for "which sample comes next",
-// because `LiveDashboardView` does not persist it: `dashboard.json` carries the
-// sample being scored RIGHT NOW (`current_sample_id`) and, on closed rounds, the
-// order after the fact (`RoundSummary.selection`). The forward view exists only
-// here, on the stream the chat already subscribes to.
+// with the shared order the scorer will walk. It is deliberately NOT an activity item
+// — nothing happened — it feeds "which sample comes next". `LiveDashboardView` also
+// absorbs it into `dashboard.json::declared_sample_order`, so this is the FASTER
+// source, not the only one: emitted once, a reader that joined mid-candidate never
+// sees it, and the walk used to lose its whole forward half on a reload.
 //
 // A DECLARED order, not a promise: PoBB can stop a candidate early, so the tail may
 // never be reached. Surfaces reading it must say "next" and not "will".

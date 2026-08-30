@@ -30,6 +30,13 @@ interface Args {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
+  // No campaigns at all — a brand-new account, or one whose last campaign was
+  // deleted. NOT a connection state and deliberately not a `StatusKind` member:
+  // the poll cannot express it (its resting `INITIAL_STATE.status` is already
+  // `offline`), so it arrives as its own fact rather than a fourth meaning of
+  // `offline`. Reconciled by the caller, which is the only place that knows the
+  // cycle list both loaded AND came back empty.
+  emptyWorkspace?: boolean;
   dash: DashboardSnapshot | null;
   // The SAME connector reachability the ConnectorInspector LED uses (`health != null
   // && health.status !== "live"`), reconciled by the caller from `useConnector()`.
@@ -52,6 +59,7 @@ export function criticalAlert({
   bannerStatus,
   bannerText,
   bannerHint,
+  emptyWorkspace,
   dash,
   connectorDown,
   connectorName,
@@ -68,6 +76,12 @@ export function criticalAlert({
   if (bannerStatus === "gone") {
     return { severity: "info", title: bannerText, detail: bannerHint };
   }
+  // Nothing here yet is not something wrong. A workspace with no campaigns
+  // reaches this function wearing the poll's resting `offline`, so without its
+  // own branch a first-run account gets the loudest bar the app has — and the
+  // one surface that should say it already does, correctly, in the sidebar's
+  // empty state. Silence here IS the message.
+  if (emptyWorkspace) return null;
   // Crash/abort wins — a terminal run with a projected ErrorRecord is the most
   // actionable failure. The full multi-line message + remediation stays in the
   // dashboard-tab RunErrorBanner; here we show only the can't-miss headline.
@@ -79,9 +93,11 @@ export function criticalAlert({
       detail: `stop: ${err.stop_reason}`,
     };
   }
-  // Every offline-class condition (fetch failure, stamp mismatch, no wallclock,
-  // empty workspace) is already collapsed to `offline` by the poll + the
-  // AppShell reconciliation, so this one branch covers them all.
+  // Every offline-class condition (fetch failure, stamp mismatch, no wallclock)
+  // is already collapsed to `offline` by the poll + the AppShell reconciliation,
+  // so this one branch covers them all. An empty workspace is NOT one of them —
+  // it returned above, because "nothing here yet" and "go check the server" are
+  // two facts and this branch is the loud one.
   if (bannerStatus === "offline") {
     return { severity: "critical", title: bannerText, detail: bannerHint };
   }

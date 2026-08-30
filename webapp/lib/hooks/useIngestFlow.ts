@@ -126,11 +126,12 @@ export interface IngestFlow {
 
 const uid = () => crypto.randomUUID();
 
-// The single dataset → origin → campaign state machine, shared by the "New
-// campaign" modal and the dashboard chat tab. One path: pick a dataset OR drop
-// a file → ask for context only if it's missing → ONE check-in call → Start.
-// `onMint` fires with the new (campaign, cycle) once the runner is spawned; the
-// caller decides the side effects (select the cycle, close the modal).
+// The single dataset → origin → campaign state machine. One path: pick a dataset
+// OR drop a file → ask for context only if it's missing → ONE check-in call →
+// Start. `onMint` fires with the new (campaign, cycle) once the runner is
+// spawned. Instantiate it ONCE, in `lib/ingest-flow.tsx` — every surface reads
+// that provider. Three independent instances is what put two live server-side
+// drafts and two disabled composers on screen at the same time.
 export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
@@ -193,32 +194,9 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     // sign anything had gone wrong.
     if (degradedCause) pushWarning(degradedCause);
     pushAi(recap);
-    // Happy path: the check-in confirmed every gated field (columns + framing)
-    // and asked nothing back — mint straight through, skipping the review
-    // surface. The server gate stays authoritative (it also checks per-node
-    // models, which the client can't see from the wire), so a rejected
-    // auto-mint falls through to the review panel below rather than
-    // dead-ending on the error. A DEGRADED turn never auto-mints — a thin
-    // resolution must land in review so the operator re-runs or fixes it by hand.
-    if (
-      !degradedCause &&
-      resolution !== null &&
-      resolution.next_action.questions.length === 0 &&
-      resolved.readiness.complete
-    ) {
-      setMinting(true);
-      try {
-        const r = await postStartCheckin(resolved.draft_id);
-        pushAi("Setup confirmed — campaign started.");
-        setPhase({ stage: "idle" });
-        onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
-        return;
-      } catch (e) {
-        pushError(e);
-      } finally {
-        setMinting(false);
-      }
-    }
+    // EVERY resolved draft lands in review, the one the check-in confirmed
+    // completely included. A launch spends real money, so it is the operator's
+    // gesture and nobody else's — no path here mints and spawns the runner.
     setPhase({ stage: "ready", draft: resolved, resolution, raised, degradedCause });
   };
 

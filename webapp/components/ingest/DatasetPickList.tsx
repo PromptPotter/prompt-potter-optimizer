@@ -40,8 +40,8 @@ export function DatasetPickList({
 
   return (
     <div className="chat-msg ai ingest-picklist">
-      <p>Reuse an origin, set up a new one from a dataset, or drop a file.</p>
-
+      {/* No lead line: the fold's summary names what this is, and the composer's own
+          placeholder already offers the drop. */}
       {origins.length > 0 ? (
         <div className="ingest-picklist-group">
           <span className="ingest-picklist-head">Origins</span>

@@ -220,10 +220,10 @@ class LiveDashboardState(StrictModel):
     # round draws a fresh subset, so a max over rounds selects the luckiest draw.
     ability_delta: float | None = None
     composite_fitness_formula: str | None = None
-    # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the
-    # the mask editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them, and
-    # the control disables rather than guessing; the browser used to parse this out of the string
-    # with a regex and substitute a default for whatever it missed.
+    # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
+    # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
+    # control disables rather than guessing, which is the whole point of serving it: a browser
+    # parsing coefficients out of the string substitutes a default for whatever its regex missed.
     composite_fitness_weights: dict[str, float] | None = None
     # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
     # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
@@ -248,6 +248,12 @@ class LiveDashboardState(StrictModel):
     # "is this row running?" lit one row of N under look-ahead, silently, since the arming is
     # exactly when the operator is watching. Two questions, so two fields.
     open_sample_ids: list[int] = Field(default_factory=list)
+    # The order the running candidate DECLARED it would walk. Served as well as streamed, because
+    # the SSE event fires once per candidate and a reader that joins after it has no forward view
+    # at all. Named `declared_` because the heatmap's `sample_order` is absolute difficulty and
+    # this one is relevance — and it is a PLAN: PoBB can stop a candidate before the tail is
+    # reached, so no reader may word it as "will".
+    declared_sample_order: list[int] = Field(default_factory=list)
 
     # What the LOOP held in flight, never what the operator asked for (that is
     # `.runtime/sample_lookahead.json`); the two differ for up to one sample.
@@ -338,5 +344,6 @@ class LiveDashboardState(StrictModel):
             "current_query_payload": None,
             "current_sample_id": None,
             "open_sample_ids": [],
+            "declared_sample_order": [],
         }
         return prior.model_copy(update=mine) if prior is not None else cls(**mine)
