@@ -1,12 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
-import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
+import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
+import { useIngest } from "@/lib/ingest-flow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
-import type { OnMinted } from "@/components/ingest/types";
 import { hasLiveProducer } from "@/lib/run-phase";
 import { isSelfOptimization, runSummary } from "@/lib/derivations";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
@@ -21,31 +19,10 @@ import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard } from "@/components/chat/RunCard";
 
 interface Props {
-  datasetName: string | null;
-  datasetItems: DatasetItem[];
-  datasetMeasuredCount: number;
-  datasetUnmeasuredCount: number;
-  datasetSplitTest: number | null;
-  // Passed to BOTH consumers, so the pane and the run card cannot name different orders.
-  datasetOrder: HardSampleOrder | null;
-  archivePerSample: Map<number, SampleSeries>;
-  datasetTotals: SeriesTotals | null;
-  // True while the displayed dataset slice is from a prior (unit, scope) and
-  // a fresh fetch is in flight — lets the table dim instead of blanking.
-  datasetStale: boolean;
-  datasetError: string | null;
-  hardSamplesScope: HardSamplesScope;
-  onHardSamplesScopeChange: (s: HardSamplesScope) => void;
-  hardSampleOrder: HardSampleOrder | null;
-  onHardSampleOrderChange: (o: HardSampleOrder) => void;
-  // Bumped by the shell's "New campaign" button while this tab is in view —
-  // each change resets the thread to its empty first-run state (compose mode),
-  // suppressing the bound cycle's live feed until a fresh campaign is minted.
-  newCampaignTick: number;
-  // Fired when the inline ingest flow mints a campaign — AppShell selects the
-  // new cycle. The whole drop → context → check-in → Start path runs inline
-  // here via the shared `IngestConversation`; nothing is handed off to a modal.
-  onMinted: OnMinted;
+  // The selected campaign when it is a durable check-in awaiting authoring, else
+  // null. The thread reopens its draft in place — no separate pane, so the hero
+  // and the samples stay where they are.
+  checkinCampaignId: string | null;
 }
 
 // The Chat surface. The pipeline hero is display-only; the live interactive path is
@@ -54,24 +31,10 @@ interface Props {
 // Run status lives on the shell's RemoteControl, and what this chat can DO is the
 // composer's Tools popover — one column of settings beside the thread was a card a
 // phone had to scroll past its own input to reach.
-export function ChatPane({
-  datasetName,
-  datasetItems,
-  datasetMeasuredCount,
-  datasetUnmeasuredCount,
-  datasetSplitTest,
-  datasetOrder,
-  archivePerSample,
-  datasetTotals,
-  datasetStale,
-  datasetError,
-  hardSamplesScope,
-  onHardSamplesScopeChange,
-  hardSampleOrder,
-  onHardSampleOrderChange,
-  newCampaignTick,
-  onMinted,
-}: Props) {
+export function ChatPane({ checkinCampaignId }: Props) {
+  // Only the name is read here (the pipeline hero labels itself with it); the roster
+  // and its controls go straight to the two panels that draw them.
+  const { datasetName } = useHardSamples();
   // Self-sourced live state — the thread's freeze-on-stop edge and the live feed.
   const { dash, isLive } = useDashboard();
   // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
@@ -84,30 +47,20 @@ export function ChatPane({
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
-  // Compose mode — entered by the shell's "New campaign" button (newCampaignTick).
-  // While composing, the bound cycle's live feed is suppressed so the thread shows
-  // its empty first-run state; minting a campaign clears it.
-  const [composing, setComposing] = useState(false);
+  // The one authoring thread, shared with the New campaign modal. `composing` is
+  // its "the operator is authoring, not watching" flag — it suppresses the bound
+  // cycle's live feed so a fresh thread is not drawn over the previous run.
+  const { flow: ingest, collection, composing } = useIngest();
 
-  // The dataset-ingest conversation, run inline on the chat tab. Same state
-  // machine + view the "New campaign" modal uses (one path, one check-in call).
-  const ingest = useIngestFlow({
-    onMint: (sel) => {
-      setComposing(false);
-      onMinted(sel);
-    },
-  });
-
-  // Reset the thread to its empty first-run state on each "New campaign" hit.
-  // Render-phase guarded (webapp/CLAUDE.md "State reset on prop change") so the
-  // cleared thread commits with the same frame — `ingest.reset()` clears this
-  // component's own hook state, the same as setting local state here.
-  const [prevNewCampaignTick, setPrevNewCampaignTick] = useState(newCampaignTick);
-  if (newCampaignTick !== prevNewCampaignTick) {
-    setPrevNewCampaignTick(newCampaignTick);
-    setComposing(true);
-    ingest.reset();
-  }
+  // Reopen a durable check-in's draft straight into the thread. It has no
+  // dashboard.json, so this is the authoring surface for it; `reopenCheckin`
+  // loads the draft and the last resolver turn from disk. Keyed on the campaign
+  // — `ingest` is rebuilt each render but its methods close over stable
+  // setState, so the exhaustive-deps lint would over-add it.
+  useEffect(() => {
+    if (checkinCampaignId) ingest.reopenCheckin(checkinCampaignId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkinCampaignId]);
 
   // Freeze a run into the thread on the live→stopped EDGE, so a later `resume`
   // leaves the finished one behind as a log entry instead of re-animating it.
@@ -206,24 +159,7 @@ export function ChatPane({
         {/* No pp-self branch: an outer self-optimization cycle has no per-sample
             roster to plot, and pointing at the inner run here was a third copy of
             a `drillInto` the sidebar and the L4 panel rows already offer. */}
-        {samplesOpen && !selfOpt && (
-          <HardSamplesHeatmap
-            datasetName={datasetName}
-            datasetItems={datasetItems}
-            datasetMeasuredCount={datasetMeasuredCount}
-            datasetUnmeasuredCount={datasetUnmeasuredCount}
-            datasetSplitTest={datasetSplitTest}
-            datasetOrder={datasetOrder}
-            archivePerSample={archivePerSample}
-            datasetTotals={datasetTotals}
-            datasetStale={datasetStale}
-            datasetError={datasetError}
-            hardSamplesScope={hardSamplesScope}
-            onHardSamplesScopeChange={onHardSamplesScopeChange}
-            hardSampleOrder={hardSampleOrder}
-            onHardSampleOrderChange={onHardSampleOrderChange}
-          />
-        )}
+        {samplesOpen && !selfOpt && <HardSamplesHeatmap />}
       </div>
 
       <div className="chat-grid">
@@ -233,27 +169,14 @@ export function ChatPane({
           </div>
           <IngestConversation
             flow={ingest}
-            variant="inline"
+            // The entry list, on the landing surface. Withholding it here is what
+            // left a visitor with no file of their own and no way in at all.
+            origins={collection.kind === "ready" ? collection.origins : undefined}
+            datasets={collection.kind === "ready" ? collection.entries : undefined}
             liveSegment={composing ? undefined : liveSegment}
             runCard={
               composing || !cycleId ? undefined : (
-                <RunCard
-                  datasetName={datasetName}
-                  datasetItems={datasetItems}
-                  datasetMeasuredCount={datasetMeasuredCount}
-                  datasetUnmeasuredCount={datasetUnmeasuredCount}
-                  datasetSplitTest={datasetSplitTest}
-                  datasetOrder={datasetOrder}
-                  archivePerSample={archivePerSample}
-                  datasetTotals={datasetTotals}
-                  datasetStale={datasetStale}
-                  datasetError={datasetError}
-                  hardSamplesScope={hardSamplesScope}
-                  onHardSamplesScopeChange={onHardSamplesScopeChange}
-                  hardSampleOrder={hardSampleOrder}
-                  onHardSampleOrderChange={onHardSampleOrderChange}
-                  sampleOrder={live.sampleOrder}
-                />
+                <RunCard sampleOrder={live.sampleOrder} />
               )
             }
           />

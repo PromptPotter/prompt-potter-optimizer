@@ -1,8 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
-import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
+import type { DatasetItem } from "@/lib/api";
+import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { useIsPhone } from "@/lib/hooks/useMediaQuery";
@@ -28,24 +28,6 @@ import { HardSamplesTable } from "./HardSamplesTable";
 // re-derived here.
 
 interface Props {
-  datasetName: string | null;
-  items: DatasetItem[];
-  archivePerSample: Map<number, SampleSeries>;
-  totals: SeriesTotals | null;
-  measuredCount: number;
-  unmeasuredCount: number;
-  splitTest: number | null;
-  // The key the server ranked the roster by, off its own echo; `null` while the read
-  // is in flight. Not `order` — `sampleOrder` in this tree is the scoring WALK.
-  rankedBy: HardSampleOrder | null;
-  // The operator's PICK, null until they make one. Separate from `rankedBy`: the control
-  // moves on click, while every LABEL keeps naming the served order until the rows land.
-  rankedByPick: HardSampleOrder | null;
-  onRankedByChange: (o: HardSampleOrder) => void;
-  stale: boolean;
-  error: string | null;
-  scope: HardSamplesScope;
-  onScopeChange: (s: HardSamplesScope) => void;
   // The declared scoring order off the SSE stream; null when nothing is running or a
   // reconnect has not seen a candidate start yet. Threaded in rather than subscribed
   // here — the chat already holds the one EventSource.
@@ -54,23 +36,8 @@ interface Props {
 
 const ROWS = 3;
 
-export function HardSamplesPreview({
-  datasetName,
-  items,
-  archivePerSample,
-  totals,
-  measuredCount,
-  unmeasuredCount,
-  splitTest,
-  rankedBy,
-  rankedByPick,
-  onRankedByChange,
-  stale,
-  error,
-  scope,
-  onScopeChange,
-  sampleOrder = null,
-}: Props) {
+export function HardSamplesPreview({ sampleOrder = null }: Props) {
+  const { datasetName, items, archivePerSample, totals, stale, error } = useHardSamples();
   const { dash, isLive } = useDashboard();
   const [showAll, setShowAll] = useState(false);
   // A phone opens the roster as a full-screen sheet instead of inline. The table
@@ -238,18 +205,6 @@ export function HardSamplesPreview({
                   ]),
                 )
               }
-              servedSeries={archivePerSample}
-              datasetName={datasetName}
-              datasetItems={items}
-              datasetMeasuredCount={measuredCount}
-              datasetUnmeasuredCount={unmeasuredCount}
-              datasetSplitTest={splitTest}
-              rankedBy={rankedBy}
-              rankedByPick={rankedByPick}
-              onRankedByChange={onRankedByChange}
-              datasetStale={stale}
-              scope={scope}
-              onScopeChange={onScopeChange}
             />
           );
           return asSheet ? (

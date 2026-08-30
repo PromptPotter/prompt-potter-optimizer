@@ -44,47 +44,16 @@ import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPr
 // prompts, and three sample lines rather than a table. Compact by default, complete
 // on click.
 //
-// LIVE the card pins to the thread tail and follows the 2 s poll; stopped it un-pins
-// and sits in the log. The separate frozen item (`RunSummaryItem`) is what survives a
-// `resume` — see the note there.
+// LIVE the card follows the 2 s poll; stopped it sits in the log. The separate frozen
+// item (`RunSummaryItem`) is what survives a `resume` — see the note there.
 
 interface Props {
-  datasetName: string | null;
-  datasetItems: DatasetItem[];
-  datasetMeasuredCount: number;
-  datasetUnmeasuredCount: number;
-  datasetSplitTest: number | null;
-  datasetOrder: HardSampleOrder | null;
-  hardSampleOrder: HardSampleOrder | null;
-  onHardSampleOrderChange: (o: HardSampleOrder) => void;
-  archivePerSample: Map<number, SampleSeries>;
-  datasetTotals: SeriesTotals | null;
-  datasetStale: boolean;
-  datasetError: string | null;
-  hardSamplesScope: HardSamplesScope;
-  onHardSamplesScopeChange: (s: HardSamplesScope) => void;
   // The declared scoring order, from the chat's ONE EventSource. Threaded rather than
   // subscribed here — a second `useCycleEvents` would open a second stream.
   sampleOrder: number[] | null;
 }
 
-export function RunCard({
-  datasetName,
-  datasetItems,
-  datasetMeasuredCount,
-  datasetUnmeasuredCount,
-  datasetSplitTest,
-  datasetOrder,
-  hardSampleOrder,
-  onHardSampleOrderChange,
-  archivePerSample,
-  datasetTotals,
-  datasetStale,
-  datasetError,
-  hardSamplesScope,
-  onHardSamplesScopeChange,
-  sampleOrder,
-}: Props) {
+export function RunCard({ sampleOrder }: Props) {
   const { dash, isLive } = useDashboard();
   const { viewedPath } = useWorkspace();
   const cv = useConnector();
@@ -120,23 +89,7 @@ export function RunCard({
           `drillInto`, and the hero above already says the backend is PromptPotter. */}
       {!isSelfOptimization(cv.backendType) && (
         <div className="run-box">
-          <HardSamplesPreview
-            datasetName={datasetName}
-            items={datasetItems}
-            archivePerSample={archivePerSample}
-            totals={datasetTotals}
-            measuredCount={datasetMeasuredCount}
-            unmeasuredCount={datasetUnmeasuredCount}
-            splitTest={datasetSplitTest}
-            rankedBy={datasetOrder}
-            rankedByPick={hardSampleOrder}
-            onRankedByChange={onHardSampleOrderChange}
-            stale={datasetStale}
-            error={datasetError}
-            scope={hardSamplesScope}
-            onScopeChange={onHardSamplesScopeChange}
-            sampleOrder={sampleOrder}
-          />
+          <HardSamplesPreview sampleOrder={sampleOrder} />
         </div>
       )}
     </section>

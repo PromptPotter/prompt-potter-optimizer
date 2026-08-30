@@ -1,12 +1,7 @@
 "use client";
 import { useMemo, useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  type DatasetItem,
-  type HardSampleOrder,
-  type HardSamplesScope,
-  type SampleSeries,
-} from "@/lib/api";
+import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
@@ -26,43 +21,26 @@ interface Props {
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
   perSample?: Map<number, HeatDot[]>;
-  // The served per-sample series — what the Fitness column reports on. Kept
-  // apart from `perSample`, which folds in the in-flight tail for the strip.
-  servedSeries?: Map<number, SampleSeries>;
-  datasetName: string | null;
-  datasetItems: DatasetItem[];
-  datasetMeasuredCount: number;
-  datasetUnmeasuredCount: number;
-  datasetSplitTest: number | null;
-  // The key the server ranked by, off its echo; `null` while the read is in flight, and the
-  // table then claims none. Not `order` — `sampleOrder` in this tree is the scoring WALK.
-  rankedBy: HardSampleOrder | null;
-  // The operator's PICK, null until they make one. Separate from `rankedBy`: the control
-  // moves on click, while every LABEL keeps naming the served order until the rows land.
-  rankedByPick: HardSampleOrder | null;
-  onRankedByChange: (o: HardSampleOrder) => void;
-  scope?: HardSamplesScope;
-  onScopeChange?: (s: HardSamplesScope) => void;
-  // Displayed roster is from a prior (unit, scope) and a fresh fetch is in
-  // flight — the table dims via the `stale` data-attr but never blanks.
-  datasetStale?: boolean;
 }
 
-export function HardSamplesTable({
-  perSample,
-  servedSeries,
-  datasetName,
-  datasetItems,
-  datasetMeasuredCount,
-  datasetUnmeasuredCount,
-  datasetSplitTest,
-  rankedBy,
-  rankedByPick,
-  onRankedByChange,
-  scope,
-  onScopeChange,
-  datasetStale,
-}: Props) {
+export function HardSamplesTable({ perSample }: Props) {
+  const {
+    datasetName,
+    // The served per-sample series — what the Fitness column reports on. Kept apart
+    // from `perSample`, which folds in the in-flight tail for the strip and is
+    // therefore the one thing each call site builds for itself.
+    archivePerSample: servedSeries,
+    items: datasetItems,
+    measuredCount,
+    unmeasuredCount,
+    splitTest: datasetSplitTest,
+    rankedBy,
+    rankedByPick,
+    setRankedBy,
+    scope,
+    setScope,
+    stale: datasetStale,
+  } = useHardSamples();
   // `isLive` (status === "live") gates the row-scoring blink. When the
   // optimizer process dies, the open set is stranded in dashboard.json;
   // `isLive` goes false once freshness lapses, so the blink stops on its own.
@@ -344,19 +322,19 @@ export function HardSamplesTable({
         </div>
         <HardSamplesFooter
           scope={scope}
-          onScopeChange={onScopeChange}
+          onScopeChange={setScope}
           syncLive={persisted.syncLive}
           rankedBy={rankedBy}
           rankedByPick={rankedByPick}
-          onRankedByChange={onRankedByChange}
+          onRankedByChange={setRankedBy}
           onToggleSyncLive={() => setPersisted((p) => ({ ...p, syncLive: !p.syncLive }))}
           hideUnmeasured={persisted.hideUnmeasured}
           onToggleHideUnmeasured={() =>
             setPersisted((p) => ({ ...p, hideUnmeasured: !p.hideUnmeasured }))
           }
           datasetName={datasetName}
-          measuredCount={datasetMeasuredCount}
-          unmeasuredCount={datasetUnmeasuredCount}
+          measuredCount={measuredCount}
+          unmeasuredCount={unmeasuredCount}
           datasetSplitTest={datasetSplitTest}
           onResetLayout={resetLayout}
         />

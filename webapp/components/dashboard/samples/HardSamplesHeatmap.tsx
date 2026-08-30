@@ -1,50 +1,13 @@
 "use client";
 import { useMemo, useState } from "react";
-import {
-  type DatasetItem,
-  type HardSampleOrder,
-  type HardSamplesScope,
-  type SampleSeries,
-} from "@/lib/api";
-import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { fmtPct0 } from "@/lib/format";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-
-interface Props {
-  datasetName: string | null;
-  datasetItems: DatasetItem[];
-  datasetMeasuredCount: number;
-  datasetUnmeasuredCount: number;
-  datasetSplitTest: number | null;
-  // The key the server ranked by, off its echo. Not `order` — `sampleOrder` here is the
-  // scoring WALK.
-  datasetOrder: HardSampleOrder | null;
-  hardSampleOrder: HardSampleOrder | null;
-  onHardSampleOrderChange: (o: HardSampleOrder) => void;
-  // Per-sample archive measurement series, fetched server-side from
-  // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
-  // all campaigns on the dataset) is owned by AppShell and re-fetches
-  // this map; the heat-map merges live mid-round samples on top.
-  archivePerSample: Map<number, SampleSeries>;
-  // Served roster-wide outcome totals for the scope in view. The headline reads these rather
-  // than folding the strip's dots down: the live tail merged into the strip carries a VERDICT,
-  // flattened to 0/1 endpoints here (see `liveMeasurements`), so summing it would mix
-  // endpoints into a graded rate.
-  datasetTotals: SeriesTotals | null;
-  // True while the displayed dataset slice is from a prior (unit, scope).
-  datasetStale: boolean;
-  // Set when the roster read failed for the unit in view. Distinct from an empty
-  // roster: this panel must never answer a broken read with the same silence it
-  // gives a genuinely empty one.
-  datasetError: string | null;
-  hardSamplesScope: HardSamplesScope;
-  onHardSamplesScopeChange: (s: HardSamplesScope) => void;
-}
 
 // Fold in live mid-round measurements that haven't landed in the archive yet — the served
 // sample rows, already graded. They sit at the right edge of each row.
@@ -74,22 +37,21 @@ function liveMeasurements(
 // per sample in live Rasch difficulty order, green = mostly hit, red =
 // mostly miss, dark = no measurements. Clicking the badge expands the full
 // HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
-export function HardSamplesHeatmap({
-  datasetName,
-  datasetItems,
-  datasetMeasuredCount,
-  datasetUnmeasuredCount,
-  datasetSplitTest,
-  datasetOrder,
-  hardSampleOrder,
-  onHardSampleOrderChange,
-  archivePerSample,
-  datasetTotals,
-  datasetStale,
-  datasetError,
-  hardSamplesScope,
-  onHardSamplesScopeChange,
-}: Props) {
+export function HardSamplesHeatmap() {
+  const {
+    datasetName,
+    // The scope toggle re-fetches this map; the heat-map merges live mid-round
+    // samples on top of it.
+    archivePerSample,
+    items: datasetItems,
+    // Served roster-wide totals for the scope in view. The headline reads these rather
+    // than folding the strip's dots down: the live tail merged into the strip carries a
+    // VERDICT flattened to 0/1 endpoints here (see `liveMeasurements`), so summing it
+    // would mix endpoints into a graded rate.
+    totals: datasetTotals,
+    stale: datasetStale,
+    error: datasetError,
+  } = useHardSamples();
   // Live snapshot, self-sourced — feeds the live mid-round measurement merge.
   // The table, run-control, and trajectory children self-source their own
   // liveness/ids now, so nothing is threaded down from here.
@@ -215,21 +177,7 @@ export function HardSamplesHeatmap({
           {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
           {heatExpanded && (
             <div className="hs-expand-wrap">
-              <HardSamplesTable
-                perSample={perSample}
-                servedSeries={archivePerSample}
-                datasetName={datasetName}
-                datasetItems={datasetItems}
-                datasetMeasuredCount={datasetMeasuredCount}
-                datasetUnmeasuredCount={datasetUnmeasuredCount}
-                datasetSplitTest={datasetSplitTest}
-                rankedBy={datasetOrder}
-                rankedByPick={hardSampleOrder}
-                onRankedByChange={onHardSampleOrderChange}
-                datasetStale={datasetStale}
-                scope={hardSamplesScope}
-                onScopeChange={onHardSamplesScopeChange}
-              />
+              <HardSamplesTable perSample={perSample} />
             </div>
           )}
         </RotatePrompt>

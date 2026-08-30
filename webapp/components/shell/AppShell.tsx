@@ -1,13 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile, type HardSampleOrder, type HardSamplesScope } from "@/lib/api";
+import { fetchCycleFile } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/commands";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
+import { HardSamplesProvider } from "@/lib/hard-samples";
 import { useLeafCycleIndex } from "@/lib/hooks/useLeafCycleIndex";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
@@ -23,6 +23,7 @@ import { ComparePane } from "@/components/compare/ComparePane";
 import { CompareSelectionProvider } from "@/lib/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
+import { IngestFlowProvider, useIngest } from "@/lib/ingest-flow";
 import { useViewMemory } from "@/lib/view-memory";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/RemoteControl";
@@ -48,11 +49,6 @@ const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((
 const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((m) => m.IngestPane), {
   ssr: false,
 });
-const CheckinReopenPane = dynamic(
-  () => import("@/components/ingest/CheckinReopenPane").then((m) => m.CheckinReopenPane),
-  { ssr: false, loading: () => <div className="content" aria-busy="true" /> },
-);
-
 // How long the "this no longer exists" notice stays up. Long enough to read after
 // glancing back at the tab, short enough that it never becomes furniture — the
 // recovery it describes is already complete, so it owes the operator nothing.
@@ -78,7 +74,12 @@ export function AppShell() {
     // whole point, and a cycle-scoped holder would drop the first on the way.
     <CompareSelectionProvider>
       <CycleStreamProvider path={viewedPath}>
-        <AppShellInner />
+        {/* ONE authoring thread for every entry point — the chat tab, the New
+            campaign modal and a re-opened check-in all drive the same draft.
+            Above the shell so the modal cannot hold a second one. */}
+        <IngestFlowProvider>
+          <AppShellInner />
+        </IngestFlowProvider>
       </CycleStreamProvider>
     </CompareSelectionProvider>
   );
@@ -97,7 +98,6 @@ function AppShellInner() {
     cyclesError,
     cyclesLoaded,
     cycles,
-    selectCycle,
     selectCyclePath,
     leafCycleId,
     viewedCandidateId,
@@ -177,38 +177,10 @@ function AppShellInner() {
   // came for. Inert above --bp-md — no desktop rule reads the class.
   const [listScreen, setListScreen] = useState(false);
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
-  // Bumped each time "New campaign" is hit while the chat tab is in view —
-  // ChatPane watches it and resets the thread to its empty first-run state
-  // (the inline entry point, distinct from the modal the other tabs open).
-  const [newCampaignTick, setNewCampaignTick] = useState(0);
+  // The one authoring thread. The modal and the chat tab are two doors onto it,
+  // never two of it.
+  const { flow: ingestFlow, startNew, mintCount } = useIngest();
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
-  // Hard-sample view scope — campaign = only the current campaign's cycles
-  // (the default view), dataset = every campaign on this dataset, which is
-  // the real series the optimizer's picker follows. Clicking the heat-map
-  // badge toggles which sort+series is shown; both are held in memory so
-  // the switch is instant. The picker itself always runs on the dataset
-  // scope regardless of this toggle — see l1/execute.py round-subset fit.
-  const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
-  // `null` = send no override and let the server resolve the dataset's declared
-  // `hard_sample_order`; the browser must never restate that default. What the control
-  // DISPLAYS is the served echo below, never this.
-  const [hardSampleOrder, setHardSampleOrder] = useState<HardSampleOrder | null>(null);
-  // Dataset roster + per-sample measurement history for the unit in view.
-  // One hook owns the fetch chain — it fetches ONE (unit, scope) slice at a time,
-  // the one in view, and keeps each it has fetched, so flipping the toggle back is
-  // a pure in-memory pick and no slice is borrowed across scopes. A campaign switch
-  // shows the prior data marked stale until the new fetch lands — never blanks.
-  const {
-    items: datasetItems,
-    measuredCount: datasetMeasuredCount,
-    unmeasuredCount: datasetUnmeasuredCount,
-    splitTest: datasetSplitTest,
-    order: datasetOrder,
-    archivePerSample,
-    totals: datasetTotals,
-    isStale: datasetStale,
-    error: datasetError,
-  } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope, hardSampleOrder);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
@@ -250,16 +222,30 @@ function AppShellInner() {
     [setTab],
   );
 
-  // Every mint / re-open path lands the operator ON the thing it just created,
-  // which on a phone means leaving the list screen. One helper so a fourth mint
-  // path can't forget.
-  const selectAndOpen = useCallback(
-    (sel: { campaignId: string; cycleId: string }) => {
-      selectCycle(sel.campaignId, sel.cycleId);
-      setListScreen(false);
-    },
-    [selectCycle],
-  );
+  // A mint lands the operator ON the thing it just created, which on a phone
+  // means leaving the list screen. Selecting the new cycle is the provider's
+  // job (every entry point shares it); this is the shell's own half, guarded in
+  // render phase so it commits with the same frame.
+  const [prevMintCount, setPrevMintCount] = useState(mintCount);
+  if (mintCount !== prevMintCount) {
+    setPrevMintCount(mintCount);
+    setListScreen(false);
+  }
+
+  // The modal is the ENTRY to the thread, not a second copy of it: the moment a
+  // pick or a drop advances the shared flow past `idle`, hand it to the chat tab
+  // — the surface that can actually hold a conversation — and close. Guarded on
+  // the stage EDGE in render phase, so the handover commits with the frame that
+  // advanced it and the modal never paints over the thread it just started.
+  const ingestStage = ingestFlow.phase.stage;
+  const [prevIngestStage, setPrevIngestStage] = useState(ingestStage);
+  if (ingestStage !== prevIngestStage) {
+    setPrevIngestStage(ingestStage);
+    if (newCampaignOpen && ingestStage !== "idle") {
+      setNewCampaignOpen(false);
+      openView("chat");
+    }
+  }
 
   // Single-ingress dashboard read, kept here only for the status-banner
   // derivation below. Every dashboard surface self-sources its own live state
@@ -299,9 +285,15 @@ function AppShellInner() {
   // Status banner with no unit in view: a network failure and a genuinely
   // empty workspace both end with no cycleId — but only one means the
   // operator should go check the server. Tell them apart. Order matters: a
-  // down server also reports zero cycles, so the netDown branch goes first.
+  // down server also reports zero cycles, so netDown is subtracted below.
   const noUnit = !cycleId;
   const netDown = Boolean(activeError || cyclesError);
+  // Nothing has ever run here, and the server is fine. Passed to the banner as
+  // its own fact rather than dressed up as a status: the poll's resting state is
+  // already `offline`, so anything short of an explicit signal paints a fresh
+  // account the same red as an outage. What to do about it is the sidebar's
+  // empty state, which points at the `+ New campaign` button already on screen.
+  const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
   let bannerStatus = dashState.status;
   let bannerText = dashState.statusText;
   let bannerHint = dashState.statusHint;
@@ -318,11 +310,6 @@ function AppShellInner() {
     bannerStatus = "offline";
     bannerText = "Server unreachable — retrying";
     bannerHint = activeError ?? cyclesError ?? "";
-  } else if (noUnit && cyclesLoaded && cycles.length === 0) {
-    bannerStatus = "offline";
-    bannerText = "No active campaign yet";
-    bannerHint =
-      "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.";
   }
 
   // The selected cycle's run phase, read off the cycle list. A `checkin` campaign
@@ -351,6 +338,10 @@ function AppShellInner() {
         of the masks it composes. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
     <ConnectorProvider datasetName={leafDatasetName}>
+    {/* The roster for the unit in view + the scope and ranking that pick it. Here
+        rather than in the chat tab because its consumers sit on two different
+        branches of that tab — the hero's heat-map and the run card's table. */}
+    <HardSamplesProvider path={viewedPath} datasetName={leafDatasetName}>
     <div
       className={cx(
         "shell",
@@ -391,11 +382,11 @@ function AppShellInner() {
           if (checkin) openView("chat");
         }}
         onNewCycle={() => {
-          // Two entry points, picked by the view in front of the operator: on the chat tab the
-          // thread resets in place, anywhere else the modal opens. A check-in counts as
-          // "anywhere else" — its takeover replaces ChatPane, so the in-place reset has no
-          // consumer, and the modal is the escape hatch out of it.
-          if (tab === "chat" && !showCheckin) setNewCampaignTick((t) => t + 1);
+          // Two doors onto one thread, picked by the view in front of the operator: already on
+          // the chat tab, the thread resets in place; anywhere else the modal opens as the
+          // entry list and hands over as soon as something is picked. A check-in no longer
+          // needs an exception — it is a stage of the chat surface now, not a takeover.
+          if (tab === "chat") startNew();
           else setNewCampaignOpen(true);
           // On a phone the sidebar IS the list screen, so the reset it triggers
           // happens on the screen behind it — go there.
@@ -434,6 +425,7 @@ function AppShellInner() {
           bannerStatus={bannerStatus}
           bannerText={bannerText}
           bannerHint={bannerHint}
+          emptyWorkspace={emptyWorkspace}
           onOpenFiles={() => openView("files")}
           onPauseCampaign={
             campaignId && cycleId
@@ -444,26 +436,13 @@ function AppShellInner() {
         {/* The unit header — what am I looking at, and which view of it. Chrome
             rather than a pane's first child, so the strip cannot scroll away. */}
         <RunMasthead tab={tab} onSelectTab={openView} />
-        {showCheckin && campaignId ? (
-          <CheckinReopenPane campaignId={campaignId} onStarted={selectAndOpen} />
-        ) : tab === "chat" ? (
+        {tab === "chat" ? (
           <ChatPane
-            datasetName={leafDatasetName}
-            datasetItems={datasetItems}
-            datasetMeasuredCount={datasetMeasuredCount}
-            datasetUnmeasuredCount={datasetUnmeasuredCount}
-            datasetSplitTest={datasetSplitTest}
-            datasetOrder={datasetOrder}
-            archivePerSample={archivePerSample}
-            datasetTotals={datasetTotals}
-            datasetStale={datasetStale}
-            datasetError={datasetError}
-            hardSamplesScope={hardSamplesScope}
-            onHardSamplesScopeChange={setHardSamplesScope}
-            hardSampleOrder={hardSampleOrder}
-            onHardSampleOrderChange={setHardSampleOrder}
-            newCampaignTick={newCampaignTick}
-            onMinted={selectAndOpen}
+            // A durable check-in has no dashboard.json, so it is authored rather than
+            // watched. It used to swap in a whole second pane for that — losing the
+            // hero, the pipeline and the samples on the way — when it is really one
+            // stage of this surface: hand the campaign over and let the thread reopen it.
+            checkinCampaignId={showCheckin ? campaignId : null}
           />
         ) : tab === "dashboard" ? (
           <DashboardTab />
@@ -489,16 +468,9 @@ function AppShellInner() {
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}
-      {newCampaignOpen && (
-        <IngestPane
-          open
-          onClose={() => setNewCampaignOpen(false)}
-          // start-checkin returns the (campaign, cycle) — select it now rather
-          // than waiting on the 2 s workspace poll.
-          onMinted={selectAndOpen}
-        />
-      )}
+      {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
     </div>
+    </HardSamplesProvider>
     </ConnectorProvider>
     </LineageProvider>
     </SelectionProvider>
